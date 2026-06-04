@@ -426,58 +426,69 @@ fn probe_status_label(status: ProbeStatus) -> &'static str {
     }
 }
 
+fn setup_tray(app: &tauri::App) {
+    use tauri::tray::TrayIconBuilder;
+
+    let Ok(menu) = build_tray_menu(app.handle()) else {
+        return;
+    };
+
+    let tray = TrayIconBuilder::with_id("main")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Agent Doctor")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "workspace_doctor" => {
+                if let Ok(report) = workspace_doctor() {
+                    publish_workspace_doctor_report(app, &report);
+                }
+            }
+            "doctor" => {
+                let report = run_doctor();
+                publish_doctor_report(app, &report);
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            id if id.starts_with("workspace:") => {
+                if let Some(name) = id.strip_prefix("workspace:") {
+                    if name != "none" {
+                        switch_workspace_from_tray(app, name);
+                    }
+                }
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    let tray = if let Some(icon) = app.default_window_icon() {
+        tray.icon(icon.clone())
+    } else {
+        tray
+    };
+
+    if tray.build(app).is_ok() {
+        update_tray_tooltip(app.handle());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            use tauri::tray::TrayIconBuilder;
-
-            let menu = build_tray_menu(app.handle())?;
-
-            let _tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .tooltip("Agent Doctor")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => show_main_window(app),
-                    "workspace_doctor" => {
-                        if let Ok(report) = workspace_doctor() {
-                            publish_workspace_doctor_report(app, &report);
-                        }
-                    }
-                    "doctor" => {
-                        let report = run_doctor();
-                        publish_doctor_report(app, &report);
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    id if id.starts_with("workspace:") => {
-                        if let Some(name) = id.strip_prefix("workspace:") {
-                            if name != "none" {
-                                switch_workspace_from_tray(app, name);
-                            }
-                        }
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        show_main_window(tray.app_handle());
-                    }
-                })
-                .build(app)?;
-
-            update_tray_tooltip(app.handle());
-
             show_main_window(app.handle());
+            setup_tray(app);
 
             Ok(())
         })
