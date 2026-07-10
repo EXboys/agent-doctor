@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod adapters;
 pub mod doctor;
+pub mod evotown;
 pub mod install;
 pub mod lifecycle;
 pub mod presets;
@@ -17,6 +18,11 @@ pub use adapter::{
 };
 pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter};
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
+pub use evotown::{
+    check_evotown_connectivity, evotown_status, execute_evotown_onboarding, execute_policy_pull,
+    execute_sync, load_evotown_config, EvotownConfig, EvotownHealthReport, EvotownStatus,
+    OnboardingOptions, OnboardingReport, PolicyPullReport, SyncOptions, SyncReport,
+};
 pub use install::{
     build_explain_input, execute_install, needs_binary_install, InstallOptions, InstallReport,
 };
@@ -54,7 +60,11 @@ pub use runtime::{
     run_runtime_lifecycle, runtime_supports_lifecycle, runtime_supports_playbook,
     suggest_runtime_repairs, RuntimeDescriptor, RuntimeLifecycleAction, RuntimeProbeSpec,
 };
-pub use setup::{execute_setup, RuntimeSetupResult, SetupOptions, SetupReport};
+pub use setup::{
+    evotown_agent_env_path, evotown_base_from_gateway, execute_setup,
+    gateway_url_from_evotown_base, write_evotown_agent_env, RuntimeSetupResult, SetupOptions,
+    SetupReport,
+};
 pub use workspace::{
     active_env_path, bash_hook_file_path, enter_workspace, fish_hook_file_path, hook_file_path,
     init_workspace, install_bash_hook, install_fish_hook, install_powershell_hook,

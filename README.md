@@ -20,11 +20,12 @@ agent-doctor setup --url ... --key ...           # Onboard: apply company profil
 
 ## Enterprise (optional)
 
-With a control plane (e.g. [Evotown](https://github.com/EXboys/evotown)):
+With **Evotown** (first-party control plane):
 
 ```bash
-agent-doctor sync          # Pull private skill bundle (planned)
-agent-doctor policy pull   # Cache policy rules locally (planned)
+agent-doctor setup --url https://your-evotown.example.com --key evk_...
+agent-doctor sync          # Pull private SkillHub bundle
+agent-doctor policy pull   # Cache policies locally
 ```
 
 See [docs/enterprise.md](docs/enterprise.md).
@@ -33,7 +34,7 @@ See [docs/enterprise.md](docs/enterprise.md).
 
 ## Status
 
-🚧 **Early MVP** — `doctor`, `install`, `setup`, Hermes-focused `repair --apply`, and a Tauri menubar shell. **Not yet:** enterprise `sync`/`policy`, full OpenClaw/Codex playbooks, or auto-filling API keys. See [docs/ROADMAP.md](docs/ROADMAP.md).
+🚧 **Early MVP** — `doctor`, `install`, `setup`, Hermes/OpenClaw `repair --apply`, Evotown `sync`/`policy pull`, desktop onboarding, and a Tauri menubar shell. **Not yet:** compliance report export, full Claude/Codex playbooks, or auto-filling API keys. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 **Hermes repair today:** backup configs; tighten `.env` permissions; dedupe API key env vars; fill model fields from your active profile; when the key is missing, create a `.env` placeholder and a local setup guide (you paste the secret). **Rollback:** `repair hermes --rollback` or the desktop **Rollback from backup** button.
 

@@ -96,8 +96,24 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Pull private SkillHub bundle (not yet implemented)
-    Sync,
+    /// Pull private SkillHub bundle from Evotown
+    Sync {
+        /// Show planned actions without downloading
+        #[arg(long)]
+        dry_run: bool,
+        /// Only install these skill_ids from the bundle manifest (repeatable)
+        #[arg(long = "only")]
+        only: Vec<String>,
+        /// Runtime target for manifest (default from evotown.agent.env or openclaw)
+        #[arg(long)]
+        runtime: Option<String>,
+        /// Skill bundle id (default: default-agent-skills)
+        #[arg(long)]
+        bundle: Option<String>,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Cache policies from control plane (not yet implemented)
     Policy {
         #[command(subcommand)]
@@ -268,7 +284,12 @@ enum WorkspaceHookAction {
 
 #[derive(Subcommand)]
 enum PolicyAction {
-    Pull,
+    /// Cache enabled policies from Evotown locally
+    Pull {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -325,9 +346,15 @@ fn main() -> Result<()> {
             provider,
             json,
         } => commands::setup::run(&url, &key, Some(&provider), json)?,
-        Commands::Sync => commands::sync::run()?,
+        Commands::Sync {
+            dry_run,
+            only,
+            runtime,
+            bundle,
+            json,
+        } => commands::sync::run(dry_run, &only, runtime.as_deref(), bundle.as_deref(), json)?,
         Commands::Policy { action } => match action {
-            PolicyAction::Pull => commands::policy::pull()?,
+            PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {

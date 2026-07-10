@@ -59,6 +59,33 @@
         </div>
       </section>
 
+      <section class="widget-section evotown-section" id="evotown-section">
+        <div class="section-label">
+          <span class="section-icon" aria-hidden="true">⎈</span>
+          <h2 data-i18n="evotown.title">Evotown</h2>
+        </div>
+        <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
+        <div id="evotown-connected" class="evotown-connected" hidden>
+          <p class="evotown-connected-line"><span data-i18n="evotown.connectedUrl">已连接</span> <strong id="evotown-connected-url">—</strong></p>
+          <p class="evotown-connected-meta" id="evotown-connected-meta"></p>
+        </div>
+        <form id="evotown-form" class="evotown-form" autocomplete="off">
+          <label class="field-row">
+            <span class="field-label" data-i18n="evotown.url">Evotown URL</span>
+            <input id="evotown-url" class="field-input" type="url" placeholder="https://evotown.example.com" />
+          </label>
+          <label class="field-row">
+            <span class="field-label" data-i18n="evotown.apiKey">API Key</span>
+            <input id="evotown-key" class="field-input" type="password" placeholder="evk_…" autocomplete="off" />
+          </label>
+          <div class="evotown-actions">
+            <button id="evotown-connect" type="submit" class="btn-primary" data-i18n="evotown.connect">连接并同步</button>
+            <button id="evotown-resync" type="button" class="btn-secondary" data-i18n="evotown.resync" hidden>重新同步</button>
+          </div>
+        </form>
+        <p id="evotown-hint" class="section-footnote"></p>
+      </section>
+
       <section class="widget-section">
         <div class="section-label">
           <span class="section-icon" aria-hidden="true">◈</span>
