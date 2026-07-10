@@ -20,7 +20,11 @@ pub fn run(url: &str, key: &str, provider: Option<&str>, json: bool) -> Result<(
 fn print_setup_report(report: &SetupReport) {
     println!("Agent Doctor — company setup\n");
     println!("Gateway: {}", report.gateway_url);
+    println!("Evotown base: {}", report.evotown_base_url);
     println!("Profile: {}\n", report.profile_env_path);
+    if let Some(path) = &report.evotown_agent_env_path {
+        println!("Evotown agent env: {path}");
+    }
     println!("Applied to runtimes:");
     for runtime in &report.runtimes {
         let status = if runtime.applied { "ok" } else { "skip" };
@@ -40,4 +44,6 @@ fn print_setup_report(report: &SetupReport) {
         report.profile_env_path
     );
     println!("\nVerify: agent-doctor doctor");
+    println!("Sync skills: agent-doctor sync");
+    println!("Pull policies: agent-doctor policy pull");
 }

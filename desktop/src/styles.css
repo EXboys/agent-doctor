@@ -375,7 +375,74 @@ body::before {
 .section-footnote {
   margin: 8px 0 0;
   min-height: 1.1em;
+}
+
+.evotown-form {
+  display: grid;
+  gap: 8px;
+}
+
+.field-row {
+  display: grid;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.field-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.evotown-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.evotown-connected-line {
+  margin: 0 0 4px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.evotown-connected-line strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.evotown-connected-meta {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
   color: var(--text-soft);
+}
+
+.evotown-section.is-connected .evotown-form .field-row {
+  display: none;
+}
+
+.evotown-section.is-connected #evotown-connect {
+  display: none;
+}
+
+.evotown-section.is-connected #evotown-resync {
+  display: inline-flex;
 }
 
 .preset-row {

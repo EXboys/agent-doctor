@@ -22,7 +22,9 @@ cargo run -p agent-doctor -- doctor --json
 | `profile list/init/use` | Implemented (Hermes model switching) |
 | `config show` | Implemented (Hermes) |
 | `workspace init/list/show/use/status/doctor/fix/matrix/direnv` | Per-project isolation for Hermes, Claude Code, Codex, OpenClaw |
-| `setup --url --key` | Company gateway profile → profile.env + Hermes/OpenClaw/Claude/Codex configs |
+| `setup --url --key` | Evotown/company profile → profile.env + evotown.agent.env + runtime configs |
+| `sync` | Pull SkillHub bundle from Evotown (replaces `evotown-agent-setup.py sync`) |
+| `policy pull` | Cache Evotown policies to `~/.config/evotown/policies-cache.json` |
 | `sync` | Stub |
 | `policy pull` | Stub |
 

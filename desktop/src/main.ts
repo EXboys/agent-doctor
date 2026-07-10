@@ -114,6 +114,49 @@ type RestoreSummary = {
   restored_files: string[];
 };
 
+interface EvotownStatus {
+  configured: boolean;
+  base_url: string | null;
+  api_key_hint: string | null;
+  config_source: string | null;
+  runtime_target: string | null;
+  bundle_id: string | null;
+}
+
+interface OnboardingReport {
+  setup: {
+    gateway_url: string;
+    evotown_base_url: string;
+    profile_env_path: string;
+  };
+  sync: {
+    installed: number;
+    skipped: number;
+    failed: number;
+  } | null;
+  policy: {
+    policy_count: number;
+  } | null;
+}
+
+interface SyncReport {
+  installed: number;
+  skipped: number;
+  failed: number;
+}
+
+const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
+const evotownStatusEl = document.querySelector<HTMLElement>("#evotown-status")!;
+const evotownConnectedEl = document.querySelector<HTMLElement>("#evotown-connected")!;
+const evotownConnectedUrlEl = document.querySelector<HTMLElement>("#evotown-connected-url")!;
+const evotownConnectedMetaEl = document.querySelector<HTMLElement>("#evotown-connected-meta")!;
+const evotownFormEl = document.querySelector<HTMLFormElement>("#evotown-form")!;
+const evotownUrlEl = document.querySelector<HTMLInputElement>("#evotown-url")!;
+const evotownKeyEl = document.querySelector<HTMLInputElement>("#evotown-key")!;
+const evotownConnectEl = document.querySelector<HTMLButtonElement>("#evotown-connect")!;
+const evotownResyncEl = document.querySelector<HTMLButtonElement>("#evotown-resync")!;
+const evotownHintEl = document.querySelector<HTMLElement>("#evotown-hint")!;
+
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
@@ -1041,6 +1084,87 @@ function renderProfiles(doc: ProfilesDocument) {
   presetHintEl.textContent = t("presets.switchHint");
 }
 
+async function loadEvotownStatus() {
+  try {
+    const status = await invoke<EvotownStatus>("get_evotown_status_command");
+    renderEvotownStatus(status);
+  } catch (error) {
+    evotownStatusEl.textContent = t("evotown.connectFailed", { error: String(error) });
+  }
+}
+
+function renderEvotownStatus(status: EvotownStatus) {
+  const connected = status.configured && Boolean(status.base_url);
+  evotownSectionEl.classList.toggle("is-connected", connected);
+  evotownConnectedEl.hidden = !connected;
+
+  if (connected && status.base_url) {
+    evotownStatusEl.textContent = t("evotown.connected");
+    evotownConnectedUrlEl.textContent = status.base_url;
+    evotownConnectedMetaEl.textContent = t("evotown.meta", {
+      runtime: status.runtime_target ?? "openclaw",
+      bundle: status.bundle_id ?? "default-agent-skills",
+      key: status.api_key_hint ?? "evk_…",
+    });
+    evotownUrlEl.value = status.base_url;
+    evotownResyncEl.hidden = false;
+  } else {
+    evotownStatusEl.textContent = t("evotown.notConfigured");
+    evotownConnectedMetaEl.textContent = "";
+    evotownResyncEl.hidden = true;
+  }
+}
+
+async function runEvotownOnboarding() {
+  const url = evotownUrlEl.value.trim();
+  const key = evotownKeyEl.value.trim();
+  if (!url || !key) {
+    evotownHintEl.textContent = t("evotown.connectFailed", { error: "URL and API key are required" });
+    return;
+  }
+
+  evotownConnectEl.disabled = true;
+  evotownResyncEl.disabled = true;
+  evotownHintEl.textContent = t("evotown.connecting");
+  try {
+    const report = await invoke<OnboardingReport>("run_evotown_onboarding_command", {
+      url,
+      key,
+      syncSkills: true,
+      pullPolicies: true,
+    });
+    evotownKeyEl.value = "";
+    await loadEvotownStatus();
+    await refresh();
+    evotownHintEl.textContent = t("evotown.connectOk", {
+      installed: String(report.sync?.installed ?? 0),
+      policies: String(report.policy?.policy_count ?? 0),
+    });
+  } catch (error) {
+    evotownHintEl.textContent = t("evotown.connectFailed", { error: String(error) });
+  } finally {
+    evotownConnectEl.disabled = false;
+    evotownResyncEl.disabled = false;
+  }
+}
+
+async function resyncEvotownSkills() {
+  evotownResyncEl.disabled = true;
+  evotownHintEl.textContent = t("evotown.resyncRunning");
+  try {
+    const report = await invoke<SyncReport>("run_sync_command");
+    evotownHintEl.textContent = t("evotown.resyncOk", {
+      installed: String(report.installed),
+      skipped: String(report.skipped),
+      failed: String(report.failed),
+    });
+  } catch (error) {
+    evotownHintEl.textContent = t("evotown.resyncFailed", { error: String(error) });
+  } finally {
+    evotownResyncEl.disabled = false;
+  }
+}
+
 async function loadProfiles() {
   try {
     const doc = await invoke<ProfilesDocument>("list_profiles_command");
@@ -1529,6 +1653,7 @@ async function switchLocale(next: Locale) {
     presetStatusEl.textContent = t("presets.loading");
     healthLabelEl.textContent = t("health.ready");
   }
+  await loadEvotownStatus();
 }
 
 runtimeTabsEl.addEventListener("click", (event) => {
@@ -1629,6 +1754,15 @@ langSwitchEl.addEventListener("click", (event) => {
   }
 });
 
+evotownFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void runEvotownOnboarding();
+});
+
+evotownResyncEl.addEventListener("click", () => {
+  void resyncEvotownSkills();
+});
+
 refreshBtn.addEventListener("click", () => {
   void refresh();
 });
@@ -1717,4 +1851,5 @@ applyStaticI18n();
 updateLangButtons();
 void loadProfiles();
 void loadWorkspaces();
+void loadEvotownStatus();
 void refresh();

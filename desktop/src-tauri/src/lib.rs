@@ -1,13 +1,14 @@
 use agent_doctor_core::{
-    apply_profile_model, build_repair_preview_from_bundle, execute_repair, list_runtime_backup_ids,
-    load_profiles, load_workspaces, probe_runtime, restore_runtime_backup, run_doctor,
-    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
+    apply_profile_model, build_repair_preview_from_bundle, evotown_status,
+    execute_evotown_onboarding, execute_repair, execute_sync, list_runtime_backup_ids,
+    load_evotown_config, load_profiles, load_workspaces, probe_runtime, restore_runtime_backup,
+    run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
     use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status, ApplyReport,
-    DoctorReport, HermesAdapter, HermesProfilePreset, HermesSettings, ProbeStatus,
-    ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
-    RuntimeProbeReport, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
-    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
-    WorkspacesDocument,
+    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    OnboardingOptions, OnboardingReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions,
+    SyncReport, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use serde::Serialize;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
@@ -169,6 +170,50 @@ fn update_tray_tooltip(app: &tauri::AppHandle) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(&label));
     }
+}
+
+#[tauri::command]
+fn get_evotown_status_command() -> EvotownStatus {
+    evotown_status().unwrap_or(EvotownStatus {
+        configured: false,
+        base_url: None,
+        api_key_hint: None,
+        config_source: None,
+        runtime_target: None,
+        bundle_id: None,
+    })
+}
+
+#[tauri::command]
+fn run_evotown_onboarding_command(
+    url: String,
+    key: String,
+    sync_skills: bool,
+    pull_policies: bool,
+) -> Result<OnboardingReport, String> {
+    execute_evotown_onboarding(&OnboardingOptions {
+        url,
+        api_key: key,
+        hermes_provider: "openai".to_string(),
+        sync_skills,
+        pull_policies,
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn run_sync_command() -> Result<SyncReport, String> {
+    let config = load_evotown_config().map_err(|error| error.to_string())?;
+    execute_sync(
+        &config,
+        &SyncOptions {
+            dry_run: false,
+            only_skills: Vec::new(),
+            runtime_target: None,
+            bundle_id: None,
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -493,6 +538,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_evotown_status_command,
+            run_evotown_onboarding_command,
+            run_sync_command,
             run_doctor_command,
             list_profiles_command,
             list_workspaces_command,

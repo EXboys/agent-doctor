@@ -14,10 +14,11 @@
 - [x] `agent-doctor repair <runtime> --explain` — AI diagnosis from probe (no writes)
 - [x] `agent-doctor repair <runtime> --apply` — backup → Hermes rule playbook → re-probe → audit (Hermes only for auto-fix today)
 - [x] `agent-doctor repair <runtime> --rollback [--backup <id>]` — restore configs from `~/.config/agent-doctor/backups/`
-- [x] `agent-doctor setup` — write `~/.config/agent-doctor/profile.env` + merge runtime configs
-- [ ] `agent-doctor sync` — skill bundle sync from control plane
-- [ ] `agent-doctor policy pull` — cache policies from control plane
-- [ ] Company profile: `--url` + API key
+- [x] `agent-doctor setup` — write `~/.config/agent-doctor/profile.env` + merge runtime configs + `~/.config/evotown/evotown.agent.env`
+- [x] `agent-doctor sync` — Skill bundle sync from Evotown SkillHub (replaces `evotown-agent-setup.py sync`)
+- [x] `agent-doctor policy pull` — cache policies from Evotown to `~/.config/evotown/policies-cache.json`
+- [x] Desktop Evotown onboarding — URL/key form → setup + doctor + sync + policy pull
+- [ ] Company profile: `--url` + API key (generic non-Evotown control planes)
 - [ ] Compliance report export for IT / DevEx support workflows
 
 ### Hermes repair (shipped vs planned)
@@ -42,6 +43,7 @@
 - [x] Tauri menubar shell: tray menu, left-click to show window, run doctor
 - [x] Runtime diagnosis panel with filterable checks and suggested fixes
 - [x] Hermes: apply fixes, rollback, open API key guide
+- [x] Evotown onboarding panel: connect URL/key, one-click doctor + sync + policy pull
 - [ ] Keychain storage for API keys (optional)
 
 ## P2 — Project workspaces
@@ -74,4 +76,4 @@
 
 ## Optional integrations
 
-- [Evotown](https://github.com/EXboys/evotown) — see [enterprise.md](enterprise.md)
+- **[Evotown](https://github.com/EXboys/evotown)** — first-party control plane; see [enterprise.md](enterprise.md)
