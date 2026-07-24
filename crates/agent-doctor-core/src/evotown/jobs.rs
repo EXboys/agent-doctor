@@ -232,7 +232,12 @@ fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // Allow non-interactive automation when explicitly requested via payload
-    if job.payload.get("dangerously_skip_permissions").and_then(|v| v.as_bool()) == Some(true) {
+    if job
+        .payload
+        .get("dangerously_skip_permissions")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
         cmd.arg("--dangerously-skip-permissions");
     }
     let output = run_command_with_timeout(cmd, job.timeout_sec)?;
@@ -317,10 +322,7 @@ fn run_command_with_timeout(mut cmd: Command, timeout_sec: u64) -> Result<std::p
     match rx.recv_timeout(Duration::from_secs(timeout_sec)) {
         Ok(result) => result.context("wait_with_output failed"),
         Err(_) => {
-            let _ = Command::new("kill")
-                .arg("-9")
-                .arg(pid.to_string())
-                .status();
+            let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
             bail!("runtime timed out after {timeout_sec}s (killed pid {pid})")
         }
     }
