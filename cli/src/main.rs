@@ -114,6 +114,18 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Stay connected to Evotown over WebSocket (presence + inventory)
+    Connect {
+        /// Seconds between inventory refreshes
+        #[arg(long, default_value_t = 60)]
+        inventory_interval: u64,
+        /// Seconds between heartbeat messages
+        #[arg(long, default_value_t = 25)]
+        heartbeat_interval: u64,
+        /// Max reconnect backoff seconds
+        #[arg(long, default_value_t = 60)]
+        max_backoff: u64,
+    },
     /// Cache policies from control plane (not yet implemented)
     Policy {
         #[command(subcommand)]
@@ -353,6 +365,11 @@ fn main() -> Result<()> {
             bundle,
             json,
         } => commands::sync::run(dry_run, &only, runtime.as_deref(), bundle.as_deref(), json)?,
+        Commands::Connect {
+            inventory_interval,
+            heartbeat_interval,
+            max_backoff,
+        } => commands::connect::run(inventory_interval, heartbeat_interval, max_backoff)?,
         Commands::Policy { action } => match action {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },
