@@ -1,5 +1,5 @@
-use anyhow::Result;
 use agent_doctor_core::{load_doctor_node_config, run_connect_loop, ConnectOptions};
+use anyhow::Result;
 
 pub fn run(
     inventory_interval_secs: u64,

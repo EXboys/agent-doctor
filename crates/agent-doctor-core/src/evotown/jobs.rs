@@ -408,7 +408,7 @@ fn http_post_json(
 ) -> Result<(u16, String)> {
     // Prefer ureq-like via std + tiny HTTP for no new deps: use reqwest blocking already in crate.
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(timeout_sec.min(600).max(5)))
+        .timeout(Duration::from_secs(timeout_sec.clamp(5, 600)))
         .build()?;
     let mut req = client.post(url).json(body);
     if let Some(token) = bearer {

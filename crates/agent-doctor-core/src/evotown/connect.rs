@@ -125,7 +125,10 @@ fn load_env_map(path: &Path) -> Result<HashMap<String, String>> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        values.insert(key.trim().to_string(), value.trim().trim_matches('"').to_string());
+        values.insert(
+            key.trim().to_string(),
+            value.trim().trim_matches('"').to_string(),
+        );
     }
     Ok(values)
 }
@@ -204,8 +207,8 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
         url.as_str().split('?').next().unwrap_or(url.as_str())
     );
 
-    let (mut socket, _response) =
-        connect(url.as_str()).with_context(|| format!("websocket connect to {}", config.base_url))?;
+    let (mut socket, _response) = connect(url.as_str())
+        .with_context(|| format!("websocket connect to {}", config.base_url))?;
 
     let welcome = read_json(&mut socket)?;
     if welcome.get("type").and_then(|v| v.as_str()) != Some("welcome") {
@@ -240,7 +243,9 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
     }
     eprintln!(
         "✓ hello ack — online (drained_jobs={})",
-        ack.get("drained_jobs").and_then(|v| v.as_u64()).unwrap_or(0)
+        ack.get("drained_jobs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
     );
 
     let (tx, rx): (Sender<Outbound>, Receiver<Outbound>) = mpsc::channel();
@@ -406,7 +411,7 @@ fn read_json(
     loop {
         match socket.read()? {
             Message::Text(text) => {
-                return Ok(serde_json::from_str(&text).context("invalid JSON from server")?);
+                return serde_json::from_str(&text).context("invalid JSON from server");
             }
             Message::Ping(payload) => {
                 socket.send(Message::Pong(payload))?;
