@@ -18,8 +18,10 @@
 - [x] `agent-doctor sync` — Skill bundle sync from Evotown SkillHub (replaces `evotown-agent-setup.py sync`)
 - [x] `agent-doctor policy pull` — cache policies from Evotown to `~/.config/evotown/policies-cache.json`
 - [x] Desktop Evotown onboarding — URL/key form → setup + doctor + sync + policy pull
+- [x] `agent-doctor connect` — WebSocket presence + inventory + **job.assign execution** (Claude/Codex CLI, OpenClaw/Hermes hooks)
 - [ ] Company profile: `--url` + API key (generic non-Evotown control planes)
 - [ ] Compliance report export for IT / DevEx support workflows
+- [ ] `agent-doctor register` — migrate engine register from evotown-agent-setup.py
 
 ### Hermes repair (shipped vs planned)
 

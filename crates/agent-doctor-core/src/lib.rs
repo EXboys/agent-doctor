@@ -19,8 +19,10 @@ pub use adapter::{
 pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter};
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
-    check_evotown_connectivity, evotown_status, execute_evotown_onboarding, execute_policy_pull,
-    execute_sync, load_evotown_config, EvotownConfig, EvotownHealthReport, EvotownStatus,
+    build_inventory_payload, check_evotown_connectivity, evotown_status,
+    execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
+    load_doctor_node_config, load_evotown_config, resolve_runtime, run_connect_loop, AssignedJob,
+    ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
     OnboardingOptions, OnboardingReport, PolicyPullReport, SyncOptions, SyncReport,
 };
 pub use install::{

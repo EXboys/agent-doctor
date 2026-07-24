@@ -8,8 +8,8 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 
 | 层级 | 产品 | 职责 |
 |------|------|------|
-| 控制面 | **Evotown** | 账号、Skill 市场、policy、批准 profile、审计接收 |
-| 本机客户端 | **Agent Doctor**（本仓库） | 发现 runtime、诊断、备份、修复、Skill sync、policy 缓存 |
+| 控制面 | **Evotown** | 账号、Skill 市场、policy、批准 profile、审计接收、派活队列 |
+| 本机客户端 | **Agent Doctor**（本仓库） | 发现 runtime、诊断、备份、修复、Skill sync、policy 缓存、**WS 在线与 inventory** |
 | Runtime | OpenClaw、Hermes、Claude Code、Codex | 本地执行任务 |
 
 ## 员工 onboarding 流程
@@ -23,6 +23,18 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 5. `agent-doctor sync` — 从 Evotown SkillHub 安装/更新私有 Skill bundle。
 6. `agent-doctor policy pull` — 缓存启用中的 policy 到本机。
 7. 若 runtime 损坏或漂移：`agent-doctor repair <runtime> --apply`（备份 → 修复 → 复检 → 审计）。
+8. **派活在线**：引擎 `register` 写入 `evi_` 后运行 `agent-doctor connect`（WebSocket presence + inventory + **执行 job.assign**）。
+
+协议说明见 Evotown [`docs/zh-CN/DOCTOR_NODE_PROTOCOL.md`](https://github.com/EXboys/evotown/blob/main/docs/zh-CN/DOCTOR_NODE_PROTOCOL.md)。
+
+`connect` 收到任务后按 `payload.runtime` 执行：
+
+| runtime | 行为 |
+|---------|------|
+| `claude-code` | `claude -p …` |
+| `codex` | `codex exec …` |
+| `openclaw` | POST `OPENCLAW_HOOK_URL` |
+| `hermes` | POST `HERMES_HOOK_URL` |
 
 ## 配置文件
 
@@ -45,6 +57,7 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 | `GET /api/v1/market/bundles/.../manifest` | `sync` |
 | `GET /api/v1/market/skills/{id}/download` | `sync`（单 Skill 包） |
 | `GET /api/v1/policies?enabled_only=true` | `policy pull` |
+| `WS /api/v1/doctor/ws` | `connect`（presence + inventory） |
 | `POST /api/v1/policy/evaluate` | 规划中（repair / ingest 前校验） |
 
 ## CLI 示例
@@ -63,6 +76,9 @@ agent-doctor sync --only my-skill --runtime openclaw
 
 # 4. 拉取 policy 到本地缓存
 agent-doctor policy pull
+
+# 5. 常驻在线（需 EVOTOWN_ENGINE_ID + evi_ 已写入 evotown.agent.env）
+agent-doctor connect
 ```
 
 ## 替代 legacy 脚本
@@ -74,8 +90,9 @@ agent-doctor policy pull
 | `evotown-agent-setup.py check` | `setup` + `doctor` |
 | `evotown-agent-setup.py sync` | `agent-doctor sync` |
 | `evotown-agent-setup.py policy-pull` | `agent-doctor policy pull` |
+| `evotown-agent-setup.py connector` | `agent-doctor connect`（在线 + 派活执行） |
 
-仍保留在 Evotown 仓库、尚未迁移的能力：`register`、`watch`、connector 派活循环（需 `EVOTOWN_INGEST_TOKEN`）。
+仍保留在 Evotown 仓库的过渡能力：`register`、`watch`。`connect` 复用同一 `evi_` 做 WebSocket 鉴权与 job 结案。
 
 ## 企业 repair 保证
 

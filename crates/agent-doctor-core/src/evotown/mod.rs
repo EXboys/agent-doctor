@@ -1,5 +1,7 @@
 mod client;
 mod config;
+mod connect;
+mod jobs;
 mod policy;
 mod sync;
 
@@ -9,6 +11,11 @@ pub use config::{
     evotown_status, load_evotown_config, validate_evotown_api_key, EvotownConfig, EvotownStatus,
     DEFAULT_BUNDLE_ID, DEFAULT_RUNTIME_TARGET,
 };
+pub use connect::{
+    build_inventory_payload, load_doctor_node_config, load_doctor_node_config_from_path,
+    run_connect_loop, ConnectOptions, DoctorNodeConfig, PROTOCOL_VERSION,
+};
+pub use jobs::{execute_job, resolve_runtime, AssignedJob, JobResult};
 pub use policy::{execute_policy_pull, PolicyPullReport};
 pub use sync::{execute_sync, SkillSyncOutcome, SyncOptions, SyncReport};
 

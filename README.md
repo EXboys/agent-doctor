@@ -11,7 +11,8 @@ agent-doctor doctor                              # Diagnose: installed runtimes,
 agent-doctor repair hermes                       # Repair: probes + safe preview (no writes)
 agent-doctor repair hermes --apply               # Backup, Hermes rule fixes, re-probe, audit
 agent-doctor repair hermes --rollback            # Restore latest backup (or --backup <id>)
-agent-doctor setup --url ... --key ...           # Onboard: apply company profile (planned)
+agent-doctor setup --url ... --key ...           # Onboard: apply company profile
+agent-doctor connect                             # Stay online on Evotown (WS presence + inventory)
 ```
 
 [License: MIT](LICENSE) · [Roadmap](docs/ROADMAP.md) · [Repair safety](docs/repair-safety.md)
@@ -26,6 +27,7 @@ With **Evotown** (first-party control plane):
 agent-doctor setup --url https://your-evotown.example.com --key evk_...
 agent-doctor sync          # Pull private SkillHub bundle
 agent-doctor policy pull   # Cache policies locally
+agent-doctor connect       # WebSocket online + inventory (needs evi_ after register)
 ```
 
 See [docs/enterprise.md](docs/enterprise.md).
