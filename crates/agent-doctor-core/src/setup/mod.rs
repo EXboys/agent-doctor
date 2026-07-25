@@ -67,7 +67,10 @@ pub fn execute_setup(options: &SetupOptions) -> Result<SetupReport> {
         let result = match adapter.id() {
             "openclaw" => merge::apply_openclaw(&gateway_url, api_key),
             "hermes" => merge::apply_hermes(&gateway_url, api_key, &options.hermes_provider),
-            "claude-code" => merge::apply_claude_code(&gateway_url, api_key),
+            "claude-code" => merge::apply_claude_code(
+                &anthropic_gateway_url_from_evotown_base(&evotown_base),
+                api_key,
+            ),
             "codex" => merge::apply_codex(&gateway_url, api_key),
             other => Ok(RuntimeSetupResult {
                 runtime_id: other.to_string(),
@@ -120,6 +123,13 @@ pub fn gateway_url_from_evotown_base(base_url: &str) -> String {
     } else {
         format!("{base}/api/gateway/v1")
     }
+}
+
+/// Claude Code speaks Anthropic Messages API; Evotown serves it under `/api/gateway/anthropic`.
+/// Do not append `/v1` — Claude Code adds `/v1/messages` itself.
+pub fn anthropic_gateway_url_from_evotown_base(base_url: &str) -> String {
+    let base = evotown_base_from_gateway(&gateway_url_from_evotown_base(base_url));
+    format!("{}/api/gateway/anthropic", base.trim_end_matches('/'))
 }
 
 pub fn evotown_agent_env_path() -> Option<PathBuf> {
@@ -241,5 +251,17 @@ mod tests {
     fn rejects_invalid_gateway_url() {
         assert!(normalize_gateway_url("").is_err());
         assert!(normalize_gateway_url("ftp://x").is_err());
+    }
+
+    #[test]
+    fn anthropic_gateway_url_omits_v1_suffix() {
+        assert_eq!(
+            anthropic_gateway_url_from_evotown_base("https://www.skilllite.ai"),
+            "https://www.skilllite.ai/api/gateway/anthropic"
+        );
+        assert_eq!(
+            anthropic_gateway_url_from_evotown_base("https://www.skilllite.ai/api/gateway/v1"),
+            "https://www.skilllite.ai/api/gateway/anthropic"
+        );
     }
 }

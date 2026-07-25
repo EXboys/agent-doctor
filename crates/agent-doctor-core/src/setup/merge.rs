@@ -70,24 +70,55 @@ pub fn apply_hermes(
             .as_mapping_mut()
             .context("Hermes model section must be a mapping")?;
 
-        if !model_map.contains_key(YamlValue::from("provider")) {
-            model_map.insert(YamlValue::from("provider"), YamlValue::from(provider));
-        }
+        // Evotown gateway is OpenAI-compatible; Hermes calls that "custom"
+        // (not "openai" — that slug is unknown to Hermes).
+        let effective_provider =
+            if provider.trim().is_empty() || provider.trim().eq_ignore_ascii_case("openai") {
+                "custom"
+            } else {
+                provider.trim()
+            };
+        model_map.insert(
+            YamlValue::from("provider"),
+            YamlValue::from(effective_provider),
+        );
         if !model_map.contains_key(YamlValue::from("default")) {
             model_map.insert(YamlValue::from("default"), YamlValue::from("gpt-4o-mini"));
         }
         model_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
     }
 
+    // Keep title generation on the same gateway (avoid auto → native provider 401).
+    if let Some(root_map) = root.as_mapping_mut() {
+        let aux = root_map
+            .entry(YamlValue::from("auxiliary"))
+            .or_insert_with(|| YamlValue::Mapping(Mapping::new()));
+        if let Some(aux_map) = aux.as_mapping_mut() {
+            let title = aux_map
+                .entry(YamlValue::from("title_generation"))
+                .or_insert_with(|| YamlValue::Mapping(Mapping::new()));
+            if let Some(title_map) = title.as_mapping_mut() {
+                title_map.insert(YamlValue::from("provider"), YamlValue::from("custom"));
+                title_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
+            }
+        }
+    }
+
     let provider_name = root
         .get("model")
         .and_then(|model| model.get("provider"))
         .and_then(YamlValue::as_str)
-        .unwrap_or(provider)
+        .unwrap_or("custom")
         .to_string();
 
     fs::write(&path, serde_yaml::to_string(&root)?)?;
-    HermesAdapter::apply_api_key(&provider_name, api_key)?;
+    // Custom endpoints authenticate via OPENAI_API_KEY.
+    let env_provider = if provider_name == "custom" {
+        "openai"
+    } else {
+        provider_name.as_str()
+    };
+    HermesAdapter::apply_api_key(env_provider, api_key)?;
 
     Ok(RuntimeSetupResult {
         runtime_id: "hermes".to_string(),
@@ -95,7 +126,9 @@ pub fn apply_hermes(
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: format!("set model.base_url to {gateway_url} and updated ~/.hermes/.env"),
+        message: format!(
+            "set model.provider={provider_name}, base_url={gateway_url}, and updated ~/.hermes/.env"
+        ),
     })
 }
 
@@ -132,7 +165,9 @@ pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<Runti
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: "set env.ANTHROPIC_BASE_URL and env.ANTHROPIC_API_KEY".to_string(),
+        message: format!(
+            "set env.ANTHROPIC_BASE_URL to {gateway_url} (Anthropic Messages path) and API key"
+        ),
     })
 }
 

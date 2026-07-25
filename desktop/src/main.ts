@@ -139,6 +139,14 @@ interface OnboardingReport {
   } | null;
 }
 
+interface OpenSessionReport {
+  runtime: string;
+  method: "deep-link" | "terminal";
+  cwd: string;
+  target: string;
+  detail: string;
+}
+
 interface SyncReport {
   installed: number;
   skipped: number;
@@ -797,6 +805,10 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     ? ""
     : `<button type="button" class="btn-ghost" data-action="edit-hermes">${t("runtime.edit")}</button>`;
   const diagnoseButton = `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`;
+  const openButton =
+    runtime.installed && canOpenSession(runtime.id)
+      ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
+      : "";
 
   const meta = hermesEditing
     ? [
@@ -846,6 +858,7 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
       <div class="runtime-head runtime-head-compact">
         <p class="runtime-tab-title">${runtime.display_name}</p>
         <div class="runtime-actions">
+          ${openButton}
           ${diagnoseButton}
           ${editButton}
           <p class="badge ok">${t("runtime.installed")}</p>
@@ -865,6 +878,10 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
 
   const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
   const badgeClass = runtime.installed ? "ok" : "muted";
+  const openButton =
+    runtime.installed && canOpenSession(runtime.id)
+      ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
+      : "";
   const rows = [
     runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
@@ -879,6 +896,7 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
       <div class="runtime-head runtime-head-compact">
         <p class="runtime-tab-title">${runtime.display_name}</p>
         <div class="runtime-actions">
+          ${openButton}
           <button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>
           <p class="badge ${badgeClass}">${state}</p>
         </div>
@@ -887,6 +905,10 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
       <div class="card-hint repair-hint" data-repair-hint hidden></div>
     </article>
   `;
+}
+
+function canOpenSession(runtimeId: string): boolean {
+  return ["claude-code", "codex", "hermes", "openclaw"].includes(runtimeId);
 }
 
 function resolveActiveRuntimeId(runtimes: RuntimeDoctorResult[]): string | null {
@@ -1556,6 +1578,39 @@ async function rollbackRepairRuntimeCard(card: HTMLElement) {
   }
 }
 
+async function openSessionFromCard(card: HTMLElement) {
+  const runtime = card.dataset.runtime;
+  const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
+  const openButton = card.querySelector<HTMLButtonElement>('[data-action="open-session"]');
+  if (!runtime) {
+    return;
+  }
+  openButton?.setAttribute("disabled", "true");
+  if (hint) {
+    hint.hidden = false;
+    hint.textContent = t("runtime.opening");
+  }
+  try {
+    const report = await invoke<OpenSessionReport>("open_session_command", {
+      runtime,
+      cwd: null,
+      prompt: null,
+      terminal: null,
+    });
+    const method = report.method === "deep-link" ? "deep-link" : "terminal";
+    if (hint) {
+      hint.textContent = t("runtime.openOk", { method });
+    }
+  } catch (error) {
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = t("runtime.openFailed", { error: String(error) });
+    }
+  } finally {
+    openButton?.removeAttribute("disabled");
+  }
+}
+
 async function openRepairGuide(path: string) {
   await invoke("open_path_command", { path });
 }
@@ -1700,6 +1755,11 @@ runtimesEl.addEventListener("click", (event) => {
   const runtimeCard = target.closest<HTMLElement>("[data-runtime]");
   if (action === "diagnose-runtime" && runtimeCard) {
     void diagnoseRuntimeCard(runtimeCard);
+    return;
+  }
+
+  if (action === "open-session" && runtimeCard) {
+    void openSessionFromCard(runtimeCard);
     return;
   }
 
