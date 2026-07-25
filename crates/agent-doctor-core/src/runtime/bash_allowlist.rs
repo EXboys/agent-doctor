@@ -1,4 +1,8 @@
 use crate::lifecycle::hermes::{hermes_install_shell_command, hermes_update_shell_command};
+use crate::lifecycle::npm_cli::{
+    claude_code_install_shell_command, claude_code_update_shell_command,
+    codex_install_shell_command, codex_update_shell_command,
+};
 use crate::lifecycle::openclaw::{openclaw_install_shell_command, openclaw_update_shell_command};
 
 /// Install/update shell commands the repair agent may run for a runtime.
@@ -12,8 +16,14 @@ pub fn runtime_allowed_bash_commands(runtime_id: &str) -> Vec<String> {
             openclaw_install_shell_command(),
             openclaw_update_shell_command(),
         ],
-        "claude-code" => vec!["npm install -g @anthropic-ai/claude-code".to_string()],
-        "codex" => vec!["npm install -g @openai/codex".to_string()],
+        "claude-code" => vec![
+            claude_code_install_shell_command(),
+            claude_code_update_shell_command(),
+        ],
+        "codex" => vec![
+            codex_install_shell_command(),
+            codex_update_shell_command(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -83,6 +93,10 @@ mod tests {
         assert!(bash_command_allowed_for_runtime(
             "codex",
             "npm install -g @openai/codex"
+        ));
+        assert!(bash_command_allowed_for_runtime(
+            "codex",
+            "npm install -g @openai/codex@latest"
         ));
     }
 }

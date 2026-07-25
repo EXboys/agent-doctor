@@ -114,6 +114,24 @@ type RestoreSummary = {
   restored_files: string[];
 };
 
+type InstallRuntimeResponse = {
+  runtime_id: string;
+  install_needed: boolean;
+  install_succeeded: boolean;
+  install_attempts: number;
+  install_log_path: string | null;
+  manual_fallback: string[];
+  skipped: Array<{ id: string; reason: string }>;
+  after_installed: boolean;
+};
+
+type InstallProgressEvent = {
+  runtime_id: string;
+  phase: string;
+  message: string;
+  percent: number;
+};
+
 interface EvotownStatus {
   configured: boolean;
   base_url: string | null;
@@ -809,6 +827,9 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     runtime.installed && canOpenSession(runtime.id)
       ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
       : "";
+  const installButton = !runtime.installed
+    ? `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`
+    : "";
 
   const meta = hermesEditing
     ? [
@@ -859,6 +880,7 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
         <p class="runtime-tab-title">${runtime.display_name}</p>
         <div class="runtime-actions">
           ${openButton}
+          ${installButton}
           ${diagnoseButton}
           ${editButton}
           <p class="badge ok">${t("runtime.installed")}</p>
@@ -882,6 +904,9 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
     runtime.installed && canOpenSession(runtime.id)
       ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
       : "";
+  const installButton = !runtime.installed
+    ? `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`
+    : "";
   const rows = [
     runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
@@ -897,6 +922,7 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
         <p class="runtime-tab-title">${runtime.display_name}</p>
         <div class="runtime-actions">
           ${openButton}
+          ${installButton}
           <button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>
           <p class="badge ${badgeClass}">${state}</p>
         </div>
@@ -1611,6 +1637,98 @@ async function openSessionFromCard(card: HTMLElement) {
   }
 }
 
+async function installRuntimeFromCard(card: HTMLElement) {
+  const runtime = card.dataset.runtime;
+  const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
+  const installButton = card.querySelector<HTMLButtonElement>('[data-action="install-runtime"]');
+  const diagnoseButton = card.querySelector<HTMLButtonElement>('[data-action="diagnose-runtime"]');
+  if (!runtime) {
+    return;
+  }
+  installButton?.setAttribute("disabled", "true");
+  diagnoseButton?.setAttribute("disabled", "true");
+  if (hint) {
+    hint.hidden = false;
+    hint.innerHTML = `
+      <div class="install-progress" data-install-progress>
+        <div class="install-progress-head">
+          <span data-install-status>${escapeHtml(t("runtime.installing"))}</span>
+          <span data-install-percent>0%</span>
+        </div>
+        <div class="install-progress-track" aria-hidden="true">
+          <div class="install-progress-fill is-indeterminate" data-install-fill></div>
+        </div>
+        <pre class="install-progress-log" data-install-log></pre>
+      </div>
+    `;
+  }
+  const statusEl = hint?.querySelector<HTMLElement>("[data-install-status]");
+  const percentEl = hint?.querySelector<HTMLElement>("[data-install-percent]");
+  const fillEl = hint?.querySelector<HTMLElement>("[data-install-fill]");
+  const logEl = hint?.querySelector<HTMLElement>("[data-install-log]");
+  const logLines: string[] = [];
+
+  const unlisten = await listen<InstallProgressEvent>("install-progress", (event) => {
+    if (event.payload.runtime_id !== runtime) {
+      return;
+    }
+    const { phase, message, percent } = event.payload;
+    if (statusEl) {
+      statusEl.textContent =
+        phase === "done"
+          ? t("runtime.installOk")
+          : phase === "verifying"
+            ? t("runtime.installVerifying")
+            : t("runtime.installing");
+    }
+    if (percentEl) {
+      percentEl.textContent = `${Math.min(100, Math.max(0, percent))}%`;
+    }
+    if (fillEl) {
+      fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+      fillEl.classList.toggle("is-indeterminate", phase === "installing" || phase === "output");
+    }
+    if (logEl && message.trim()) {
+      logLines.push(message);
+      while (logLines.length > 40) {
+        logLines.shift();
+      }
+      logEl.textContent = logLines.join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  });
+
+  try {
+    const report = await invoke<InstallRuntimeResponse>("install_runtime_command", { runtime });
+    if (hint) {
+      if (!report.install_needed) {
+        hint.textContent = t("runtime.installAlready");
+      } else if (report.install_succeeded || report.after_installed) {
+        const last = logLines.slice(-3).join("\n");
+        hint.innerHTML = `<div class="install-progress-done">${escapeHtml(t("runtime.installOk"))}${
+          last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""
+        }</div>`;
+      } else {
+        const detail =
+          report.skipped.map((item) => item.reason).find(Boolean) ||
+          report.manual_fallback[0] ||
+          t("runtime.installFailed");
+        hint.textContent = `${t("runtime.installFailed")} ${detail}`;
+      }
+    }
+    await refresh();
+  } catch (error) {
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = String(error);
+    }
+  } finally {
+    unlisten();
+    installButton?.removeAttribute("disabled");
+    diagnoseButton?.removeAttribute("disabled");
+  }
+}
+
 async function openRepairGuide(path: string) {
   await invoke("open_path_command", { path });
 }
@@ -1760,6 +1878,11 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "open-session" && runtimeCard) {
     void openSessionFromCard(runtimeCard);
+    return;
+  }
+
+  if (action === "install-runtime" && runtimeCard) {
+    void installRuntimeFromCard(runtimeCard);
     return;
   }
 

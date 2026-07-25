@@ -1,14 +1,15 @@
 use agent_doctor_core::{
     apply_profile_model, build_repair_preview_from_bundle, evotown_status,
-    execute_evotown_onboarding, execute_repair, execute_sync, list_runtime_backup_ids,
-    load_evotown_config, load_profiles, load_workspaces, open_interactive_session, probe_runtime,
-    restore_runtime_backup, run_doctor, runtime_supports_playbook, set_runtime_model,
-    suggest_runtime_repairs, use_profile, use_workspace_with_options, workspace_doctor,
-    workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
-    HermesProfilePreset, HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions,
-    OpenSessionReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions, RepairExecuteReport,
-    RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions, SyncReport,
-    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    execute_evotown_onboarding, execute_install_with_progress, execute_repair, execute_sync,
+    list_runtime_backup_ids, load_evotown_config, load_profiles, load_workspaces,
+    needs_binary_install, open_interactive_session, probe_runtime, restore_runtime_backup,
+    run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
+    use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status, ApplyReport,
+    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    InstallOptions, InstallProgressEvent, InstallReport, OnboardingOptions, OnboardingReport,
+    OpenSessionOptions, OpenSessionReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions,
+    SyncReport, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
     WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use serde::Serialize;
@@ -312,6 +313,32 @@ fn run_repair_rollback_command(
 }
 
 #[tauri::command]
+async fn install_runtime_command(
+    app: tauri::AppHandle,
+    runtime: String,
+) -> Result<InstallRuntimeResponse, String> {
+    let app_for_emit = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = execute_install_with_progress(
+            &runtime,
+            &InstallOptions {
+                explain: false,
+                plan_ai_repair: false,
+                repair_after: false,
+                retry_count: 0,
+            },
+            |event: InstallProgressEvent| {
+                let _ = app_for_emit.emit("install-progress", &event);
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(InstallRuntimeResponse::from(&report))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(path, None::<&str>)
@@ -466,6 +493,40 @@ impl From<&RestoreReport> for RestoreSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct InstallRuntimeResponse {
+    runtime_id: String,
+    install_needed: bool,
+    install_succeeded: bool,
+    install_attempts: u8,
+    install_log_path: Option<String>,
+    manual_fallback: Vec<String>,
+    skipped: Vec<SkippedRepairItem>,
+    after_installed: bool,
+}
+
+impl From<&InstallReport> for InstallRuntimeResponse {
+    fn from(report: &InstallReport) -> Self {
+        Self {
+            runtime_id: report.runtime_id.clone(),
+            install_needed: report.install_needed,
+            install_succeeded: report.install_succeeded,
+            install_attempts: report.install_attempts,
+            install_log_path: report.install_log_path.clone(),
+            manual_fallback: report.manual_fallback.clone(),
+            skipped: report
+                .skipped_actions
+                .iter()
+                .map(|item| SkippedRepairItem {
+                    id: item.id.clone(),
+                    reason: item.reason.clone(),
+                })
+                .collect(),
+            after_installed: !needs_binary_install(&report.after_probe),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct RepairPreviewResponse {
     runtime_id: String,
     display_name: String,
@@ -572,6 +633,7 @@ pub fn run() {
             run_repair_preview_command,
             run_repair_execute_command,
             run_repair_rollback_command,
+            install_runtime_command,
             open_path_command,
             open_session_command
         ])

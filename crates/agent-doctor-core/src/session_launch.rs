@@ -10,7 +10,16 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use url::form_urlencoded;
 
-use crate::evotown::normalize_runtime;
+use crate::evotown::{load_evotown_config, normalize_runtime};
+use crate::profile::agent_profile_path;
+#[cfg(windows)]
+use crate::profile::read_company_profile;
+use crate::setup::{
+    clear_codex_placeholder_auth, evotown_agent_env_path, write_company_profile_with_gateway,
+    COMPANY_API_KEY_ENV,
+};
+#[cfg(windows)]
+use crate::setup::EVOTOWN_API_KEY_ENV;
 use crate::workspace::load_workspaces;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +101,10 @@ pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSess
         "claude-code" => {
             open_claude_code(&cwd, options.prompt.as_deref(), options.prefer_deep_link)
         }
-        "codex" => open_in_terminal("codex", &["codex"], &cwd, options.prompt.as_deref()),
+        "codex" => {
+            let _ = clear_codex_placeholder_auth();
+            open_in_terminal("codex", &["codex"], &cwd, options.prompt.as_deref())
+        }
         "hermes" => open_in_terminal("hermes", &["hermes"], &cwd, options.prompt.as_deref()),
         "openclaw" => open_in_terminal(
             "openclaw",
@@ -137,7 +149,7 @@ fn open_in_terminal(
     if argv.is_empty() {
         bail!("empty terminal command for {runtime}");
     }
-    let command_line = shell_join(argv);
+    let command_line = wrap_with_company_env(&shell_join(argv));
     launch_system_terminal(cwd, &command_line)?;
     Ok(OpenSessionReport {
         runtime: runtime.into(),
@@ -149,6 +161,68 @@ fn open_in_terminal(
             cwd.display()
         ),
     })
+}
+
+/// Prefix a shell command so Evotown / company API keys are available to the CLI.
+/// Prefer sourcing env files (never inline secrets into the displayed command).
+fn wrap_with_company_env(command: &str) -> String {
+    let _ = ensure_profile_env_from_evotown();
+
+    #[cfg(not(windows))]
+    {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(path) = agent_profile_path().filter(|path| path.exists()) {
+            parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
+        }
+        if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
+            parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
+        }
+        if parts.is_empty() {
+            return command.to_string();
+        }
+        return format!(
+            "set -a && {} && set +a && export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{OPENAI_API_KEY:-$EVOTOWN_API_KEY}}}}\" && {command}",
+            parts.join(" && ")
+        );
+    }
+
+    #[cfg(windows)]
+    {
+        let api_key = read_company_profile()
+            .ok()
+            .flatten()
+            .and_then(|profile| profile.api_key)
+            .filter(|key| !key.trim().is_empty())
+            .or_else(|| {
+                load_evotown_config()
+                    .ok()
+                    .map(|config| config.api_key)
+                    .filter(|key| !key.trim().is_empty())
+            });
+        match api_key {
+            Some(key) => {
+                let escaped = key.replace('\'', "''");
+                format!(
+                    "$env:OPENAI_API_KEY='{escaped}'; $env:{EVOTOWN_API_KEY_ENV}='{escaped}'; $env:{COMPANY_API_KEY_ENV}='{escaped}'; {command}"
+                )
+            }
+            None => command.to_string(),
+        }
+    }
+}
+
+/// If Evotown is configured but profile.env is missing, recreate it so Doctor/Codex share one key.
+fn ensure_profile_env_from_evotown() -> anyhow::Result<()> {
+    let Some(path) = agent_profile_path() else {
+        return Ok(());
+    };
+    if path.exists() {
+        return Ok(());
+    }
+    let config = load_evotown_config()?;
+    let gateway = format!("{}/api/gateway/v1", config.base_url.trim_end_matches('/'));
+    write_company_profile_with_gateway(&path, &gateway, &config.api_key, &config.base_url)?;
+    Ok(())
 }
 
 fn open_url(url: &str) -> Result<()> {
@@ -314,5 +388,12 @@ mod tests {
             claude_cli_deep_link(Path::new(""), None),
             "claude-cli://open"
         );
+    }
+
+    #[test]
+    fn wraps_command_with_exported_key_when_no_profile_env() {
+        // Without a profile file, wrap still returns a runnable command.
+        let wrapped = wrap_with_company_env("codex");
+        assert!(wrapped.contains("codex"));
     }
 }

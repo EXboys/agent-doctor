@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{ClaudeCodeAdapter, CodexAdapter, HermesAdapter, OpenClawAdapter};
 use crate::lifecycle::{
-    run_hermes_lifecycle, run_openclaw_lifecycle, HermesLifecycleAction, OpenClawLifecycleAction,
+    run_claude_code_lifecycle, run_codex_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
+    HermesLifecycleAction, NpmCliLifecycleAction, OpenClawLifecycleAction,
 };
 use crate::probe::runtimes::{
     openclaw_probe_deep, probe_deep, schema_claude_code, schema_codex, schema_hermes,
@@ -126,6 +127,22 @@ fn run_hermes_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
     run_hermes_lifecycle(action)
 }
 
+fn run_claude_code_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => NpmCliLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
+    };
+    run_claude_code_lifecycle(action)
+}
+
+fn run_codex_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => NpmCliLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
+    };
+    run_codex_lifecycle(action)
+}
+
 static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
     RuntimeDescriptor {
         id: "openclaw",
@@ -167,7 +184,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         deep_probe: None,
         suggest_repairs: None,
         apply_playbook: None,
-        run_lifecycle: None,
+        run_lifecycle: Some(run_claude_code_lifecycle_action),
     },
     RuntimeDescriptor {
         id: "codex",
@@ -181,7 +198,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         deep_probe: None,
         suggest_repairs: None,
         apply_playbook: None,
-        run_lifecycle: None,
+        run_lifecycle: Some(run_codex_lifecycle_action),
     },
 ];
 
@@ -328,6 +345,20 @@ mod tests {
         assert!(hermes.apply_playbook.is_some());
         assert!(hermes.run_lifecycle.is_some());
         assert!(hermes.deep_probe.is_some());
+    }
+
+    #[test]
+    fn claude_and_codex_wire_lifecycle() {
+        assert!(descriptor_by_id("claude-code")
+            .expect("claude-code")
+            .run_lifecycle
+            .is_some());
+        assert!(descriptor_by_id("codex")
+            .expect("codex")
+            .run_lifecycle
+            .is_some());
+        assert!(runtime_supports_lifecycle("claude-code"));
+        assert!(runtime_supports_lifecycle("codex"));
     }
 
     #[test]

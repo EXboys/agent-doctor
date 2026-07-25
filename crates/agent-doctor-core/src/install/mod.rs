@@ -4,8 +4,8 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::lifecycle::{
-    hermes_install_shell_command, openclaw_install_shell_command, run_shell_command_capturing,
-    write_install_log,
+    claude_code_install_shell_command, codex_install_shell_command, hermes_install_shell_command,
+    openclaw_install_shell_command, run_shell_command_streaming, write_install_log,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
@@ -45,10 +45,39 @@ pub struct InstallReport {
     pub repair_loop: Option<RepairLoopReport>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallProgressEvent {
+    pub runtime_id: String,
+    /// probing | installing | output | verifying | done
+    pub phase: String,
+    pub message: String,
+    pub percent: u8,
+}
+
 pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<InstallReport> {
+    execute_install_with_progress(runtime_id, options, |_| {})
+}
+
+pub fn execute_install_with_progress<F>(
+    runtime_id: &str,
+    options: &InstallOptions,
+    mut on_progress: F,
+) -> Result<InstallReport>
+where
+    F: FnMut(InstallProgressEvent),
+{
     if descriptor_by_id(runtime_id).is_none() {
         bail!("unknown runtime '{runtime_id}'");
     }
+
+    let emit = |phase: &str, message: &str, percent: u8| InstallProgressEvent {
+        runtime_id: runtime_id.to_string(),
+        phase: phase.to_string(),
+        message: message.to_string(),
+        percent,
+    };
+
+    on_progress(emit("probing", "Checking whether the runtime binary is installed…", 5));
 
     let has_rule_install = runtime_supports_lifecycle(runtime_id);
     let before_probe = probe_runtime(runtime_id)?;
@@ -58,13 +87,21 @@ pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<Ins
     let mut install_attempts = 0u8;
     let mut install_succeeded = !install_needed;
 
-    if install_needed && has_rule_install {
+    if !install_needed {
+        on_progress(emit("done", "Already installed — no install action required.", 100));
+    } else if has_rule_install {
         let max_attempts = 1 + options.retry_count;
         while install_attempts < max_attempts {
             install_attempts += 1;
-            match run_rule_install(runtime_id) {
+            on_progress(emit(
+                "installing",
+                &format!("Running installer (attempt {install_attempts}/{max_attempts})…"),
+                15,
+            ));
+            match run_rule_install(runtime_id, &mut on_progress) {
                 Ok(path) => {
                     install_log_path = Some(path.display().to_string());
+                    on_progress(emit("verifying", "Installer finished — verifying binary…", 85));
                     let after_attempt = probe_runtime(runtime_id)?;
                     if !needs_binary_install(&after_attempt) {
                         install_succeeded = true;
@@ -87,8 +124,15 @@ pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<Ins
                 }
             }
         }
+    } else {
+        on_progress(emit(
+            "installing",
+            "No rule installer — falling back to AI / allowlisted install…",
+            20,
+        ));
     }
 
+    on_progress(emit("verifying", "Re-probing runtime health…", 90));
     let mut after_probe = probe_runtime(runtime_id)?;
     if install_needed && !install_succeeded {
         install_succeeded = !needs_binary_install(&after_probe);
@@ -113,6 +157,7 @@ pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<Ins
         &after_probe,
     ) {
         Some(use_ai_planner) => {
+            on_progress(emit("installing", "Running repair loop for remaining issues…", 92));
             let loop_report = execute_repair_loop(
                 runtime_id,
                 &RepairLoopOptions {
@@ -127,6 +172,16 @@ pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<Ins
         }
         None => None,
     };
+
+    on_progress(emit(
+        "done",
+        if install_succeeded {
+            "Install finished."
+        } else {
+            "Install finished with issues."
+        },
+        100,
+    ));
 
     Ok(InstallReport {
         runtime_id: runtime_id.to_string(),
@@ -148,13 +203,37 @@ struct InstallRunError {
     log_path: Option<PathBuf>,
 }
 
-fn run_rule_install(runtime_id: &str) -> std::result::Result<PathBuf, InstallRunError> {
+fn run_rule_install<F>(
+    runtime_id: &str,
+    on_progress: &mut F,
+) -> std::result::Result<PathBuf, InstallRunError>
+where
+    F: FnMut(InstallProgressEvent),
+{
     let command = install_shell_command(runtime_id).ok_or_else(|| InstallRunError {
         reason: format!("no install command for runtime '{runtime_id}'"),
         log_path: None,
     })?;
 
-    let capture = run_shell_command_capturing(&command).map_err(|error| InstallRunError {
+    on_progress(InstallProgressEvent {
+        runtime_id: runtime_id.to_string(),
+        phase: "installing".to_string(),
+        message: format!("$ {command}"),
+        percent: 20,
+    });
+
+    let mut line_count = 0u32;
+    let capture = run_shell_command_streaming(&command, |line| {
+        line_count = line_count.saturating_add(1);
+        let percent = (20 + (line_count.min(60) as u8)).min(80);
+        on_progress(InstallProgressEvent {
+            runtime_id: runtime_id.to_string(),
+            phase: "output".to_string(),
+            message: line.to_string(),
+            percent,
+        });
+    })
+    .map_err(|error| InstallRunError {
         reason: error.to_string(),
         log_path: None,
     })?;
@@ -192,6 +271,8 @@ fn install_shell_command(runtime_id: &str) -> Option<String> {
     match runtime_id {
         "hermes" => Some(hermes_install_shell_command()),
         "openclaw" => Some(openclaw_install_shell_command()),
+        "claude-code" => Some(claude_code_install_shell_command()),
+        "codex" => Some(codex_install_shell_command()),
         _ => None,
     }
 }
@@ -200,6 +281,8 @@ fn install_action_id(runtime_id: &str) -> &'static str {
     match runtime_id {
         "hermes" => "fix-hermes-install",
         "openclaw" => "fix-openclaw-install",
+        "claude-code" => "fix-claude-code-install",
+        "codex" => "fix-codex-install",
         _ => "fix-install",
     }
 }

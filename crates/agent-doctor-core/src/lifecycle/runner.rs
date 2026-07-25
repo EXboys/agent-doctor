@@ -1,6 +1,9 @@
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::Output;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -33,31 +36,109 @@ pub(crate) fn run_shell_command(command_line: &str) -> Result<()> {
 }
 
 pub fn run_shell_command_capturing(command_line: &str) -> Result<ShellCapture> {
-    use std::process::Command;
+    run_shell_command_streaming(command_line, |_| {})
+}
 
+/// Run a shell command, streaming each stdout/stderr line to `on_line`.
+pub fn run_shell_command_streaming<F>(command_line: &str, on_line: F) -> Result<ShellCapture>
+where
+    F: FnMut(&str),
+{
     #[cfg(unix)]
-    let output = Command::new("bash")
+    let mut child = Command::new("bash")
         .arg("-c")
         .arg(command_line)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("failed to start install shell")?;
 
     #[cfg(windows)]
-    let output = Command::new("cmd")
+    let mut child = Command::new("cmd")
         .args(["/C", command_line])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("failed to start install shell")?;
 
-    Ok(capture_from_output(&output))
-}
+    let stdout = child.stdout.take().context("missing stdout pipe")?;
+    let stderr = child.stderr.take().context("missing stderr pipe")?;
 
-fn capture_from_output(output: &Output) -> ShellCapture {
-    ShellCapture {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code(),
+    let queue: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let stdout_acc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let stderr_acc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+    let queue_out = Arc::clone(&queue);
+    let acc_out = Arc::clone(&stdout_acc);
+    let stdout_handle = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(mut acc) = acc_out.lock() {
+                acc.push_str(&line);
+                acc.push('\n');
+            }
+            if let Ok(mut q) = queue_out.lock() {
+                q.push(line);
+            }
+        }
+    });
+
+    let queue_err = Arc::clone(&queue);
+    let acc_err = Arc::clone(&stderr_acc);
+    let stderr_handle = thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Ok(mut acc) = acc_err.lock() {
+                acc.push_str(&line);
+                acc.push('\n');
+            }
+            if let Ok(mut q) = queue_err.lock() {
+                q.push(line);
+            }
+        }
+    });
+
+    let mut on_line = on_line;
+    let status = loop {
+        let drained = {
+            let mut guard = queue.lock().unwrap_or_else(|error| error.into_inner());
+            guard.drain(..).collect::<Vec<_>>()
+        };
+        for line in drained {
+            on_line(&line);
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => thread::sleep(Duration::from_millis(80)),
+            Err(error) => return Err(error).context("failed waiting for install shell"),
+        }
+    };
+
+    let _ = stdout_handle.join();
+    let _ = stderr_handle.join();
+
+    let drained = {
+        let mut guard = queue.lock().unwrap_or_else(|error| error.into_inner());
+        guard.drain(..).collect::<Vec<_>>()
+    };
+    for line in drained {
+        on_line(&line);
     }
+
+    let stdout = stdout_acc
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let stderr = stderr_acc
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+
+    Ok(ShellCapture {
+        success: status.success(),
+        stdout,
+        stderr,
+        exit_code: status.code(),
+    })
 }
 
 fn finish_lifecycle_error(capture: &ShellCapture) -> anyhow::Error {

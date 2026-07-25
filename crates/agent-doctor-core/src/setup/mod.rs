@@ -1,5 +1,7 @@
 mod merge;
 
+pub use merge::clear_codex_placeholder_auth;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

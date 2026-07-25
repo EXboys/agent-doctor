@@ -81,9 +81,29 @@ fn common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".local/bin"));
         dirs.push(home.join(".cargo/bin"));
         dirs.push(home.join("bin"));
+        dirs.push(home.join(".npm-global/bin"));
+    }
+
+    if let Some(npm_bin) = npm_global_bin_dir() {
+        dirs.push(npm_bin);
     }
 
     dirs
+}
+
+fn npm_global_bin_dir() -> Option<PathBuf> {
+    let output = Command::new("npm")
+        .args(["prefix", "-g"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(prefix).join("bin"))
 }
 
 /// Use `where.exe` on Windows to find executables that may be in restricted

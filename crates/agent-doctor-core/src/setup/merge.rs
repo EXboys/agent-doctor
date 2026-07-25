@@ -7,7 +7,7 @@ use toml::Value as TomlValue;
 
 use crate::adapters::util::home_join;
 use crate::adapters::HermesAdapter;
-use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult, COMPANY_API_KEY_ENV};
+use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult};
 
 pub fn apply_openclaw(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".openclaw/openclaw.json");
@@ -171,7 +171,7 @@ pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<Runti
     })
 }
 
-pub fn apply_codex(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
+pub fn apply_codex(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".codex/config.toml");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
@@ -187,12 +187,11 @@ pub fn apply_codex(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetu
         .as_table_mut()
         .context("Codex config root must be a table")?;
 
-    if !table.contains_key("model") {
-        table.insert(
-            "model".to_string(),
-            TomlValue::String("gpt-4o-mini".to_string()),
-        );
-    }
+    // Prefer Evotown-routable defaults; gpt-4o-* often fails upstream on company gateways.
+    table.insert(
+        "model".to_string(),
+        TomlValue::String("deepseek-v4-flash".to_string()),
+    );
     table.insert(
         "model_provider".to_string(),
         TomlValue::String("company".to_string()),
@@ -209,7 +208,21 @@ pub fn apply_codex(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetu
     );
     company.insert(
         "env_key".to_string(),
-        TomlValue::String(COMPANY_API_KEY_ENV.to_string()),
+        // Evotown agent env already exports OPENAI_API_KEY=evk_…
+        TomlValue::String("OPENAI_API_KEY".to_string()),
+    );
+    company.insert(
+        "requires_openai_auth".to_string(),
+        TomlValue::Boolean(false),
+    );
+    // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
+    company.insert(
+        "wire_api".to_string(),
+        TomlValue::String("responses".to_string()),
+    );
+    company.insert(
+        "supports_websockets".to_string(),
+        TomlValue::Boolean(false),
     );
 
     let mut providers = toml::map::Map::new();
@@ -218,7 +231,7 @@ pub fn apply_codex(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetu
 
     fs::write(&path, toml::to_string_pretty(&root)?)?;
 
-    write_codex_auth_hint(api_key)?;
+    clear_codex_placeholder_auth()?;
 
     Ok(RuntimeSetupResult {
         runtime_id: "codex".to_string(),
@@ -226,23 +239,32 @@ pub fn apply_codex(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetu
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: format!(
-            "set model_providers.company.base_url; export {COMPANY_API_KEY_ENV} or source profile.env"
-        ),
+        message: "set company gateway (wire_api=responses, model=deepseek-v4-flash); uses OPENAI_API_KEY from evotown.agent.env"
+            .to_string(),
     })
 }
 
-fn write_codex_auth_hint(api_key: &str) -> AnyhowResult<()> {
+/// Remove Agent Doctor placeholder / empty apikey auth.json so Codex uses env_key auth.
+pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
     let path = home_join(".codex/auth.json");
-    if path.exists() {
+    if !path.exists() {
         return Ok(());
     }
-    ensure_parent(&path)?;
-    let payload = json!({
-        "auth_mode": "apikey",
-        "note": "API key is stored in ~/.config/agent-doctor/profile.env — source it or set AGENT_DOCTOR_COMPANY_API_KEY",
-        "placeholder": !api_key.is_empty()
-    });
-    fs::write(&path, serde_json::to_string_pretty(&payload)?)?;
+    let raw = fs::read_to_string(&path)?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(());
+    };
+    let is_placeholder = value
+        .get("placeholder")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    let is_empty_apikey = value.get("auth_mode").and_then(serde_json::Value::as_str)
+        == Some("apikey")
+        && value.get("OPENAI_API_KEY").is_none()
+        && value.get("api_key").is_none()
+        && value.get("tokens").is_none();
+    if is_placeholder || is_empty_apikey {
+        fs::remove_file(&path)?;
+    }
     Ok(())
 }
