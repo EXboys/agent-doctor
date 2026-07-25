@@ -48,6 +48,7 @@ pub fn apply_hermes(
     gateway_url: &str,
     api_key: &str,
     provider: &str,
+    model_id: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".hermes/config.yaml");
     let backup_path = backup_file(&path)?;
@@ -82,7 +83,9 @@ pub fn apply_hermes(
             YamlValue::from("provider"),
             YamlValue::from(effective_provider),
         );
-        if !model_map.contains_key(YamlValue::from("default")) {
+        if let Some(id) = model_id.map(str::trim).filter(|m| !m.is_empty()) {
+            model_map.insert(YamlValue::from("default"), YamlValue::from(id));
+        } else if !model_map.contains_key(YamlValue::from("default")) {
             model_map.insert(YamlValue::from("default"), YamlValue::from("gpt-4o-mini"));
         }
         model_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
@@ -171,7 +174,11 @@ pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<Runti
     })
 }
 
-pub fn apply_codex(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
+pub fn apply_codex(
+    gateway_url: &str,
+    _api_key: &str,
+    model: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".codex/config.toml");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
@@ -188,10 +195,11 @@ pub fn apply_codex(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSet
         .context("Codex config root must be a table")?;
 
     // Prefer Evotown-routable defaults; gpt-4o-* often fails upstream on company gateways.
-    table.insert(
-        "model".to_string(),
-        TomlValue::String("deepseek-v4-flash".to_string()),
-    );
+    let model_id = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("deepseek-v4-flash");
+    table.insert("model".to_string(), TomlValue::String(model_id.to_string()));
     table.insert(
         "model_provider".to_string(),
         TomlValue::String("company".to_string()),
@@ -236,8 +244,9 @@ pub fn apply_codex(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSet
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: "set company gateway (wire_api=responses, model=deepseek-v4-flash); uses OPENAI_API_KEY from evotown.agent.env"
-            .to_string(),
+        message: format!(
+            "set company gateway (wire_api=responses, model={model_id}); uses OPENAI_API_KEY from env"
+        ),
     })
 }
 

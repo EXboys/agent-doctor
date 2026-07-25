@@ -171,6 +171,30 @@ interface SyncReport {
   failed: number;
 }
 
+interface PersonalProviderStatus {
+  configured: boolean;
+  gateway_url: string | null;
+  model: string | null;
+  api_key_hint: string | null;
+  profile_env_path: string | null;
+}
+
+interface PersonalProviderVerifyReport {
+  ok: boolean;
+  status_code: number | null;
+  checked_url: string | null;
+  message: string;
+  models_sample: string[];
+}
+
+interface PersonalProviderSetupReport {
+  profile_env_path: string;
+  gateway_url: string;
+  model: string;
+  runtimes: Array<{ runtime_id: string; applied: boolean }>;
+  verify: PersonalProviderVerifyReport | null;
+}
+
 const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
 const evotownStatusEl = document.querySelector<HTMLElement>("#evotown-status")!;
 const evotownConnectedEl = document.querySelector<HTMLElement>("#evotown-connected")!;
@@ -182,6 +206,53 @@ const evotownKeyEl = document.querySelector<HTMLInputElement>("#evotown-key")!;
 const evotownConnectEl = document.querySelector<HTMLButtonElement>("#evotown-connect")!;
 const evotownResyncEl = document.querySelector<HTMLButtonElement>("#evotown-resync")!;
 const evotownHintEl = document.querySelector<HTMLElement>("#evotown-hint")!;
+
+const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
+const personalStatusEl = document.querySelector<HTMLElement>("#personal-status")!;
+const personalConnectedEl = document.querySelector<HTMLElement>("#personal-connected")!;
+const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-connected-url")!;
+const personalConnectedMetaEl = document.querySelector<HTMLElement>("#personal-connected-meta")!;
+const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
+const personalUrlEl = document.querySelector<HTMLInputElement>("#personal-url")!;
+const personalKeyEl = document.querySelector<HTMLInputElement>("#personal-key")!;
+const personalModelEl = document.querySelector<HTMLInputElement>("#personal-model")!;
+const personalVerifyEl = document.querySelector<HTMLButtonElement>("#personal-verify")!;
+const personalApplyEl = document.querySelector<HTMLButtonElement>("#personal-apply")!;
+const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
+
+const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
+const providerTabsEl = document.querySelector<HTMLElement>("#provider-tabs")!;
+const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
+const providerPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-provider-panel]"));
+
+type MainTabId = "diagnose" | "provider" | "workspace";
+type ProviderTabId = "personal" | "evotown";
+
+function setMainTab(tab: MainTabId) {
+  mainTabsEl.querySelectorAll<HTMLButtonElement>("[data-main-tab]").forEach((button) => {
+    const active = button.dataset.mainTab === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  for (const panel of mainPanels) {
+    const active = panel.dataset.mainPanel === tab;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  }
+}
+
+function setProviderTab(tab: ProviderTabId) {
+  providerTabsEl.querySelectorAll<HTMLButtonElement>("[data-provider-tab]").forEach((button) => {
+    const active = button.dataset.providerTab === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  for (const panel of providerPanels) {
+    const active = panel.dataset.providerPanel === tab;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  }
+}
 
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
@@ -1213,6 +1284,102 @@ async function resyncEvotownSkills() {
   }
 }
 
+async function loadPersonalProviderStatus() {
+  try {
+    const status = await invoke<PersonalProviderStatus>("get_personal_provider_status_command");
+    renderPersonalProviderStatus(status);
+  } catch (error) {
+    personalStatusEl.textContent = t("personal.applyFailed", { error: String(error) });
+  }
+}
+
+function renderPersonalProviderStatus(status: PersonalProviderStatus) {
+  personalSectionEl.classList.toggle("is-configured", status.configured);
+  personalConnectedEl.hidden = !status.configured;
+
+  if (status.configured && status.gateway_url) {
+    personalStatusEl.textContent = t("personal.configured");
+    personalConnectedUrlEl.textContent = status.gateway_url;
+    personalConnectedMetaEl.textContent = t("personal.meta", {
+      model: status.model ?? "—",
+      key: status.api_key_hint ?? "…",
+    });
+    personalUrlEl.value = status.gateway_url;
+    if (status.model) {
+      personalModelEl.value = status.model;
+    }
+  } else {
+    personalStatusEl.textContent = t("personal.notConfigured");
+    personalConnectedMetaEl.textContent = "";
+  }
+}
+
+function personalFormValues(): { url: string; key: string; model: string } | null {
+  const url = personalUrlEl.value.trim();
+  const key = personalKeyEl.value.trim();
+  const model = personalModelEl.value.trim();
+  if (!url || !key || !model) {
+    personalHintEl.textContent = t("personal.missingFields");
+    return null;
+  }
+  return { url, key, model };
+}
+
+async function verifyPersonalProvider() {
+  const values = personalFormValues();
+  if (!values) {
+    return;
+  }
+  personalVerifyEl.disabled = true;
+  personalApplyEl.disabled = true;
+  personalHintEl.textContent = t("personal.verifying");
+  try {
+    const report = await invoke<PersonalProviderVerifyReport>("verify_personal_provider_command", {
+      url: values.url,
+      key: values.key,
+    });
+    if (report.ok) {
+      const sample =
+        report.models_sample.length > 0 ? ` (${report.models_sample.slice(0, 3).join(", ")})` : "";
+      personalHintEl.textContent = t("personal.verifyOk", { message: `${report.message}${sample}` });
+    } else {
+      personalHintEl.textContent = t("personal.verifyFailed", { error: report.message });
+    }
+  } catch (error) {
+    personalHintEl.textContent = t("personal.verifyFailed", { error: String(error) });
+  } finally {
+    personalVerifyEl.disabled = false;
+    personalApplyEl.disabled = false;
+  }
+}
+
+async function applyPersonalProvider() {
+  const values = personalFormValues();
+  if (!values) {
+    return;
+  }
+  personalVerifyEl.disabled = true;
+  personalApplyEl.disabled = true;
+  personalHintEl.textContent = t("personal.applying");
+  try {
+    const report = await invoke<PersonalProviderSetupReport>("apply_personal_provider_command", {
+      url: values.url,
+      key: values.key,
+      model: values.model,
+    });
+    personalKeyEl.value = "";
+    await loadPersonalProviderStatus();
+    await refresh();
+    const applied = report.runtimes.filter((item) => item.applied).length;
+    personalHintEl.textContent = t("personal.applyOk", { count: String(applied) });
+  } catch (error) {
+    personalHintEl.textContent = t("personal.applyFailed", { error: String(error) });
+  } finally {
+    personalVerifyEl.disabled = false;
+    personalApplyEl.disabled = false;
+  }
+}
+
 async function loadProfiles() {
   try {
     const doc = await invoke<ProfilesDocument>("list_profiles_command");
@@ -1827,6 +1994,7 @@ async function switchLocale(next: Locale) {
     healthLabelEl.textContent = t("health.ready");
   }
   await loadEvotownStatus();
+  await loadPersonalProviderStatus();
 }
 
 runtimeTabsEl.addEventListener("click", (event) => {
@@ -1937,6 +2105,22 @@ langSwitchEl.addEventListener("click", (event) => {
   }
 });
 
+mainTabsEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-main-tab]");
+  const tab = button?.dataset.mainTab;
+  if (tab === "diagnose" || tab === "provider" || tab === "workspace") {
+    setMainTab(tab);
+  }
+});
+
+providerTabsEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-provider-tab]");
+  const tab = button?.dataset.providerTab;
+  if (tab === "personal" || tab === "evotown") {
+    setProviderTab(tab);
+  }
+});
+
 evotownFormEl.addEventListener("submit", (event) => {
   event.preventDefault();
   void runEvotownOnboarding();
@@ -1944,6 +2128,15 @@ evotownFormEl.addEventListener("submit", (event) => {
 
 evotownResyncEl.addEventListener("click", () => {
   void resyncEvotownSkills();
+});
+
+personalFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void applyPersonalProvider();
+});
+
+personalVerifyEl.addEventListener("click", () => {
+  void verifyPersonalProvider();
 });
 
 refreshBtn.addEventListener("click", () => {
@@ -2035,4 +2228,5 @@ updateLangButtons();
 void loadProfiles();
 void loadWorkspaces();
 void loadEvotownStatus();
+void loadPersonalProviderStatus();
 void refresh();

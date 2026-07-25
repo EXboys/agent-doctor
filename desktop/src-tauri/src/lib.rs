@@ -1,16 +1,19 @@
 use agent_doctor_core::{
     apply_profile_model, build_repair_preview_from_bundle, evotown_status,
-    execute_evotown_onboarding, execute_install_with_progress, execute_repair, execute_sync,
-    list_runtime_backup_ids, load_evotown_config, load_profiles, load_workspaces,
-    needs_binary_install, open_interactive_session, probe_runtime, restore_runtime_backup,
-    run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
-    use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status, ApplyReport,
-    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    InstallOptions, InstallProgressEvent, InstallReport, OnboardingOptions, OnboardingReport,
-    OpenSessionOptions, OpenSessionReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions,
-    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions,
-    SyncReport, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
-    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    execute_evotown_onboarding, execute_install_with_progress, execute_personal_provider_setup,
+    execute_repair, execute_sync, list_runtime_backup_ids, load_evotown_config,
+    load_personal_provider_status, load_profiles, load_workspaces, needs_binary_install,
+    open_interactive_session, probe_runtime, restore_runtime_backup, run_doctor,
+    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
+    use_workspace_with_options, verify_personal_provider, workspace_doctor, workspace_fix,
+    workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
+    HermesSettings, InstallOptions, InstallProgressEvent, InstallReport, OnboardingOptions,
+    OnboardingReport, OpenSessionOptions, OpenSessionReport, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport, ProbeStatus,
+    ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
+    RuntimeProbeReport, SyncOptions, SyncReport, UseProfileReport, UseWorkspaceOptions,
+    UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport,
+    WorkspaceStatusReport, WorkspacesDocument,
 };
 use serde::Serialize;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
@@ -215,6 +218,39 @@ fn run_sync_command() -> Result<SyncReport, String> {
             bundle_id: None,
         },
     )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_personal_provider_status_command() -> PersonalProviderStatus {
+    load_personal_provider_status().unwrap_or(PersonalProviderStatus {
+        configured: false,
+        gateway_url: None,
+        model: None,
+        api_key_hint: None,
+        profile_env_path: None,
+    })
+}
+
+#[tauri::command]
+fn verify_personal_provider_command(
+    url: String,
+    key: String,
+) -> Result<PersonalProviderVerifyReport, String> {
+    verify_personal_provider(&url, &key).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn apply_personal_provider_command(
+    url: String,
+    key: String,
+    model: String,
+) -> Result<PersonalProviderSetupReport, String> {
+    execute_personal_provider_setup(&PersonalProviderOptions {
+        url,
+        api_key: key,
+        model,
+    })
     .map_err(|error| error.to_string())
 }
 
@@ -619,6 +655,9 @@ pub fn run() {
             get_evotown_status_command,
             run_evotown_onboarding_command,
             run_sync_command,
+            get_personal_provider_status_command,
+            verify_personal_provider_command,
+            apply_personal_provider_command,
             run_doctor_command,
             list_profiles_command,
             list_workspaces_command,

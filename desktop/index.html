@@ -59,107 +59,159 @@
         </div>
       </section>
 
-      <section class="widget-section evotown-section" id="evotown-section">
-        <div class="section-label">
-          <span class="section-icon" aria-hidden="true">⎈</span>
-          <h2 data-i18n="evotown.title">Evotown</h2>
-        </div>
-        <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
-        <div id="evotown-connected" class="evotown-connected" hidden>
-          <p class="evotown-connected-line"><span data-i18n="evotown.connectedUrl">已连接</span> <strong id="evotown-connected-url">—</strong></p>
-          <p class="evotown-connected-meta" id="evotown-connected-meta"></p>
-        </div>
-        <form id="evotown-form" class="evotown-form" autocomplete="off">
-          <label class="field-row">
-            <span class="field-label" data-i18n="evotown.url">Evotown URL</span>
-            <input id="evotown-url" class="field-input" type="url" placeholder="https://evotown.example.com" />
-          </label>
-          <label class="field-row">
-            <span class="field-label" data-i18n="evotown.apiKey">API Key</span>
-            <input id="evotown-key" class="field-input" type="password" placeholder="evk_…" autocomplete="off" />
-          </label>
-          <div class="evotown-actions">
-            <button id="evotown-connect" type="submit" class="btn-primary" data-i18n="evotown.connect">连接并同步</button>
-            <button id="evotown-resync" type="button" class="btn-secondary" data-i18n="evotown.resync" hidden>重新同步</button>
-          </div>
-        </form>
-        <p id="evotown-hint" class="section-footnote"></p>
-      </section>
+      <nav class="main-tabs" id="main-tabs" role="tablist" aria-label="Main sections">
+        <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.diagnose">诊断</button>
+        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="provider" data-i18n="nav.provider">Provider</button>
+        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="workspace" data-i18n="nav.workspace">工作区</button>
+      </nav>
 
-      <section class="widget-section">
-        <div class="section-label">
-          <span class="section-icon" aria-hidden="true">◈</span>
-          <h2 data-i18n="presets.title">配置预设</h2>
-        </div>
-        <p id="preset-status" class="section-hint" data-i18n="presets.loading">正在加载预设…</p>
-        <div class="preset-row">
-          <div class="picker" id="preset-picker">
-            <button
-              type="button"
-              class="picker-trigger"
-              id="preset-trigger"
-              aria-haspopup="listbox"
-              aria-expanded="false"
-              disabled
-            >
-              <span class="picker-leading" aria-hidden="true">◈</span>
-              <span class="picker-value" id="preset-trigger-label">—</span>
-              <span class="picker-chevron" aria-hidden="true">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-            </button>
-            <div class="picker-menu" id="preset-menu" role="listbox" hidden></div>
-          </div>
-          <button id="preset-apply" type="button" class="btn-secondary" data-i18n="presets.switch">切换</button>
-        </div>
-        <p id="preset-hint" class="section-footnote"></p>
-      </section>
+      <div class="main-panels">
+        <section class="main-panel is-active" id="panel-diagnose" role="tabpanel" data-main-panel="diagnose">
+          <section class="widget-section runtime-section">
+            <div class="section-label">
+              <span class="section-icon" aria-hidden="true">⬡</span>
+              <h2 data-i18n="runtimes.title">Runtime</h2>
+              <span id="runtime-count" class="section-badge">—</span>
+            </div>
+            <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
+            <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
+          </section>
+        </section>
 
-      <section class="widget-section">
-        <div class="section-label">
-          <span class="section-icon" aria-hidden="true">▣</span>
-          <h2 data-i18n="workspaces.title">Workspaces</h2>
-        </div>
-        <p id="workspace-status" class="section-hint" data-i18n="workspaces.loading">Loading workspaces…</p>
-        <div class="preset-row">
-          <div class="picker" id="workspace-picker">
-            <button
-              type="button"
-              class="picker-trigger"
-              id="workspace-trigger"
-              aria-haspopup="listbox"
-              aria-expanded="false"
-              disabled
-            >
-              <span class="picker-leading" aria-hidden="true">▣</span>
-              <span class="picker-value" id="workspace-trigger-label">—</span>
-              <span class="picker-chevron" aria-hidden="true">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-            </button>
-            <div class="picker-menu" id="workspace-menu" role="listbox" hidden></div>
+        <section class="main-panel" id="panel-provider" role="tabpanel" data-main-panel="provider" hidden>
+          <div class="provider-tabs" id="provider-tabs" role="tablist" aria-label="Provider modes">
+            <button type="button" class="provider-tab is-active" role="tab" aria-selected="true" data-provider-tab="personal" data-i18n="nav.personal">个人</button>
+            <button type="button" class="provider-tab" role="tab" aria-selected="false" data-provider-tab="evotown" data-i18n="nav.evotown">Evotown</button>
           </div>
-          <button id="workspace-apply" type="button" class="btn-secondary" data-i18n="workspaces.switch">Switch</button>
-          <button id="workspace-doctor" type="button" class="btn-ghost" data-i18n="workspaces.doctor">Check</button>
-          <button id="workspace-fix" type="button" class="btn-ghost" data-i18n="workspaces.fix">Fix</button>
-        </div>
-        <ul id="workspace-checks" class="repair-checks" hidden></ul>
-        <p id="workspace-hint" class="section-footnote"></p>
-      </section>
 
-      <section class="widget-section runtime-section">
-        <div class="section-label">
-          <span class="section-icon" aria-hidden="true">⬡</span>
-          <h2 data-i18n="runtimes.title">Runtime</h2>
-          <span id="runtime-count" class="section-badge">—</span>
-        </div>
-        <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
-        <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
-      </section>
+          <section class="widget-section personal-section provider-panel is-active" id="personal-section" data-provider-panel="personal">
+            <div class="section-label">
+              <span class="section-icon" aria-hidden="true">⬡</span>
+              <h2 data-i18n="personal.title">个人 Provider</h2>
+            </div>
+            <p id="personal-status" class="section-hint" data-i18n="personal.loading">正在检查个人配置…</p>
+            <div id="personal-connected" class="evotown-connected" hidden>
+              <p class="evotown-connected-line"><span data-i18n="personal.configuredUrl">已配置</span> <strong id="personal-connected-url">—</strong></p>
+              <p class="evotown-connected-meta" id="personal-connected-meta"></p>
+            </div>
+            <form id="personal-form" class="evotown-form" autocomplete="off">
+              <label class="field-row field-row-inline">
+                <span class="field-label" data-i18n="personal.url">API Base URL</span>
+                <input id="personal-url" class="field-input" type="url" placeholder="https://api.openai.com/v1" />
+              </label>
+              <label class="field-row field-row-inline">
+                <span class="field-label" data-i18n="personal.apiKey">API Key</span>
+                <input id="personal-key" class="field-input" type="password" placeholder="sk-…" autocomplete="off" />
+              </label>
+              <label class="field-row field-row-inline">
+                <span class="field-label" data-i18n="personal.model">模型</span>
+                <input id="personal-model" class="field-input" type="text" placeholder="gpt-4o-mini" />
+              </label>
+              <div class="evotown-actions">
+                <button id="personal-verify" type="button" class="btn-secondary" data-i18n="personal.verify">验证连通</button>
+                <button id="personal-apply" type="submit" class="btn-primary" data-i18n="personal.apply">保存并应用</button>
+              </div>
+            </form>
+            <p id="personal-hint" class="section-footnote" data-i18n="personal.footnote">写入 Codex / Claude / Hermes。不连接 Evotown。</p>
+          </section>
+
+          <section class="widget-section evotown-section provider-panel" id="evotown-section" data-provider-panel="evotown" hidden>
+            <div class="section-label">
+              <span class="section-icon" aria-hidden="true">⎈</span>
+              <h2 data-i18n="evotown.title">Evotown</h2>
+            </div>
+            <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
+            <div id="evotown-connected" class="evotown-connected" hidden>
+              <p class="evotown-connected-line"><span data-i18n="evotown.connectedUrl">已连接</span> <strong id="evotown-connected-url">—</strong></p>
+              <p class="evotown-connected-meta" id="evotown-connected-meta"></p>
+            </div>
+            <form id="evotown-form" class="evotown-form" autocomplete="off">
+              <label class="field-row field-row-inline">
+                <span class="field-label" data-i18n="evotown.url">Evotown URL</span>
+                <input id="evotown-url" class="field-input" type="url" placeholder="https://evotown.example.com" />
+              </label>
+              <label class="field-row field-row-inline">
+                <span class="field-label" data-i18n="evotown.apiKey">API Key</span>
+                <input id="evotown-key" class="field-input" type="password" placeholder="evk_…" autocomplete="off" />
+              </label>
+              <div class="evotown-actions">
+                <button id="evotown-connect" type="submit" class="btn-primary" data-i18n="evotown.connect">连接并同步</button>
+                <button id="evotown-resync" type="button" class="btn-secondary" data-i18n="evotown.resync" hidden>重新同步</button>
+              </div>
+            </form>
+            <p id="evotown-hint" class="section-footnote"></p>
+          </section>
+        </section>
+
+        <section class="main-panel" id="panel-workspace" role="tabpanel" data-main-panel="workspace" hidden>
+          <section class="widget-section">
+            <div class="section-label">
+              <span class="section-icon" aria-hidden="true">◈</span>
+              <h2 data-i18n="presets.title">配置预设</h2>
+            </div>
+            <p id="preset-status" class="section-hint" data-i18n="presets.loading">正在加载预设…</p>
+            <div class="preset-row">
+              <div class="picker" id="preset-picker">
+                <button
+                  type="button"
+                  class="picker-trigger"
+                  id="preset-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  disabled
+                >
+                  <span class="picker-leading" aria-hidden="true">◈</span>
+                  <span class="picker-value" id="preset-trigger-label">—</span>
+                  <span class="picker-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+                <div class="picker-menu" id="preset-menu" role="listbox" hidden></div>
+              </div>
+              <button id="preset-apply" type="button" class="btn-secondary" data-i18n="presets.switch">切换</button>
+            </div>
+            <p id="preset-hint" class="section-footnote"></p>
+          </section>
+
+          <section class="widget-section">
+            <div class="section-label">
+              <span class="section-icon" aria-hidden="true">▣</span>
+              <h2 data-i18n="workspaces.title">Workspaces</h2>
+            </div>
+            <p id="workspace-status" class="section-hint" data-i18n="workspaces.loading">Loading workspaces…</p>
+            <div class="preset-row workspace-actions-row">
+              <div class="picker" id="workspace-picker">
+                <button
+                  type="button"
+                  class="picker-trigger"
+                  id="workspace-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  disabled
+                >
+                  <span class="picker-leading" aria-hidden="true">▣</span>
+                  <span class="picker-value" id="workspace-trigger-label">—</span>
+                  <span class="picker-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+                <div class="picker-menu" id="workspace-menu" role="listbox" hidden></div>
+              </div>
+              <button id="workspace-apply" type="button" class="btn-secondary" data-i18n="workspaces.switch">Switch</button>
+            </div>
+            <div class="workspace-secondary-actions">
+              <button id="workspace-doctor" type="button" class="btn-ghost" data-i18n="workspaces.doctor">Check</button>
+              <button id="workspace-fix" type="button" class="btn-ghost" data-i18n="workspaces.fix">Fix</button>
+            </div>
+            <ul id="workspace-checks" class="repair-checks" hidden></ul>
+            <p id="workspace-hint" class="section-footnote"></p>
+          </section>
+        </section>
+      </div>
 
       <footer class="widget-footer">
         <p id="status" class="status-footnote" hidden data-i18n="doctor.loading">加载中…</p>

@@ -1,6 +1,13 @@
 mod merge;
+mod personal;
 
 pub use merge::clear_codex_placeholder_auth;
+pub use personal::{
+    execute_personal_provider_setup, load_personal_provider_status, normalize_personal_gateway_url,
+    verify_personal_provider, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, MODEL_ENV, PROVIDER_KIND_ENV,
+    PROVIDER_KIND_PERSONAL,
+};
 
 use std::fs;
 use std::io::Write;
@@ -68,12 +75,12 @@ pub fn execute_setup(options: &SetupOptions) -> Result<SetupReport> {
     for adapter in all_adapters() {
         let result = match adapter.id() {
             "openclaw" => merge::apply_openclaw(&gateway_url, api_key),
-            "hermes" => merge::apply_hermes(&gateway_url, api_key, &options.hermes_provider),
+            "hermes" => merge::apply_hermes(&gateway_url, api_key, &options.hermes_provider, None),
             "claude-code" => merge::apply_claude_code(
                 &anthropic_gateway_url_from_evotown_base(&evotown_base),
                 api_key,
             ),
-            "codex" => merge::apply_codex(&gateway_url, api_key),
+            "codex" => merge::apply_codex(&gateway_url, api_key, None),
             other => Ok(RuntimeSetupResult {
                 runtime_id: other.to_string(),
                 display_name: adapter.display_name().to_string(),
