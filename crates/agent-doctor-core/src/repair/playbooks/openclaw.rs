@@ -180,7 +180,11 @@ pub fn apply_openclaw_playbook_filtered(
     }
 
     if should_run("fix-openclaw-legacy-gateway-url", only_ids)
-        && probe_has_check(probe, "openclaw.schema.legacy_gateway_url", ProbeStatus::Warn)
+        && probe_has_check(
+            probe,
+            "openclaw.schema.legacy_gateway_url",
+            ProbeStatus::Warn,
+        )
     {
         match migrate_legacy_gateway_url() {
             Ok(()) => result
@@ -351,8 +355,7 @@ fn create_openclaw_config() -> Result<()> {
         crate::setup::merge::apply_openclaw(&url, "", None)?;
         let mut root = load_json_config(&path)?;
         if let Some(obj) = root.as_object_mut() {
-            obj.entry("env")
-                .or_insert_with(|| json!({ "vars": {} }));
+            obj.entry("env").or_insert_with(|| json!({ "vars": {} }));
         }
         write_json_config(&path, &root)
     } else {
@@ -375,8 +378,8 @@ fn apply_gateway_from_company_profile() -> Result<()> {
 fn migrate_legacy_gateway_url() -> Result<()> {
     let path = openclaw_config_path();
     let root = load_json_config(&path)?;
-    let url = crate::adapters::configured_base_url(&root)
-        .context("no LLM base URL found to migrate")?;
+    let url =
+        crate::adapters::configured_base_url(&root).context("no LLM base URL found to migrate")?;
     crate::setup::merge::apply_openclaw(&url, "", None)?;
     Ok(())
 }

@@ -60,7 +60,10 @@ pub fn configured_base_url(value: &serde_json::Value) -> Option<String> {
         return Some(url.to_string());
     }
 
-    if let Some(providers) = value.pointer("/models/providers").and_then(|v| v.as_object()) {
+    if let Some(providers) = value
+        .pointer("/models/providers")
+        .and_then(|v| v.as_object())
+    {
         for provider in providers.values() {
             if let Some(url) = provider
                 .get("baseUrl")

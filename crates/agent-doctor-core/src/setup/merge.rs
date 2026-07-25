@@ -151,7 +151,10 @@ fn ensure_openclaw_local_gateway(obj: &mut Map<String, JsonValue>) {
 
     if !has_token && !has_password {
         auth_obj.insert("mode".to_string(), json!("token"));
-        auth_obj.insert("token".to_string(), json!(generate_openclaw_gateway_token()));
+        auth_obj.insert(
+            "token".to_string(),
+            json!(generate_openclaw_gateway_token()),
+        );
     } else {
         auth_obj
             .entry("mode".to_string())
