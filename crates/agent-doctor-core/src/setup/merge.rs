@@ -15,9 +15,13 @@ pub const OPENCLAW_PROVIDER_ID: &str = "agent-doctor";
 
 /// OpenClaw's `gateway` key is the local control-plane listener (port/mode/bind),
 /// not the LLM base URL. Custom/company endpoints belong under `models.providers`.
+///
+/// Provider `apiKey` is an env ref to `OPENAI_API_KEY`. When `api_key` is non-empty,
+/// it is written to `~/.openclaw/.env` and the LaunchAgent `service-env` file so the
+/// running gateway does not keep a stale company/personal key.
 pub fn apply_openclaw(
     gateway_url: &str,
-    _api_key: &str,
+    api_key: &str,
     model_id: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".openclaw/openclaw.json");
@@ -99,16 +103,88 @@ pub fn apply_openclaw(
 
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
 
+    let mut message = format!(
+        "set models.providers.{OPENCLAW_PROVIDER_ID} baseUrl={gateway_url} model={model}"
+    );
+    if !api_key.trim().is_empty() {
+        sync_openclaw_openai_api_key(api_key.trim())?;
+        message.push_str("; synced OPENAI_API_KEY to ~/.openclaw/.env (+ service-env if present)");
+    }
+
     Ok(RuntimeSetupResult {
         runtime_id: "openclaw".to_string(),
         display_name: "OpenClaw".to_string(),
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: format!(
-            "set models.providers.{OPENCLAW_PROVIDER_ID} baseUrl={gateway_url} model={model}"
-        ),
+        message,
     })
+}
+
+/// Keep OpenClaw's env-ref `OPENAI_API_KEY` in sync with the active Agent Doctor key.
+fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
+    let env_path = home_join(".openclaw/.env");
+    ensure_parent(&env_path)?;
+    let existing = if env_path.exists() {
+        fs::read_to_string(&env_path)?
+    } else {
+        String::new()
+    };
+    let mut lines: Vec<String> = existing
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("OPENAI_API_KEY=")
+        })
+        .map(str::to_string)
+        .collect();
+    if lines.is_empty() {
+        lines.push("# Agent Doctor — OPENAI_API_KEY synced from setup / personal provider".into());
+        lines.push("ANTHROPIC_API_KEY=".into());
+    }
+    // Keep key near the top after comments.
+    let insert_at = lines
+        .iter()
+        .position(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
+        .unwrap_or(lines.len());
+    lines.insert(insert_at, format!("OPENAI_API_KEY={api_key}"));
+    fs::write(&env_path, lines.join("\n") + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&env_path, fs::Permissions::from_mode(0o600))?;
+    }
+
+    // LaunchAgent gateway injects OPENAI_API_KEY from service-env; update if present.
+    let service_env = home_join(".openclaw/service-env/ai.openclaw.gateway.env");
+    if service_env.exists() {
+        let raw = fs::read_to_string(&service_env)?;
+        let escaped = api_key.replace('\'', "'\\''");
+        let replacement = format!("export OPENAI_API_KEY='{escaped}'");
+        let mut replaced = false;
+        let mut out = Vec::new();
+        for line in raw.lines() {
+            if line.trim_start().starts_with("export OPENAI_API_KEY=")
+                || line.trim_start().starts_with("OPENAI_API_KEY=")
+            {
+                out.push(replacement.clone());
+                replaced = true;
+            } else {
+                out.push(line.to_string());
+            }
+        }
+        if !replaced {
+            out.push(replacement);
+        }
+        fs::write(&service_env, out.join("\n") + "\n")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&service_env, fs::Permissions::from_mode(0o600))?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Ensure OpenClaw local gateway can accept `openclaw tui` clients.

@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::profile::{agent_profile_path, read_company_profile};
+use crate::profile::{
+    agent_profile_path, company_baseline_path, read_company_baseline,
+    read_env_map as read_profile_env_map,
+};
 use crate::setup::{
     default_evotown_skills_dir, evotown_agent_env_path, evotown_base_from_gateway,
     DEFAULT_EVOTOWN_BUNDLE_ID, DEFAULT_EVOTOWN_RUNTIME, EVOTOWN_API_KEY_ENV, EVOTOWN_BUNDLE_ID_ENV,
@@ -41,13 +44,14 @@ pub fn default_policy_cache_path() -> Option<PathBuf> {
 }
 
 pub fn load_evotown_config() -> Result<EvotownConfig> {
-    if let Some(from_profile) = load_from_company_profile()? {
-        return Ok(from_profile);
-    }
+    // Prefer dedicated Evotown env so a personal provider overlay cannot hijack team connect.
     if let Some(path) = evotown_agent_env_path() {
         if path.exists() {
             return load_from_env_file(&path, path.display().to_string());
         }
+    }
+    if let Some(from_profile) = load_from_company_profile()? {
+        return Ok(from_profile);
     }
     bail!(
         "Evotown is not configured — run `agent-doctor setup --url <evotown-url> --key evk_...` \
@@ -56,7 +60,8 @@ pub fn load_evotown_config() -> Result<EvotownConfig> {
 }
 
 fn load_from_company_profile() -> Result<Option<EvotownConfig>> {
-    let Some(profile) = read_company_profile()? else {
+    // Durable team baseline only — never the personal provider overlay.
+    let Some(profile) = read_company_baseline()? else {
         return Ok(None);
     };
     let Some(gateway_url) = profile.gateway_url.filter(|value| !value.trim().is_empty()) else {
@@ -66,7 +71,13 @@ fn load_from_company_profile() -> Result<Option<EvotownConfig>> {
         return Ok(None);
     };
 
-    let base_url = evotown_base_from_gateway(&gateway_url);
+    let evotown_url = company_baseline_path()
+        .filter(|path| path.exists())
+        .and_then(|path| read_profile_env_map(&path).ok())
+        .and_then(|env| env.get("AGENT_DOCTOR_EVOTOWN_URL").cloned())
+        .filter(|value| !value.trim().is_empty());
+
+    let base_url = evotown_url.unwrap_or_else(|| evotown_base_from_gateway(&gateway_url));
     let agent_env = evotown_agent_env_path();
     let file_overrides = agent_env
         .as_ref()
@@ -75,13 +86,17 @@ fn load_from_company_profile() -> Result<Option<EvotownConfig>> {
         .transpose()?
         .unwrap_or_default();
 
+    let source = company_baseline_path()
+        .filter(|path| path.exists())
+        .or_else(agent_profile_path)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "company-profile.env".to_string());
+
     Ok(Some(build_config(
         base_url,
         api_key,
         file_overrides,
-        agent_profile_path()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "profile.env".to_string()),
+        source,
     )?))
 }
 
@@ -204,12 +219,12 @@ pub fn evotown_status() -> Result<EvotownStatus> {
         }),
         Err(_) => Ok(EvotownStatus {
             configured: false,
-            base_url: read_company_profile().ok().flatten().and_then(|profile| {
+            base_url: read_company_baseline().ok().flatten().and_then(|profile| {
                 profile
                     .gateway_url
                     .map(|url| evotown_base_from_gateway(&url))
             }),
-            api_key_hint: read_company_profile()
+            api_key_hint: read_company_baseline()
                 .ok()
                 .flatten()
                 .and_then(|profile| profile.api_key.map(|key| mask_key(&key))),

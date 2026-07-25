@@ -2538,7 +2538,6 @@ personalPresetEl.addEventListener("change", () => {
 });
 
 personalProtocolEl.addEventListener("change", () => {
-  // Changing protocol manually marks the form as custom unless a matching preset stays valid.
   const presetId = personalPresetEl.value;
   if (presetId !== "custom" && PROVIDER_PRESETS[presetId]) {
     if (PROVIDER_PRESETS[presetId].protocol !== personalProtocolEl.value) {
@@ -2560,7 +2559,6 @@ personalProtocolEl.addEventListener("change", () => {
 });
 
 personalUrlEl.addEventListener("change", () => {
-  // If user edits URL away from the selected preset, flip to Custom but keep name.
   const presetId = personalPresetEl.value;
   if (presetId !== "custom" && PROVIDER_PRESETS[presetId]) {
     const presetUrl = PROVIDER_PRESETS[presetId].url.replace(/\/+$/, "");

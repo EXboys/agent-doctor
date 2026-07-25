@@ -1,49 +1,60 @@
 # Agent Doctor 中文说明
 
-**Agent Doctor（企业本机 Agent 诊断、修复与合规工具）** 是面向团队/企业 DevEx 与 IT 的轻量客户端，用于在员工电脑上诊断、备份、修复并合规化多种桌面 Agent runtime。
+**Agent Doctor** 在本机诊断、修复并隔离多种 AI Agent runtime（OpenClaw、Hermes、Claude Code、Codex 等）。
+
+默认是**个人本机运维**工具；需要团队合规时，再接 Evotown。边界见 [product-boundary.md](product-boundary.md)。
 
 ## 解决什么问题
 
 同一个人可能同时安装：
 
-- **OpenClaw** — 常驻助手、Skill、派活  
-- **Hermes** — 团队推送的另一套 Agent 运行时  
-- **Claude Code** — IDE/终端里的 coding agent  
-- **Codex CLI** — OpenAI coding agent  
+- **OpenClaw** — 常驻助手、Skill、派活
+- **Hermes** — 另一套 Agent 运行时
+- **Claude Code** — IDE/终端里的 coding agent
+- **Codex CLI** — OpenAI coding agent
 
-各自安装路径、配置文件、网关、Skill/MCP 配置、策略面和日志位置都不同。Agent 出问题或不符合团队标准时，很难快速判断是安装损坏、配置漂移、环境变量冲突，还是团队网关/policy 配置错误。
+各自安装路径、配置、网关、Skill/MCP 和失败模式都不同。Agent 坏了时，需要快速判断是安装损坏、配置漂移、环境变量冲突，还是（团队场景下）网关/policy 不合规。
 
 Agent Doctor 提供：
 
-1. **发现** — 装了哪些、版本、配置在哪  
-2. **诊断** — `doctor` 检查安装、配置、网关与密钥来源  
-3. **合规** — 检查 runtime 是否指向团队批准的 gateway/profile/policy  
-4. **备份** — 修复前保存 runtime 配置快照（计划）  
-5. **修复** — 针对 OpenClaw、Hermes、Claude Code、Codex 等生成并执行确认后的修复方案（计划）  
-6. **审计** — 输出脱敏 repair report 与回滚提示（计划）  
-7. **同步** — 从控制面拉团队 profile、Skill bundle 和 policy（计划）
+1. **发现** — 装了哪些、版本、配置在哪
+2. **诊断** — `doctor` 检查安装、配置、网关与密钥来源
+3. **修复** — 备份后按 playbook 修好（运维语义，不是切换管家）
+4. **隔离** — `workspace` 避免项目记忆 / MCP / Skill 串味
+5. **（团队）合规** — 对照公司 baseline、Skill sync、policy、派活与审计
+
+## 个人（C）与团队（B）
+
+| | 个人（C） | 团队（B） |
+|--|----------|----------|
+| 入口 | CLI + 轻桌面「本机修好」 | 同客户端 + Evotown / 公司 profile |
+| 价值 | 坏了能查、能修、项目不串味 | 合规、基线、同步、派活、审计 |
+| 不做 | 不拼 Provider 预设/代理/用量 | 不依赖个人中转生态 |
+| 增量 | 零配置就位、个人 provider、一键修好 | `setup` / `sync` / `policy` / `connect` + 审计导出 |
+
+共同内核：**doctor / repair / workspace**。
 
 ## 和 ClawPanel 的区别
 
-- [ClawPanel](https://github.com/qingchencloud/clawpanel) 侧重 **OpenClaw + Hermes** 图形化管理。  
-- Agent Doctor 侧重 **企业/团队的跨 Runtime 本机诊断、备份、修复、合规验证与审计报告**，CLI 优先，桌面菜单栏作为轻量补充。
+- [ClawPanel](https://github.com/qingchencloud/clawpanel) 侧重 OpenClaw + Hermes 图形化管理。
+- Agent Doctor 侧重跨 runtime 的本机诊断、备份、修复与项目隔离；团队场景再叠加合规与 Evotown。
 
-## 企业控制面（可选）
+## 团队控制面（可选）
 
-若团队部署了企业网关 / Skill 市场 / 策略服务，可通过 `setup` / `sync` / `policy pull` 对接。示例见 [enterprise.md](../enterprise.md)（含 [Evotown](https://github.com/EXboys/evotown) 集成说明）。
+若团队部署了 Evotown，可通过 `setup` / `sync` / `policy pull` / `connect` 对接。见 [enterprise.md](../enterprise.md)。
 
 ## 当前状态
 
-🚧 **早期 MVP** — 已搭建 Rust workspace、`agent-doctor doctor` 与 Tauri 菜单栏。`repair` / `setup` / `sync` / `policy pull` 见 [ROADMAP.md](../ROADMAP.md)。
+🚧 **早期 MVP** — `doctor`、`repair`、`workspace`、桌面个人 Provider、Evotown onboarding 已可用。合规报告导出等见 [ROADMAP.md](../ROADMAP.md)。
 
-## 计划命令
+## 常用命令
 
 ```bash
 agent-doctor doctor
-agent-doctor repair openclaw
-agent-doctor setup --url https://gateway.company.internal --key ...
+agent-doctor repair openclaw --apply
+agent-doctor workspace status
+agent-doctor setup --url https://evotown.example.com --key evk_...
 agent-doctor sync
 agent-doctor policy pull
+agent-doctor connect
 ```
-
-详见 [ROADMAP.md](../ROADMAP.md)。

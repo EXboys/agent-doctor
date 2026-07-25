@@ -1,13 +1,14 @@
 use crate::adapters::util::home_join;
 use crate::presets::load_profiles;
-use crate::profile::read_company_profile;
+use crate::profile::read_company_baseline;
 
 use super::backends::{openclaw_default_agent_id, openclaw_defaults_workspace};
 use super::{WorkspaceCheck, WorkspaceCheckStatus, WorkspaceEntry};
 
 pub fn baseline_drift_checks(entry: &WorkspaceEntry) -> Vec<WorkspaceCheck> {
     let mut checks = Vec::new();
-    let company = match read_company_profile() {
+    // Team baseline only — never the personal provider overlay in profile.env.
+    let company = match read_company_baseline() {
         Ok(Some(profile)) => profile,
         _ => return checks,
     };

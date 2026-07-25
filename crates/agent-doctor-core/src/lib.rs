@@ -46,7 +46,10 @@ pub use presets::{
 pub use probe::{
     probe_all_runtimes, probe_runtime, ProbeCheck, ProbeSeverity, ProbeStatus, RuntimeProbeReport,
 };
-pub use profile::{agent_profile_path, read_company_profile, CompanyProfile};
+pub use profile::{
+    agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
+    read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
+};
 pub use repair::{
     allowed_paths_for_runtime, apply_hermes_playbook, apply_hermes_playbook_filtered,
     build_repair_preview, build_repair_preview_from_bundle, execute_repair, execute_repair_loop,

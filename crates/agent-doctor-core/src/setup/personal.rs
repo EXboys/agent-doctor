@@ -12,18 +12,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::profile::agent_profile_path;
+use crate::profile::{
+    agent_profile_path, ensure_company_baseline_snapshot_from_active, COMPANY_API_KEY_ENV,
+    GATEWAY_URL_ENV, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
+};
 use crate::repair::mask_secret_value;
 use crate::runtime::all_adapters;
 use crate::setup::merge::{self, clear_codex_placeholder_auth};
-use crate::setup::{
-    normalize_gateway_url, RuntimeSetupResult, COMPANY_API_KEY_ENV, GATEWAY_URL_ENV,
-};
+use crate::setup::{normalize_gateway_url, RuntimeSetupResult};
 
-pub const PROVIDER_KIND_ENV: &str = "AGENT_DOCTOR_PROVIDER_KIND";
 pub const MODEL_ENV: &str = "AGENT_DOCTOR_MODEL";
 pub const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
-pub const PROVIDER_KIND_PERSONAL: &str = "personal";
 pub const ACTIVE_PROVIDER_ID_ENV: &str = "AGENT_DOCTOR_PROVIDER_ID";
 pub const PROVIDER_PROTOCOL_ENV: &str = "AGENT_DOCTOR_PROVIDER_PROTOCOL";
 pub const PROTOCOL_OPENAI: &str = "openai";
@@ -706,6 +705,9 @@ fn write_personal_profile(
     provider_id: Option<&str>,
     provider_name: Option<&str>,
 ) -> Result<()> {
+    // Keep team baseline intact when switching the active overlay to personal.
+    ensure_company_baseline_snapshot_from_active()?;
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

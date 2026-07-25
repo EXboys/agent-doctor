@@ -9,7 +9,7 @@ pub use personal::{
     verify_personal_provider_with_protocol, PersonalProviderListItem, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
-    PROTOCOL_OPENAI, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
+    PROTOCOL_OPENAI,
 };
 
 use std::fs;
@@ -19,11 +19,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::profile::agent_profile_path;
+use crate::profile::{agent_profile_path, write_company_baseline, PROVIDER_KIND_COMPANY};
 use crate::runtime::all_adapters;
 
-pub const COMPANY_API_KEY_ENV: &str = "AGENT_DOCTOR_COMPANY_API_KEY";
-pub const GATEWAY_URL_ENV: &str = "AGENT_DOCTOR_GATEWAY_URL";
+pub use crate::profile::{
+    COMPANY_API_KEY_ENV, GATEWAY_URL_ENV, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
+};
 pub const EVOTOWN_URL_ENV: &str = "EVOTOWN_URL";
 pub const EVOTOWN_API_KEY_ENV: &str = "EVOTOWN_API_KEY";
 pub const EVOTOWN_RUNTIME_ENV: &str = "EVOTOWN_RUNTIME";
@@ -207,6 +208,7 @@ pub fn write_company_profile_with_gateway(
         "# Source before running agents: set -a && source \"{}\" && set +a",
         path.display()
     )?;
+    writeln!(file, "{PROVIDER_KIND_ENV}={PROVIDER_KIND_COMPANY}")?;
     writeln!(file, "{GATEWAY_URL_ENV}={gateway_url}")?;
     writeln!(file, "AGENT_DOCTOR_EVOTOWN_URL={evotown_base}")?;
     writeln!(file, "{COMPANY_API_KEY_ENV}={api_key}")?;
@@ -218,6 +220,7 @@ pub fn write_company_profile_with_gateway(
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
 
+    write_company_baseline(gateway_url, api_key, Some(evotown_base))?;
     Ok(())
 }
 
