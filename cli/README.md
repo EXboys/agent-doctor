@@ -27,6 +27,7 @@ cargo run -p agent-doctor -- doctor --json
 | `policy pull` | Cache Evotown policies to `~/.config/evotown/policies-cache.json` |
 | `connect` | WebSocket presence + inventory + job.assign execution |
 | `preferred-runtime show/use` | Default local runtime for Evotown dispatch (`EVOTOWN_RUNTIME`) |
+| `open <runtime>` | Open interactive CLI (Claude Code deep link, else system terminal) |
 
 ## Adapters
 

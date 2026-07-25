@@ -132,6 +132,23 @@ enum Commands {
         #[command(subcommand)]
         action: PreferredRuntimeAction,
     },
+    /// Open an interactive CLI session (Claude Code deep link / system terminal)
+    Open {
+        /// Runtime id: claude-code, codex, hermes, openclaw
+        runtime: String,
+        /// Working directory (default: active workspace or cwd)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Optional prompt to pre-fill (Claude Code deep link only)
+        #[arg(long, short = 'q')]
+        prompt: Option<String>,
+        /// Skip deep link and always open a system terminal
+        #[arg(long)]
+        terminal: bool,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Cache policies from control plane (not yet implemented)
     Policy {
         #[command(subcommand)]
@@ -398,6 +415,19 @@ fn main() -> Result<()> {
                 commands::preferred_runtime::use_runtime(&runtime, json)?
             }
         },
+        Commands::Open {
+            runtime,
+            cwd,
+            prompt,
+            terminal,
+            json,
+        } => commands::open_session::run(
+            &runtime,
+            cwd.as_deref(),
+            prompt.as_deref(),
+            terminal,
+            json,
+        )?,
         Commands::Policy { action } => match action {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },

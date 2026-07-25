@@ -1,13 +1,14 @@
 use agent_doctor_core::{
     apply_profile_model, build_repair_preview_from_bundle, evotown_status,
     execute_evotown_onboarding, execute_repair, execute_sync, list_runtime_backup_ids,
-    load_evotown_config, load_profiles, load_workspaces, probe_runtime, restore_runtime_backup,
-    run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
-    use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status, ApplyReport,
-    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    OnboardingOptions, OnboardingReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions,
-    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions,
-    SyncReport, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    load_evotown_config, load_profiles, load_workspaces, open_interactive_session, probe_runtime,
+    restore_runtime_backup, run_doctor, runtime_supports_playbook, set_runtime_model,
+    suggest_runtime_repairs, use_profile, use_workspace_with_options, workspace_doctor,
+    workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
+    HermesProfilePreset, HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions,
+    OpenSessionReport, ProbeStatus, ProfilesDocument, RepairExecuteOptions, RepairExecuteReport,
+    RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SyncOptions, SyncReport,
+    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
     WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use serde::Serialize;
@@ -317,6 +318,22 @@ fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> 
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn open_session_command(
+    runtime: String,
+    cwd: Option<String>,
+    prompt: Option<String>,
+    terminal: Option<bool>,
+) -> Result<OpenSessionReport, String> {
+    open_interactive_session(&OpenSessionOptions {
+        runtime,
+        cwd: cwd.map(std::path::PathBuf::from),
+        prompt,
+        prefer_deep_link: !terminal.unwrap_or(false),
+    })
+    .map_err(|err| format!("{err:#}"))
+}
+
 fn build_repair_preview_response(
     report: RuntimeProbeReport,
     last_execute: Option<RepairExecuteSummary>,
@@ -555,7 +572,8 @@ pub fn run() {
             run_repair_preview_command,
             run_repair_execute_command,
             run_repair_rollback_command,
-            open_path_command
+            open_path_command,
+            open_session_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

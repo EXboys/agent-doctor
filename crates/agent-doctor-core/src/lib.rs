@@ -9,6 +9,7 @@ pub mod probe;
 pub mod profile;
 pub mod repair;
 pub mod runtime;
+pub mod session_launch;
 pub mod setup;
 pub mod workspace;
 
@@ -65,10 +66,14 @@ pub use runtime::{
     run_runtime_lifecycle, runtime_supports_lifecycle, runtime_supports_playbook,
     suggest_runtime_repairs, RuntimeDescriptor, RuntimeLifecycleAction, RuntimeProbeSpec,
 };
+pub use session_launch::{
+    claude_cli_deep_link, open_interactive_session, resolve_session_cwd, OpenSessionMethod,
+    OpenSessionOptions, OpenSessionReport,
+};
 pub use setup::{
-    evotown_agent_env_path, evotown_base_from_gateway, execute_setup,
-    gateway_url_from_evotown_base, write_evotown_agent_env, RuntimeSetupResult, SetupOptions,
-    SetupReport,
+    anthropic_gateway_url_from_evotown_base, evotown_agent_env_path, evotown_base_from_gateway,
+    execute_setup, gateway_url_from_evotown_base, write_evotown_agent_env, RuntimeSetupResult,
+    SetupOptions, SetupReport,
 };
 pub use workspace::{
     active_env_path, bash_hook_file_path, enter_workspace, fish_hook_file_path, hook_file_path,

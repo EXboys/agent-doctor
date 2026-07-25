@@ -87,6 +87,9 @@ agent-doctor policy pull
 
 # 5. 常驻在线（需 EVOTOWN_ENGINE_ID + evi_ 已写入 evotown.agent.env）
 agent-doctor connect
+# 打开官方交互会话（Claude Code 优先 deep link，否则系统终端）
+agent-doctor open claude-code
+agent-doctor open claude-code --cwd /path/to/project -q "review recent changes"
 ```
 
 ## 替代 legacy 脚本

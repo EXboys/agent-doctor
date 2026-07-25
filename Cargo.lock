@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-desktop"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "agent-doctor-core",
  "serde",
