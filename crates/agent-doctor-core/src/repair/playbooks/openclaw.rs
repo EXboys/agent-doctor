@@ -42,8 +42,8 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
             items.push(SuggestedRepair {
                 id: "fix-openclaw-create-config".to_string(),
                 title: "Create OpenClaw config".to_string(),
-                description: "Create ~/.openclaw/openclaw.json with gateway from company profile \
-                    when available."
+                description: "Create ~/.openclaw/openclaw.json with models.providers from \
+                    company profile when available."
                     .to_string(),
                 auto_fixable: true,
             });
@@ -54,11 +54,22 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
                 id: "fix-openclaw-gateway-from-profile".to_string(),
                 title: "Apply company gateway to OpenClaw".to_string(),
                 description: if company_gateway {
-                    "Set gateway.url from ~/.config/agent-doctor/profile.env.".to_string()
+                    "Set models.providers.agent-doctor.baseUrl from profile.env.".to_string()
                 } else {
                     "Run `agent-doctor setup --url ... --key ...` first.".to_string()
                 },
                 auto_fixable: company_gateway,
+            });
+        }
+
+        if check.id == "openclaw.schema.legacy_gateway_url" && check.status == ProbeStatus::Warn {
+            items.push(SuggestedRepair {
+                id: "fix-openclaw-legacy-gateway-url".to_string(),
+                title: "Migrate OpenClaw LLM URL to models.providers".to_string(),
+                description: "Remove invalid gateway.url / evotown.url and write \
+                    models.providers.agent-doctor.baseUrl."
+                    .to_string(),
+                auto_fixable: true,
             });
         }
 
@@ -163,6 +174,24 @@ pub fn apply_openclaw_playbook_filtered(
                 .push("fix-openclaw-gateway-from-profile".to_string()),
             Err(error) => result.skipped.push(SkippedRepairAction {
                 id: "fix-openclaw-gateway-from-profile".to_string(),
+                reason: error.to_string(),
+            }),
+        }
+    }
+
+    if should_run("fix-openclaw-legacy-gateway-url", only_ids)
+        && probe_has_check(
+            probe,
+            "openclaw.schema.legacy_gateway_url",
+            ProbeStatus::Warn,
+        )
+    {
+        match migrate_legacy_gateway_url() {
+            Ok(()) => result
+                .executed
+                .push("fix-openclaw-legacy-gateway-url".to_string()),
+            Err(error) => result.skipped.push(SkippedRepairAction {
+                id: "fix-openclaw-legacy-gateway-url".to_string(),
                 reason: error.to_string(),
             }),
         }
@@ -322,42 +351,37 @@ fn create_openclaw_config() -> Result<()> {
         .ok()
         .flatten()
         .and_then(|profile| profile.gateway_url);
-    let root = if let Some(url) = gateway_url {
-        json!({
-            "gateway": { "url": url },
-            "evotown": { "url": url },
-            "tools": { "profile": DEFAULT_TOOL_PROFILE },
-            "env": { "vars": {} }
-        })
+    if let Some(url) = gateway_url {
+        crate::setup::merge::apply_openclaw(&url, "", None)?;
+        let mut root = load_json_config(&path)?;
+        if let Some(obj) = root.as_object_mut() {
+            obj.entry("env").or_insert_with(|| json!({ "vars": {} }));
+        }
+        write_json_config(&path, &root)
     } else {
-        json!({
-            "tools": { "profile": DEFAULT_TOOL_PROFILE },
-            "env": { "vars": {} }
-        })
-    };
-    write_json_config(&path, &root)
+        write_json_config(
+            &path,
+            &json!({
+                "tools": { "profile": DEFAULT_TOOL_PROFILE },
+                "env": { "vars": {} }
+            }),
+        )
+    }
 }
 
 fn apply_gateway_from_company_profile() -> Result<()> {
     let url = company_gateway_url()?;
+    crate::setup::merge::apply_openclaw(&url, "", None)?;
+    Ok(())
+}
+
+fn migrate_legacy_gateway_url() -> Result<()> {
     let path = openclaw_config_path();
-    let mut root = load_json_config(&path)?;
-    let obj = root
-        .as_object_mut()
-        .context("OpenClaw config root must be an object")?;
-    let gateway = obj
-        .entry("gateway")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .context("gateway must be an object")?;
-    gateway.insert("url".to_string(), json!(url));
-    let evotown = obj
-        .entry("evotown")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .context("evotown must be an object")?;
-    evotown.insert("url".to_string(), json!(url));
-    write_json_config(&path, &root)
+    let root = load_json_config(&path)?;
+    let url =
+        crate::adapters::configured_base_url(&root).context("no LLM base URL found to migrate")?;
+    crate::setup::merge::apply_openclaw(&url, "", None)?;
+    Ok(())
 }
 
 fn fix_legacy_timeout_field() -> Result<()> {

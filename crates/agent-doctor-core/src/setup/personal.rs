@@ -468,7 +468,9 @@ pub fn execute_personal_provider_setup(
     let mut runtimes = Vec::new();
     for adapter in all_adapters() {
         let result = match (protocol.as_str(), adapter.id()) {
-            (PROTOCOL_OPENAI, "openclaw") => merge::apply_openclaw(&gateway_url, api_key),
+            (PROTOCOL_OPENAI, "openclaw") => {
+                merge::apply_openclaw(&gateway_url, api_key, Some(model))
+            }
             (PROTOCOL_OPENAI, "hermes") => {
                 merge::apply_hermes(&gateway_url, api_key, "custom", Some(model))
             }

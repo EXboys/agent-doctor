@@ -37,15 +37,48 @@ impl RuntimeAdapter for OpenClawAdapter {
 
         let raw = fs::read_to_string(&path)?;
         let value: serde_json::Value = serde_json::from_str(&raw)?;
-        let gateway_url = value
-            .pointer("/gateway/url")
-            .or_else(|| value.pointer("/evotown/url"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
+        let gateway_url = configured_base_url(&value);
 
         Ok(RuntimeProfile {
             gateway_url,
             key_source: Some(format!("{}", path.display())),
         })
     }
+}
+
+/// Resolve the LLM base URL OpenClaw is configured to use.
+///
+/// Prefer `models.providers.agent-doctor` (written by Agent Doctor). Fall back to
+/// any other provider `baseUrl`, then legacy invalid keys for migration reads.
+pub fn configured_base_url(value: &serde_json::Value) -> Option<String> {
+    const PROVIDER_ID: &str = "agent-doctor";
+    if let Some(url) = value
+        .pointer(&format!("/models/providers/{PROVIDER_ID}/baseUrl"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|u| !u.trim().is_empty())
+    {
+        return Some(url.to_string());
+    }
+
+    if let Some(providers) = value
+        .pointer("/models/providers")
+        .and_then(|v| v.as_object())
+    {
+        for provider in providers.values() {
+            if let Some(url) = provider
+                .get("baseUrl")
+                .and_then(serde_json::Value::as_str)
+                .filter(|u| !u.trim().is_empty())
+            {
+                return Some(url.to_string());
+            }
+        }
+    }
+
+    value
+        .pointer("/gateway/url")
+        .or_else(|| value.pointer("/evotown/url"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|u| !u.trim().is_empty())
+        .map(str::to_string)
 }

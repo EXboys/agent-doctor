@@ -1,7 +1,8 @@
 use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result as AnyhowResult};
-use serde_json::json;
+use serde_json::{json, Map, Value as JsonValue};
 use serde_yaml::{Mapping, Value as YamlValue};
 use toml::Value as TomlValue;
 
@@ -9,7 +10,16 @@ use crate::adapters::util::home_join;
 use crate::adapters::HermesAdapter;
 use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult};
 
-pub fn apply_openclaw(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
+/// Stable custom provider id written into `models.providers`.
+pub const OPENCLAW_PROVIDER_ID: &str = "agent-doctor";
+
+/// OpenClaw's `gateway` key is the local control-plane listener (port/mode/bind),
+/// not the LLM base URL. Custom/company endpoints belong under `models.providers`.
+pub fn apply_openclaw(
+    gateway_url: &str,
+    _api_key: &str,
+    model_id: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".openclaw/openclaw.json");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
@@ -21,14 +31,69 @@ pub fn apply_openclaw(gateway_url: &str, _api_key: &str) -> AnyhowResult<Runtime
         json!({})
     };
 
+    let model = model_id
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("default");
+
     if let Some(obj) = root.as_object_mut() {
-        let gateway = obj.entry("gateway").or_insert_with(|| json!({}));
-        if let Some(gateway_obj) = gateway.as_object_mut() {
-            gateway_obj.insert("url".to_string(), json!(gateway_url));
-        }
-        let evotown = obj.entry("evotown").or_insert_with(|| json!({}));
-        if let Some(evotown_obj) = evotown.as_object_mut() {
-            evotown_obj.insert("url".to_string(), json!(gateway_url));
+        // Strip legacy Agent Doctor keys that fail OpenClaw ≥2026.7 schema.
+        obj.remove("evotown");
+        ensure_openclaw_local_gateway(obj);
+
+        let models = obj.entry("models").or_insert_with(|| json!({}));
+        let models_obj = models
+            .as_object_mut()
+            .context("OpenClaw models section must be an object")?;
+        models_obj
+            .entry("mode".to_string())
+            .or_insert_with(|| json!("merge"));
+
+        let providers = models_obj
+            .entry("providers".to_string())
+            .or_insert_with(|| json!({}));
+        let providers_obj = providers
+            .as_object_mut()
+            .context("OpenClaw models.providers must be an object")?;
+
+        providers_obj.insert(
+            OPENCLAW_PROVIDER_ID.to_string(),
+            json!({
+                "baseUrl": gateway_url,
+                "api": "openai-completions",
+                "apiKey": {
+                    "source": "env",
+                    "provider": "default",
+                    "id": "OPENAI_API_KEY"
+                },
+                "models": [{
+                    "id": model,
+                    "name": model,
+                    "input": ["text"]
+                }]
+            }),
+        );
+
+        let agents = obj.entry("agents").or_insert_with(|| json!({}));
+        let agents_obj = agents
+            .as_object_mut()
+            .context("OpenClaw agents section must be an object")?;
+        let defaults = agents_obj
+            .entry("defaults".to_string())
+            .or_insert_with(|| json!({}));
+        let defaults_obj = defaults
+            .as_object_mut()
+            .context("OpenClaw agents.defaults must be an object")?;
+        defaults_obj.insert(
+            "model".to_string(),
+            json!({ "primary": format!("{OPENCLAW_PROVIDER_ID}/{model}") }),
+        );
+
+        let tools = obj.entry("tools").or_insert_with(|| json!({}));
+        if let Some(tools_obj) = tools.as_object_mut() {
+            tools_obj
+                .entry("profile".to_string())
+                .or_insert_with(|| json!("coding"));
         }
     }
 
@@ -40,8 +105,88 @@ pub fn apply_openclaw(gateway_url: &str, _api_key: &str) -> AnyhowResult<Runtime
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
-        message: format!("set gateway.url to {gateway_url}"),
+        message: format!(
+            "set models.providers.{OPENCLAW_PROVIDER_ID} baseUrl={gateway_url} model={model}"
+        ),
     })
+}
+
+/// Ensure OpenClaw local gateway can accept `openclaw tui` clients.
+///
+/// OpenClaw 2026.7+ expects `gateway.mode=local` and a shared-secret token
+/// (even on loopback). Preserve any existing auth token/password.
+fn ensure_openclaw_local_gateway(obj: &mut Map<String, JsonValue>) {
+    let gateway = obj.entry("gateway").or_insert_with(|| json!({}));
+    let Some(gateway_obj) = gateway.as_object_mut() else {
+        return;
+    };
+
+    // Legacy Agent Doctor wrote LLM URLs here; that is invalid now.
+    gateway_obj.remove("url");
+    gateway_obj
+        .entry("mode".to_string())
+        .or_insert_with(|| json!("local"));
+
+    let auth = gateway_obj.entry("auth").or_insert_with(|| json!({}));
+    let Some(auth_obj) = auth.as_object_mut() else {
+        return;
+    };
+
+    let has_token = auth_obj
+        .get("token")
+        .map(|v| match v {
+            JsonValue::String(s) => !s.trim().is_empty(),
+            JsonValue::Object(_) => true,
+            _ => false,
+        })
+        .unwrap_or(false);
+    let has_password = auth_obj
+        .get("password")
+        .map(|v| match v {
+            JsonValue::String(s) => !s.trim().is_empty(),
+            JsonValue::Object(_) => true,
+            _ => false,
+        })
+        .unwrap_or(false);
+
+    if !has_token && !has_password {
+        auth_obj.insert("mode".to_string(), json!("token"));
+        auth_obj.insert(
+            "token".to_string(),
+            json!(generate_openclaw_gateway_token()),
+        );
+    } else {
+        auth_obj
+            .entry("mode".to_string())
+            .or_insert_with(|| json!(if has_password { "password" } else { "token" }));
+    }
+}
+
+fn generate_openclaw_gateway_token() -> String {
+    // Prefer OS entropy; fall back to a time/pid mix if /dev/urandom is unavailable.
+    if let Ok(mut file) = fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        let mut bytes = [0u8; 24];
+        if file.read_exact(&mut bytes).is_ok() {
+            return bytes.iter().map(|b| format!("{b:02x}")).collect();
+        }
+    }
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut out = String::with_capacity(48);
+    for salt in [0u128, 1, 2] {
+        let mut hasher = DefaultHasher::new();
+        (nanos ^ (salt << 48)).hash(&mut hasher);
+        std::process::id().hash(&mut hasher);
+        salt.hash(&mut hasher);
+        out.push_str(&format!("{:016x}", hasher.finish()));
+    }
+    out
 }
 
 pub fn apply_hermes(
