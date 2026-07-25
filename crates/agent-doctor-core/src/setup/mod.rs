@@ -3,10 +3,13 @@ mod personal;
 
 pub use merge::clear_codex_placeholder_auth;
 pub use personal::{
-    execute_personal_provider_setup, load_personal_provider_status, normalize_personal_gateway_url,
-    verify_personal_provider, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, MODEL_ENV, PROVIDER_KIND_ENV,
-    PROVIDER_KIND_PERSONAL,
+    activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
+    list_personal_providers, load_personal_provider_status, normalize_personal_gateway_url,
+    normalize_protocol, upsert_personal_provider, verify_personal_provider,
+    verify_personal_provider_with_protocol, PersonalProviderListItem, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
+    PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
+    PROTOCOL_OPENAI, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
 };
 
 use std::fs;

@@ -85,34 +85,78 @@
           </div>
 
           <section class="widget-section personal-section provider-panel is-active" id="personal-section" data-provider-panel="personal">
-            <div class="section-label">
-              <span class="section-icon" aria-hidden="true">⬡</span>
-              <h2 data-i18n="personal.title">个人 Provider</h2>
-            </div>
-            <p id="personal-status" class="section-hint" data-i18n="personal.loading">正在检查个人配置…</p>
-            <div id="personal-connected" class="evotown-connected" hidden>
-              <p class="evotown-connected-line"><span data-i18n="personal.configuredUrl">已配置</span> <strong id="personal-connected-url">—</strong></p>
-              <p class="evotown-connected-meta" id="personal-connected-meta"></p>
-            </div>
-            <form id="personal-form" class="evotown-form" autocomplete="off">
-              <label class="field-row field-row-inline">
-                <span class="field-label" data-i18n="personal.url">API Base URL</span>
-                <input id="personal-url" class="field-input" type="url" placeholder="https://api.openai.com/v1" />
-              </label>
-              <label class="field-row field-row-inline">
-                <span class="field-label" data-i18n="personal.apiKey">API Key</span>
-                <input id="personal-key" class="field-input" type="password" placeholder="sk-…" autocomplete="off" />
-              </label>
-              <label class="field-row field-row-inline">
-                <span class="field-label" data-i18n="personal.model">模型</span>
-                <input id="personal-model" class="field-input" type="text" placeholder="gpt-4o-mini" />
-              </label>
-              <div class="evotown-actions">
-                <button id="personal-verify" type="button" class="btn-secondary" data-i18n="personal.verify">验证连通</button>
-                <button id="personal-apply" type="submit" class="btn-primary" data-i18n="personal.apply">保存并应用</button>
+            <div id="personal-list-view">
+              <div class="section-label">
+                <span class="section-icon" aria-hidden="true">⬡</span>
+                <h2 data-i18n="personal.title">个人 Provider</h2>
+                <button id="personal-add" type="button" class="btn-primary btn-compact" data-i18n="personal.add">新增</button>
               </div>
-            </form>
-            <p id="personal-hint" class="section-footnote" data-i18n="personal.footnote">写入 Codex / Claude / Hermes。不连接 Evotown。</p>
+              <p id="personal-status" class="section-hint" data-i18n="personal.loading">正在检查个人配置…</p>
+              <div id="personal-connected" class="evotown-connected" hidden>
+                <p class="evotown-connected-line"><span data-i18n="personal.configuredUrl">当前</span> <strong id="personal-connected-url">—</strong></p>
+                <p class="evotown-connected-meta" id="personal-connected-meta"></p>
+              </div>
+              <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
+              <p id="personal-list-hint" class="section-footnote" data-i18n="personal.footnote">OpenAI 协议写入 Codex/Hermes；Claude 协议写入 Claude Code。</p>
+            </div>
+
+            <div id="personal-form-view" hidden>
+              <div class="section-label">
+                <button id="personal-back" type="button" class="btn-ghost btn-compact" data-i18n="personal.back">返回</button>
+                <h2 id="personal-form-title" data-i18n="personal.formAdd">新增 Provider</h2>
+              </div>
+              <form id="personal-form" class="evotown-form" autocomplete="off">
+                <input id="personal-id" type="hidden" value="" />
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="personal.preset">服务商</span>
+                  <select id="personal-preset" class="field-input field-select">
+                    <option value="custom" data-i18n="personal.presetCustom">自定义</option>
+                    <optgroup label="OpenAI 协议" data-i18n-label="personal.groupOpenAI">
+                      <option value="openai">OpenAI</option>
+                      <option value="deepseek">DeepSeek (OpenAI)</option>
+                      <option value="moonshot">Moonshot / Kimi</option>
+                      <option value="siliconflow">SiliconFlow</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="groq">Groq</option>
+                    </optgroup>
+                    <optgroup label="Claude 协议" data-i18n-label="personal.groupClaude">
+                      <option value="anthropic">Anthropic</option>
+                      <option value="deepseek-anthropic">DeepSeek (Claude)</option>
+                    </optgroup>
+                  </select>
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="personal.protocol">协议</span>
+                  <select id="personal-protocol" class="field-input field-select">
+                    <option value="openai" data-i18n="personal.protocolOpenAI">OpenAI 兼容（Codex / Hermes）</option>
+                    <option value="anthropic" data-i18n="personal.protocolAnthropic">Claude / Anthropic（Claude Code）</option>
+                  </select>
+                </label>
+                <label class="field-row field-row-inline" id="personal-name-row">
+                  <span class="field-label" data-i18n="personal.name">名称</span>
+                  <input id="personal-name" class="field-input" type="text" placeholder="My Provider" />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="personal.url">API Base URL</span>
+                  <input id="personal-url" class="field-input" type="url" placeholder="https://api.openai.com/v1" />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="personal.apiKey">API Key</span>
+                  <input id="personal-key" class="field-input" type="password" placeholder="sk-…" autocomplete="off" />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="personal.model">模型</span>
+                  <input id="personal-model" class="field-input" type="text" list="personal-model-suggestions" placeholder="deepseek-v4-flash" />
+                </label>
+                <datalist id="personal-model-suggestions"></datalist>
+                <div class="evotown-actions">
+                  <button id="personal-verify" type="button" class="btn-secondary" data-i18n="personal.verify">验证</button>
+                  <button id="personal-save" type="button" class="btn-secondary" data-i18n="personal.save">保存</button>
+                  <button id="personal-apply" type="submit" class="btn-primary" data-i18n="personal.apply">保存并切换</button>
+                </div>
+              </form>
+              <p id="personal-hint" class="section-footnote"></p>
+            </div>
           </section>
 
           <section class="widget-section evotown-section provider-panel" id="evotown-section" data-provider-panel="evotown" hidden>

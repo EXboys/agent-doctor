@@ -1,19 +1,21 @@
 use agent_doctor_core::{
-    apply_profile_model, build_repair_preview_from_bundle, evotown_status,
-    execute_evotown_onboarding, execute_install_with_progress, execute_personal_provider_setup,
-    execute_repair, execute_sync, list_runtime_backup_ids, load_evotown_config,
+    activate_personal_provider, apply_profile_model, build_repair_preview_from_bundle,
+    delete_personal_provider, evotown_status, execute_evotown_onboarding,
+    execute_install_with_progress, execute_personal_provider_setup, execute_repair, execute_sync,
+    list_personal_providers, list_runtime_backup_ids, load_evotown_config,
     load_personal_provider_status, load_profiles, load_workspaces, needs_binary_install,
     open_interactive_session, probe_runtime, restore_runtime_backup, run_doctor,
-    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs, use_profile,
-    use_workspace_with_options, verify_personal_provider, workspace_doctor, workspace_fix,
-    workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
-    HermesSettings, InstallOptions, InstallProgressEvent, InstallReport, OnboardingOptions,
-    OnboardingReport, OpenSessionOptions, OpenSessionReport, PersonalProviderOptions,
-    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport, ProbeStatus,
+    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
+    upsert_personal_provider, use_profile, use_workspace_with_options,
+    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
+    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    InstallOptions, InstallProgressEvent, InstallReport, OnboardingOptions, OnboardingReport,
+    OpenSessionOptions, OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
     ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
-    RuntimeProbeReport, SyncOptions, SyncReport, UseProfileReport, UseWorkspaceOptions,
-    UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport,
-    WorkspaceStatusReport, WorkspacesDocument,
+    RuntimeProbeReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions, UseProfileReport,
+    UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions,
+    WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use serde::Serialize;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
@@ -229,15 +231,60 @@ fn get_personal_provider_status_command() -> PersonalProviderStatus {
         model: None,
         api_key_hint: None,
         profile_env_path: None,
+        active_id: None,
+        active_name: None,
+        protocol: None,
     })
+}
+
+#[tauri::command]
+fn list_personal_providers_command() -> PersonalProvidersDocument {
+    list_personal_providers().unwrap_or(PersonalProvidersDocument {
+        active_id: None,
+        providers: Vec::new(),
+        store_path: String::new(),
+    })
+}
+
+#[tauri::command]
+fn upsert_personal_provider_command(
+    id: Option<String>,
+    name: String,
+    url: String,
+    key: String,
+    model: String,
+    protocol: String,
+    activate: bool,
+) -> Result<PersonalProvidersDocument, String> {
+    upsert_personal_provider(&UpsertPersonalProviderOptions {
+        id,
+        name,
+        url,
+        api_key: key,
+        model,
+        protocol,
+        activate,
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_personal_provider_command(id: String) -> Result<PersonalProvidersDocument, String> {
+    delete_personal_provider(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn activate_personal_provider_command(id: String) -> Result<PersonalProviderSetupReport, String> {
+    activate_personal_provider(&id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn verify_personal_provider_command(
     url: String,
     key: String,
+    protocol: String,
 ) -> Result<PersonalProviderVerifyReport, String> {
-    verify_personal_provider(&url, &key).map_err(|error| error.to_string())
+    verify_personal_provider_with_protocol(&url, &key, &protocol).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -245,11 +292,13 @@ fn apply_personal_provider_command(
     url: String,
     key: String,
     model: String,
+    protocol: String,
 ) -> Result<PersonalProviderSetupReport, String> {
     execute_personal_provider_setup(&PersonalProviderOptions {
         url,
         api_key: key,
         model,
+        protocol,
     })
     .map_err(|error| error.to_string())
 }
@@ -656,6 +705,10 @@ pub fn run() {
             run_evotown_onboarding_command,
             run_sync_command,
             get_personal_provider_status_command,
+            list_personal_providers_command,
+            upsert_personal_provider_command,
+            delete_personal_provider_command,
+            activate_personal_provider_command,
             verify_personal_provider_command,
             apply_personal_provider_command,
             run_doctor_command,

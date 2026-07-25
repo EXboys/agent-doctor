@@ -500,6 +500,25 @@ body::before {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
+.field-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 55%,
+    calc(100% - 9px) 55%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 24px;
+  cursor: pointer;
+}
+
+#personal-name-row.is-preset-locked .field-input {
+  background: rgba(148, 163, 184, 0.12);
+}
+
 .evotown-actions {
   display: flex;
   gap: 8px;
@@ -537,6 +556,100 @@ body::before {
 
 .personal-section.is-configured .field-row input:placeholder-shown {
   opacity: 0.9;
+}
+
+.btn-compact {
+  padding: 5px 10px;
+  min-height: 28px;
+  font-size: 0.7rem;
+}
+
+.personal-section .section-label h2 {
+  flex: 1;
+}
+
+#personal-form-view .section-label {
+  gap: 8px;
+}
+
+#personal-form-view .section-label h2 {
+  font-size: 0.8rem;
+}
+
+.provider-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.provider-list:empty {
+  display: none;
+}
+
+.provider-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.provider-item.is-active {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.provider-item-main {
+  min-width: 0;
+}
+
+.provider-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.provider-item-meta {
+  margin: 2px 0 0;
+  font-size: 0.66rem;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.provider-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
+.provider-item .btn-ghost,
+.provider-item .btn-secondary {
+  padding: 4px 8px;
+  font-size: 0.66rem;
+  min-height: 28px;
 }
 
 .preset-row {

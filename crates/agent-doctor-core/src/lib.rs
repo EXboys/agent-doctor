@@ -72,12 +72,16 @@ pub use session_launch::{
     OpenSessionOptions, OpenSessionReport,
 };
 pub use setup::{
-    anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth, evotown_agent_env_path,
+    activate_personal_provider, anthropic_gateway_url_from_evotown_base,
+    clear_codex_placeholder_auth, delete_personal_provider, evotown_agent_env_path,
     evotown_base_from_gateway, execute_personal_provider_setup, execute_setup,
-    gateway_url_from_evotown_base, load_personal_provider_status, normalize_personal_gateway_url,
-    verify_personal_provider, write_evotown_agent_env, PersonalProviderOptions,
-    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
-    RuntimeSetupResult, SetupOptions, SetupReport,
+    gateway_url_from_evotown_base, list_personal_providers, load_personal_provider_status,
+    normalize_personal_gateway_url, normalize_protocol, upsert_personal_provider,
+    verify_personal_provider, verify_personal_provider_with_protocol, write_evotown_agent_env,
+    PersonalProviderListItem, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument,
+    RuntimeSetupResult, SetupOptions, SetupReport, UpsertPersonalProviderOptions,
+    PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 pub use workspace::{
     active_env_path, bash_hook_file_path, enter_workspace, fish_hook_file_path, hook_file_path,
