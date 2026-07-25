@@ -21,9 +21,12 @@ pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
-    load_doctor_node_config, load_evotown_config, resolve_runtime, run_connect_loop, AssignedJob,
-    ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
-    OnboardingOptions, OnboardingReport, PolicyPullReport, SyncOptions, SyncReport,
+    is_known_dispatch_runtime, known_dispatch_runtimes, load_doctor_node_config,
+    load_evotown_config, normalize_runtime, preferred_runtime_status, resolve_preferred_runtime,
+    resolve_runtime, run_connect_loop, set_preferred_runtime, AssignedJob, ConnectOptions,
+    DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
+    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, SyncOptions,
+    SyncReport,
 };
 pub use install::{
     build_explain_input, execute_install, needs_binary_install, InstallOptions, InstallReport,

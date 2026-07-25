@@ -126,6 +126,12 @@ enum Commands {
         #[arg(long, default_value_t = 60)]
         max_backoff: u64,
     },
+    /// Default local agent runtime for Evotown job dispatch (`EVOTOWN_RUNTIME`)
+    #[command(name = "preferred-runtime")]
+    PreferredRuntime {
+        #[command(subcommand)]
+        action: PreferredRuntimeAction,
+    },
     /// Cache policies from control plane (not yet implemented)
     Policy {
         #[command(subcommand)]
@@ -135,6 +141,22 @@ enum Commands {
     Workspace {
         #[command(subcommand)]
         action: WorkspaceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PreferredRuntimeAction {
+    /// Show the configured preferred runtime
+    Show {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set preferred runtime (claude-code, hermes, openclaw, codex)
+    Use {
+        /// Runtime id
+        runtime: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -370,6 +392,12 @@ fn main() -> Result<()> {
             heartbeat_interval,
             max_backoff,
         } => commands::connect::run(inventory_interval, heartbeat_interval, max_backoff)?,
+        Commands::PreferredRuntime { action } => match action {
+            PreferredRuntimeAction::Show { json } => commands::preferred_runtime::show(json)?,
+            PreferredRuntimeAction::Use { runtime, json } => {
+                commands::preferred_runtime::use_runtime(&runtime, json)?
+            }
+        },
         Commands::Policy { action } => match action {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },

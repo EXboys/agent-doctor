@@ -3,6 +3,7 @@ mod config;
 mod connect;
 mod jobs;
 mod policy;
+mod preferred_runtime;
 mod sync;
 
 pub use client::{check_evotown_connectivity, EvotownClient, EvotownHealthReport};
@@ -15,8 +16,15 @@ pub use connect::{
     build_inventory_payload, load_doctor_node_config, load_doctor_node_config_from_path,
     run_connect_loop, ConnectOptions, DoctorNodeConfig, PROTOCOL_VERSION,
 };
-pub use jobs::{execute_job, resolve_runtime, AssignedJob, JobResult};
+pub use jobs::{
+    execute_job, is_known_dispatch_runtime, known_dispatch_runtimes, normalize_runtime,
+    resolve_runtime, AssignedJob, JobResult,
+};
 pub use policy::{execute_policy_pull, PolicyPullReport};
+pub use preferred_runtime::{
+    preferred_runtime_status, read_preferred_runtime_from_env_file, resolve_preferred_runtime,
+    set_preferred_runtime, PreferredRuntimeStatus,
+};
 pub use sync::{execute_sync, SkillSyncOutcome, SyncOptions, SyncReport};
 
 use anyhow::Result;

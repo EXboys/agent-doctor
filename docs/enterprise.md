@@ -25,6 +25,14 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 7. 若 runtime 损坏或漂移：`agent-doctor repair <runtime> --apply`（备份 → 修复 → 复检 → 审计）。
 8. **派活在线**：引擎 `register` 写入 `evi_` 后运行 `agent-doctor connect`（WebSocket presence + inventory + **执行 job.assign**）。
 
+默认执行哪个本地 runtime：
+
+1. 任务 `payload.runtime`（控制台可覆盖）
+2. 否则本机 `EVOTOWN_RUNTIME`（`agent-doctor preferred-runtime use <id>`）
+3. 否则按已安装优先：claude-code → codex → openclaw → hermes
+
+`connect` 会上报 inventory 中的 `preferred_runtime`，Evotown 派活未指定 runtime 时默认填入该值。
+
 协议说明见 Evotown [`docs/zh-CN/DOCTOR_NODE_PROTOCOL.md`](https://github.com/EXboys/evotown/blob/main/docs/zh-CN/DOCTOR_NODE_PROTOCOL.md)。
 
 `connect` 收到任务后按 `payload.runtime` 执行：
