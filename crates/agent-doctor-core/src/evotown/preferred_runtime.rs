@@ -110,9 +110,7 @@ fn upsert_env_key(path: &Path, key: &str, value: &str) -> Result<()> {
             .map(|l| l.to_string())
             .collect()
     } else {
-        vec![
-            "# Evotown employee agent config — written by Agent Doctor".to_string(),
-        ]
+        vec!["# Evotown employee agent config — written by Agent Doctor".to_string()]
     };
 
     let mut replaced = false;

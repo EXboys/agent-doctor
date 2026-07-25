@@ -1,5 +1,5 @@
-use anyhow::Result;
 use agent_doctor_core::{preferred_runtime_status, set_preferred_runtime};
+use anyhow::Result;
 
 pub fn show(json: bool) -> Result<()> {
     let status = preferred_runtime_status();
@@ -17,7 +17,9 @@ pub fn show(json: bool) -> Result<()> {
         }
         None => {
             println!("Preferred runtime: (not set)");
-            println!("Set with: agent-doctor preferred-runtime use <claude-code|hermes|openclaw|codex>");
+            println!(
+                "Set with: agent-doctor preferred-runtime use <claude-code|hermes|openclaw|codex>"
+            );
         }
     }
     if let Some(path) = &status.env_path {
