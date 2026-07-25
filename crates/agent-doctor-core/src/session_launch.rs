@@ -180,10 +180,10 @@ fn wrap_with_company_env(command: &str) -> String {
         if parts.is_empty() {
             return command.to_string();
         }
-        return format!(
+        format!(
             "set -a && {} && set +a && export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{OPENAI_API_KEY:-$EVOTOWN_API_KEY}}}}\" && {command}",
             parts.join(" && ")
-        );
+        )
     }
 
     #[cfg(windows)]
