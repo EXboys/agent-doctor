@@ -15,6 +15,7 @@ use url::Url;
 
 use crate::doctor::run_doctor;
 use crate::evotown::jobs::{execute_job, AssignedJob, JobResult};
+use crate::evotown::preferred_runtime::resolve_preferred_runtime;
 use crate::setup::evotown_agent_env_path;
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -148,8 +149,20 @@ pub fn build_inventory_payload() -> Value {
             })
         })
         .collect();
+    let preferred_runtime = resolve_preferred_runtime();
+    let preferred_runtime_installed = preferred_runtime
+        .as_ref()
+        .map(|pref| {
+            report
+                .runtimes
+                .iter()
+                .any(|rt| rt.id == *pref && rt.installed)
+        })
+        .unwrap_or(false);
     json!({
         "runtimes": runtimes,
+        "preferred_runtime": preferred_runtime,
+        "preferred_runtime_installed": preferred_runtime_installed,
         "company_gateway_url": report.company_gateway_url,
         "active_preset": report.active_preset,
         "profile_env_exists": report.profile_env_exists,

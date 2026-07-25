@@ -162,7 +162,7 @@ pub fn resolve_runtime(job: &AssignedJob) -> String {
     "claude-code".to_string()
 }
 
-fn normalize_runtime(raw: &str) -> String {
+pub fn normalize_runtime(raw: &str) -> String {
     match raw.trim().to_lowercase().as_str() {
         "claude" | "claude_code" | "claude-code" | "claudecode" => "claude-code".into(),
         "codex" | "openai-codex" => "codex".into(),
@@ -170,6 +170,15 @@ fn normalize_runtime(raw: &str) -> String {
         "hermes" => "hermes".into(),
         other => other.to_string(),
     }
+}
+
+/// Runtimes Agent Doctor can execute for Evotown job.assign.
+pub fn known_dispatch_runtimes() -> &'static [&'static str] {
+    &["claude-code", "codex", "openclaw", "hermes"]
+}
+
+pub fn is_known_dispatch_runtime(runtime: &str) -> bool {
+    known_dispatch_runtimes().contains(&normalize_runtime(runtime).as_str())
 }
 
 pub fn execute_job(job: &AssignedJob) -> JobResult {

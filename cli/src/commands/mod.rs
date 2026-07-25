@@ -3,6 +3,7 @@ pub mod connect;
 pub mod doctor;
 pub mod install;
 pub mod policy;
+pub mod preferred_runtime;
 pub mod profile;
 pub mod repair;
 pub mod setup;
