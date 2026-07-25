@@ -161,7 +161,7 @@ fn open_url(url: &str) -> Result<()> {
         if !status.success() {
             bail!("`open` exited with {status}");
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -172,7 +172,7 @@ fn open_url(url: &str) -> Result<()> {
         if !status.success() {
             bail!("`xdg-open` exited with {status}");
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -183,7 +183,7 @@ fn open_url(url: &str) -> Result<()> {
         if !status.success() {
             bail!("`start` exited with {status}");
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
@@ -208,7 +208,7 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
         if !status.success() {
             bail!("osascript exited with {status}");
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -261,7 +261,7 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
         if !status.success() {
             bail!("PowerShell exited with {status}");
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
