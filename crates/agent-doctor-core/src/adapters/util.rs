@@ -92,10 +92,7 @@ fn common_binary_dirs() -> Vec<PathBuf> {
 }
 
 fn npm_global_bin_dir() -> Option<PathBuf> {
-    let output = Command::new("npm")
-        .args(["prefix", "-g"])
-        .output()
-        .ok()?;
+    let output = Command::new("npm").args(["prefix", "-g"]).output().ok()?;
     if !output.status.success() {
         return None;
     }

@@ -14,12 +14,12 @@ use crate::evotown::{load_evotown_config, normalize_runtime};
 use crate::profile::agent_profile_path;
 #[cfg(windows)]
 use crate::profile::read_company_profile;
+#[cfg(windows)]
+use crate::setup::EVOTOWN_API_KEY_ENV;
 use crate::setup::{
     clear_codex_placeholder_auth, evotown_agent_env_path, write_company_profile_with_gateway,
     COMPANY_API_KEY_ENV,
 };
-#[cfg(windows)]
-use crate::setup::EVOTOWN_API_KEY_ENV;
 use crate::workspace::load_workspaces;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

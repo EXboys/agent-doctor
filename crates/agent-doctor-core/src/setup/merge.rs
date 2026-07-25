@@ -220,10 +220,7 @@ pub fn apply_codex(gateway_url: &str, _api_key: &str) -> AnyhowResult<RuntimeSet
         "wire_api".to_string(),
         TomlValue::String("responses".to_string()),
     );
-    company.insert(
-        "supports_websockets".to_string(),
-        TomlValue::Boolean(false),
-    );
+    company.insert("supports_websockets".to_string(), TomlValue::Boolean(false));
 
     let mut providers = toml::map::Map::new();
     providers.insert("company".to_string(), TomlValue::Table(company));

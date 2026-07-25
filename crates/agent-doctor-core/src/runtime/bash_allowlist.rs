@@ -20,10 +20,7 @@ pub fn runtime_allowed_bash_commands(runtime_id: &str) -> Vec<String> {
             claude_code_install_shell_command(),
             claude_code_update_shell_command(),
         ],
-        "codex" => vec![
-            codex_install_shell_command(),
-            codex_update_shell_command(),
-        ],
+        "codex" => vec![codex_install_shell_command(), codex_update_shell_command()],
         _ => Vec::new(),
     }
 }

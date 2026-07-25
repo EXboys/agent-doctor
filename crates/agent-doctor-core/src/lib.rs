@@ -72,10 +72,9 @@ pub use session_launch::{
     OpenSessionOptions, OpenSessionReport,
 };
 pub use setup::{
-    anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth,
-    evotown_agent_env_path, evotown_base_from_gateway, execute_setup,
-    gateway_url_from_evotown_base, write_evotown_agent_env, RuntimeSetupResult, SetupOptions,
-    SetupReport,
+    anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth, evotown_agent_env_path,
+    evotown_base_from_gateway, execute_setup, gateway_url_from_evotown_base,
+    write_evotown_agent_env, RuntimeSetupResult, SetupOptions, SetupReport,
 };
 pub use workspace::{
     active_env_path, bash_hook_file_path, enter_workspace, fish_hook_file_path, hook_file_path,

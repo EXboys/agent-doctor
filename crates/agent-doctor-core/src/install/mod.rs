@@ -77,7 +77,11 @@ where
         percent,
     };
 
-    on_progress(emit("probing", "Checking whether the runtime binary is installed…", 5));
+    on_progress(emit(
+        "probing",
+        "Checking whether the runtime binary is installed…",
+        5,
+    ));
 
     let has_rule_install = runtime_supports_lifecycle(runtime_id);
     let before_probe = probe_runtime(runtime_id)?;
@@ -88,7 +92,11 @@ where
     let mut install_succeeded = !install_needed;
 
     if !install_needed {
-        on_progress(emit("done", "Already installed — no install action required.", 100));
+        on_progress(emit(
+            "done",
+            "Already installed — no install action required.",
+            100,
+        ));
     } else if has_rule_install {
         let max_attempts = 1 + options.retry_count;
         while install_attempts < max_attempts {
@@ -101,7 +109,11 @@ where
             match run_rule_install(runtime_id, &mut on_progress) {
                 Ok(path) => {
                     install_log_path = Some(path.display().to_string());
-                    on_progress(emit("verifying", "Installer finished — verifying binary…", 85));
+                    on_progress(emit(
+                        "verifying",
+                        "Installer finished — verifying binary…",
+                        85,
+                    ));
                     let after_attempt = probe_runtime(runtime_id)?;
                     if !needs_binary_install(&after_attempt) {
                         install_succeeded = true;
@@ -157,7 +169,11 @@ where
         &after_probe,
     ) {
         Some(use_ai_planner) => {
-            on_progress(emit("installing", "Running repair loop for remaining issues…", 92));
+            on_progress(emit(
+                "installing",
+                "Running repair loop for remaining issues…",
+                92,
+            ));
             let loop_report = execute_repair_loop(
                 runtime_id,
                 &RepairLoopOptions {
