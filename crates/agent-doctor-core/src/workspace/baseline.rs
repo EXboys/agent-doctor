@@ -163,11 +163,7 @@ fn read_openclaw_gateway_url() -> Option<String> {
     let path = home_join(".openclaw/openclaw.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    value
-        .pointer("/gateway/url")
-        .or_else(|| value.pointer("/evotown/url"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
+    crate::adapters::configured_base_url(&value)
 }
 
 fn read_hermes_profile_gateway(profile: &str) -> Option<String> {

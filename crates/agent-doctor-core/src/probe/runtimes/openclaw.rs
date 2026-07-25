@@ -29,14 +29,21 @@ pub(crate) fn probe_schema(
         return;
     }
 
-    let gateway = value
-        .pointer("/gateway/url")
-        .or_else(|| value.pointer("/evotown/url"))
-        .and_then(serde_json::Value::as_str);
-    if let Some(url) = gateway {
+    if let Some(url) = crate::adapters::configured_base_url(value) {
         facts.push(DiagnosticFact::new(
             "gateway.url",
             url,
+            SensitivityLevel::ConfigShape,
+        ));
+    }
+
+    if value.pointer("/gateway/url").is_some() || value.get("evotown").is_some() {
+        checks.push(ProbeCheck::new(
+            "openclaw.schema.legacy_gateway_url",
+            "OpenClaw legacy LLM URL keys",
+            ProbeStatus::Warn,
+            ProbeSeverity::Warning,
+            "gateway.url / evotown.url are invalid; use models.providers.*.baseUrl".to_string(),
             SensitivityLevel::ConfigShape,
         ));
     }

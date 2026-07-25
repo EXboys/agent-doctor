@@ -1,4 +1,4 @@
-mod merge;
+pub(crate) mod merge;
 mod personal;
 
 pub use merge::clear_codex_placeholder_auth;
@@ -77,7 +77,7 @@ pub fn execute_setup(options: &SetupOptions) -> Result<SetupReport> {
     let mut runtimes = Vec::new();
     for adapter in all_adapters() {
         let result = match adapter.id() {
-            "openclaw" => merge::apply_openclaw(&gateway_url, api_key),
+            "openclaw" => merge::apply_openclaw(&gateway_url, api_key, None),
             "hermes" => merge::apply_hermes(&gateway_url, api_key, &options.hermes_provider, None),
             "claude-code" => merge::apply_claude_code(
                 &anthropic_gateway_url_from_evotown_base(&evotown_base),
