@@ -21,10 +21,11 @@ pub fn company_baseline_path() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join("agent-doctor").join("company-profile.env"))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProviderKind {
     Company,
     Personal,
+    #[default]
     Unknown,
 }
 
@@ -39,12 +40,6 @@ pub struct AgentProfile {
     pub kind: ProviderKind,
     pub gateway_url: Option<String>,
     pub api_key: Option<String>,
-}
-
-impl Default for ProviderKind {
-    fn default() -> Self {
-        ProviderKind::Unknown
-    }
 }
 
 pub fn write_company_profile(path: &Path, gateway_url: &str, api_key: &str) -> Result<()> {
