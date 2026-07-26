@@ -281,12 +281,12 @@ fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
     #[cfg(target_os = "macos")]
     {
         match restart_openclaw_via_launchctl() {
-            Ok(detail) => return Ok(detail),
+            Ok(detail) => Ok(detail),
             Err(err) => {
                 // Do not chain a slow CLI restart here; surface a short hint instead.
-                return Err(anyhow::anyhow!(
+                Err(anyhow::anyhow!(
                     "{err}; run `openclaw gateway restart` manually if auth is stale"
-                ));
+                ))
             }
         }
     }

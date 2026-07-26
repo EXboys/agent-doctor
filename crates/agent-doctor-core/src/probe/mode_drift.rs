@@ -456,6 +456,6 @@ mod tests {
 
     #[test]
     fn bare_default_is_team_risk() {
-        assert!(COMPANY_DEFAULT_MODEL.to_ascii_lowercase() != "default");
+        assert!(!COMPANY_DEFAULT_MODEL.eq_ignore_ascii_case("default"));
     }
 }
