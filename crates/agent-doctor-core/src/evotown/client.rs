@@ -11,8 +11,16 @@ pub struct EvotownClient {
 
 impl EvotownClient {
     pub fn new(base_url: &str, api_key: &str) -> Result<Self> {
+        Self::with_timeout(base_url, api_key, std::time::Duration::from_secs(120))
+    }
+
+    pub fn with_timeout(
+        base_url: &str,
+        api_key: &str,
+        timeout: std::time::Duration,
+    ) -> Result<Self> {
         let http = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(timeout)
             .build()
             .context("failed to build HTTP client")?;
         Ok(Self {

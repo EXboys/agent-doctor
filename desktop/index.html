@@ -194,6 +194,19 @@
               </div>
             </form>
             <p id="evotown-hint" class="section-footnote"></p>
+            <div id="skills-inventory" class="skills-inventory" hidden>
+              <div class="skills-inventory-head">
+                <h3 data-i18n="skills.title">已同步 Skills</h3>
+                <div class="skills-inventory-actions">
+                  <button id="skills-mount-all" type="button" class="btn-primary btn-compact" data-i18n="skills.mountAll">一键挂载</button>
+                  <button id="skills-refresh" type="button" class="btn-secondary btn-compact" data-i18n="skills.refresh">刷新</button>
+                </div>
+              </div>
+              <p id="skills-dir" class="skills-dir"></p>
+              <ul id="skills-list" class="skills-list" aria-live="polite"></ul>
+              <p id="skills-empty" class="section-hint" hidden data-i18n="skills.empty">暂无已安装 Skill。点「重新同步」从 Evotown 拉取。</p>
+              <p id="skills-footnote" class="section-footnote"></p>
+            </div>
           </section>
         </section>
 

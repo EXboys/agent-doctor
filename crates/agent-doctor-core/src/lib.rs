@@ -22,12 +22,14 @@ pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
-    is_known_dispatch_runtime, known_dispatch_runtimes, load_doctor_node_config,
-    load_evotown_config, normalize_runtime, preferred_runtime_status, resolve_preferred_runtime,
-    resolve_runtime, run_connect_loop, set_preferred_runtime, AssignedJob, ConnectOptions,
-    DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
-    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, SyncOptions,
-    SyncReport,
+    is_known_dispatch_runtime, known_dispatch_runtimes, list_skills_inventory,
+    list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
+    mount_synced_skills, normalize_runtime, preferred_runtime_status, resolve_preferred_runtime,
+    resolve_runtime, run_connect_loop, set_preferred_runtime, unmount_synced_skills, AssignedJob,
+    ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
+    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, SkillAgentUsage,
+    SkillInventoryItem, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
+    SkillsInventoryReport, SyncOptions, SyncReport,
 };
 pub use install::{
     build_explain_input, execute_install, execute_install_with_progress, needs_binary_install,

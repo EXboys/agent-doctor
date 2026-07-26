@@ -872,6 +872,214 @@ body::before {
   display: inline-flex;
 }
 
+.skills-inventory {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.skills-inventory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.skills-inventory-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.skills-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.skills-inventory-head h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.skills-dir {
+  margin: 0 0 8px;
+  font-size: 0.66rem;
+  color: var(--text-soft);
+  word-break: break-all;
+}
+
+.skills-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.skills-list:empty {
+  display: none;
+}
+
+.skills-item {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  display: grid;
+  gap: 7px;
+}
+
+.skills-item-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skills-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.skills-ver {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--text-soft);
+}
+
+.skills-desc {
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skills-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.skills-runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 500;
+  line-height: 1;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.skills-runtime:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary, #3b82f6) 45%, var(--border));
+  color: var(--text);
+}
+
+.skills-runtime:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.skills-runtime.is-on {
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--ok, #2f9e44) 28%, var(--border));
+  background: color-mix(in srgb, var(--ok, #2f9e44) 8%, var(--surface));
+  cursor: pointer;
+}
+
+.skills-runtime.is-on:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger, #dc2626) 8%, var(--surface));
+  color: var(--text);
+}
+
+.skills-runtime.is-busy {
+  pointer-events: none;
+  opacity: 0.75;
+  position: relative;
+}
+
+.skills-runtime.is-busy .skills-runtime-dot {
+  animation: skills-dot-pulse 0.7s ease-in-out infinite;
+  opacity: 1;
+  background: var(--primary, #3b82f6);
+}
+
+.skills-inventory.is-busy {
+  opacity: 0.92;
+}
+
+@keyframes skills-dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.7);
+    opacity: 1;
+  }
+}
+
+.skills-runtime-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+.skills-runtime.is-on .skills-runtime-dot {
+  opacity: 1;
+  background: var(--ok, #2f9e44);
+}
+
+.skills-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 2px;
+  border-top: 1px dashed var(--border);
+}
+
+.skills-metric {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.skills-metric span {
+  font-size: 0.58rem;
+  color: var(--text-soft);
+  text-transform: none;
+}
+
+.skills-metric strong {
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .personal-section.is-configured .field-row input:placeholder-shown {
   opacity: 0.9;
 }
