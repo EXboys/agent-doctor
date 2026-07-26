@@ -41,14 +41,22 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
-  min-height: 100vh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
   color: var(--text);
   background:
     radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.14), transparent 38%),
     radial-gradient(circle at 85% 8%, rgba(14, 165, 233, 0.1), transparent 32%),
     linear-gradient(180deg, #edf1f7 0%, var(--bg) 100%);
+  /* Inset without body scroll — old margin:14px on .widget caused bounce gaps. */
+  padding: 10px;
 }
 
 body::before {
@@ -65,10 +73,11 @@ body::before {
   position: relative;
   display: flex;
   flex-direction: column;
-  max-width: 400px;
-  min-height: calc(100vh - 28px);
-  max-height: calc(100vh - 28px);
-  margin: 14px auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.65);
   border-radius: calc(var(--radius-lg) + 4px);
@@ -85,6 +94,7 @@ body::before {
   gap: 8px;
   margin-bottom: 8px;
   flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .brand {
@@ -294,6 +304,7 @@ body::before {
   gap: 8px;
   margin-bottom: 8px;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .health-pill {
@@ -414,6 +425,7 @@ body::before {
   border-radius: 12px;
   background: var(--surface-inset);
   border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .main-tab,
@@ -450,7 +462,9 @@ body::before {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding-right: 2px;
+  scrollbar-gutter: stable;
 }
 
 .main-panel[hidden],
@@ -1779,4 +1793,5 @@ body::before {
   font-size: 0.64rem;
   color: var(--text-soft);
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }

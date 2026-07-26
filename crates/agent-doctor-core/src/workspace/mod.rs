@@ -504,12 +504,28 @@ pub fn workspace_doctor() -> Result<WorkspaceDoctorReport> {
     }
 
     if !workspace_paths_match(&entry.codex_home, &codex_home_from_env()) {
+        let actual = codex_home_from_env();
+        let detail = if std::env::var_os("CODEX_HOME").is_none() {
+            format!(
+                "This process has no CODEX_HOME (falls back to {}). \
+                 Launch Codex via Agents → Open (loads workspace env), \
+                 or: source active-workspace.env then run codex. \
+                 expected={}",
+                actual.display(),
+                entry.codex_home.display()
+            )
+        } else {
+            format!(
+                "expected={} actual={} — source active-workspace.env before launching Codex",
+                entry.codex_home.display(),
+                actual.display()
+            )
+        };
         checks.push(WorkspaceCheck {
             id: "workspace.codex.global_memory".to_string(),
             title: "Codex not using workspace CODEX_HOME".to_string(),
             status: WorkspaceCheckStatus::Warn,
-            detail: "Source ~/.config/agent-doctor/active-workspace.env before launching Codex to isolate memories."
-                .to_string(),
+            detail,
         });
     }
 
@@ -688,13 +704,19 @@ fn codex_runtime_status(entry: &WorkspaceEntry) -> RuntimeStatus {
     let expected = entry.codex_home.display().to_string();
     let actual = codex_home_from_env().display().to_string();
     let aligned = workspace_paths_match(&entry.codex_home, &codex_home_from_env());
+    let hint = if std::env::var_os("CODEX_HOME").is_none() {
+        "Desktop Check has no CODEX_HOME; use Agents → Open for Codex (or source active-workspace.env in the terminal)"
+            .into()
+    } else {
+        "Source active-workspace.env before running codex".into()
+    };
     RuntimeStatus {
         runtime_id: "codex",
         isolation_tier: "L2",
         expected,
         actual,
         aligned,
-        hint: "Source ~/.config/agent-doctor/active-workspace.env before running codex".into(),
+        hint,
     }
 }
 
