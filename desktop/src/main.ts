@@ -260,6 +260,34 @@ const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 let personalProvidersDoc: PersonalProvidersDocument | null = null;
 
 type ProviderProtocol = "openai" | "anthropic";
+type ActiveMode = "personal" | "team" | "unset";
+
+type ModeStatus = {
+  mode: ActiveMode | string;
+  personal_ready: boolean;
+  team_ready: boolean;
+  active_label: string | null;
+  active_gateway_url: string | null;
+  active_key_hint: string | null;
+  personal_active_id: string | null;
+  personal_active_name: string | null;
+  team_base_url: string | null;
+};
+
+type ModeSwitchReport = {
+  mode: string;
+  active_label: string | null;
+  active_gateway_url: string | null;
+  message: string;
+  runtimes: Array<{ runtime_id: string; applied: boolean }>;
+};
+
+const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
+const modeHintEl = document.querySelector<HTMLElement>("#mode-hint")!;
+const modeUsePersonalEl = document.querySelector<HTMLButtonElement>("#mode-use-personal")!;
+const modeUseTeamEl = document.querySelector<HTMLButtonElement>("#mode-use-team")!;
+
+let lastModeStatus: ModeStatus | null = null;
 
 const PROVIDER_PRESETS: Record<
   string,
@@ -382,7 +410,6 @@ function applyProviderPreset(presetId: string, { forceModel = true } = {}) {
 }
 
 const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
-const providerTabsEl = document.querySelector<HTMLElement>("#provider-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
 const providerPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-provider-panel]"));
 
@@ -402,16 +429,127 @@ function setMainTab(tab: MainTabId) {
   }
 }
 
-function setProviderTab(tab: ProviderTabId) {
-  providerTabsEl.querySelectorAll<HTMLButtonElement>("[data-provider-tab]").forEach((button) => {
-    const active = button.dataset.providerTab === tab;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
-  });
+/** Provider panel follows global mode — no nested Personal/Evotown tabs. */
+function syncProviderPanelToMode(mode?: string) {
+  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
+  const tab: ProviderTabId = activeMode === "team" ? "evotown" : "personal";
   for (const panel of providerPanels) {
     const active = panel.dataset.providerPanel === tab;
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
+  }
+}
+
+function setProviderTab(tab: ProviderTabId) {
+  // Kept for mode-switch helpers; panels track global mode.
+  for (const panel of providerPanels) {
+    const active = panel.dataset.providerPanel === tab;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  }
+}
+
+function modeDisplayName(mode: string): string {
+  if (mode === "personal") return t("mode.personal");
+  if (mode === "team") return t("mode.team");
+  return t("mode.unset");
+}
+
+function renderModeStatus(status: ModeStatus) {
+  lastModeStatus = status;
+  modeUsePersonalEl.classList.toggle("is-active", status.mode === "personal");
+  modeUseTeamEl.classList.toggle("is-active", status.mode === "team");
+  // Always visible; disable only when that side has no credentials yet.
+  modeUsePersonalEl.hidden = false;
+  modeUseTeamEl.hidden = false;
+  // Keep clickable so users can jump to the config tab even when not ready.
+  modeUsePersonalEl.disabled = false;
+  modeUseTeamEl.disabled = false;
+  modeUsePersonalEl.classList.toggle("is-unavailable", !status.personal_ready);
+  modeUseTeamEl.classList.toggle("is-unavailable", !status.team_ready);
+  modeUsePersonalEl.title = status.personal_ready
+    ? modeDisplayName("personal")
+    : t("mode.personalNotReady");
+  modeUseTeamEl.title = status.team_ready ? modeDisplayName("team") : t("mode.teamNotReady");
+
+  const meta = status.active_gateway_url
+    ? t("mode.meta", {
+        label: status.active_label || modeDisplayName(status.mode),
+        url: status.active_gateway_url,
+        key: status.active_key_hint || "—",
+      })
+    : t("mode.metaEmpty");
+  modeMetaEl.textContent = meta;
+  modeUsePersonalEl.title = status.personal_ready ? meta : t("mode.personalNotReady");
+  modeUseTeamEl.title = status.team_ready ? meta : t("mode.teamNotReady");
+  syncProviderPanelToMode(status.mode);
+}
+
+async function loadModeStatus() {
+  try {
+    const status = await invoke<ModeStatus>("get_mode_status_command");
+    renderModeStatus(status);
+  } catch (error) {
+    modeMetaEl.textContent = String(error);
+    modeUsePersonalEl.classList.remove("is-active");
+    modeUseTeamEl.classList.remove("is-active");
+    modeUsePersonalEl.classList.add("is-unavailable");
+    modeUseTeamEl.classList.add("is-unavailable");
+  }
+}
+
+function showModeHint(text: string) {
+  modeHintEl.hidden = !text;
+  modeHintEl.textContent = text;
+}
+
+async function enablePersonalMode() {
+  if (lastModeStatus?.mode === "personal") {
+    syncProviderPanelToMode("personal");
+    showModeHint(t("mode.alreadyPersonal"));
+    return;
+  }
+  if (!lastModeStatus?.personal_ready) {
+    showModeHint(t("mode.personalNotReady"));
+    syncProviderPanelToMode("personal");
+    return;
+  }
+  showModeHint(t("mode.switching"));
+  try {
+    const report = await invoke<ModeSwitchReport>("switch_to_personal_mode_command", {
+      providerId: lastModeStatus.personal_active_id,
+    });
+    await loadModeStatus();
+    await loadPersonalProviderStatus();
+    await refresh();
+    showModeHint(t("mode.switchOk", { message: report.message }));
+  } catch (error) {
+    showModeHint(t("mode.switchFailed", { error: String(error) }));
+    await loadModeStatus();
+  }
+}
+
+async function enableTeamMode() {
+  if (lastModeStatus?.mode === "team") {
+    syncProviderPanelToMode("team");
+    showModeHint(t("mode.alreadyTeam"));
+    return;
+  }
+  if (!lastModeStatus?.team_ready) {
+    showModeHint(t("mode.teamNotReady"));
+    syncProviderPanelToMode("team");
+    return;
+  }
+  showModeHint(t("mode.switching"));
+  try {
+    const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command");
+    await loadModeStatus();
+    await loadEvotownStatus();
+    await refresh();
+    showModeHint(t("mode.switchOk", { message: report.message }));
+  } catch (error) {
+    showModeHint(t("mode.switchFailed", { error: String(error) }));
+    await loadModeStatus();
   }
 }
 
@@ -1415,6 +1553,7 @@ async function runEvotownOnboarding() {
     });
     evotownKeyEl.value = "";
     await loadEvotownStatus();
+    await loadModeStatus();
     await refresh();
     evotownHintEl.textContent = t("evotown.connectOk", {
       installed: String(report.sync?.installed ?? 0),
@@ -1488,9 +1627,11 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     return;
   }
 
+  const personalModeActive = lastModeStatus?.mode === "personal";
   for (const item of doc.providers) {
+    const routingActive = item.active && personalModeActive;
     const li = document.createElement("li");
-    li.className = `provider-item${item.active ? " is-active" : ""}`;
+    li.className = `provider-item${routingActive ? " is-active" : ""}`;
     li.dataset.providerId = item.id;
 
     const main = document.createElement("div");
@@ -1498,7 +1639,7 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     const title = document.createElement("p");
     title.className = "provider-item-title";
     title.textContent = item.name;
-    if (item.active) {
+    if (routingActive) {
       const badge = document.createElement("span");
       badge.className = "provider-badge";
       badge.textContent = t("personal.activeBadge");
@@ -1687,6 +1828,7 @@ async function upsertPersonalProvider(activate: boolean) {
       });
       personalKeyEl.value = "";
       await loadPersonalProviderStatus();
+      await loadModeStatus();
       await refresh();
       const applied = report.runtimes.filter((item) => item.applied).length;
       personalListHintEl.textContent = t("personal.applyOk", {
@@ -1707,6 +1849,7 @@ async function upsertPersonalProvider(activate: boolean) {
       });
       personalKeyEl.value = "";
       await loadPersonalProviderStatus();
+      await loadModeStatus();
       personalListHintEl.textContent = t("personal.saveOk", { name: values.name });
       resetPersonalForm();
       showPersonalListView();
@@ -1726,6 +1869,7 @@ async function activateProviderById(id: string) {
       id,
     });
     await loadPersonalProviderStatus();
+    await loadModeStatus();
     await refresh();
     const applied = report.runtimes.filter((item) => item.applied).length;
     personalListHintEl.textContent = t("personal.applyOk", {
@@ -2370,6 +2514,7 @@ async function switchLocale(next: Locale) {
   }
   await loadEvotownStatus();
   await loadPersonalProviderStatus();
+  await loadModeStatus();
 }
 
 runtimeTabsEl.addEventListener("click", (event) => {
@@ -2485,14 +2630,6 @@ mainTabsEl.addEventListener("click", (event) => {
   const tab = button?.dataset.mainTab;
   if (tab === "diagnose" || tab === "provider" || tab === "workspace") {
     setMainTab(tab);
-  }
-});
-
-providerTabsEl.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-provider-tab]");
-  const tab = button?.dataset.providerTab;
-  if (tab === "personal" || tab === "evotown") {
-    setProviderTab(tab);
   }
 });
 
@@ -2687,8 +2824,16 @@ updateLangButtons();
 refreshPresetGroupLabels();
 applyProviderPreset("custom");
 showPersonalListView();
+modeUsePersonalEl.addEventListener("click", () => {
+  void enablePersonalMode();
+});
+modeUseTeamEl.addEventListener("click", () => {
+  void enableTeamMode();
+});
+
 void loadProfiles();
 void loadWorkspaces();
 void loadEvotownStatus();
 void loadPersonalProviderStatus();
+void loadModeStatus();
 void refresh();

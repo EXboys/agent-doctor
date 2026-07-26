@@ -1,7 +1,12 @@
 pub(crate) mod merge;
+mod mode;
 mod personal;
 
 pub use merge::clear_codex_placeholder_auth;
+pub use mode::{
+    load_mode_status, switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport,
+    MODE_PERSONAL, MODE_TEAM, MODE_UNSET,
+};
 pub use personal::{
     activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
     list_personal_providers, load_personal_provider_status, normalize_personal_gateway_url,

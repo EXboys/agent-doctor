@@ -32,6 +32,15 @@ Personal provider means: wire an endpoint + key + model, verify, write runtime c
 
 Evotown is the control plane (accounts, SkillHub, policy, gateway, dispatch, audit ingest). Agent Doctor remains the on-laptop executor and repair tool. See [enterprise.md](enterprise.md).
 
+## Mode switch (exclusive)
+
+| Mode | LLM path |
+|------|----------|
+| **Personal** | Personal provider endpoint + key only |
+| **Team** | Evotown gateway + `evk_` only |
+
+Switching rewrites runtime configs. Control-plane files (`evotown.agent.env`, personal provider list) are kept so you can switch back. The desktop Provider page shows the active mode.
+
 ## Profile state (do not mix)
 
 | File | Role |

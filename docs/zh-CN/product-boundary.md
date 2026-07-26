@@ -32,6 +32,15 @@ Agent Doctor 是同一个本机客户端，共用运维内核。个人与团队�
 
 Evotown 是控制面；Agent Doctor 仍是本机执行与修复工具。详见 [enterprise.md](../enterprise.md)。
 
+## 模式切换（互斥）
+
+| 模式 | LLM 路径 |
+|------|----------|
+| **个人版** | 只走个人 Provider（endpoint + key） |
+| **团队版** | 只走 Evotown 中转（gateway + `evk_`） |
+
+切换会重写 runtime 配置。控制面文件（`evotown.agent.env`、个人 Provider 列表）保留，便于来回切。桌面 Provider 页顶部显示当前模式。
+
 ## Profile 状态（勿串味）
 
 | 文件 | 角色 |

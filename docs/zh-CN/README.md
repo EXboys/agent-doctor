@@ -29,10 +29,11 @@ Agent Doctor 提供：
 |--|----------|----------|
 | 入口 | CLI + 轻桌面「本机修好」 | 同客户端 + Evotown / 公司 profile |
 | 价值 | 坏了能查、能修、项目不串味 | 合规、基线、同步、派活、审计 |
-| 不做 | 不拼 Provider 预设/代理/用量 | 不依赖个人中转生态 |
+| LLM | 只走个人 Provider | 只走 Evotown 中转（互斥） |
+| 不做 | 不做中转市场/用量看板 | 不依赖个人中转生态 |
 | 增量 | 零配置就位、个人 provider、一键修好 | `setup` / `sync` / `policy` / `connect` + 审计导出 |
 
-共同内核：**doctor / repair / workspace**。
+共同内核：**doctor / repair / workspace**。桌面 Provider 页可在个人版 / 团队版之间切换。
 
 ## 和 ClawPanel 的区别
 

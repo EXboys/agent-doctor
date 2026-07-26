@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result as AnyhowResult};
@@ -12,6 +13,10 @@ use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult};
 
 /// Stable custom provider id written into `models.providers`.
 pub const OPENCLAW_PROVIDER_ID: &str = "agent-doctor";
+
+/// Default model id for company/Evotown wiring when none is specified.
+/// Prefer a gateway-routable id: bare `default` / `gpt-4o-*` often 502/503 upstream.
+pub const COMPANY_DEFAULT_MODEL: &str = "deepseek-v4-flash";
 
 /// OpenClaw's `gateway` key is the local control-plane listener (port/mode/bind),
 /// not the LLM base URL. Custom/company endpoints belong under `models.providers`.
@@ -38,7 +43,7 @@ pub fn apply_openclaw(
     let model = model_id
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .unwrap_or("default");
+        .unwrap_or(COMPANY_DEFAULT_MODEL);
 
     if let Some(obj) = root.as_object_mut() {
         // Strip legacy Agent Doctor keys that fail OpenClaw ≥2026.7 schema.
@@ -109,6 +114,19 @@ pub fn apply_openclaw(
     if !api_key.trim().is_empty() {
         sync_openclaw_openai_api_key(api_key.trim())?;
         message.push_str("; synced OPENAI_API_KEY to ~/.openclaw/.env (+ service-env if present)");
+        // Hot-reload picks up openclaw.json but NOT process env; restart so LaunchAgent
+        // re-sources service-env (stale sk_/evk_ keys cause Evotown 503).
+        match restart_openclaw_gateway_for_key_sync() {
+            Ok(detail) => {
+                message.push_str("; ");
+                message.push_str(&detail);
+            }
+            Err(err) => {
+                message.push_str(&format!(
+                    "; gateway restart skipped ({err}) — run `openclaw gateway restart` if auth is stale"
+                ));
+            }
+        }
     }
 
     Ok(RuntimeSetupResult {
@@ -185,6 +203,55 @@ fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
     }
 
     Ok(())
+}
+
+/// Restart the LaunchAgent/systemd OpenClaw gateway so a freshly written
+/// `OPENAI_API_KEY` in service-env is actually loaded into the process.
+fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
+    let openclaw = which_openclaw().context("openclaw binary not found on PATH")?;
+    let output = Command::new(&openclaw)
+        .args(["gateway", "restart"])
+        .output()
+        .with_context(|| format!("failed to run `{} gateway restart`", openclaw.display()))?;
+    if output.status.success() {
+        return Ok("restarted OpenClaw gateway (reload env key)".into());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = if stdout.trim().is_empty() {
+        stderr.trim().to_string()
+    } else if stderr.trim().is_empty() {
+        stdout.trim().to_string()
+    } else {
+        format!("{} / {}", stderr.trim(), stdout.trim())
+    };
+    Err(anyhow::anyhow!(
+        "`openclaw gateway restart` failed: {detail}"
+    ))
+}
+
+fn which_openclaw() -> Option<std::path::PathBuf> {
+    if let Ok(path) = std::env::var("OPENCLAW_BIN") {
+        let p = std::path::PathBuf::from(path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("openclaw");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let brew = std::path::PathBuf::from("/opt/homebrew/bin/openclaw");
+        if brew.is_file() {
+            return Some(brew);
+        }
+    }
+    None
 }
 
 /// Ensure OpenClaw local gateway can accept `openclaw tui` clients.
@@ -307,7 +374,10 @@ pub fn apply_hermes(
         if let Some(id) = model_id.map(str::trim).filter(|m| !m.is_empty()) {
             model_map.insert(YamlValue::from("default"), YamlValue::from(id));
         } else if !model_map.contains_key(YamlValue::from("default")) {
-            model_map.insert(YamlValue::from("default"), YamlValue::from("gpt-4o-mini"));
+            model_map.insert(
+                YamlValue::from("default"),
+                YamlValue::from(COMPANY_DEFAULT_MODEL),
+            );
         }
         model_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
     }
@@ -419,7 +489,7 @@ pub fn apply_codex(
     let model_id = model
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .unwrap_or("deepseek-v4-flash");
+        .unwrap_or(COMPANY_DEFAULT_MODEL);
     table.insert("model".to_string(), TomlValue::String(model_id.to_string()));
     table.insert(
         "model_provider".to_string(),
