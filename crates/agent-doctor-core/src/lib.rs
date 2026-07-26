@@ -75,8 +75,9 @@ pub use session_launch::{
     OpenSessionOptions, OpenSessionReport,
 };
 pub use setup::{
-    activate_personal_provider, anthropic_gateway_url_from_evotown_base, apply_mode_switch,
-    apply_openclaw_slot, clear_codex_placeholder_auth, delete_personal_provider, effector_label,
+    activate_personal_provider, anthropic_gateway_url_from_evotown_base, apply_codex_slot,
+    apply_hermes_slot, apply_mode_switch, apply_openclaw_slot, clear_codex_placeholder_auth,
+    delete_personal_provider, effector_label,
     evotown_agent_env_path, evotown_base_from_gateway, execute_personal_provider_setup,
     execute_setup, gateway_url_from_evotown_base, list_personal_providers, load_mode_status,
     load_personal_provider_status, normalize_personal_gateway_url, normalize_protocol,
@@ -87,7 +88,8 @@ pub use setup::{
     ModeSwitchTarget, PersonalProviderListItem, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
     PersonalProvidersDocument, RuntimeSetupResult, RuntimeStrategy, SetupOptions, SetupReport,
-    UpsertPersonalProviderOptions, WriteSemantics, COMPANY_DEFAULT_MODEL, MODE_PERSONAL, MODE_TEAM,
+    UpsertPersonalProviderOptions, WriteSemantics, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
+    COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT, MODE_PERSONAL, MODE_TEAM,
     MODE_UNSET, OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
     PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };

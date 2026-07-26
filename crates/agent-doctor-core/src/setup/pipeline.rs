@@ -64,14 +64,14 @@ pub fn runtime_strategies() -> &'static [RuntimeStrategy] {
         },
         RuntimeStrategy {
             runtime_id: "hermes",
-            write_semantics: WriteSemantics::Exclusive,
+            write_semantics: WriteSemantics::Additive,
             effector: EffectorKind::RestartGateway,
             openai_compatible: true,
             anthropic_compatible: false,
         },
         RuntimeStrategy {
             runtime_id: "codex",
-            write_semantics: WriteSemantics::Exclusive,
+            write_semantics: WriteSemantics::Additive,
             effector: EffectorKind::ManualRestart,
             openai_compatible: true,
             anthropic_compatible: false,
@@ -299,14 +299,32 @@ fn project_one_runtime(
                 Some(slot),
             )
         }
-        (PROTOCOL_OPENAI, "hermes") => merge::apply_hermes(
-            &bundle.gateway_url,
-            &bundle.api_key,
-            &bundle.hermes_provider,
-            Some(&bundle.model),
-        ),
+        (PROTOCOL_OPENAI, "hermes") => {
+            let slot = if bundle.mode == MODE_TEAM {
+                merge::HERMES_TEAM_SLOT
+            } else {
+                merge::HERMES_PERSONAL_SLOT
+            };
+            merge::apply_hermes_slot(
+                &bundle.gateway_url,
+                &bundle.api_key,
+                &bundle.hermes_provider,
+                Some(&bundle.model),
+                Some(slot),
+            )
+        }
         (PROTOCOL_OPENAI, "codex") => {
-            merge::apply_codex(&bundle.gateway_url, &bundle.api_key, Some(&bundle.model))
+            let slot = if bundle.mode == MODE_TEAM {
+                merge::CODEX_TEAM_SLOT
+            } else {
+                merge::CODEX_PERSONAL_SLOT
+            };
+            merge::apply_codex_slot(
+                &bundle.gateway_url,
+                &bundle.api_key,
+                Some(&bundle.model),
+                Some(slot),
+            )
         }
         (PROTOCOL_OPENAI, "claude-code") => Ok(RuntimeSetupResult {
             runtime_id: "claude-code".into(),
@@ -633,6 +651,14 @@ mod tests {
         let oc = strategy_for("openclaw").unwrap();
         assert_eq!(oc.effector, EffectorKind::RestartGateway);
         assert_eq!(oc.write_semantics, WriteSemantics::Additive);
+        assert_eq!(
+            strategy_for("hermes").unwrap().write_semantics,
+            WriteSemantics::Additive
+        );
+        assert_eq!(
+            strategy_for("codex").unwrap().write_semantics,
+            WriteSemantics::Additive
+        );
         let cd = strategy_for("claude-code").unwrap();
         assert!(cd.anthropic_compatible);
         assert!(!cd.openai_compatible);

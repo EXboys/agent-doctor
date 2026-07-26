@@ -12,6 +12,7 @@ use crate::repair::{DiagnosticBundle, DiagnosticFact, SensitivityLevel};
 use crate::runtime::{adapter_by_id, all_adapters, descriptor_by_id, ConfigFormat};
 
 pub(crate) mod config;
+mod mode_drift;
 pub(crate) mod runtimes;
 mod schema;
 
@@ -136,6 +137,7 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
     probe_env_conflicts(&ctx, &mut checks, &mut facts);
     descriptor.run_deep_probe(&mut checks, &mut facts);
     probe_gateway(adapter, &mut checks, &mut facts);
+    mode_drift::probe_mode_drift(adapter.id(), &mut checks, &mut facts);
 
     Ok(RuntimeProbeReport {
         runtime_id: adapter.id().to_string(),

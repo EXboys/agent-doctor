@@ -41,7 +41,15 @@ Evotown 是控制面；Agent Doctor 仍是本机执行与修复工具。详见 [
 
 切换统一走 **`apply_mode_switch` 管道**：解析凭证 → 写 overlay → 按策略表投影各 runtime → 生效动作（如 OpenClaw gateway restart）→ LLM 探活。控制面文件（`evotown.agent.env`、个人 Provider 列表）保留，便于来回切。桌面 Provider 页顶部显示当前模式。
 
-团队侧默认模型使用可路由 id（禁止裸 `default`）。OpenClaw 使用累加槽位（`models.providers.evotown` + `personal`）；模式切换只改 `agents.defaults.model.primary` 并重载当前 key。见 issue [#46](https://github.com/EXboys/agent-doctor/issues/46)。
+团队侧默认模型使用可路由 id（禁止裸 `default`）。累加槽位：
+
+| Runtime | 槽位 | 指针 |
+|---------|------|------|
+| OpenClaw | `models.providers.evotown` + `personal` | `agents.defaults.model.primary` |
+| Codex | `model_providers.company` + `personal` | `model_provider` |
+| Hermes | `~/.hermes/agent-doctor-slots.yaml` | `model.base_url` / `model.default` |
+
+Doctor 探针：`mode.overlay_mismatch`、`runtime.env_stale`（OpenClaw key）、`runtime.model_unroutable`。见 issue [#46](https://github.com/EXboys/agent-doctor/issues/46)。
 
 ## Profile 状态（勿串味）
 

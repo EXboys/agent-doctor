@@ -18,6 +18,15 @@ pub const OPENCLAW_TEAM_SLOT: &str = "evotown";
 /// Personal slot in OpenClaw `models.providers` (additive mode).
 pub const OPENCLAW_PERSONAL_SLOT: &str = "personal";
 
+/// Codex `model_providers` team slot (pointer via `model_provider`).
+pub const CODEX_TEAM_SLOT: &str = "company";
+/// Codex `model_providers` personal slot.
+pub const CODEX_PERSONAL_SLOT: &str = "personal";
+
+/// Hermes additive slot ids (sidecar + active `model.*` pointer).
+pub const HERMES_TEAM_SLOT: &str = "company";
+pub const HERMES_PERSONAL_SLOT: &str = "personal";
+
 /// Default model id for company/Evotown wiring when none is specified.
 /// Prefer a gateway-routable id: bare `default` / `gpt-4o-*` often 502/503 upstream.
 pub const COMPANY_DEFAULT_MODEL: &str = "deepseek-v4-flash";
@@ -393,9 +402,41 @@ pub fn apply_hermes(
     provider: &str,
     model_id: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
+    apply_hermes_slot(gateway_url, api_key, provider, model_id, None)
+}
+
+/// Additive Hermes wiring: slots live in `~/.hermes/agent-doctor-slots.yaml`;
+/// `config.yaml` `model.*` is the active pointer (Hermes-safe; no unknown keys).
+pub fn apply_hermes_slot(
+    gateway_url: &str,
+    api_key: &str,
+    provider: &str,
+    model_id: Option<&str>,
+    provider_slot: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".hermes/config.yaml");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
+
+    let slot = provider_slot
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| infer_codex_hermes_slot(gateway_url).to_string());
+    let model = model_id
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or(COMPANY_DEFAULT_MODEL);
+
+    // Evotown gateway is OpenAI-compatible; Hermes calls that "custom".
+    let effective_provider =
+        if provider.trim().is_empty() || provider.trim().eq_ignore_ascii_case("openai") {
+            "custom"
+        } else {
+            provider.trim()
+        };
+
+    upsert_hermes_slot(&slot, gateway_url, model)?;
 
     let mut root: YamlValue = if path.exists() {
         let raw = fs::read_to_string(&path)?;
@@ -405,35 +446,20 @@ pub fn apply_hermes(
     };
 
     {
-        let model = root
+        let model_section = root
             .as_mapping_mut()
             .context("Hermes config root must be a mapping")?
             .entry(YamlValue::from("model"))
             .or_insert_with(|| YamlValue::Mapping(Mapping::new()));
-        let model_map = model
+        let model_map = model_section
             .as_mapping_mut()
             .context("Hermes model section must be a mapping")?;
 
-        // Evotown gateway is OpenAI-compatible; Hermes calls that "custom"
-        // (not "openai" — that slug is unknown to Hermes).
-        let effective_provider =
-            if provider.trim().is_empty() || provider.trim().eq_ignore_ascii_case("openai") {
-                "custom"
-            } else {
-                provider.trim()
-            };
         model_map.insert(
             YamlValue::from("provider"),
             YamlValue::from(effective_provider),
         );
-        if let Some(id) = model_id.map(str::trim).filter(|m| !m.is_empty()) {
-            model_map.insert(YamlValue::from("default"), YamlValue::from(id));
-        } else if !model_map.contains_key(YamlValue::from("default")) {
-            model_map.insert(
-                YamlValue::from("default"),
-                YamlValue::from(COMPANY_DEFAULT_MODEL),
-            );
-        }
+        model_map.insert(YamlValue::from("default"), YamlValue::from(model));
         model_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
     }
 
@@ -453,19 +479,11 @@ pub fn apply_hermes(
         }
     }
 
-    let provider_name = root
-        .get("model")
-        .and_then(|model| model.get("provider"))
-        .and_then(YamlValue::as_str)
-        .unwrap_or("custom")
-        .to_string();
-
     fs::write(&path, serde_yaml::to_string(&root)?)?;
-    // Custom endpoints authenticate via OPENAI_API_KEY.
-    let env_provider = if provider_name == "custom" {
+    let env_provider = if effective_provider == "custom" {
         "openai"
     } else {
-        provider_name.as_str()
+        effective_provider
     };
     HermesAdapter::apply_api_key(env_provider, api_key)?;
 
@@ -476,10 +494,49 @@ pub fn apply_hermes(
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
         message: format!(
-            "set model.provider={provider_name}, base_url={gateway_url}, and updated ~/.hermes/.env"
+            "set Hermes pointer model.base_url={gateway_url} model={model} (slot={slot}; additive sidecar)"
         ),
         ..Default::default()
     })
+}
+
+fn hermes_slots_path() -> std::path::PathBuf {
+    home_join(".hermes/agent-doctor-slots.yaml")
+}
+
+fn upsert_hermes_slot(slot: &str, gateway_url: &str, model: &str) -> AnyhowResult<()> {
+    let path = hermes_slots_path();
+    ensure_parent(&path)?;
+    let mut root: YamlValue = if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
+    } else {
+        YamlValue::Mapping(Mapping::new())
+    };
+    let map = root
+        .as_mapping_mut()
+        .context("Hermes slots root must be a mapping")?;
+    map.insert(YamlValue::from("active"), YamlValue::from(slot));
+    let slots = map
+        .entry(YamlValue::from("slots"))
+        .or_insert_with(|| YamlValue::Mapping(Mapping::new()));
+    let slots_map = slots
+        .as_mapping_mut()
+        .context("Hermes slots.slots must be a mapping")?;
+    let mut entry = Mapping::new();
+    entry.insert(
+        YamlValue::from("base_url"),
+        YamlValue::from(gateway_url),
+    );
+    entry.insert(YamlValue::from("default"), YamlValue::from(model));
+    slots_map.insert(YamlValue::from(slot), YamlValue::Mapping(entry));
+    fs::write(&path, serde_yaml::to_string(&root)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
@@ -527,6 +584,17 @@ pub fn apply_codex(
     _api_key: &str,
     model: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
+    apply_codex_slot(gateway_url, _api_key, model, None)
+}
+
+/// Additive Codex wiring: upsert `model_providers.{company|personal}`, point
+/// `model_provider` at the active slot, leave the other slot intact.
+pub fn apply_codex_slot(
+    gateway_url: &str,
+    _api_key: &str,
+    model: Option<&str>,
+    provider_slot: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".codex/config.toml");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
@@ -542,45 +610,58 @@ pub fn apply_codex(
         .as_table_mut()
         .context("Codex config root must be a table")?;
 
-    // Prefer Evotown-routable defaults; gpt-4o-* often fails upstream on company gateways.
     let model_id = model
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .unwrap_or(COMPANY_DEFAULT_MODEL);
+    let slot = provider_slot
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| infer_codex_hermes_slot(gateway_url).to_string());
+
     table.insert("model".to_string(), TomlValue::String(model_id.to_string()));
     table.insert(
         "model_provider".to_string(),
-        TomlValue::String("company".to_string()),
+        TomlValue::String(slot.clone()),
     );
 
-    let mut company = toml::map::Map::new();
-    company.insert(
+    let mut entry = toml::map::Map::new();
+    let display = if slot == CODEX_TEAM_SLOT {
+        "Company Gateway"
+    } else {
+        "Personal Provider"
+    };
+    entry.insert(
         "name".to_string(),
-        TomlValue::String("Company Gateway".to_string()),
+        TomlValue::String(display.to_string()),
     );
-    company.insert(
+    entry.insert(
         "base_url".to_string(),
         TomlValue::String(gateway_url.to_string()),
     );
-    company.insert(
+    entry.insert(
         "env_key".to_string(),
-        // Evotown agent env already exports OPENAI_API_KEY=evk_…
         TomlValue::String("OPENAI_API_KEY".to_string()),
     );
-    company.insert(
+    entry.insert(
         "requires_openai_auth".to_string(),
         TomlValue::Boolean(false),
     );
     // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
-    company.insert(
+    entry.insert(
         "wire_api".to_string(),
         TomlValue::String("responses".to_string()),
     );
-    company.insert("supports_websockets".to_string(), TomlValue::Boolean(false));
+    entry.insert("supports_websockets".to_string(), TomlValue::Boolean(false));
 
-    let mut providers = toml::map::Map::new();
-    providers.insert("company".to_string(), TomlValue::Table(company));
-    table.insert("model_providers".to_string(), TomlValue::Table(providers));
+    let providers = table
+        .entry("model_providers".to_string())
+        .or_insert_with(|| TomlValue::Table(toml::map::Map::new()));
+    let providers_table = providers
+        .as_table_mut()
+        .context("Codex model_providers must be a table")?;
+    providers_table.insert(slot.clone(), TomlValue::Table(entry));
 
     fs::write(&path, toml::to_string_pretty(&root)?)?;
 
@@ -593,10 +674,19 @@ pub fn apply_codex(
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
         message: format!(
-            "set company gateway (wire_api=responses, model={model_id}); uses OPENAI_API_KEY from env"
+            "set model_provider={slot} (wire_api=responses, model={model_id}); additive model_providers"
         ),
         ..Default::default()
     })
+}
+
+fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
+    // Same heuristics as OpenClaw team detection.
+    if infer_openclaw_slot(gateway_url) == OPENCLAW_TEAM_SLOT {
+        CODEX_TEAM_SLOT
+    } else {
+        CODEX_PERSONAL_SLOT
+    }
 }
 
 /// Remove Agent Doctor placeholder / empty apikey auth.json so Codex uses env_key auth.
