@@ -13,10 +13,9 @@ use crate::profile::{
 use crate::runtime::all_adapters;
 use crate::setup::merge::{self, clear_codex_placeholder_auth, COMPANY_DEFAULT_MODEL};
 use crate::setup::personal::{
-    load_personal_provider_entry, normalize_personal_gateway_url, normalize_protocol,
-    set_active_personal_provider_id, write_personal_profile,
-    list_personal_providers, PersonalProviderSetupReport, PersonalProviderVerifyReport,
-    PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
+    list_personal_providers, load_personal_provider_entry, normalize_personal_gateway_url,
+    normalize_protocol, set_active_personal_provider_id, write_personal_profile,
+    PersonalProviderSetupReport, PersonalProviderVerifyReport, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, evotown_agent_env_path, evotown_base_from_gateway,
@@ -337,9 +336,7 @@ fn project_one_runtime(
             runtime_id: other.into(),
             display_name: display_name.into(),
             applied: false,
-            message: format!(
-                "skipped — Anthropic protocol; {other} needs OpenAI-compatible API"
-            ),
+            message: format!("skipped — Anthropic protocol; {other} needs OpenAI-compatible API"),
             effector: strategy_for(other).map(|s| effector_label(s.effector).into()),
             ..Default::default()
         }),
@@ -578,7 +575,8 @@ fn write_overlay_for_bundle(bundle: &EndpointBundle) -> Result<()> {
                 &bundle.api_key,
                 &evotown_base,
             )?;
-            let _ = write_evotown_agent_env(&evotown_base, &bundle.api_key, DEFAULT_EVOTOWN_RUNTIME);
+            let _ =
+                write_evotown_agent_env(&evotown_base, &bundle.api_key, DEFAULT_EVOTOWN_RUNTIME);
         }
         other => bail!("unsupported mode for overlay write: {other}"),
     }
@@ -674,5 +672,4 @@ mod tests {
             "manual_restart"
         );
     }
-
 }

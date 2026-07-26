@@ -69,7 +69,11 @@ pub fn configured_base_url(value: &serde_json::Value) -> Option<String> {
         }
     }
 
-    for slot in [OPENCLAW_TEAM_SLOT, OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID] {
+    for slot in [
+        OPENCLAW_TEAM_SLOT,
+        OPENCLAW_PERSONAL_SLOT,
+        OPENCLAW_PROVIDER_ID,
+    ] {
         if let Some(url) = value
             .pointer(&format!("/models/providers/{slot}/baseUrl"))
             .and_then(serde_json::Value::as_str)

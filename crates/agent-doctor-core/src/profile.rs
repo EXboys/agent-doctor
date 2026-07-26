@@ -76,7 +76,11 @@ pub fn write_company_profile(path: &Path, gateway_url: &str, api_key: &str) -> R
 }
 
 /// Persist the durable team baseline used by workspace company-drift checks.
-pub fn write_company_baseline(gateway_url: &str, api_key: &str, evotown_base: Option<&str>) -> Result<()> {
+pub fn write_company_baseline(
+    gateway_url: &str,
+    api_key: &str,
+    evotown_base: Option<&str>,
+) -> Result<()> {
     let Some(path) = company_baseline_path() else {
         anyhow::bail!("could not resolve config directory");
     };
@@ -279,7 +283,11 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let baseline = temp.path().join("company-profile.env");
         let mut file = fs::File::create(&baseline).unwrap();
-        writeln!(file, "{GATEWAY_URL_ENV}=https://company.example/api/gateway/v1").unwrap();
+        writeln!(
+            file,
+            "{GATEWAY_URL_ENV}=https://company.example/api/gateway/v1"
+        )
+        .unwrap();
         writeln!(file, "{COMPANY_API_KEY_ENV}=evk_team").unwrap();
 
         let env = read_env_map(&baseline).unwrap();

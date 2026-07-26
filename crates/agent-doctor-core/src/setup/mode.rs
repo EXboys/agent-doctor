@@ -10,10 +10,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::profile::{
-    company_baseline_path, read_agent_profile, read_company_baseline, read_env_map, ProviderKind,
-};
-use crate::repair::mask_secret_value;
 use super::personal::{
     list_personal_providers, PersonalProviderSetupReport, PersonalProvidersDocument,
 };
@@ -22,6 +18,10 @@ use super::{
     evotown_agent_env_path, evotown_base_from_gateway, gateway_url_from_evotown_base,
     RuntimeSetupResult, SetupReport, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
 };
+use crate::profile::{
+    company_baseline_path, read_agent_profile, read_company_baseline, read_env_map, ProviderKind,
+};
+use crate::repair::mask_secret_value;
 
 pub const MODE_PERSONAL: &str = "personal";
 pub const MODE_TEAM: &str = "team";
@@ -85,7 +85,12 @@ pub fn load_mode_status() -> Result<ModeStatus> {
         Some(ProviderKind::Personal) => MODE_PERSONAL.to_string(),
         Some(ProviderKind::Company) => MODE_TEAM.to_string(),
         Some(ProviderKind::Unknown) | None => {
-            if team_ready && active.as_ref().and_then(|p| p.gateway_url.as_ref()).is_some() {
+            if team_ready
+                && active
+                    .as_ref()
+                    .and_then(|p| p.gateway_url.as_ref())
+                    .is_some()
+            {
                 MODE_TEAM.to_string()
             } else if personal_active.is_some()
                 && active
@@ -228,9 +233,7 @@ mod tests {
     fn load_mode_status_does_not_panic() {
         let status = load_mode_status().expect("status");
         assert!(
-            status.mode == MODE_PERSONAL
-                || status.mode == MODE_TEAM
-                || status.mode == MODE_UNSET
+            status.mode == MODE_PERSONAL || status.mode == MODE_TEAM || status.mode == MODE_UNSET
         );
     }
 }

@@ -7,8 +7,8 @@
 use std::fs;
 use std::process::Command;
 
-use crate::adapters::util::home_join;
 use crate::adapter::RuntimeAdapter;
+use crate::adapters::util::home_join;
 use crate::adapters::{configured_base_url, CodexAdapter, HermesAdapter};
 use crate::profile::{read_agent_profile, ProviderKind};
 use crate::repair::{DiagnosticFact, SensitivityLevel};
@@ -100,10 +100,7 @@ fn live_gateway_url(runtime_id: &str) -> Option<String> {
             .read_profile()
             .ok()
             .and_then(|p| p.gateway_url),
-        "codex" => CodexAdapter
-            .read_profile()
-            .ok()
-            .and_then(|p| p.gateway_url),
+        "codex" => CodexAdapter.read_profile().ok().and_then(|p| p.gateway_url),
         "claude-code" => {
             let path = home_join(".claude/settings.json");
             let raw = fs::read_to_string(path).ok()?;
@@ -149,9 +146,8 @@ fn probe_openclaw_env_stale(
     facts: &mut Vec<DiagnosticFact>,
 ) {
     let dotenv_key = read_dotenv_openai_key(&home_join(".openclaw/.env"));
-    let service_key = read_service_env_openai_key(&home_join(
-        ".openclaw/service-env/ai.openclaw.gateway.env",
-    ));
+    let service_key =
+        read_service_env_openai_key(&home_join(".openclaw/service-env/ai.openclaw.gateway.env"));
     let process_key = read_openclaw_gateway_process_key();
 
     if let Some(ref k) = dotenv_key {
@@ -190,8 +186,10 @@ fn probe_openclaw_env_stale(
             );
         }
     }
-    if let (Some(profile), Some(dotenv)) = (profile_key.map(str::trim).filter(|k| !k.is_empty()), dotenv_key.as_ref())
-    {
+    if let (Some(profile), Some(dotenv)) = (
+        profile_key.map(str::trim).filter(|k| !k.is_empty()),
+        dotenv_key.as_ref(),
+    ) {
         if profile != dotenv.as_str() {
             stale_reasons.push("profile.env key differs from OpenClaw .env".to_string());
         }
@@ -356,7 +354,11 @@ fn read_dotenv_openai_key(path: &std::path::Path) -> Option<String> {
     for line in raw.lines() {
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix("OPENAI_API_KEY=") {
-            let v = value.trim().trim_matches('"').trim_matches('\'').to_string();
+            let v = value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
             if !v.is_empty() {
                 return Some(v);
             }

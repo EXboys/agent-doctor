@@ -9,8 +9,8 @@ use agent_doctor_core::{
     switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider, use_profile,
     use_workspace_with_options, verify_personal_provider_with_protocol, workspace_doctor,
     workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
-    HermesProfilePreset, HermesSettings, InstallOptions, InstallProgressEvent, InstallReport,
-    InitWorkspaceReport, ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport,
+    HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions, InstallProgressEvent,
+    InstallReport, ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport,
     OpenSessionOptions, OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
     PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
     ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
@@ -18,8 +18,8 @@ use agent_doctor_core::{
     UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions,
     WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
-use std::path::PathBuf;
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
