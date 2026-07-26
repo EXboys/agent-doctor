@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   applyStaticI18n,
   getLocale,
@@ -317,8 +318,101 @@ const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
 const modeHintEl = document.querySelector<HTMLElement>("#mode-hint")!;
 const modeUsePersonalEl = document.querySelector<HTMLButtonElement>("#mode-use-personal")!;
 const modeUseTeamEl = document.querySelector<HTMLButtonElement>("#mode-use-team")!;
+const wiringModeFootnoteEl = document.querySelector<HTMLElement>("#wiring-mode-footnote")!;
+const footerCopyEl = document.querySelector<HTMLElement>("#footer-copy")!;
+const agentsWsChipEl = document.querySelector<HTMLElement>("#agents-ws-chip")!;
+const agentsWsNameEl = document.querySelector<HTMLElement>("#agents-ws-name")!;
+const agentsWsQuickEl = document.querySelector<HTMLButtonElement>("#agents-ws-quick")!;
+const agentsWsManageEl = document.querySelector<HTMLButtonElement>("#agents-ws-manage")!;
+const agentsWsPickerEl = document.querySelector<HTMLElement>("#agents-ws-picker")!;
+const agentsWsListEl = document.querySelector<HTMLUListElement>("#agents-ws-list")!;
 
 let lastModeStatus: ModeStatus | null = null;
+let agentsWsPickerOpen = false;
+
+function updateFooterCopy(mode?: string): void {
+  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
+  footerCopyEl.textContent = activeMode === "team" ? t("app.footerTeam") : t("app.footer");
+}
+
+function updateWiringModeFootnote(mode?: string): void {
+  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
+  wiringModeFootnoteEl.textContent =
+    activeMode === "team" ? t("wiring.modeTeamFootnote") : t("wiring.modePersonalFootnote");
+}
+
+function closeAgentsWsPicker(): void {
+  agentsWsPickerOpen = false;
+  agentsWsPickerEl.hidden = true;
+}
+
+function toggleAgentsWsPicker(): void {
+  if (agentsWsPickerOpen) {
+    closeAgentsWsPicker();
+    return;
+  }
+  if (lastWorkspaces) {
+    renderAgentsWorkspaceQuickList(lastWorkspaces);
+  }
+  agentsWsPickerOpen = true;
+  agentsWsPickerEl.hidden = false;
+}
+
+function updateAgentsWorkspaceChip(doc: WorkspacesDocument): void {
+  const active = doc.active ?? selectedWorkspaceName ?? null;
+  agentsWsNameEl.textContent = active ?? t("workspaces.noActive");
+  renderAgentsWorkspaceQuickList(doc);
+}
+
+function renderAgentsWorkspaceQuickList(doc: WorkspacesDocument): void {
+  const names = Object.keys(doc.workspaces).sort();
+  if (names.length === 0) {
+    agentsWsListEl.innerHTML = `
+      <li class="ws-quick-item">
+        <span class="ws-quick-item-main">
+          <strong>${escapeHtml(t("workspaces.none"))}</strong>
+          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
+        </span>
+      </li>
+    `;
+    agentsWsQuickEl.disabled = true;
+    return;
+  }
+
+  agentsWsQuickEl.disabled = false;
+  const active = doc.active ?? selectedWorkspaceName;
+  agentsWsListEl.innerHTML = names
+    .map((name) => {
+      const entry = doc.workspaces[name];
+      const isActive = name === active;
+      const meta = entry?.path ?? "";
+      return `
+        <li class="ws-quick-item ${isActive ? "is-active" : ""}">
+          <span class="ws-quick-item-main">
+            <strong>${escapeHtml(name)}</strong>
+            ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+          </span>
+          ${
+            isActive
+              ? `<span class="badge ok">${escapeHtml(t("agents.wsActiveBadge"))}</span>`
+              : `<button type="button" class="btn-secondary btn-compact" data-agents-ws="${escapeHtml(name)}">${escapeHtml(t("agents.wsUse"))}</button>`
+          }
+        </li>
+      `;
+    })
+    .join("");
+}
+
+async function applyAgentsWorkspaceQuick(name: string): Promise<void> {
+  closeAgentsWsPicker();
+  agentsWsNameEl.textContent = name;
+  try {
+    await invoke("use_workspace_command", { name });
+    await loadWorkspaces();
+  } catch {
+    await loadWorkspaces();
+  }
+}
 
 const PROVIDER_PRESETS: Record<
   string,
@@ -471,15 +565,6 @@ function syncProviderPanelToMode(mode?: string) {
   }
 }
 
-function setProviderTab(tab: ProviderTabId) {
-  // Kept for mode-switch helpers; panels track global mode.
-  for (const panel of providerPanels) {
-    const active = panel.dataset.providerPanel === tab;
-    panel.classList.toggle("is-active", active);
-    panel.hidden = !active;
-  }
-}
-
 function modeDisplayName(mode: string): string {
   if (mode === "personal") return t("mode.personal");
   if (mode === "team") return t("mode.team");
@@ -517,6 +602,8 @@ function renderModeStatus(status: ModeStatus) {
   modeUsePersonalEl.title = status.personal_ready ? meta : t("mode.personalNotReady");
   modeUseTeamEl.title = status.team_ready ? meta : t("mode.teamNotReady");
   syncProviderPanelToMode(status.mode);
+  updateWiringModeFootnote(status.mode);
+  updateFooterCopy(status.mode);
 }
 
 async function loadModeStatus() {
@@ -533,14 +620,22 @@ async function loadModeStatus() {
 }
 
 function showModeHint(text: string) {
+  // Keep sr-only #mode-hint for a11y, but also surface on the visible footnote —
+  // otherwise mode switch looks "stuck" while buttons are disabled.
   modeHintEl.hidden = !text;
   modeHintEl.textContent = text;
+  if (text) {
+    wiringModeFootnoteEl.textContent = text;
+  }
 }
 
 function setModeSwitchBusy(busy: boolean) {
   modeSwitchInFlight = busy;
   modeUsePersonalEl.disabled = busy;
   modeUseTeamEl.disabled = busy;
+  modeUsePersonalEl.classList.toggle("is-busy", busy);
+  modeUseTeamEl.classList.toggle("is-busy", busy);
+  document.getElementById("mode-banner")?.classList.toggle("is-busy", busy);
 }
 
 async function enablePersonalMode() {
@@ -563,8 +658,9 @@ async function enablePersonalMode() {
     });
     await loadModeStatus();
     await loadPersonalProviderStatus();
-    await refresh();
     showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
+    // Doctor rescan is secondary — don't block the switch UI on it.
+    void refresh();
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
@@ -591,8 +687,8 @@ async function enableTeamMode() {
     const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command");
     await loadModeStatus();
     await loadEvotownStatus();
-    await refresh();
     showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
+    void refresh();
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
@@ -618,15 +714,11 @@ const presetTriggerEl = document.querySelector<HTMLButtonElement>("#preset-trigg
 const presetTriggerLabelEl = document.querySelector<HTMLElement>("#preset-trigger-label")!;
 const presetMenuEl = document.querySelector<HTMLElement>("#preset-menu")!;
 const workspaceStatusEl = document.querySelector<HTMLElement>("#workspace-status")!;
-const workspaceApplyEl = document.querySelector<HTMLButtonElement>("#workspace-apply")!;
-const workspaceDoctorEl = document.querySelector<HTMLButtonElement>("#workspace-doctor")!;
-const workspaceFixEl = document.querySelector<HTMLButtonElement>("#workspace-fix")!;
+const workspaceListEl = document.querySelector<HTMLUListElement>("#workspace-list")!;
 const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-checks")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
-const workspacePickerEl = document.querySelector<HTMLElement>("#workspace-picker")!;
-const workspaceTriggerEl = document.querySelector<HTMLButtonElement>("#workspace-trigger")!;
-const workspaceTriggerLabelEl = document.querySelector<HTMLElement>("#workspace-trigger-label")!;
-const workspaceMenuEl = document.querySelector<HTMLElement>("#workspace-menu")!;
+const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
+const evotownBadgeEl = document.querySelector<HTMLElement>("#evotown-badge");
 const langSwitchEl = document.querySelector<HTMLElement>(".lang-switch")!;
 const healthPillEl = document.querySelector<HTMLElement>("#health-pill")!;
 const healthLabelEl = document.querySelector<HTMLElement>("#health-label")!;
@@ -755,7 +847,7 @@ const repairFilterByRuntime = new Map<string, RepairStatusFilter>();
 let selectedPresetName = "";
 let selectedWorkspaceName = "";
 let presetMenuOpen = false;
-let workspaceMenuOpen = false;
+let workspaceBusy = false;
 
 function escapeHtml(value: string): string {
   return value
@@ -779,10 +871,6 @@ function runtimeClass(id: string): string {
     return id;
   }
   return "default";
-}
-
-function runtimeInitials(id: string, displayName: string): string {
-  return RUNTIME_SHORT[id] ?? displayName.slice(0, 2).toUpperCase();
 }
 
 function effectiveModels(
@@ -1180,6 +1268,10 @@ function mountRepairPreview(hint: HTMLElement, report: RepairPreviewResponse): v
   repairPreviewByRuntime.set(runtime, report);
   const filter = repairFilterByRuntime.get(runtime) ?? "all";
   hint.innerHTML = renderRepairPreview(report, filter);
+  const card = runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
+  if (card) {
+    mountRelatedResources(card, runtime);
+  }
 }
 
 function applyRepairFilter(runtime: string, filter: RepairStatusFilter): void {
@@ -1227,6 +1319,104 @@ function repairStatusClass(status: RepairPreviewResponse["checks"][number]["stat
   return "muted";
 }
 
+function runtimeHasProblems(runtimeId: string): boolean {
+  const report = repairPreviewByRuntime.get(runtimeId);
+  if (!report) {
+    return false;
+  }
+  return report.summary.fail > 0 || report.summary.warn > 0;
+}
+
+function renderRuntimeCardActions(
+  runtime: RuntimeDoctorResult,
+  options?: { includeEdit?: boolean },
+): string {
+  if (!runtime.installed) {
+    return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
+  }
+
+  const parts: string[] = [];
+  if (canOpenSession(runtime.id)) {
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`,
+    );
+  }
+  const diagnoseClass = runtimeHasProblems(runtime.id) ? "btn-secondary" : "btn-ghost";
+  parts.push(
+    `<button type="button" class="${diagnoseClass}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+  );
+  parts.push(
+    `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`,
+  );
+  if (options?.includeEdit) {
+    parts.push(
+      `<button type="button" class="btn-ghost" data-action="edit-hermes">${t("runtime.edit")}</button>`,
+    );
+  }
+  return parts.join("");
+}
+
+type RelatedTag = { kind: "skill" | "mcp"; name: string; broken: boolean };
+
+function extractRelatedTags(report: RepairPreviewResponse | undefined): RelatedTag[] {
+  if (!report) {
+    return [];
+  }
+  const tags: RelatedTag[] = [];
+  const seen = new Set<string>();
+  for (const check of report.checks) {
+    const blob = `${check.title} ${check.message}`;
+    if (!/mcp|skill/i.test(blob)) {
+      continue;
+    }
+    const kind: RelatedTag["kind"] = /skill/i.test(blob) && !/mcp/i.test(check.title)
+      ? "skill"
+      : "mcp";
+    const nameMatch =
+      check.message.match(/[`'"]([a-z0-9._/-]+)[`'"]/i) ||
+      check.title.match(/(?:mcp|skill)[._-]?([a-z0-9._/-]+)/i);
+    const name = (nameMatch?.[1] || check.title).replace(/^(mcp|skill)[._-]?/i, "") || check.title;
+    const key = `${kind}:${name}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    tags.push({
+      kind,
+      name,
+      broken: check.status === "fail" || check.status === "warn",
+    });
+  }
+  return tags;
+}
+
+function renderRelatedResourcesHtml(runtimeId: string): string {
+  const tags = extractRelatedTags(repairPreviewByRuntime.get(runtimeId));
+  const tagsHtml = tags.length
+    ? tags
+        .map((tag) => {
+          const label = tag.kind === "skill" ? "Skill" : "MCP";
+          const broken = tag.broken ? ` · ${t("agents.relatedMissing")}` : "";
+          return `<span class="mini-tag ${tag.kind}${tag.broken ? " broken" : ""}">${label} · ${escapeHtml(tag.name)}${broken}</span>`;
+        })
+        .join("")
+    : `<span class="tone-soft">${escapeHtml(t("agents.relatedEmpty"))}</span>`;
+  return `
+    <div class="mounted" data-related-resources>
+      <h3>${escapeHtml(t("agents.relatedTitle"))}</h3>
+      <div class="mini-tags">${tagsHtml}</div>
+    </div>
+  `;
+}
+
+function mountRelatedResources(card: HTMLElement, runtime: string): void {
+  const el = card.querySelector<HTMLElement>("[data-related-resources]");
+  if (!el) {
+    return;
+  }
+  el.outerHTML = renderRelatedResourcesHtml(runtime);
+}
+
 function renderHermesCard(runtime: RuntimeDoctorResult): string {
   const model = hermesModel ?? {
     provider: "",
@@ -1237,17 +1427,7 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     api_key_hint: null,
   };
 
-  const editButton = hermesEditing
-    ? ""
-    : `<button type="button" class="btn-ghost" data-action="edit-hermes">${t("runtime.edit")}</button>`;
-  const diagnoseButton = `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`;
-  const openButton =
-    runtime.installed && canOpenSession(runtime.id)
-      ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
-      : "";
-  const installButton = !runtime.installed
-    ? `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`
-    : "";
+  const actionButtons = hermesEditing ? "" : renderRuntimeCardActions(runtime, { includeEdit: true });
 
   const meta = hermesEditing
     ? [
@@ -1290,23 +1470,20 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
       </div>
       <p class="card-hint" data-hermes-hint>${t("runtime.saveHint")}</p>
     `
-    : "";
+    : actionButtons
+      ? `<div class="card-actions">${actionButtons}</div>`
+      : "";
 
   return `
     <article class="runtime hermes ${hermesEditing ? "is-editing" : ""}" data-runtime="hermes">
-      <div class="runtime-head runtime-head-compact">
-        <p class="runtime-tab-title">${runtime.display_name}</p>
-        <div class="runtime-actions">
-          ${openButton}
-          ${installButton}
-          ${diagnoseButton}
-          ${editButton}
-          <p class="badge ok">${t("runtime.installed")}</p>
-        </div>
+      <div class="section-label runtime-card-label">
+        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
+        <span class="badge ok">${t("runtime.installed")}</span>
       </div>
       ${meta ? `<div class="meta-grid">${meta}</div>` : ""}
-      <div class="card-hint repair-hint" data-repair-hint hidden></div>
       ${actions}
+      ${renderRelatedResourcesHtml("hermes")}
+      <div class="card-hint repair-hint" data-repair-hint hidden></div>
     </article>
   `;
 }
@@ -1318,35 +1495,32 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
 
   const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
   const badgeClass = runtime.installed ? "ok" : "muted";
-  const openButton =
-    runtime.installed && canOpenSession(runtime.id)
-      ? `<button type="button" class="btn-ghost" data-action="open-session">${t("runtime.open")}</button>`
-      : "";
-  const installButton = !runtime.installed
-    ? `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`
-    : "";
+  const actionButtons = renderRuntimeCardActions(runtime);
   const rows = [
     runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
     runtime.config_paths.length ? metaRow("meta.config", runtime.config_paths.join("\n")) : "",
     runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
+    !runtime.installed ? metaRow("meta.status", t("runtime.notDetected")) : "",
   ]
     .filter(Boolean)
     .join("");
 
   return `
     <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
-      <div class="runtime-head runtime-head-compact">
-        <p class="runtime-tab-title">${runtime.display_name}</p>
-        <div class="runtime-actions">
-          ${openButton}
-          ${installButton}
-          <button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>
-          <p class="badge ${badgeClass}">${state}</p>
-        </div>
+      <div class="section-label runtime-card-label">
+        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
+        <span class="badge ${badgeClass}">${state}</span>
       </div>
       ${rows ? `<div class="meta-grid">${rows}</div>` : ""}
+      ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
+      ${renderRelatedResourcesHtml(runtime.id)}
       <div class="card-hint repair-hint" data-repair-hint hidden></div>
+      ${
+        !runtime.installed
+          ? `<p class="footnote runtime-install-footnote">${escapeHtml(t("runtime.installHint"))}</p>`
+          : ""
+      }
     </article>
   `;
 }
@@ -1365,11 +1539,24 @@ function resolveActiveRuntimeId(runtimes: RuntimeDoctorResult[]): string | null 
   return runtimes.find((runtime) => runtime.installed)?.id ?? runtimes[0].id;
 }
 
+function runtimeTabDotClass(runtime: RuntimeDoctorResult): string {
+  if (!runtime.installed) {
+    return "off";
+  }
+  if (runtimeHasProblems(runtime.id)) {
+    return "warn";
+  }
+  return "ok";
+}
+
 function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string): string {
   return runtimes
     .map((runtime) => {
       const active = runtime.id === selectedId;
-      const dotClass = runtime.installed ? "ok" : "muted";
+      const shortName =
+        runtime.id === "claude-code"
+          ? "Claude"
+          : runtime.display_name.replace(/\s+Code$/i, "");
       return `
         <button
           type="button"
@@ -1378,9 +1565,8 @@ function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string):
           aria-selected="${active}"
           data-runtime-tab="${runtime.id}"
         >
-          <span class="runtime-tab-icon">${runtimeInitials(runtime.id, runtime.display_name)}</span>
-          <span class="runtime-tab-label">${escapeHtml(runtime.display_name)}</span>
-          <span class="runtime-tab-dot ${dotClass}" aria-hidden="true"></span>
+          <span class="runtime-tab-dot ${runtimeTabDotClass(runtime)}" aria-hidden="true"></span>
+          <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
         </button>
       `;
     })
@@ -1532,22 +1718,20 @@ function renderPresetOptions(
 function renderProfiles(doc: ProfilesDocument) {
   lastProfiles = doc;
   const names = sortPresetNames(Object.keys(doc.profiles));
+  presetStatusEl.textContent = t("presets.manageHint");
 
   if (names.length === 0) {
-    presetStatusEl.textContent = t("presets.none");
     presetApplyEl.disabled = true;
     presetHintEl.textContent = t("presets.noneHint");
     renderPresetOptions([], null, doc.profiles);
     return;
   }
 
-  presetStatusEl.textContent = doc.active
-    ? t("presets.active", { name: doc.active })
-    : t("presets.noActive");
-
   renderPresetOptions(names, doc.active, doc.profiles);
   presetApplyEl.disabled = false;
-  presetHintEl.textContent = t("presets.switchHint");
+  presetHintEl.textContent = doc.active
+    ? t("presets.active", { name: doc.active })
+    : t("presets.noActive");
 }
 
 async function loadEvotownStatus() {
@@ -1563,6 +1747,17 @@ function renderEvotownStatus(status: EvotownStatus) {
   const connected = status.configured && Boolean(status.base_url);
   evotownSectionEl.classList.toggle("is-connected", connected);
   evotownConnectedEl.hidden = !connected;
+
+  if (evotownBadgeEl) {
+    if (connected) {
+      evotownBadgeEl.hidden = false;
+      evotownBadgeEl.className = "badge ok";
+      evotownBadgeEl.textContent = t("evotown.connectedBadge");
+    } else {
+      evotownBadgeEl.hidden = true;
+      evotownBadgeEl.textContent = "";
+    }
+  }
 
   if (connected && status.base_url) {
     evotownStatusEl.textContent = t("evotown.connected");
@@ -1957,72 +2152,53 @@ async function loadProfiles() {
   }
 }
 
-function setWorkspaceTriggerLabel(name: string | null) {
-  workspaceTriggerLabelEl.textContent = name ?? t("workspaces.noActive");
-}
-
-function closeWorkspaceMenu() {
-  workspaceMenuOpen = false;
-  workspaceMenuEl.hidden = true;
-  workspaceTriggerEl.setAttribute("aria-expanded", "false");
-  workspacePickerEl.classList.remove("is-open");
-}
-
-function openWorkspaceMenu() {
-  if (workspaceTriggerEl.disabled) {
-    return;
-  }
-  workspaceMenuOpen = true;
-  workspaceMenuEl.hidden = false;
-  workspaceTriggerEl.setAttribute("aria-expanded", "true");
-  workspacePickerEl.classList.add("is-open");
-}
-
-function toggleWorkspaceMenu() {
-  if (workspaceMenuOpen) {
-    closeWorkspaceMenu();
-  } else {
-    openWorkspaceMenu();
-  }
-}
-
-function renderWorkspaceOptions(doc: WorkspacesDocument) {
+function renderWorkspaceManageList(doc: WorkspacesDocument): void {
   const names = Object.keys(doc.workspaces).sort();
+  selectedWorkspaceName = doc.active ?? selectedWorkspaceName;
+
   if (names.length === 0) {
-    workspaceMenuEl.innerHTML = "";
-    selectedWorkspaceName = "";
-    setWorkspaceTriggerLabel(null);
-    workspaceTriggerEl.disabled = true;
-    closeWorkspaceMenu();
+    workspaceListEl.innerHTML = `
+      <li class="ws-manage-item">
+        <div class="ws-manage-main">
+          <strong>${escapeHtml(t("workspaces.none"))}</strong>
+          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
+        </div>
+      </li>
+    `;
     return;
   }
 
-  selectedWorkspaceName =
-    selectedWorkspaceName && names.includes(selectedWorkspaceName)
-      ? selectedWorkspaceName
-      : (doc.active ?? names[0]);
-  setWorkspaceTriggerLabel(selectedWorkspaceName);
-  workspaceTriggerEl.disabled = false;
-
-  workspaceMenuEl.innerHTML = names
+  workspaceListEl.innerHTML = names
     .map((name) => {
-      const activeOption = name === selectedWorkspaceName;
       const entry = doc.workspaces[name];
-      const meta = entry?.path ?? "";
+      const path = entry?.path ?? "";
+      const isActive = name === doc.active;
+      const pathLabel = isActive
+        ? `${path}${path ? " · " : ""}${t("agents.wsActiveBadge")}`
+        : path;
+      const right = isActive
+        ? `
+          <div class="ws-manage-right">
+            <span class="badge ok">${escapeHtml(t("agents.wsActiveBadge"))}</span>
+            <div class="ws-manage-actions">
+              <button type="button" class="btn-ghost btn-compact" data-workspace-action="doctor" data-workspace="${escapeHtml(name)}" ${workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.doctor"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-workspace-action="fix" data-workspace="${escapeHtml(name)}" ${workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.fix"))}</button>
+            </div>
+          </div>
+        `
+        : `
+          <div class="ws-manage-right">
+            <button type="button" class="btn-secondary btn-compact" data-workspace-action="use" data-workspace="${escapeHtml(name)}" ${workspaceBusy ? "disabled" : ""}>${escapeHtml(t("agents.wsUse"))}</button>
+          </div>
+        `;
       return `
-        <button
-          type="button"
-          class="picker-option ${activeOption ? "is-active" : ""}"
-          role="option"
-          aria-selected="${activeOption}"
-          data-workspace="${escapeHtml(name)}"
-        >
-          <span class="picker-option-body">
-            <span class="picker-option-label">${escapeHtml(name)}</span>
-            ${meta ? `<span class="picker-option-meta">${escapeHtml(meta)}</span>` : ""}
-          </span>
-          <span class="picker-option-check" aria-hidden="true">✓</span>
-        </button>
+        <li class="ws-manage-item ${isActive ? "is-active" : ""}">
+          <div class="ws-manage-main">
+            <strong>${escapeHtml(name)}</strong>
+            ${pathLabel ? `<span>${escapeHtml(pathLabel)}</span>` : ""}
+          </div>
+          ${right}
+        </li>
       `;
     })
     .join("");
@@ -2030,22 +2206,16 @@ function renderWorkspaceOptions(doc: WorkspacesDocument) {
 
 function renderWorkspaces(doc: WorkspacesDocument) {
   lastWorkspaces = doc;
-  const names = Object.keys(doc.workspaces);
+  updateAgentsWorkspaceChip(doc);
+  renderWorkspaceManageList(doc);
 
-  if (names.length === 0) {
+  if (Object.keys(doc.workspaces).length === 0) {
     workspaceStatusEl.textContent = t("workspaces.none");
-    workspaceApplyEl.disabled = true;
     workspaceHintEl.textContent = t("workspaces.noneHint");
-    renderWorkspaceOptions({ active: null, workspaces: {} });
     return;
   }
 
-  workspaceStatusEl.textContent = doc.active
-    ? t("workspaces.active", { name: doc.active })
-    : t("workspaces.noActive");
-  renderWorkspaceOptions(doc);
-  workspaceApplyEl.disabled = false;
-  workspaceHintEl.textContent = t("workspaces.switchHint");
+  workspaceStatusEl.textContent = t("workspaces.manageHint");
 }
 
 async function loadWorkspaces() {
@@ -2055,18 +2225,18 @@ async function loadWorkspaces() {
   } catch (error) {
     workspaceStatusEl.textContent = t("workspaces.failed");
     workspaceHintEl.textContent = String(error);
-    workspaceApplyEl.disabled = true;
+    workspaceListEl.innerHTML = "";
   }
 }
 
-async function applyWorkspace() {
-  const name = selectedWorkspaceName;
-  if (!name) {
+async function applyWorkspace(name: string) {
+  if (!name || workspaceBusy) {
     return;
   }
 
-  closeWorkspaceMenu();
-  workspaceApplyEl.disabled = true;
+  workspaceBusy = true;
+  selectedWorkspaceName = name;
+  renderWorkspaceManageList(lastWorkspaces ?? { active: null, workspaces: {} });
   workspaceHintEl.textContent = t("workspaces.applying", { name });
   try {
     await invoke("use_workspace_command", { name });
@@ -2075,12 +2245,65 @@ async function applyWorkspace() {
   } catch (error) {
     workspaceHintEl.textContent = String(error);
   } finally {
-    workspaceApplyEl.disabled = false;
+    workspaceBusy = false;
+    if (lastWorkspaces) {
+      renderWorkspaceManageList(lastWorkspaces);
+    }
+  }
+}
+
+async function registerWorkspace() {
+  if (workspaceBusy) {
+    return;
+  }
+
+  let selected: string | string[] | null;
+  try {
+    selected = await open({
+      directory: true,
+      multiple: false,
+      title: t("workspaces.registerPick"),
+    });
+  } catch (error) {
+    workspaceHintEl.textContent = String(error);
+    return;
+  }
+
+  const path = Array.isArray(selected) ? selected[0] : selected;
+  if (!path) {
+    return;
+  }
+
+  workspaceBusy = true;
+  workspaceRegisterEl.disabled = true;
+  workspaceHintEl.textContent = t("workspaces.registering");
+  try {
+    const report = await invoke<{ name: string }>("init_workspace_command", {
+      path,
+      name: null,
+      gitRoot: true,
+    });
+    workspaceHintEl.textContent = t("workspaces.registered", { name: report.name });
+    await loadWorkspaces();
+  } catch (error) {
+    workspaceHintEl.textContent = String(error);
+  } finally {
+    workspaceBusy = false;
+    workspaceRegisterEl.disabled = false;
+    if (lastWorkspaces) {
+      renderWorkspaceManageList(lastWorkspaces);
+    }
   }
 }
 
 async function doctorWorkspace() {
-  workspaceDoctorEl.disabled = true;
+  if (workspaceBusy) {
+    return;
+  }
+  workspaceBusy = true;
+  if (lastWorkspaces) {
+    renderWorkspaceManageList(lastWorkspaces);
+  }
   workspaceHintEl.textContent = t("workspaces.doctorRunning");
   try {
     const report = await invoke<WorkspaceDoctorReport>("workspace_doctor_command");
@@ -2090,13 +2313,21 @@ async function doctorWorkspace() {
     workspaceChecksEl.innerHTML = "";
     workspaceHintEl.textContent = String(error);
   } finally {
-    workspaceDoctorEl.disabled = false;
+    workspaceBusy = false;
+    if (lastWorkspaces) {
+      renderWorkspaceManageList(lastWorkspaces);
+    }
   }
 }
 
 async function fixWorkspace() {
-  workspaceFixEl.disabled = true;
-  workspaceDoctorEl.disabled = true;
+  if (workspaceBusy) {
+    return;
+  }
+  workspaceBusy = true;
+  if (lastWorkspaces) {
+    renderWorkspaceManageList(lastWorkspaces);
+  }
   workspaceHintEl.textContent = t("workspaces.fixRunning");
   try {
     const report = await invoke<WorkspaceFixReport>("workspace_fix_command", {
@@ -2104,12 +2335,14 @@ async function fixWorkspace() {
     });
     const applied = report.actions.filter((action) => action.applied).length;
     workspaceHintEl.textContent = t("workspaces.fixSummary", { count: String(applied) });
+    workspaceBusy = false;
     await doctorWorkspace();
   } catch (error) {
     workspaceHintEl.textContent = String(error);
-  } finally {
-    workspaceFixEl.disabled = false;
-    workspaceDoctorEl.disabled = false;
+    workspaceBusy = false;
+    if (lastWorkspaces) {
+      renderWorkspaceManageList(lastWorkspaces);
+    }
   }
 }
 
@@ -2553,6 +2786,8 @@ async function switchLocale(next: Locale) {
   if (lastWorkspaces) {
     renderWorkspaces(lastWorkspaces);
   }
+  updateFooterCopy();
+  updateWiringModeFootnote();
   if (lastReport) {
     await renderReport(lastReport);
   } else {
@@ -2791,31 +3026,31 @@ presetApplyEl.addEventListener("click", () => {
   void applyPreset();
 });
 
-workspaceApplyEl.addEventListener("click", () => {
-  void applyWorkspace();
+workspaceRegisterEl.addEventListener("click", () => {
+  void registerWorkspace();
 });
 
-workspaceDoctorEl.addEventListener("click", () => {
-  void doctorWorkspace();
-});
-
-workspaceFixEl.addEventListener("click", () => {
-  void fixWorkspace();
-});
-
-workspaceTriggerEl.addEventListener("click", () => {
-  toggleWorkspaceMenu();
-});
-
-workspaceMenuEl.addEventListener("click", (event) => {
-  const option = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-workspace]");
-  const name = option?.dataset.workspace;
-  if (!name || !lastWorkspaces) {
+workspaceListEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-workspace-action]");
+  if (!button) {
     return;
   }
-  selectedWorkspaceName = name;
-  renderWorkspaceOptions(lastWorkspaces);
-  closeWorkspaceMenu();
+  const name = button.dataset.workspace;
+  const action = button.dataset.workspaceAction;
+  if (!name || !action) {
+    return;
+  }
+  if (action === "use") {
+    void applyWorkspace(name);
+    return;
+  }
+  if (action === "doctor") {
+    void doctorWorkspace();
+    return;
+  }
+  if (action === "fix") {
+    void fixWorkspace();
+  }
 });
 
 presetTriggerEl.addEventListener("click", () => {
@@ -2842,15 +3077,36 @@ document.addEventListener("click", (event) => {
   if (presetMenuOpen && !presetPickerEl.contains(target)) {
     closePresetMenu();
   }
-  if (workspaceMenuOpen && !workspacePickerEl.contains(target)) {
-    closeWorkspaceMenu();
+  if (
+    agentsWsPickerOpen &&
+    !agentsWsChipEl.contains(target) &&
+    !agentsWsPickerEl.contains(target)
+  ) {
+    closeAgentsWsPicker();
+  }
+});
+
+agentsWsQuickEl.addEventListener("click", () => {
+  toggleAgentsWsPicker();
+});
+
+agentsWsManageEl.addEventListener("click", () => {
+  closeAgentsWsPicker();
+  setMainTab("workspace");
+});
+
+agentsWsListEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-agents-ws]");
+  const name = button?.dataset.agentsWs;
+  if (name) {
+    void applyAgentsWorkspaceQuick(name);
   }
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closePresetMenu();
-    closeWorkspaceMenu();
+    closeAgentsWsPicker();
   }
 });
 
@@ -2868,6 +3124,8 @@ void listen<WorkspaceDoctorReport>("workspace-doctor-report", (event) => {
 
 setLocale(getLocale());
 applyStaticI18n();
+updateFooterCopy();
+updateWiringModeFootnote();
 updateLangButtons();
 refreshPresetGroupLabels();
 applyProviderPreset("custom");

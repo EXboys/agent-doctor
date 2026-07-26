@@ -264,7 +264,7 @@ impl RuntimeAdapter for HermesAdapter {
     }
 
     fn display_name(&self) -> &'static str {
-        "Hermes Agent"
+        "Hermes"
     }
 
     fn discover(&self) -> AdapterDiscovery {

@@ -2,22 +2,23 @@ use agent_doctor_core::{
     activate_personal_provider, apply_profile_model, build_repair_preview_from_bundle,
     delete_personal_provider, evotown_status, execute_evotown_onboarding,
     execute_install_with_progress, execute_personal_provider_setup, execute_repair, execute_sync,
-    list_personal_providers, list_runtime_backup_ids, load_evotown_config, load_mode_status,
-    load_personal_provider_status, load_profiles, load_workspaces, needs_binary_install,
-    open_interactive_session, probe_runtime, restore_runtime_backup, run_doctor,
-    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
+    init_workspace, list_personal_providers, list_runtime_backup_ids, load_evotown_config,
+    load_mode_status, load_personal_provider_status, load_profiles, load_workspaces,
+    needs_binary_install, open_interactive_session, probe_runtime, restore_runtime_backup,
+    run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
     switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider, use_profile,
     use_workspace_with_options, verify_personal_provider_with_protocol, workspace_doctor,
     workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
     HermesProfilePreset, HermesSettings, InstallOptions, InstallProgressEvent, InstallReport,
-    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
-    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus, ProfilesDocument,
-    RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
+    InitWorkspaceReport, ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport,
+    OpenSessionOptions, OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
+    ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
     RuntimeProbeReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions, UseProfileReport,
     UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions,
     WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
+use std::path::PathBuf;
 use serde::Serialize;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -41,6 +42,27 @@ fn publish_doctor_report(app: &tauri::AppHandle, report: &DoctorReport) {
 #[tauri::command]
 fn list_workspaces_command() -> WorkspacesDocument {
     load_workspaces().unwrap_or_default()
+}
+
+#[tauri::command]
+fn init_workspace_command(
+    path: String,
+    name: Option<String>,
+    git_root: bool,
+    app: tauri::AppHandle,
+) -> Result<InitWorkspaceReport, String> {
+    let report = init_workspace(Some(PathBuf::from(path)), name, git_root)
+        .map_err(|error| error.to_string())?;
+    let _ = use_workspace_with_options(
+        &report.name,
+        &UseWorkspaceOptions {
+            backup: true,
+            restart_gateways: false,
+        },
+    );
+    update_tray_tooltip(&app);
+    rebuild_tray_menu(&app);
+    Ok(report)
 }
 
 #[tauri::command]
@@ -730,6 +752,7 @@ fn setup_tray(app: &tauri::App) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             show_main_window(app.handle());
             setup_tray(app);
@@ -753,6 +776,7 @@ pub fn run() {
             run_doctor_command,
             list_profiles_command,
             list_workspaces_command,
+            init_workspace_command,
             use_workspace_command,
             workspace_status_command,
             workspace_doctor_command,

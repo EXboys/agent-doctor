@@ -274,40 +274,50 @@ fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
 /// Restart the LaunchAgent/systemd OpenClaw gateway so a freshly written
 /// `OPENAI_API_KEY` in service-env is actually loaded into the process.
 ///
-/// Prefer a fast `launchctl kickstart` on macOS — `openclaw gateway restart`
-/// can take 15–20s and freeze the desktop mode switch.
+/// Prefer a fast `launchctl kickstart` on macOS. Avoid falling back to
+/// `openclaw gateway restart` during mode switch — it often blocks 15–20s and
+/// makes the desktop UI look frozen.
 fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(detail) = restart_openclaw_via_launchctl() {
-            return Ok(detail);
+        match restart_openclaw_via_launchctl() {
+            Ok(detail) => return Ok(detail),
+            Err(err) => {
+                // Do not chain a slow CLI restart here; surface a short hint instead.
+                return Err(anyhow::anyhow!(
+                    "{err}; run `openclaw gateway restart` manually if auth is stale"
+                ));
+            }
         }
     }
 
-    let openclaw = which_openclaw().context("openclaw binary not found on PATH")?;
-    let output = run_command_with_timeout(
-        Command::new(&openclaw)
-            .args(["gateway", "restart"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()),
-        Duration::from_secs(12),
-    )
-    .with_context(|| format!("failed to run `{} gateway restart`", openclaw.display()))?;
-    if output.status.success() {
-        return Ok("restarted OpenClaw gateway (reload env key)".into());
+    #[cfg(not(target_os = "macos"))]
+    {
+        let openclaw = which_openclaw().context("openclaw binary not found on PATH")?;
+        let output = run_command_with_timeout(
+            Command::new(&openclaw)
+                .args(["gateway", "restart"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+            Duration::from_secs(6),
+        )
+        .with_context(|| format!("failed to run `{} gateway restart`", openclaw.display()))?;
+        if output.status.success() {
+            return Ok("restarted OpenClaw gateway (reload env key)".into());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if stdout.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("{} / {}", stderr.trim(), stdout.trim())
+        };
+        Err(anyhow::anyhow!(
+            "`openclaw gateway restart` failed: {detail}"
+        ))
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let detail = if stdout.trim().is_empty() {
-        stderr.trim().to_string()
-    } else if stderr.trim().is_empty() {
-        stdout.trim().to_string()
-    } else {
-        format!("{} / {}", stderr.trim(), stdout.trim())
-    };
-    Err(anyhow::anyhow!(
-        "`openclaw gateway restart` failed: {detail}"
-    ))
 }
 
 #[cfg(target_os = "macos")]
@@ -327,12 +337,12 @@ fn restart_openclaw_via_launchctl() -> AnyhowResult<String> {
             .args(["kickstart", "-k", &label])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
-        Duration::from_secs(8),
+        Duration::from_secs(4),
     )
     .with_context(|| format!("launchctl kickstart {label}"))?;
     if output.status.success() {
         // Brief settle so subsequent probe is less flaky.
-        thread::sleep(Duration::from_millis(400));
+        thread::sleep(Duration::from_millis(200));
         return Ok(format!("restarted OpenClaw gateway via launchctl ({label})"));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -364,6 +374,7 @@ fn run_command_with_timeout(
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn which_openclaw() -> Option<std::path::PathBuf> {
     if let Ok(path) = std::env::var("OPENCLAW_BIN") {
         let p = std::path::PathBuf::from(path);
@@ -559,7 +570,7 @@ pub fn apply_hermes_slot(
 
     Ok(RuntimeSetupResult {
         runtime_id: "hermes".to_string(),
-        display_name: "Hermes Agent".to_string(),
+        display_name: "Hermes".to_string(),
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
@@ -657,29 +668,28 @@ pub fn apply_codex(
     apply_codex_slot(gateway_url, _api_key, model, None)
 }
 
+/// Hosts that speak OpenAI Chat Completions but not Codex's required `/v1/responses`.
+/// Pointing Codex `wire_api = "responses"` at these yields HTTP 404.
+pub fn codex_host_supports_responses_api(gateway_url: &str) -> bool {
+    let lower = gateway_url.to_ascii_lowercase();
+    // Official DeepSeek API: chat/completions only (verified 2026-07).
+    if lower.contains("api.deepseek.com") {
+        return false;
+    }
+    true
+}
+
 /// Additive Codex wiring: upsert `model_providers.{company|personal}`, point
 /// `model_provider` at the active slot, leave the other slot intact.
+///
+/// Also mirrors into the active workspace `CODEX_HOME` when present so
+/// `workspace use` overlays stay aligned with `~/.codex`.
 pub fn apply_codex_slot(
     gateway_url: &str,
     _api_key: &str,
     model: Option<&str>,
     provider_slot: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
-    let path = home_join(".codex/config.toml");
-    let backup_path = backup_file(&path)?;
-    ensure_parent(&path)?;
-
-    let mut root: TomlValue = if path.exists() {
-        let raw = fs::read_to_string(&path)?;
-        toml::from_str(&raw).unwrap_or(TomlValue::Table(toml::map::Map::new()))
-    } else {
-        TomlValue::Table(toml::map::Map::new())
-    };
-
-    let table = root
-        .as_table_mut()
-        .context("Codex config root must be a table")?;
-
     let model_id = model
         .map(str::trim)
         .filter(|m| !m.is_empty())
@@ -690,10 +700,85 @@ pub fn apply_codex_slot(
         .map(str::to_string)
         .unwrap_or_else(|| infer_codex_hermes_slot(gateway_url).to_string());
 
+    if slot == CODEX_PERSONAL_SLOT && !codex_host_supports_responses_api(gateway_url) {
+        return Ok(RuntimeSetupResult {
+            runtime_id: "codex".to_string(),
+            display_name: "Codex CLI".to_string(),
+            applied: false,
+            message: format!(
+                "skipped — Codex requires OpenAI Responses API (/v1/responses); \
+                 {gateway_url} only exposes chat/completions (404 on /responses). \
+                 Use Team/Evotown for Codex, or put a Responses→Chat bridge in front."
+            ),
+            ..Default::default()
+        });
+    }
+
+    let path = home_join(".codex/config.toml");
+    let backup_path = backup_file(&path)?;
+    ensure_parent(&path)?;
+    write_codex_provider_config(&path, gateway_url, model_id, &slot)?;
+
+    // Keep workspace overlay in sync when an active workspace isolates CODEX_HOME.
+    if let Ok(doc) = crate::workspace::load_workspaces() {
+        if let Some(active) = doc.active.as_deref() {
+            if let Some(entry) = doc.workspaces.get(active) {
+                let ws_config = entry.codex_home.join("config.toml");
+                if entry.codex_home.exists() {
+                    let _ = write_codex_provider_config(&ws_config, gateway_url, model_id, &slot);
+                }
+            }
+        }
+    }
+
+    clear_codex_placeholder_auth()?;
+
+    let env_key = codex_slot_env_key(&slot);
+    Ok(RuntimeSetupResult {
+        runtime_id: "codex".to_string(),
+        display_name: "Codex CLI".to_string(),
+        applied: true,
+        config_path: Some(path.display().to_string()),
+        backup_path: backup_path.map(|p| p.display().to_string()),
+        message: format!(
+            "set model_provider={slot} (wire_api=responses, env_key={env_key}, model={model_id}); additive model_providers"
+        ),
+        ..Default::default()
+    })
+}
+
+fn codex_slot_env_key(slot: &str) -> &'static str {
+    if slot == CODEX_TEAM_SLOT {
+        // Prefer Evotown key so personal DeepSeek OPENAI_API_KEY does not shadow team.
+        "EVOTOWN_API_KEY"
+    } else {
+        "OPENAI_API_KEY"
+    }
+}
+
+fn write_codex_provider_config(
+    path: &std::path::Path,
+    gateway_url: &str,
+    model_id: &str,
+    slot: &str,
+) -> AnyhowResult<()> {
+    ensure_parent(path)?;
+
+    let mut root: TomlValue = if path.exists() {
+        let raw = fs::read_to_string(path)?;
+        toml::from_str(&raw).unwrap_or(TomlValue::Table(toml::map::Map::new()))
+    } else {
+        TomlValue::Table(toml::map::Map::new())
+    };
+
+    let table = root
+        .as_table_mut()
+        .context("Codex config root must be a table")?;
+
     table.insert("model".to_string(), TomlValue::String(model_id.to_string()));
     table.insert(
         "model_provider".to_string(),
-        TomlValue::String(slot.clone()),
+        TomlValue::String(slot.to_string()),
     );
 
     let mut entry = toml::map::Map::new();
@@ -702,17 +787,14 @@ pub fn apply_codex_slot(
     } else {
         "Personal Provider"
     };
-    entry.insert(
-        "name".to_string(),
-        TomlValue::String(display.to_string()),
-    );
+    entry.insert("name".to_string(), TomlValue::String(display.to_string()));
     entry.insert(
         "base_url".to_string(),
         TomlValue::String(gateway_url.to_string()),
     );
     entry.insert(
         "env_key".to_string(),
-        TomlValue::String("OPENAI_API_KEY".to_string()),
+        TomlValue::String(codex_slot_env_key(slot).to_string()),
     );
     entry.insert(
         "requires_openai_auth".to_string(),
@@ -731,23 +813,10 @@ pub fn apply_codex_slot(
     let providers_table = providers
         .as_table_mut()
         .context("Codex model_providers must be a table")?;
-    providers_table.insert(slot.clone(), TomlValue::Table(entry));
+    providers_table.insert(slot.to_string(), TomlValue::Table(entry));
 
-    fs::write(&path, toml::to_string_pretty(&root)?)?;
-
-    clear_codex_placeholder_auth()?;
-
-    Ok(RuntimeSetupResult {
-        runtime_id: "codex".to_string(),
-        display_name: "Codex CLI".to_string(),
-        applied: true,
-        config_path: Some(path.display().to_string()),
-        backup_path: backup_path.map(|p| p.display().to_string()),
-        message: format!(
-            "set model_provider={slot} (wire_api=responses, model={model_id}); additive model_providers"
-        ),
-        ..Default::default()
-    })
+    fs::write(path, toml::to_string_pretty(&root)?)?;
+    Ok(())
 }
 
 fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
@@ -756,6 +825,24 @@ fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
         CODEX_TEAM_SLOT
     } else {
         CODEX_PERSONAL_SLOT
+    }
+}
+
+#[cfg(test)]
+mod codex_responses_tests {
+    use super::*;
+
+    #[test]
+    fn deepseek_official_is_chat_only_for_codex() {
+        assert!(!codex_host_supports_responses_api(
+            "https://api.deepseek.com/v1"
+        ));
+        assert!(codex_host_supports_responses_api(
+            "https://www.skilllite.ai/api/gateway/v1"
+        ));
+        assert!(codex_host_supports_responses_api(
+            "https://api.openai.com/v1"
+        ));
     }
 }
 

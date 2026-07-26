@@ -18,4 +18,5 @@ agent-doctor-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

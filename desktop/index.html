@@ -19,10 +19,6 @@
           <p class="brand-name" data-i18n="app.eyebrow">Agent Doctor</p>
         </div>
         <div class="toolbar-actions">
-          <div class="mode-switch" id="mode-banner" role="group" aria-label="LLM mode">
-            <button id="mode-use-personal" type="button" class="mode-switch-btn" data-mode="personal" data-i18n="mode.personal">个人</button>
-            <button id="mode-use-team" type="button" class="mode-switch-btn" data-mode="team" data-i18n="mode.team">团队</button>
-          </div>
           <div class="lang-switch" role="group" aria-label="Language">
             <button type="button" class="lang-btn" data-lang="zh" data-i18n="lang.zh">中</button>
             <button type="button" class="lang-btn" data-lang="en" data-i18n="lang.en">EN</button>
@@ -55,38 +51,63 @@
         </div>
       </section>
 
-      <nav class="main-tabs" id="main-tabs" role="tablist" aria-label="Main sections">
-        <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.diagnose">诊断</button>
-        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="provider" data-i18n="nav.provider">Provider</button>
+      <nav class="main-tabs main-tabs-3" id="main-tabs" role="tablist" aria-label="Main sections">
+        <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.agents">Agents</button>
+        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="provider" data-i18n="nav.wiring">接线</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="workspace" data-i18n="nav.workspace">工作区</button>
       </nav>
 
       <div class="main-panels">
         <section class="main-panel is-active" id="panel-diagnose" role="tabpanel" data-main-panel="diagnose">
+          <div class="ws-chip" id="agents-ws-chip">
+            <span class="ws-chip-label">
+              <span data-i18n="agents.wsCurrent">当前工作区</span>
+              <strong id="agents-ws-name">—</strong>
+            </span>
+            <span class="ws-chip-actions">
+              <button id="agents-ws-quick" type="button" class="ws-chip-btn" data-i18n="agents.wsQuickSwitch">切换 ▾</button>
+              <button id="agents-ws-manage" type="button" class="ws-chip-btn ws-chip-btn-muted" data-i18n="workspaces.manage">管理</button>
+            </span>
+          </div>
+          <div class="ws-quick-picker" id="agents-ws-picker" hidden>
+            <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
+            <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切只换上下文；登记 / Check / Fix 在「工作区」Tab</p>
+          </div>
+
           <section class="widget-section runtime-section">
-            <div class="runtime-head">
-              <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
-              <span id="runtime-count" class="section-badge">—</span>
-            </div>
+            <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
+            <span id="runtime-count" class="sr-only">—</span>
             <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
           </section>
         </section>
 
         <section class="main-panel" id="panel-provider" role="tabpanel" data-main-panel="provider" hidden>
+          <section class="widget-section wiring-mode-section">
+            <div class="section-label">
+              <h2 data-i18n="wiring.modeTitle">通路模式</h2>
+            </div>
+            <p class="section-hint" data-i18n="wiring.modeHint">个人走本机 Provider；团队走 Evotown。切换会重写 Runtime 通路。</p>
+            <div class="mode-switch wiring-mode-switch" id="mode-banner" role="group" aria-label="LLM mode">
+              <button id="mode-use-personal" type="button" class="mode-switch-btn" data-mode="personal" data-i18n="mode.personal">个人</button>
+              <button id="mode-use-team" type="button" class="mode-switch-btn" data-mode="team" data-i18n="mode.team">团队</button>
+            </div>
+            <p id="wiring-mode-footnote" class="section-footnote wiring-mode-footnote" aria-live="polite"></p>
+          </section>
+
           <section class="widget-section personal-section provider-panel is-active" id="personal-section" data-provider-panel="personal">
             <div id="personal-list-view">
               <div class="section-label">
-                <span class="section-icon" aria-hidden="true">⬡</span>
                 <h2 data-i18n="personal.title">个人 Provider</h2>
                 <button id="personal-add" type="button" class="btn-primary btn-compact" data-i18n="personal.add">新增</button>
               </div>
-              <p id="personal-status" class="section-hint" data-i18n="personal.loading">正在检查个人配置…</p>
+              <p class="section-hint" data-i18n="personal.wiringHint">通路写给 Agents，不直接挂 Skills。</p>
+              <p id="personal-status" class="sr-only" data-i18n="personal.loading">正在检查个人配置…</p>
               <div id="personal-connected" class="evotown-connected" hidden>
                 <p class="evotown-connected-line"><span data-i18n="personal.configuredUrl">当前</span> <strong id="personal-connected-url">—</strong></p>
                 <p class="evotown-connected-meta" id="personal-connected-meta"></p>
               </div>
               <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
-              <p id="personal-list-hint" class="section-footnote" data-i18n="personal.footnote">选服务商模板或自定义 URL → 验证 → 写入 runtime。</p>
+              <p id="personal-list-hint" class="section-footnote" data-i18n="personal.footnote" hidden></p>
             </div>
 
             <div id="personal-form-view" hidden>
@@ -150,8 +171,8 @@
 
           <section class="widget-section evotown-section provider-panel" id="evotown-section" data-provider-panel="evotown" hidden>
             <div class="section-label">
-              <span class="section-icon" aria-hidden="true">⎈</span>
               <h2 data-i18n="evotown.title">Evotown</h2>
+              <span id="evotown-badge" class="badge muted" hidden></span>
             </div>
             <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
             <div id="evotown-connected" class="evotown-connected" hidden>
@@ -179,10 +200,20 @@
         <section class="main-panel" id="panel-workspace" role="tabpanel" data-main-panel="workspace" hidden>
           <section class="widget-section">
             <div class="section-label">
-              <span class="section-icon" aria-hidden="true">◈</span>
+              <h2 data-i18n="workspaces.manageTitle">工作区管理</h2>
+              <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">登记</button>
+            </div>
+            <p id="workspace-status" class="section-hint" data-i18n="workspaces.manageHint">管项目列表与隔离对齐。日常切换也可在 Agents 顶栏完成。</p>
+            <ul id="workspace-list" class="ws-manage-list" aria-live="polite"></ul>
+            <ul id="workspace-checks" class="repair-checks" hidden></ul>
+            <p id="workspace-hint" class="section-footnote"></p>
+          </section>
+
+          <section class="widget-section">
+            <div class="section-label">
               <h2 data-i18n="presets.title">配置预设</h2>
             </div>
-            <p id="preset-status" class="section-hint" data-i18n="presets.loading">正在加载预设…</p>
+            <p id="preset-status" class="section-hint" data-i18n="presets.manageHint">Hermes scene 等本机预设，与工作区隔离互补。</p>
             <div class="preset-row">
               <div class="picker" id="preset-picker">
                 <button
@@ -207,48 +238,12 @@
             </div>
             <p id="preset-hint" class="section-footnote"></p>
           </section>
-
-          <section class="widget-section">
-            <div class="section-label">
-              <span class="section-icon" aria-hidden="true">▣</span>
-              <h2 data-i18n="workspaces.title">Workspaces</h2>
-            </div>
-            <p id="workspace-status" class="section-hint" data-i18n="workspaces.loading">Loading workspaces…</p>
-            <div class="preset-row workspace-actions-row">
-              <div class="picker" id="workspace-picker">
-                <button
-                  type="button"
-                  class="picker-trigger"
-                  id="workspace-trigger"
-                  aria-haspopup="listbox"
-                  aria-expanded="false"
-                  disabled
-                >
-                  <span class="picker-leading" aria-hidden="true">▣</span>
-                  <span class="picker-value" id="workspace-trigger-label">—</span>
-                  <span class="picker-chevron" aria-hidden="true">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </span>
-                </button>
-                <div class="picker-menu" id="workspace-menu" role="listbox" hidden></div>
-              </div>
-              <button id="workspace-apply" type="button" class="btn-secondary" data-i18n="workspaces.switch">Switch</button>
-            </div>
-            <div class="workspace-secondary-actions">
-              <button id="workspace-doctor" type="button" class="btn-ghost" data-i18n="workspaces.doctor">Check</button>
-              <button id="workspace-fix" type="button" class="btn-ghost" data-i18n="workspaces.fix">Fix</button>
-            </div>
-            <ul id="workspace-checks" class="repair-checks" hidden></ul>
-            <p id="workspace-hint" class="section-footnote"></p>
-          </section>
         </section>
       </div>
 
       <footer class="widget-footer">
         <p id="status" class="status-footnote" hidden data-i18n="doctor.loading">加载中…</p>
-        <span data-i18n="app.footer">本机 Runtime 发现 · 配置 · 健康检查</span>
+        <span id="footer-copy" data-i18n="app.footer">本机 Runtime · 诊断修复</span>
       </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
