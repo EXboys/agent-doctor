@@ -48,11 +48,14 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 
 | 文件 | 写入方 | 用途 |
 |------|--------|------|
-| `~/.config/agent-doctor/profile.env` | `setup` | 公司 gateway URL、`evk_` key、runtime merge 源 |
+| `~/.config/agent-doctor/profile.env` | `setup` / 个人 Provider | **当前生效** runtime 覆盖层（公司或个人） |
+| `~/.config/agent-doctor/company-profile.env` | `setup` | **持久团队基线**（个人激活不会覆盖；workspace baseline 对照此文件） |
 | `~/.config/evotown/evotown.agent.env` | `setup` | Evotown 连接（与 legacy `evotown-agent-setup.py` 兼容） |
 | `~/.config/evotown/skills-lock.json` | `sync` | 已安装 Skill 版本锁 |
 | `~/.evotown/skills/` | `sync` | Skill 安装目录 |
 | `~/.config/evotown/policies-cache.json` | `policy pull` | 本地 policy 缓存 |
+
+个人与团队边界见 [product-boundary.md](product-boundary.md) / [zh-CN/product-boundary.md](zh-CN/product-boundary.md)。
 
 `setup --url` 接受 Evotown **根 URL**（如 `https://evotown.example.com`）或完整 gateway URL（`.../api/gateway/v1`）。Agent Doctor 会自动规范化并写入各 runtime 配置。
 

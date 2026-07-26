@@ -1,13 +1,14 @@
 use crate::adapters::util::home_join;
 use crate::presets::load_profiles;
-use crate::profile::read_company_profile;
+use crate::profile::{read_agent_profile, read_company_baseline, ProviderKind};
 
 use super::backends::{openclaw_default_agent_id, openclaw_defaults_workspace};
 use super::{WorkspaceCheck, WorkspaceCheckStatus, WorkspaceEntry};
 
 pub fn baseline_drift_checks(entry: &WorkspaceEntry) -> Vec<WorkspaceCheck> {
     let mut checks = Vec::new();
-    let company = match read_company_profile() {
+    // Team baseline only — never the personal provider overlay in profile.env.
+    let company = match read_company_baseline() {
         Ok(Some(profile)) => profile,
         _ => return checks,
     };
@@ -16,6 +17,24 @@ pub fn baseline_drift_checks(entry: &WorkspaceEntry) -> Vec<WorkspaceCheck> {
     };
     let expected_gateway = normalize_url(&expected_gateway);
     let expected_label = expected_gateway.clone();
+
+    // Personal mode intentionally points runtimes at a private provider (e.g. DeepSeek).
+    // Comparing that to the Evotown company baseline only creates noise on this page.
+    let personal_mode = read_agent_profile()
+        .ok()
+        .flatten()
+        .is_some_and(|p| p.kind == ProviderKind::Personal);
+    if personal_mode {
+        checks.push(WorkspaceCheck {
+            id: "workspace.baseline.mode.personal".into(),
+            title: "Personal mode — skip company gateway drift checks".into(),
+            status: WorkspaceCheckStatus::Pass,
+            detail: format!(
+                "active path differs from company baseline by design (company={expected_label})"
+            ),
+        });
+        return checks;
+    }
 
     if let Some(actual) = read_openclaw_gateway_url() {
         let actual = normalize_url(&actual);

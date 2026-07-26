@@ -504,12 +504,28 @@ pub fn workspace_doctor() -> Result<WorkspaceDoctorReport> {
     }
 
     if !workspace_paths_match(&entry.codex_home, &codex_home_from_env()) {
+        let actual = codex_home_from_env();
+        let detail = if std::env::var_os("CODEX_HOME").is_none() {
+            format!(
+                "This process has no CODEX_HOME (falls back to {}). \
+                 Launch Codex via Agents → Open (loads workspace env), \
+                 or: source active-workspace.env then run codex. \
+                 expected={}",
+                actual.display(),
+                entry.codex_home.display()
+            )
+        } else {
+            format!(
+                "expected={} actual={} — source active-workspace.env before launching Codex",
+                entry.codex_home.display(),
+                actual.display()
+            )
+        };
         checks.push(WorkspaceCheck {
             id: "workspace.codex.global_memory".to_string(),
             title: "Codex not using workspace CODEX_HOME".to_string(),
             status: WorkspaceCheckStatus::Warn,
-            detail: "Source ~/.config/agent-doctor/active-workspace.env before launching Codex to isolate memories."
-                .to_string(),
+            detail,
         });
     }
 
@@ -688,13 +704,19 @@ fn codex_runtime_status(entry: &WorkspaceEntry) -> RuntimeStatus {
     let expected = entry.codex_home.display().to_string();
     let actual = codex_home_from_env().display().to_string();
     let aligned = workspace_paths_match(&entry.codex_home, &codex_home_from_env());
+    let hint = if std::env::var_os("CODEX_HOME").is_none() {
+        "Desktop Check has no CODEX_HOME; use Agents → Open for Codex (or source active-workspace.env in the terminal)"
+            .into()
+    } else {
+        "Source active-workspace.env before running codex".into()
+    };
     RuntimeStatus {
         runtime_id: "codex",
         isolation_tier: "L2",
         expected,
         actual,
         aligned,
-        hint: "Source ~/.config/agent-doctor/active-workspace.env before running codex".into(),
+        hint,
     }
 }
 
@@ -731,15 +753,32 @@ pub(crate) fn write_active_env(name: &str, entry: &WorkspaceEntry) -> Result<Pat
         "# Usage: set -a && source \"{}\" && set +a",
         path.display()
     )?;
-    writeln!(file, "AGENT_DOCTOR_WORKSPACE={name}")?;
-    writeln!(file, "AGENT_DOCTOR_PROJECT_ROOT={}", entry.path.display())?;
-    writeln!(file, "HERMES_HOME={}", profile_home.display())?;
-    writeln!(file, "CODEX_HOME={}", entry.codex_home.display())?;
-    writeln!(file, "OPENCLAW_AGENT_ID={}", entry.openclaw_agent_id)?;
+    // Quote values: macOS config paths contain spaces (`Application Support`).
+    writeln!(file, "AGENT_DOCTOR_WORKSPACE={}", shell_quote_env(name))?;
+    writeln!(
+        file,
+        "AGENT_DOCTOR_PROJECT_ROOT={}",
+        shell_quote_env(&entry.path.display().to_string())
+    )?;
+    writeln!(
+        file,
+        "HERMES_HOME={}",
+        shell_quote_env(&profile_home.display().to_string())
+    )?;
+    writeln!(
+        file,
+        "CODEX_HOME={}",
+        shell_quote_env(&entry.codex_home.display().to_string())
+    )?;
+    writeln!(
+        file,
+        "OPENCLAW_AGENT_ID={}",
+        shell_quote_env(&entry.openclaw_agent_id)
+    )?;
     writeln!(
         file,
         "OPENCLAW_WORKSPACE={}",
-        entry.openclaw_workspace.display()
+        shell_quote_env(&entry.openclaw_workspace.display().to_string())
     )?;
 
     #[cfg(unix)]
@@ -749,6 +788,20 @@ pub(crate) fn write_active_env(name: &str, entry: &WorkspaceEntry) -> Result<Pat
     }
 
     Ok(path)
+}
+
+/// POSIX-safe single-quoted value for `KEY=value` lines in sourced env files.
+fn shell_quote_env(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.' | ':' | '@' | '+'))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn unique_workspace_name(base: &str, workspaces: &BTreeMap<String, WorkspaceEntry>) -> String {
@@ -781,5 +834,17 @@ mod tests {
             },
         );
         assert_eq!(unique_workspace_name("foo", &workspaces), "foo-2");
+    }
+
+    #[test]
+    fn shell_quote_env_handles_application_support_spaces() {
+        assert_eq!(shell_quote_env("agent-doctor"), "agent-doctor");
+        assert_eq!(
+            shell_quote_env(
+                "/Users/airlu/Library/Application Support/agent-doctor/workspaces/x/codex-home"
+            ),
+            "'/Users/airlu/Library/Application Support/agent-doctor/workspaces/x/codex-home'"
+        );
+        assert_eq!(shell_quote_env("a'b"), "'a'\\''b'");
     }
 }

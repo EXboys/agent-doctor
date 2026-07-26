@@ -1,10 +1,14 @@
 # Agent Doctor
 
-**Diagnose, repair, and onboard local AI agent runtimes on one machine.**
+**Diagnose, repair, and isolate local AI agent runtimes on one machine.**
 
 Agent Doctor discovers OpenClaw, Hermes, Claude Code, Codex, and related runtimes, runs redacted probes to find misconfiguration, and repairs them with backups, typed actions, and audit reports.
 
-Use it standalone on a developer laptop, or connect an enterprise control plane when your team needs shared gateways, skills, and policy.
+**Personal (default):** CLI + light desktop — when agents break, diagnose and fix them; keep projects from cross-contaminating. Wire your own endpoint if needed; this is ops repair, not a provider marketplace.
+
+**Team (optional):** same client + [Evotown](https://github.com/EXboys/evotown) for compliance baseline, skill sync, policy, dispatch, and audit.
+
+Product boundary: [docs/product-boundary.md](docs/product-boundary.md) · 中文：[docs/zh-CN/product-boundary.md](docs/zh-CN/product-boundary.md)
 
 ```bash
 agent-doctor doctor                              # Diagnose: installed runtimes, config paths, gateway wiring
@@ -19,9 +23,9 @@ agent-doctor connect                             # Stay online on Evotown (WS pr
 
 ---
 
-## Enterprise (optional)
+## Team / Evotown (optional)
 
-With **Evotown** (first-party control plane):
+With **Evotown** (first-party control plane) — the **B** increment on top of doctor / repair / workspace:
 
 ```bash
 agent-doctor setup --url https://your-evotown.example.com --key evk_...
@@ -30,7 +34,7 @@ agent-doctor policy pull   # Cache policies locally
 agent-doctor connect       # WebSocket online + inventory (needs evi_ after register)
 ```
 
-See [docs/enterprise.md](docs/enterprise.md).
+See [docs/enterprise.md](docs/enterprise.md) and [docs/product-boundary.md](docs/product-boundary.md).
 
 ---
 
@@ -61,11 +65,10 @@ Each runtime has its own install path, gateway settings, skills manifest, policy
 
 - What is installed on this laptop?
 - Where do configs live?
-- Are runtimes pointed at the approved company gateway?
-- Which configs drifted away from the team profile?
-- Why did this employee's agent stop working?
-- What needs to be backed up before repair or policy remediation?
-- Can we safely restore the runtime to a compliant team baseline?
+- Why did this agent stop working, and can we repair it safely?
+- Are projects isolated (workspace), or is memory/MCP bleeding across them?
+- *(Team)* Are runtimes pointed at the approved company gateway / baseline?
+- *(Team)* What drifted from the team profile, and can we restore compliance?
 
 ```text
   Your laptop
@@ -86,24 +89,29 @@ Each runtime has its own install path, gateway settings, skills manifest, policy
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | **[ClawPanel](https://github.com/qingchencloud/clawpanel)** | Rich GUI for OpenClaw + Hermes                                                |
 | **[ClawPal](https://github.com/lay2dev/clawpal)**           | OpenClaw desktop config companion                                             |
-| **Agent Doctor**                                             | **Team runtime diagnosis, backup, repair, policy checks, and compliance reporting** |
+| **Agent Doctor**                                             | **Local runtime diagnosis, backup, repair, and project isolation; optional team compliance via Evotown** |
 
 
 ---
 
 ## 中文
 
-**Agent Doctor** 在本机 **诊断、修复、就位** AI Agent Runtime（OpenClaw、Hermes、Claude Code、Codex 等）。
+**Agent Doctor** 在本机 **诊断、修复、隔离** AI Agent Runtime（OpenClaw、Hermes、Claude Code、Codex 等）。
+
+- **个人（C）**：坏了能查、能修、项目不串味；可选个人 endpoint 接线（运维语义，非代理管家）。
+- **团队（B）**：同客户端 + Evotown — 合规基线、同步、策略、派活、审计。
+
+产品边界：[docs/zh-CN/product-boundary.md](docs/zh-CN/product-boundary.md)。
 
 ```bash
 agent-doctor doctor                              # 诊断
 agent-doctor repair hermes                       # 修复预览（不写文件）
 agent-doctor repair hermes --apply               # 备份 + Hermes 规则修复 + 复检
 agent-doctor repair hermes --rollback            # 从备份恢复
-agent-doctor setup --url ... --key ...           # 就位（规划中）
+agent-doctor setup --url ... --key ...           # 团队就位（Evotown）
 ```
 
-企业可选：`sync`、`policy pull` — 见 [docs/enterprise.md](docs/enterprise.md)。完整中文说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)。
+团队可选：`sync`、`policy pull`、`connect` — 见 [docs/enterprise.md](docs/enterprise.md)。完整中文说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)。
 
 ---
 

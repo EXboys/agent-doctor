@@ -48,16 +48,35 @@ impl RuntimeAdapter for OpenClawAdapter {
 
 /// Resolve the LLM base URL OpenClaw is configured to use.
 ///
-/// Prefer `models.providers.agent-doctor` (written by Agent Doctor). Fall back to
-/// any other provider `baseUrl`, then legacy invalid keys for migration reads.
+/// Prefer the provider named in `agents.defaults.model.primary` (`slot/model`),
+/// then Agent Doctor slots (`evotown` / `personal` / legacy `agent-doctor`),
+/// then any other provider `baseUrl`, then legacy invalid keys for migration reads.
 pub fn configured_base_url(value: &serde_json::Value) -> Option<String> {
-    const PROVIDER_ID: &str = "agent-doctor";
-    if let Some(url) = value
-        .pointer(&format!("/models/providers/{PROVIDER_ID}/baseUrl"))
+    use crate::setup::{OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT};
+
+    if let Some(primary) = value
+        .pointer("/agents/defaults/model/primary")
         .and_then(serde_json::Value::as_str)
-        .filter(|u| !u.trim().is_empty())
     {
-        return Some(url.to_string());
+        if let Some((slot, _)) = primary.split_once('/') {
+            if let Some(url) = value
+                .pointer(&format!("/models/providers/{slot}/baseUrl"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|u| !u.trim().is_empty())
+            {
+                return Some(url.to_string());
+            }
+        }
+    }
+
+    for slot in [OPENCLAW_TEAM_SLOT, OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID] {
+        if let Some(url) = value
+            .pointer(&format!("/models/providers/{slot}/baseUrl"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|u| !u.trim().is_empty())
+        {
+            return Some(url.to_string());
+        }
     }
 
     if let Some(providers) = value

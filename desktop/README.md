@@ -5,11 +5,13 @@
 ## Features (MVP)
 
 - System tray with **Show**, **Run doctor**, **Quit** (tooltip shows active workspace)
+- Diagnose / personal provider (with URL templates) / Evotown tabs
 - Workspace picker: list and switch registered project workspaces
-- Small window listing discovered runtimes and company profile status
-- Hermes model preset switching and API key status
-- Foundation for future repair reports and guided fixes
+- Hermes scene preset switching and API key status
+- Repair apply / rollback for supported runtimes
 - No separate business logic in the TypeScript UI layer
+
+See [docs/product-boundary.md](../docs/product-boundary.md) for personal vs team modes.
 
 ## Develop
 

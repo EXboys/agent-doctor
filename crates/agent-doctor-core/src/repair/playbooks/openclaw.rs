@@ -54,7 +54,7 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
                 id: "fix-openclaw-gateway-from-profile".to_string(),
                 title: "Apply company gateway to OpenClaw".to_string(),
                 description: if company_gateway {
-                    "Set models.providers.agent-doctor.baseUrl from profile.env.".to_string()
+                    "Set models.providers.evotown|personal.baseUrl from profile.env.".to_string()
                 } else {
                     "Run `agent-doctor setup --url ... --key ...` first.".to_string()
                 },
@@ -67,7 +67,7 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
                 id: "fix-openclaw-legacy-gateway-url".to_string(),
                 title: "Migrate OpenClaw LLM URL to models.providers".to_string(),
                 description: "Remove invalid gateway.url / evotown.url and write \
-                    models.providers.agent-doctor.baseUrl."
+                    models.providers.evotown|personal.baseUrl."
                     .to_string(),
                 auto_fixable: true,
             });

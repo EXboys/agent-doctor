@@ -70,6 +70,9 @@
 - [x] `workspace show` / `workspace matrix` — details and capability matrix
 - [x] Desktop workspace doctor summary
 - [x] Team baseline drift detection for gateway (company profile vs Hermes/OpenClaw)
+- [x] C/B product boundary docs + durable `company-profile.env` (personal overlay does not pollute team baseline)
+- [x] Desktop personal provider templates (URL/model fill-ins) + durable company baseline split
+- [x] Exclusive personal/team mode switch (LLM path: personal provider XOR Evotown gateway)
 - [x] OpenClaw default agent routing (`default: true`, `agents.defaults.workspace`)
 - [x] Claude global MCP scaffold + migration hint on `workspace fix`
 - [x] Codex CODEX_HOME isolation marker + doctor guard

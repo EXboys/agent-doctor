@@ -20,7 +20,7 @@ use crate::setup::{
     clear_codex_placeholder_auth, evotown_agent_env_path, write_company_profile_with_gateway,
     COMPANY_API_KEY_ENV,
 };
-use crate::workspace::load_workspaces;
+use crate::workspace::{active_env_path, load_workspaces};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenSessionOptions {
@@ -163,7 +163,7 @@ fn open_in_terminal(
     })
 }
 
-/// Prefix a shell command so Evotown / company API keys are available to the CLI.
+/// Prefix a shell command so Evotown / company API keys and workspace env are available.
 /// Prefer sourcing env files (never inline secrets into the displayed command).
 fn wrap_with_company_env(command: &str) -> String {
     let _ = ensure_profile_env_from_evotown();
@@ -171,6 +171,12 @@ fn wrap_with_company_env(command: &str) -> String {
     #[cfg(not(windows))]
     {
         let mut parts: Vec<String> = Vec::new();
+        // Workspace first so CODEX_HOME / HERMES_HOME isolation applies.
+        if let Ok(path) = active_env_path() {
+            if path.exists() {
+                parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
+            }
+        }
         if let Some(path) = agent_profile_path().filter(|path| path.exists()) {
             parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
         }
@@ -180,8 +186,9 @@ fn wrap_with_company_env(command: &str) -> String {
         if parts.is_empty() {
             return command.to_string();
         }
+        // Company Codex slot reads EVOTOWN_API_KEY; keep COMPANY alias for other CLIs.
         format!(
-            "set -a && {} && set +a && export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{OPENAI_API_KEY:-$EVOTOWN_API_KEY}}}}\" && {command}",
+            "set -a && {} && set +a && export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{EVOTOWN_API_KEY:-$OPENAI_API_KEY}}}}\" && {command}",
             parts.join(" && ")
         )
     }
