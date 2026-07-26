@@ -172,6 +172,44 @@ interface SyncReport {
   failed: number;
 }
 
+interface SkillAgentUsage {
+  runtime: string;
+  scope: string;
+  path: string;
+  mounted: boolean;
+}
+
+interface SkillInventoryItem {
+  skill_id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  installed_path: string;
+  agents: SkillAgentUsage[];
+  call_count: number | null;
+  success_count: number | null;
+  success_rate: number | null;
+  first_success_rate: number | null;
+  download_count: number | null;
+  metrics_source: string;
+}
+
+interface SkillsInventoryReport {
+  skills_dir: string;
+  lock_path: string;
+  bundle_id: string | null;
+  skills: SkillInventoryItem[];
+  remote_stats_ok: boolean;
+  remote_stats_error: string | null;
+}
+
+interface SkillMountReport {
+  mounted: number;
+  unmounted: number;
+  skipped: number;
+  failed: number;
+}
+
 interface PersonalProviderStatus {
   configured: boolean;
   gateway_url: string | null;
@@ -228,6 +266,13 @@ const evotownKeyEl = document.querySelector<HTMLInputElement>("#evotown-key")!;
 const evotownConnectEl = document.querySelector<HTMLButtonElement>("#evotown-connect")!;
 const evotownResyncEl = document.querySelector<HTMLButtonElement>("#evotown-resync")!;
 const evotownHintEl = document.querySelector<HTMLElement>("#evotown-hint")!;
+const skillsInventoryEl = document.querySelector<HTMLElement>("#skills-inventory")!;
+const skillsRefreshEl = document.querySelector<HTMLButtonElement>("#skills-refresh")!;
+const skillsMountAllEl = document.querySelector<HTMLButtonElement>("#skills-mount-all")!;
+const skillsDirEl = document.querySelector<HTMLElement>("#skills-dir")!;
+const skillsListEl = document.querySelector<HTMLUListElement>("#skills-list")!;
+const skillsEmptyEl = document.querySelector<HTMLElement>("#skills-empty")!;
+const skillsFootnoteEl = document.querySelector<HTMLElement>("#skills-footnote")!;
 
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -1769,10 +1814,216 @@ function renderEvotownStatus(status: EvotownStatus) {
     });
     evotownUrlEl.value = status.base_url;
     evotownResyncEl.hidden = false;
+    void loadSkillsInventory();
   } else {
     evotownStatusEl.textContent = t("evotown.notConfigured");
     evotownConnectedMetaEl.textContent = "";
     evotownResyncEl.hidden = true;
+    skillsInventoryEl.hidden = true;
+  }
+}
+
+function formatRate(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return t("skills.na");
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatCount(value: number | null | undefined): string {
+  if (value == null) return t("skills.na");
+  return String(value);
+}
+
+const RUNTIME_LABELS: Record<string, string> = {
+  hermes: "Hermes",
+  openclaw: "OpenClaw",
+  "claude-code": "Claude",
+  codex: "Codex",
+};
+
+function renderSkillsInventory(report: SkillsInventoryReport) {
+  skillsInventoryEl.hidden = false;
+  skillsDirEl.textContent = t("skills.dir", { dir: report.skills_dir });
+  skillsFootnoteEl.textContent = t("skills.footnote");
+  skillsListEl.replaceChildren();
+  skillsEmptyEl.textContent = t("skills.empty");
+
+  const empty = report.skills.length === 0;
+  skillsEmptyEl.hidden = !empty;
+  if (empty) return;
+
+  for (const skill of report.skills) {
+    const li = document.createElement("li");
+    li.className = "skills-item";
+
+    const top = document.createElement("div");
+    top.className = "skills-item-top";
+    const name = document.createElement("div");
+    name.className = "skills-name";
+    name.textContent = skill.name || skill.skill_id;
+    const ver = document.createElement("div");
+    ver.className = "skills-ver";
+    ver.textContent =
+      skill.download_count != null
+        ? `v${skill.version} · ↓${skill.download_count}`
+        : `v${skill.version}`;
+    top.append(name, ver);
+
+    if (skill.description) {
+      const desc = document.createElement("p");
+      desc.className = "skills-desc";
+      desc.textContent = skill.description;
+      li.append(top, desc);
+    } else {
+      li.append(top);
+    }
+
+    const agents = document.createElement("div");
+    agents.className = "skills-agents";
+    if (skill.agents.length === 0) {
+      const none = document.createElement("span");
+      none.className = "skills-runtime";
+      none.textContent = t("skills.na");
+      agents.appendChild(none);
+    } else {
+      for (const agent of skill.agents) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = agent.mounted ? "skills-runtime is-on" : "skills-runtime";
+        const runtimeLabel = RUNTIME_LABELS[agent.runtime] ?? agent.runtime;
+        chip.title = agent.mounted
+          ? `${t("skills.unmountRuntime", { runtime: runtimeLabel })}\n${agent.path}`
+          : `${t("skills.mountRuntime", { runtime: runtimeLabel })}\n${agent.path}`;
+        const dot = document.createElement("i");
+        dot.className = "skills-runtime-dot";
+        const label = document.createElement("span");
+        label.textContent = runtimeLabel;
+        chip.append(dot, label);
+        chip.addEventListener("click", () => {
+          void toggleSkillRuntimeMount(chip, skill.skill_id, agent.runtime, agent.mounted);
+        });
+        agents.appendChild(chip);
+      }
+    }
+
+    const metrics = document.createElement("div");
+    metrics.className = "skills-metrics";
+    const metricDefs: Array<[string, string]> = [
+      [t("skills.colCalls"), formatCount(skill.call_count)],
+      [t("skills.colFirstOk"), formatRate(skill.first_success_rate)],
+      [t("skills.colSuccess"), formatRate(skill.success_rate)],
+    ];
+    for (const [label, value] of metricDefs) {
+      const cell = document.createElement("div");
+      cell.className = "skills-metric";
+      const span = document.createElement("span");
+      span.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      cell.append(span, strong);
+      metrics.appendChild(cell);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "skills-item-actions";
+    const needsMount = skill.agents.some((a) => !a.mounted);
+    if (needsMount) {
+      const mountBtn = document.createElement("button");
+      mountBtn.type = "button";
+      mountBtn.className = "btn-secondary btn-compact";
+      mountBtn.textContent = t("skills.mountOne");
+      mountBtn.title = t("skills.mountAll");
+      mountBtn.addEventListener("click", () => {
+        void mountSyncedSkills([skill.skill_id]);
+      });
+      actions.appendChild(mountBtn);
+    }
+
+    li.append(agents, metrics, actions);
+    skillsListEl.appendChild(li);
+  }
+}
+
+async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
+  try {
+    const report = await invoke<SkillsInventoryReport>("list_skills_inventory_command", {
+      remoteStats: opts?.remoteStats ?? true,
+    });
+    renderSkillsInventory(report);
+  } catch (error) {
+    skillsInventoryEl.hidden = false;
+    skillsListEl.replaceChildren();
+    skillsEmptyEl.hidden = false;
+    skillsEmptyEl.textContent = t("skills.loadFailed", { error: String(error) });
+    skillsDirEl.textContent = "";
+    skillsFootnoteEl.textContent = "";
+  }
+}
+
+function setSkillsBusy(busy: boolean) {
+  skillsInventoryEl.classList.toggle("is-busy", busy);
+  skillsMountAllEl.disabled = busy;
+  skillsRefreshEl.disabled = busy;
+}
+
+async function toggleSkillRuntimeMount(
+  chip: HTMLButtonElement,
+  skillId: string,
+  runtime: string,
+  wasMounted: boolean,
+) {
+  if (chip.classList.contains("is-busy")) return;
+  chip.classList.add("is-busy");
+  chip.classList.toggle("is-on", !wasMounted);
+  skillsFootnoteEl.textContent = wasMounted ? t("skills.unmounting") : t("skills.mounting");
+  try {
+    const report = wasMounted
+      ? await invoke<SkillMountReport>("unmount_synced_skills_command", {
+          skillIds: [skillId],
+          runtimes: [runtime],
+        })
+      : await invoke<SkillMountReport>("mount_synced_skills_command", {
+          skillIds: [skillId],
+          runtimes: [runtime],
+        });
+    skillsFootnoteEl.textContent = wasMounted
+      ? t("skills.unmountOk", {
+          unmounted: String(report.unmounted),
+          skipped: String(report.skipped),
+          failed: String(report.failed),
+        })
+      : t("skills.mountOk", {
+          mounted: String(report.mounted),
+          skipped: String(report.skipped),
+          failed: String(report.failed),
+        });
+    // Fast local refresh (skip remote stats) so the click never feels stuck.
+    await loadSkillsInventory({ remoteStats: false });
+  } catch (error) {
+    chip.classList.toggle("is-on", wasMounted);
+    skillsFootnoteEl.textContent = t("skills.mountFailed", { error: String(error) });
+  } finally {
+    chip.classList.remove("is-busy");
+  }
+}
+
+async function mountSyncedSkills(skillIds?: string[], runtimes?: string[]) {
+  setSkillsBusy(true);
+  skillsFootnoteEl.textContent = t("skills.mounting");
+  try {
+    const report = await invoke<SkillMountReport>("mount_synced_skills_command", {
+      skillIds: skillIds ?? null,
+      runtimes: runtimes ?? null,
+    });
+    skillsFootnoteEl.textContent = t("skills.mountOk", {
+      mounted: String(report.mounted),
+      skipped: String(report.skipped),
+      failed: String(report.failed),
+    });
+    await loadSkillsInventory({ remoteStats: false });
+  } catch (error) {
+    skillsFootnoteEl.textContent = t("skills.mountFailed", { error: String(error) });
+  } finally {
+    setSkillsBusy(false);
   }
 }
 
@@ -1820,6 +2071,7 @@ async function resyncEvotownSkills() {
       skipped: String(report.skipped),
       failed: String(report.failed),
     });
+    await loadSkillsInventory();
   } catch (error) {
     evotownHintEl.textContent = t("evotown.resyncFailed", { error: String(error) });
   } finally {
@@ -2923,6 +3175,14 @@ evotownFormEl.addEventListener("submit", (event) => {
 
 evotownResyncEl.addEventListener("click", () => {
   void resyncEvotownSkills();
+});
+
+skillsRefreshEl.addEventListener("click", () => {
+  void loadSkillsInventory();
+});
+
+skillsMountAllEl.addEventListener("click", () => {
+  void mountSyncedSkills();
 });
 
 personalAddEl.addEventListener("click", () => {

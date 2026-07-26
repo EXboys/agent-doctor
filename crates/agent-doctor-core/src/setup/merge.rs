@@ -343,7 +343,9 @@ fn restart_openclaw_via_launchctl() -> AnyhowResult<String> {
     if output.status.success() {
         // Brief settle so subsequent probe is less flaky.
         thread::sleep(Duration::from_millis(200));
-        return Ok(format!("restarted OpenClaw gateway via launchctl ({label})"));
+        return Ok(format!(
+            "restarted OpenClaw gateway via launchctl ({label})"
+        ));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     Err(anyhow::anyhow!(
@@ -366,9 +368,15 @@ fn run_command_with_timeout(
         Ok(Ok(output)) => Ok(output),
         Ok(Err(err)) => Err(err).context("failed waiting for process"),
         Err(_) => {
-            let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).output();
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .output();
             thread::sleep(Duration::from_millis(200));
-            let _ = Command::new("kill").arg("-KILL").arg(pid.to_string()).output();
+            let _ = Command::new("kill")
+                .arg("-KILL")
+                .arg(pid.to_string())
+                .output();
             anyhow::bail!("timed out after {}s", timeout.as_secs());
         }
     }
@@ -605,10 +613,7 @@ fn upsert_hermes_slot(slot: &str, gateway_url: &str, model: &str) -> AnyhowResul
         .as_mapping_mut()
         .context("Hermes slots.slots must be a mapping")?;
     let mut entry = Mapping::new();
-    entry.insert(
-        YamlValue::from("base_url"),
-        YamlValue::from(gateway_url),
-    );
+    entry.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
     entry.insert(YamlValue::from("default"), YamlValue::from(model));
     slots_map.insert(YamlValue::from(slot), YamlValue::Mapping(entry));
     fs::write(&path, serde_yaml::to_string(&root)?)?;

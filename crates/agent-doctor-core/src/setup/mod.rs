@@ -13,11 +13,6 @@ pub use mode::{
     load_mode_status, switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport,
     MODE_PERSONAL, MODE_TEAM, MODE_UNSET,
 };
-pub use pipeline::{
-    apply_mode_switch, effector_label, project_bundle, probe_endpoint_bundle, runtime_strategies,
-    strategy_for, BundleProbeReport, EffectorKind, EndpointBundle, ModeSwitchTarget,
-    RuntimeStrategy, WriteSemantics,
-};
 pub use personal::{
     activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
     list_personal_providers, load_personal_provider_status, normalize_personal_gateway_url,
@@ -26,6 +21,11 @@ pub use personal::{
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
     PROTOCOL_OPENAI,
+};
+pub use pipeline::{
+    apply_mode_switch, effector_label, probe_endpoint_bundle, project_bundle, runtime_strategies,
+    strategy_for, BundleProbeReport, EffectorKind, EndpointBundle, ModeSwitchTarget,
+    RuntimeStrategy, WriteSemantics,
 };
 
 use std::fs;

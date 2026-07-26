@@ -2,24 +2,27 @@ use agent_doctor_core::{
     activate_personal_provider, apply_profile_model, build_repair_preview_from_bundle,
     delete_personal_provider, evotown_status, execute_evotown_onboarding,
     execute_install_with_progress, execute_personal_provider_setup, execute_repair, execute_sync,
-    init_workspace, list_personal_providers, list_runtime_backup_ids, load_evotown_config,
-    load_mode_status, load_personal_provider_status, load_profiles, load_workspaces,
+    init_workspace, list_personal_providers, list_runtime_backup_ids,
+    list_skills_inventory_with_options, load_evotown_config, load_mode_status,
+    load_personal_provider_status, load_profiles, load_workspaces, mount_synced_skills,
     needs_binary_install, open_interactive_session, probe_runtime, restore_runtime_backup,
     run_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
-    switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider, use_profile,
-    use_workspace_with_options, verify_personal_provider_with_protocol, workspace_doctor,
-    workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
-    HermesProfilePreset, HermesSettings, InstallOptions, InstallProgressEvent, InstallReport,
-    InitWorkspaceReport, ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport,
-    OpenSessionOptions, OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
-    ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
-    RuntimeProbeReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions, UseProfileReport,
-    UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions,
-    WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills, upsert_personal_provider,
+    use_profile, use_workspace_with_options, verify_personal_provider_with_protocol,
+    workspace_doctor, workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus,
+    HermesAdapter, HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions,
+    InstallProgressEvent, InstallReport, ModeStatus, ModeSwitchReport, OnboardingOptions,
+    OnboardingReport, OpenSessionOptions, OpenSessionReport, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
+    PersonalProvidersDocument, ProbeStatus, ProfilesDocument, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions,
+    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
+    UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
+    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
+    WorkspacesDocument,
 };
-use std::path::PathBuf;
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -243,6 +246,42 @@ fn run_sync_command() -> Result<SyncReport, String> {
             bundle_id: None,
         },
     )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_skills_inventory_command(
+    remote_stats: Option<bool>,
+) -> Result<SkillsInventoryReport, String> {
+    list_skills_inventory_with_options(&SkillsInventoryOptions {
+        remote_stats: remote_stats.unwrap_or(true),
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn mount_synced_skills_command(
+    skill_ids: Option<Vec<String>>,
+    runtimes: Option<Vec<String>>,
+) -> Result<SkillMountReport, String> {
+    mount_synced_skills(&SkillMountOptions {
+        skill_ids: skill_ids.unwrap_or_default(),
+        runtimes: runtimes.unwrap_or_default(),
+        include_active_workspace: true,
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn unmount_synced_skills_command(
+    skill_ids: Option<Vec<String>>,
+    runtimes: Option<Vec<String>>,
+) -> Result<SkillMountReport, String> {
+    unmount_synced_skills(&SkillMountOptions {
+        skill_ids: skill_ids.unwrap_or_default(),
+        runtimes: runtimes.unwrap_or_default(),
+        include_active_workspace: true,
+    })
     .map_err(|error| error.to_string())
 }
 
@@ -763,6 +802,9 @@ pub fn run() {
             get_evotown_status_command,
             run_evotown_onboarding_command,
             run_sync_command,
+            list_skills_inventory_command,
+            mount_synced_skills_command,
+            unmount_synced_skills_command,
             get_personal_provider_status_command,
             list_personal_providers_command,
             upsert_personal_provider_command,
