@@ -39,7 +39,9 @@ Evotown 是控制面；Agent Doctor 仍是本机执行与修复工具。详见 [
 | **个人版** | 只走个人 Provider（endpoint + key） |
 | **团队版** | 只走 Evotown 中转（gateway + `evk_`） |
 
-切换会重写 runtime 配置。控制面文件（`evotown.agent.env`、个人 Provider 列表）保留，便于来回切。桌面 Provider 页顶部显示当前模式。
+切换统一走 **`apply_mode_switch` 管道**：解析凭证 → 写 overlay → 按策略表投影各 runtime → 生效动作（如 OpenClaw gateway restart）→ LLM 探活。控制面文件（`evotown.agent.env`、个人 Provider 列表）保留，便于来回切。桌面 Provider 页顶部显示当前模式。
+
+团队侧默认模型使用可路由 id（禁止裸 `default`）。OpenClaw 使用累加槽位（`models.providers.evotown` + `personal`）；模式切换只改 `agents.defaults.model.primary` 并重载当前 key。见 issue [#46](https://github.com/EXboys/agent-doctor/issues/46)。
 
 ## Profile 状态（勿串味）
 

@@ -1,11 +1,20 @@
 pub(crate) mod merge;
 mod mode;
 mod personal;
+mod pipeline;
 
-pub use merge::clear_codex_placeholder_auth;
+pub use merge::{
+    clear_codex_placeholder_auth, apply_openclaw_slot, COMPANY_DEFAULT_MODEL, OPENCLAW_PERSONAL_SLOT,
+    OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
+};
 pub use mode::{
     load_mode_status, switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport,
     MODE_PERSONAL, MODE_TEAM, MODE_UNSET,
+};
+pub use pipeline::{
+    apply_mode_switch, effector_label, project_bundle, probe_endpoint_bundle, runtime_strategies,
+    strategy_for, BundleProbeReport, EffectorKind, EndpointBundle, ModeSwitchTarget,
+    RuntimeStrategy, WriteSemantics,
 };
 pub use personal::{
     activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
@@ -25,7 +34,6 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::profile::{agent_profile_path, write_company_baseline, PROVIDER_KIND_COMPANY};
-use crate::runtime::all_adapters;
 
 pub use crate::profile::{
     COMPANY_API_KEY_ENV, GATEWAY_URL_ENV, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
@@ -46,7 +54,7 @@ pub struct SetupOptions {
     pub hermes_provider: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuntimeSetupResult {
     pub runtime_id: String,
     pub display_name: String,
@@ -54,6 +62,40 @@ pub struct RuntimeSetupResult {
     pub config_path: Option<String>,
     pub backup_path: Option<String>,
     pub message: String,
+    /// `none` | `restart_gateway` | `manual_restart` (from runtime strategy table).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effector: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effector_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effector_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_detail: Option<String>,
+}
+
+impl RuntimeSetupResult {
+    pub fn basic(
+        runtime_id: impl Into<String>,
+        display_name: impl Into<String>,
+        applied: bool,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            runtime_id: runtime_id.into(),
+            display_name: display_name.into(),
+            applied,
+            config_path: None,
+            backup_path: None,
+            message: message.into(),
+            effector: None,
+            effector_ok: None,
+            effector_detail: None,
+            probe_ok: None,
+            probe_detail: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,27 +122,21 @@ pub fn execute_setup(options: &SetupOptions) -> Result<SetupReport> {
             .ok()
             .map(|path| path.display().to_string());
 
-    let mut runtimes = Vec::new();
-    for adapter in all_adapters() {
-        let result = match adapter.id() {
-            "openclaw" => merge::apply_openclaw(&gateway_url, api_key, None),
-            "hermes" => merge::apply_hermes(&gateway_url, api_key, &options.hermes_provider, None),
-            "claude-code" => merge::apply_claude_code(
-                &anthropic_gateway_url_from_evotown_base(&evotown_base),
-                api_key,
-            ),
-            "codex" => merge::apply_codex(&gateway_url, api_key, None),
-            other => Ok(RuntimeSetupResult {
-                runtime_id: other.to_string(),
-                display_name: adapter.display_name().to_string(),
-                applied: false,
-                config_path: None,
-                backup_path: None,
-                message: "no company setup merge for this runtime yet".to_string(),
-            }),
-        }?;
-        runtimes.push(result);
-    }
+    // Prefer the unified projector so company default model / effectors stay consistent.
+    let bundle = pipeline::EndpointBundle {
+        mode: MODE_TEAM.to_string(),
+        label: "Evotown".to_string(),
+        gateway_url: gateway_url.clone(),
+        api_key: api_key.to_string(),
+        model: merge::COMPANY_DEFAULT_MODEL.to_string(),
+        protocol: personal::PROTOCOL_OPENAI.to_string(),
+        source_id: "team:evotown".to_string(),
+        hermes_provider: options.hermes_provider.clone(),
+        anthropic_gateway_url: Some(anthropic_gateway_url_from_evotown_base(&evotown_base)),
+        personal_provider_id: None,
+        personal_provider_name: None,
+    };
+    let runtimes = pipeline::project_bundle(&bundle)?;
 
     Ok(SetupReport {
         profile_env_path: profile_path.display().to_string(),

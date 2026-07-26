@@ -228,45 +228,37 @@ pub fn delete_personal_provider(id: &str) -> Result<PersonalProvidersDocument> {
 }
 
 pub fn activate_personal_provider(id: &str) -> Result<PersonalProviderSetupReport> {
+    let switch = crate::setup::pipeline::apply_mode_switch(
+        crate::setup::pipeline::ModeSwitchTarget::Personal {
+            provider_id: Some(id.to_string()),
+        },
+    )?;
+    switch.personal.ok_or_else(|| {
+        anyhow::anyhow!("personal mode switch did not return a personal setup report")
+    })
+}
+
+/// Mark which personal provider is active without projecting runtimes.
+pub(crate) fn set_active_personal_provider_id(id: &str) -> Result<()> {
+    let path = personal_providers_path().context("could not resolve config directory")?;
+    let mut store = load_store(&path)?;
+    if !store.providers.iter().any(|p| p.id == id) {
+        bail!("provider not found: {id}");
+    }
+    store.active_id = Some(id.to_string());
+    save_store(&path, &store)
+}
+
+pub(crate) fn load_personal_provider_entry(id: &str) -> Result<PersonalProviderEntry> {
     let path = personal_providers_path().context("could not resolve config directory")?;
     let mut store = load_store(&path)?;
     migrate_from_profile_if_empty(&mut store, &path)?;
-
-    let entry = store
+    store
         .providers
         .iter()
         .find(|p| p.id == id)
         .cloned()
-        .with_context(|| format!("provider not found: {id}"))?;
-
-    let report = execute_personal_provider_setup(&PersonalProviderOptions {
-        url: entry.url.clone(),
-        api_key: entry.api_key.clone(),
-        model: entry.model.clone(),
-        protocol: entry.protocol.clone(),
-    })?;
-
-    // Re-write profile with provider id/name markers.
-    if let Some(profile_path) = agent_profile_path() {
-        write_personal_profile(
-            &profile_path,
-            &report.gateway_url,
-            &entry.api_key,
-            &entry.model,
-            &entry.protocol,
-            Some(&entry.id),
-            Some(&entry.name),
-        )?;
-    }
-
-    store.active_id = Some(entry.id.clone());
-    save_store(&path, &store)?;
-
-    Ok(PersonalProviderSetupReport {
-        provider_id: Some(entry.id),
-        provider_name: Some(entry.name),
-        ..report
-    })
+        .with_context(|| format!("provider not found: {id}"))
 }
 
 pub fn load_personal_provider_status() -> Result<PersonalProviderStatus> {
@@ -478,10 +470,9 @@ pub fn execute_personal_provider_setup(
                 runtime_id: "claude-code".to_string(),
                 display_name: "Claude Code".to_string(),
                 applied: false,
-                config_path: None,
-                backup_path: None,
                 message: "skipped — this provider uses OpenAI protocol; Claude Code needs Anthropic/Claude protocol"
                     .to_string(),
+                ..Default::default()
             }),
             (PROTOCOL_ANTHROPIC, "claude-code") => {
                 merge::apply_claude_code(&gateway_url, api_key)
@@ -490,19 +481,17 @@ pub fn execute_personal_provider_setup(
                 runtime_id: other.to_string(),
                 display_name: adapter.display_name().to_string(),
                 applied: false,
-                config_path: None,
-                backup_path: None,
                 message: format!(
                     "skipped — this provider uses Claude/Anthropic protocol; {other} needs OpenAI-compatible API"
                 ),
+                ..Default::default()
             }),
             (_, other) => Ok(RuntimeSetupResult {
                 runtime_id: other.to_string(),
                 display_name: adapter.display_name().to_string(),
                 applied: false,
-                config_path: None,
-                backup_path: None,
                 message: "no personal provider merge for this runtime yet".to_string(),
+                ..Default::default()
             }),
         }?;
         runtimes.push(result);
@@ -696,7 +685,7 @@ fn verify_anthropic_endpoint(
     }
 }
 
-fn write_personal_profile(
+pub(crate) fn write_personal_profile(
     path: &Path,
     gateway_url: &str,
     api_key: &str,

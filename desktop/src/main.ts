@@ -279,8 +279,39 @@ type ModeSwitchReport = {
   active_label: string | null;
   active_gateway_url: string | null;
   message: string;
-  runtimes: Array<{ runtime_id: string; applied: boolean }>;
+  model?: string | null;
+  source_id?: string | null;
+  probe_ok?: boolean | null;
+  probe_detail?: string | null;
+  warnings?: string[];
+  runtimes: Array<{
+    runtime_id: string;
+    applied: boolean;
+    effector?: string | null;
+    effector_ok?: boolean | null;
+    probe_ok?: boolean | null;
+  }>;
 };
+
+function formatModeSwitchHint(report: ModeSwitchReport): string {
+  const parts = [report.message];
+  if (report.probe_ok === false && report.probe_detail) {
+    parts.push(t("mode.probeFail", { detail: report.probe_detail }));
+  } else if (report.probe_ok === true) {
+    parts.push(t("mode.probeOk"));
+  }
+  const applied = report.runtimes.filter((r) => r.applied).length;
+  const needRestart = report.runtimes.filter(
+    (r) => r.applied && (r.effector === "restart_gateway" || r.effector === "manual_restart"),
+  ).length;
+  if (needRestart > 0) {
+    parts.push(t("mode.effectorHint", { count: String(needRestart), applied: String(applied) }));
+  }
+  if (report.warnings?.length) {
+    parts.push(t("mode.warnings", { count: String(report.warnings.length) }));
+  }
+  return parts.join(" ");
+}
 
 const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
 const modeHintEl = document.querySelector<HTMLElement>("#mode-hint")!;
@@ -522,7 +553,7 @@ async function enablePersonalMode() {
     await loadModeStatus();
     await loadPersonalProviderStatus();
     await refresh();
-    showModeHint(t("mode.switchOk", { message: report.message }));
+    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
@@ -546,7 +577,7 @@ async function enableTeamMode() {
     await loadModeStatus();
     await loadEvotownStatus();
     await refresh();
-    showModeHint(t("mode.switchOk", { message: report.message }));
+    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();

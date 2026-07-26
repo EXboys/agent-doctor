@@ -39,7 +39,9 @@ Evotown is the control plane (accounts, SkillHub, policy, gateway, dispatch, aud
 | **Personal** | Personal provider endpoint + key only |
 | **Team** | Evotown gateway + `evk_` only |
 
-Switching rewrites runtime configs. Control-plane files (`evotown.agent.env`, personal provider list) are kept so you can switch back. The desktop Provider page shows the active mode.
+Switching goes through a single **`apply_mode_switch` pipeline**: resolve credentials → write overlay → project each runtime (strategy table) → run effectors (e.g. OpenClaw gateway restart) → LLM probe. Control-plane files (`evotown.agent.env`, personal provider list) are kept so you can switch back. The desktop Provider page shows the active mode.
+
+Team OpenClaw/Codex/Hermes default model is a routable id (not bare `default`). OpenClaw uses additive slots (`models.providers.evotown` + `personal`); mode switch only flips `agents.defaults.model.primary` and reloads the active key. See issue [#46](https://github.com/EXboys/agent-doctor/issues/46).
 
 ## Profile state (do not mix)
 

@@ -11,8 +11,12 @@ use crate::adapters::util::home_join;
 use crate::adapters::HermesAdapter;
 use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult};
 
-/// Stable custom provider id written into `models.providers`.
+/// Legacy single-slot id (migrated away; removed when writing additive slots).
 pub const OPENCLAW_PROVIDER_ID: &str = "agent-doctor";
+/// Team / Evotown slot in OpenClaw `models.providers` (additive mode).
+pub const OPENCLAW_TEAM_SLOT: &str = "evotown";
+/// Personal slot in OpenClaw `models.providers` (additive mode).
+pub const OPENCLAW_PERSONAL_SLOT: &str = "personal";
 
 /// Default model id for company/Evotown wiring when none is specified.
 /// Prefer a gateway-routable id: bare `default` / `gpt-4o-*` often 502/503 upstream.
@@ -21,13 +25,25 @@ pub const COMPANY_DEFAULT_MODEL: &str = "deepseek-v4-flash";
 /// OpenClaw's `gateway` key is the local control-plane listener (port/mode/bind),
 /// not the LLM base URL. Custom/company endpoints belong under `models.providers`.
 ///
-/// Provider `apiKey` is an env ref to `OPENAI_API_KEY`. When `api_key` is non-empty,
-/// it is written to `~/.openclaw/.env` and the LaunchAgent `service-env` file so the
-/// running gateway does not keep a stale company/personal key.
+/// Additive slots: `evotown` + `personal` coexist; only `agents.defaults.model.primary`
+/// flips on mode switch. Provider `apiKey` is an env ref to `OPENAI_API_KEY`. When
+/// `api_key` is non-empty, it is synced to `~/.openclaw/.env` + LaunchAgent service-env,
+/// then the gateway is restarted so process env picks up the new key.
 pub fn apply_openclaw(
     gateway_url: &str,
     api_key: &str,
     model_id: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
+    apply_openclaw_slot(gateway_url, api_key, model_id, None)
+}
+
+/// Like [`apply_openclaw`], but targets an explicit provider slot (`evotown` / `personal`).
+/// `None` picks the slot from URL heuristics (Evotown gateway → team slot).
+pub fn apply_openclaw_slot(
+    gateway_url: &str,
+    api_key: &str,
+    model_id: Option<&str>,
+    provider_slot: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".openclaw/openclaw.json");
     let backup_path = backup_file(&path)?;
@@ -44,6 +60,12 @@ pub fn apply_openclaw(
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .unwrap_or(COMPANY_DEFAULT_MODEL);
+
+    let slot = provider_slot
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| infer_openclaw_slot(gateway_url).to_string());
 
     if let Some(obj) = root.as_object_mut() {
         // Strip legacy Agent Doctor keys that fail OpenClaw ≥2026.7 schema.
@@ -65,8 +87,11 @@ pub fn apply_openclaw(
             .as_object_mut()
             .context("OpenClaw models.providers must be an object")?;
 
+        // Drop legacy exclusive slot so UI/status shows additive ids only.
+        providers_obj.remove(OPENCLAW_PROVIDER_ID);
+
         providers_obj.insert(
-            OPENCLAW_PROVIDER_ID.to_string(),
+            slot.clone(),
             json!({
                 "baseUrl": gateway_url,
                 "api": "openai-completions",
@@ -95,7 +120,7 @@ pub fn apply_openclaw(
             .context("OpenClaw agents.defaults must be an object")?;
         defaults_obj.insert(
             "model".to_string(),
-            json!({ "primary": format!("{OPENCLAW_PROVIDER_ID}/{model}") }),
+            json!({ "primary": format!("{slot}/{model}") }),
         );
 
         let tools = obj.entry("tools").or_insert_with(|| json!({}));
@@ -109,7 +134,7 @@ pub fn apply_openclaw(
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
 
     let mut message = format!(
-        "set models.providers.{OPENCLAW_PROVIDER_ID} baseUrl={gateway_url} model={model}"
+        "set models.providers.{slot} baseUrl={gateway_url} model={model} (primary={slot}/{model}; additive)"
     );
     if !api_key.trim().is_empty() {
         sync_openclaw_openai_api_key(api_key.trim())?;
@@ -136,7 +161,37 @@ pub fn apply_openclaw(
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
         message,
+        ..Default::default()
     })
+}
+
+fn infer_openclaw_slot(gateway_url: &str) -> &'static str {
+    let lower = gateway_url.to_ascii_lowercase();
+    if lower.contains("/api/gateway/v1")
+        || lower.contains("skilllite.ai")
+        || lower.contains("evotown")
+    {
+        OPENCLAW_TEAM_SLOT
+    } else {
+        OPENCLAW_PERSONAL_SLOT
+    }
+}
+
+#[cfg(test)]
+mod openclaw_slot_tests {
+    use super::*;
+
+    #[test]
+    fn infer_slot_prefers_evotown_for_company_gateway() {
+        assert_eq!(
+            infer_openclaw_slot("https://www.skilllite.ai/api/gateway/v1"),
+            OPENCLAW_TEAM_SLOT
+        );
+        assert_eq!(
+            infer_openclaw_slot("https://api.deepseek.com/v1"),
+            OPENCLAW_PERSONAL_SLOT
+        );
+    }
 }
 
 /// Keep OpenClaw's env-ref `OPENAI_API_KEY` in sync with the active Agent Doctor key.
@@ -423,6 +478,7 @@ pub fn apply_hermes(
         message: format!(
             "set model.provider={provider_name}, base_url={gateway_url}, and updated ~/.hermes/.env"
         ),
+        ..Default::default()
     })
 }
 
@@ -462,6 +518,7 @@ pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<Runti
         message: format!(
             "set env.ANTHROPIC_BASE_URL to {gateway_url} (Anthropic Messages path) and API key"
         ),
+        ..Default::default()
     })
 }
 
@@ -538,6 +595,7 @@ pub fn apply_codex(
         message: format!(
             "set company gateway (wire_api=responses, model={model_id}); uses OPENAI_API_KEY from env"
         ),
+        ..Default::default()
     })
 }
 

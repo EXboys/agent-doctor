@@ -7,7 +7,7 @@
 //! (`evotown.agent.env`, `company-profile.env`, `personal-providers.json`) are kept
 //! so you can switch back without re-entering credentials.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::profile::{
@@ -15,12 +15,12 @@ use crate::profile::{
 };
 use crate::repair::mask_secret_value;
 use super::personal::{
-    activate_personal_provider, list_personal_providers, PersonalProviderSetupReport,
-    PersonalProvidersDocument,
+    list_personal_providers, PersonalProviderSetupReport, PersonalProvidersDocument,
 };
+use super::pipeline::{apply_mode_switch, ModeSwitchTarget};
 use super::{
-    evotown_agent_env_path, evotown_base_from_gateway, execute_setup, gateway_url_from_evotown_base,
-    RuntimeSetupResult, SetupOptions, SetupReport, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
+    evotown_agent_env_path, evotown_base_from_gateway, gateway_url_from_evotown_base,
+    RuntimeSetupResult, SetupReport, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
 };
 
 pub const MODE_PERSONAL: &str = "personal";
@@ -50,6 +50,16 @@ pub struct ModeSwitchReport {
     pub message: String,
     pub personal: Option<PersonalProviderSetupReport>,
     pub team_setup: Option<SetupReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 pub fn load_mode_status() -> Result<ModeStatus> {
@@ -145,64 +155,17 @@ pub fn load_mode_status() -> Result<ModeStatus> {
 ///
 /// `provider_id` selects which saved provider; `None` uses the last active personal provider.
 pub fn switch_to_personal_mode(provider_id: Option<&str>) -> Result<ModeSwitchReport> {
-    let doc = list_personal_providers()?;
-    if doc.providers.is_empty() {
-        bail!("no personal providers saved — add one under Personal first");
-    }
-    let id = provider_id
-        .map(str::to_string)
-        .or(doc.active_id.clone())
-        .or_else(|| doc.providers.first().map(|p| p.id.clone()))
-        .context("no personal provider id")?;
-
-    let personal = activate_personal_provider(&id)?;
-    let applied = personal.runtimes.iter().filter(|r| r.applied).count();
-
-    Ok(ModeSwitchReport {
-        mode: MODE_PERSONAL.to_string(),
-        active_label: personal.provider_name.clone(),
-        active_gateway_url: Some(personal.gateway_url.clone()),
-        runtimes: personal.runtimes.clone(),
-        message: format!(
-            "personal mode — {applied} runtime(s) wired to personal provider (Evotown gateway not used for LLM)"
-        ),
-        personal: Some(personal),
-        team_setup: None,
+    apply_mode_switch(ModeSwitchTarget::Personal {
+        provider_id: provider_id.map(str::to_string),
     })
 }
 
 /// Switch runtime wiring to Evotown / company gateway (exclusive).
 pub fn switch_to_team_mode() -> Result<ModeSwitchReport> {
-    let team = resolve_team_credentials().context(
-        "team mode not configured — connect Evotown first (URL + evk_ key)",
-    )?;
-
-    let gateway_url = gateway_url_from_evotown_base(&team.base_url);
-    let setup = execute_setup(&SetupOptions {
-        gateway_url: gateway_url.clone(),
-        api_key: team.api_key.clone(),
-        hermes_provider: "openai".to_string(),
-    })?;
-    let applied = setup.runtimes.iter().filter(|r| r.applied).count();
-
-    Ok(ModeSwitchReport {
-        mode: MODE_TEAM.to_string(),
-        active_label: Some("Evotown".to_string()),
-        active_gateway_url: Some(gateway_url),
-        runtimes: setup.runtimes.clone(),
-        message: format!(
-            "team mode — {applied} runtime(s) wired to Evotown gateway (personal provider not used for LLM)"
-        ),
-        personal: None,
-        team_setup: Some(setup),
-    })
+    apply_mode_switch(ModeSwitchTarget::Team)
 }
 
-struct TeamCredentials {
-    base_url: String,
-    api_key: String,
-}
-
+/// Team credentials for status checks (overlay readiness).
 fn resolve_team_credentials() -> Result<TeamCredentials> {
     // Prefer dedicated Evotown agent env (survives personal overlay).
     if let Some(path) = evotown_agent_env_path() {
@@ -243,6 +206,11 @@ fn resolve_team_credentials() -> Result<TeamCredentials> {
         .unwrap_or_else(|| evotown_base_from_gateway(&gateway));
 
     Ok(TeamCredentials { base_url, api_key })
+}
+
+struct TeamCredentials {
+    base_url: String,
+    api_key: String,
 }
 
 #[cfg(test)]
