@@ -486,6 +486,8 @@ function modeDisplayName(mode: string): string {
   return t("mode.unset");
 }
 
+let modeSwitchInFlight = false;
+
 function renderModeStatus(status: ModeStatus) {
   lastModeStatus = status;
   modeUsePersonalEl.classList.toggle("is-active", status.mode === "personal");
@@ -494,8 +496,9 @@ function renderModeStatus(status: ModeStatus) {
   modeUsePersonalEl.hidden = false;
   modeUseTeamEl.hidden = false;
   // Keep clickable so users can jump to the config tab even when not ready.
-  modeUsePersonalEl.disabled = false;
-  modeUseTeamEl.disabled = false;
+  // While a mode switch is in flight, keep both buttons disabled.
+  modeUsePersonalEl.disabled = modeSwitchInFlight;
+  modeUseTeamEl.disabled = modeSwitchInFlight;
   modeUsePersonalEl.classList.toggle("is-unavailable", !status.personal_ready);
   modeUseTeamEl.classList.toggle("is-unavailable", !status.team_ready);
   modeUsePersonalEl.title = status.personal_ready
@@ -534,7 +537,14 @@ function showModeHint(text: string) {
   modeHintEl.textContent = text;
 }
 
+function setModeSwitchBusy(busy: boolean) {
+  modeSwitchInFlight = busy;
+  modeUsePersonalEl.disabled = busy;
+  modeUseTeamEl.disabled = busy;
+}
+
 async function enablePersonalMode() {
+  if (modeSwitchInFlight) return;
   if (lastModeStatus?.mode === "personal") {
     syncProviderPanelToMode("personal");
     showModeHint(t("mode.alreadyPersonal"));
@@ -545,6 +555,7 @@ async function enablePersonalMode() {
     syncProviderPanelToMode("personal");
     return;
   }
+  setModeSwitchBusy(true);
   showModeHint(t("mode.switching"));
   try {
     const report = await invoke<ModeSwitchReport>("switch_to_personal_mode_command", {
@@ -557,10 +568,13 @@ async function enablePersonalMode() {
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
+  } finally {
+    setModeSwitchBusy(false);
   }
 }
 
 async function enableTeamMode() {
+  if (modeSwitchInFlight) return;
   if (lastModeStatus?.mode === "team") {
     syncProviderPanelToMode("team");
     showModeHint(t("mode.alreadyTeam"));
@@ -571,6 +585,7 @@ async function enableTeamMode() {
     syncProviderPanelToMode("team");
     return;
   }
+  setModeSwitchBusy(true);
   showModeHint(t("mode.switching"));
   try {
     const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command");
@@ -581,6 +596,8 @@ async function enableTeamMode() {
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
+  } finally {
+    setModeSwitchBusy(false);
   }
 }
 

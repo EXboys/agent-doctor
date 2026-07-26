@@ -14,7 +14,7 @@ use crate::runtime::all_adapters;
 use crate::setup::merge::{self, clear_codex_placeholder_auth, COMPANY_DEFAULT_MODEL};
 use crate::setup::personal::{
     load_personal_provider_entry, normalize_personal_gateway_url, normalize_protocol,
-    set_active_personal_provider_id, verify_personal_provider_with_protocol, write_personal_profile,
+    set_active_personal_provider_id, write_personal_profile,
     list_personal_providers, PersonalProviderSetupReport, PersonalProviderVerifyReport,
     PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
@@ -139,18 +139,10 @@ pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
         ModeSwitchTarget::Team => resolve_team_bundle()?,
     };
 
-    let mut verify_report = None;
-    if bundle.mode == MODE_PERSONAL {
-        let verify = verify_personal_provider_with_protocol(
-            &bundle.gateway_url,
-            &bundle.api_key,
-            &bundle.protocol,
-        )?;
-        if !verify.ok {
-            bail!("provider connectivity check failed: {}", verify.message);
-        }
-        verify_report = Some(verify);
-    }
+    // Skip pre-verify here — it can take ~20s and freezes mode switch UX.
+    // Post-apply `probe_endpoint_bundle` covers connectivity; first-time add
+    // still verifies via personal provider setup.
+    let verify_report = None;
 
     write_overlay_for_bundle(&bundle)?;
     let _ = clear_codex_placeholder_auth();
@@ -382,7 +374,7 @@ pub fn probe_endpoint_bundle(bundle: &EndpointBundle) -> BundleProbeReport {
 
 fn probe_openai_chat_bundle(bundle: &EndpointBundle) -> BundleProbeReport {
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(25))
+        .timeout(Duration::from_secs(8))
         .build()
     {
         Ok(c) => c,
@@ -454,7 +446,7 @@ fn probe_anthropic_bundle(bundle: &EndpointBundle) -> BundleProbeReport {
         .trim_end_matches('/');
     let url = format!("{base}/v1/models");
     let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(8))
         .build()
     {
         Ok(c) => c,

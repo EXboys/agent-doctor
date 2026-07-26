@@ -320,15 +320,23 @@ fn get_mode_status_command() -> ModeStatus {
 }
 
 #[tauri::command]
-fn switch_to_personal_mode_command(
+async fn switch_to_personal_mode_command(
     provider_id: Option<String>,
 ) -> Result<ModeSwitchReport, String> {
-    switch_to_personal_mode(provider_id.as_deref()).map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        switch_to_personal_mode(provider_id.as_deref()).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn switch_to_team_mode_command() -> Result<ModeSwitchReport, String> {
-    switch_to_team_mode().map_err(|error| error.to_string())
+async fn switch_to_team_mode_command() -> Result<ModeSwitchReport, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        switch_to_team_mode().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

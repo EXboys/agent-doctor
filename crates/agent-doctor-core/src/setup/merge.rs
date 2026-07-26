@@ -1,6 +1,8 @@
 use std::fs;
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result as AnyhowResult};
 use serde_json::{json, Map, Value as JsonValue};
@@ -271,12 +273,26 @@ fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
 
 /// Restart the LaunchAgent/systemd OpenClaw gateway so a freshly written
 /// `OPENAI_API_KEY` in service-env is actually loaded into the process.
+///
+/// Prefer a fast `launchctl kickstart` on macOS — `openclaw gateway restart`
+/// can take 15–20s and freeze the desktop mode switch.
 fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(detail) = restart_openclaw_via_launchctl() {
+            return Ok(detail);
+        }
+    }
+
     let openclaw = which_openclaw().context("openclaw binary not found on PATH")?;
-    let output = Command::new(&openclaw)
-        .args(["gateway", "restart"])
-        .output()
-        .with_context(|| format!("failed to run `{} gateway restart`", openclaw.display()))?;
+    let output = run_command_with_timeout(
+        Command::new(&openclaw)
+            .args(["gateway", "restart"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+        Duration::from_secs(12),
+    )
+    .with_context(|| format!("failed to run `{} gateway restart`", openclaw.display()))?;
     if output.status.success() {
         return Ok("restarted OpenClaw gateway (reload env key)".into());
     }
@@ -292,6 +308,60 @@ fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
     Err(anyhow::anyhow!(
         "`openclaw gateway restart` failed: {detail}"
     ))
+}
+
+#[cfg(target_os = "macos")]
+fn restart_openclaw_via_launchctl() -> AnyhowResult<String> {
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .context("could not resolve user id for launchctl")?;
+    let label = format!("gui/{uid}/ai.openclaw.gateway");
+    let output = run_command_with_timeout(
+        Command::new("launchctl")
+            .args(["kickstart", "-k", &label])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+        Duration::from_secs(8),
+    )
+    .with_context(|| format!("launchctl kickstart {label}"))?;
+    if output.status.success() {
+        // Brief settle so subsequent probe is less flaky.
+        thread::sleep(Duration::from_millis(400));
+        return Ok(format!("restarted OpenClaw gateway via launchctl ({label})"));
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(anyhow::anyhow!(
+        "launchctl kickstart failed: {}",
+        stderr.trim()
+    ))
+}
+
+fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> AnyhowResult<std::process::Output> {
+    let child = command.spawn().context("failed to spawn process")?;
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(err)) => Err(err).context("failed waiting for process"),
+        Err(_) => {
+            let _ = Command::new("kill").arg("-TERM").arg(pid.to_string()).output();
+            thread::sleep(Duration::from_millis(200));
+            let _ = Command::new("kill").arg("-KILL").arg(pid.to_string()).output();
+            anyhow::bail!("timed out after {}s", timeout.as_secs());
+        }
+    }
 }
 
 fn which_openclaw() -> Option<std::path::PathBuf> {
