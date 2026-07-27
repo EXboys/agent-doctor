@@ -295,39 +295,29 @@ pub fn run_mcp_server(browser: &Mutex<BrowserContext>) -> Result<()> {
             .strip_prefix("Content-Length:")
             .or_else(|| line.strip_prefix("content-length:"))
         {
-            content_length = Some(
-                len_str
-                    .trim()
-                    .parse()
-                    .context("Invalid Content-Length")?,
-            );
+            content_length = Some(len_str.trim().parse().context("Invalid Content-Length")?);
         }
     }
 }
 
-fn handle_request(
-    request: &McpRequest,
-    browser: &Mutex<BrowserContext>,
-) -> Result<HandleResult> {
+fn handle_request(request: &McpRequest, browser: &Mutex<BrowserContext>) -> Result<HandleResult> {
     let id = request.id.clone();
 
     let response = match request.method.as_str() {
-        "initialize" => {
-            McpResponse {
-                id,
-                result: Some(json!({
-                    "protocolVersion": "0.1.0",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "agent-doctor-browser",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                })),
-                error: None,
-            }
-        }
+        "initialize" => McpResponse {
+            id,
+            result: Some(json!({
+                "protocolVersion": "0.1.0",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "agent-doctor-browser",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            })),
+            error: None,
+        },
         // Notifications have no 'id' — we just ignore them
         "notifications/initialized" | "initialized" => {
             return Ok(HandleResult::NoResponse);
@@ -371,21 +361,19 @@ fn handle_request(
                         error: None,
                     }
                 }
-                Err(e) => {
-                    McpResponse {
-                        id,
-                        result: Some(json!({
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": format!("{e:#}"),
-                                }
-                            ],
-                            "isError": true,
-                        })),
-                        error: None,
-                    }
-                }
+                Err(e) => McpResponse {
+                    id,
+                    result: Some(json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": format!("{e:#}"),
+                            }
+                        ],
+                        "isError": true,
+                    })),
+                    error: None,
+                },
             }
         }
         "shutdown" => {
@@ -479,15 +467,24 @@ fn execute_tool(name: &str, args: &Value, browser: &Mutex<BrowserContext>) -> Re
         }
         "browser_get_links" => ctx.get_links(),
         "browser_new_tab" => {
-            let url = args.get("url").and_then(Value::as_str).context("Missing url")?;
+            let url = args
+                .get("url")
+                .and_then(Value::as_str)
+                .context("Missing url")?;
             ctx.new_tab(url)
         }
         "browser_switch_tab" => {
-            let tid = args.get("target_id").and_then(Value::as_str).context("Missing target_id")?;
+            let tid = args
+                .get("target_id")
+                .and_then(Value::as_str)
+                .context("Missing target_id")?;
             ctx.switch_tab(tid)
         }
         "browser_close_tab" => {
-            let tid = args.get("target_id").and_then(Value::as_str).context("Missing target_id")?;
+            let tid = args
+                .get("target_id")
+                .and_then(Value::as_str)
+                .context("Missing target_id")?;
             ctx.close_tab(tid)
         }
         "browser_list_tabs" => ctx.list_tabs(),

@@ -98,10 +98,7 @@ impl BrowserContext {
                     "returnByValue": true,
                 }),
             )?;
-            if let Some(state) = result
-                .pointer("/result/value")
-                .and_then(Value::as_str)
-            {
+            if let Some(state) = result.pointer("/result/value").and_then(Value::as_str) {
                 if state == "complete" {
                     break;
                 }
@@ -190,21 +187,27 @@ impl BrowserContext {
         )?;
         std::thread::sleep(Duration::from_millis(200));
 
-        self.send_command("Input.dispatchMouseEvent", json!({
-            "type": "mousePressed",
-            "x": x,
-            "y": y,
-            "button": "left",
-            "clickCount": 1,
-        }))?;
+        self.send_command(
+            "Input.dispatchMouseEvent",
+            json!({
+                "type": "mousePressed",
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1,
+            }),
+        )?;
 
-        self.send_command("Input.dispatchMouseEvent", json!({
-            "type": "mouseReleased",
-            "x": x,
-            "y": y,
-            "button": "left",
-            "clickCount": 1,
-        }))?;
+        self.send_command(
+            "Input.dispatchMouseEvent",
+            json!({
+                "type": "mouseReleased",
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1,
+            }),
+        )?;
 
         Ok(json!({
             "selector": selector,
@@ -234,25 +237,34 @@ impl BrowserContext {
         std::thread::sleep(Duration::from_millis(100));
 
         // Clear existing content
-        self.send_command("Input.dispatchKeyEvent", json!({
-            "type": "keyDown",
-            "windowsVirtualKeyCode": 8,
-            "key": "Backspace",
-            "code": "Backspace",
-        }))?;
-        self.send_command("Input.dispatchKeyEvent", json!({
-            "type": "keyUp",
-            "windowsVirtualKeyCode": 8,
-            "key": "Backspace",
-            "code": "Backspace",
-        }))?;
+        self.send_command(
+            "Input.dispatchKeyEvent",
+            json!({
+                "type": "keyDown",
+                "windowsVirtualKeyCode": 8,
+                "key": "Backspace",
+                "code": "Backspace",
+            }),
+        )?;
+        self.send_command(
+            "Input.dispatchKeyEvent",
+            json!({
+                "type": "keyUp",
+                "windowsVirtualKeyCode": 8,
+                "key": "Backspace",
+                "code": "Backspace",
+            }),
+        )?;
 
         for ch in text.chars() {
             let key = ch.to_string();
-            self.send_command("Input.dispatchKeyEvent", json!({
-                "type": "char",
-                "text": key,
-            }))
+            self.send_command(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": "char",
+                    "text": key,
+                }),
+            )
             .ok();
         }
 
@@ -264,10 +276,13 @@ impl BrowserContext {
 
     /// Take a screenshot (returns base64-encoded PNG).
     pub fn screenshot(&mut self) -> Result<String> {
-        let result = self.send_command("Page.captureScreenshot", json!({
-            "format": "png",
-            "fromSurface": true,
-        }))?;
+        let result = self.send_command(
+            "Page.captureScreenshot",
+            json!({
+                "format": "png",
+                "fromSurface": true,
+            }),
+        )?;
 
         result
             .get("data")
@@ -436,17 +451,23 @@ impl BrowserContext {
 
     /// Switch to a browser tab by target ID.
     pub fn switch_tab(&mut self, target_id: &str) -> Result<Value> {
-        self.send_command("Target.activateTarget", json!({
-            "targetId": target_id,
-        }))?;
+        self.send_command(
+            "Target.activateTarget",
+            json!({
+                "targetId": target_id,
+            }),
+        )?;
         Ok(json!({ "target_id": target_id, "status": "activated" }))
     }
 
     /// Close a browser tab by target ID.
     pub fn close_tab(&mut self, target_id: &str) -> Result<Value> {
-        self.send_command("Target.closeTarget", json!({
-            "targetId": target_id,
-        }))?;
+        self.send_command(
+            "Target.closeTarget",
+            json!({
+                "targetId": target_id,
+            }),
+        )?;
         Ok(json!({ "target_id": target_id, "status": "closed" }))
     }
 
@@ -459,5 +480,4 @@ impl BrowserContext {
             "count": targets.as_array().map(|a| a.len()).unwrap_or(0),
         }))
     }
-
 }

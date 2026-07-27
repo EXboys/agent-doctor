@@ -17,13 +17,13 @@ use agent_doctor_core::{
     PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
     ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
     RuntimeProbeReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions, UseProfileReport,
-    UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions,
-    WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions,
+    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use agent_doctor_mcp::{
-    browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
-    BrowserMcpStatus, McpConfigureOptions, DEFAULT_BROWSER_MCP_PORT,
+    browser_mcp_status, configure_for, discover_chrome, generate_config_snippet, BrowserMcpStatus,
+    McpConfigureOptions, DEFAULT_BROWSER_MCP_PORT,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -107,7 +107,11 @@ fn with_tray_state<R>(
 }
 
 fn remember_tray_health(app: &tauri::AppHandle, report: &DoctorReport) {
-    let installed = report.runtimes.iter().filter(|runtime| runtime.installed).count();
+    let installed = report
+        .runtimes
+        .iter()
+        .filter(|runtime| runtime.installed)
+        .count();
     let total = report.runtimes.len();
     let _ = with_tray_state(app, |state| {
         state.health = Some((installed, total));
@@ -123,8 +127,8 @@ fn set_tray_busy(app: &tauri::AppHandle, action: Option<&str>) {
 
 fn update_tray_tooltip(app: &tauri::AppHandle) {
     let doc = load_workspaces().unwrap_or_default();
-    let (health, busy) = with_tray_state(app, |state| (state.health, state.busy.clone()))
-        .unwrap_or((None, None));
+    let (health, busy) =
+        with_tray_state(app, |state| (state.health, state.busy.clone())).unwrap_or((None, None));
     let label = format_tray_tooltip(
         health,
         doc.active.as_deref(),
@@ -421,7 +425,12 @@ fn mcp_configure_command(
         .and_then(|name| workspaces.workspaces.get(name))
         .map(|entry| entry.path.clone());
 
-    emit("write", &format!("Writing MCP config for {runtime}…"), false, true);
+    emit(
+        "write",
+        &format!("Writing MCP config for {runtime}…"),
+        false,
+        true,
+    );
     let options = McpConfigureOptions {
         runtime: runtime.clone(),
         port,
@@ -433,7 +442,7 @@ fn mcp_configure_command(
         error.to_string()
     })?;
 
-    let config_path = agent_doctor_mcp::mcp_servers_path(&runtime, options.project_path.as_ref())
+    let config_path = agent_doctor_mcp::mcp_servers_path(&runtime, options.project_path.as_deref())
         .map_err(|error| error.to_string())?;
 
     emit(

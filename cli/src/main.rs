@@ -348,7 +348,6 @@ enum PolicyAction {
     },
 }
 
-
 #[derive(Subcommand)]
 enum McpAction {
     /// Start browser MCP server (connect Codex/Claude to Chrome)
@@ -473,15 +472,17 @@ fn main() -> Result<()> {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },
         Commands::Mcp { action } => match action {
-            McpAction::Browser { port, headless, json } => {
-                commands::mcp::run_browser(port, headless, json)?
-            }
-            McpAction::Status { port, json } => {
-                commands::mcp::run_status(port, json)?
-            }
-            McpAction::Configure { runtime, port, json } => {
-                commands::mcp::run_configure(&runtime, port, json)?
-            }
+            McpAction::Browser {
+                port,
+                headless,
+                json,
+            } => commands::mcp::run_browser(port, headless, json)?,
+            McpAction::Status { port, json } => commands::mcp::run_status(port, json)?,
+            McpAction::Configure {
+                runtime,
+                port,
+                json,
+            } => commands::mcp::run_configure(&runtime, port, json)?,
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {

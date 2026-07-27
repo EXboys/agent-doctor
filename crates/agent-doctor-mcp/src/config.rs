@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,7 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 /// Find the MCP servers config path for a given runtime.
-pub fn mcp_servers_path(runtime: &str, project_path: Option<&PathBuf>) -> Result<PathBuf> {
+pub fn mcp_servers_path(runtime: &str, project_path: Option<&Path>) -> Result<PathBuf> {
     match runtime {
         "claude-code" | "claude" => {
             let path = home_dir()
@@ -57,7 +57,7 @@ pub fn mcp_servers_path(runtime: &str, project_path: Option<&PathBuf>) -> Result
 }
 
 /// Read the existing MCP server entries from a config file.
-pub fn read_mcp_servers(config_path: &PathBuf) -> Result<Value> {
+pub fn read_mcp_servers(config_path: &Path) -> Result<Value> {
     if !config_path.exists() {
         return Ok(json!({}));
     }
@@ -80,7 +80,7 @@ pub fn read_mcp_servers(config_path: &PathBuf) -> Result<Value> {
 }
 
 /// Write MCP server entries to a config file.
-pub fn write_mcp_servers(config_path: &PathBuf, mcp_servers: &Value) -> Result<()> {
+pub fn write_mcp_servers(config_path: &Path, mcp_servers: &Value) -> Result<()> {
     let is_json = config_path
         .extension()
         .map(|e| e == "json")
@@ -122,7 +122,7 @@ pub fn write_mcp_servers(config_path: &PathBuf, mcp_servers: &Value) -> Result<(
 
 /// Configure the browser MCP server for a given runtime.
 pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOptions) -> Result<()> {
-    let config_path = mcp_servers_path(&options.runtime, options.project_path.as_ref())?;
+    let config_path = mcp_servers_path(&options.runtime, options.project_path.as_deref())?;
     let mut servers = read_mcp_servers(&config_path)?;
 
     let entry = json!({
@@ -146,7 +146,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
 }
 
 /// Generate the MCP configuration JSON snippet for display/export.
-pub fn generate_config_snippet(binary: &PathBuf, port: u16) -> Value {
+pub fn generate_config_snippet(binary: &Path, port: u16) -> Value {
     json!({
         "mcpServers": {
             "browser": {

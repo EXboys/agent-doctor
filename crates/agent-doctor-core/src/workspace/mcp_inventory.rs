@@ -53,11 +53,7 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
 
     if let Some((_, entry)) = active.as_ref() {
         let project_mcp = entry.path.join(".mcp.json");
-        servers.extend(read_servers_from_file(
-            &project_mcp,
-            "project",
-            "codex",
-        ));
+        servers.extend(read_servers_from_file(&project_mcp, "project", "codex"));
     }
 
     let settings = home_join(".claude/settings.json");
@@ -99,11 +95,7 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
     }
 }
 
-fn read_servers_from_file(
-    path: &Path,
-    scope: &str,
-    runtime_hint: &str,
-) -> Vec<McpInventoryItem> {
+fn read_servers_from_file(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
     if !path.exists() {
         return Vec::new();
     }

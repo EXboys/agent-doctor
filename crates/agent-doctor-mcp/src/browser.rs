@@ -80,9 +80,7 @@ fn find_chrome_binary() -> Result<PathBuf> {
         }
     }
 
-    anyhow::bail!(
-        "Could not find Chrome/Chromium binary. Install Google Chrome or chromium."
-    )
+    anyhow::bail!("Could not find Chrome/Chromium binary. Install Google Chrome or chromium.")
 }
 
 fn default_user_data_dir() -> PathBuf {
@@ -178,11 +176,8 @@ pub fn connect_chrome(port: u16) -> Result<ChromeInstance> {
 /// Fetch the WebSocket debug URL from Chrome's DevTools Protocol endpoint.
 fn find_ws_endpoint_http(port: u16) -> Result<String> {
     let addr = format!("127.0.0.1:{port}");
-    let mut stream = TcpStream::connect_timeout(
-        &addr.parse().unwrap(),
-        Duration::from_secs(5),
-    )
-    .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(5))
+        .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
 
     let request = format!(
         "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
@@ -205,8 +200,8 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
         .nth(1)
         .context("No HTTP body in Chrome version response")?;
 
-    let json: serde_json::Value = serde_json::from_str(body)
-        .context("Failed to parse Chrome version endpoint response")?;
+    let json: serde_json::Value =
+        serde_json::from_str(body).context("Failed to parse Chrome version endpoint response")?;
 
     let ws = json
         .get("webSocketDebuggerUrl")
