@@ -46,6 +46,8 @@
 - [x] Runtime diagnosis panel with filterable checks and suggested fixes
 - [x] Hermes: apply fixes, rollback, open API key guide
 - [x] Evotown onboarding panel: connect URL/key, one-click doctor + sync + policy pull
+- [x] Tray workspace switch + tooltip (`Agent Doctor · workspace: …`)
+- [x] Tray compact status (small enhancement, not a product skin): tooltip shows health + active workspace + personal/team mode; refresh after doctor/repair/workspace switch; brief “busy” state while a tray action runs. No Dynamic Island chrome, theme pack, or floating HUD.
 - [ ] Keychain storage for API keys (optional)
 
 ## P2 — Project workspaces

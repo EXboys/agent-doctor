@@ -210,6 +210,72 @@ interface SkillMountReport {
   failed: number;
 }
 
+interface McpInventoryItem {
+  name: string;
+  scope: string;
+  config_path: string;
+  command: string | null;
+  args: string[];
+  healthy: boolean;
+  issue: string | null;
+  is_browser: boolean;
+  runtime_hint: string;
+}
+
+interface McpInventoryReport {
+  workspace_name: string | null;
+  workspace_path: string | null;
+  servers: McpInventoryItem[];
+  total: number;
+  healthy: number;
+  issues: number;
+  browser_configured: boolean;
+}
+
+interface BrowserMcpStatus {
+  chrome_found: boolean;
+  binary: string | null;
+  version: string | null;
+  user_data_dir: string | null;
+  cdp_connected: boolean;
+  ws_endpoint: string | null;
+  port: number;
+}
+
+interface McpModuleStatus {
+  browser: BrowserMcpStatus;
+  inventory: McpInventoryReport;
+  configured_runtimes: string[];
+  binary: string;
+  config_snippet: unknown;
+}
+
+interface McpConfigureReport {
+  runtime: string;
+  port: number;
+  config_path: string;
+  binary: string;
+}
+
+interface McpProgressEvent {
+  stage: string;
+  message: string;
+  done: boolean;
+  ok: boolean;
+}
+
+type ResourceFilter = "all" | "skill" | "mcp" | "issue";
+type ResourceRow = {
+  kind: "skill" | "mcp";
+  name: string;
+  sub: string;
+  meta: string;
+  tone: "ok" | "warn" | "bad" | "muted";
+  issue: boolean;
+  skillId?: string;
+  needsMount?: boolean;
+};
+
 interface PersonalProviderStatus {
   configured: boolean;
   gateway_url: string | null;
@@ -273,6 +339,28 @@ const skillsDirEl = document.querySelector<HTMLElement>("#skills-dir")!;
 const skillsListEl = document.querySelector<HTMLUListElement>("#skills-list")!;
 const skillsEmptyEl = document.querySelector<HTMLElement>("#skills-empty")!;
 const skillsFootnoteEl = document.querySelector<HTMLElement>("#skills-footnote")!;
+const skillsCountEl = document.querySelector<HTMLElement>("#skills-count")!;
+const mcpCountEl = document.querySelector<HTMLElement>("#mcp-count")!;
+
+const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
+const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
+const mcpCdpEl = document.querySelector<HTMLElement>("#mcp-cdp")!;
+const mcpConfiguredEl = document.querySelector<HTMLElement>("#mcp-configured")!;
+const mcpBinaryEl = document.querySelector<HTMLElement>("#mcp-binary")!;
+const mcpRefreshEl = document.querySelector<HTMLButtonElement>("#mcp-refresh")!;
+const mcpConfigureCodexEl = document.querySelector<HTMLButtonElement>("#mcp-configure-codex")!;
+const mcpConfigureClaudeEl = document.querySelector<HTMLButtonElement>("#mcp-configure-claude")!;
+const mcpProgressEl = document.querySelector<HTMLElement>("#mcp-progress")!;
+const mcpProgressStageEl = document.querySelector<HTMLElement>("#mcp-progress-stage")!;
+const mcpProgressFillEl = document.querySelector<HTMLElement>("#mcp-progress-fill")!;
+const mcpProgressLogEl = document.querySelector<HTMLElement>("#mcp-progress-log")!;
+const mcpSnippetEl = document.querySelector<HTMLElement>("#mcp-snippet")!;
+const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
+const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#resources-refresh")!;
+const resourcesFiltersEl = document.querySelector<HTMLElement>("#resources-filters")!;
+const resourcesListEl = document.querySelector<HTMLUListElement>("#resources-list")!;
+const resourcesEmptyEl = document.querySelector<HTMLElement>("#resources-empty")!;
+const resourcesFootnoteEl = document.querySelector<HTMLElement>("#resources-footnote")!;
 
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -583,8 +671,13 @@ const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
 const providerPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-provider-panel]"));
 
-type MainTabId = "diagnose" | "provider" | "workspace";
+type MainTabId = "diagnose" | "resources" | "provider" | "workspace";
 type ProviderTabId = "personal" | "evotown";
+
+let lastSkillsInventory: SkillsInventoryReport | null = null;
+let lastMcpStatus: McpModuleStatus | null = null;
+let resourceFilter: ResourceFilter = "all";
+let mcpConfigureInFlight = false;
 
 function setMainTab(tab: MainTabId) {
   mainTabsEl.querySelectorAll<HTMLButtonElement>("[data-main-tab]").forEach((button) => {
@@ -596,6 +689,9 @@ function setMainTab(tab: MainTabId) {
     const active = panel.dataset.mainPanel === tab;
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
+  }
+  if (tab === "resources") {
+    void loadResourcesPanel();
   }
 }
 
@@ -1948,14 +2044,225 @@ async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
     const report = await invoke<SkillsInventoryReport>("list_skills_inventory_command", {
       remoteStats: opts?.remoteStats ?? true,
     });
+    lastSkillsInventory = report;
+    skillsCountEl.textContent = String(report.skills.length);
     renderSkillsInventory(report);
+    renderResourcesList();
   } catch (error) {
+    lastSkillsInventory = null;
+    skillsCountEl.textContent = "—";
     skillsInventoryEl.hidden = false;
     skillsListEl.replaceChildren();
     skillsEmptyEl.hidden = false;
     skillsEmptyEl.textContent = t("skills.loadFailed", { error: String(error) });
     skillsDirEl.textContent = "";
     skillsFootnoteEl.textContent = "";
+    renderResourcesList();
+  }
+}
+
+function scopeLabel(scope: string): string {
+  if (scope === "project") return t("resources.scopeProject");
+  return t("resources.scopeGlobal");
+}
+
+function renderMcpBrowserStatus(status: McpModuleStatus) {
+  lastMcpStatus = status;
+  mcpCountEl.textContent = String(status.inventory.total);
+
+  const chrome = status.browser;
+  mcpChromeEl.textContent = chrome.chrome_found
+    ? t("mcp.chromeOk", { version: chrome.version || chrome.binary || "OK" })
+    : t("mcp.chromeMissing");
+  mcpChromeEl.title = chrome.binary || "";
+  mcpCdpEl.textContent = chrome.cdp_connected
+    ? t("mcp.cdpConnected", { port: String(chrome.port) })
+    : t("mcp.cdpIdle", { port: String(chrome.port) });
+  mcpConfiguredEl.textContent =
+    status.configured_runtimes.length > 0
+      ? t("mcp.configuredList", { list: status.configured_runtimes.join(", ") })
+      : t("mcp.configuredNone");
+  mcpBinaryEl.textContent = status.binary;
+  mcpBinaryEl.title = status.binary;
+  mcpSnippetEl.textContent = JSON.stringify(status.config_snippet, null, 2);
+
+  mcpBrowserBadgeEl.classList.remove("ok", "warn", "muted", "bad");
+  if (!chrome.chrome_found) {
+    mcpBrowserBadgeEl.textContent = t("mcp.badgeMissing");
+    mcpBrowserBadgeEl.classList.add("bad");
+  } else if (status.configured_runtimes.length > 0) {
+    mcpBrowserBadgeEl.textContent = t("mcp.badgeReady");
+    mcpBrowserBadgeEl.classList.add("ok");
+  } else {
+    mcpBrowserBadgeEl.textContent = t("mcp.badgePartial");
+    mcpBrowserBadgeEl.classList.add("warn");
+  }
+
+  const canConfigure = chrome.chrome_found && !mcpConfigureInFlight;
+  mcpConfigureCodexEl.disabled = !canConfigure;
+  mcpConfigureClaudeEl.disabled = !canConfigure;
+}
+
+function buildResourceRows(): ResourceRow[] {
+  const rows: ResourceRow[] = [];
+
+  for (const server of lastMcpStatus?.inventory.servers ?? []) {
+    const scope = `${scopeLabel(server.scope)} · ${server.runtime_hint}`;
+    const meta = server.is_browser
+      ? t("resources.mcpBrowser")
+      : server.healthy
+        ? t("resources.mcpHealthy")
+        : server.issue || t("resources.mcpIssue");
+    rows.push({
+      kind: "mcp",
+      name: server.name,
+      sub: scope,
+      meta,
+      tone: server.healthy ? (server.is_browser ? "ok" : "ok") : "bad",
+      issue: !server.healthy,
+    });
+  }
+
+  for (const skill of lastSkillsInventory?.skills ?? []) {
+    const mounted = skill.agents.filter((a) => a.mounted).length;
+    const needsMount = skill.agents.some((a) => !a.mounted);
+    const calls = formatCount(skill.call_count);
+    const rate = formatRate(skill.first_success_rate);
+    rows.push({
+      kind: "skill",
+      name: skill.name || skill.skill_id,
+      sub: t("resources.skillMounted", { count: String(mounted) }),
+      meta: t("resources.skillUsage", { calls, rate }),
+      tone: needsMount ? "warn" : "ok",
+      issue: needsMount,
+      skillId: skill.skill_id,
+      needsMount,
+    });
+  }
+
+  return rows;
+}
+
+function renderResourcesList() {
+  const rows = buildResourceRows().filter((row) => {
+    if (resourceFilter === "all") return true;
+    if (resourceFilter === "issue") return row.issue;
+    return row.kind === resourceFilter;
+  });
+
+  resourcesListEl.replaceChildren();
+  resourcesEmptyEl.hidden = rows.length > 0;
+  resourcesFootnoteEl.textContent =
+    lastMcpStatus?.inventory.workspace_name
+      ? `${lastMcpStatus.inventory.workspace_name}${
+          lastMcpStatus.inventory.workspace_path
+            ? ` · ${lastMcpStatus.inventory.workspace_path}`
+            : ""
+        }`
+      : "";
+
+  for (const row of rows) {
+    const li = document.createElement("li");
+    li.className = "res-item";
+
+    const info = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = row.name;
+    const sub = document.createElement("span");
+    sub.textContent = `${row.kind === "skill" ? "Skill" : "MCP"} · ${row.sub}`;
+    info.append(strong, sub);
+
+    const metaWrap = document.createElement("div");
+    metaWrap.className = "res-item-meta";
+    const meta = document.createElement("span");
+    meta.className = `tone-${row.tone}`;
+    meta.textContent = row.meta;
+    metaWrap.appendChild(meta);
+
+    if (row.kind === "mcp" && row.issue) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-ghost btn-compact";
+      btn.textContent = t("resources.goDiagnose");
+      btn.addEventListener("click", () => setMainTab("diagnose"));
+      metaWrap.appendChild(btn);
+    } else if (row.kind === "skill" && row.needsMount && row.skillId) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary btn-compact";
+      btn.textContent = t("resources.mount");
+      const skillId = row.skillId;
+      btn.addEventListener("click", () => {
+        void mountSyncedSkills([skillId]);
+      });
+      metaWrap.appendChild(btn);
+    }
+
+    li.append(info, metaWrap);
+    resourcesListEl.appendChild(li);
+  }
+}
+
+async function loadMcpStatus() {
+  try {
+    const status = await invoke<McpModuleStatus>("mcp_status_command", { port: null });
+    renderMcpBrowserStatus(status);
+    renderResourcesList();
+  } catch (error) {
+    lastMcpStatus = null;
+    mcpCountEl.textContent = "—";
+    mcpBrowserBadgeEl.textContent = "—";
+    mcpBrowserBadgeEl.classList.remove("ok", "warn", "bad");
+    mcpBrowserBadgeEl.classList.add("muted");
+    mcpFootnoteEl.textContent = t("mcp.loadFailed", { error: String(error) });
+    renderResourcesList();
+  }
+}
+
+async function loadResourcesPanel() {
+  await Promise.all([loadMcpStatus(), loadSkillsInventory({ remoteStats: false })]);
+}
+
+function appendMcpProgress(message: string) {
+  const prev = mcpProgressLogEl.textContent?.trim();
+  mcpProgressLogEl.textContent = prev ? `${prev}\n${message}` : message;
+  mcpProgressLogEl.scrollTop = mcpProgressLogEl.scrollHeight;
+}
+
+function hideMcpProgress() {
+  mcpProgressEl.hidden = true;
+  mcpProgressFillEl.classList.remove("is-indeterminate");
+  mcpProgressFillEl.style.width = "";
+  mcpProgressStageEl.textContent = "";
+  mcpProgressLogEl.textContent = "";
+}
+
+async function configureBrowserMcp(runtime: "codex" | "claude-code") {
+  if (mcpConfigureInFlight) return;
+  mcpConfigureInFlight = true;
+  mcpConfigureCodexEl.disabled = true;
+  mcpConfigureClaudeEl.disabled = true;
+  mcpProgressEl.hidden = false;
+  mcpProgressFillEl.classList.add("is-indeterminate");
+  mcpProgressStageEl.textContent = runtime;
+  mcpProgressLogEl.textContent = "";
+  mcpFootnoteEl.textContent = t("mcp.configuring");
+
+  try {
+    const report = await invoke<McpConfigureReport>("mcp_configure_command", {
+      runtime,
+      port: null,
+    });
+    mcpFootnoteEl.textContent = t("mcp.configureOk", { runtime: report.runtime });
+    await loadMcpStatus();
+  } catch (error) {
+    mcpFootnoteEl.textContent = t("mcp.configureFailed", { error: String(error) });
+  } finally {
+    hideMcpProgress();
+    mcpConfigureInFlight = false;
+    const chromeOk = lastMcpStatus?.browser.chrome_found ?? false;
+    mcpConfigureCodexEl.disabled = !chromeOk;
+    mcpConfigureClaudeEl.disabled = !chromeOk;
   }
 }
 
@@ -3163,9 +3470,36 @@ langSwitchEl.addEventListener("click", (event) => {
 mainTabsEl.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-main-tab]");
   const tab = button?.dataset.mainTab;
-  if (tab === "diagnose" || tab === "provider" || tab === "workspace") {
+  if (tab === "diagnose" || tab === "resources" || tab === "provider" || tab === "workspace") {
     setMainTab(tab);
   }
+});
+
+mcpRefreshEl.addEventListener("click", () => {
+  void loadMcpStatus();
+});
+
+resourcesRefreshEl.addEventListener("click", () => {
+  void loadResourcesPanel();
+});
+
+mcpConfigureCodexEl.addEventListener("click", () => {
+  void configureBrowserMcp("codex");
+});
+
+mcpConfigureClaudeEl.addEventListener("click", () => {
+  void configureBrowserMcp("claude-code");
+});
+
+resourcesFiltersEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-res-filter]");
+  const filter = button?.dataset.resFilter as ResourceFilter | undefined;
+  if (!filter) return;
+  resourceFilter = filter;
+  resourcesFiltersEl.querySelectorAll<HTMLButtonElement>("[data-res-filter]").forEach((chip) => {
+    chip.classList.toggle("is-active", chip.dataset.resFilter === filter);
+  });
+  renderResourcesList();
 });
 
 evotownFormEl.addEventListener("submit", (event) => {
@@ -3376,10 +3710,26 @@ void listen<DoctorReport>("doctor-report", (event) => {
 
 void listen("workspace-changed", () => {
   void loadWorkspaces();
+  void loadMcpStatus();
 });
 
 void listen<WorkspaceDoctorReport>("workspace-doctor-report", (event) => {
   renderWorkspaceChecks(event.payload);
+});
+
+void listen<McpProgressEvent>("mcp-progress", (event) => {
+  if (!mcpConfigureInFlight) return;
+  mcpProgressEl.hidden = false;
+  mcpProgressStageEl.textContent = event.payload.stage;
+  appendMcpProgress(event.payload.message);
+  if (event.payload.done) {
+    // Keep showing until configureBrowserMcp finally-hides; mark track complete.
+    mcpProgressFillEl.classList.remove("is-indeterminate");
+    mcpProgressFillEl.style.width = "100%";
+  } else {
+    mcpProgressFillEl.classList.add("is-indeterminate");
+    mcpProgressFillEl.style.width = "";
+  }
 });
 
 setLocale(getLocale());
@@ -3402,4 +3752,5 @@ void loadWorkspaces();
 void loadEvotownStatus();
 void loadPersonalProviderStatus();
 void loadModeStatus();
+void loadMcpStatus();
 void refresh();

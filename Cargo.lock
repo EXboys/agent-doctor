@@ -24,6 +24,7 @@ name = "agent-doctor"
 version = "0.1.11"
 dependencies = [
  "agent-doctor-core",
+ "agent-doctor-mcp",
  "anyhow",
  "clap",
  "serde_json",
@@ -56,12 +57,24 @@ name = "agent-doctor-desktop"
 version = "0.1.11"
 dependencies = [
  "agent-doctor-core",
+ "agent-doctor-mcp",
+ "anyhow",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+]
+
+[[package]]
+name = "agent-doctor-mcp"
+version = "0.1.11"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tungstenite",
 ]
 
 [[package]]

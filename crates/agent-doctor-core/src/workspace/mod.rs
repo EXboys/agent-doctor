@@ -25,6 +25,7 @@ pub mod fix;
 pub mod gateway;
 pub mod hook_status;
 pub mod matrix;
+pub mod mcp_inventory;
 pub mod path;
 pub mod paths_check;
 pub mod shell;
@@ -84,6 +85,10 @@ pub use fix::{
 pub use gateway::{gateway_restart_hint, restart_workspace_gateways, GatewayRestartReport};
 pub use hook_status::{workspace_hook_status, ShellHookStatus};
 pub use matrix::{workspace_capability_matrix, CapabilityCell, CapabilityMatrix};
+pub use mcp_inventory::{
+    browser_configured_runtimes, list_mcp_inventory, list_mcp_inventory_with_doc,
+    resolve_agent_doctor_binary, McpInventoryItem, McpInventoryReport,
+};
 pub use paths_check::{scan_workspace_path_references, PathReferenceIssue};
 pub use shell::{
     bash_hook_file_path, enter_workspace, fish_hook_file_path, hook_file_path, install_bash_hook,

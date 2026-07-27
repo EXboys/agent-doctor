@@ -45,14 +45,19 @@
         <div class="status-meta">
           <span><span data-i18n="summary.installed">已装</span> <strong id="installed-count">—</strong></span>
           <span class="status-sep" aria-hidden="true">·</span>
+          <span><span data-i18n="summary.skills">Skills</span> <strong id="skills-count">—</strong></span>
+          <span class="status-sep" aria-hidden="true">·</span>
+          <span><span data-i18n="summary.mcp">MCP</span> <strong id="mcp-count">—</strong></span>
+          <span class="status-sep" aria-hidden="true">·</span>
           <span><span data-i18n="summary.preset">预设</span> <strong id="profile-status">—</strong></span>
           <span class="status-sep" aria-hidden="true">·</span>
           <span><strong id="last-scan" class="stat-chip-value-sm">—</strong></span>
         </div>
       </section>
 
-      <nav class="main-tabs main-tabs-3" id="main-tabs" role="tablist" aria-label="Main sections">
+      <nav class="main-tabs main-tabs-4" id="main-tabs" role="tablist" aria-label="Main sections">
         <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.agents">Agents</button>
+        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="resources" data-i18n="nav.resources">资源</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="provider" data-i18n="nav.wiring">接线</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="workspace" data-i18n="nav.workspace">工作区</button>
       </nav>
@@ -78,6 +83,60 @@
             <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
             <span id="runtime-count" class="sr-only">—</span>
             <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
+          </section>
+        </section>
+
+        <section class="main-panel" id="panel-resources" role="tabpanel" data-main-panel="resources" hidden>
+          <section class="widget-section">
+            <div class="section-label">
+              <h2 data-i18n="mcp.browserTitle">Browser MCP</h2>
+              <span id="mcp-browser-badge" class="badge muted">—</span>
+            </div>
+            <p class="section-hint" data-i18n="mcp.browserHint">把 Chrome 接到 Codex / Claude：状态、写入配置、查看用法。</p>
+            <div class="meta-grid" id="mcp-browser-meta">
+              <div class="meta-row"><span class="meta-label" data-i18n="mcp.chrome">Chrome</span><span class="meta-value" id="mcp-chrome">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="mcp.cdp">CDP</span><span class="meta-value" id="mcp-cdp">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="mcp.configured">已配置</span><span class="meta-value" id="mcp-configured">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
+            </div>
+            <div class="runtime-actions mcp-actions">
+              <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
+              <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex</button>
+              <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude</button>
+            </div>
+            <div id="mcp-progress" class="install-progress" hidden>
+              <div class="install-progress-head">
+                <strong data-i18n="mcp.progressTitle">配置进度</strong>
+                <span id="mcp-progress-stage"></span>
+              </div>
+              <div class="install-progress-track" aria-hidden="true">
+                <div class="install-progress-fill is-indeterminate" id="mcp-progress-fill"></div>
+              </div>
+              <pre class="install-progress-log" id="mcp-progress-log"></pre>
+            </div>
+            <details class="mcp-snippet">
+              <summary data-i18n="mcp.snippetTitle">用法 / 配置片段</summary>
+              <pre id="mcp-snippet" class="mcp-snippet-code"></pre>
+              <p class="section-footnote" data-i18n="mcp.snippetHint">Runtime 会按需拉起 `agent-doctor mcp browser`；改配置后请重启对应 Agent。</p>
+            </details>
+            <p id="mcp-footnote" class="section-footnote"></p>
+          </section>
+
+          <section class="widget-section">
+            <div class="section-label">
+              <h2 data-i18n="resources.title">Skills / MCP</h2>
+              <button id="resources-refresh" type="button" class="btn-secondary btn-compact" data-i18n="resources.refresh">刷新</button>
+            </div>
+            <p class="section-hint" data-i18n="resources.hint">本机已配置的 Skills 与 MCP。有问题可回 Agents 诊断。</p>
+            <div class="filters" id="resources-filters" role="group" aria-label="Resource filters">
+              <button type="button" class="filter-chip is-active" data-res-filter="all" data-i18n="resources.filterAll">全部</button>
+              <button type="button" class="filter-chip" data-res-filter="skill" data-i18n="resources.filterSkills">Skills</button>
+              <button type="button" class="filter-chip" data-res-filter="mcp" data-i18n="resources.filterMcp">MCP</button>
+              <button type="button" class="filter-chip" data-res-filter="issue" data-i18n="resources.filterIssue">问题</button>
+            </div>
+            <ul id="resources-list" class="res-list" aria-live="polite"></ul>
+            <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP。团队模式可先同步 Skills，或上方写入 Browser MCP。</p>
+            <p id="resources-footnote" class="section-footnote"></p>
           </section>
         </section>
 
