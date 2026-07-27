@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — UI 设计稿</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+        --bg: #e8ecf4;
+        --shell: rgba(255, 255, 255, 0.82);
+        --surface: #ffffff;
+        --surface-muted: #f4f7fb;
+        --surface-inset: #eef2f8;
+        --border: rgba(15, 23, 42, 0.08);
+        --border-strong: rgba(15, 23, 42, 0.12);
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --text-soft: #94a3b8;
+        --primary: #3b82f6;
+        --primary-deep: #2563eb;
+        --success: #16a34a;
+        --success-bg: rgba(22, 163, 74, 0.1);
+        --warn: #d97706;
+        --warn-bg: rgba(217, 119, 6, 0.1);
+        --danger: #dc2626;
+        --danger-bg: rgba(220, 38, 38, 0.08);
+        --shadow-shell: 0 18px 50px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+        --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+        --radius-lg: 18px;
+        --radius-sm: 8px;
+        line-height: 1.45;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.14), transparent 38%),
+          radial-gradient(circle at 85% 8%, rgba(14, 165, 233, 0.1), transparent 32%),
+          linear-gradient(180deg, #edf1f7 0%, var(--bg) 100%);
+      }
+      .page {
+        padding: 18px 16px 36px;
+        display: grid;
+        gap: 12px;
+        justify-items: center;
+      }
+      .head {
+        width: min(440px, 100%);
+      }
+      .head h1 { margin: 0; font-size: 1rem; }
+      .head p { margin: 4px 0 0; font-size: 0.75rem; color: var(--text-muted); }
+
+      .widget {
+        display: flex;
+        flex-direction: column;
+        width: min(420px, 100%);
+        height: min(740px, calc(100vh - 100px));
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        border-radius: calc(var(--radius-lg) + 4px);
+        background: var(--shell);
+        backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--shadow-shell);
+        overflow: hidden;
+      }
+      .widget-toolbar {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      }
+      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .brand-icon {
+        width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #fff;
+        background: linear-gradient(145deg, #3b82f6 0%, #06b6d4 100%);
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
+      }
+      .brand-name { margin: 0; font-size: 0.84rem; font-weight: 700; }
+      .toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+      .mode-switch, .lang-switch {
+        display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 2px;
+        border-radius: 999px; background: var(--surface-inset); border: 1px solid var(--border);
+      }
+      .mode-switch-btn, .lang-btn {
+        appearance: none; border: 0; border-radius: 999px; padding: 4px 8px;
+        font: inherit; font-size: 0.66rem; font-weight: 700; color: var(--text-soft);
+        background: transparent; cursor: pointer;
+      }
+      .mode-switch-btn.is-active { background: #2563eb; color: #fff; }
+      .lang-btn.is-active { background: #fff; color: var(--primary-deep); box-shadow: var(--shadow-soft); }
+      .btn-scan {
+        border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 999px;
+        background: linear-gradient(180deg, #fff, #eff6ff);
+        color: var(--primary-deep); padding: 5px 9px; font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      }
+      .status-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      .health-pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 8px; border-radius: 999px; border: 1px solid var(--border);
+        background: #fff; font-size: 0.68rem; font-weight: 700; color: var(--text-muted);
+      }
+      .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px rgba(217,119,6,.18); }
+      .status-meta {
+        margin-left: auto; font-size: 0.64rem; color: var(--text-soft); font-weight: 600;
+        display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
+      }
+      .status-meta strong { color: var(--text); }
+      .ws-chip {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        margin-bottom: 8px; padding: 7px 10px; border-radius: 10px;
+        background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.12);
+        font-size: 0.68rem; font-weight: 600; color: var(--text-muted);
+      }
+      .ws-chip button {
+        appearance: none; border: 0; background: transparent;
+        color: var(--primary-deep); font: inherit; font-size: 0.66rem; font-weight: 700; cursor: pointer;
+      }
+
+      .main-tabs {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
+        margin: 0 0 8px; padding: 3px; border-radius: 12px;
+        background: var(--surface-inset); border: 1px solid var(--border);
+      }
+      .main-tabs.tabs-3 { grid-template-columns: repeat(3, 1fr); }
+      .main-tab {
+        appearance: none; border: 0; border-radius: 9px; background: transparent;
+        color: var(--text-muted); padding: 7px 2px; font: inherit; font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      }
+      .main-tab.is-active { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(15,23,42,.08); }
+      .panels { flex: 1; min-height: 0; overflow: auto; }
+      .panel { display: none; flex-direction: column; gap: 8px; }
+      .panel.is-active { display: flex; }
+      .section {
+        padding: 10px 12px; border-radius: var(--radius-lg);
+        border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-soft);
+      }
+      .section-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+      .section-label h2 { margin: 0; flex: 1; font-size: 0.82rem; font-weight: 700; }
+      .badge {
+        padding: 2px 7px; border-radius: 999px; background: var(--surface-inset);
+        color: var(--text-soft); font-size: 0.64rem; font-weight: 700;
+      }
+      .badge.ok { background: var(--success-bg); color: var(--success); }
+      .badge.warn { background: var(--warn-bg); color: var(--warn); }
+      .badge.muted { background: var(--surface-inset); color: var(--text-soft); }
+      .hint { margin: 0 0 8px; font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
+      .footnote { margin: 8px 0 0; font-size: 0.68rem; color: var(--text-soft); }
+
+      .btn-primary, .btn-secondary, .btn-ghost {
+        appearance: none; border-radius: 9px; font: inherit; font-size: 0.72rem; font-weight: 700;
+        padding: 7px 10px; cursor: pointer;
+      }
+      .btn-primary { border: 0; color: #fff; background: linear-gradient(180deg, #3b82f6, #2563eb); }
+      .btn-secondary, .btn-ghost {
+        border: 1px solid var(--border-strong); background: #fff; color: var(--text);
+      }
+      .btn-ghost { background: transparent; color: var(--text-muted); }
+      .btn-compact { padding: 4px 8px; font-size: 0.66rem; }
+      .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+      .runtime-tabs { display: flex; gap: 4px; overflow-x: auto; margin-bottom: 8px; }
+      .runtime-tab {
+        display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px;
+        border-radius: 999px; border: 1px solid var(--border); background: var(--surface-muted);
+        font-size: 0.66rem; font-weight: 700; color: var(--text-muted); cursor: pointer; white-space: nowrap;
+      }
+      .runtime-tab.is-active { background: #fff; color: var(--text); border-color: rgba(59,130,246,.35); }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; }
+      .dot.ok { background: var(--success); }
+      .dot.warn { background: var(--warn); }
+      .dot.off { background: #94a3b8; }
+
+      .meta-grid { display: grid; gap: 5px; }
+      .meta-row {
+        display: grid; grid-template-columns: 78px 1fr; gap: 8px;
+        padding: 6px 8px; border-radius: var(--radius-sm);
+        background: var(--surface-muted); border: 1px solid var(--border);
+      }
+      .meta-label { font-size: 0.64rem; font-weight: 700; color: var(--text-soft); }
+      .meta-value {
+        margin: 0; font-size: 0.72rem; color: var(--text); word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .item {
+        display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+        padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-muted);
+      }
+      .item strong { display: block; font-size: 0.76rem; }
+      .item span { display: block; font-size: 0.64rem; color: var(--text-muted); margin-top: 2px; }
+      .item .right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+      .tone-ok { color: var(--success); font-size: 0.64rem; font-weight: 700; }
+      .tone-warn { color: var(--warn); font-size: 0.64rem; font-weight: 700; }
+      .tone-bad { color: var(--danger); font-size: 0.64rem; font-weight: 700; }
+      .tone-soft { color: var(--text-soft); font-size: 0.64rem; font-weight: 700; }
+
+      .filters { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+      .chip {
+        appearance: none; border: 1px solid var(--border); background: var(--surface-muted);
+        color: var(--text-muted); border-radius: 999px; padding: 3px 8px;
+        font: inherit; font-size: 0.64rem; font-weight: 700; cursor: pointer;
+      }
+      .chip.is-active { background: #fff; color: var(--primary-deep); border-color: rgba(59,130,246,.35); }
+
+      .checks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+      .check {
+        display: grid; grid-template-columns: auto 1fr; gap: 8px;
+        padding: 7px 8px; border-radius: 10px; background: var(--surface-muted); border: 1px solid var(--border);
+      }
+      .st {
+        padding: 1px 6px; border-radius: 999px; font-size: 0.58rem; font-weight: 800;
+      }
+      .st.fail { background: var(--danger-bg); color: var(--danger); }
+      .st.warn { background: var(--warn-bg); color: var(--warn); }
+      .st.pass { background: var(--success-bg); color: var(--success); }
+      .check strong { display: block; font-size: 0.72rem; }
+      .check span { font-size: 0.64rem; color: var(--text-muted); }
+
+      .picker-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+      .picker {
+        display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+        border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-muted);
+        font-size: 0.74rem; font-weight: 700;
+      }
+      .field-row {
+        display: grid; grid-template-columns: 88px 1fr; gap: 8px; align-items: center; margin-bottom: 8px;
+      }
+      .field-label { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); }
+      .field-input {
+        width: 100%; padding: 7px 9px; border-radius: 8px;
+        border: 1px solid var(--border-strong); background: var(--surface-muted);
+        font: inherit; font-size: 0.74rem; color: var(--text);
+      }
+
+      .mounted {
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+      }
+      .mounted h3 {
+        margin: 0 0 6px; font-size: 0.68rem; font-weight: 700; color: var(--text-soft);
+      }
+      .mini-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+      .mini-tag {
+        padding: 3px 7px; border-radius: 999px; background: #eff6ff;
+        border: 1px solid rgba(59,130,246,.18); font-size: 0.62rem; font-weight: 700; color: var(--primary-deep);
+      }
+      .mini-tag.mcp { background: #ecfeff; border-color: rgba(8,145,178,.18); color: #0e7490; }
+      .mini-tag.broken { background: var(--danger-bg); border-color: rgba(220,38,38,.2); color: var(--danger); }
+
+      .footer {
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+        font-size: 0.64rem; color: var(--text-soft); text-align: center;
+      }
+      .team-only { display: none !important; }
+      body.is-team .personal-only { display: none !important; }
+      body.is-team .team-only { display: block !important; }
+      body.is-team .team-only.inline { display: inline !important; }
+
+      .notes {
+        width: min(420px, 100%);
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(255,255,255,0.85);
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
+      .notes strong { color: var(--text); }
+      .notes ol { margin: 6px 0 0; padding-left: 18px; }
+      .notes li { margin: 4px 0; }
+      .toast {
+        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(8px);
+        opacity: 0; pointer-events: none; background: #0f172a; color: #fff;
+        font-size: 0.75rem; font-weight: 600; padding: 9px 12px; border-radius: 999px; transition: .18s ease; z-index: 20;
+      }
+      .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="head">
+        <h1>UI 设计稿 · 现有壳 · 三 Tab</h1>
+        <p>Agents 带当前工作区并可快切 · 工作区 Tab 管登记/对齐/预设</p>
+      </div>
+
+      <main class="widget">
+        <header class="widget-toolbar">
+          <div class="brand">
+            <div class="brand-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+            </div>
+            <p class="brand-name">Agent Doctor</p>
+          </div>
+          <div class="toolbar-actions">
+            <div class="lang-switch">
+              <button type="button" class="lang-btn is-active">中</button>
+              <button type="button" class="lang-btn">EN</button>
+            </div>
+            <button type="button" class="btn-scan" data-toast="扫描完成">扫描</button>
+          </div>
+        </header>
+
+        <section class="status-bar">
+          <div class="health-pill"><span class="health-dot"></span>待修复 1</div>
+          <div class="status-meta">
+            <span>已装 <strong>3</strong></span>
+            <span>·</span>
+            <span>预设 <strong>local</strong></span>
+            <span>·</span>
+            <span><strong>刚刚</strong></span>
+          </div>
+        </section>
+
+        <nav class="main-tabs tabs-3" id="tabs">
+          <button type="button" class="main-tab is-active" data-tab="agents">Agents</button>
+          <button type="button" class="main-tab" data-tab="wiring">接线</button>
+          <button type="button" class="main-tab" data-tab="workspace">工作区</button>
+        </nav>
+
+        <div class="panels">
+          <!-- Agents：突出当前工作区 + 可快切 -->
+          <section class="panel is-active" data-panel="agents">
+            <div class="ws-chip" id="ws-chip">
+              <span>当前工作区 <strong style="color:var(--text)" id="ws-name">agent-doctor</strong></span>
+              <span style="display:flex;gap:8px;align-items:center">
+                <button type="button" id="ws-quick" title="快速切换">切换 ▾</button>
+                <button type="button" data-go="workspace" style="color:var(--text-soft)">管理</button>
+              </span>
+            </div>
+            <div class="section" id="ws-picker" hidden style="padding:8px 10px">
+              <ul class="list" id="ws-quick-list">
+                <li class="item" data-ws="agent-doctor" style="cursor:pointer">
+                  <div><strong>agent-doctor</strong><span>当前 · Skills/MCP 已对齐</span></div>
+                  <span class="badge ok">当前</span>
+                </li>
+                <li class="item" data-ws="evotown" style="cursor:pointer">
+                  <div><strong>evotown</strong><span>3 天前</span></div>
+                  <button type="button" class="btn-ghost btn-compact">使用</button>
+                </li>
+              </ul>
+              <p class="footnote">快切只换上下文；登记 / Check / Fix 在「工作区」Tab</p>
+            </div>
+            <section class="section">
+              <div class="runtime-tabs" id="rt-tabs">
+                <button type="button" class="runtime-tab is-active" data-rt="hermes"><span class="dot warn"></span>Hermes</button>
+                <button type="button" class="runtime-tab" data-rt="openclaw"><span class="dot ok"></span>OpenClaw</button>
+                <button type="button" class="runtime-tab" data-rt="claude"><span class="dot ok"></span>Claude</button>
+                <button type="button" class="runtime-tab" data-rt="codex"><span class="dot off"></span>Codex</button>
+              </div>
+              <div id="rt-body"></div>
+            </section>
+          </section>
+
+          <!-- Wiring：个人 / 团队放这里 -->
+          <section class="panel" data-panel="wiring">
+            <section class="section">
+              <div class="section-label">
+                <h2>通路模式</h2>
+              </div>
+              <p class="hint">个人走本机 Provider；团队走 Evotown。切换会重写 Runtime 通路。</p>
+              <div class="mode-switch" id="mode" style="width:100%;grid-template-columns:1fr 1fr;margin-bottom:4px">
+                <button type="button" class="mode-switch-btn is-active" data-mode="personal" style="padding:8px 10px;font-size:0.74rem">个人</button>
+                <button type="button" class="mode-switch-btn" data-mode="team" style="padding:8px 10px;font-size:0.74rem">团队</button>
+              </div>
+              <p class="footnote personal-only">当前：个人模式 · 效率仅本地</p>
+              <p class="footnote team-only">当前：团队模式 · 效率可上报中心</p>
+            </section>
+
+            <section class="section personal-only">
+              <div class="section-label">
+                <h2>个人 Provider</h2>
+                <button type="button" class="btn-primary btn-compact" data-toast="新增 Provider">新增</button>
+              </div>
+              <p class="hint">通路写给 Agents，不直接挂 Skills。</p>
+              <ul class="list">
+                <li class="item">
+                  <div><strong>DeepSeek</strong><span>openai · deepseek-v4-flash</span></div>
+                  <span class="badge ok">当前</span>
+                </li>
+                <li class="item">
+                  <div><strong>OpenRouter</strong><span>openai · 备用</span></div>
+                  <button type="button" class="btn-ghost btn-compact" data-toast="已切换">切换</button>
+                </li>
+              </ul>
+            </section>
+
+            <section class="section team-only">
+              <div class="section-label">
+                <h2>Evotown</h2>
+                <span class="badge ok">已连接</span>
+              </div>
+              <div class="field-row"><span class="field-label">URL</span><input class="field-input" value="https://evotown.example.com" readonly /></div>
+              <div class="field-row"><span class="field-label">API Key</span><input class="field-input" type="password" value="evk_demo" readonly /></div>
+              <div class="actions">
+                <button type="button" class="btn-primary" data-toast="同步 Skill 到团队库">同步 Skill</button>
+                <button type="button" class="btn-secondary" data-toast="效率摘要已上报">上报效率</button>
+              </div>
+              <p class="footnote">同步更新团队 Skill 目录；不自动挂载到各 Runtime。</p>
+            </section>
+          </section>
+
+          <!-- Workspace：登记 / 对齐 / 预设（深管理） -->
+          <section class="panel" data-panel="workspace">
+            <section class="section">
+              <div class="section-label">
+                <h2>工作区管理</h2>
+                <button type="button" class="btn-primary btn-compact" data-toast="登记新工作区…">登记</button>
+              </div>
+              <p class="hint">管项目列表与隔离对齐。日常切换也可在 Agents 顶栏完成。</p>
+              <ul class="list">
+                <li class="item">
+                  <div><strong>agent-doctor</strong><span>~/Documents/agent-doctor · 当前</span></div>
+                  <div class="right">
+                    <span class="badge ok">当前</span>
+                    <div style="display:flex;gap:4px">
+                      <button type="button" class="btn-ghost btn-compact" data-toast="Check 完成">Check</button>
+                      <button type="button" class="btn-ghost btn-compact" data-toast="Fix 完成">Fix</button>
+                    </div>
+                  </div>
+                </li>
+                <li class="item">
+                  <div><strong>evotown</strong><span>~/Documents/evotown</span></div>
+                  <div class="right">
+                    <button type="button" class="btn-secondary btn-compact" data-toast="已切换到 evotown">使用</button>
+                  </div>
+                </li>
+              </ul>
+            </section>
+            <section class="section">
+              <div class="section-label"><h2>配置预设</h2></div>
+              <p class="hint">Hermes scene 等本机预设，与工作区隔离互补。</p>
+              <div class="picker-row">
+                <div class="picker">◈ local</div>
+                <button type="button" class="btn-secondary" data-toast="已切换预设">切换</button>
+              </div>
+            </section>
+          </section>
+        </div>
+
+        <footer class="footer">
+          <span class="personal-only">本机 Runtime · 诊断修复 · 个人通路</span>
+          <span class="team-only">本机执行器 · 团队基线 · 效率可上报</span>
+        </footer>
+      </main>
+
+      <div class="notes">
+        <strong>P0 约定</strong>
+        <ol>
+          <li><strong>Agents</strong>：当前工作区上下文 + 快切；打开 / 诊断 / 安装</li>
+          <li><strong>接线</strong>：个人/团队 + Provider / Evotown</li>
+          <li><strong>工作区</strong>：登记列表、Check/Fix 对齐、配置预设</li>
+          <li>不做独立资源模块、不做挂载</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const AGENTS = {
+        hermes: {
+          title: "Hermes", badge: "已安装", badgeClass: "ok", installed: true, problem: true,
+          rows: [
+            ["Model", "deepseek-v4-flash"],
+            ["Profile", "agent-doctor"],
+            ["Gateway", "https://api.deepseek.com/v1"],
+          ],
+          seen: [
+            ["skill", "code-review"],
+            ["skill", "docs-search"],
+            ["mcp", "filesystem", true],
+            ["mcp", "github"],
+          ],
+          checks: [
+            ["fail", "FAIL", "mcp.path_missing", "filesystem 路径不存在"],
+            ["pass", "PASS", "binary.ok", "hermes 在 PATH"],
+          ],
+        },
+        openclaw: {
+          title: "OpenClaw", badge: "已安装", badgeClass: "ok", installed: true, problem: false,
+          rows: [["Workspace", "agent-doctor"], ["Gateway", "http://127.0.0.1:18789"]],
+          seen: [["skill", "code-review"], ["mcp", "github"]],
+          checks: [["pass", "PASS", "gateway.ok", "可连通"]],
+        },
+        claude: {
+          title: "Claude Code", badge: "已安装", badgeClass: "ok", installed: true, problem: false,
+          rows: [["项目", "agent-doctor"], ["MCP", "项目 .mcp.json"]],
+          seen: [["skill", "code-review"], ["skill", "docs-search"], ["mcp", "github"]],
+          checks: [["pass", "PASS", "project.bind", "已绑定"]],
+        },
+        codex: {
+          title: "Codex", badge: "未安装", badgeClass: "muted", installed: false, problem: false,
+          rows: [["状态", "本机未检测到"]],
+          seen: [],
+          checks: [],
+        },
+      };
+
+      let tab = "agents";
+      let rt = "hermes";
+      const toastEl = document.getElementById("toast");
+      let toastTimer;
+
+      function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add("on");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toastEl.classList.remove("on"), 1400);
+      }
+
+      function setTab(next) {
+        tab = next;
+        document.querySelectorAll("#tabs .main-tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === next));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === next));
+      }
+
+      function renderAgent() {
+        const a = AGENTS[rt];
+        const ops = !a.installed
+          ? `<button type="button" class="btn-primary" data-toast="开始安装 Codex…">安装</button>`
+          : `<button type="button" class="btn-primary" data-toast="正在打开 ${a.title}…">打开</button>
+             <button type="button" class="${a.problem ? "btn-secondary" : "btn-ghost"}" data-toast="正在诊断 ${a.title}…">诊断</button>
+             <button type="button" class="btn-ghost" data-toast="已安装">安装</button>`;
+
+        const tags = a.seen.length
+          ? a.seen
+              .map(([k, n, broken]) => `<span class="mini-tag ${k}${broken ? " broken" : ""}">${k === "skill" ? "Skill" : "MCP"} · ${n}${broken ? " · 缺失" : ""}</span>`)
+              .join("")
+          : `<span class="tone-soft">未发现相关资源</span>`;
+
+        document.getElementById("rt-body").innerHTML = `
+          <div class="section-label" style="margin-bottom:8px">
+            <h2 style="margin:0;font-size:0.86rem">${a.title}</h2>
+            <span class="badge ${a.badgeClass}">${a.badge}</span>
+          </div>
+          <div class="meta-grid">
+            ${a.rows.map(([k,v]) => `<div class="meta-row"><span class="meta-label">${k}</span><span class="meta-value">${v}</span></div>`).join("")}
+          </div>
+          <div class="actions">${ops}</div>
+          <div class="mounted">
+            <h3>相关 Skills / MCP（扫描）</h3>
+            <div class="mini-tags">${tags}</div>
+          </div>
+          ${
+            a.checks.length
+              ? `<ul class="checks">${a.checks
+                  .map(([c,l,t,d]) => `<li class="check"><span class="st ${c}">${l}</span><div><strong>${t}</strong><span>${d}</span></div></li>`)
+                  .join("")}</ul>`
+              : `<p class="footnote">安装后可诊断</p>`
+          }
+        `;
+        bindLocal(document.getElementById("rt-body"));
+      }
+
+      function bindLocal(root) {
+        root.querySelectorAll("[data-toast]").forEach((el) => {
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toast(el.dataset.toast);
+          });
+        });
+        root.querySelectorAll("[data-go]").forEach((el) => {
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setTab(el.dataset.go);
+          });
+        });
+      }
+
+      document.querySelectorAll("#tabs .main-tab").forEach((b) => {
+        b.addEventListener("click", () => setTab(b.dataset.tab));
+      });
+
+      document.querySelectorAll("#rt-tabs .runtime-tab").forEach((b) => {
+        b.addEventListener("click", () => {
+          document.querySelectorAll("#rt-tabs .runtime-tab").forEach((x) => x.classList.remove("is-active"));
+          b.classList.add("is-active");
+          rt = b.dataset.rt;
+          renderAgent();
+        });
+      });
+
+      document.querySelectorAll("#mode .mode-switch-btn").forEach((b) => {
+        b.addEventListener("click", () => {
+          document.querySelectorAll("#mode .mode-switch-btn").forEach((x) => x.classList.remove("is-active"));
+          b.classList.add("is-active");
+          document.body.classList.toggle("is-team", b.dataset.mode === "team");
+        });
+      });
+
+      document.querySelectorAll("[data-toast]").forEach((el) => {
+        if (!el.closest("#rt-body") && !el.closest("#res-list")) {
+          el.addEventListener("click", () => toast(el.dataset.toast));
+        }
+      });
+      document.querySelectorAll("[data-go]").forEach((el) => {
+        if (!el.closest("#rt-body")) el.addEventListener("click", () => setTab(el.dataset.go));
+      });
+
+      const wsPicker = document.getElementById("ws-picker");
+      document.getElementById("ws-quick").addEventListener("click", () => {
+        wsPicker.hidden = !wsPicker.hidden;
+      });
+      document.querySelectorAll("#ws-quick-list [data-ws]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const name = el.dataset.ws;
+          document.getElementById("ws-name").textContent = name;
+          wsPicker.hidden = true;
+          toast("已切换到 " + name);
+        });
+      });
+
+      renderAgent();
+    </script>
+  </body>
+</html>

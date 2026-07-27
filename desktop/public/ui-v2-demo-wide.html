@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — 在现有 UI 上演进</title>
+    <style>
+      /* 直接延续 desktop/src/styles.css 的视觉语言，不做换皮 */
+      :root {
+        color-scheme: light;
+        font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+        --bg: #e8ecf4;
+        --shell: rgba(255, 255, 255, 0.82);
+        --surface: #ffffff;
+        --surface-muted: #f4f7fb;
+        --surface-inset: #eef2f8;
+        --border: rgba(15, 23, 42, 0.08);
+        --border-strong: rgba(15, 23, 42, 0.12);
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --text-soft: #94a3b8;
+        --primary: #3b82f6;
+        --primary-deep: #2563eb;
+        --success: #16a34a;
+        --success-bg: rgba(22, 163, 74, 0.1);
+        --warn: #d97706;
+        --warn-bg: rgba(217, 119, 6, 0.1);
+        --danger: #dc2626;
+        --danger-bg: rgba(220, 38, 38, 0.08);
+        --shadow-shell: 0 18px 50px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+        --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+        --radius-lg: 18px;
+        --radius-md: 12px;
+        --radius-sm: 8px;
+        line-height: 1.45;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.14), transparent 38%),
+          radial-gradient(circle at 85% 8%, rgba(14, 165, 233, 0.1), transparent 32%),
+          linear-gradient(180deg, #edf1f7 0%, var(--bg) 100%);
+      }
+      .page {
+        padding: 20px 16px 40px;
+        display: grid;
+        gap: 14px;
+        justify-items: center;
+      }
+      .intro {
+        width: min(920px, 100%);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        justify-content: space-between;
+        align-items: end;
+      }
+      .intro h1 { margin: 0; font-size: 1.05rem; }
+      .intro p { margin: 4px 0 0; font-size: 0.78rem; color: var(--text-muted); max-width: 52ch; }
+      .compare {
+        width: min(920px, 100%);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 880px) { .compare { grid-template-columns: 1fr; } }
+      .col-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--text-soft);
+        margin: 0 0 8px 4px;
+        letter-spacing: 0.02em;
+      }
+      .col-label em {
+        font-style: normal;
+        color: var(--primary-deep);
+      }
+
+      .widget {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: 420px;
+        height: 720px;
+        margin: 0 auto;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        border-radius: calc(var(--radius-lg) + 4px);
+        background: var(--shell);
+        backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--shadow-shell);
+        overflow: hidden;
+      }
+      .widget-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .brand-icon {
+        width: 28px; height: 28px; border-radius: 8px;
+        display: grid; place-items: center; color: white;
+        background: linear-gradient(145deg, #3b82f6 0%, #06b6d4 100%);
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
+      }
+      .brand-name { margin: 0; font-size: 0.84rem; font-weight: 700; }
+      .toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+      .mode-switch, .lang-switch {
+        display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 2px;
+        border-radius: 999px; background: var(--surface-inset); border: 1px solid var(--border);
+      }
+      .mode-switch-btn, .lang-btn {
+        appearance: none; border: 0; border-radius: 999px; padding: 4px 8px;
+        font: inherit; font-size: 0.66rem; font-weight: 700; color: var(--text-soft);
+        background: transparent; cursor: pointer;
+      }
+      .mode-switch-btn.is-active { background: #2563eb; color: #fff; }
+      .lang-btn.is-active { background: var(--surface); color: var(--primary-deep); box-shadow: var(--shadow-soft); }
+      .btn-scan {
+        display: inline-flex; align-items: center; gap: 4px;
+        border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 999px;
+        background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+        color: var(--primary-deep); padding: 5px 9px; font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      }
+      .status-bar {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      }
+      .health-pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 8px 4px 7px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surface);
+        font-size: 0.68rem; font-weight: 700; color: var(--text-muted);
+      }
+      .health-pill.is-good .health-dot { background: var(--success); box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18); }
+      .health-pill.is-partial .health-dot { background: var(--warn); box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18); }
+      .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-soft); }
+      .status-meta {
+        margin-left: auto; display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
+        font-size: 0.64rem; color: var(--text-soft); font-weight: 600;
+      }
+      .status-meta strong { color: var(--text); }
+      .status-sep { opacity: 0.55; }
+
+      .main-tabs {
+        display: grid;
+        gap: 3px;
+        margin: 0 0 8px;
+        padding: 3px;
+        border-radius: 12px;
+        background: var(--surface-inset);
+        border: 1px solid var(--border);
+      }
+      .tabs-3 { grid-template-columns: repeat(3, 1fr); }
+      .tabs-4 { grid-template-columns: repeat(4, 1fr); }
+      .main-tab {
+        appearance: none; border: 0; border-radius: 9px; background: transparent;
+        color: var(--text-muted); padding: 7px 4px; font: inherit;
+        font-size: 0.7rem; font-weight: 700; cursor: pointer;
+      }
+      .main-tab.is-active {
+        background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+      .main-panels { flex: 1; min-height: 0; overflow: auto; }
+      .main-panel { display: none; flex-direction: column; gap: 8px; }
+      .main-panel.is-active { display: flex; }
+      .widget-section {
+        padding: 10px 12px; border-radius: var(--radius-lg);
+        border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-soft);
+      }
+      .section-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+      .section-label h2 { margin: 0; flex: 1; font-size: 0.82rem; font-weight: 700; }
+      .section-badge {
+        padding: 2px 7px; border-radius: 999px; background: var(--surface-inset);
+        color: var(--text-soft); font-size: 0.64rem; font-weight: 700;
+      }
+      .section-hint, .section-footnote {
+        margin: 0 0 8px; color: var(--text-muted); font-size: 0.72rem; line-height: 1.35;
+      }
+      .section-footnote { margin: 8px 0 0; }
+      .btn-primary, .btn-secondary, .btn-ghost {
+        appearance: none; border-radius: 9px; font: inherit; font-size: 0.72rem; font-weight: 700;
+        padding: 7px 10px; cursor: pointer;
+      }
+      .btn-primary {
+        border: 0; color: #fff;
+        background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+      }
+      .btn-secondary, .btn-ghost {
+        border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      }
+      .btn-ghost { background: transparent; color: var(--text-muted); }
+      .btn-compact { padding: 4px 8px; font-size: 0.66rem; }
+      .widget-footer {
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+        font-size: 0.64rem; color: var(--text-soft); text-align: center;
+      }
+
+      .runtime-tabs { display: flex; gap: 4px; overflow-x: auto; margin-bottom: 8px; }
+      .runtime-tab {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 6px 8px; border-radius: 999px; border: 1px solid var(--border);
+        background: var(--surface-muted); font-size: 0.66rem; font-weight: 700;
+        color: var(--text-muted); cursor: pointer; white-space: nowrap;
+      }
+      .runtime-tab.is-active { background: #fff; color: var(--text); border-color: rgba(59, 130, 246, 0.35); }
+      .runtime-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-soft); }
+      .runtime-tab-dot.ok { background: var(--success); }
+      .runtime-tab-dot.warn { background: var(--warn); }
+      .runtime-tab-dot.off { background: #94a3b8; }
+      .runtime-head-compact { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .runtime-tab-title { margin: 0; font-size: 0.86rem; font-weight: 800; }
+      .badge {
+        margin: 0; padding: 3px 8px; border-radius: 999px; font-size: 0.64rem; font-weight: 800;
+      }
+      .badge.ok { background: var(--success-bg); color: var(--success); }
+      .badge.warn { background: var(--warn-bg); color: var(--warn); }
+      .badge.muted { background: var(--surface-inset); color: var(--text-soft); }
+      .meta-grid { display: grid; gap: 5px; }
+      .meta-row {
+        display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start;
+        padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-muted); border: 1px solid var(--border);
+      }
+      .meta-label { font-size: 0.64rem; font-weight: 700; color: var(--text-soft); }
+      .meta-value {
+        margin: 0; font-size: 0.74rem; color: var(--text); word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .runtime-actions {
+        display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+      }
+      /* 演进点：主操作更明确 */
+      .runtime-actions .btn-primary { min-width: 72px; }
+      .repair-checks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+      .repair-check {
+        display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start;
+        padding: 7px 8px; border-radius: 10px; background: var(--surface-muted); border: 1px solid var(--border);
+      }
+      .repair-check-status {
+        padding: 1px 6px; border-radius: 999px; font-size: 0.58rem; font-weight: 800;
+      }
+      .repair-check-status.pass { background: var(--success-bg); color: var(--success); }
+      .repair-check-status.warn { background: var(--warn-bg); color: var(--warn); }
+      .repair-check-status.fail { background: var(--danger-bg); color: var(--danger); }
+      .repair-check strong { display: block; font-size: 0.72rem; }
+      .repair-check span { font-size: 0.64rem; color: var(--text-muted); }
+
+      .provider-list, .res-list, .ws-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .provider-item, .res-item, .ws-item {
+        display: flex; justify-content: space-between; gap: 8px; align-items: center;
+        padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-muted);
+      }
+      .provider-item.is-active, .ws-item.is-active {
+        border-color: rgba(37, 99, 235, 0.35); background: #eff6ff;
+      }
+      .provider-item strong, .res-item strong, .ws-item strong { display: block; font-size: 0.76rem; }
+      .provider-item span, .res-item span, .ws-item span { font-size: 0.64rem; color: var(--text-muted); }
+      .field-row { display: grid; grid-template-columns: 88px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .field-label { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); }
+      .field-input {
+        width: 100%; padding: 7px 9px; border-radius: 8px;
+        border: 1px solid var(--border-strong); background: var(--surface-muted);
+        color: var(--text); font: inherit; font-size: 0.74rem;
+      }
+      .picker-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-bottom: 8px; }
+      .picker-trigger {
+        display: flex; align-items: center; gap: 6px; width: 100%;
+        padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-strong);
+        background: var(--surface-muted); font: inherit; font-size: 0.74rem; font-weight: 700; text-align: left;
+      }
+      .filters { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+      .filter-chip {
+        appearance: none; border: 1px solid var(--border); background: var(--surface-muted);
+        color: var(--text-muted); border-radius: 999px; padding: 3px 8px;
+        font: inherit; font-size: 0.64rem; font-weight: 700; cursor: pointer;
+      }
+      .filter-chip.is-active { background: #fff; color: var(--primary-deep); border-color: rgba(59,130,246,.35); }
+      .tone-bad { color: var(--danger); font-weight: 700; font-size: 0.64rem; }
+      .tone-ok { color: var(--success); font-weight: 700; font-size: 0.64rem; }
+      .tone-warn { color: var(--warn); font-weight: 700; font-size: 0.64rem; }
+      .team-only { display: none !important; }
+      .is-team .personal-only { display: none !important; }
+      .is-team .team-only { display: block !important; }
+
+      .diff {
+        width: min(920px, 100%);
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.7);
+        border: 1px solid rgba(255,255,255,0.85);
+        font-size: 0.74rem;
+        color: var(--text-muted);
+      }
+      .diff strong { color: var(--text); }
+      .diff ul { margin: 6px 0 0; padding-left: 18px; }
+      .diff li { margin: 3px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="intro">
+        <div>
+          <h1>回到你现在的壳，只做小演进</h1>
+          <p>深色大盘那套先丢掉。左边近似现状，右边是同一套视觉语言下的克制升级：操作更清楚，多一个「资源」页。</p>
+        </div>
+      </div>
+
+      <div class="compare">
+        <!-- CURRENT-ish -->
+        <div>
+          <p class="col-label">现状气质（对照）</p>
+          <main class="widget" id="now">
+            <header class="widget-toolbar">
+              <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                </div>
+                <p class="brand-name">Agent Doctor</p>
+              </div>
+              <div class="toolbar-actions">
+                <div class="mode-switch">
+                  <button type="button" class="mode-switch-btn is-active">个人</button>
+                  <button type="button" class="mode-switch-btn">团队</button>
+                </div>
+                <div class="lang-switch">
+                  <button type="button" class="lang-btn is-active">中</button>
+                  <button type="button" class="lang-btn">EN</button>
+                </div>
+                <button type="button" class="btn-scan">扫描</button>
+              </div>
+            </header>
+            <section class="status-bar">
+              <div class="health-pill is-partial"><span class="health-dot"></span>待修复</div>
+              <div class="status-meta">
+                <span>已装 <strong>3</strong></span><span class="status-sep">·</span>
+                <span>预设 <strong>local</strong></span><span class="status-sep">·</span>
+                <span><strong>刚刚</strong></span>
+              </div>
+            </section>
+            <nav class="main-tabs tabs-3">
+              <button type="button" class="main-tab is-active">诊断</button>
+              <button type="button" class="main-tab">Provider</button>
+              <button type="button" class="main-tab">工作区</button>
+            </nav>
+            <div class="main-panels">
+              <section class="main-panel is-active">
+                <section class="widget-section">
+                  <div class="runtime-tabs">
+                    <button type="button" class="runtime-tab is-active"><span class="runtime-tab-dot warn"></span>Hermes</button>
+                    <button type="button" class="runtime-tab"><span class="runtime-tab-dot ok"></span>OpenClaw</button>
+                    <button type="button" class="runtime-tab"><span class="runtime-tab-dot ok"></span>Claude</button>
+                    <button type="button" class="runtime-tab"><span class="runtime-tab-dot off"></span>Codex</button>
+                  </div>
+                  <div class="runtime-head-compact">
+                    <h3 class="runtime-tab-title">Hermes</h3>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <button type="button" class="btn-ghost btn-compact">诊断</button>
+                      <button type="button" class="btn-ghost btn-compact">编辑</button>
+                      <span class="badge ok">已安装</span>
+                    </div>
+                  </div>
+                  <div class="meta-grid">
+                    <div class="meta-row"><span class="meta-label">Model</span><span class="meta-value">deepseek-v4-flash</span></div>
+                    <div class="meta-row"><span class="meta-label">Gateway</span><span class="meta-value">https://api.deepseek.com/v1</span></div>
+                    <div class="meta-row"><span class="meta-label">Version</span><span class="meta-value">v0.9.2</span></div>
+                  </div>
+                  <p class="section-footnote">操作入口偏弱：打开 / 安装不够突出</p>
+                </section>
+              </section>
+            </div>
+            <footer class="widget-footer">本机 Runtime 发现 · 配置 · 健康检查</footer>
+          </main>
+        </div>
+
+        <!-- EVOLVED -->
+        <div class="is-evolve" id="evolve-root">
+          <p class="col-label">演进稿 · <em>同一壳 + 更清楚的操作</em></p>
+          <main class="widget" id="evolve">
+            <header class="widget-toolbar">
+              <div class="brand">
+                <div class="brand-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                </div>
+                <p class="brand-name">Agent Doctor</p>
+              </div>
+              <div class="toolbar-actions">
+                <div class="mode-switch" id="mode">
+                  <button type="button" class="mode-switch-btn is-active" data-mode="personal">个人</button>
+                  <button type="button" class="mode-switch-btn" data-mode="team">团队</button>
+                </div>
+                <div class="lang-switch">
+                  <button type="button" class="lang-btn is-active">中</button>
+                  <button type="button" class="lang-btn">EN</button>
+                </div>
+                <button type="button" class="btn-scan">扫描</button>
+              </div>
+            </header>
+
+            <section class="status-bar">
+              <div class="health-pill is-partial"><span class="health-dot"></span>待修复 1</div>
+              <div class="status-meta">
+                <span>已装 <strong>3</strong></span><span class="status-sep">·</span>
+                <span>Skills <strong>14</strong></span><span class="status-sep">·</span>
+                <span>MCP <strong>6</strong></span>
+              </div>
+            </section>
+
+            <nav class="main-tabs tabs-4" id="tabs">
+              <button type="button" class="main-tab is-active" data-tab="diagnose">诊断</button>
+              <button type="button" class="main-tab" data-tab="resources">资源</button>
+              <button type="button" class="main-tab" data-tab="provider">接线</button>
+              <button type="button" class="main-tab" data-tab="workspace">工作区</button>
+            </nav>
+
+            <div class="main-panels">
+              <!-- 诊断：保留现结构，只强化操作 -->
+              <section class="main-panel is-active" data-panel="diagnose">
+                <section class="widget-section">
+                  <div class="runtime-tabs" id="rt-tabs">
+                    <button type="button" class="runtime-tab is-active" data-rt="hermes"><span class="runtime-tab-dot warn"></span>Hermes</button>
+                    <button type="button" class="runtime-tab" data-rt="openclaw"><span class="runtime-tab-dot ok"></span>OpenClaw</button>
+                    <button type="button" class="runtime-tab" data-rt="claude"><span class="runtime-tab-dot ok"></span>Claude</button>
+                    <button type="button" class="runtime-tab" data-rt="codex"><span class="runtime-tab-dot off"></span>Codex</button>
+                  </div>
+
+                  <div id="rt-body"></div>
+                </section>
+              </section>
+
+              <!-- 资源：新增，但仍是你们现有的 list 风格 -->
+              <section class="main-panel" data-panel="resources">
+                <section class="widget-section">
+                  <div class="section-label">
+                    <h2>Skills / MCP</h2>
+                    <span class="section-badge">本机</span>
+                  </div>
+                  <p class="section-hint personal-only">效率只记本机。问题可跳回诊断。</p>
+                  <p class="section-hint team-only">团队模式可上报效率摘要到中心。</p>
+                  <div class="filters" id="res-filters">
+                    <button type="button" class="filter-chip is-active" data-f="all">全部</button>
+                    <button type="button" class="filter-chip" data-f="skill">Skills</button>
+                    <button type="button" class="filter-chip" data-f="mcp">MCP</button>
+                    <button type="button" class="filter-chip" data-f="issue">问题</button>
+                  </div>
+                  <ul class="res-list" id="res-list"></ul>
+                </section>
+              </section>
+
+              <!-- 接线 = 现 Provider，改名而已 -->
+              <section class="main-panel" data-panel="provider">
+                <section class="widget-section personal-only">
+                  <div class="section-label">
+                    <h2>个人 Provider</h2>
+                    <button type="button" class="btn-primary btn-compact">新增</button>
+                  </div>
+                  <p class="section-hint">选模板 → 验证 → 写入 runtime</p>
+                  <ul class="provider-list">
+                    <li class="provider-item is-active">
+                      <div><strong>DeepSeek</strong><span>openai · deepseek-v4-flash</span></div>
+                      <span class="badge ok">当前</span>
+                    </li>
+                    <li class="provider-item">
+                      <div><strong>OpenRouter</strong><span>openai · 备用</span></div>
+                      <button type="button" class="btn-ghost btn-compact">切换</button>
+                    </li>
+                  </ul>
+                </section>
+                <section class="widget-section team-only">
+                  <div class="section-label">
+                    <h2>Evotown</h2>
+                    <span class="section-badge">已连接</span>
+                  </div>
+                  <div class="field-row"><span class="field-label">URL</span><input class="field-input" value="https://evotown.example.com" readonly /></div>
+                  <div class="field-row"><span class="field-label">API Key</span><input class="field-input" type="password" value="evk_demo" readonly /></div>
+                  <div class="runtime-actions">
+                    <button type="button" class="btn-primary">重新同步</button>
+                    <button type="button" class="btn-secondary">上报效率</button>
+                  </div>
+                  <p class="section-footnote">上次 sync 08:10</p>
+                </section>
+              </section>
+
+              <!-- 工作区：现结构 + 资源摘要一行 -->
+              <section class="main-panel" data-panel="workspace">
+                <section class="widget-section">
+                  <div class="section-label"><h2>配置预设</h2></div>
+                  <div class="picker-row">
+                    <button type="button" class="picker-trigger">◈ local</button>
+                    <button type="button" class="btn-secondary">切换</button>
+                  </div>
+                </section>
+                <section class="widget-section">
+                  <div class="section-label"><h2>Workspaces</h2></div>
+                  <div class="picker-row">
+                    <button type="button" class="picker-trigger">▣ agent-doctor</button>
+                    <button type="button" class="btn-secondary">Switch</button>
+                  </div>
+                  <div class="runtime-actions" style="margin-top:0;margin-bottom:8px">
+                    <button type="button" class="btn-ghost">Check</button>
+                    <button type="button" class="btn-ghost">Fix</button>
+                  </div>
+                  <ul class="ws-list">
+                    <li class="ws-item is-active">
+                      <div><strong>本区资源</strong><span>Skills 5 · MCP 3 · 快照昨天</span></div>
+                      <span class="badge ok">对齐</span>
+                    </li>
+                  </ul>
+                </section>
+              </section>
+            </div>
+
+            <footer class="widget-footer">
+              <span class="personal-only">本机 Runtime · 诊断修复 · 本地效率</span>
+              <span class="team-only">本机执行器 · 团队基线 · 效率上报</span>
+            </footer>
+          </main>
+        </div>
+      </div>
+
+      <div class="diff">
+        <strong>相对现状只动这些：</strong>
+        <ul>
+          <li>视觉壳、健康条、runtime 详情、Provider / 工作区交互 —— <strong>保持</strong></li>
+          <li>诊断页操作改成：<strong>打开（主按钮）/ 诊断 / 安装</strong>；未装时主按钮变安装</li>
+          <li>多一个「资源」Tab（Skills/MCP 列表，风格沿用 provider-list）</li>
+          <li>状态条多显示 Skills / MCP 计数；Provider 文案可改叫「接线」</li>
+          <li>不做深色大盘、不做三栏后台</li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      const RTS = {
+        hermes: {
+          title: "Hermes", badge: "已安装", badgeClass: "ok",
+          installed: true, problem: true,
+          rows: [
+            ["Model", "deepseek-v4-flash"],
+            ["Gateway", "https://api.deepseek.com/v1"],
+            ["Version", "v0.9.2"],
+          ],
+          checks: [
+            ["fail", "FAIL", "mcp.path_missing", "filesystem 路径缺失"],
+            ["warn", "WARN", "skills.idle_orphan", "legacy-deploy 无引用"],
+            ["pass", "PASS", "binary.ok", "hermes 在 PATH"],
+          ],
+        },
+        openclaw: {
+          title: "OpenClaw", badge: "已安装", badgeClass: "ok",
+          installed: true, problem: false,
+          rows: [
+            ["Gateway", "http://127.0.0.1:18789"],
+            ["Version", "v1.2.0"],
+          ],
+          checks: [["pass", "PASS", "gateway.ok", "可连通"]],
+        },
+        claude: {
+          title: "Claude Code", badge: "已安装", badgeClass: "ok",
+          installed: true, problem: false,
+          rows: [["绑定", "agent-doctor"], ["MCP", "项目级"]],
+          checks: [["pass", "PASS", "project.bind", "已绑定"]],
+        },
+        codex: {
+          title: "Codex", badge: "未安装", badgeClass: "muted",
+          installed: false, problem: false,
+          rows: [["状态", "本机未检测到"]],
+          checks: [],
+        },
+      };
+
+      const RES = [
+        { t: "mcp", name: "filesystem", sub: "Hermes · 工作区", issue: true, tone: "bad", meta: "路径缺失", act: "去诊断" },
+        { t: "mcp", name: "github", sub: "项目", issue: false, tone: "ok", meta: "7d · 19 次", act: "打开" },
+        { t: "skill", name: "code-review", sub: "本地", issue: false, tone: "ok", meta: "7d · 42 次", act: "打开" },
+        { t: "skill", name: "legacy-deploy", sub: "全局", issue: true, tone: "warn", meta: "闲置 21 天", act: "忽略" },
+      ];
+
+      let rt = "hermes";
+      let resFilter = "all";
+      const evolve = document.getElementById("evolve");
+
+      function renderRt() {
+        const a = RTS[rt];
+        const actions = !a.installed
+          ? `<button type="button" class="btn-primary">安装</button>`
+          : `<button type="button" class="btn-primary">打开</button>
+             <button type="button" class="${a.problem ? "btn-secondary" : "btn-ghost"}">诊断</button>
+             <button type="button" class="btn-ghost">安装</button>`;
+        document.getElementById("rt-body").innerHTML = `
+          <div class="runtime-head-compact">
+            <h3 class="runtime-tab-title">${a.title}</h3>
+            <span class="badge ${a.badgeClass}">${a.badge}</span>
+          </div>
+          <div class="meta-grid">
+            ${a.rows.map(([k,v]) => `<div class="meta-row"><span class="meta-label">${k}</span><span class="meta-value">${v}</span></div>`).join("")}
+          </div>
+          <div class="runtime-actions">${actions}</div>
+          ${
+            a.checks.length
+              ? `<ul class="repair-checks">${a.checks
+                  .map(
+                    ([c, l, t, d]) =>
+                      `<li class="repair-check"><span class="repair-check-status ${c}">${l}</span><div><strong>${t}</strong><span>${d}</span></div></li>`
+                  )
+                  .join("")}</ul>`
+              : `<p class="section-footnote">安装后可诊断配置与 Gateway</p>`
+          }
+        `;
+      }
+
+      function renderRes() {
+        const list = RES.filter((r) => resFilter === "all" || (resFilter === "issue" ? r.issue : r.t === resFilter));
+        document.getElementById("res-list").innerHTML = list
+          .map(
+            (r) => `
+          <li class="res-item">
+            <div>
+              <strong>${r.name}</strong>
+              <span>${r.sub}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="tone-${r.tone}">${r.meta}</span>
+              <button type="button" class="btn-ghost btn-compact">${r.act}</button>
+            </div>
+          </li>`
+          )
+          .join("");
+      }
+
+      document.querySelectorAll("#tabs .main-tab").forEach((t) => {
+        t.addEventListener("click", () => {
+          document.querySelectorAll("#tabs .main-tab").forEach((x) => x.classList.remove("is-active"));
+          t.classList.add("is-active");
+          document.querySelectorAll("#evolve .main-panel").forEach((p) => {
+            p.classList.toggle("is-active", p.dataset.panel === t.dataset.tab);
+          });
+        });
+      });
+
+      document.querySelectorAll("#rt-tabs .runtime-tab").forEach((t) => {
+        t.addEventListener("click", () => {
+          document.querySelectorAll("#rt-tabs .runtime-tab").forEach((x) => x.classList.remove("is-active"));
+          t.classList.add("is-active");
+          rt = t.dataset.rt;
+          renderRt();
+        });
+      });
+
+      document.querySelectorAll("#mode .mode-switch-btn").forEach((b) => {
+        b.addEventListener("click", () => {
+          document.querySelectorAll("#mode .mode-switch-btn").forEach((x) => x.classList.remove("is-active"));
+          b.classList.add("is-active");
+          evolve.classList.toggle("is-team", b.dataset.mode === "team");
+        });
+      });
+
+      document.querySelectorAll("#res-filters .filter-chip").forEach((c) => {
+        c.addEventListener("click", () => {
+          document.querySelectorAll("#res-filters .filter-chip").forEach((x) => x.classList.remove("is-active"));
+          c.classList.add("is-active");
+          resFilter = c.dataset.f;
+          renderRes();
+        });
+      });
+
+      renderRt();
+      renderRes();
+    </script>
+  </body>
+</html>

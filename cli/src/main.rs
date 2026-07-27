@@ -96,6 +96,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Manage MCP servers (browser control via CDP)
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
     /// Pull private SkillHub bundle from Evotown
     Sync {
         /// Show planned actions without downloading
@@ -343,6 +348,42 @@ enum PolicyAction {
     },
 }
 
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Start browser MCP server (connect Codex/Claude to Chrome)
+    Browser {
+        /// Chrome DevTools Protocol port
+        #[arg(long, default_value_t = 9222)]
+        port: u16,
+        /// Run headless (no visible window)
+        #[arg(long)]
+        headless: bool,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check browser MCP server status
+    Status {
+        /// Chrome DevTools Protocol port to check
+        #[arg(long, default_value_t = 9222)]
+        port: u16,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Configure browser MCP for a runtime (codex, claude-code)
+    Configure {
+        /// Runtime id (codex or claude-code)
+        runtime: String,
+        /// Chrome DevTools Protocol port
+        #[arg(long, default_value_t = 9222)]
+        port: u16,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -430,6 +471,17 @@ fn main() -> Result<()> {
         )?,
         Commands::Policy { action } => match action {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
+        },
+        Commands::Mcp { action } => match action {
+            McpAction::Browser { port, headless, json } => {
+                commands::mcp::run_browser(port, headless, json)?
+            }
+            McpAction::Status { port, json } => {
+                commands::mcp::run_status(port, json)?
+            }
+            McpAction::Configure { runtime, port, json } => {
+                commands::mcp::run_configure(&runtime, port, json)?
+            }
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {

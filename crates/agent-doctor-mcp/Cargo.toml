@@ -1,0 +1,13 @@
+[package]
+name = "agent-doctor-mcp"
+description = "Browser MCP server for AI agent runtimes — Chrome discovery, anti-detection launch, CDP-based browser control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tungstenite = { workspace = true, features = ["handshake"] }

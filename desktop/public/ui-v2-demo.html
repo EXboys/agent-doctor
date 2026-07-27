@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — UI v2 Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+        --bg: #e8ecf4;
+        --shell: rgba(255, 255, 255, 0.82);
+        --surface: #ffffff;
+        --surface-muted: #f4f7fb;
+        --surface-inset: #eef2f8;
+        --border: rgba(15, 23, 42, 0.08);
+        --border-strong: rgba(15, 23, 42, 0.12);
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --text-soft: #94a3b8;
+        --primary: #3b82f6;
+        --primary-deep: #2563eb;
+        --success: #16a34a;
+        --success-bg: rgba(22, 163, 74, 0.1);
+        --warn: #d97706;
+        --warn-bg: rgba(217, 119, 6, 0.1);
+        --danger: #dc2626;
+        --danger-bg: rgba(220, 38, 38, 0.08);
+        --shadow-shell: 0 18px 50px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.04);
+        --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
+        --radius-lg: 18px;
+        --radius-md: 12px;
+        --radius-sm: 8px;
+        line-height: 1.45;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.14), transparent 38%),
+          radial-gradient(circle at 85% 8%, rgba(14, 165, 233, 0.1), transparent 32%),
+          linear-gradient(180deg, #edf1f7 0%, var(--bg) 100%);
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: radial-gradient(rgba(15, 23, 42, 0.05) 0.6px, transparent 0.6px);
+        background-size: 14px 14px;
+        pointer-events: none;
+        opacity: 0.35;
+      }
+      .page {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 28px;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 28px 20px 48px;
+      }
+      .page-note {
+        width: 100%;
+        max-width: 920px;
+        margin: 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .page-note h1 {
+        margin: 0;
+        font-size: 1.05rem;
+        letter-spacing: -0.02em;
+      }
+      .page-note p {
+        margin: 2px 0 0;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+      .demo-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--border);
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--primary-deep);
+      }
+      .widget {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 440px;
+        max-width: calc(100vw - 24px);
+        height: 760px;
+        max-height: calc(100vh - 120px);
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        border-radius: calc(var(--radius-lg) + 4px);
+        background: var(--shell);
+        backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--shadow-shell);
+        overflow: hidden;
+      }
+      .widget-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .brand-icon {
+        width: 28px; height: 28px; border-radius: 8px;
+        display: grid; place-items: center; color: white;
+        background: linear-gradient(145deg, #3b82f6 0%, #06b6d4 100%);
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
+        flex-shrink: 0;
+      }
+      .brand-name { margin: 0; font-size: 0.84rem; font-weight: 700; }
+      .toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+      .mode-switch, .lang-switch, .sub-tabs {
+        display: inline-grid;
+        grid-auto-flow: column;
+        gap: 2px;
+        padding: 2px;
+        border-radius: 999px;
+        background: var(--surface-inset);
+        border: 1px solid var(--border);
+      }
+      .mode-switch-btn, .lang-btn, .sub-tab {
+        appearance: none; border: 0; border-radius: 999px;
+        padding: 4px 8px; font: inherit; font-size: 0.66rem; font-weight: 700;
+        color: var(--text-soft); background: transparent; cursor: pointer;
+      }
+      .mode-switch-btn.is-active { background: #2563eb; color: #fff; }
+      .lang-btn.is-active, .sub-tab.is-active {
+        background: var(--surface); color: var(--primary-deep); box-shadow: var(--shadow-soft);
+      }
+      .btn-scan {
+        display: inline-flex; align-items: center; gap: 4px;
+        border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 999px;
+        background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+        color: var(--primary-deep); padding: 5px 9px; font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      }
+      .status-bar {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      }
+      .health-pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 8px 4px 7px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surface);
+        font-size: 0.68rem; font-weight: 700; color: var(--text-muted);
+      }
+      .health-pill.is-good .health-dot { background: var(--success); box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18); }
+      .health-pill.is-partial .health-dot { background: var(--warn); box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.18); }
+      .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-soft); }
+      .status-meta {
+        margin-left: auto; display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
+        font-size: 0.64rem; color: var(--text-soft); font-weight: 600;
+      }
+      .status-meta strong { color: var(--text); }
+      .status-sep { opacity: 0.55; }
+      .main-tabs {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 3px;
+        margin: 0 0 8px;
+        padding: 3px;
+        border-radius: 12px;
+        background: var(--surface-inset);
+        border: 1px solid var(--border);
+      }
+      .main-tab {
+        appearance: none; border: 0; border-radius: 9px; background: transparent;
+        color: var(--text-muted); padding: 7px 2px; font: inherit;
+        font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      }
+      .main-tab.is-active {
+        background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+      .main-panels { flex: 1; min-height: 0; overflow: auto; padding-right: 2px; }
+      .main-panel { display: none; flex-direction: column; gap: 8px; }
+      .main-panel.is-active { display: flex; }
+      .widget-section {
+        padding: 10px 12px; border-radius: var(--radius-lg);
+        border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-soft);
+      }
+      .section-label { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+      .section-label h2 { margin: 0; flex: 1; font-size: 0.82rem; font-weight: 700; }
+      .section-icon { color: var(--primary); font-size: 0.72rem; opacity: 0.85; }
+      .section-badge {
+        padding: 2px 7px; border-radius: 999px; background: var(--surface-inset);
+        color: var(--text-soft); font-size: 0.64rem; font-weight: 700;
+      }
+      .section-hint, .section-footnote {
+        margin: 0 0 8px; color: var(--text-muted); font-size: 0.72rem; line-height: 1.35;
+      }
+      .section-footnote { margin: 8px 0 0; }
+      .btn-primary, .btn-secondary, .btn-ghost {
+        appearance: none; border-radius: 9px; font: inherit; font-size: 0.72rem; font-weight: 700;
+        padding: 7px 10px; cursor: pointer;
+      }
+      .btn-primary {
+        border: 0; color: #fff;
+        background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+      }
+      .btn-secondary, .btn-ghost {
+        border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      }
+      .btn-ghost { background: transparent; color: var(--text-muted); }
+      .btn-compact { padding: 4px 8px; font-size: 0.66rem; }
+      .widget-footer {
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+        font-size: 0.64rem; color: var(--text-soft); text-align: center;
+      }
+
+      /* Demo-specific: overview */
+      .snap-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .snap {
+        padding: 8px 6px;
+        border-radius: 10px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        text-align: center;
+      }
+      .snap strong { display: block; font-size: 0.95rem; font-weight: 800; letter-spacing: -0.02em; }
+      .snap span { font-size: 0.6rem; color: var(--text-soft); font-weight: 700; }
+      .eff-block { margin-top: 4px; }
+      .eff-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 6px; font-size: 0.68rem; font-weight: 700; color: var(--text-muted);
+      }
+      .eff-bars { display: grid; gap: 6px; }
+      .eff-row { display: grid; grid-template-columns: 52px 1fr 28px; gap: 6px; align-items: center; }
+      .eff-row label { font-size: 0.64rem; font-weight: 700; color: var(--text-soft); }
+      .eff-track {
+        height: 8px; border-radius: 999px; background: var(--surface-inset); overflow: hidden;
+      }
+      .eff-fill {
+        height: 100%; border-radius: 999px;
+        background: linear-gradient(90deg, #3b82f6, #06b6d4);
+      }
+      .eff-fill.mcp { background: linear-gradient(90deg, #0ea5e9, #22c55e); }
+      .eff-row em { font-style: normal; font-size: 0.64rem; font-weight: 700; color: var(--text); text-align: right; }
+      .todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .todo-item {
+        display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+        padding: 8px 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-muted);
+        cursor: pointer;
+      }
+      .todo-item:hover { border-color: rgba(59, 130, 246, 0.35); }
+      .todo-tag {
+        padding: 2px 6px; border-radius: 999px; font-size: 0.6rem; font-weight: 800;
+      }
+      .todo-tag.fail { background: var(--danger-bg); color: var(--danger); }
+      .todo-tag.warn { background: var(--warn-bg); color: var(--warn); }
+      .todo-item strong { display: block; font-size: 0.74rem; }
+      .todo-item span { display: block; font-size: 0.64rem; color: var(--text-muted); }
+      .mode-chip {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        padding: 8px 10px; border-radius: 10px;
+        background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.12);
+        font-size: 0.68rem; font-weight: 600; color: var(--text-muted);
+      }
+      .mode-chip strong { color: var(--primary-deep); }
+      body.is-team .mode-chip {
+        background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.18);
+      }
+      body.is-team .mode-chip strong { color: #047857; }
+
+      /* Resources */
+      .resource-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .resource-item {
+        display: grid; grid-template-columns: 1fr auto; gap: 6px;
+        padding: 9px 10px; border-radius: 12px;
+        border: 1px solid var(--border); background: var(--surface-muted); cursor: pointer;
+      }
+      .resource-item:hover, .resource-item.is-open {
+        border-color: rgba(59, 130, 246, 0.35); background: #fff;
+      }
+      .resource-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .resource-top strong { font-size: 0.76rem; }
+      .type-pill, .scope-pill, .health-mini {
+        padding: 1px 6px; border-radius: 999px; font-size: 0.58rem; font-weight: 800;
+      }
+      .type-pill.skill { background: #eff6ff; color: #1d4ed8; }
+      .type-pill.mcp { background: #ecfeff; color: #0e7490; }
+      .type-pill.runtime { background: #f5f3ff; color: #6d28d9; }
+      .scope-pill { background: var(--surface-inset); color: var(--text-soft); }
+      .health-mini.ok { background: var(--success-bg); color: var(--success); }
+      .health-mini.warn { background: var(--warn-bg); color: var(--warn); }
+      .health-mini.fail { background: var(--danger-bg); color: var(--danger); }
+      .health-mini.idle { background: #f1f5f9; color: #64748b; }
+      .resource-meta { margin-top: 4px; font-size: 0.64rem; color: var(--text-soft); font-weight: 600; }
+      .resource-score {
+        align-self: start; text-align: right;
+      }
+      .resource-score strong { display: block; font-size: 0.9rem; font-weight: 800; color: var(--primary-deep); }
+      .resource-score span { font-size: 0.58rem; color: var(--text-soft); font-weight: 700; }
+      .detail-drawer {
+        display: none; margin-top: 8px; padding: 10px;
+        border-radius: 12px; border: 1px dashed rgba(59, 130, 246, 0.35);
+        background: rgba(239, 246, 255, 0.65);
+      }
+      .detail-drawer.is-open { display: block; }
+      .detail-drawer h3 { margin: 0 0 6px; font-size: 0.78rem; }
+      .detail-kv { display: grid; gap: 4px; margin: 0 0 8px; }
+      .detail-kv div {
+        display: grid; grid-template-columns: 72px 1fr; gap: 6px;
+        font-size: 0.68rem;
+      }
+      .detail-kv dt { color: var(--text-soft); font-weight: 700; }
+      .detail-kv dd { margin: 0; color: var(--text); font-weight: 600; }
+      .spark {
+        display: grid; grid-auto-flow: column; gap: 3px; align-items: end; height: 28px; margin: 6px 0 8px;
+      }
+      .spark i {
+        display: block; width: 8px; border-radius: 3px 3px 1px 1px;
+        background: rgba(37, 99, 235, 0.55); font-style: normal;
+      }
+
+      /* Diagnose */
+      .runtime-tabs { display: flex; gap: 4px; overflow-x: auto; }
+      .runtime-tab {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 6px 8px; border-radius: 999px; border: 1px solid var(--border);
+        background: var(--surface-muted); font-size: 0.66rem; font-weight: 700;
+        color: var(--text-muted); cursor: pointer; white-space: nowrap;
+      }
+      .runtime-tab.is-active { background: #fff; color: var(--text); border-color: rgba(59, 130, 246, 0.35); }
+      .runtime-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-soft); }
+      .runtime-tab-dot.ok { background: var(--success); }
+      .runtime-card { margin-top: 8px; }
+      .runtime-head-compact { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+      .runtime-tab-title { margin: 0; font-size: 0.86rem; font-weight: 800; }
+      .kv { margin: 0; display: grid; gap: 3px; font-size: 0.68rem; color: var(--text-muted); }
+      .kv strong { color: var(--text); font-weight: 700; }
+      .runtime-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+      .repair-checks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+      .repair-check {
+        display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start;
+        padding: 7px 8px; border-radius: 10px; background: var(--surface-muted); border: 1px solid var(--border);
+      }
+      .repair-check-status {
+        padding: 1px 6px; border-radius: 999px; font-size: 0.58rem; font-weight: 800;
+      }
+      .repair-check-status.pass { background: var(--success-bg); color: var(--success); }
+      .repair-check-status.warn { background: var(--warn-bg); color: var(--warn); }
+      .repair-check-status.fail { background: var(--danger-bg); color: var(--danger); }
+      .repair-check strong { display: block; font-size: 0.72rem; }
+      .repair-check span { font-size: 0.64rem; color: var(--text-muted); }
+
+      /* Provider / workspace */
+      .provider-list, .ws-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .provider-item, .ws-item {
+        display: flex; justify-content: space-between; gap: 8px; align-items: center;
+        padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-muted);
+      }
+      .provider-item.is-active, .ws-item.is-active {
+        border-color: rgba(37, 99, 235, 0.35); background: #eff6ff;
+      }
+      .provider-item strong, .ws-item strong { display: block; font-size: 0.76rem; }
+      .provider-item span, .ws-item span { font-size: 0.64rem; color: var(--text-muted); }
+      .picker-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+      .picker-trigger {
+        display: flex; align-items: center; gap: 6px; width: 100%;
+        padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-strong);
+        background: var(--surface-muted); font: inherit; font-size: 0.74rem; font-weight: 700; text-align: left;
+      }
+      .field-row { display: grid; grid-template-columns: 88px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .field-label { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); }
+      .field-input {
+        width: 100%; padding: 7px 9px; border-radius: 8px;
+        border: 1px solid var(--border-strong); background: var(--surface-muted);
+        color: var(--text); font: inherit; font-size: 0.74rem;
+      }
+      .evotown-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+      .team-only { display: none; }
+      body.is-team .personal-only { display: none; }
+      body.is-team .team-only { display: block; }
+      body.is-team .team-only.inline { display: inline; }
+      body.is-team .team-only.flex { display: flex; }
+
+      .storyboard {
+        width: 440px;
+        max-width: calc(100vw - 24px);
+        display: grid;
+        gap: 12px;
+      }
+      .story-card {
+        padding: 14px 14px 12px;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(255,255,255,0.8);
+        box-shadow: var(--shadow-soft);
+        backdrop-filter: blur(10px);
+      }
+      .story-card h2 { margin: 0 0 6px; font-size: 0.88rem; }
+      .story-card p { margin: 0 0 8px; font-size: 0.74rem; color: var(--text-muted); }
+      .story-card ol { margin: 0; padding-left: 18px; font-size: 0.72rem; color: var(--text); }
+      .story-card li { margin: 4px 0; }
+      .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .legend span {
+        padding: 3px 8px; border-radius: 999px; background: #fff;
+        border: 1px solid var(--border); font-size: 0.64rem; font-weight: 700; color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="page-note">
+        <div>
+          <h1>Agent Doctor UI v2 · 可交互 Demo</h1>
+          <p>菜单栏 companion 原型 · 切换 Tab / 个人·团队模式 · 点资源看详情</p>
+        </div>
+        <div style="display:inline-flex;gap:6px;align-items:center;padding:4px;border-radius:999px;background:#fff;border:1px solid var(--border)">
+          <a href="/ui-v2-demo.html" style="text-decoration:none;padding:6px 10px;border-radius:999px;font-size:0.7rem;font-weight:700;background:#2563eb;color:#fff">竖窗 440</a>
+          <a href="/ui-v2-demo-wide.html" style="text-decoration:none;padding:6px 10px;border-radius:999px;font-size:0.7rem;font-weight:700;color:var(--text-muted)">横向 960</a>
+        </div>
+      </div>
+
+      <main class="widget" id="widget">
+        <header class="widget-toolbar">
+          <div class="brand">
+            <div class="brand-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p class="brand-name">Agent Doctor</p>
+          </div>
+          <div class="toolbar-actions">
+            <div class="mode-switch" role="group" aria-label="模式">
+              <button type="button" class="mode-switch-btn is-active" data-mode="personal">个人</button>
+              <button type="button" class="mode-switch-btn" data-mode="team">团队</button>
+            </div>
+            <div class="lang-switch">
+              <button type="button" class="lang-btn is-active">中</button>
+              <button type="button" class="lang-btn">EN</button>
+            </div>
+            <button type="button" class="btn-scan">扫描</button>
+          </div>
+        </header>
+
+        <section class="status-bar">
+          <div class="health-pill is-partial" id="health-pill">
+            <span class="health-dot"></span>
+            <span class="health-label">待修复 2</span>
+          </div>
+          <div class="status-meta">
+            <span>已装 <strong>4</strong></span>
+            <span class="status-sep">·</span>
+            <span>Skills <strong>14</strong></span>
+            <span class="status-sep">·</span>
+            <span>MCP <strong>6</strong></span>
+            <span class="status-sep">·</span>
+            <span><strong>刚刚</strong></span>
+          </div>
+        </section>
+
+        <nav class="main-tabs" id="main-tabs">
+          <button type="button" class="main-tab is-active" data-tab="overview">概览</button>
+          <button type="button" class="main-tab" data-tab="resources">资源</button>
+          <button type="button" class="main-tab" data-tab="diagnose">诊断</button>
+          <button type="button" class="main-tab" data-tab="wiring">接线</button>
+          <button type="button" class="main-tab" data-tab="workspace">工作区</button>
+        </nav>
+
+        <div class="main-panels">
+          <!-- 概览 -->
+          <section class="main-panel is-active" data-panel="overview">
+            <section class="widget-section">
+              <div class="section-label">
+                <span class="section-icon">▣</span>
+                <h2>资源快照</h2>
+                <span class="section-badge">本机</span>
+              </div>
+              <div class="snap-grid">
+                <div class="snap"><strong>4</strong><span>Runtime</span></div>
+                <div class="snap"><strong>14</strong><span>Skills</span></div>
+                <div class="snap"><strong>6</strong><span>MCP</span></div>
+                <div class="snap"><strong>3</strong><span>工作区</span></div>
+              </div>
+              <div class="eff-block">
+                <div class="eff-head">
+                  <span>7 日效率</span>
+                  <span class="personal-only">仅本地</span>
+                  <span class="team-only">已上报 · 08:12</span>
+                </div>
+                <div class="eff-bars">
+                  <div class="eff-row">
+                    <label>Skills</label>
+                    <div class="eff-track"><div class="eff-fill" style="width:78%"></div></div>
+                    <em>126</em>
+                  </div>
+                  <div class="eff-row">
+                    <label>MCP</label>
+                    <div class="eff-track"><div class="eff-fill mcp" style="width:52%"></div></div>
+                    <em>84</em>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="widget-section">
+              <div class="section-label">
+                <span class="section-icon">◈</span>
+                <h2>待办</h2>
+                <span class="section-badge">2</span>
+              </div>
+              <ul class="todo-list">
+                <li class="todo-item" data-jump="diagnose">
+                  <span class="todo-tag fail">FAIL</span>
+                  <div>
+                    <strong>Hermes MCP 路径缺失</strong>
+                    <span>filesystem → 跳转诊断</span>
+                  </div>
+                  <span style="color:var(--text-soft);font-size:0.7rem;font-weight:700">→</span>
+                </li>
+                <li class="todo-item" data-jump="resources">
+                  <span class="todo-tag warn">IDLE</span>
+                  <div>
+                    <strong>3 个 Skill 闲置 &gt;14 天</strong>
+                    <span>可清理或禁用</span>
+                  </div>
+                  <span style="color:var(--text-soft);font-size:0.7rem;font-weight:700">→</span>
+                </li>
+              </ul>
+            </section>
+
+            <div class="mode-chip">
+              <span class="personal-only">个人模式 · 统计只留本机</span>
+              <span class="team-only">团队模式 · 效率摘要上报 Evotown</span>
+              <strong class="personal-only">Local</strong>
+              <strong class="team-only">Synced</strong>
+            </div>
+          </section>
+
+          <!-- 资源 -->
+          <section class="main-panel" data-panel="resources">
+            <section class="widget-section">
+              <div class="section-label">
+                <span class="section-icon">⬡</span>
+                <h2>资源清单</h2>
+                <span class="section-badge">23</span>
+              </div>
+              <div class="sub-tabs" style="margin-bottom:8px;width:100%;grid-template-columns:repeat(5,1fr)">
+                <button type="button" class="sub-tab is-active" data-filter="all">全部</button>
+                <button type="button" class="sub-tab" data-filter="skill">Skills</button>
+                <button type="button" class="sub-tab" data-filter="mcp">MCP</button>
+                <button type="button" class="sub-tab" data-filter="runtime">Runtime</button>
+                <button type="button" class="sub-tab" data-filter="issue">问题</button>
+              </div>
+              <ul class="resource-list" id="resource-list">
+                <li class="resource-item" data-type="skill" data-issue="0" data-name="code-review">
+                  <div>
+                    <div class="resource-top">
+                      <strong>code-review</strong>
+                      <span class="type-pill skill">Skill</span>
+                      <span class="scope-pill personal-only">本地</span>
+                      <span class="scope-pill team-only">SkillHub</span>
+                      <span class="health-mini ok">OK</span>
+                    </div>
+                    <div class="resource-meta">7d · 42 次 · 2 小时前</div>
+                  </div>
+                  <div class="resource-score"><strong>92</strong><span>效率</span></div>
+                </li>
+                <li class="resource-item" data-type="mcp" data-issue="1" data-name="filesystem">
+                  <div>
+                    <div class="resource-top">
+                      <strong>filesystem</strong>
+                      <span class="type-pill mcp">MCP</span>
+                      <span class="scope-pill">工作区</span>
+                      <span class="health-mini fail">FAIL</span>
+                    </div>
+                    <div class="resource-meta">路径缺失 · 失败率 38%</div>
+                  </div>
+                  <div class="resource-score"><strong>34</strong><span>效率</span></div>
+                </li>
+                <li class="resource-item" data-type="skill" data-issue="1" data-name="legacy-deploy">
+                  <div>
+                    <div class="resource-top">
+                      <strong>legacy-deploy</strong>
+                      <span class="type-pill skill">Skill</span>
+                      <span class="scope-pill">全局</span>
+                      <span class="health-mini idle">IDLE</span>
+                    </div>
+                    <div class="resource-meta">闲置 21 天 · 0 引用</div>
+                  </div>
+                  <div class="resource-score"><strong>18</strong><span>效率</span></div>
+                </li>
+                <li class="resource-item" data-type="mcp" data-issue="0" data-name="github">
+                  <div>
+                    <div class="resource-top">
+                      <strong>github</strong>
+                      <span class="type-pill mcp">MCP</span>
+                      <span class="scope-pill">项目</span>
+                      <span class="health-mini ok">OK</span>
+                    </div>
+                    <div class="resource-meta">7d · 19 次 · 昨天</div>
+                  </div>
+                  <div class="resource-score"><strong>81</strong><span>效率</span></div>
+                </li>
+                <li class="resource-item" data-type="runtime" data-issue="0" data-name="hermes">
+                  <div>
+                    <div class="resource-top">
+                      <strong>Hermes</strong>
+                      <span class="type-pill runtime">Runtime</span>
+                      <span class="scope-pill">本机</span>
+                      <span class="health-mini warn">WARN</span>
+                    </div>
+                    <div class="resource-meta">v0.9 · MCP 引用漂移</div>
+                  </div>
+                  <div class="resource-score"><strong>70</strong><span>效率</span></div>
+                </li>
+              </ul>
+
+              <div class="detail-drawer" id="detail-drawer">
+                <h3 id="detail-title">code-review</h3>
+                <div class="spark" aria-hidden="true">
+                  <i style="height:40%"></i><i style="height:55%"></i><i style="height:35%"></i>
+                  <i style="height:70%"></i><i style="height:90%"></i><i style="height:60%"></i><i style="height:75%"></i>
+                </div>
+                <div class="detail-kv">
+                  <div><dt>类型</dt><dd id="detail-type">Skill</dd></div>
+                  <div><dt>路径</dt><dd>~/.evotown/skills/code-review</dd></div>
+                  <div><dt>引用</dt><dd>workspace/agent-doctor · Hermes</dd></div>
+                  <div><dt>7 日</dt><dd>42 次调用 · 失败 0</dd></div>
+                  <div class="team-only flex"><dt>同步</dt><dd>lock v1.4 · 与中心一致</dd></div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button type="button" class="btn-secondary btn-compact">打开路径</button>
+                  <button type="button" class="btn-secondary btn-compact">诊断引用</button>
+                  <button type="button" class="btn-ghost btn-compact">标记闲置</button>
+                </div>
+              </div>
+              <p class="section-footnote">点列表项展开详情 · 效率分 = 健康 + 近用 + 低失败</p>
+            </section>
+          </section>
+
+          <!-- 诊断 -->
+          <section class="main-panel" data-panel="diagnose">
+            <section class="widget-section runtime-section">
+              <div class="runtime-tabs">
+                <button type="button" class="runtime-tab is-active"><span class="runtime-tab-dot ok"></span>OpenClaw</button>
+                <button type="button" class="runtime-tab"><span class="runtime-tab-dot" style="background:var(--warn)"></span>Hermes</button>
+                <button type="button" class="runtime-tab"><span class="runtime-tab-dot ok"></span>Claude</button>
+                <button type="button" class="runtime-tab"><span class="runtime-tab-dot ok"></span>Codex</button>
+              </div>
+              <div class="runtime-card">
+                <div class="runtime-head-compact">
+                  <h3 class="runtime-tab-title">Hermes</h3>
+                  <span class="section-badge">已安装</span>
+                </div>
+                <p class="kv">版本 <strong>0.9.2</strong> · 配置 <strong>~/.hermes/config.yaml</strong></p>
+                <p class="kv">Gateway <strong class="personal-only">api.deepseek.com</strong><strong class="team-only">evotown gateway</strong></p>
+                <div class="runtime-actions">
+                  <button type="button" class="btn-primary">诊断修复</button>
+                  <button type="button" class="btn-secondary">打开会话</button>
+                </div>
+                <ul class="repair-checks">
+                  <li class="repair-check">
+                    <span class="repair-check-status fail">FAIL</span>
+                    <div>
+                      <strong>mcp.path_missing</strong>
+                      <span>filesystem 指向已删除目录</span>
+                    </div>
+                  </li>
+                  <li class="repair-check">
+                    <span class="repair-check-status warn">WARN</span>
+                    <div>
+                      <strong>skills.idle_orphan</strong>
+                      <span>legacy-deploy 无 workspace 引用</span>
+                    </div>
+                  </li>
+                  <li class="repair-check">
+                    <span class="repair-check-status pass">PASS</span>
+                    <div>
+                      <strong>binary.ok</strong>
+                      <span>hermes 在 PATH</span>
+                    </div>
+                  </li>
+                </ul>
+                <div class="runtime-actions">
+                  <button type="button" class="btn-primary">Apply 修复</button>
+                  <button type="button" class="btn-ghost">Rollback</button>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <!-- 接线 -->
+          <section class="main-panel" data-panel="wiring">
+            <section class="widget-section personal-only">
+              <div class="section-label">
+                <span class="section-icon">⬡</span>
+                <h2>个人 Provider</h2>
+                <button type="button" class="btn-primary btn-compact">新增</button>
+              </div>
+              <p class="section-hint">选模板 → 验证 → 写入 runtime</p>
+              <ul class="provider-list">
+                <li class="provider-item is-active">
+                  <div>
+                    <strong>DeepSeek</strong>
+                    <span>openai · deepseek-v4-flash</span>
+                  </div>
+                  <span class="health-mini ok">当前</span>
+                </li>
+                <li class="provider-item">
+                  <div>
+                    <strong>OpenRouter</strong>
+                    <span>openai · 备用</span>
+                  </div>
+                  <span class="health-mini idle">闲置</span>
+                </li>
+              </ul>
+            </section>
+            <section class="widget-section team-only">
+              <div class="section-label">
+                <span class="section-icon">⎈</span>
+                <h2>Evotown</h2>
+                <span class="section-badge">已连接</span>
+              </div>
+              <p class="section-hint">https://evotown.example.com · engine demo</p>
+              <div class="field-row">
+                <span class="field-label">URL</span>
+                <input class="field-input" value="https://evotown.example.com" readonly />
+              </div>
+              <div class="field-row">
+                <span class="field-label">API Key</span>
+                <input class="field-input" type="password" value="evk_demo" readonly />
+              </div>
+              <div class="evotown-actions">
+                <button type="button" class="btn-primary">重新同步 Skill</button>
+                <button type="button" class="btn-secondary">效率上报</button>
+              </div>
+              <p class="section-footnote">上次 sync 08:10 · 效率摘要随 inventory 上报</p>
+            </section>
+          </section>
+
+          <!-- 工作区 -->
+          <section class="main-panel" data-panel="workspace">
+            <section class="widget-section">
+              <div class="section-label">
+                <span class="section-icon">◈</span>
+                <h2>配置预设</h2>
+              </div>
+              <div class="picker-row">
+                <button type="button" class="picker-trigger">◈ local</button>
+                <button type="button" class="btn-secondary">切换</button>
+              </div>
+            </section>
+            <section class="widget-section">
+              <div class="section-label">
+                <span class="section-icon">▣</span>
+                <h2>Workspaces</h2>
+              </div>
+              <div class="picker-row" style="margin-bottom:8px">
+                <button type="button" class="picker-trigger">▣ agent-doctor</button>
+                <button type="button" class="btn-secondary">Switch</button>
+              </div>
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <button type="button" class="btn-ghost">Check</button>
+                <button type="button" class="btn-ghost">Fix</button>
+              </div>
+              <p class="section-hint" style="margin-bottom:6px">本工作区资源</p>
+              <ul class="ws-list">
+                <li class="ws-item is-active">
+                  <div>
+                    <strong>Skills 5 · MCP 3</strong>
+                    <span>快照 昨天 21:04 · 无串味</span>
+                  </div>
+                  <span class="health-mini ok">对齐</span>
+                </li>
+              </ul>
+              <p class="section-footnote">Check 结果可跳到资源详情</p>
+            </section>
+          </section>
+        </div>
+
+        <footer class="widget-footer">
+          <span class="personal-only">本机资源 · 诊断修复 · 本地效率</span>
+          <span class="team-only">本机执行器 · 团队基线 · 效率上报</span>
+        </footer>
+      </main>
+
+      <aside class="storyboard">
+        <div class="story-card">
+          <h2>怎么点</h2>
+          <p>右侧是说明；左侧是真实比例的菜单栏窗体原型。</p>
+          <ol>
+            <li>顶栏切换 <strong>个人 / 团队</strong>，接线页与 footer 会变</li>
+            <li>五个主 Tab：概览 → 资源 → 诊断 → 接线 → 工作区</li>
+            <li>在「资源」里点列表项展开详情抽屉</li>
+            <li>概览待办可跳到诊断 / 资源</li>
+          </ol>
+          <div class="legend">
+            <span>440×760 companion</span>
+            <span>延续现有蓝青玻璃壳</span>
+            <span>无真实 Tauri invoke</span>
+          </div>
+        </div>
+        <div class="story-card">
+          <h2>相对现状的变化</h2>
+          <ol>
+            <li>诊断不再是默认首页 → <strong>概览</strong> 接管</li>
+            <li>新增 <strong>资源</strong>：Skills / MCP / Runtime 统一清单</li>
+            <li>效率嵌在概览条 + 资源效率分，不是账单大盘</li>
+            <li>Provider 改名 <strong>接线</strong>，随模式显示个人或 Evotown</li>
+          </ol>
+        </div>
+        <div class="story-card">
+          <h2>文件</h2>
+          <p><code>desktop/public/ui-v2-demo.html</code></p>
+          <p>本地预览：</p>
+          <p><code>cd desktop && npm run dev</code><br />然后打开 <code>/ui-v2-demo.html</code></p>
+          <p>或直接用浏览器打开该 HTML（已内联样式）。</p>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const body = document.body;
+      const panels = [...document.querySelectorAll(".main-panel")];
+      const tabs = [...document.querySelectorAll(".main-tab")];
+
+      function showTab(id) {
+        tabs.forEach((t) => t.classList.toggle("is-active", t.dataset.tab === id));
+        panels.forEach((p) => p.classList.toggle("is-active", p.dataset.panel === id));
+      }
+
+      tabs.forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+      document.querySelectorAll("[data-mode]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("[data-mode]").forEach((b) => b.classList.remove("is-active"));
+          btn.classList.add("is-active");
+          body.classList.toggle("is-team", btn.dataset.mode === "team");
+        });
+      });
+
+      document.querySelectorAll("[data-jump]").forEach((el) => {
+        el.addEventListener("click", () => showTab(el.dataset.jump));
+      });
+
+      const drawer = document.getElementById("detail-drawer");
+      const detailTitle = document.getElementById("detail-title");
+      const detailType = document.getElementById("detail-type");
+      const items = [...document.querySelectorAll(".resource-item")];
+
+      items.forEach((item) => {
+        item.addEventListener("click", () => {
+          const open = item.classList.contains("is-open");
+          items.forEach((i) => i.classList.remove("is-open"));
+          if (open) {
+            drawer.classList.remove("is-open");
+            return;
+          }
+          item.classList.add("is-open");
+          detailTitle.textContent = item.dataset.name;
+          detailType.textContent =
+            item.dataset.type === "skill" ? "Skill" : item.dataset.type === "mcp" ? "MCP" : "Runtime";
+          drawer.classList.add("is-open");
+        });
+      });
+
+      const filterBtns = [...document.querySelectorAll(".sub-tab[data-filter]")];
+      filterBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          filterBtns.forEach((b) => b.classList.remove("is-active"));
+          btn.classList.add("is-active");
+          const f = btn.dataset.filter;
+          items.forEach((item) => {
+            const show =
+              f === "all" ||
+              (f === "issue" ? item.dataset.issue === "1" : item.dataset.type === f);
+            item.style.display = show ? "" : "none";
+          });
+          drawer.classList.remove("is-open");
+          items.forEach((i) => i.classList.remove("is-open"));
+        });
+      });
+
+      document.querySelectorAll(".runtime-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".runtime-tab").forEach((t) => t.classList.remove("is-active"));
+          tab.classList.add("is-active");
+        });
+      });
+    </script>
+  </body>
+</html>

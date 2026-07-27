@@ -4,7 +4,7 @@
 
 ## Features (MVP)
 
-- System tray with **Show**, **Run doctor**, **Quit** (tooltip shows active workspace)
+- System tray with **Show**, **Run doctor**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
 - Diagnose / personal provider (with URL templates) / Evotown tabs
 - Workspace picker: list and switch registered project workspaces
 - Hermes scene preset switching and API key status
