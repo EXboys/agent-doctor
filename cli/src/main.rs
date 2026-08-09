@@ -164,6 +164,84 @@ enum Commands {
         #[command(subcommand)]
         action: WorkspaceAction,
     },
+    /// Agentless remote VPS project health over SSH (read-only doctor)
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteAction {
+    /// Manage SSH hosts registered for remote doctor
+    Host {
+        #[command(subcommand)]
+        action: RemoteHostAction,
+    },
+    /// Manage remote project paths on a host
+    Project {
+        #[command(subcommand)]
+        action: RemoteProjectAction,
+    },
+    /// Run read-only remote doctor for host/project
+    Doctor {
+        /// Target as host/project (e.g. prod-vps/api)
+        target: String,
+        #[arg(long)]
+        json: bool,
+        /// Limit checks to one runtime id
+        #[arg(long)]
+        runtime: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteHostAction {
+    /// Register a host (OpenSSH config Host alias)
+    Add {
+        /// Local registry id (e.g. prod-vps)
+        id: String,
+        /// Value of `Host` in ~/.ssh/config
+        #[arg(long)]
+        ssh_config_host: String,
+    },
+    /// List registered hosts
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a registered host
+    Remove {
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteProjectAction {
+    /// Register a project path on a host
+    Add {
+        /// Host id
+        host: String,
+        /// Project name
+        name: String,
+        /// Absolute path on the remote host
+        #[arg(long)]
+        path: String,
+        /// Runtime ids to check (repeatable; default: all)
+        #[arg(long = "runtime")]
+        runtimes: Vec<String>,
+    },
+    /// List projects (optionally filter by host)
+    List {
+        host: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a project from a host
+    Remove {
+        host: String,
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -378,6 +456,9 @@ enum McpAction {
         /// Chrome DevTools Protocol port
         #[arg(long, default_value_t = 9222)]
         port: u16,
+        /// Launch Chrome without a visible window (default: show UI)
+        #[arg(long)]
+        headless: bool,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -481,8 +562,9 @@ fn main() -> Result<()> {
             McpAction::Configure {
                 runtime,
                 port,
+                headless,
                 json,
-            } => commands::mcp::run_configure(&runtime, port, json)?,
+            } => commands::mcp::run_configure(&runtime, port, headless, json)?,
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {
@@ -525,6 +607,34 @@ fn main() -> Result<()> {
                 json,
             } => commands::workspace::fix(dry_run, restart_gateways, migrate_claude_mcp, json)?,
             WorkspaceAction::Remove { name, purge } => commands::workspace::remove(&name, purge)?,
+        },
+        Commands::Remote { action } => match action {
+            RemoteAction::Host { action } => match action {
+                RemoteHostAction::Add { id, ssh_config_host } => {
+                    commands::remote::host_add(&id, &ssh_config_host)?
+                }
+                RemoteHostAction::List { json } => commands::remote::host_list(json)?,
+                RemoteHostAction::Remove { id } => commands::remote::host_remove(&id)?,
+            },
+            RemoteAction::Project { action } => match action {
+                RemoteProjectAction::Add {
+                    host,
+                    name,
+                    path,
+                    runtimes,
+                } => commands::remote::project_add(&host, &name, &path, runtimes)?,
+                RemoteProjectAction::List { host, json } => {
+                    commands::remote::project_list(host.as_deref(), json)?
+                }
+                RemoteProjectAction::Remove { host, name } => {
+                    commands::remote::project_remove(&host, &name)?
+                }
+            },
+            RemoteAction::Doctor {
+                target,
+                json,
+                runtime,
+            } => commands::remote::doctor(&target, json, runtime.as_deref())?,
         },
     }
     Ok(())

@@ -1,25 +1,28 @@
 use agent_doctor_core::{
-    activate_personal_provider, apply_profile_model, browser_configured_runtimes,
+    activate_personal_provider, add_host, add_project, apply_profile_model, browser_configured_runtimes,
     build_repair_preview_from_bundle, delete_personal_provider, evotown_status,
     execute_evotown_onboarding, execute_install_with_progress, execute_personal_provider_setup,
-    execute_repair, execute_sync, init_workspace, list_mcp_inventory, list_personal_providers,
-    list_runtime_backup_ids, list_skills_inventory_with_options, load_evotown_config,
-    load_mode_status, load_personal_provider_status, load_profiles, load_workspaces,
+    execute_repair, execute_sync, init_workspace, list_mcp_inventory,
+    list_personal_providers, list_runtime_backup_ids,
+    list_skills_inventory_with_options, load_evotown_config, load_mode_status,
+    load_personal_provider_status, load_profiles, load_remote_hosts, load_workspaces,
     mount_synced_skills, needs_binary_install, open_interactive_session, probe_runtime,
-    resolve_agent_doctor_binary, restore_runtime_backup, run_doctor, runtime_supports_playbook,
-    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode, switch_to_team_mode,
-    unmount_synced_skills, upsert_personal_provider, use_profile, use_workspace_with_options,
-    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
-    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
-    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
-    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
-    ProfilesDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
-    RuntimeProbeReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions,
-    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
-    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    remove_host, remove_project, resolve_agent_doctor_binary, restore_runtime_backup, run_doctor,
+    run_remote_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
+    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills, upsert_personal_provider,
+    use_profile, use_workspace_with_options, verify_personal_provider_with_protocol,
+    workspace_doctor, workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus,
+    HermesAdapter, HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions,
+    InstallProgressEvent, InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport,
+    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
+    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
+    PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus, ProfilesDocument,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions,
+    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
+    UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
+    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
+    WorkspacesDocument,
 };
 use agent_doctor_mcp::{
     browser_mcp_status, configure_for, discover_chrome, generate_config_snippet, BrowserMcpStatus,
@@ -219,6 +222,81 @@ fn workspace_fix_command(migrate_claude_mcp: bool) -> Result<WorkspaceFixReport,
     .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct RemoteProjectRow {
+    host_id: String,
+    project_id: String,
+    path: String,
+    runtimes: Vec<String>,
+    ssh_config_host: String,
+}
+
+#[tauri::command]
+fn list_remote_hosts_command() -> Result<RemoteHostsDocument, String> {
+    load_remote_hosts().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_remote_projects_command() -> Result<Vec<RemoteProjectRow>, String> {
+    let doc = load_remote_hosts().map_err(|error| error.to_string())?;
+    let mut rows = Vec::new();
+    for (host_id, host) in &doc.hosts {
+        for (project_id, project) in &host.projects {
+            rows.push(RemoteProjectRow {
+                host_id: host_id.clone(),
+                project_id: project_id.clone(),
+                path: project.path.clone(),
+                runtimes: project.runtimes.clone(),
+                ssh_config_host: host.ssh_config_host.clone(),
+            });
+        }
+    }
+    rows.sort_by(|a, b| {
+        (&a.host_id, &a.project_id).cmp(&(&b.host_id, &b.project_id))
+    });
+    Ok(rows)
+}
+
+#[tauri::command]
+fn add_remote_host_command(id: String, ssh_config_host: String) -> Result<RemoteHostsDocument, String> {
+    add_host(&id, &ssh_config_host).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn add_remote_project_command(
+    host: String,
+    name: String,
+    path: String,
+    runtimes: Vec<String>,
+) -> Result<RemoteHostsDocument, String> {
+    add_project(&host, &name, &path, runtimes).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_remote_host_command(id: String) -> Result<RemoteHostsDocument, String> {
+    remove_host(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_remote_project_command(host: String, name: String) -> Result<RemoteHostsDocument, String> {
+    remove_project(&host, &name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn run_remote_doctor_command(
+    target: String,
+    runtime: Option<String>,
+) -> Result<RemoteDoctorReport, String> {
+    run_remote_doctor(
+        &target,
+        RemoteDoctorOptions {
+            runtime_filter: runtime,
+            save_report: true,
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 
@@ -378,7 +456,7 @@ fn mcp_status_command(port: Option<u16>) -> Result<McpModuleStatus, String> {
         inventory,
         configured_runtimes,
         binary: binary.display().to_string(),
-        config_snippet: generate_config_snippet(&binary, port),
+        config_snippet: generate_config_snippet(&binary, port, false),
     })
 }
 
@@ -387,8 +465,11 @@ fn mcp_configure_command(
     app: AppHandle,
     runtime: String,
     port: Option<u16>,
+    headless: Option<bool>,
 ) -> Result<McpConfigureReport, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
+    // Default: show browser UI (headed). Pass headless=true to hide the window.
+    let headless = headless.unwrap_or(false);
     let emit = |stage: &str, message: &str, done: bool, ok: bool| {
         let _ = app.emit(
             "mcp-progress",
@@ -419,11 +500,12 @@ fn mcp_configure_command(
     })?;
 
     let workspaces = load_workspaces().unwrap_or_default();
-    let project_path = workspaces
+    let active_entry = workspaces
         .active
         .as_ref()
-        .and_then(|name| workspaces.workspaces.get(name))
-        .map(|entry| entry.path.clone());
+        .and_then(|name| workspaces.workspaces.get(name));
+    let project_path = active_entry.map(|entry| entry.path.clone());
+    let codex_home = active_entry.map(|entry| entry.codex_home.clone());
 
     emit(
         "write",
@@ -434,16 +516,22 @@ fn mcp_configure_command(
     let options = McpConfigureOptions {
         runtime: runtime.clone(),
         port,
+        headless,
         binary: binary.clone(),
         project_path,
+        codex_home,
     };
     configure_for(&discovery, &options).map_err(|error| {
         emit("write", &error.to_string(), true, false);
         error.to_string()
     })?;
 
-    let config_path = agent_doctor_mcp::mcp_servers_path(&runtime, options.project_path.as_deref())
-        .map_err(|error| error.to_string())?;
+    let config_path = agent_doctor_mcp::mcp_servers_path(
+        &runtime,
+        options.project_path.as_deref(),
+        options.codex_home.as_deref(),
+    )
+    .map_err(|error| error.to_string())?;
 
     emit(
         "done",
@@ -1056,6 +1144,13 @@ pub fn run() {
             workspace_status_command,
             workspace_doctor_command,
             workspace_fix_command,
+            list_remote_hosts_command,
+            list_remote_projects_command,
+            add_remote_host_command,
+            add_remote_project_command,
+            remove_remote_host_command,
+            remove_remote_project_command,
+            run_remote_doctor_command,
             use_profile_command,
             get_hermes_model_command,
             set_hermes_model_command,

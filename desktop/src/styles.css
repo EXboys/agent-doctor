@@ -515,6 +515,29 @@ body::before {
 .tone-bad { color: var(--danger); font-weight: 700; font-size: 0.66rem; }
 .tone-muted { color: var(--text-soft); font-weight: 700; font-size: 0.66rem; }
 
+.mcp-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcp-option input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent, #2563eb);
+  cursor: pointer;
+}
+
+.mcp-option-hint {
+  margin-top: 4px !important;
+}
+
 .mcp-actions {
   margin-top: 8px;
 }
@@ -803,6 +826,33 @@ body::before {
 .ws-manage-item.is-active {
   border-color: rgba(59, 130, 246, 0.28);
   background: rgba(59, 130, 246, 0.05);
+}
+
+.remote-add {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 0 10px;
+}
+
+.remote-add > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 9px 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.remote-add > summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-form {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 10px;
 }
 
 .ws-manage-main {
@@ -1765,6 +1815,11 @@ body::before {
   display: grid;
   gap: 6px;
   white-space: normal;
+}
+
+/* `display: grid` above would otherwise override the HTML hidden attribute. */
+.install-progress[hidden] {
+  display: none !important;
 }
 
 .install-progress-head {

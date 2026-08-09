@@ -99,20 +99,15 @@
               <div class="meta-row"><span class="meta-label" data-i18n="mcp.configured">已配置</span><span class="meta-value" id="mcp-configured">—</span></div>
               <div class="meta-row"><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
             </div>
+            <label class="mcp-option" for="mcp-show-ui">
+              <input id="mcp-show-ui" type="checkbox" checked />
+              <span data-i18n="mcp.showUi">启动时显示浏览器窗口</span>
+            </label>
+            <p class="section-footnote mcp-option-hint" data-i18n="mcp.showUiHint">默认显示界面；取消勾选则无头运行。写入配置后需重启对应 Agent。</p>
             <div class="runtime-actions mcp-actions">
               <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
               <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex</button>
               <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude</button>
-            </div>
-            <div id="mcp-progress" class="install-progress" hidden>
-              <div class="install-progress-head">
-                <strong data-i18n="mcp.progressTitle">配置进度</strong>
-                <span id="mcp-progress-stage"></span>
-              </div>
-              <div class="install-progress-track" aria-hidden="true">
-                <div class="install-progress-fill is-indeterminate" id="mcp-progress-fill"></div>
-              </div>
-              <pre class="install-progress-log" id="mcp-progress-log"></pre>
             </div>
             <details class="mcp-snippet">
               <summary data-i18n="mcp.snippetTitle">用法 / 配置片段</summary>
@@ -279,6 +274,52 @@
             <ul id="workspace-list" class="ws-manage-list" aria-live="polite"></ul>
             <ul id="workspace-checks" class="repair-checks" hidden></ul>
             <p id="workspace-hint" class="section-footnote"></p>
+          </section>
+
+          <section class="widget-section" id="remote-section">
+            <div class="section-label">
+              <h2 data-i18n="remote.title">远程 VPS</h2>
+              <button id="remote-refresh" type="button" class="btn-ghost btn-compact" data-i18n="remote.refresh">刷新</button>
+            </div>
+            <p id="remote-status" class="section-hint" data-i18n="remote.hint">经 SSH 只读诊断远程项目上的 Agent 健康（非 Provider 切换）。</p>
+
+            <details class="remote-add" id="remote-add-host">
+              <summary data-i18n="remote.addHost">登记 Host</summary>
+              <form id="remote-host-form" class="remote-form" autocomplete="off">
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.hostId">ID</span>
+                  <input id="remote-host-id" class="field-input" type="text" placeholder="prod-vps" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.sshHost">SSH Host</span>
+                  <input id="remote-ssh-host" class="field-input" type="text" placeholder="prod-vps" required />
+                </label>
+                <button type="submit" class="btn-secondary btn-compact" data-i18n="remote.saveHost">保存 Host</button>
+              </form>
+            </details>
+
+            <details class="remote-add" id="remote-add-project">
+              <summary data-i18n="remote.addProject">登记项目</summary>
+              <form id="remote-project-form" class="remote-form" autocomplete="off">
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.projectHost">Host</span>
+                  <select id="remote-project-host" class="field-input" required></select>
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.projectName">名称</span>
+                  <input id="remote-project-name" class="field-input" type="text" placeholder="api" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.projectPath">远程路径</span>
+                  <input id="remote-project-path" class="field-input" type="text" placeholder="/srv/api" required />
+                </label>
+                <button type="submit" class="btn-secondary btn-compact" data-i18n="remote.saveProject">保存项目</button>
+              </form>
+            </details>
+
+            <ul id="remote-list" class="ws-manage-list" aria-live="polite"></ul>
+            <ul id="remote-checks" class="repair-checks" hidden></ul>
+            <p id="remote-hint" class="section-footnote"></p>
           </section>
 
           <section class="widget-section">
