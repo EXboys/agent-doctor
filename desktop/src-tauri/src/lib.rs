@@ -1,9 +1,9 @@
 use agent_doctor_core::{
-    activate_personal_provider, add_host, add_project, apply_profile_model, browser_configured_runtimes,
-    build_repair_preview_from_bundle, delete_personal_provider, evotown_status,
-    execute_evotown_onboarding, execute_install_with_progress, execute_personal_provider_setup,
-    execute_repair, execute_sync, init_workspace, list_mcp_inventory,
-    list_personal_providers, list_runtime_backup_ids,
+    activate_personal_provider, add_host, add_project, apply_profile_model,
+    browser_configured_runtimes, build_repair_preview_from_bundle, delete_personal_provider,
+    evotown_status, execute_evotown_onboarding, execute_install_with_progress,
+    execute_personal_provider_setup, execute_repair, execute_sync, init_workspace,
+    list_mcp_inventory, list_personal_providers, list_runtime_backup_ids,
     list_skills_inventory_with_options, load_evotown_config, load_mode_status,
     load_personal_provider_status, load_profiles, load_remote_hosts, load_workspaces,
     mount_synced_skills, needs_binary_install, open_interactive_session, probe_runtime,
@@ -252,14 +252,15 @@ fn list_remote_projects_command() -> Result<Vec<RemoteProjectRow>, String> {
             });
         }
     }
-    rows.sort_by(|a, b| {
-        (&a.host_id, &a.project_id).cmp(&(&b.host_id, &b.project_id))
-    });
+    rows.sort_by(|a, b| (&a.host_id, &a.project_id).cmp(&(&b.host_id, &b.project_id)));
     Ok(rows)
 }
 
 #[tauri::command]
-fn add_remote_host_command(id: String, ssh_config_host: String) -> Result<RemoteHostsDocument, String> {
+fn add_remote_host_command(
+    id: String,
+    ssh_config_host: String,
+) -> Result<RemoteHostsDocument, String> {
     add_host(&id, &ssh_config_host).map_err(|error| error.to_string())
 }
 
@@ -279,7 +280,10 @@ fn remove_remote_host_command(id: String) -> Result<RemoteHostsDocument, String>
 }
 
 #[tauri::command]
-fn remove_remote_project_command(host: String, name: String) -> Result<RemoteHostsDocument, String> {
+fn remove_remote_project_command(
+    host: String,
+    name: String,
+) -> Result<RemoteHostsDocument, String> {
     remove_project(&host, &name).map_err(|error| error.to_string())
 }
 

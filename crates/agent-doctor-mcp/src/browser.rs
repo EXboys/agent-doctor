@@ -315,10 +315,7 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
                 if !is_page {
                     continue;
                 }
-                if let Some(ws) = target
-                    .get("webSocketDebuggerUrl")
-                    .and_then(|v| v.as_str())
-                {
+                if let Some(ws) = target.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
                     return Ok(ws.to_string());
                 }
             }
@@ -395,7 +392,10 @@ pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Valu
 
     let response_str = String::from_utf8_lossy(&response);
     if !response_str.contains("200") {
-        anyhow::bail!("Chrome CDP HTTP {path} failed: {}", &response_str[..response_str.len().min(200)]);
+        anyhow::bail!(
+            "Chrome CDP HTTP {path} failed: {}",
+            &response_str[..response_str.len().min(200)]
+        );
     }
     let raw_body = response_str
         .split("\r\n\r\n")
@@ -442,12 +442,7 @@ pub fn stop_chrome(instance: &mut ChromeInstance) -> Result<()> {
 /// PIDs currently listening on a TCP port (best-effort via `lsof`).
 fn pids_listening_on_port(port: u16) -> Vec<u32> {
     let output = Command::new("lsof")
-        .args([
-            "-nP",
-            &format!("-iTCP:{port}"),
-            "-sTCP:LISTEN",
-            "-t",
-        ])
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
         .output();
     let Ok(output) = output else {
         return Vec::new();
@@ -545,7 +540,9 @@ pub fn profile_locked_by_other_chrome(user_data_dir: &PathBuf, cdp_port: u16) ->
     let want = user_data_dir.to_string_lossy();
     let cdp_pids: std::collections::HashSet<u32> =
         pids_listening_on_port(cdp_port).into_iter().collect();
-    let output = Command::new("ps").args(["-ax", "-ww", "-o", "pid=,command="]).output();
+    let output = Command::new("ps")
+        .args(["-ax", "-ww", "-o", "pid=,command="])
+        .output();
     let Ok(output) = output else {
         return false;
     };

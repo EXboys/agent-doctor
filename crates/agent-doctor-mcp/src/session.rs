@@ -54,14 +54,11 @@ impl LazyBrowser {
             if let Some(dir) = &self.user_data_dir {
                 discovery.user_data_dir = dir.clone();
             } else {
-                discovery.user_data_dir = crate::browser::resolve_user_data_dir(
-                    None,
-                    Some(&discovery.binary_path),
-                );
+                discovery.user_data_dir =
+                    crate::browser::resolve_user_data_dir(None, Some(&discovery.binary_path));
             }
-            discovery.profile_directory = crate::browser::resolve_profile_directory(
-                self.profile_directory.as_deref(),
-            );
+            discovery.profile_directory =
+                crate::browser::resolve_profile_directory(self.profile_directory.as_deref());
             let instance = match connect_chrome(self.port) {
                 Ok(existing) => {
                     // Prefer reusing CDP, but never keep a headless Chrome when the
@@ -98,10 +95,7 @@ impl LazyBrowser {
                         );
                         launch_chrome(&discovery, self.port, self.headless)?
                     } else {
-                        eprintln!(
-                            "Connected to existing Chrome CDP on port {}",
-                            self.port
-                        );
+                        eprintln!("Connected to existing Chrome CDP on port {}", self.port);
                         existing
                     }
                 }

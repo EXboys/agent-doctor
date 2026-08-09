@@ -211,9 +211,7 @@ enum RemoteHostAction {
         json: bool,
     },
     /// Remove a registered host
-    Remove {
-        id: String,
-    },
+    Remove { id: String },
 }
 
 #[derive(Subcommand)]
@@ -238,10 +236,7 @@ enum RemoteProjectAction {
         json: bool,
     },
     /// Remove a project from a host
-    Remove {
-        host: String,
-        name: String,
-    },
+    Remove { host: String, name: String },
 }
 
 #[derive(Subcommand)]
@@ -604,7 +599,9 @@ fn main() -> Result<()> {
                 user_data_dir,
                 profile_directory,
                 json,
-            } => commands::mcp::run_browser(port, headless, user_data_dir, profile_directory, json)?,
+            } => {
+                commands::mcp::run_browser(port, headless, user_data_dir, profile_directory, json)?
+            }
             McpAction::Status { port, json } => commands::mcp::run_status(port, json)?,
             McpAction::Configure {
                 runtime,
@@ -678,9 +675,10 @@ fn main() -> Result<()> {
         },
         Commands::Remote { action } => match action {
             RemoteAction::Host { action } => match action {
-                RemoteHostAction::Add { id, ssh_config_host } => {
-                    commands::remote::host_add(&id, &ssh_config_host)?
-                }
+                RemoteHostAction::Add {
+                    id,
+                    ssh_config_host,
+                } => commands::remote::host_add(&id, &ssh_config_host)?,
                 RemoteHostAction::List { json } => commands::remote::host_list(json)?,
                 RemoteHostAction::Remove { id } => commands::remote::host_remove(&id)?,
             },

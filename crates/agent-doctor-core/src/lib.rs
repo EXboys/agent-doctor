@@ -1,8 +1,8 @@
 pub mod adapter;
 pub mod adapters;
 pub mod doctor;
-pub mod exec;
 pub mod evotown;
+pub mod exec;
 pub mod install;
 pub mod lifecycle;
 pub mod presets;
@@ -21,14 +21,6 @@ pub use adapter::{
 };
 pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter};
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
-pub use exec::{ExecBackend, ExecOutput, LocalBackend};
-pub use remote::{
-    add_host, add_project, list_hosts, list_projects, load_remote_hosts, remote_hosts_path,
-    remote_root_dir, remove_host, remove_project, run_remote_doctor,
-    run_remote_doctor_with_backend, save_remote_hosts, write_remote_doctor_report, RemoteDoctorOptions,
-    RemoteDoctorReport, RemoteHostEntry, RemoteHostsDocument, RemoteProjectEntry,
-    RemoteRuntimeDoctorResult, SshBackend,
-};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
@@ -41,6 +33,7 @@ pub use evotown::{
     SkillInventoryItem, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
     SkillsInventoryReport, SyncOptions, SyncReport,
 };
+pub use exec::{ExecBackend, ExecOutput, LocalBackend};
 pub use install::{
     build_explain_input, execute_install, execute_install_with_progress, needs_binary_install,
     InstallOptions, InstallProgressEvent, InstallReport,
@@ -61,6 +54,13 @@ pub use probe::{
 pub use profile::{
     agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
     read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
+};
+pub use remote::{
+    add_host, add_project, list_hosts, list_projects, load_remote_hosts, remote_hosts_path,
+    remote_root_dir, remove_host, remove_project, run_remote_doctor,
+    run_remote_doctor_with_backend, save_remote_hosts, write_remote_doctor_report,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostEntry, RemoteHostsDocument,
+    RemoteProjectEntry, RemoteRuntimeDoctorResult, SshBackend,
 };
 pub use repair::{
     allowed_paths_for_runtime, apply_hermes_playbook, apply_hermes_playbook_filtered,

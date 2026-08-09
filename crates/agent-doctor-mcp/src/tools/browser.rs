@@ -343,10 +343,7 @@ impl BrowserContext {
         }
 
         let mut verify = self.read_element_value(selector)?;
-        let matches = verify
-            .as_str()
-            .map(|v| v == text)
-            .unwrap_or(false);
+        let matches = verify.as_str().map(|v| v == text).unwrap_or(false);
         if !matches {
             method = "dom-set";
             self.set_element_value(selector, text)?;
@@ -674,10 +671,7 @@ fn page_ws_for_target(port: u16, target_id: &str) -> Result<String> {
             .map(|t| t == "page")
             .unwrap_or(false);
         if id == target_id && is_page {
-            if let Some(ws) = target
-                .get("webSocketDebuggerUrl")
-                .and_then(Value::as_str)
-            {
+            if let Some(ws) = target.get("webSocketDebuggerUrl").and_then(Value::as_str) {
                 return Ok(ws.to_string());
             }
         }
@@ -692,10 +686,7 @@ fn page_ws_for_target(port: u16, target_id: &str) -> Result<String> {
         if id != target_id {
             continue;
         }
-        if let Some(ws) = target
-            .get("webSocketDebuggerUrl")
-            .and_then(Value::as_str)
-        {
+        if let Some(ws) = target.get("webSocketDebuggerUrl").and_then(Value::as_str) {
             return Ok(ws.to_string());
         }
     }

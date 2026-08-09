@@ -305,7 +305,11 @@ fn resolve_runtime_ids(
         if descriptor_by_id(id).is_none() {
             bail!("unknown runtime '{id}' in project runtimes");
         }
-        if let Some(static_id) = all.iter().copied().find(|candidate| *candidate == id.as_str()) {
+        if let Some(static_id) = all
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == id.as_str())
+        {
             selected.push(static_id);
         }
     }
@@ -318,8 +322,8 @@ fn probe_remote_runtime(
     project_path: &Path,
     runtime_id: &str,
 ) -> Result<RemoteRuntimeDoctorResult> {
-    let descriptor = descriptor_by_id(runtime_id)
-        .with_context(|| format!("unknown runtime '{runtime_id}'"))?;
+    let descriptor =
+        descriptor_by_id(runtime_id).with_context(|| format!("unknown runtime '{runtime_id}'"))?;
     let binary_name = descriptor.probe.binary_name;
     let adapter = descriptor.create_adapter();
     let mut checks = Vec::new();
@@ -405,7 +409,10 @@ fn probe_remote_runtime(
     // config files under remote HOME (relative paths from local adapter config_paths)
     let local_home = dirs::home_dir();
     for local_config in adapter.config_paths() {
-        let relative = match local_home.as_ref().and_then(|h| local_config.strip_prefix(h).ok()) {
+        let relative = match local_home
+            .as_ref()
+            .and_then(|h| local_config.strip_prefix(h).ok())
+        {
             Some(rel) => rel.to_path_buf(),
             None => {
                 // Fallback: use known suffixes
@@ -441,7 +448,11 @@ fn probe_remote_runtime(
 
         match backend.read_to_string(&remote_config) {
             Ok(raw) => {
-                let format = config_format_for_runtime(runtime_id, &remote_config, descriptor.probe.config_format);
+                let format = config_format_for_runtime(
+                    runtime_id,
+                    &remote_config,
+                    descriptor.probe.config_format,
+                );
                 match parse_config(&raw, format) {
                     Ok(parsed) => {
                         checks.push(
@@ -546,10 +557,7 @@ fn probe_remote_runtime(
 
 fn project_traces(runtime_id: &str) -> Vec<(&'static str, &'static str)> {
     match runtime_id {
-        "claude-code" => vec![
-            ("claude_dir", ".claude"),
-            ("mcp_json", ".mcp.json"),
-        ],
+        "claude-code" => vec![("claude_dir", ".claude"), ("mcp_json", ".mcp.json")],
         "codex" => vec![("codex_dir", ".codex")],
         "hermes" => vec![("hermes_dir", ".hermes")],
         "openclaw" => vec![("openclaw_workspace", ".openclaw")],
@@ -557,11 +565,7 @@ fn project_traces(runtime_id: &str) -> Vec<(&'static str, &'static str)> {
     }
 }
 
-fn config_format_for_runtime(
-    runtime_id: &str,
-    path: &Path,
-    default: ConfigFormat,
-) -> ConfigFormat {
+fn config_format_for_runtime(runtime_id: &str, path: &Path, default: ConfigFormat) -> ConfigFormat {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -569,7 +573,11 @@ fn config_format_for_runtime(
     if name == ".env" {
         return ConfigFormat::Env;
     }
-    match path.extension().and_then(|e| e.to_str()).unwrap_or_default() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+    {
         "json" => ConfigFormat::Json,
         "yaml" | "yml" => ConfigFormat::Yaml,
         "toml" => ConfigFormat::Toml,
@@ -614,10 +622,7 @@ fn extract_gateway(runtime_id: &str, raw: &str, parsed: &ParsedConfig) -> Option
             .map(str::to_string),
         ("codex", ParsedConfig::Toml(value)) => {
             // Prefer model_providers.<active>.base_url if present; else scan providers.
-            if let Some(provider) = value
-                .get("model_provider")
-                .and_then(|v| v.as_str())
-            {
+            if let Some(provider) = value.get("model_provider").and_then(|v| v.as_str()) {
                 if let Some(url) = value
                     .get("model_providers")
                     .and_then(|t| t.get(provider))
@@ -646,7 +651,9 @@ fn extract_gateway(runtime_id: &str, raw: &str, parsed: &ParsedConfig) -> Option
             // Fallback: look for common URL-looking lines (no secrets dump)
             for line in raw.lines() {
                 let lower = line.to_ascii_lowercase();
-                if lower.contains("base_url") || lower.contains("baseurl") || lower.contains("gateway")
+                if lower.contains("base_url")
+                    || lower.contains("baseurl")
+                    || lower.contains("gateway")
                 {
                     if let Some((_, rest)) = line.split_once(':').or_else(|| line.split_once('=')) {
                         let candidate = rest.trim().trim_matches('"').trim_matches('\'');
@@ -719,7 +726,10 @@ mod tests {
                     stderr: String::new(),
                 });
             }
-            if argv.len() == 3 && argv[0] == "sh" && argv[1] == "-c" && argv[2].starts_with("command -v ")
+            if argv.len() == 3
+                && argv[0] == "sh"
+                && argv[1] == "-c"
+                && argv[2].starts_with("command -v ")
             {
                 let name = argv[2].trim_start_matches("command -v ");
                 return Ok(ExecOutput {
@@ -782,7 +792,8 @@ mod tests {
         let backend = FakeBackend::new();
         backend.files.lock().unwrap().insert(
             "/home/deploy/.hermes/config.yaml".into(),
-            "model:\n  provider: openai\n  default: gpt\n  base_url: https://gw.example/v1\n".into(),
+            "model:\n  provider: openai\n  default: gpt\n  base_url: https://gw.example/v1\n"
+                .into(),
         );
         backend
             .dirs

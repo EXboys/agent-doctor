@@ -44,14 +44,12 @@ impl SshBackend {
             .arg(remote_script)
             .stdin(Stdio::null());
 
-        let output = cmd
-            .output()
-            .with_context(|| {
-                format!(
-                    "failed to spawn ssh to '{}'; is OpenSSH client installed?",
-                    self.ssh_config_host
-                )
-            })?;
+        let output = cmd.output().with_context(|| {
+            format!(
+                "failed to spawn ssh to '{}'; is OpenSSH client installed?",
+                self.ssh_config_host
+            )
+        })?;
 
         let status = output.status.code().unwrap_or(-1);
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -160,7 +158,8 @@ fn classify_ssh_error(stderr: &str) -> &'static str {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("permission denied") {
         "authentication failed — use ssh-agent / key auth (BatchMode; no password)"
-    } else if lower.contains("could not resolve hostname") || lower.contains("name or service not known")
+    } else if lower.contains("could not resolve hostname")
+        || lower.contains("name or service not known")
     {
         "host not found — check ~/.ssh/config Host alias"
     } else if lower.contains("connection timed out") || lower.contains("operation timed out") {
@@ -186,7 +185,8 @@ mod tests {
 
     #[test]
     fn classifies_permission_denied() {
-        assert!(classify_ssh_error("Permission denied (publickey).")
-            .contains("authentication failed"));
+        assert!(
+            classify_ssh_error("Permission denied (publickey).").contains("authentication failed")
+        );
     }
 }
