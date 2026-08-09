@@ -524,7 +524,7 @@ fn parse_user_data_dir_flag(cmd: &str) -> Option<PathBuf> {
             let path = if let Some(stripped) = rest.strip_prefix('=') {
                 stripped.split_whitespace().next().unwrap_or("")
             } else {
-                rest.trim_start().split_whitespace().next().unwrap_or("")
+                rest.split_whitespace().next().unwrap_or("")
             };
             if !path.is_empty() {
                 return Some(PathBuf::from(path));
