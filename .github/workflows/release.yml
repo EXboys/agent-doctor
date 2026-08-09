@@ -180,7 +180,6 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
           if [ -z "${APPLE_CERTIFICATE:-}" ]; then
@@ -191,10 +190,10 @@ jobs:
             echo "::error::APPLE_CERTIFICATE_PASSWORD is empty"
             exit 1
           fi
-          if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
-            echo "::error::KEYCHAIN_PASSWORD is empty"
-            exit 1
-          fi
+          # Ephemeral runner keychain only (not an Apple secret). Fixed password avoids
+          # KEYCHAIN_PASSWORD secret mismatches that break set-key-partition-list and
+          # leave codesign hung on a GUI unlock prompt.
+          KEYCHAIN_PASSWORD="agent-doctor-ci-keychain"
 
           # macOS base64 accepts -D / --decode; prefer -D for BSD compatibility.
           printf '%s' "$APPLE_CERTIFICATE" | base64 -D > certificate.p12
@@ -204,18 +203,20 @@ jobs:
           fi
           echo "Decoded certificate.p12 size: $(wc -c < certificate.p12) bytes"
 
+          security delete-keychain build.keychain 2>/dev/null || true
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
+          # -lut: lock after timeout (seconds); avoid -u (lock on sleep) which can re-lock mid-build.
+          security set-keychain-settings -lut 21600 build.keychain
+          security list-keychains -d user -s build.keychain
 
-          # Do not swallow import errors — wrong password is the usual failure mode.
+          # Do not swallow import errors — wrong p12 password is the usual failure mode.
           if ! security import certificate.p12 \
             -k build.keychain \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
-            -T /usr/bin/security \
-            -A
+            -T /usr/bin/security
           then
             echo "::error::security import failed (wrong APPLE_CERTIFICATE_PASSWORD, or p12 missing private key)"
             rm -f certificate.p12
@@ -223,10 +224,11 @@ jobs:
           fi
           rm -f certificate.p12
 
-          # With -A on import, codesign can use the key even if partition-list fails
-          # (common flake on GitHub macos runners with custom KEYCHAIN_PASSWORD).
+          # Required so codesign can use the private key non-interactively.
+          # Fail hard: skipping this hangs later on "replacing existing signature".
           if ! security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain; then
-            echo "::warning::set-key-partition-list failed; continuing because import used -A"
+            echo "::error::set-key-partition-list failed (key ACL / keychain unlock issue)"
+            exit 1
           fi
           security find-identity -v -p codesigning build.keychain | sed 's/"[^"]*"/"[redacted]"/g' || true
 
@@ -243,8 +245,13 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+              security unlock-keychain -p "agent-doctor-ci-keychain" build.keychain
+              security set-keychain-settings -lut 21600 build.keychain
+            fi
             # App only; notarize + DMG in later steps (SkillLite pattern).
-            npm run tauri -- build --bundles app
+            # Fail fast if codesign waits on a keychain dialog (common hang symptom).
+            perl -e 'alarm shift; exec @ARGV' 2700 npm run tauri -- build --bundles app
           else
             npm run tauri -- build
           fi
