@@ -18,6 +18,8 @@ pub struct McpConfigureOptions {
     /// When true, Chrome launches without a visible window (`--headless`).
     /// Default is false: show the browser UI.
     pub headless: bool,
+    /// Chrome user-data-dir. Default: everyday system Chrome profile.
+    pub user_data_dir: Option<PathBuf>,
     /// The agent-doctor binary path (used for the MCP server command)
     pub binary: PathBuf,
     /// The project/workspace path (used for Claude project hints / legacy .mcp.json)
@@ -27,7 +29,7 @@ pub struct McpConfigureOptions {
 }
 
 /// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
-pub fn browser_mcp_args(port: u16, headless: bool) -> Vec<String> {
+pub fn browser_mcp_args(port: u16, headless: bool, user_data_dir: Option<&Path>) -> Vec<String> {
     let mut args = vec![
         "mcp".to_string(),
         "browser".to_string(),
@@ -36,6 +38,12 @@ pub fn browser_mcp_args(port: u16, headless: bool) -> Vec<String> {
     ];
     if headless {
         args.push("--headless".to_string());
+    }
+    if let Some(dir) = user_data_dir {
+        if !dir.as_os_str().is_empty() {
+            args.push("--user-data-dir".to_string());
+            args.push(dir.display().to_string());
+        }
     }
     args
 }
@@ -230,7 +238,11 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
         options.codex_home.as_deref(),
     )?;
     let command = options.binary.to_string_lossy().to_string();
-    let args = browser_mcp_args(options.port, options.headless);
+    let args = browser_mcp_args(
+        options.port,
+        options.headless,
+        options.user_data_dir.as_deref(),
+    );
 
     match options.runtime.as_str() {
         "codex" => write_mcp_servers_toml(&config_path, "browser", &command, &args)?,
@@ -251,12 +263,17 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
 }
 
 /// Generate the MCP configuration JSON snippet for display/export.
-pub fn generate_config_snippet(binary: &Path, port: u16, headless: bool) -> Value {
+pub fn generate_config_snippet(
+    binary: &Path,
+    port: u16,
+    headless: bool,
+    user_data_dir: Option<&Path>,
+) -> Value {
     json!({
         "mcpServers": {
             "browser": {
                 "command": binary.to_string_lossy().to_string(),
-                "args": browser_mcp_args(port, headless),
+                "args": browser_mcp_args(port, headless, user_data_dir),
             }
         }
     })

@@ -104,6 +104,15 @@
               <span data-i18n="mcp.showUi">启动时显示浏览器窗口</span>
             </label>
             <p class="section-footnote mcp-option-hint" data-i18n="mcp.showUiHint">默认显示界面；取消勾选则无头运行。写入配置后需重启对应 Agent。</p>
+            <div class="mcp-profile">
+              <label class="mcp-profile-label" for="mcp-user-data-dir" data-i18n="mcp.profile">Chrome 用户目录</label>
+              <input id="mcp-user-data-dir" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" />
+              <div class="mcp-profile-actions">
+                <button id="mcp-profile-system" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileSystem">日常 Chrome</button>
+                <button id="mcp-profile-isolated" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileIsolated">独立目录</button>
+              </div>
+              <p class="section-footnote mcp-option-hint" data-i18n="mcp.profileHint">默认用日常 Chrome 登录态。日常 Chrome 正在运行时请先退出，或自行用调试端口启动后再连接。写入配置后生效。</p>
+            </div>
             <div class="runtime-actions mcp-actions">
               <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
               <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex</button>

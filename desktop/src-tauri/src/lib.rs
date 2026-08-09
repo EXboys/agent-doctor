@@ -25,8 +25,8 @@ use agent_doctor_core::{
     WorkspacesDocument,
 };
 use agent_doctor_mcp::{
-    browser_mcp_status, configure_for, discover_chrome, generate_config_snippet, BrowserMcpStatus,
-    McpConfigureOptions, DEFAULT_BROWSER_MCP_PORT,
+    browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
+    resolve_user_data_dir, BrowserMcpStatus, McpConfigureOptions, DEFAULT_BROWSER_MCP_PORT,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -451,12 +451,18 @@ fn mcp_status_command(port: Option<u16>) -> Result<McpModuleStatus, String> {
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
     let binary = resolve_agent_doctor_binary().map_err(|error| error.to_string())?;
+    let browser = browser_mcp_status(port);
+    let user_data = browser
+        .user_data_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&browser.system_user_data_dir));
     Ok(McpModuleStatus {
-        browser: browser_mcp_status(port),
+        browser,
         inventory,
         configured_runtimes,
         binary: binary.display().to_string(),
-        config_snippet: generate_config_snippet(&binary, port, false),
+        config_snippet: generate_config_snippet(&binary, port, false, Some(user_data.as_path())),
     })
 }
 
@@ -466,6 +472,7 @@ fn mcp_configure_command(
     runtime: String,
     port: Option<u16>,
     headless: Option<bool>,
+    user_data_dir: Option<String>,
 ) -> Result<McpConfigureReport, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     // Default: show browser UI (headed). Pass headless=true to hide the window.
@@ -506,6 +513,12 @@ fn mcp_configure_command(
         .and_then(|name| workspaces.workspaces.get(name));
     let project_path = active_entry.map(|entry| entry.path.clone());
     let codex_home = active_entry.map(|entry| entry.codex_home.clone());
+    let explicit_dir = user_data_dir
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let resolved_dir = resolve_user_data_dir(explicit_dir.as_ref(), Some(&discovery.binary_path));
 
     emit(
         "write",
@@ -517,6 +530,7 @@ fn mcp_configure_command(
         runtime: runtime.clone(),
         port,
         headless,
+        user_data_dir: Some(resolved_dir),
         binary: binary.clone(),
         project_path,
         codex_home,

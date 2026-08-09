@@ -26,7 +26,7 @@ pub struct ChromeInstance {
 /// Discover Chrome on the local machine (macOS first, Linux fallback).
 pub fn discover_chrome() -> Result<BrowserDiscovery> {
     let binary_path = find_chrome_binary().context("Chrome not found on this system")?;
-    let user_data_dir = default_user_data_dir();
+    let user_data_dir = resolve_user_data_dir(None, Some(&binary_path));
     let version = detect_chrome_version(&binary_path);
 
     Ok(BrowserDiscovery {
@@ -83,24 +83,62 @@ fn find_chrome_binary() -> Result<PathBuf> {
     anyhow::bail!("Could not find Chrome/Chromium binary. Install Google Chrome or chromium.")
 }
 
-/// Profile directory used when launching Chrome for MCP.
-///
-/// Default is an Agent Doctor-managed profile. The real Chrome profile cannot be
-/// opened with `--remote-debugging-port` while a normal Chrome instance is already
-/// using it (macOS profile lock). Override with `AGENT_DOCTOR_CHROME_USER_DATA_DIR`.
-fn default_user_data_dir() -> PathBuf {
-    if let Ok(custom) = std::env::var("AGENT_DOCTOR_CHROME_USER_DATA_DIR") {
-        let path = PathBuf::from(custom);
-        if !path.as_os_str().is_empty() {
-            return path;
-        }
-    }
-
-    let home = std::env::var("HOME")
+fn home_dir() -> PathBuf {
+    std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
+/// Everyday browser profile (Google Chrome / Brave / Edge / Chromium).
+///
+/// This is the user-data-dir parent (contains `Default`, `Profile 1`, …), not
+/// `…/Default` itself.
+pub fn system_chrome_user_data_dir(binary: Option<&PathBuf>) -> PathBuf {
+    let home = home_dir();
+    let kind = binary
+        .map(|p| p.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
 
+    if cfg!(target_os = "macos") {
+        if kind.contains("brave") {
+            return home.join("Library/Application Support/BraveSoftware/Brave-Browser");
+        }
+        if kind.contains("edge") {
+            return home.join("Library/Application Support/Microsoft Edge");
+        }
+        if kind.contains("chromium") {
+            return home.join("Library/Application Support/Chromium");
+        }
+        home.join("Library/Application Support/Google/Chrome")
+    } else if cfg!(target_os = "linux") {
+        if kind.contains("brave") {
+            return home.join(".config/BraveSoftware/Brave-Browser");
+        }
+        if kind.contains("edge") || kind.contains("msedge") {
+            return home.join(".config/microsoft-edge");
+        }
+        if kind.contains("chromium") {
+            return home.join(".config/chromium");
+        }
+        home.join(".config/google-chrome")
+    } else {
+        if kind.contains("brave") {
+            return home.join(r"AppData\Local\BraveSoftware\Brave-Browser\User Data");
+        }
+        if kind.contains("edge") || kind.contains("msedge") {
+            return home.join(r"AppData\Local\Microsoft\Edge\User Data");
+        }
+        if kind.contains("chromium") {
+            return home.join(r"AppData\Local\Chromium\User Data");
+        }
+        home.join(r"AppData\Local\Google\Chrome\User Data")
+    }
+}
+
+/// Isolated Agent Doctor profile (no shared cookies/login with everyday Chrome).
+pub fn isolated_chrome_user_data_dir() -> PathBuf {
+    let home = home_dir();
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support/agent-doctor/chrome-cdp")
     } else if cfg!(target_os = "linux") {
@@ -108,6 +146,27 @@ fn default_user_data_dir() -> PathBuf {
     } else {
         home.join(r"AppData\Local\agent-doctor\chrome-cdp")
     }
+}
+
+/// Resolve profile dir: explicit arg → env → everyday system Chrome profile.
+pub fn resolve_user_data_dir(explicit: Option<&PathBuf>, binary: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = explicit {
+        if !path.as_os_str().is_empty() {
+            return path.clone();
+        }
+    }
+    if let Ok(custom) = std::env::var("AGENT_DOCTOR_CHROME_USER_DATA_DIR") {
+        let path = PathBuf::from(custom);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
+    system_chrome_user_data_dir(binary)
+}
+
+/// Default profile used when launching Chrome for MCP (everyday Chrome).
+fn default_user_data_dir() -> PathBuf {
+    resolve_user_data_dir(None, find_chrome_binary().ok().as_ref())
 }
 
 fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
@@ -119,12 +178,16 @@ fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
     }
 }
 
-/// Launch Chrome with anti-detection settings and a dedicated CDP profile.
+/// Launch Chrome with anti-detection settings.
 ///
 /// Anti-detection measures:
 /// - Disables AutomationControlled Blink feature
 /// - Does NOT pass --enable-automation flag
 /// - Does NOT pass --remote-debugging-pipe (less conspicuous)
+///
+/// Uses `discovery.user_data_dir` (defaults to the everyday Chrome profile).
+/// That profile cannot be opened while a normal Chrome instance already holds
+/// the lock — quit Chrome first, or connect to an existing CDP port.
 pub fn launch_chrome(
     discovery: &BrowserDiscovery,
     port: u16,
@@ -239,7 +302,11 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
         .context("Chrome /json/new response missing webSocketDebuggerUrl")
 }
 
-fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Value> {
+/// GET a Chrome DevTools HTTP endpoint and parse the JSON body.
+///
+/// Chrome's CDP HTTP server may keep the socket open; reads until
+/// Content-Length bytes are received instead of waiting for EOF.
+pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Value> {
     let addr = format!("127.0.0.1:{port}");
     let mut stream = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(800))
         .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
@@ -435,11 +502,24 @@ mod tests {
     #[test]
     fn test_default_user_data_dir_is_valid_path() {
         let dir = default_user_data_dir();
+        let s = dir.to_string_lossy();
         assert!(
-            dir.to_string_lossy().contains("chrome-cdp")
-                || dir.to_string_lossy().contains("Chrome")
-                || dir.to_string_lossy().contains("google-chrome")
+            s.contains("Chrome")
+                || s.contains("google-chrome")
+                || s.contains("Chromium")
+                || s.contains("Brave")
+                || s.contains("Edge")
+                || s.contains("chrome-cdp"),
+            "unexpected user-data-dir: {s}"
         );
+    }
+
+    #[test]
+    fn test_system_profile_is_not_isolated_by_default() {
+        let system = system_chrome_user_data_dir(None);
+        let isolated = isolated_chrome_user_data_dir();
+        assert_ne!(system, isolated);
+        assert!(!system.to_string_lossy().contains("chrome-cdp"));
     }
 
     #[test]
