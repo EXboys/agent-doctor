@@ -94,26 +94,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" || \
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Agent Doctor ${GITHUB_REF_NAME}" \
-            --notes "$(cat <<'EOF'
+          NOTES=$(cat <<EOF
           ## Downloads
 
           ### CLI
           Use [GitHub CLI](https://cli.github.com/) to download the binary for your platform:
 
-          ```bash
+          \`\`\`bash
           gh release download ${GITHUB_REF_NAME} --repo ${GITHUB_REPOSITORY} --pattern 'agent-doctor-*'
-          ```
+          \`\`\`
 
           See [docs/install.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/install.md) for install examples.
 
           ### Desktop
-          Platform installers and bundles are attached below (`.dmg`, `.msi`, `.AppImage`, etc.).
+          Platform installers and bundles are attached below (\`.dmg\`, \`.msi\`, \`.AppImage\`, etc.).
           EOF
-          )"
+          )
+          # Strip leading indentation from the heredoc.
+          NOTES=$(printf '%s\n' "$NOTES" | sed -e 's/^          //')
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" || \
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Agent Doctor ${GITHUB_REF_NAME}" \
+            --notes "$NOTES"
 
       - name: Upload CLI archives to release
         env:
