@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::browser::{
-    connect_chrome, discover_chrome, isolated_chrome_user_data_dir, system_chrome_user_data_dir,
+    connect_chrome, discover_chrome, isolated_chrome_user_data_dir, resolve_profile_directory,
+    system_chrome_user_data_dir,
 };
 
 pub const DEFAULT_BROWSER_MCP_PORT: u16 = 9222;
@@ -15,6 +16,8 @@ pub struct BrowserMcpStatus {
     pub version: Option<String>,
     /// Resolved profile that will be used to launch (env / default).
     pub user_data_dir: Option<String>,
+    /// Chrome profile directory name (`Default`, `Profile 2`, …).
+    pub profile_directory: String,
     /// Everyday browser profile path for this Chrome binary.
     pub system_user_data_dir: String,
     /// Isolated Agent Doctor profile (no shared login).
@@ -39,6 +42,10 @@ pub fn browser_mcp_status(port: u16) -> BrowserMcpStatus {
         user_data_dir: discovery
             .as_ref()
             .map(|d| d.user_data_dir.display().to_string()),
+        profile_directory: discovery
+            .as_ref()
+            .map(|d| d.profile_directory.clone())
+            .unwrap_or_else(|| resolve_profile_directory(None)),
         system_user_data_dir: system.display().to_string(),
         isolated_user_data_dir: isolated.display().to_string(),
         cdp_connected: connected.is_some(),

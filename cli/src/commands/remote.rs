@@ -1,6 +1,6 @@
 use agent_doctor_core::{
-    add_host, add_project, list_hosts, list_projects, remove_host, remove_project, run_remote_doctor,
-    ProbeStatus, RemoteDoctorOptions,
+    add_host, add_project, list_hosts, list_projects, remove_host, remove_project,
+    run_remote_doctor, ProbeStatus, RemoteDoctorOptions,
 };
 use anyhow::Result;
 

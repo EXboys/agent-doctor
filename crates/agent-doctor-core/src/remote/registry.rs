@@ -65,8 +65,7 @@ pub fn save_remote_hosts(doc: &RemoteHostsDocument) -> Result<PathBuf> {
 
 pub fn save_remote_hosts_to(path: &Path, doc: &RemoteHostsDocument) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let raw = serde_yaml::to_string(doc).context("serialize remote hosts")?;
     fs::write(path, raw).with_context(|| format!("write {}", path.display()))?;

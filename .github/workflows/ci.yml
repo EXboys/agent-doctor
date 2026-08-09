@@ -29,7 +29,10 @@ jobs:
         run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
 
       - name: Test (core + CLI only)
+        # Some unit tests mutate HOME; serialize to avoid cross-test races.
         run: cargo test -p agent-doctor-core -p agent-doctor
+        env:
+          RUST_TEST_THREADS: "1"
 
       - name: Build CLI
         run: cargo build --release -p agent-doctor
@@ -47,6 +50,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+
+      # custom-protocol (default) requires frontendDist at compile time.
+      - name: Placeholder frontend dist for clippy
+        run: |
+          mkdir -p desktop/dist
+          printf '%s\n' '<!doctype html><title>clippy</title>' > desktop/dist/index.html
 
       - name: Clippy desktop crate
         run: cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings

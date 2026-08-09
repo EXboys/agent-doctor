@@ -253,9 +253,7 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
 
     for path in candidates {
         if is_real_agent_doctor_cli(&path) {
-            return Ok(path
-                .canonicalize()
-                .unwrap_or(path));
+            return Ok(path.canonicalize().unwrap_or(path));
         }
     }
 

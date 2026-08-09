@@ -211,9 +211,7 @@ enum RemoteHostAction {
         json: bool,
     },
     /// Remove a registered host
-    Remove {
-        id: String,
-    },
+    Remove { id: String },
 }
 
 #[derive(Subcommand)]
@@ -238,10 +236,7 @@ enum RemoteProjectAction {
         json: bool,
     },
     /// Remove a project from a host
-    Remove {
-        host: String,
-        name: String,
-    },
+    Remove { host: String, name: String },
 }
 
 #[derive(Subcommand)]
@@ -439,6 +434,9 @@ enum McpAction {
         /// Chrome user-data-dir (default: everyday system Chrome profile)
         #[arg(long)]
         user_data_dir: Option<std::path::PathBuf>,
+        /// Chrome profile directory name (default: Default)
+        #[arg(long)]
+        profile_directory: Option<String>,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -462,9 +460,45 @@ enum McpAction {
         /// Launch Chrome without a visible window (default: show UI)
         #[arg(long)]
         headless: bool,
-        /// Chrome user-data-dir (default: everyday system Chrome profile)
+        /// Chrome user-data-dir (default: isolated automation profile)
         #[arg(long)]
         user_data_dir: Option<std::path::PathBuf>,
+        /// Chrome profile directory name (default: Default)
+        #[arg(long)]
+        profile_directory: Option<String>,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prepare a Chrome instance for Browser MCP (isolated by default)
+    Chrome {
+        #[command(subcommand)]
+        action: McpChromeAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpChromeAction {
+    /// Ensure CDP is ready without touching everyday Chrome (isolated profile)
+    Ensure {
+        /// Chrome DevTools Protocol port
+        #[arg(long, default_value_t = 9222)]
+        port: u16,
+        /// Hide the browser window
+        #[arg(long)]
+        headless: bool,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restart everyday Chrome with remote debugging so MCP can attach (keeps logins)
+    AttachDaily {
+        /// Chrome DevTools Protocol port
+        #[arg(long, default_value_t = 9222)]
+        port: u16,
+        /// Profile directory inside the everyday user-data-dir
+        #[arg(long, default_value = "Default")]
+        profile_directory: String,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -563,16 +597,39 @@ fn main() -> Result<()> {
                 port,
                 headless,
                 user_data_dir,
+                profile_directory,
                 json,
-            } => commands::mcp::run_browser(port, headless, user_data_dir, json)?,
+            } => {
+                commands::mcp::run_browser(port, headless, user_data_dir, profile_directory, json)?
+            }
             McpAction::Status { port, json } => commands::mcp::run_status(port, json)?,
             McpAction::Configure {
                 runtime,
                 port,
                 headless,
                 user_data_dir,
+                profile_directory,
                 json,
-            } => commands::mcp::run_configure(&runtime, port, headless, user_data_dir, json)?,
+            } => commands::mcp::run_configure(
+                &runtime,
+                port,
+                headless,
+                user_data_dir,
+                profile_directory,
+                json,
+            )?,
+            McpAction::Chrome { action } => match action {
+                McpChromeAction::Ensure {
+                    port,
+                    headless,
+                    json,
+                } => commands::mcp::run_chrome_ensure(port, headless, json)?,
+                McpChromeAction::AttachDaily {
+                    port,
+                    profile_directory,
+                    json,
+                } => commands::mcp::run_chrome_attach_daily(port, &profile_directory, json)?,
+            },
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {
@@ -618,9 +675,10 @@ fn main() -> Result<()> {
         },
         Commands::Remote { action } => match action {
             RemoteAction::Host { action } => match action {
-                RemoteHostAction::Add { id, ssh_config_host } => {
-                    commands::remote::host_add(&id, &ssh_config_host)?
-                }
+                RemoteHostAction::Add {
+                    id,
+                    ssh_config_host,
+                } => commands::remote::host_add(&id, &ssh_config_host)?,
                 RemoteHostAction::List { json } => commands::remote::host_list(json)?,
                 RemoteHostAction::Remove { id } => commands::remote::host_remove(&id)?,
             },

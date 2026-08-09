@@ -230,8 +230,11 @@ mod tests {
     #[test]
     fn common_binary_dirs_includes_home_local_bin() {
         let dirs = common_binary_dirs();
-        let home = dirs::home_dir().expect("home");
-        assert!(dirs.contains(&home.join(".local/bin")));
+        // Prefer suffix check: other tests temporarily mutate HOME in parallel.
+        assert!(
+            dirs.iter().any(|d| d.ends_with(".local/bin")),
+            "expected a …/.local/bin entry, got {dirs:?}"
+        );
         assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
     }
 }

@@ -5,6 +5,9 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  // Relative asset URLs are required for Tauri's custom protocol (absolute
+  // `/assets/...` paths white-screen the webview when loading frontendDist).
+  base: "./",
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -14,7 +17,9 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // Bind IPv4 explicitly — macOS `localhost` often prefers ::1, which leaves
+    // the Tauri webview white when Vite only listens on 127.0.0.1.
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",
