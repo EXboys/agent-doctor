@@ -433,14 +433,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          shopt -s nullglob
-          files=(
-            desktop-artifacts/agent-doctor-desktop-darwin-arm64/*
-            desktop-artifacts/agent-doctor-desktop-windows-x64/*
-            desktop-artifacts/agent-doctor-desktop-linux-x64/*
-          )
+          # upload-artifact keeps bundle subdirs (msi/, nsis/, deb/, …); only upload files.
+          mapfile -d '' files < <(find desktop-artifacts -type f -print0)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No desktop artifacts to upload."
             exit 0
           fi
+          printf 'Uploading %s file(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
           gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
