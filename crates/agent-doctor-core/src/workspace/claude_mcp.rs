@@ -144,13 +144,22 @@ mod tests {
         let project = temp.join("project");
         fs::create_dir_all(&project).unwrap();
 
-        std::env::set_var("HOME", &temp);
-        let report = migrate_claude_global_mcp_to_project(&project, false).unwrap();
-        assert!(report.applied);
-        assert!(report.added_servers.contains(&"global-demo".to_string()));
-        assert!(project.join(".mcp.json").exists());
-
-        std::env::remove_var("HOME");
+        let previous = env::var_os("HOME");
+        // SAFETY: test-only HOME override, restored below.
+        unsafe { env::set_var("HOME", &temp) };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let report = migrate_claude_global_mcp_to_project(&project, false).unwrap();
+            assert!(report.applied);
+            assert!(report.added_servers.contains(&"global-demo".to_string()));
+            assert!(project.join(".mcp.json").exists());
+        }));
+        match previous {
+            Some(value) => unsafe { env::set_var("HOME", value) },
+            None => unsafe { env::remove_var("HOME") },
+        }
         let _ = fs::remove_dir_all(&temp);
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
     }
 }
