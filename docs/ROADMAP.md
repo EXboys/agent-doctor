@@ -80,6 +80,8 @@
 - [x] Codex CODEX_HOME isolation marker + doctor guard
 - [ ] Team baseline drift — model provider / MCP / Skill full matrix
 - [ ] SkillLite adapter (optional runtime)
+- [x] Agentless remote doctor (SSH) — `remote host|project|doctor` read-only; see [remote.md](remote.md)
+- [ ] Remote repair / workspace over SSH
 
 ## Optional integrations
 

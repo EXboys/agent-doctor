@@ -257,13 +257,6 @@ interface McpConfigureReport {
   binary: string;
 }
 
-interface McpProgressEvent {
-  stage: string;
-  message: string;
-  done: boolean;
-  ok: boolean;
-}
-
 type ResourceFilter = "all" | "skill" | "mcp" | "issue";
 type ResourceRow = {
   kind: "skill" | "mcp";
@@ -347,15 +340,13 @@ const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
 const mcpCdpEl = document.querySelector<HTMLElement>("#mcp-cdp")!;
 const mcpConfiguredEl = document.querySelector<HTMLElement>("#mcp-configured")!;
 const mcpBinaryEl = document.querySelector<HTMLElement>("#mcp-binary")!;
+const mcpShowUiEl = document.querySelector<HTMLInputElement>("#mcp-show-ui")!;
 const mcpRefreshEl = document.querySelector<HTMLButtonElement>("#mcp-refresh")!;
 const mcpConfigureCodexEl = document.querySelector<HTMLButtonElement>("#mcp-configure-codex")!;
 const mcpConfigureClaudeEl = document.querySelector<HTMLButtonElement>("#mcp-configure-claude")!;
-const mcpProgressEl = document.querySelector<HTMLElement>("#mcp-progress")!;
-const mcpProgressStageEl = document.querySelector<HTMLElement>("#mcp-progress-stage")!;
-const mcpProgressFillEl = document.querySelector<HTMLElement>("#mcp-progress-fill")!;
-const mcpProgressLogEl = document.querySelector<HTMLElement>("#mcp-progress-log")!;
 const mcpSnippetEl = document.querySelector<HTMLElement>("#mcp-snippet")!;
 const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
+const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
 const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#resources-refresh")!;
 const resourcesFiltersEl = document.querySelector<HTMLElement>("#resources-filters")!;
 const resourcesListEl = document.querySelector<HTMLUListElement>("#resources-list")!;
@@ -859,6 +850,19 @@ const workspaceListEl = document.querySelector<HTMLUListElement>("#workspace-lis
 const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-checks")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
+const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
+const remoteListEl = document.querySelector<HTMLUListElement>("#remote-list")!;
+const remoteChecksEl = document.querySelector<HTMLUListElement>("#remote-checks")!;
+const remoteHintEl = document.querySelector<HTMLElement>("#remote-hint")!;
+const remoteRefreshEl = document.querySelector<HTMLButtonElement>("#remote-refresh")!;
+const remoteHostFormEl = document.querySelector<HTMLFormElement>("#remote-host-form")!;
+const remoteProjectFormEl = document.querySelector<HTMLFormElement>("#remote-project-form")!;
+const remoteHostIdEl = document.querySelector<HTMLInputElement>("#remote-host-id")!;
+const remoteSshHostEl = document.querySelector<HTMLInputElement>("#remote-ssh-host")!;
+const remoteProjectHostEl = document.querySelector<HTMLSelectElement>("#remote-project-host")!;
+const remoteProjectNameEl = document.querySelector<HTMLInputElement>("#remote-project-name")!;
+const remoteProjectPathEl = document.querySelector<HTMLInputElement>("#remote-project-path")!;
+let remoteBusy = false;
 const evotownBadgeEl = document.querySelector<HTMLElement>("#evotown-badge");
 const langSwitchEl = document.querySelector<HTMLElement>(".lang-switch")!;
 const healthPillEl = document.querySelector<HTMLElement>("#health-pill")!;
@@ -2066,6 +2070,57 @@ function scopeLabel(scope: string): string {
   return t("resources.scopeGlobal");
 }
 
+function isShowBrowserUi(): boolean {
+  return mcpShowUiEl.checked;
+}
+
+function persistShowBrowserUi(show: boolean) {
+  try {
+    localStorage.setItem(MCP_SHOW_UI_KEY, show ? "1" : "0");
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function syncShowBrowserUiPreference(status: McpModuleStatus) {
+  try {
+    const saved = localStorage.getItem(MCP_SHOW_UI_KEY);
+    if (saved === "0" || saved === "1") {
+      mcpShowUiEl.checked = saved === "1";
+      return;
+    }
+  } catch {
+    // fall through
+  }
+  const browser = status.inventory.servers.find((server) => server.is_browser);
+  if (browser) {
+    mcpShowUiEl.checked = !browser.args.includes("--headless");
+    return;
+  }
+  mcpShowUiEl.checked = true;
+}
+
+function refreshMcpSnippet() {
+  if (!lastMcpStatus) return;
+  const port = lastMcpStatus.browser.port;
+  const args = ["mcp", "browser", "--port", String(port)];
+  if (!isShowBrowserUi()) {
+    args.push("--headless");
+  }
+  mcpSnippetEl.textContent = JSON.stringify(
+    {
+      mcpServers: {
+        browser: {
+          command: lastMcpStatus.binary,
+          args,
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
 function renderMcpBrowserStatus(status: McpModuleStatus) {
   lastMcpStatus = status;
   mcpCountEl.textContent = String(status.inventory.total);
@@ -2084,7 +2139,8 @@ function renderMcpBrowserStatus(status: McpModuleStatus) {
       : t("mcp.configuredNone");
   mcpBinaryEl.textContent = status.binary;
   mcpBinaryEl.title = status.binary;
-  mcpSnippetEl.textContent = JSON.stringify(status.config_snippet, null, 2);
+  syncShowBrowserUiPreference(status);
+  refreshMcpSnippet();
 
   mcpBrowserBadgeEl.classList.remove("ok", "warn", "muted", "bad");
   if (!chrome.chrome_found) {
@@ -2223,42 +2279,29 @@ async function loadResourcesPanel() {
   await Promise.all([loadMcpStatus(), loadSkillsInventory({ remoteStats: false })]);
 }
 
-function appendMcpProgress(message: string) {
-  const prev = mcpProgressLogEl.textContent?.trim();
-  mcpProgressLogEl.textContent = prev ? `${prev}\n${message}` : message;
-  mcpProgressLogEl.scrollTop = mcpProgressLogEl.scrollHeight;
-}
-
-function hideMcpProgress() {
-  mcpProgressEl.hidden = true;
-  mcpProgressFillEl.classList.remove("is-indeterminate");
-  mcpProgressFillEl.style.width = "";
-  mcpProgressStageEl.textContent = "";
-  mcpProgressLogEl.textContent = "";
-}
-
 async function configureBrowserMcp(runtime: "codex" | "claude-code") {
   if (mcpConfigureInFlight) return;
   mcpConfigureInFlight = true;
   mcpConfigureCodexEl.disabled = true;
   mcpConfigureClaudeEl.disabled = true;
-  mcpProgressEl.hidden = false;
-  mcpProgressFillEl.classList.add("is-indeterminate");
-  mcpProgressStageEl.textContent = runtime;
-  mcpProgressLogEl.textContent = "";
   mcpFootnoteEl.textContent = t("mcp.configuring");
 
   try {
+    const showUi = isShowBrowserUi();
+    persistShowBrowserUi(showUi);
     const report = await invoke<McpConfigureReport>("mcp_configure_command", {
       runtime,
       port: null,
+      headless: !showUi,
     });
-    mcpFootnoteEl.textContent = t("mcp.configureOk", { runtime: report.runtime });
+    mcpFootnoteEl.textContent = t("mcp.configureOk", {
+      runtime: report.runtime,
+      path: report.config_path,
+    });
     await loadMcpStatus();
   } catch (error) {
     mcpFootnoteEl.textContent = t("mcp.configureFailed", { error: String(error) });
   } finally {
-    hideMcpProgress();
     mcpConfigureInFlight = false;
     const chromeOk = lastMcpStatus?.browser.chrome_found ?? false;
     mcpConfigureCodexEl.disabled = !chromeOk;
@@ -2986,6 +3029,248 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
   });
 }
 
+interface RemoteHostsDocument {
+  hosts: Record<
+    string,
+    {
+      ssh_config_host: string;
+      projects: Record<string, { path: string; runtimes: string[] }>;
+    }
+  >;
+}
+
+interface RemoteProjectRow {
+  host_id: string;
+  project_id: string;
+  path: string;
+  runtimes: string[];
+  ssh_config_host: string;
+}
+
+interface RemoteProbeCheck {
+  id: string;
+  title: string;
+  status: "pass" | "warn" | "fail" | "not_applicable" | "not_checked";
+  severity: string;
+  message: string;
+  details: string[];
+}
+
+interface RemoteDoctorReport {
+  host_id: string;
+  ssh_config_host: string;
+  project_id: string;
+  project_path: string;
+  remote_home: string | null;
+  connectivity_ok: boolean;
+  checks: RemoteProbeCheck[];
+  runtimes: Array<{
+    runtime_id: string;
+    display_name: string;
+    binary_name: string;
+    checks: RemoteProbeCheck[];
+  }>;
+  report_path: string | null;
+}
+
+let lastRemoteProjects: RemoteProjectRow[] = [];
+
+function fillRemoteHostSelect(doc: RemoteHostsDocument): void {
+  const ids = Object.keys(doc.hosts).sort();
+  const previous = remoteProjectHostEl.value;
+  if (ids.length === 0) {
+    remoteProjectHostEl.innerHTML = `<option value="">${escapeHtml(t("remote.noHosts"))}</option>`;
+    remoteProjectHostEl.disabled = true;
+    return;
+  }
+  remoteProjectHostEl.disabled = false;
+  remoteProjectHostEl.innerHTML =
+    `<option value="">${escapeHtml(t("remote.selectHost"))}</option>` +
+    ids
+      .map(
+        (id) =>
+          `<option value="${escapeHtml(id)}">${escapeHtml(id)} (${escapeHtml(doc.hosts[id]?.ssh_config_host ?? id)})</option>`,
+      )
+      .join("");
+  if (previous && ids.includes(previous)) {
+    remoteProjectHostEl.value = previous;
+  }
+}
+
+function renderRemoteList(rows: RemoteProjectRow[]): void {
+  if (rows.length === 0) {
+    remoteListEl.innerHTML = `
+      <li class="ws-manage-item">
+        <div class="ws-manage-main">
+          <strong>${escapeHtml(t("remote.none"))}</strong>
+          <span>${escapeHtml(t("remote.noneHint"))}</span>
+        </div>
+      </li>
+    `;
+    return;
+  }
+
+  remoteListEl.innerHTML = rows
+    .map((row) => {
+      const target = `${row.host_id}/${row.project_id}`;
+      const runtimes =
+        row.runtimes.length === 0 ? "all" : row.runtimes.join(", ");
+      return `
+        <li class="ws-manage-item">
+          <div class="ws-manage-main">
+            <strong>${escapeHtml(target)}</strong>
+            <span>${escapeHtml(row.path)} · ssh ${escapeHtml(row.ssh_config_host)} · ${escapeHtml(runtimes)}</span>
+          </div>
+          <div class="ws-manage-right">
+            <div class="ws-manage-actions">
+              <button type="button" class="btn-ghost btn-compact" data-remote-action="doctor" data-remote-target="${escapeHtml(target)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.doctor"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-remote-action="remove" data-remote-host="${escapeHtml(row.host_id)}" data-remote-project="${escapeHtml(row.project_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.remove"))}</button>
+            </div>
+          </div>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function remoteCheckClass(status: RemoteProbeCheck["status"]): string {
+  if (status === "pass") return "pass";
+  if (status === "warn" || status === "not_checked") return "warn";
+  if (status === "fail") return "fail";
+  return "pass";
+}
+
+function remoteCheckLabel(status: RemoteProbeCheck["status"]): string {
+  switch (status) {
+    case "pass":
+      return t("repair.pass");
+    case "warn":
+    case "not_checked":
+      return t("repair.warn");
+    case "fail":
+      return t("repair.fail");
+    default:
+      return "—";
+  }
+}
+
+function renderRemoteChecks(report: RemoteDoctorReport): void {
+  const items: Array<{ title: string; message: string; status: RemoteProbeCheck["status"] }> = [];
+  for (const check of report.checks) {
+    if (check.status === "not_applicable") continue;
+    items.push({
+      title: check.title,
+      message: check.details.length
+        ? `${check.message} · ${check.details.join(" · ")}`
+        : check.message,
+      status: check.status,
+    });
+  }
+  for (const runtime of report.runtimes) {
+    for (const check of runtime.checks) {
+      if (check.status === "not_applicable") continue;
+      items.push({
+        title: `${runtime.display_name}: ${check.title}`,
+        message: check.details.length
+          ? `${check.message} · ${check.details.join(" · ")}`
+          : check.message,
+        status: check.status,
+      });
+    }
+  }
+
+  if (items.length === 0) {
+    remoteChecksEl.hidden = true;
+    remoteChecksEl.innerHTML = "";
+    return;
+  }
+
+  remoteChecksEl.hidden = false;
+  remoteChecksEl.innerHTML = items
+    .map(
+      (check) => `
+        <li class="repair-check">
+          <span class="repair-check-status ${remoteCheckClass(check.status)}">${escapeHtml(remoteCheckLabel(check.status))}</span>
+          <span class="repair-check-body">
+            <strong>${escapeHtml(check.title)}</strong>
+            <span>${escapeHtml(check.message)}</span>
+          </span>
+        </li>
+      `,
+    )
+    .join("");
+
+  let pass = 0;
+  let warn = 0;
+  let fail = 0;
+  for (const check of items) {
+    if (check.status === "pass") pass += 1;
+    else if (check.status === "fail") fail += 1;
+    else warn += 1;
+  }
+  let summary = t("remote.doctorSummary", {
+    pass: String(pass),
+    warn: String(warn),
+    fail: String(fail),
+  });
+  if (report.report_path) {
+    summary += ` · ${t("remote.reportSaved", { path: report.report_path })}`;
+  }
+  remoteHintEl.textContent = summary;
+}
+
+async function loadRemoteProjects(): Promise<void> {
+  try {
+    const [hosts, projects] = await Promise.all([
+      invoke<RemoteHostsDocument>("list_remote_hosts_command"),
+      invoke<RemoteProjectRow[]>("list_remote_projects_command"),
+    ]);
+    lastRemoteProjects = projects;
+    fillRemoteHostSelect(hosts);
+    renderRemoteList(projects);
+    remoteStatusEl.textContent = t("remote.hint");
+  } catch (error) {
+    remoteStatusEl.textContent = t("remote.doctorFailed", { error: String(error) });
+    remoteListEl.innerHTML = "";
+  }
+}
+
+async function runRemoteDoctorUi(target: string): Promise<void> {
+  if (!target || remoteBusy) return;
+  remoteBusy = true;
+  renderRemoteList(lastRemoteProjects);
+  remoteHintEl.textContent = t("remote.doctorRunning");
+  try {
+    const report = await invoke<RemoteDoctorReport>("run_remote_doctor_command", {
+      target,
+      runtime: null,
+    });
+    renderRemoteChecks(report);
+  } catch (error) {
+    remoteChecksEl.hidden = true;
+    remoteChecksEl.innerHTML = "";
+    remoteHintEl.textContent = t("remote.doctorFailed", { error: String(error) });
+  } finally {
+    remoteBusy = false;
+    renderRemoteList(lastRemoteProjects);
+  }
+}
+
+async function removeRemoteProjectUi(host: string, project: string): Promise<void> {
+  if (remoteBusy) return;
+  remoteBusy = true;
+  try {
+    await invoke("remove_remote_project_command", { host, name: project });
+    await loadRemoteProjects();
+    remoteHintEl.textContent = "";
+  } catch (error) {
+    remoteHintEl.textContent = t("remote.removeFailed", { error: String(error) });
+  } finally {
+    remoteBusy = false;
+    renderRemoteList(lastRemoteProjects);
+  }
+}
+
 function setLoading(loading: boolean) {
   refreshBtn.disabled = loading;
   refreshBtn.classList.toggle("is-loading", loading);
@@ -3479,6 +3764,11 @@ mcpRefreshEl.addEventListener("click", () => {
   void loadMcpStatus();
 });
 
+mcpShowUiEl.addEventListener("change", () => {
+  persistShowBrowserUi(mcpShowUiEl.checked);
+  refreshMcpSnippet();
+});
+
 resourcesRefreshEl.addEventListener("click", () => {
   void loadResourcesPanel();
 });
@@ -3647,6 +3937,93 @@ workspaceListEl.addEventListener("click", (event) => {
   }
 });
 
+remoteRefreshEl.addEventListener("click", () => {
+  void loadRemoteProjects();
+});
+
+remoteListEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-remote-action]");
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.remoteAction;
+  if (action === "doctor") {
+    const target = button.dataset.remoteTarget;
+    if (target) {
+      void runRemoteDoctorUi(target);
+    }
+    return;
+  }
+  if (action === "remove") {
+    const host = button.dataset.remoteHost;
+    const project = button.dataset.remoteProject;
+    if (host && project) {
+      void removeRemoteProjectUi(host, project);
+    }
+  }
+});
+
+remoteHostFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const id = remoteHostIdEl.value.trim();
+  const ssh = remoteSshHostEl.value.trim();
+  if (!id || !ssh || remoteBusy) {
+    return;
+  }
+  remoteBusy = true;
+  void (async () => {
+    try {
+      await invoke("add_remote_host_command", { id, sshConfigHost: ssh });
+      remoteHostIdEl.value = "";
+      remoteSshHostEl.value = "";
+      remoteHintEl.textContent = t("remote.hostSaved", { id });
+      await loadRemoteProjects();
+      const addHost = document.querySelector<HTMLDetailsElement>("#remote-add-host");
+      if (addHost) {
+        addHost.open = false;
+      }
+    } catch (error) {
+      remoteHintEl.textContent = t("remote.hostFailed", { error: String(error) });
+    } finally {
+      remoteBusy = false;
+    }
+  })();
+});
+
+remoteProjectFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const host = remoteProjectHostEl.value.trim();
+  const name = remoteProjectNameEl.value.trim();
+  const path = remoteProjectPathEl.value.trim();
+  if (!host || !name || !path || remoteBusy) {
+    return;
+  }
+  remoteBusy = true;
+  void (async () => {
+    try {
+      await invoke("add_remote_project_command", {
+        host,
+        name,
+        path,
+        runtimes: [],
+      });
+      const target = `${host}/${name}`;
+      remoteProjectNameEl.value = "";
+      remoteProjectPathEl.value = "";
+      remoteHintEl.textContent = t("remote.projectSaved", { target });
+      await loadRemoteProjects();
+      const addProject = document.querySelector<HTMLDetailsElement>("#remote-add-project");
+      if (addProject) {
+        addProject.open = false;
+      }
+    } catch (error) {
+      remoteHintEl.textContent = t("remote.projectFailed", { error: String(error) });
+    } finally {
+      remoteBusy = false;
+    }
+  })();
+});
+
 presetTriggerEl.addEventListener("click", () => {
   togglePresetMenu();
 });
@@ -3717,21 +4094,6 @@ void listen<WorkspaceDoctorReport>("workspace-doctor-report", (event) => {
   renderWorkspaceChecks(event.payload);
 });
 
-void listen<McpProgressEvent>("mcp-progress", (event) => {
-  if (!mcpConfigureInFlight) return;
-  mcpProgressEl.hidden = false;
-  mcpProgressStageEl.textContent = event.payload.stage;
-  appendMcpProgress(event.payload.message);
-  if (event.payload.done) {
-    // Keep showing until configureBrowserMcp finally-hides; mark track complete.
-    mcpProgressFillEl.classList.remove("is-indeterminate");
-    mcpProgressFillEl.style.width = "100%";
-  } else {
-    mcpProgressFillEl.classList.add("is-indeterminate");
-    mcpProgressFillEl.style.width = "";
-  }
-});
-
 setLocale(getLocale());
 applyStaticI18n();
 updateFooterCopy();
@@ -3749,6 +4111,7 @@ modeUseTeamEl.addEventListener("click", () => {
 
 void loadProfiles();
 void loadWorkspaces();
+void loadRemoteProjects();
 void loadEvotownStatus();
 void loadPersonalProviderStatus();
 void loadModeStatus();

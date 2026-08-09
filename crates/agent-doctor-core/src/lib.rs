@@ -1,12 +1,14 @@
 pub mod adapter;
 pub mod adapters;
 pub mod doctor;
+pub mod exec;
 pub mod evotown;
 pub mod install;
 pub mod lifecycle;
 pub mod presets;
 pub mod probe;
 pub mod profile;
+pub mod remote;
 pub mod repair;
 pub mod runtime;
 pub mod session_launch;
@@ -19,6 +21,14 @@ pub use adapter::{
 };
 pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter};
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
+pub use exec::{ExecBackend, ExecOutput, LocalBackend};
+pub use remote::{
+    add_host, add_project, list_hosts, list_projects, load_remote_hosts, remote_hosts_path,
+    remote_root_dir, remove_host, remove_project, run_remote_doctor,
+    run_remote_doctor_with_backend, save_remote_hosts, write_remote_doctor_report, RemoteDoctorOptions,
+    RemoteDoctorReport, RemoteHostEntry, RemoteHostsDocument, RemoteProjectEntry,
+    RemoteRuntimeDoctorResult, SshBackend,
+};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
