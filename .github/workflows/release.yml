@@ -264,10 +264,12 @@ jobs:
       - name: Verify .app bundle exists (macOS)
         if: runner.os == 'macOS'
         run: |
-          APP_DIR="desktop/src-tauri/target/release/bundle/macos"
+          # Workspace Cargo.toml → artifacts live under repo-root target/, not desktop/src-tauri/target/.
+          APP_DIR="target/release/bundle/macos"
           echo "--- Contents of bundle/macos/ ---"
-          ls -la "$APP_DIR" || echo "WARNING: $APP_DIR does not exist"
-          ls -la "$APP_DIR/Agent Doctor.app/Contents/" 2>/dev/null || echo "WARNING: .app not found"
+          ls -la "$APP_DIR"
+          test -d "$APP_DIR/Agent Doctor.app/Contents"
+          ls -la "$APP_DIR/Agent Doctor.app/Contents/"
 
       # API Key (.p8) or Apple ID + app-specific password + Team ID.
       # Failure does not fail the job (signed-only .app / DMG may still ship).
@@ -285,7 +287,7 @@ jobs:
           set -euo pipefail
           REPO="${{ github.workspace }}"
           KEY_PATH="$REPO/desktop/authkey.p8"
-          APP_PATH="$REPO/desktop/src-tauri/target/release/bundle/macos/Agent Doctor.app"
+          APP_PATH="$REPO/target/release/bundle/macos/Agent Doctor.app"
           ZIP_PATH=""
           cleanup() {
             rm -f "$KEY_PATH"
@@ -338,8 +340,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           APP_VERSION=$(python3 -c "import json; print(json.load(open('desktop/src-tauri/tauri.conf.json'))['version'])")
-          APP_PATH="desktop/src-tauri/target/release/bundle/macos/Agent Doctor.app"
-          DMG_DIR="desktop/src-tauri/target/release/bundle/dmg"
+          APP_PATH="target/release/bundle/macos/Agent Doctor.app"
+          DMG_DIR="target/release/bundle/dmg"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::.app not found at $APP_PATH"
+            exit 1
+          fi
           mkdir -p "$DMG_DIR"
           set +e
           create-dmg \
@@ -358,6 +364,7 @@ jobs:
             echo "create-dmg failed with exit code $EXIT_CODE"
             exit 1
           fi
+          test -f "$DMG_DIR/Agent.Doctor_${APP_VERSION}_aarch64.dmg"
 
       - name: Remove Apple API key file (macOS)
         if: runner.os == 'macOS'
@@ -369,7 +376,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-doctor-desktop-darwin-arm64
-          path: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          path: target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
 
       - name: Upload Windows artifacts
         if: matrix.os == 'windows-latest'
@@ -377,8 +385,9 @@ jobs:
         with:
           name: agent-doctor-desktop-windows-x64
           path: |
-            desktop/src-tauri/target/release/bundle/msi/*.msi
-            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+          if-no-files-found: error
 
       - name: Upload Linux artifacts
         if: matrix.os == 'ubuntu-22.04'
@@ -386,9 +395,10 @@ jobs:
         with:
           name: agent-doctor-desktop-linux-x64
           path: |
-            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-            desktop/src-tauri/target/release/bundle/deb/*.deb
-            desktop/src-tauri/target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
 
   upload-desktop-to-release:
     name: Upload desktop assets to Release
