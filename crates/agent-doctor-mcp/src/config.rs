@@ -20,6 +20,8 @@ pub struct McpConfigureOptions {
     pub headless: bool,
     /// Chrome user-data-dir. Default: everyday system Chrome profile.
     pub user_data_dir: Option<PathBuf>,
+    /// Chrome profile directory name (`Default`, `Profile 2`, …).
+    pub profile_directory: Option<String>,
     /// The agent-doctor binary path (used for the MCP server command)
     pub binary: PathBuf,
     /// The project/workspace path (used for Claude project hints / legacy .mcp.json)
@@ -29,7 +31,12 @@ pub struct McpConfigureOptions {
 }
 
 /// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
-pub fn browser_mcp_args(port: u16, headless: bool, user_data_dir: Option<&Path>) -> Vec<String> {
+pub fn browser_mcp_args(
+    port: u16,
+    headless: bool,
+    user_data_dir: Option<&Path>,
+    profile_directory: Option<&str>,
+) -> Vec<String> {
     let mut args = vec![
         "mcp".to_string(),
         "browser".to_string(),
@@ -43,6 +50,13 @@ pub fn browser_mcp_args(port: u16, headless: bool, user_data_dir: Option<&Path>)
         if !dir.as_os_str().is_empty() {
             args.push("--user-data-dir".to_string());
             args.push(dir.display().to_string());
+        }
+    }
+    if let Some(profile) = profile_directory {
+        let trimmed = profile.trim();
+        if !trimmed.is_empty() {
+            args.push("--profile-directory".to_string());
+            args.push(trimmed.to_string());
         }
     }
     args
@@ -242,6 +256,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
         options.port,
         options.headless,
         options.user_data_dir.as_deref(),
+        options.profile_directory.as_deref(),
     );
 
     match options.runtime.as_str() {
@@ -268,12 +283,13 @@ pub fn generate_config_snippet(
     port: u16,
     headless: bool,
     user_data_dir: Option<&Path>,
+    profile_directory: Option<&str>,
 ) -> Value {
     json!({
         "mcpServers": {
             "browser": {
                 "command": binary.to_string_lossy().to_string(),
-                "args": browser_mcp_args(port, headless, user_data_dir),
+                "args": browser_mcp_args(port, headless, user_data_dir, profile_directory),
             }
         }
     })

@@ -237,6 +237,7 @@ interface BrowserMcpStatus {
   binary: string | null;
   version: string | null;
   user_data_dir: string | null;
+  profile_directory: string;
   system_user_data_dir: string;
   isolated_user_data_dir: string;
   cdp_connected: boolean;
@@ -344,6 +345,7 @@ const mcpConfiguredEl = document.querySelector<HTMLElement>("#mcp-configured")!;
 const mcpBinaryEl = document.querySelector<HTMLElement>("#mcp-binary")!;
 const mcpShowUiEl = document.querySelector<HTMLInputElement>("#mcp-show-ui")!;
 const mcpUserDataDirEl = document.querySelector<HTMLInputElement>("#mcp-user-data-dir")!;
+const mcpProfileDirectoryEl = document.querySelector<HTMLInputElement>("#mcp-profile-directory")!;
 const mcpProfileSystemEl = document.querySelector<HTMLButtonElement>("#mcp-profile-system")!;
 const mcpProfileIsolatedEl = document.querySelector<HTMLButtonElement>("#mcp-profile-isolated")!;
 const mcpRefreshEl = document.querySelector<HTMLButtonElement>("#mcp-refresh")!;
@@ -353,6 +355,7 @@ const mcpSnippetEl = document.querySelector<HTMLElement>("#mcp-snippet")!;
 const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
 const MCP_USER_DATA_DIR_KEY = "agent-doctor.mcp.userDataDir";
+const MCP_PROFILE_DIRECTORY_KEY = "agent-doctor.mcp.profileDirectory";
 const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#resources-refresh")!;
 const resourcesFiltersEl = document.querySelector<HTMLElement>("#resources-filters")!;
 const resourcesListEl = document.querySelector<HTMLUListElement>("#resources-list")!;
@@ -425,11 +428,13 @@ type ModeSwitchReport = {
 };
 
 function formatModeSwitchHint(report: ModeSwitchReport): string {
-  const parts = [report.message];
-  if (report.probe_ok === false && report.probe_detail) {
-    parts.push(t("mode.probeFail", { detail: report.probe_detail }));
+  const parts: string[] = [];
+  if (report.probe_ok === false) {
+    parts.push(t("mode.probeFailShort"));
   } else if (report.probe_ok === true) {
     parts.push(t("mode.probeOk"));
+  } else {
+    parts.push(t("mode.switchDone"));
   }
   const applied = report.runtimes.filter((r) => r.applied).length;
   const needRestart = report.runtimes.filter(
@@ -441,7 +446,14 @@ function formatModeSwitchHint(report: ModeSwitchReport): string {
   if (report.warnings?.length) {
     parts.push(t("mode.warnings", { count: String(report.warnings.length) }));
   }
-  return parts.join(" ");
+  return parts.join(" · ");
+}
+
+function formatModeSwitchDetail(report: ModeSwitchReport): string {
+  const bits = [report.message];
+  if (report.probe_detail) bits.push(report.probe_detail);
+  if (report.warnings?.length) bits.push(...report.warnings);
+  return bits.filter(Boolean).join("\n");
 }
 
 const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
@@ -469,6 +481,7 @@ function updateWiringModeFootnote(mode?: string): void {
   const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
   wiringModeFootnoteEl.textContent =
     activeMode === "team" ? t("wiring.modeTeamFootnote") : t("wiring.modePersonalFootnote");
+  wiringModeFootnoteEl.title = t("wiring.modeHint");
 }
 
 function closeAgentsWsPicker(): void {
@@ -757,13 +770,14 @@ async function loadModeStatus() {
   }
 }
 
-function showModeHint(text: string) {
+function showModeHint(text: string, detail?: string) {
   // Keep sr-only #mode-hint for a11y, but also surface on the visible footnote —
   // otherwise mode switch looks "stuck" while buttons are disabled.
   modeHintEl.hidden = !text;
   modeHintEl.textContent = text;
   if (text) {
     wiringModeFootnoteEl.textContent = text;
+    wiringModeFootnoteEl.title = detail || text;
   }
 }
 
@@ -796,7 +810,7 @@ async function enablePersonalMode() {
     });
     await loadModeStatus();
     await loadPersonalProviderStatus();
-    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
+    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }), formatModeSwitchDetail(report));
     // Doctor rescan is secondary — don't block the switch UI on it.
     void refresh();
   } catch (error) {
@@ -825,7 +839,7 @@ async function enableTeamMode() {
     const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command");
     await loadModeStatus();
     await loadEvotownStatus();
-    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }));
+    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }), formatModeSwitchDetail(report));
     void refresh();
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
@@ -1869,7 +1883,7 @@ function renderPresetOptions(
 function renderProfiles(doc: ProfilesDocument) {
   lastProfiles = doc;
   const names = sortPresetNames(Object.keys(doc.profiles));
-  presetStatusEl.textContent = t("presets.manageHint");
+  presetStatusEl.textContent = "";
 
   if (names.length === 0) {
     presetApplyEl.disabled = true;
@@ -1898,6 +1912,7 @@ function renderEvotownStatus(status: EvotownStatus) {
   const connected = status.configured && Boolean(status.base_url);
   evotownSectionEl.classList.toggle("is-connected", connected);
   evotownConnectedEl.hidden = !connected;
+  evotownStatusEl.hidden = connected;
 
   if (evotownBadgeEl) {
     if (connected) {
@@ -1911,19 +1926,20 @@ function renderEvotownStatus(status: EvotownStatus) {
   }
 
   if (connected && status.base_url) {
-    evotownStatusEl.textContent = t("evotown.connected");
+    evotownStatusEl.textContent = "";
     evotownConnectedUrlEl.textContent = status.base_url;
     evotownConnectedMetaEl.textContent = t("evotown.meta", {
       runtime: status.runtime_target ?? "openclaw",
       bundle: status.bundle_id ?? "default-agent-skills",
-      key: status.api_key_hint ?? "evk_…",
     });
+    evotownConnectedMetaEl.title = status.api_key_hint ?? "";
     evotownUrlEl.value = status.base_url;
     evotownResyncEl.hidden = false;
     void loadSkillsInventory();
   } else {
     evotownStatusEl.textContent = t("evotown.notConfigured");
     evotownConnectedMetaEl.textContent = "";
+    evotownConnectedMetaEl.title = "";
     evotownResyncEl.hidden = true;
     skillsInventoryEl.hidden = true;
   }
@@ -2092,9 +2108,21 @@ function selectedUserDataDir(): string {
   return mcpUserDataDirEl.value.trim();
 }
 
+function selectedProfileDirectory(): string {
+  return mcpProfileDirectoryEl.value.trim() || "Default";
+}
+
 function persistUserDataDir(path: string) {
   try {
     localStorage.setItem(MCP_USER_DATA_DIR_KEY, path.trim());
+  } catch {
+    // ignore
+  }
+}
+
+function persistProfileDirectory(name: string) {
+  try {
+    localStorage.setItem(MCP_PROFILE_DIRECTORY_KEY, name.trim() || "Default");
   } catch {
     // ignore
   }
@@ -2118,27 +2146,57 @@ function syncShowBrowserUiPreference(status: McpModuleStatus) {
   mcpShowUiEl.checked = true;
 }
 
+function configuredBrowserArg(status: McpModuleStatus, flag: string): string | null {
+  const browser = status.inventory.servers.find((server) => server.is_browser);
+  if (!browser) return null;
+  const idx = browser.args.findIndex((arg) => arg === flag);
+  if (idx >= 0 && browser.args[idx + 1]) {
+    return browser.args[idx + 1];
+  }
+  return null;
+}
+
+function syncProfileModeButtons() {
+  const dir = selectedUserDataDir();
+  const isolated = lastMcpStatus?.browser.isolated_user_data_dir || "";
+  const system = lastMcpStatus?.browser.system_user_data_dir || "";
+  const isIsolated = Boolean(isolated) && dir === isolated;
+  const isSystem = Boolean(system) && dir === system;
+  mcpProfileIsolatedEl.classList.toggle("is-active", isIsolated);
+  mcpProfileSystemEl.classList.toggle("is-active", isSystem);
+}
+
 function syncUserDataDirPreference(status: McpModuleStatus) {
   const chrome = status.browser;
+  // Prefer what's actually written to Claude/Codex, then local draft, then isolated.
+  const fromConfig = configuredBrowserArg(status, "--user-data-dir");
+  let saved: string | null = null;
   try {
-    const saved = localStorage.getItem(MCP_USER_DATA_DIR_KEY);
-    if (saved && saved.trim()) {
-      mcpUserDataDirEl.value = saved.trim();
-      return;
-    }
+    saved = localStorage.getItem(MCP_USER_DATA_DIR_KEY);
   } catch {
-    // fall through
-  }
-  const browser = status.inventory.servers.find((server) => server.is_browser);
-  if (browser) {
-    const idx = browser.args.findIndex((arg) => arg === "--user-data-dir");
-    if (idx >= 0 && browser.args[idx + 1]) {
-      mcpUserDataDirEl.value = browser.args[idx + 1];
-      return;
-    }
+    saved = null;
   }
   mcpUserDataDirEl.value =
-    chrome.user_data_dir || chrome.system_user_data_dir || "";
+    (fromConfig && fromConfig.trim()) ||
+    (saved && saved.trim()) ||
+    chrome.isolated_user_data_dir ||
+    chrome.user_data_dir ||
+    "";
+
+  const profileFromConfig = configuredBrowserArg(status, "--profile-directory");
+  let savedProfile: string | null = null;
+  try {
+    savedProfile = localStorage.getItem(MCP_PROFILE_DIRECTORY_KEY);
+  } catch {
+    savedProfile = null;
+  }
+  mcpProfileDirectoryEl.value =
+    (profileFromConfig && profileFromConfig.trim()) ||
+    (savedProfile && savedProfile.trim()) ||
+    chrome.profile_directory ||
+    "Default";
+
+  syncProfileModeButtons();
 }
 
 function refreshMcpSnippet() {
@@ -2152,6 +2210,7 @@ function refreshMcpSnippet() {
   if (dir) {
     args.push("--user-data-dir", dir);
   }
+  args.push("--profile-directory", selectedProfileDirectory());
   mcpSnippetEl.textContent = JSON.stringify(
     {
       mcpServers: {
@@ -2336,12 +2395,15 @@ async function configureBrowserMcp(runtime: "codex" | "claude-code") {
     const showUi = isShowBrowserUi();
     persistShowBrowserUi(showUi);
     const userDataDir = selectedUserDataDir();
+    const profileDirectory = selectedProfileDirectory();
     persistUserDataDir(userDataDir);
+    persistProfileDirectory(profileDirectory);
     const report = await invoke<McpConfigureReport>("mcp_configure_command", {
       runtime,
       port: null,
       headless: !showUi,
       userDataDir: userDataDir || null,
+      profileDirectory,
     });
     mcpFootnoteEl.textContent = t("mcp.configureOk", {
       runtime: report.runtime,
@@ -2866,7 +2928,8 @@ function renderWorkspaces(doc: WorkspacesDocument) {
     return;
   }
 
-  workspaceStatusEl.textContent = t("workspaces.manageHint");
+  workspaceStatusEl.textContent = "";
+  workspaceHintEl.textContent = "";
 }
 
 async function loadWorkspaces() {
@@ -3277,7 +3340,7 @@ async function loadRemoteProjects(): Promise<void> {
     lastRemoteProjects = projects;
     fillRemoteHostSelect(hosts);
     renderRemoteList(projects);
-    remoteStatusEl.textContent = t("remote.hint");
+    remoteStatusEl.textContent = "";
   } catch (error) {
     remoteStatusEl.textContent = t("remote.doctorFailed", { error: String(error) });
     remoteListEl.innerHTML = "";
@@ -3821,9 +3884,20 @@ mcpShowUiEl.addEventListener("change", () => {
 mcpUserDataDirEl.addEventListener("change", () => {
   persistUserDataDir(selectedUserDataDir());
   refreshMcpSnippet();
+  syncProfileModeButtons();
 });
 
 mcpUserDataDirEl.addEventListener("input", () => {
+  refreshMcpSnippet();
+  syncProfileModeButtons();
+});
+
+mcpProfileDirectoryEl.addEventListener("change", () => {
+  persistProfileDirectory(selectedProfileDirectory());
+  refreshMcpSnippet();
+});
+
+mcpProfileDirectoryEl.addEventListener("input", () => {
   refreshMcpSnippet();
 });
 
@@ -3833,15 +3907,21 @@ mcpProfileSystemEl.addEventListener("click", () => {
     lastMcpStatus?.browser.user_data_dir ||
     "";
   mcpUserDataDirEl.value = path;
+  mcpProfileDirectoryEl.value = "Default";
   persistUserDataDir(path);
+  persistProfileDirectory("Default");
   refreshMcpSnippet();
+  syncProfileModeButtons();
 });
 
 mcpProfileIsolatedEl.addEventListener("click", () => {
   const path = lastMcpStatus?.browser.isolated_user_data_dir || "";
   mcpUserDataDirEl.value = path;
+  mcpProfileDirectoryEl.value = "Default";
   persistUserDataDir(path);
+  persistProfileDirectory("Default");
   refreshMcpSnippet();
+  syncProfileModeButtons();
 });
 
 resourcesRefreshEl.addEventListener("click", () => {

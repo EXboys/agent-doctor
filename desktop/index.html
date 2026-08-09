@@ -76,7 +76,7 @@
           </div>
           <div class="ws-quick-picker" id="agents-ws-picker" hidden>
             <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
-            <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切只换上下文；登记 / Check / Fix 在「工作区」Tab</p>
+            <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切工作区</p>
           </div>
 
           <section class="widget-section runtime-section">
@@ -92,26 +92,28 @@
               <h2 data-i18n="mcp.browserTitle">Browser MCP</h2>
               <span id="mcp-browser-badge" class="badge muted">—</span>
             </div>
-            <p class="section-hint" data-i18n="mcp.browserHint">把 Chrome 接到 Codex / Claude：状态、写入配置、查看用法。</p>
             <div class="meta-grid" id="mcp-browser-meta">
               <div class="meta-row"><span class="meta-label" data-i18n="mcp.chrome">Chrome</span><span class="meta-value" id="mcp-chrome">—</span></div>
               <div class="meta-row"><span class="meta-label" data-i18n="mcp.cdp">CDP</span><span class="meta-value" id="mcp-cdp">—</span></div>
               <div class="meta-row"><span class="meta-label" data-i18n="mcp.configured">已配置</span><span class="meta-value" id="mcp-configured">—</span></div>
-              <div class="meta-row"><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
+              <div class="meta-row" hidden><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
             </div>
             <label class="mcp-option" for="mcp-show-ui">
               <input id="mcp-show-ui" type="checkbox" checked />
-              <span data-i18n="mcp.showUi">启动时显示浏览器窗口</span>
+              <span data-i18n="mcp.showUi">显示浏览器窗口</span>
             </label>
-            <p class="section-footnote mcp-option-hint" data-i18n="mcp.showUiHint">默认显示界面；取消勾选则无头运行。写入配置后需重启对应 Agent。</p>
             <div class="mcp-profile">
-              <label class="mcp-profile-label" for="mcp-user-data-dir" data-i18n="mcp.profile">Chrome 用户目录</label>
-              <input id="mcp-user-data-dir" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" />
               <div class="mcp-profile-actions">
-                <button id="mcp-profile-system" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileSystem">日常 Chrome</button>
-                <button id="mcp-profile-isolated" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileIsolated">独立目录</button>
+                <button id="mcp-profile-isolated" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileIsolated" data-i18n-title="mcp.profileIsolatedTitle">独立（推荐）</button>
+                <button id="mcp-profile-system" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileSystem" data-i18n-title="mcp.profileSystemTitle">日常登录</button>
               </div>
-              <p class="section-footnote mcp-option-hint" data-i18n="mcp.profileHint">默认用日常 Chrome 登录态。日常 Chrome 正在运行时请先退出，或自行用调试端口启动后再连接。写入配置后生效。</p>
+              <details class="mcp-advanced">
+                <summary data-i18n="mcp.advanced">高级</summary>
+                <label class="mcp-profile-label" for="mcp-user-data-dir" data-i18n="mcp.profile">用户目录</label>
+                <input id="mcp-user-data-dir" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" />
+                <label class="mcp-profile-label" for="mcp-profile-directory" data-i18n="mcp.profileDirectory">账号目录</label>
+                <input id="mcp-profile-directory" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" placeholder="Default" />
+              </details>
             </div>
             <div class="runtime-actions mcp-actions">
               <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
@@ -119,9 +121,8 @@
               <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude</button>
             </div>
             <details class="mcp-snippet">
-              <summary data-i18n="mcp.snippetTitle">用法 / 配置片段</summary>
+              <summary data-i18n="mcp.snippetTitle">配置片段</summary>
               <pre id="mcp-snippet" class="mcp-snippet-code"></pre>
-              <p class="section-footnote" data-i18n="mcp.snippetHint">Runtime 会按需拉起 `agent-doctor mcp browser`；改配置后请重启对应 Agent。</p>
             </details>
             <p id="mcp-footnote" class="section-footnote"></p>
           </section>
@@ -131,7 +132,6 @@
               <h2 data-i18n="resources.title">Skills / MCP</h2>
               <button id="resources-refresh" type="button" class="btn-secondary btn-compact" data-i18n="resources.refresh">刷新</button>
             </div>
-            <p class="section-hint" data-i18n="resources.hint">本机已配置的 Skills 与 MCP。有问题可回 Agents 诊断。</p>
             <div class="filters" id="resources-filters" role="group" aria-label="Resource filters">
               <button type="button" class="filter-chip is-active" data-res-filter="all" data-i18n="resources.filterAll">全部</button>
               <button type="button" class="filter-chip" data-res-filter="skill" data-i18n="resources.filterSkills">Skills</button>
@@ -139,7 +139,7 @@
               <button type="button" class="filter-chip" data-res-filter="issue" data-i18n="resources.filterIssue">问题</button>
             </div>
             <ul id="resources-list" class="res-list" aria-live="polite"></ul>
-            <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP。团队模式可先同步 Skills，或上方写入 Browser MCP。</p>
+            <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP</p>
             <p id="resources-footnote" class="section-footnote"></p>
           </section>
         </section>
@@ -149,8 +149,7 @@
             <div class="section-label">
               <h2 data-i18n="wiring.modeTitle">通路模式</h2>
             </div>
-            <p class="section-hint" data-i18n="wiring.modeHint">个人走本机 Provider；团队走 Evotown。切换会重写 Runtime 通路。</p>
-            <div class="mode-switch wiring-mode-switch" id="mode-banner" role="group" aria-label="LLM mode">
+            <div class="mode-switch wiring-mode-switch" id="mode-banner" role="group" aria-label="LLM mode" data-i18n-title="wiring.modeHint">
               <button id="mode-use-personal" type="button" class="mode-switch-btn" data-mode="personal" data-i18n="mode.personal">个人</button>
               <button id="mode-use-team" type="button" class="mode-switch-btn" data-mode="team" data-i18n="mode.team">团队</button>
             </div>
@@ -163,10 +162,9 @@
                 <h2 data-i18n="personal.title">个人 Provider</h2>
                 <button id="personal-add" type="button" class="btn-primary btn-compact" data-i18n="personal.add">新增</button>
               </div>
-              <p class="section-hint" data-i18n="personal.wiringHint">通路写给 Agents，不直接挂 Skills。</p>
               <p id="personal-status" class="sr-only" data-i18n="personal.loading">正在检查个人配置…</p>
               <div id="personal-connected" class="evotown-connected" hidden>
-                <p class="evotown-connected-line"><span data-i18n="personal.configuredUrl">当前</span> <strong id="personal-connected-url">—</strong></p>
+                <p class="evotown-connected-line"><strong id="personal-connected-url">—</strong></p>
                 <p class="evotown-connected-meta" id="personal-connected-meta"></p>
               </div>
               <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
@@ -239,12 +237,12 @@
             </div>
             <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
             <div id="evotown-connected" class="evotown-connected" hidden>
-              <p class="evotown-connected-line"><span data-i18n="evotown.connectedUrl">已连接</span> <strong id="evotown-connected-url">—</strong></p>
+              <p class="evotown-connected-line"><strong id="evotown-connected-url">—</strong></p>
               <p class="evotown-connected-meta" id="evotown-connected-meta"></p>
             </div>
             <form id="evotown-form" class="evotown-form" autocomplete="off">
               <label class="field-row field-row-inline">
-                <span class="field-label" data-i18n="evotown.url">Evotown URL</span>
+                <span class="field-label" data-i18n="evotown.url">URL</span>
                 <input id="evotown-url" class="field-input" type="url" placeholder="https://evotown.example.com" />
               </label>
               <label class="field-row field-row-inline">
@@ -259,15 +257,15 @@
             <p id="evotown-hint" class="section-footnote"></p>
             <div id="skills-inventory" class="skills-inventory" hidden>
               <div class="skills-inventory-head">
-                <h3 data-i18n="skills.title">已同步 Skills</h3>
+                <h3 data-i18n="skills.title">Skills</h3>
                 <div class="skills-inventory-actions">
-                  <button id="skills-mount-all" type="button" class="btn-primary btn-compact" data-i18n="skills.mountAll">一键挂载</button>
+                  <button id="skills-mount-all" type="button" class="btn-primary btn-compact" data-i18n="skills.mountAll">挂载</button>
                   <button id="skills-refresh" type="button" class="btn-secondary btn-compact" data-i18n="skills.refresh">刷新</button>
                 </div>
               </div>
               <p id="skills-dir" class="skills-dir"></p>
               <ul id="skills-list" class="skills-list" aria-live="polite"></ul>
-              <p id="skills-empty" class="section-hint" hidden data-i18n="skills.empty">暂无已安装 Skill。点「重新同步」从 Evotown 拉取。</p>
+              <p id="skills-empty" class="section-hint" hidden data-i18n="skills.empty">暂无 Skill</p>
               <p id="skills-footnote" class="section-footnote"></p>
             </div>
           </section>
@@ -279,9 +277,9 @@
               <h2 data-i18n="workspaces.manageTitle">工作区管理</h2>
               <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">登记</button>
             </div>
-            <p id="workspace-status" class="section-hint" data-i18n="workspaces.manageHint">管项目列表与隔离对齐。日常切换也可在 Agents 顶栏完成。</p>
             <ul id="workspace-list" class="ws-manage-list" aria-live="polite"></ul>
             <ul id="workspace-checks" class="repair-checks" hidden></ul>
+            <p id="workspace-status" class="section-footnote"></p>
             <p id="workspace-hint" class="section-footnote"></p>
           </section>
 
@@ -290,7 +288,7 @@
               <h2 data-i18n="remote.title">远程 VPS</h2>
               <button id="remote-refresh" type="button" class="btn-ghost btn-compact" data-i18n="remote.refresh">刷新</button>
             </div>
-            <p id="remote-status" class="section-hint" data-i18n="remote.hint">经 SSH 只读诊断远程项目上的 Agent 健康（非 Provider 切换）。</p>
+            <p id="remote-status" class="section-footnote"></p>
 
             <details class="remote-add" id="remote-add-host">
               <summary data-i18n="remote.addHost">登记 Host</summary>
@@ -335,7 +333,7 @@
             <div class="section-label">
               <h2 data-i18n="presets.title">配置预设</h2>
             </div>
-            <p id="preset-status" class="section-hint" data-i18n="presets.manageHint">Hermes scene 等本机预设，与工作区隔离互补。</p>
+            <p id="preset-status" class="section-footnote"></p>
             <div class="preset-row">
               <div class="picker" id="preset-picker">
                 <button

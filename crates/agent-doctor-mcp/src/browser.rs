@@ -11,6 +11,8 @@ use anyhow::{Context, Result};
 pub struct BrowserDiscovery {
     pub binary_path: PathBuf,
     pub user_data_dir: PathBuf,
+    /// Chrome profile directory name inside user-data-dir (`Default`, `Profile 2`, …).
+    pub profile_directory: String,
     pub version: Option<String>,
 }
 
@@ -27,11 +29,13 @@ pub struct ChromeInstance {
 pub fn discover_chrome() -> Result<BrowserDiscovery> {
     let binary_path = find_chrome_binary().context("Chrome not found on this system")?;
     let user_data_dir = resolve_user_data_dir(None, Some(&binary_path));
+    let profile_directory = resolve_profile_directory(None);
     let version = detect_chrome_version(&binary_path);
 
     Ok(BrowserDiscovery {
         binary_path,
         user_data_dir,
+        profile_directory,
         version,
     })
 }
@@ -148,8 +152,13 @@ pub fn isolated_chrome_user_data_dir() -> PathBuf {
     }
 }
 
-/// Resolve profile dir: explicit arg → env → everyday system Chrome profile.
+/// Resolve profile dir: explicit arg → env → isolated automation profile.
+///
+/// Default is the Agent Doctor chrome-cdp dir so everyday Chrome is never
+/// locked or duplicated. Pass an explicit path (or use desktop "日常 Chrome")
+/// when you intentionally want the shared login profile.
 pub fn resolve_user_data_dir(explicit: Option<&PathBuf>, binary: Option<&PathBuf>) -> PathBuf {
+    let _ = binary;
     if let Some(path) = explicit {
         if !path.as_os_str().is_empty() {
             return path.clone();
@@ -161,7 +170,26 @@ pub fn resolve_user_data_dir(explicit: Option<&PathBuf>, binary: Option<&PathBuf
             return path;
         }
     }
-    system_chrome_user_data_dir(binary)
+    isolated_chrome_user_data_dir()
+}
+
+/// Resolve profile directory: explicit → env → `Default`.
+///
+/// Without this, multi-profile Chrome shows the account picker on launch.
+pub fn resolve_profile_directory(explicit: Option<&str>) -> String {
+    if let Some(name) = explicit {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(from_env) = std::env::var("AGENT_DOCTOR_CHROME_PROFILE_DIRECTORY") {
+        let trimmed = from_env.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "Default".to_string()
 }
 
 /// Default profile used when launching Chrome for MCP (everyday Chrome).
@@ -206,6 +234,11 @@ pub fn launch_chrome(
         .arg(format!(
             "--user-data-dir={}",
             discovery.user_data_dir.display()
+        ))
+        // Skip the multi-account picker when Default / Profile N exist.
+        .arg(format!(
+            "--profile-directory={}",
+            discovery.profile_directory
         ))
         // Anti-detection: disable Blink automation flag
         .arg("--disable-blink-features=AutomationControlled")
@@ -472,6 +505,92 @@ pub fn cdp_port_is_headless(port: u16) -> Option<bool> {
     }
 }
 
+/// Parse `--user-data-dir=` from the Chrome process listening on `port`.
+pub fn cdp_user_data_dir(port: u16) -> Option<PathBuf> {
+    for pid in pids_listening_on_port(port) {
+        let Some(cmd) = process_command_line(pid) else {
+            continue;
+        };
+        if let Some(dir) = parse_user_data_dir_flag(&cmd) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+fn parse_user_data_dir_flag(cmd: &str) -> Option<PathBuf> {
+    // Handles `--user-data-dir=/path` and `--user-data-dir /path`.
+    let bytes = cmd.as_bytes();
+    let key = b"--user-data-dir";
+    let mut i = 0;
+    while i + key.len() <= bytes.len() {
+        if &bytes[i..i + key.len()] == key {
+            let rest = &cmd[i + key.len()..];
+            let path = if let Some(stripped) = rest.strip_prefix('=') {
+                stripped.split_whitespace().next().unwrap_or("")
+            } else {
+                rest.trim_start().split_whitespace().next().unwrap_or("")
+            };
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// True if a non-CDP Chrome already holds `user_data_dir` (profile lock).
+pub fn profile_locked_by_other_chrome(user_data_dir: &PathBuf, cdp_port: u16) -> bool {
+    let want = user_data_dir.to_string_lossy();
+    let cdp_pids: std::collections::HashSet<u32> =
+        pids_listening_on_port(cdp_port).into_iter().collect();
+    let output = Command::new("ps").args(["-ax", "-ww", "-o", "pid=,command="]).output();
+    let Ok(output) = output else {
+        return false;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((pid_str, cmd)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Ok(pid) = pid_str.trim().parse::<u32>() else {
+            continue;
+        };
+        if cdp_pids.contains(&pid) {
+            continue;
+        }
+        let lower = cmd.to_ascii_lowercase();
+        if !(lower.contains("google chrome")
+            || lower.contains("chromium")
+            || lower.contains("/chrome"))
+        {
+            continue;
+        }
+        if cmd.contains("--type=") {
+            continue; // helper/renderer processes
+        }
+        if let Some(dir) = parse_user_data_dir_flag(cmd) {
+            if dir == *user_data_dir {
+                return true;
+            }
+        } else if cmd.contains(want.as_ref()) {
+            // Everyday Chrome often omits --user-data-dir (uses default).
+            return true;
+        } else if want.contains("Google/Chrome")
+            && !cmd.contains("--user-data-dir")
+            && (lower.contains("google chrome") || lower.contains("google chrome.app"))
+        {
+            // Default profile lock: main Chrome process without explicit dir.
+            return true;
+        }
+    }
+    false
+}
+
 /// Kill processes listening on the CDP port so a fresh Chrome can bind it.
 pub fn kill_chrome_on_port(port: u16) -> Result<()> {
     let pids = pids_listening_on_port(port);
@@ -519,7 +638,8 @@ mod tests {
         let system = system_chrome_user_data_dir(None);
         let isolated = isolated_chrome_user_data_dir();
         assert_ne!(system, isolated);
-        assert!(!system.to_string_lossy().contains("chrome-cdp"));
+        assert!(isolated.to_string_lossy().contains("chrome-cdp"));
+        assert_eq!(resolve_user_data_dir(None, None), isolated);
     }
 
     #[test]

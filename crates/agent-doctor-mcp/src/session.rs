@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use anyhow::{Context, Result};
 
 use crate::browser::{
-    cdp_port_is_headless, connect_chrome, discover_chrome, kill_chrome_on_port, launch_chrome,
-    stop_chrome, ChromeInstance,
+    cdp_port_is_headless, cdp_user_data_dir, connect_chrome, discover_chrome, kill_chrome_on_port,
+    launch_chrome, profile_locked_by_other_chrome, stop_chrome, ChromeInstance,
 };
 use crate::tools::BrowserContext;
 
@@ -14,13 +14,14 @@ pub struct LazyBrowser {
     port: u16,
     headless: bool,
     user_data_dir: Option<std::path::PathBuf>,
+    profile_directory: Option<String>,
     chrome: Option<ChromeInstance>,
     ctx: Option<BrowserContext>,
 }
 
 impl LazyBrowser {
     pub fn new(port: u16, headless: bool) -> Self {
-        Self::with_user_data_dir(port, headless, None)
+        Self::with_options(port, headless, None, None)
     }
 
     pub fn with_user_data_dir(
@@ -28,10 +29,20 @@ impl LazyBrowser {
         headless: bool,
         user_data_dir: Option<std::path::PathBuf>,
     ) -> Self {
+        Self::with_options(port, headless, user_data_dir, None)
+    }
+
+    pub fn with_options(
+        port: u16,
+        headless: bool,
+        user_data_dir: Option<std::path::PathBuf>,
+        profile_directory: Option<String>,
+    ) -> Self {
         Self {
             port,
             headless,
             user_data_dir,
+            profile_directory,
             chrome: None,
             ctx: None,
         }
@@ -48,6 +59,9 @@ impl LazyBrowser {
                     Some(&discovery.binary_path),
                 );
             }
+            discovery.profile_directory = crate::browser::resolve_profile_directory(
+                self.profile_directory.as_deref(),
+            );
             let instance = match connect_chrome(self.port) {
                 Ok(existing) => {
                     // Prefer reusing CDP, but never keep a headless Chrome when the
@@ -57,22 +71,29 @@ impl LazyBrowser {
                         (self.headless, existing_headless),
                         (false, Some(true)) | (true, Some(false))
                     );
-                    if mode_mismatch {
+                    let profile_mismatch = cdp_user_data_dir(self.port)
+                        .map(|dir| dir != discovery.user_data_dir)
+                        .unwrap_or(false);
+                    if mode_mismatch || profile_mismatch {
                         eprintln!(
-                            "Existing Chrome on port {} is {} but requested {}; restarting…",
-                            self.port,
-                            if existing_headless == Some(true) {
-                                "headless"
-                            } else {
-                                "headed"
-                            },
-                            if self.headless { "headless" } else { "headed" }
+                            "Existing Chrome on port {} is wrong mode/profile (headless_mismatch={}, profile_mismatch={}); restarting…",
+                            self.port, mode_mismatch, profile_mismatch
                         );
                         kill_chrome_on_port(self.port)?;
+                        if profile_locked_by_other_chrome(&discovery.user_data_dir, self.port) {
+                            anyhow::bail!(
+                                "Chrome profile `{}` is already open without remote debugging. \
+                                 Quit that Chrome completely, then retry — or start it with \
+                                 --remote-debugging-port={}.",
+                                discovery.user_data_dir.display(),
+                                self.port
+                            );
+                        }
                         eprintln!(
-                            "Starting Chrome on port {} (profile: {}, ui={})",
+                            "Starting Chrome on port {} (profile: {} / {}, ui={})",
                             self.port,
                             discovery.user_data_dir.display(),
+                            discovery.profile_directory,
                             if self.headless { "hidden" } else { "visible" }
                         );
                         launch_chrome(&discovery, self.port, self.headless)?
@@ -85,10 +106,21 @@ impl LazyBrowser {
                     }
                 }
                 Err(_) => {
+                    if profile_locked_by_other_chrome(&discovery.user_data_dir, self.port) {
+                        anyhow::bail!(
+                            "Chrome profile `{}` is already open without remote debugging. \
+                             Quit that Chrome completely, then retry — or start it with \
+                             --remote-debugging-port={}. Opening a second copy would either \
+                             fail or spawn an empty browser.",
+                            discovery.user_data_dir.display(),
+                            self.port
+                        );
+                    }
                     eprintln!(
-                        "Starting Chrome on port {} (profile: {}, ui={})",
+                        "Starting Chrome on port {} (profile: {} / {}, ui={})",
                         self.port,
                         discovery.user_data_dir.display(),
+                        discovery.profile_directory,
                         if self.headless { "hidden" } else { "visible" }
                     );
                     launch_chrome(&discovery, self.port, self.headless)?

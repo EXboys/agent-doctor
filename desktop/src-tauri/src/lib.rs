@@ -26,7 +26,8 @@ use agent_doctor_core::{
 };
 use agent_doctor_mcp::{
     browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
-    resolve_user_data_dir, BrowserMcpStatus, McpConfigureOptions, DEFAULT_BROWSER_MCP_PORT,
+    resolve_profile_directory, resolve_user_data_dir, BrowserMcpStatus, McpConfigureOptions,
+    DEFAULT_BROWSER_MCP_PORT,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -457,12 +458,19 @@ fn mcp_status_command(port: Option<u16>) -> Result<McpModuleStatus, String> {
         .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(&browser.system_user_data_dir));
+    let profile = browser.profile_directory.clone();
     Ok(McpModuleStatus {
         browser,
         inventory,
         configured_runtimes,
         binary: binary.display().to_string(),
-        config_snippet: generate_config_snippet(&binary, port, false, Some(user_data.as_path())),
+        config_snippet: generate_config_snippet(
+            &binary,
+            port,
+            false,
+            Some(user_data.as_path()),
+            Some(profile.as_str()),
+        ),
     })
 }
 
@@ -473,6 +481,7 @@ fn mcp_configure_command(
     port: Option<u16>,
     headless: Option<bool>,
     user_data_dir: Option<String>,
+    profile_directory: Option<String>,
 ) -> Result<McpConfigureReport, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     // Default: show browser UI (headed). Pass headless=true to hide the window.
@@ -519,6 +528,7 @@ fn mcp_configure_command(
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
     let resolved_dir = resolve_user_data_dir(explicit_dir.as_ref(), Some(&discovery.binary_path));
+    let resolved_profile = resolve_profile_directory(profile_directory.as_deref());
 
     emit(
         "write",
@@ -531,6 +541,7 @@ fn mcp_configure_command(
         port,
         headless,
         user_data_dir: Some(resolved_dir),
+        profile_directory: Some(resolved_profile),
         binary: binary.clone(),
         project_path,
         codex_home,
@@ -1127,7 +1138,9 @@ pub fn run() {
             app.manage(Mutex::new(TrayCompactState::default()));
             show_main_window(app.handle());
             setup_tray(app);
-
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

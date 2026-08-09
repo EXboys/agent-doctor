@@ -545,6 +545,34 @@ body::before {
   gap: 6px;
 }
 
+.mcp-advanced {
+  margin-top: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+  padding: 4px 8px 8px;
+}
+
+.mcp-advanced summary {
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted);
+  list-style: none;
+}
+
+.mcp-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcp-advanced[open] summary {
+  margin-bottom: 6px;
+}
+
+.mcp-advanced .mcp-profile-label {
+  margin-top: 4px;
+}
+
 .mcp-profile-label {
   font-size: 0.74rem;
   font-weight: 600;
@@ -568,10 +596,24 @@ body::before {
   outline-offset: 1px;
 }
 
+.mcp-profile-actions .btn-compact.is-active {
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 70%, var(--border));
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--surface));
+  color: var(--text);
+  font-weight: 600;
+}
+
 .mcp-profile-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.mcp-profile-actions .btn-compact.is-active {
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 70%, var(--border));
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--surface));
+  color: var(--text);
+  font-weight: 600;
 }
 
 .mcp-actions {
