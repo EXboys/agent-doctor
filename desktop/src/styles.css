@@ -538,6 +538,42 @@ body::before {
   margin-top: 4px !important;
 }
 
+.mcp-profile {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-profile-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mcp-profile-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-size: 0.72rem;
+  padding: 7px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.mcp-profile-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent, #2563eb) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.mcp-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .mcp-actions {
   margin-top: 8px;
 }

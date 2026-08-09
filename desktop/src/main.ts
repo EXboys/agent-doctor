@@ -237,6 +237,8 @@ interface BrowserMcpStatus {
   binary: string | null;
   version: string | null;
   user_data_dir: string | null;
+  system_user_data_dir: string;
+  isolated_user_data_dir: string;
   cdp_connected: boolean;
   ws_endpoint: string | null;
   port: number;
@@ -341,12 +343,16 @@ const mcpCdpEl = document.querySelector<HTMLElement>("#mcp-cdp")!;
 const mcpConfiguredEl = document.querySelector<HTMLElement>("#mcp-configured")!;
 const mcpBinaryEl = document.querySelector<HTMLElement>("#mcp-binary")!;
 const mcpShowUiEl = document.querySelector<HTMLInputElement>("#mcp-show-ui")!;
+const mcpUserDataDirEl = document.querySelector<HTMLInputElement>("#mcp-user-data-dir")!;
+const mcpProfileSystemEl = document.querySelector<HTMLButtonElement>("#mcp-profile-system")!;
+const mcpProfileIsolatedEl = document.querySelector<HTMLButtonElement>("#mcp-profile-isolated")!;
 const mcpRefreshEl = document.querySelector<HTMLButtonElement>("#mcp-refresh")!;
 const mcpConfigureCodexEl = document.querySelector<HTMLButtonElement>("#mcp-configure-codex")!;
 const mcpConfigureClaudeEl = document.querySelector<HTMLButtonElement>("#mcp-configure-claude")!;
 const mcpSnippetEl = document.querySelector<HTMLElement>("#mcp-snippet")!;
 const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
+const MCP_USER_DATA_DIR_KEY = "agent-doctor.mcp.userDataDir";
 const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#resources-refresh")!;
 const resourcesFiltersEl = document.querySelector<HTMLElement>("#resources-filters")!;
 const resourcesListEl = document.querySelector<HTMLUListElement>("#resources-list")!;
@@ -2082,6 +2088,18 @@ function persistShowBrowserUi(show: boolean) {
   }
 }
 
+function selectedUserDataDir(): string {
+  return mcpUserDataDirEl.value.trim();
+}
+
+function persistUserDataDir(path: string) {
+  try {
+    localStorage.setItem(MCP_USER_DATA_DIR_KEY, path.trim());
+  } catch {
+    // ignore
+  }
+}
+
 function syncShowBrowserUiPreference(status: McpModuleStatus) {
   try {
     const saved = localStorage.getItem(MCP_SHOW_UI_KEY);
@@ -2100,12 +2118,39 @@ function syncShowBrowserUiPreference(status: McpModuleStatus) {
   mcpShowUiEl.checked = true;
 }
 
+function syncUserDataDirPreference(status: McpModuleStatus) {
+  const chrome = status.browser;
+  try {
+    const saved = localStorage.getItem(MCP_USER_DATA_DIR_KEY);
+    if (saved && saved.trim()) {
+      mcpUserDataDirEl.value = saved.trim();
+      return;
+    }
+  } catch {
+    // fall through
+  }
+  const browser = status.inventory.servers.find((server) => server.is_browser);
+  if (browser) {
+    const idx = browser.args.findIndex((arg) => arg === "--user-data-dir");
+    if (idx >= 0 && browser.args[idx + 1]) {
+      mcpUserDataDirEl.value = browser.args[idx + 1];
+      return;
+    }
+  }
+  mcpUserDataDirEl.value =
+    chrome.user_data_dir || chrome.system_user_data_dir || "";
+}
+
 function refreshMcpSnippet() {
   if (!lastMcpStatus) return;
   const port = lastMcpStatus.browser.port;
   const args = ["mcp", "browser", "--port", String(port)];
   if (!isShowBrowserUi()) {
     args.push("--headless");
+  }
+  const dir = selectedUserDataDir();
+  if (dir) {
+    args.push("--user-data-dir", dir);
   }
   mcpSnippetEl.textContent = JSON.stringify(
     {
@@ -2140,6 +2185,7 @@ function renderMcpBrowserStatus(status: McpModuleStatus) {
   mcpBinaryEl.textContent = status.binary;
   mcpBinaryEl.title = status.binary;
   syncShowBrowserUiPreference(status);
+  syncUserDataDirPreference(status);
   refreshMcpSnippet();
 
   mcpBrowserBadgeEl.classList.remove("ok", "warn", "muted", "bad");
@@ -2289,10 +2335,13 @@ async function configureBrowserMcp(runtime: "codex" | "claude-code") {
   try {
     const showUi = isShowBrowserUi();
     persistShowBrowserUi(showUi);
+    const userDataDir = selectedUserDataDir();
+    persistUserDataDir(userDataDir);
     const report = await invoke<McpConfigureReport>("mcp_configure_command", {
       runtime,
       port: null,
       headless: !showUi,
+      userDataDir: userDataDir || null,
     });
     mcpFootnoteEl.textContent = t("mcp.configureOk", {
       runtime: report.runtime,
@@ -3766,6 +3815,32 @@ mcpRefreshEl.addEventListener("click", () => {
 
 mcpShowUiEl.addEventListener("change", () => {
   persistShowBrowserUi(mcpShowUiEl.checked);
+  refreshMcpSnippet();
+});
+
+mcpUserDataDirEl.addEventListener("change", () => {
+  persistUserDataDir(selectedUserDataDir());
+  refreshMcpSnippet();
+});
+
+mcpUserDataDirEl.addEventListener("input", () => {
+  refreshMcpSnippet();
+});
+
+mcpProfileSystemEl.addEventListener("click", () => {
+  const path =
+    lastMcpStatus?.browser.system_user_data_dir ||
+    lastMcpStatus?.browser.user_data_dir ||
+    "";
+  mcpUserDataDirEl.value = path;
+  persistUserDataDir(path);
+  refreshMcpSnippet();
+});
+
+mcpProfileIsolatedEl.addEventListener("click", () => {
+  const path = lastMcpStatus?.browser.isolated_user_data_dir || "";
+  mcpUserDataDirEl.value = path;
+  persistUserDataDir(path);
   refreshMcpSnippet();
 });
 

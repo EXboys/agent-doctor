@@ -1,14 +1,36 @@
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use agent_doctor_mcp::{
-    browser_mcp_status, configure_for, discover_chrome, LazyBrowser, McpConfigureOptions,
+    browser_mcp_status, configure_for, discover_chrome, resolve_user_data_dir, LazyBrowser,
+    McpConfigureOptions,
 };
 use anyhow::Result;
 
-pub fn run_browser(port: u16, headless: bool, _json: bool) -> Result<()> {
+pub fn run_browser(
+    port: u16,
+    headless: bool,
+    user_data_dir: Option<PathBuf>,
+    _json: bool,
+) -> Result<()> {
     // Respond to MCP initialize/tools/list immediately; Chrome starts on first tool use.
-    eprintln!("Browser MCP server listening (Chrome launches on first tool call, port {port})");
-    let browser = Mutex::new(LazyBrowser::new(port, headless));
+    let resolved = user_data_dir.clone().or_else(|| {
+        discover_chrome()
+            .ok()
+            .map(|d| resolve_user_data_dir(None, Some(&d.binary_path)))
+    });
+    eprintln!(
+        "Browser MCP server listening (Chrome launches on first tool call, port {port}, profile: {})",
+        resolved
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "(default)".into())
+    );
+    let browser = Mutex::new(LazyBrowser::with_user_data_dir(
+        port,
+        headless,
+        user_data_dir,
+    ));
     agent_doctor_mcp::run_mcp_server(&browser)?;
     Ok(())
 }
@@ -46,16 +68,27 @@ pub fn run_status(port: u16, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_configure(runtime: &str, port: u16, headless: bool, json: bool) -> Result<()> {
+pub fn run_configure(
+    runtime: &str,
+    port: u16,
+    headless: bool,
+    user_data_dir: Option<PathBuf>,
+    json: bool,
+) -> Result<()> {
     let discovery = discover_chrome()?;
     let binary = agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_else(|_| {
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("agent-doctor-cli"))
     });
+    let user_data_dir = Some(resolve_user_data_dir(
+        user_data_dir.as_ref(),
+        Some(&discovery.binary_path),
+    ));
 
     let options = McpConfigureOptions {
         runtime: runtime.to_string(),
         port,
         headless,
+        user_data_dir: user_data_dir.clone(),
         binary: binary.clone(),
         project_path: None,
         codex_home: std::env::var("CODEX_HOME")
@@ -73,6 +106,7 @@ pub fn run_configure(runtime: &str, port: u16, headless: bool, json: bool) -> Re
                 "runtime": runtime,
                 "port": port,
                 "headless": headless,
+                "user_data_dir": user_data_dir,
                 "binary": binary.display().to_string(),
             }))?
         );
@@ -90,6 +124,9 @@ pub fn run_configure(runtime: &str, port: u16, headless: bool, json: bool) -> Re
             "visible window"
         }
     );
+    if let Some(dir) = &user_data_dir {
+        println!("  Profile: {}", dir.display());
+    }
     println!("  Restart {runtime} for changes to take effect.");
     Ok(())
 }

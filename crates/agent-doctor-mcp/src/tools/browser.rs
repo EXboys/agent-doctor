@@ -8,6 +8,8 @@ use tungstenite::{client::IntoClientRequest, Message};
 pub struct BrowserContext {
     ws_connection: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
     next_id: u64,
+    /// DevTools HTTP port (parsed from the page WebSocket URL).
+    debug_port: Option<u16>,
 }
 
 impl BrowserContext {
@@ -22,14 +24,33 @@ impl BrowserContext {
         let mut ctx = BrowserContext {
             ws_connection,
             next_id: 1,
+            debug_port: parse_debug_port(ws_endpoint),
         };
 
         // Enable CDP domains we need. `Input` has no enable method.
         ctx.enable_domain("Page")?;
         ctx.enable_domain("Runtime")?;
         ctx.enable_domain("DOM")?;
+        // Needed for Target.activateTarget / getTargets from a page session.
+        let _ = ctx.enable_domain("Target");
 
         Ok(ctx)
+    }
+
+    fn reconnect(&mut self, ws_endpoint: &str) -> Result<()> {
+        let request = ws_endpoint
+            .into_client_request()
+            .context("Failed to create WebSocket request")?;
+        let (ws_connection, _) = tungstenite::connect(request)
+            .with_context(|| format!("Failed to reconnect Chrome CDP at {ws_endpoint}"))?;
+        self.ws_connection = ws_connection;
+        self.next_id = 1;
+        self.debug_port = parse_debug_port(ws_endpoint);
+        self.enable_domain("Page")?;
+        self.enable_domain("Runtime")?;
+        self.enable_domain("DOM")?;
+        let _ = self.enable_domain("Target");
+        Ok(())
     }
 
     fn enable_domain(&mut self, domain: &str) -> Result<Value> {
@@ -135,20 +156,28 @@ impl BrowserContext {
 
     /// Click on an element identified by a CSS selector.
     pub fn click(&mut self, selector: &str) -> Result<Value> {
+        // Scroll first, then read fresh coordinates (old code scrolled AFTER measuring → miss).
         let result = self.send_command(
             "Runtime.evaluate",
             json!({
                 "expression": format!(
                     r#"(function() {{
                         const el = document.querySelector({s:?});
-                        if (!el) return {{ error: "Element not found: {s:?}" }};
+                        if (!el) return {{ error: "Element not found: " + {s:?} }};
+                        el.scrollIntoView({{ block: "center", inline: "center" }});
                         const rect = el.getBoundingClientRect();
+                        if (rect.width <= 0 || rect.height <= 0) {{
+                            return {{
+                                error: "Element has zero size (not visible): " + {s:?},
+                                tag: el.tagName
+                            }};
+                        }}
                         return {{
-                            x: rect.x + rect.width / 2,
-                            y: rect.y + rect.height / 2,
-                            visible: rect.width > 0 && rect.height > 0,
+                            x: rect.left + rect.width / 2,
+                            y: rect.top + rect.height / 2,
+                            visible: true,
                             tag: el.tagName,
-                            text: el.textContent?.substring(0, 100) || ''
+                            text: (el.innerText || el.textContent || "").substring(0, 100)
                         }};
                     }})()"#,
                     s = selector,
@@ -161,8 +190,7 @@ impl BrowserContext {
             .pointer("/result/value")
             .context("Failed to evaluate click target")?;
 
-        if coords.get("error").and_then(Value::as_str).is_some() {
-            let err = coords.get("error").and_then(Value::as_str).unwrap_or("");
+        if let Some(err) = coords.get("error").and_then(Value::as_str) {
             anyhow::bail!("{err}");
         }
 
@@ -175,17 +203,16 @@ impl BrowserContext {
             .and_then(Value::as_f64)
             .context("Missing y coordinate")?;
 
+        std::thread::sleep(Duration::from_millis(50));
+
         self.send_command(
-            "Runtime.evaluate",
+            "Input.dispatchMouseEvent",
             json!({
-                "expression": format!(
-                    r#"document.querySelector({s:?})?.scrollIntoView({{block:"center"}})"#,
-                    s = selector
-                ),
+                "type": "mouseMoved",
+                "x": x,
+                "y": y,
             }),
         )?;
-        std::thread::sleep(Duration::from_millis(200));
-
         self.send_command(
             "Input.dispatchMouseEvent",
             json!({
@@ -193,10 +220,10 @@ impl BrowserContext {
                 "x": x,
                 "y": y,
                 "button": "left",
+                "buttons": 1,
                 "clickCount": 1,
             }),
         )?;
-
         self.send_command(
             "Input.dispatchMouseEvent",
             json!({
@@ -204,19 +231,137 @@ impl BrowserContext {
                 "x": x,
                 "y": y,
                 "button": "left",
+                "buttons": 0,
                 "clickCount": 1,
             }),
         )?;
+
+        // DOM click only if mouse missed the target (overlay / wrong node).
+        // Always doing both double-toggles checkboxes and radios.
+        let hit = self.send_command(
+            "Runtime.evaluate",
+            json!({
+                "expression": format!(
+                    r#"(function() {{
+                        const el = document.querySelector({s:?});
+                        if (!el) return {{ method: "mouse", matched: false }};
+                        const top = document.elementFromPoint({x}, {y});
+                        if (top && (top === el || el.contains(top) || top.contains(el))) {{
+                            return {{ method: "mouse", matched: true }};
+                        }}
+                        el.click();
+                        return {{
+                            method: "dom-fallback",
+                            matched: false,
+                            atPoint: top ? top.tagName : null
+                        }};
+                    }})()"#,
+                    s = selector,
+                    x = x,
+                    y = y,
+                ),
+                "returnByValue": true,
+            }),
+        )?;
+        let method = hit
+            .pointer("/result/value/method")
+            .and_then(Value::as_str)
+            .unwrap_or("mouse");
 
         Ok(json!({
             "selector": selector,
             "x": x,
             "y": y,
+            "tag": coords.get("tag"),
+            "method": method,
         }))
     }
 
     /// Type text into an element identified by a CSS selector.
+    ///
+    /// Clears existing content first, then inserts. `Input.insertText` alone
+    /// often leaves the previous value (select + insertText does not reliably
+    /// replace), so we verify and fall back to a native value setter.
     pub fn type_text(&mut self, selector: &str, text: &str) -> Result<Value> {
+        let focused = self.send_command(
+            "Runtime.evaluate",
+            json!({
+                "expression": format!(
+                    r#"(function() {{
+                        const el = document.querySelector({s:?});
+                        if (!el) return {{ ok: false, error: "Element not found: " + {s:?} }};
+                        el.scrollIntoView({{ block: "center", inline: "center" }});
+                        el.focus();
+                        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {{
+                            const proto = el instanceof HTMLTextAreaElement
+                                ? HTMLTextAreaElement.prototype
+                                : HTMLInputElement.prototype;
+                            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+                            if (setter) setter.call(el, ""); else el.value = "";
+                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                        }} else if (el.isContentEditable) {{
+                            el.textContent = "";
+                            const range = document.createRange();
+                            range.selectNodeContents(el);
+                            const sel = window.getSelection();
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                        }}
+                        return {{
+                            ok: true,
+                            tag: el.tagName,
+                            focused: document.activeElement === el
+                        }};
+                    }})()"#,
+                    s = selector,
+                ),
+                "returnByValue": true,
+            }),
+        )?;
+
+        let focus_info = focused
+            .pointer("/result/value")
+            .cloned()
+            .unwrap_or(json!({}));
+        if focus_info.get("ok") != Some(&json!(true)) {
+            let err = focus_info
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("Failed to focus element");
+            anyhow::bail!("{err}");
+        }
+
+        std::thread::sleep(Duration::from_millis(30));
+
+        let mut method = "insertText";
+        if self
+            .send_command("Input.insertText", json!({ "text": text }))
+            .is_err()
+        {
+            method = "dom-set";
+            self.set_element_value(selector, text)?;
+        }
+
+        let mut verify = self.read_element_value(selector)?;
+        let matches = verify
+            .as_str()
+            .map(|v| v == text)
+            .unwrap_or(false);
+        if !matches {
+            method = "dom-set";
+            self.set_element_value(selector, text)?;
+            verify = self.read_element_value(selector)?;
+        }
+
+        Ok(json!({
+            "selector": selector,
+            "typed_length": text.chars().count(),
+            "value": verify,
+            "method": method,
+        }))
+    }
+
+    fn set_element_value(&mut self, selector: &str, text: &str) -> Result<()> {
         self.send_command(
             "Runtime.evaluate",
             json!({
@@ -225,52 +370,53 @@ impl BrowserContext {
                         const el = document.querySelector({s:?});
                         if (!el) return false;
                         el.focus();
-                        if (el.value !== undefined) el.value = '';
+                        const value = {t:?};
+                        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {{
+                            const proto = el instanceof HTMLTextAreaElement
+                                ? HTMLTextAreaElement.prototype
+                                : HTMLInputElement.prototype;
+                            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+                            if (setter) setter.call(el, value); else el.value = value;
+                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                        }} else if (el.isContentEditable) {{
+                            el.textContent = value;
+                            el.dispatchEvent(new InputEvent("input", {{ bubbles: true, data: value }}));
+                        }}
                         return true;
+                    }})()"#,
+                    s = selector,
+                    t = text,
+                ),
+                "returnByValue": true,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn read_element_value(&mut self, selector: &str) -> Result<Value> {
+        let result = self.send_command(
+            "Runtime.evaluate",
+            json!({
+                "expression": format!(
+                    r#"(function() {{
+                        const el = document.querySelector({s:?});
+                        if (!el) return null;
+                        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {{
+                            return el.value;
+                        }}
+                        if (el.isContentEditable) return el.textContent || "";
+                        return null;
                     }})()"#,
                     s = selector,
                 ),
                 "returnByValue": true,
             }),
         )?;
-        std::thread::sleep(Duration::from_millis(100));
-
-        // Clear existing content
-        self.send_command(
-            "Input.dispatchKeyEvent",
-            json!({
-                "type": "keyDown",
-                "windowsVirtualKeyCode": 8,
-                "key": "Backspace",
-                "code": "Backspace",
-            }),
-        )?;
-        self.send_command(
-            "Input.dispatchKeyEvent",
-            json!({
-                "type": "keyUp",
-                "windowsVirtualKeyCode": 8,
-                "key": "Backspace",
-                "code": "Backspace",
-            }),
-        )?;
-
-        for ch in text.chars() {
-            let key = ch.to_string();
-            self.send_command(
-                "Input.dispatchKeyEvent",
-                json!({
-                    "type": "char",
-                    "text": key,
-                }),
-            )
-            .ok();
-        }
-
-        Ok(json!({
-            "selector": selector,
-            "typed_length": text.len(),
-        }))
+        Ok(result
+            .pointer("/result/value")
+            .cloned()
+            .unwrap_or(Value::Null))
     }
 
     /// Take a screenshot (returns base64-encoded PNG).
@@ -328,7 +474,7 @@ impl BrowserContext {
     pub fn get_html(&mut self, selector: Option<&str>) -> Result<String> {
         let expr = if let Some(sel) = selector {
             format!(
-                r#"document.querySelector({s:?})?.outerHTML || "Element not found: {s:?}""#,
+                r#"document.querySelector({s:?})?.outerHTML || "Element not found: " + {s:?}"#,
                 s = sel
             )
         } else {
@@ -445,18 +591,42 @@ impl BrowserContext {
             .context("Failed to get targetId")?;
 
         std::thread::sleep(Duration::from_millis(500));
-        Ok(json!({ "target_id": target_id, "url": url }))
+        // Attach subsequent commands to the new tab's page session.
+        let switched = self.switch_tab(&target_id)?;
+        Ok(json!({
+            "target_id": target_id,
+            "url": url,
+            "status": switched.get("status"),
+        }))
     }
 
     /// Switch to a browser tab by target ID.
+    ///
+    /// `Target.activateTarget` only brings the tab to the front; the existing page
+    /// WebSocket stays bound to the old document. Reconnect CDP to the target's
+    /// page debugger URL so subsequent tools operate on the selected tab.
     pub fn switch_tab(&mut self, target_id: &str) -> Result<Value> {
-        self.send_command(
+        let _ = self.send_command(
             "Target.activateTarget",
             json!({
                 "targetId": target_id,
             }),
+        );
+
+        let port = self.debug_port.context(
+            "Cannot switch tabs: DevTools port unknown (CDP was not connected via ws://host:port)",
         )?;
-        Ok(json!({ "target_id": target_id, "status": "activated" }))
+        let ws = page_ws_for_target(port, target_id)
+            .with_context(|| format!("No page WebSocket for target {target_id}"))?;
+        self.reconnect(&ws)?;
+
+        let url = self.get_url().unwrap_or_default();
+        Ok(json!({
+            "target_id": target_id,
+            "status": "switched",
+            "url": url,
+            "ws_endpoint": ws,
+        }))
     }
 
     /// Close a browser tab by target ID.
@@ -479,4 +649,55 @@ impl BrowserContext {
             "count": targets.as_array().map(|a| a.len()).unwrap_or(0),
         }))
     }
+}
+
+fn parse_debug_port(ws_endpoint: &str) -> Option<u16> {
+    let rest = ws_endpoint
+        .strip_prefix("ws://")
+        .or_else(|| ws_endpoint.strip_prefix("wss://"))?;
+    let hostport = rest.split('/').next()?;
+    let port = hostport.rsplit(':').next()?;
+    port.parse().ok()
+}
+
+fn page_ws_for_target(port: u16, target_id: &str) -> Result<String> {
+    let list = crate::browser::chrome_http_json(port, "/json/list")
+        .with_context(|| format!("Failed to list Chrome targets on port {port}"))?;
+    let arr = list
+        .as_array()
+        .with_context(|| "Chrome /json/list is not an array")?;
+    for target in arr {
+        let id = target.get("id").and_then(Value::as_str).unwrap_or("");
+        let is_page = target
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|t| t == "page")
+            .unwrap_or(false);
+        if id == target_id && is_page {
+            if let Some(ws) = target
+                .get("webSocketDebuggerUrl")
+                .and_then(Value::as_str)
+            {
+                return Ok(ws.to_string());
+            }
+        }
+    }
+    // Some Chrome builds expose target id only under "targetId".
+    for target in arr {
+        let id = target
+            .get("id")
+            .or_else(|| target.get("targetId"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if id != target_id {
+            continue;
+        }
+        if let Some(ws) = target
+            .get("webSocketDebuggerUrl")
+            .and_then(Value::as_str)
+        {
+            return Ok(ws.to_string());
+        }
+    }
+    anyhow::bail!("target {target_id} not found in /json/list");
 }

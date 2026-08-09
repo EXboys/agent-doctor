@@ -436,6 +436,9 @@ enum McpAction {
         /// Run headless (no visible window)
         #[arg(long)]
         headless: bool,
+        /// Chrome user-data-dir (default: everyday system Chrome profile)
+        #[arg(long)]
+        user_data_dir: Option<std::path::PathBuf>,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -459,6 +462,9 @@ enum McpAction {
         /// Launch Chrome without a visible window (default: show UI)
         #[arg(long)]
         headless: bool,
+        /// Chrome user-data-dir (default: everyday system Chrome profile)
+        #[arg(long)]
+        user_data_dir: Option<std::path::PathBuf>,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -556,15 +562,17 @@ fn main() -> Result<()> {
             McpAction::Browser {
                 port,
                 headless,
+                user_data_dir,
                 json,
-            } => commands::mcp::run_browser(port, headless, json)?,
+            } => commands::mcp::run_browser(port, headless, user_data_dir, json)?,
             McpAction::Status { port, json } => commands::mcp::run_status(port, json)?,
             McpAction::Configure {
                 runtime,
                 port,
                 headless,
+                user_data_dir,
                 json,
-            } => commands::mcp::run_configure(&runtime, port, headless, json)?,
+            } => commands::mcp::run_configure(&runtime, port, headless, user_data_dir, json)?,
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {
