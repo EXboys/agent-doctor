@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::adapters::util::{find_binary, home_join};
+use crate::adapters::util::{find_all_binaries, find_binary, home_join};
 
 use super::{load_workspaces, WorkspacesDocument};
 
@@ -52,22 +52,29 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
     let mut servers = Vec::new();
 
     if let Some((_, entry)) = active.as_ref() {
+        // Legacy / shared project JSON (Cursor-style). Codex itself reads config.toml.
         let project_mcp = entry.path.join(".mcp.json");
-        servers.extend(read_servers_from_file(&project_mcp, "project", "codex"));
+        servers.extend(read_servers_from_json(&project_mcp, "project", "shared"));
+
+        // Codex: workspace CODEX_HOME/config.toml → [mcp_servers.*]
+        let codex_config = entry.codex_home.join("config.toml");
+        servers.extend(read_servers_from_toml(&codex_config, "codex-home", "codex"));
     }
 
-    let settings = home_join(".claude/settings.json");
-    servers.extend(read_servers_from_file(
-        &settings,
-        "claude-global",
+    // Claude Code user-scope MCP lives in ~/.claude.json (settings.json is ignored for MCP).
+    let claude_json = home_join(".claude.json");
+    servers.extend(read_servers_from_json(
+        &claude_json,
+        "claude-user",
         "claude-code",
     ));
 
-    let claude_json = home_join(".claude.json");
-    servers.extend(read_servers_from_file(
-        &claude_json,
-        "claude-json",
-        "claude-code",
+    // Legacy mistaken path — still surface if present so users can clean it up.
+    let settings = home_join(".claude/settings.json");
+    servers.extend(read_servers_from_json(
+        &settings,
+        "claude-settings-ignored",
+        "shared",
     ));
 
     servers.sort_by(|a, b| {
@@ -95,7 +102,7 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
     }
 }
 
-fn read_servers_from_file(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
+fn read_servers_from_json(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
     if !path.exists() {
         return Vec::new();
     }
@@ -111,13 +118,47 @@ fn read_servers_from_file(path: &Path, scope: &str, runtime_hint: &str) -> Vec<M
 
     map.iter()
         .map(|(name, entry)| {
-            let command = entry
-                .get("command")
-                .and_then(JsonValue::as_str)
-                .map(str::to_string);
+            item_from_command_args(
+                name,
+                entry.get("command").and_then(JsonValue::as_str),
+                entry
+                    .get("args")
+                    .and_then(JsonValue::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                path,
+                scope,
+                runtime_hint,
+            )
+        })
+        .collect()
+}
+
+fn read_servers_from_toml(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(map) = value.get("mcp_servers").and_then(|v| v.as_table()) else {
+        return Vec::new();
+    };
+
+    map.iter()
+        .map(|(name, entry)| {
+            let command = entry.get("command").and_then(|v| v.as_str());
             let args = entry
                 .get("args")
-                .and_then(JsonValue::as_array)
+                .and_then(|v| v.as_array())
                 .map(|items| {
                     items
                         .iter()
@@ -125,23 +166,34 @@ fn read_servers_from_file(path: &Path, scope: &str, runtime_hint: &str) -> Vec<M
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let is_browser = name == "browser"
-                || (args.iter().any(|a| a == "mcp") && args.iter().any(|a| a == "browser"));
-            let (healthy, issue) = assess_command(command.as_deref());
-
-            McpInventoryItem {
-                name: name.clone(),
-                scope: scope.to_string(),
-                config_path: path.display().to_string(),
-                command,
-                args,
-                healthy,
-                issue,
-                is_browser,
-                runtime_hint: runtime_hint.to_string(),
-            }
+            item_from_command_args(name, command, args, path, scope, runtime_hint)
         })
         .collect()
+}
+
+fn item_from_command_args(
+    name: &str,
+    command: Option<&str>,
+    args: Vec<String>,
+    path: &Path,
+    scope: &str,
+    runtime_hint: &str,
+) -> McpInventoryItem {
+    let is_browser = name == "browser"
+        || (args.iter().any(|a| a == "mcp") && args.iter().any(|a| a == "browser"));
+    let (healthy, issue) = assess_command(command);
+
+    McpInventoryItem {
+        name: name.to_string(),
+        scope: scope.to_string(),
+        config_path: path.display().to_string(),
+        command: command.map(str::to_string),
+        args,
+        healthy,
+        issue,
+        is_browser,
+        runtime_hint: runtime_hint.to_string(),
+    }
 }
 
 fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
@@ -169,19 +221,85 @@ fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
     (true, None)
 }
 
-/// Resolve the `agent-doctor` CLI binary used as the MCP server command.
+/// Resolve the real `agent-doctor` CLI binary used as the MCP server command.
+///
+/// Skips the common Hermes workspace shim at `~/.local/bin/agent-doctor`
+/// (`exec hermes -p agent-doctor …`), which is not the Agent Doctor CLI.
 pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
-    if let Some(path) = find_binary("agent-doctor") {
-        return Ok(path);
+    let mut candidates = Vec::new();
+    candidates.extend(find_all_binaries("agent-doctor-cli"));
+    candidates.extend(find_all_binaries("agent-doctor"));
+
+    // Prefer an in-tree release/debug build when developing from source.
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let root = PathBuf::from(manifest_dir);
+        for rel in [
+            "../target/release/agent-doctor",
+            "../target/debug/agent-doctor",
+            "../../target/release/agent-doctor",
+            "../../target/debug/agent-doctor",
+            "target/release/agent-doctor",
+            "target/debug/agent-doctor",
+        ] {
+            candidates.push(root.join(rel));
+        }
     }
-    let exe = std::env::current_exe()?;
-    Ok(exe)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("agent-doctor"));
+            candidates.push(dir.join("agent-doctor-cli"));
+        }
+    }
+
+    for path in candidates {
+        if is_real_agent_doctor_cli(&path) {
+            return Ok(path
+                .canonicalize()
+                .unwrap_or(path));
+        }
+    }
+
+    anyhow::bail!(
+        "Could not find the Agent Doctor CLI. Install with `cargo install --path cli`, \
+         or place `agent-doctor-cli` on PATH (note: ~/.local/bin/agent-doctor may be a Hermes shim)."
+    )
+}
+
+fn is_real_agent_doctor_cli(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    // Skip shell wrappers such as `exec hermes -p agent-doctor "$@"`.
+    if let Ok(bytes) = fs::read(path) {
+        if bytes.starts_with(b"#!") {
+            let text = String::from_utf8_lossy(&bytes);
+            if text.contains("hermes") {
+                return false;
+            }
+        }
+    }
+
+    let Ok(output) = std::process::Command::new(path)
+        .args(["mcp", "status", "--json"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.contains("chrome_found") || stdout.contains("cdp_connected")
 }
 
 /// Group configured browser MCP entries by runtime hint.
 pub fn browser_configured_runtimes(report: &McpInventoryReport) -> Vec<String> {
     let mut map = BTreeMap::new();
     for item in report.servers.iter().filter(|s| s.is_browser) {
+        // Ignore Cursor-style project .mcp.json; Codex/Claude use their own configs.
+        if item.runtime_hint == "shared" {
+            continue;
+        }
         map.insert(item.runtime_hint.clone(), ());
     }
     map.into_keys().collect()
@@ -195,39 +313,108 @@ mod tests {
 
     use super::super::WorkspaceEntry;
 
+    fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
+        let temp = tempdir().unwrap();
+        let previous = std::env::var_os("HOME");
+        // SAFETY: test-only HOME override, restored after the closure.
+        unsafe { std::env::set_var("HOME", temp.path()) };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(temp.path())));
+        match previous {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
     #[test]
     fn lists_project_mcp_servers_and_flags_missing_binary() {
-        let temp = tempdir().unwrap();
-        let project = temp.path().join("proj");
-        fs::create_dir_all(&project).unwrap();
-        fs::write(
-            project.join(".mcp.json"),
-            r#"{"mcpServers":{"browser":{"command":"agent-doctor","args":["mcp","browser"]},"broken":{"command":"/no/such/mcp-bin"}}}"#,
-        )
-        .unwrap();
+        with_temp_home(|home| {
+            let project = home.join("proj");
+            fs::create_dir_all(&project).unwrap();
+            fs::write(
+                project.join(".mcp.json"),
+                r#"{"mcpServers":{"browser":{"command":"agent-doctor","args":["mcp","browser"]},"broken":{"command":"/no/such/mcp-bin"}}}"#,
+            )
+            .unwrap();
 
-        let mut workspaces = BTreeMap::new();
-        workspaces.insert(
-            "demo".into(),
-            WorkspaceEntry {
-                path: project,
-                hermes_profile: "default".into(),
-                codex_home: temp.path().join("codex"),
-                openclaw_agent_id: "demo".into(),
-                openclaw_workspace: temp.path().join("oc"),
-            },
-        );
-        let doc = WorkspacesDocument {
-            active: Some("demo".into()),
-            workspaces,
-        };
+            let mut workspaces = BTreeMap::new();
+            workspaces.insert(
+                "demo".into(),
+                WorkspaceEntry {
+                    path: project,
+                    hermes_profile: "default".into(),
+                    codex_home: home.join("codex"),
+                    openclaw_agent_id: "demo".into(),
+                    openclaw_workspace: home.join("oc"),
+                },
+            );
+            let doc = WorkspacesDocument {
+                active: Some("demo".into()),
+                workspaces,
+            };
 
-        let report = list_mcp_inventory_with_doc(&doc);
-        assert_eq!(report.total, 2);
-        assert!(report.browser_configured);
-        let broken = report.servers.iter().find(|s| s.name == "broken").unwrap();
-        assert!(!broken.healthy);
-        let browser = report.servers.iter().find(|s| s.name == "browser").unwrap();
-        assert!(browser.is_browser);
+            let report = list_mcp_inventory_with_doc(&doc);
+            let broken = report
+                .servers
+                .iter()
+                .find(|s| s.name == "broken" && s.runtime_hint == "shared")
+                .unwrap();
+            assert!(!broken.healthy);
+            let browser = report
+                .servers
+                .iter()
+                .find(|s| s.name == "browser" && s.runtime_hint == "shared")
+                .unwrap();
+            assert!(browser.is_browser);
+            assert!(report.browser_configured);
+        });
+    }
+
+    #[test]
+    fn lists_codex_toml_mcp_servers() {
+        with_temp_home(|home| {
+            let project = home.join("proj");
+            let codex_home = home.join("codex-home");
+            fs::create_dir_all(&project).unwrap();
+            fs::create_dir_all(&codex_home).unwrap();
+            fs::write(
+                codex_home.join("config.toml"),
+                r#"
+model = "gpt-5"
+[mcp_servers.browser]
+command = "agent-doctor"
+args = ["mcp", "browser", "--port", "9222"]
+"#,
+            )
+            .unwrap();
+
+            let mut workspaces = BTreeMap::new();
+            workspaces.insert(
+                "demo".into(),
+                WorkspaceEntry {
+                    path: project,
+                    hermes_profile: "default".into(),
+                    codex_home,
+                    openclaw_agent_id: "demo".into(),
+                    openclaw_workspace: home.join("oc"),
+                },
+            );
+            let doc = WorkspacesDocument {
+                active: Some("demo".into()),
+                workspaces,
+            };
+
+            let report = list_mcp_inventory_with_doc(&doc);
+            let codex = report
+                .servers
+                .iter()
+                .find(|s| s.runtime_hint == "codex" && s.name == "browser")
+                .expect("codex browser MCP");
+            assert!(codex.is_browser);
+            assert!(browser_configured_runtimes(&report).contains(&"codex".to_string()));
+        });
     }
 }

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use toml::Value as TomlValue;
 
 use crate::browser::BrowserDiscovery;
 
@@ -14,10 +15,29 @@ pub struct McpConfigureOptions {
     pub runtime: String,
     /// Port for the Chrome debugging endpoint
     pub port: u16,
+    /// When true, Chrome launches without a visible window (`--headless`).
+    /// Default is false: show the browser UI.
+    pub headless: bool,
     /// The agent-doctor binary path (used for the MCP server command)
     pub binary: PathBuf,
-    /// The project/workspace path to write .mcp.json into
+    /// The project/workspace path (used for Claude project hints / legacy .mcp.json)
     pub project_path: Option<PathBuf>,
+    /// Codex home directory (`CODEX_HOME` / workspace codex-home). Required for Codex.
+    pub codex_home: Option<PathBuf>,
+}
+
+/// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
+pub fn browser_mcp_args(port: u16, headless: bool) -> Vec<String> {
+    let mut args = vec![
+        "mcp".to_string(),
+        "browser".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+    ];
+    if headless {
+        args.push("--headless".to_string());
+    }
+    args
 }
 
 /// A single MCP server entry for .mcp.json.
@@ -34,29 +54,46 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn resolve_codex_home(explicit: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return Ok(path.to_path_buf());
+    }
+    if let Ok(from_env) = std::env::var("CODEX_HOME") {
+        let path = PathBuf::from(from_env);
+        if !path.as_os_str().is_empty() {
+            return Ok(path);
+        }
+    }
+    home_dir()
+        .map(|home| home.join(".codex"))
+        .context("Cannot resolve Codex home (set CODEX_HOME or pass codex_home)")
+}
+
 /// Find the MCP servers config path for a given runtime.
-pub fn mcp_servers_path(runtime: &str, project_path: Option<&Path>) -> Result<PathBuf> {
+///
+/// - Claude Code: `~/.claude/settings.json` (`mcpServers` JSON)
+/// - Codex: `$CODEX_HOME/config.toml` (`[mcp_servers.*]` TOML) — **not** project `.mcp.json`
+pub fn mcp_servers_path(
+    runtime: &str,
+    project_path: Option<&Path>,
+    codex_home: Option<&Path>,
+) -> Result<PathBuf> {
+    let _ = project_path;
     match runtime {
+        // Claude Code reads user-scope MCP from ~/.claude.json (NOT settings.json).
         "claude-code" | "claude" => {
             let path = home_dir()
                 .context("Cannot find home directory")?
-                .join(".claude/settings.json");
+                .join(".claude.json");
             Ok(path)
         }
-        "codex" => {
-            if let Some(project) = project_path {
-                Ok(project.join(".mcp.json"))
-            } else {
-                Ok(std::env::current_dir()
-                    .context("Cannot determine current directory")?
-                    .join(".mcp.json"))
-            }
-        }
+        "codex" => Ok(resolve_codex_home(codex_home)?.join("config.toml")),
         _ => anyhow::bail!("Unsupported runtime: {runtime}. Supported: codex, claude-code"),
     }
 }
 
 /// Read the existing MCP server entries from a config file.
+/// Returns a JSON object map of server-name → entry (command/args).
 pub fn read_mcp_servers(config_path: &Path) -> Result<Value> {
     if !config_path.exists() {
         return Ok(json!({}));
@@ -65,31 +102,53 @@ pub fn read_mcp_servers(config_path: &Path) -> Result<Value> {
     let content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read {}", config_path.display()))?;
 
-    let is_json = config_path
-        .extension()
-        .map(|e| e == "json")
-        .unwrap_or(false);
-
-    if is_json {
-        let parsed: Value = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", config_path.display()))?;
-        Ok(parsed.get("mcpServers").cloned().unwrap_or(json!({})))
-    } else {
-        anyhow::bail!("Unsupported config format: {}", config_path.display());
+    if config_path.extension().and_then(|e| e.to_str()) == Some("toml") {
+        return read_mcp_servers_toml(&content);
     }
+
+    let parsed: Value = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+    Ok(parsed.get("mcpServers").cloned().unwrap_or(json!({})))
 }
 
-/// Write MCP server entries to a config file.
-pub fn write_mcp_servers(config_path: &Path, mcp_servers: &Value) -> Result<()> {
-    let is_json = config_path
-        .extension()
-        .map(|e| e == "json")
-        .unwrap_or(false);
+fn read_mcp_servers_toml(content: &str) -> Result<Value> {
+    let doc: TomlValue = toml::from_str(content).context("Failed to parse Codex config.toml")?;
+    let Some(servers) = doc.get("mcp_servers").and_then(TomlValue::as_table) else {
+        return Ok(json!({}));
+    };
 
-    if !is_json {
-        anyhow::bail!("Unsupported config format: {}", config_path.display());
+    let mut out = serde_json::Map::new();
+    for (name, entry) in servers {
+        let Some(table) = entry.as_table() else {
+            continue;
+        };
+        let command = table
+            .get("command")
+            .and_then(TomlValue::as_str)
+            .unwrap_or_default();
+        let args = table
+            .get("args")
+            .and_then(TomlValue::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        out.insert(
+            name.clone(),
+            json!({
+                "command": command,
+                "args": args,
+            }),
+        );
     }
+    Ok(Value::Object(out))
+}
 
+/// Write MCP server entries to a JSON config file (`mcpServers`).
+pub fn write_mcp_servers(config_path: &Path, mcp_servers: &Value) -> Result<()> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
@@ -109,9 +168,7 @@ pub fn write_mcp_servers(config_path: &Path, mcp_servers: &Value) -> Result<()> 
         fs::write(config_path, format!("{updated}\n"))
             .with_context(|| format!("Failed to write {}", config_path.display()))?;
     } else {
-        let doc = json!({
-            "mcpServers": mcp_servers
-        });
+        let doc = json!({ "mcpServers": mcp_servers });
         let content = serde_json::to_string_pretty(&doc)?;
         fs::write(config_path, format!("{content}\n"))
             .with_context(|| format!("Failed to write {}", config_path.display()))?;
@@ -120,42 +177,86 @@ pub fn write_mcp_servers(config_path: &Path, mcp_servers: &Value) -> Result<()> 
     Ok(())
 }
 
-/// Configure the browser MCP server for a given runtime.
-pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOptions) -> Result<()> {
-    let config_path = mcp_servers_path(&options.runtime, options.project_path.as_deref())?;
-    let mut servers = read_mcp_servers(&config_path)?;
-
-    let entry = json!({
-        "command": options.binary.to_string_lossy().to_string(),
-        "args": [
-            "mcp",
-            "browser",
-            "--port", options.port.to_string(),
-        ]
-    });
-
-    if let Some(obj) = servers.as_object_mut() {
-        obj.insert("browser".to_string(), entry);
-    } else {
-        servers = json!({ "browser": entry });
+fn write_mcp_servers_toml(
+    config_path: &Path,
+    name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
 
-    write_mcp_servers(&config_path, &servers)?;
+    let mut doc: TomlValue = if config_path.exists() {
+        let content = fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        toml::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", config_path.display()))?
+    } else {
+        TomlValue::Table(toml::map::Map::new())
+    };
+
+    let root = doc
+        .as_table_mut()
+        .context("Codex config.toml root must be a table")?;
+    let servers = root
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| TomlValue::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("mcp_servers must be a table")?;
+
+    let mut entry = toml::map::Map::new();
+    entry.insert("command".into(), TomlValue::String(command.to_string()));
+    entry.insert(
+        "args".into(),
+        TomlValue::Array(args.iter().cloned().map(TomlValue::String).collect()),
+    );
+    // Browser MCP may launch Chrome; give Codex more than the default 10s.
+    entry.insert("startup_timeout_sec".into(), TomlValue::Float(60.0));
+    servers.insert(name.to_string(), TomlValue::Table(entry));
+
+    let rendered = toml::to_string_pretty(&doc).context("serialize Codex config.toml")?;
+    fs::write(config_path, rendered)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+/// Configure the browser MCP server for a given runtime.
+pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOptions) -> Result<()> {
+    let config_path = mcp_servers_path(
+        &options.runtime,
+        options.project_path.as_deref(),
+        options.codex_home.as_deref(),
+    )?;
+    let command = options.binary.to_string_lossy().to_string();
+    let args = browser_mcp_args(options.port, options.headless);
+
+    match options.runtime.as_str() {
+        "codex" => write_mcp_servers_toml(&config_path, "browser", &command, &args)?,
+        "claude-code" | "claude" => {
+            let mut servers = read_mcp_servers(&config_path)?;
+            let entry = json!({ "command": command, "args": args });
+            if let Some(obj) = servers.as_object_mut() {
+                obj.insert("browser".to_string(), entry);
+            } else {
+                servers = json!({ "browser": entry });
+            }
+            write_mcp_servers(&config_path, &servers)?;
+        }
+        other => anyhow::bail!("Unsupported runtime: {other}"),
+    }
 
     Ok(())
 }
 
 /// Generate the MCP configuration JSON snippet for display/export.
-pub fn generate_config_snippet(binary: &Path, port: u16) -> Value {
+pub fn generate_config_snippet(binary: &Path, port: u16, headless: bool) -> Value {
     json!({
         "mcpServers": {
             "browser": {
                 "command": binary.to_string_lossy().to_string(),
-                "args": [
-                    "mcp",
-                    "browser",
-                    "--port", port.to_string(),
-                ]
+                "args": browser_mcp_args(port, headless),
             }
         }
     })

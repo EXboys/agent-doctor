@@ -83,18 +83,30 @@ fn find_chrome_binary() -> Result<PathBuf> {
     anyhow::bail!("Could not find Chrome/Chromium binary. Install Google Chrome or chromium.")
 }
 
+/// Profile directory used when launching Chrome for MCP.
+///
+/// Default is an Agent Doctor-managed profile. The real Chrome profile cannot be
+/// opened with `--remote-debugging-port` while a normal Chrome instance is already
+/// using it (macOS profile lock). Override with `AGENT_DOCTOR_CHROME_USER_DATA_DIR`.
 fn default_user_data_dir() -> PathBuf {
+    if let Ok(custom) = std::env::var("AGENT_DOCTOR_CHROME_USER_DATA_DIR") {
+        let path = PathBuf::from(custom);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
+
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default();
 
     if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Google/Chrome")
+        home.join("Library/Application Support/agent-doctor/chrome-cdp")
     } else if cfg!(target_os = "linux") {
-        home.join(".config/google-chrome")
+        home.join(".config/agent-doctor/chrome-cdp")
     } else {
-        home.join(r"AppData\Local\Google\Chrome\User Data")
+        home.join(r"AppData\Local\agent-doctor\chrome-cdp")
     }
 }
 
@@ -107,10 +119,9 @@ fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
     }
 }
 
-/// Launch Chrome with anti-detection settings.
+/// Launch Chrome with anti-detection settings and a dedicated CDP profile.
 ///
 /// Anti-detection measures:
-/// - Uses your real user data directory (authentic cookies, sessions)
 /// - Disables AutomationControlled Blink feature
 /// - Does NOT pass --enable-automation flag
 /// - Does NOT pass --remote-debugging-pipe (less conspicuous)
@@ -119,6 +130,13 @@ pub fn launch_chrome(
     port: u16,
     headless: bool,
 ) -> Result<ChromeInstance> {
+    std::fs::create_dir_all(&discovery.user_data_dir).with_context(|| {
+        format!(
+            "Failed to create Chrome user data dir {}",
+            discovery.user_data_dir.display()
+        )
+    })?;
+
     let mut cmd = Command::new(&discovery.binary_path);
 
     cmd.arg(format!("--remote-debugging-port={}", port))
@@ -140,17 +158,29 @@ pub fn launch_chrome(
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
 
-    let child = cmd.spawn().with_context(|| {
+    let mut child = cmd.spawn().with_context(|| {
         format!(
             "Failed to start Chrome: {}",
             discovery.binary_path.display()
         )
     })?;
 
-    // Wait for Chrome to start listening
-    std::thread::sleep(Duration::from_millis(1500));
-
-    let ws_endpoint = find_ws_endpoint_http(port).ok();
+    // Wait for Chrome to start listening (cold profile can be slow).
+    let mut ws_endpoint = None;
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(500));
+        if let Ok(endpoint) = find_ws_endpoint_http(port) {
+            ws_endpoint = Some(endpoint);
+            break;
+        }
+        if let Some(status) = child.try_wait().ok().flatten() {
+            anyhow::bail!(
+                "Chrome exited early ({status}) while starting CDP on port {port}. \
+                 If you need your everyday profile, quit Chrome and relaunch with \
+                 --remote-debugging-port={port}, or set AGENT_DOCTOR_CHROME_USER_DATA_DIR."
+            );
+        }
+    }
 
     Ok(ChromeInstance {
         process: Some(child),
@@ -173,14 +203,57 @@ pub fn connect_chrome(port: u16) -> Result<ChromeInstance> {
     })
 }
 
-/// Fetch the WebSocket debug URL from Chrome's DevTools Protocol endpoint.
+/// Fetch a *page* WebSocket debug URL (not the browser-level endpoint).
+///
+/// Page domains like `Page.enable` only work on page targets. Prefer an existing
+/// page from `/json/list`, otherwise create one via `/json/new`.
 fn find_ws_endpoint_http(port: u16) -> Result<String> {
-    let addr = format!("127.0.0.1:{port}");
-    let mut stream = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(5))
-        .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
+    if let Ok(list) = chrome_http_json(port, "/json/list") {
+        if let Some(arr) = list.as_array() {
+            for target in arr {
+                let is_page = target
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|t| t == "page")
+                    .unwrap_or(true);
+                if !is_page {
+                    continue;
+                }
+                if let Some(ws) = target
+                    .get("webSocketDebuggerUrl")
+                    .and_then(|v| v.as_str())
+                {
+                    return Ok(ws.to_string());
+                }
+            }
+        }
+    }
 
+    // Create a blank page target and use its debugger URL.
+    let created = chrome_http_json(port, "/json/new?about:blank")
+        .context("Failed to create a Chrome page target via /json/new")?;
+    created
+        .get("webSocketDebuggerUrl")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .context("Chrome /json/new response missing webSocketDebuggerUrl")
+}
+
+fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Value> {
+    let addr = format!("127.0.0.1:{port}");
+    let mut stream = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(800))
+        .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(800)))
+        .ok();
+    stream
+        .set_write_timeout(Some(Duration::from_millis(800)))
+        .ok();
+
+    // Chrome's CDP HTTP server expects HTTP/1.1 and may keep the socket open;
+    // read until Content-Length bytes are received instead of waiting for EOF.
     let request = format!(
-        "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())
@@ -188,28 +261,73 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
     stream.flush()?;
 
     let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .context("Failed to read response from Chrome")?;
+    let mut buf = [0u8; 8192];
+    let mut content_length: Option<usize> = None;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if content_length.is_some() {
+                    break;
+                }
+                continue;
+            }
+            Err(err) => return Err(err).context("Failed to read response from Chrome"),
+        }
+
+        if let Some(headers) = split_headers(&response) {
+            if content_length.is_none() {
+                content_length = parse_content_length(headers);
+            }
+            let body_start = headers.len() + 4; // \r\n\r\n
+            if let Some(len) = content_length {
+                if response.len().saturating_sub(body_start) >= len {
+                    break;
+                }
+            }
+        }
+    }
 
     let response_str = String::from_utf8_lossy(&response);
-
-    // Find the JSON body after HTTP headers
-    let body = response_str
+    if !response_str.contains("200") {
+        anyhow::bail!("Chrome CDP HTTP {path} failed: {}", &response_str[..response_str.len().min(200)]);
+    }
+    let raw_body = response_str
         .split("\r\n\r\n")
         .nth(1)
-        .context("No HTTP body in Chrome version response")?;
+        .context("No HTTP body in Chrome CDP response")?;
+    let body = match content_length {
+        Some(len) => {
+            let bytes = raw_body.as_bytes();
+            std::str::from_utf8(&bytes[..len.min(bytes.len())]).unwrap_or(raw_body)
+        }
+        None => raw_body.trim(),
+    };
 
-    let json: serde_json::Value =
-        serde_json::from_str(body).context("Failed to parse Chrome version endpoint response")?;
+    serde_json::from_str(body.trim()).context("Failed to parse Chrome CDP JSON response")
+}
 
-    let ws = json
-        .get("webSocketDebuggerUrl")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .context("Chrome version endpoint missing webSocketDebuggerUrl")?;
+fn split_headers(response: &[u8]) -> Option<&[u8]> {
+    response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|idx| &response[..idx])
+}
 
-    Ok(ws)
+fn parse_content_length(headers: &[u8]) -> Option<usize> {
+    let text = String::from_utf8_lossy(headers);
+    for line in text.split("\r\n") {
+        let lower = line.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("content-length:") {
+            return rest.trim().parse().ok();
+        }
+    }
+    None
 }
 
 /// Stop the Chrome instance gracefully.
@@ -221,6 +339,95 @@ pub fn stop_chrome(instance: &mut ChromeInstance) -> Result<()> {
     Ok(())
 }
 
+/// PIDs currently listening on a TCP port (best-effort via `lsof`).
+fn pids_listening_on_port(port: u16) -> Vec<u32> {
+    let output = Command::new("lsof")
+        .args([
+            "-nP",
+            &format!("-iTCP:{port}"),
+            "-sTCP:LISTEN",
+            "-t",
+        ])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect()
+}
+
+fn process_command_line(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-ww", "-o", "command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let cmd = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if cmd.is_empty() {
+        None
+    } else {
+        Some(cmd)
+    }
+}
+
+/// Whether the Chrome (or Chromium) listening on `port` was started with `--headless`.
+/// Returns `None` if nothing is listening or the mode cannot be determined.
+pub fn cdp_port_is_headless(port: u16) -> Option<bool> {
+    let mut saw_browser = false;
+    for pid in pids_listening_on_port(port) {
+        let Some(cmd) = process_command_line(pid) else {
+            continue;
+        };
+        let lower = cmd.to_ascii_lowercase();
+        let is_browser = lower.contains("chrome")
+            || lower.contains("chromium")
+            || lower.contains("msedge")
+            || lower.contains("brave");
+        if !is_browser {
+            continue;
+        }
+        saw_browser = true;
+        if cmd.contains("--headless") {
+            return Some(true);
+        }
+    }
+    if saw_browser {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Kill processes listening on the CDP port so a fresh Chrome can bind it.
+pub fn kill_chrome_on_port(port: u16) -> Result<()> {
+    let pids = pids_listening_on_port(port);
+    if pids.is_empty() {
+        return Ok(());
+    }
+    for pid in &pids {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(200));
+        if pids_listening_on_port(port).is_empty() {
+            return Ok(());
+        }
+    }
+    // Last resort
+    for pid in pids_listening_on_port(port) {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +436,8 @@ mod tests {
     fn test_default_user_data_dir_is_valid_path() {
         let dir = default_user_data_dir();
         assert!(
-            dir.to_string_lossy().contains("Chrome")
+            dir.to_string_lossy().contains("chrome-cdp")
+                || dir.to_string_lossy().contains("Chrome")
                 || dir.to_string_lossy().contains("google-chrome")
         );
     }

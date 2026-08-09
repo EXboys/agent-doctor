@@ -24,11 +24,10 @@ impl BrowserContext {
             next_id: 1,
         };
 
-        // Enable CDP domains we need
+        // Enable CDP domains we need. `Input` has no enable method.
         ctx.enable_domain("Page")?;
         ctx.enable_domain("Runtime")?;
         ctx.enable_domain("DOM")?;
-        ctx.enable_domain("Input")?;
 
         Ok(ctx)
     }

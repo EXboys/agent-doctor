@@ -1,17 +1,17 @@
 use std::io::{self, BufRead, Read, Write};
-use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::tools::BrowserContext;
+use crate::session::SharedBrowser;
 
 /// A tool definition exposed by this MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
+    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -28,12 +28,35 @@ pub struct McpRequest {
 /// Outgoing MCP response (JSON-RPC).
 #[derive(Debug, Serialize)]
 pub struct McpResponse {
+    pub jsonrpc: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<McpError>,
+}
+
+fn ok_response(id: Option<Value>, result: Value) -> McpResponse {
+    McpResponse {
+        jsonrpc: "2.0",
+        id,
+        result: Some(result),
+        error: None,
+    }
+}
+
+fn err_response(id: Option<Value>, code: i64, message: String) -> McpResponse {
+    McpResponse {
+        jsonrpc: "2.0",
+        id,
+        result: None,
+        error: Some(McpError {
+            code,
+            message,
+            data: None,
+        }),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -241,11 +264,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+fn debug_log(msg: impl AsRef<str>) {
+    if let Ok(path) = std::env::var("AGENT_DOCTOR_MCP_DEBUG") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{}", msg.as_ref());
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Framing {
+    /// LSP-style `Content-Length` headers (Codex / official MCP SDK).
+    ContentLength,
+    /// Newline-delimited JSON-RPC (Claude Code).
+    Ndjson,
+}
+
 /// Run the MCP server over stdio.
 ///
-/// Reads JSON-RPC requests from stdin, dispatches to a shared `BrowserContext`,
-/// and writes responses to stdout.
-pub fn run_mcp_server(browser: &Mutex<BrowserContext>) -> Result<()> {
+/// Handshake/`tools/list` respond immediately; Chrome is started on first tool call.
+pub fn run_mcp_server(browser: &SharedBrowser) -> Result<()> {
+    debug_log(format!("run_mcp_server start pid={}", std::process::id()));
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let mut buffer = String::new();
@@ -254,10 +298,12 @@ pub fn run_mcp_server(browser: &Mutex<BrowserContext>) -> Result<()> {
     loop {
         buffer.clear();
         if reader.read_line(&mut buffer)? == 0 {
+            debug_log("stdin EOF");
             return Ok(());
         }
 
         let line = buffer.trim().to_string();
+        debug_log(format!("stdin line: {line:?}"));
 
         if line.is_empty() {
             let len = content_length
@@ -267,68 +313,79 @@ pub fn run_mcp_server(browser: &Mutex<BrowserContext>) -> Result<()> {
             reader
                 .read_exact(&mut body)
                 .context("Failed to read MCP request body")?;
-
-            let body_str = String::from_utf8_lossy(&body);
-            let request: McpRequest = match serde_json::from_str(&body_str) {
-                Ok(req) => req,
-                Err(e) => {
-                    let resp = McpResponse {
-                        id: None,
-                        result: None,
-                        error: Some(McpError {
-                            code: -32700,
-                            message: format!("Parse error: {e}"),
-                            data: None,
-                        }),
-                    };
-                    write_response(&resp)?;
-                    continue;
-                }
-            };
-
-            match handle_request(&request, browser)? {
-                HandleResult::Respond(resp) => write_response(&resp)?,
-                HandleResult::Shutdown => return Ok(()),
-                HandleResult::NoResponse => {} // notifications
+            debug_log(format!("body: {}", String::from_utf8_lossy(&body)));
+            if !dispatch_raw(
+                &String::from_utf8_lossy(&body),
+                browser,
+                Framing::ContentLength,
+            )? {
+                return Ok(());
             }
         } else if let Some(len_str) = line
             .strip_prefix("Content-Length:")
             .or_else(|| line.strip_prefix("content-length:"))
         {
             content_length = Some(len_str.trim().parse().context("Invalid Content-Length")?);
+        } else if line.starts_with('{') {
+            // Claude Code speaks newline-delimited JSON-RPC (no Content-Length).
+            if !dispatch_raw(&line, browser, Framing::Ndjson)? {
+                return Ok(());
+            }
         }
     }
 }
 
-fn handle_request(request: &McpRequest, browser: &Mutex<BrowserContext>) -> Result<HandleResult> {
+/// Returns `false` when the server should shut down.
+fn dispatch_raw(body: &str, browser: &SharedBrowser, framing: Framing) -> Result<bool> {
+    let request: McpRequest = match serde_json::from_str(body) {
+        Ok(req) => req,
+        Err(e) => {
+            write_response(
+                &err_response(None, -32700, format!("Parse error: {e}")),
+                framing,
+            )?;
+            return Ok(true);
+        }
+    };
+
+    match handle_request(&request, browser)? {
+        HandleResult::Respond(resp) => write_response(&resp, framing)?,
+        HandleResult::Shutdown => return Ok(false),
+        HandleResult::NoResponse => {}
+    }
+    Ok(true)
+}
+
+fn handle_request(request: &McpRequest, browser: &SharedBrowser) -> Result<HandleResult> {
     let id = request.id.clone();
 
     let response = match request.method.as_str() {
-        "initialize" => McpResponse {
-            id,
-            result: Some(json!({
-                "protocolVersion": "0.1.0",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "agent-doctor-browser",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            })),
-            error: None,
-        },
+        "initialize" => {
+            let protocol = request
+                .params
+                .as_ref()
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str)
+                .unwrap_or("2024-11-05");
+            ok_response(
+                id,
+                json!({
+                    "protocolVersion": protocol,
+                    "capabilities": { "tools": {} },
+                    "serverInfo": {
+                        "name": "agent-doctor-browser",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }),
+            )
+        }
         // Notifications have no 'id' — we just ignore them
         "notifications/initialized" | "initialized" => {
             return Ok(HandleResult::NoResponse);
         }
         "tools/list" => {
             let tools = tool_definitions();
-            McpResponse {
-                id,
-                result: Some(json!({ "tools": tools })),
-                error: None,
-            }
+            ok_response(id, json!({ "tools": tools }))
         }
         "tools/call" => {
             let tool_name = request
@@ -347,57 +404,35 @@ fn handle_request(request: &McpRequest, browser: &Mutex<BrowserContext>) -> Resu
             match execute_tool(tool_name, &args, browser) {
                 Ok(result) => {
                     let text = serde_json::to_string_pretty(&result)?;
-                    McpResponse {
+                    ok_response(
                         id,
-                        result: Some(json!({
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": text,
-                                }
-                            ],
+                        json!({
+                            "content": [{ "type": "text", "text": text }],
                             "isError": false,
-                        })),
-                        error: None,
-                    }
+                        }),
+                    )
                 }
-                Err(e) => McpResponse {
+                Err(e) => ok_response(
                     id,
-                    result: Some(json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": format!("{e:#}"),
-                            }
-                        ],
+                    json!({
+                        "content": [{ "type": "text", "text": format!("{e:#}") }],
                         "isError": true,
-                    })),
-                    error: None,
-                },
+                    }),
+                ),
             }
         }
-        "shutdown" => {
+        "shutdown" | "exit" => {
             return Ok(HandleResult::Shutdown);
         }
-        "exit" => {
-            return Ok(HandleResult::Shutdown);
-        }
-        _ => McpResponse {
-            id,
-            result: None,
-            error: Some(McpError {
-                code: -32601,
-                message: format!("Method not found: {}", request.method),
-                data: None,
-            }),
-        },
+        _ => err_response(id, -32601, format!("Method not found: {}", request.method)),
     };
 
     Ok(HandleResult::Respond(response))
 }
 
-fn execute_tool(name: &str, args: &Value, browser: &Mutex<BrowserContext>) -> Result<Value> {
-    let mut ctx = browser.lock().unwrap();
+fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Value> {
+    let mut session = browser.lock().unwrap();
+    let ctx = session.ensure()?;
 
     match name {
         "browser_navigate" => {
@@ -492,11 +527,20 @@ fn execute_tool(name: &str, args: &Value, browser: &Mutex<BrowserContext>) -> Re
     }
 }
 
-fn write_response(response: &McpResponse) -> Result<()> {
+fn write_response(response: &McpResponse, framing: Framing) -> Result<()> {
     let body = serde_json::to_string(response)?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    write!(out, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+    match framing {
+        Framing::ContentLength => {
+            write!(out, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+        }
+        Framing::Ndjson => {
+            // Claude Code expects one JSON-RPC object per line.
+            writeln!(out, "{body}")?;
+        }
+    }
     out.flush()?;
+    debug_log(format!("wrote ({framing:?}): {body}"));
     Ok(())
 }
