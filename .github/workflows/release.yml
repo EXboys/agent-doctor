@@ -223,7 +223,11 @@ jobs:
           fi
           rm -f certificate.p12
 
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          # With -A on import, codesign can use the key even if partition-list fails
+          # (common flake on GitHub macos runners with custom KEYCHAIN_PASSWORD).
+          if ! security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain; then
+            echo "::warning::set-key-partition-list failed; continuing because import used -A"
+          fi
           security find-identity -v -p codesigning build.keychain | sed 's/"[^"]*"/"[redacted]"/g' || true
 
           SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
