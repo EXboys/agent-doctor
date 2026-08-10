@@ -270,6 +270,10 @@ jobs:
           ls -la "$APP_DIR"
           test -d "$APP_DIR/Agent Doctor.app/Contents"
           ls -la "$APP_DIR/Agent Doctor.app/Contents/"
+          # Bundled CLI must ship with the app (MCP configure on clean machines).
+          test -x "$APP_DIR/Agent Doctor.app/Contents/Resources/agent-doctor-cli" \
+            || test -x "$APP_DIR/Agent Doctor.app/Contents/MacOS/agent-doctor-cli"
+          ls -la "$APP_DIR/Agent Doctor.app/Contents/Resources/" || true
 
       # API Key (.p8) or Apple ID + app-specific password + Team ID.
       # Failure does not fail the job (signed-only .app / DMG may still ship).

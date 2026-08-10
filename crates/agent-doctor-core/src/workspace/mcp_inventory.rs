@@ -246,8 +246,24 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("agent-doctor"));
+            // Same folder as the desktop binary (Contents/MacOS on macOS).
             candidates.push(dir.join("agent-doctor-cli"));
+            candidates.push(dir.join("agent-doctor"));
+            #[cfg(windows)]
+            {
+                candidates.push(dir.join("agent-doctor-cli.exe"));
+                candidates.push(dir.join("agent-doctor.exe"));
+            }
+            // Tauri bundle.resources → Contents/Resources/ (macOS) or resources/ beside exe.
+            candidates.push(dir.join("../Resources/agent-doctor-cli"));
+            candidates.push(dir.join("../Resources/agent-doctor"));
+            candidates.push(dir.join("resources/agent-doctor-cli"));
+            candidates.push(dir.join("resources/agent-doctor"));
+            #[cfg(windows)]
+            {
+                candidates.push(dir.join("../Resources/agent-doctor-cli.exe"));
+                candidates.push(dir.join("resources/agent-doctor-cli.exe"));
+            }
         }
     }
 
@@ -273,6 +289,24 @@ fn is_real_agent_doctor_cli(path: &Path) -> bool {
             let text = String::from_utf8_lossy(&bytes);
             if text.contains("hermes") {
                 return false;
+            }
+        }
+    }
+
+    // Prefer a cheap --version probe (works even when Chrome discovery fails in
+    // GUI / sandboxed environments). Fall back to mcp status for older builds.
+    if let Ok(output) = std::process::Command::new(path)
+        .args(["--version"])
+        .output()
+    {
+        if output.status.success() {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if text.to_ascii_lowercase().contains("agent-doctor") {
+                return true;
             }
         }
     }

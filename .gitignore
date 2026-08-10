@@ -15,6 +15,9 @@ node_modules/
 .tauri/
 dist/
 desktop/.vite/
+# Built into the app at package time; do not commit platform binaries.
+desktop/src-tauri/resources/agent-doctor-cli
+desktop/src-tauri/resources/agent-doctor-cli.exe
 
 # OS
 .DS_Store
