@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result as AnyhowResult};
 use serde_json::{json, Map, Value as JsonValue};
 use serde_yaml::{Mapping, Value as YamlValue};
-use toml::Value as TomlValue;
 
 use crate::adapters::util::home_join;
 use crate::adapters::HermesAdapter;
@@ -769,58 +768,46 @@ fn write_codex_provider_config(
 ) -> AnyhowResult<()> {
     ensure_parent(path)?;
 
-    let mut root: TomlValue = if path.exists() {
+    let mut doc = if path.exists() {
         let raw = fs::read_to_string(path)?;
-        toml::from_str(&raw).unwrap_or(TomlValue::Table(toml::map::Map::new()))
+        raw.parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
     } else {
-        TomlValue::Table(toml::map::Map::new())
+        toml_edit::DocumentMut::new()
     };
 
-    let table = root
-        .as_table_mut()
-        .context("Codex config root must be a table")?;
+    doc["model"] = toml_edit::value(model_id);
+    doc["model_provider"] = toml_edit::value(slot);
 
-    table.insert("model".to_string(), TomlValue::String(model_id.to_string()));
-    table.insert(
-        "model_provider".to_string(),
-        TomlValue::String(slot.to_string()),
-    );
-
-    let mut entry = toml::map::Map::new();
     let display = if slot == CODEX_TEAM_SLOT {
         "Company Gateway"
     } else {
         "Personal Provider"
     };
-    entry.insert("name".to_string(), TomlValue::String(display.to_string()));
-    entry.insert(
-        "base_url".to_string(),
-        TomlValue::String(gateway_url.to_string()),
-    );
-    entry.insert(
-        "env_key".to_string(),
-        TomlValue::String(codex_slot_env_key(slot).to_string()),
-    );
-    entry.insert(
-        "requires_openai_auth".to_string(),
-        TomlValue::Boolean(false),
-    );
-    // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
-    entry.insert(
-        "wire_api".to_string(),
-        TomlValue::String("responses".to_string()),
-    );
-    entry.insert("supports_websockets".to_string(), TomlValue::Boolean(false));
 
-    let providers = table
-        .entry("model_providers".to_string())
-        .or_insert_with(|| TomlValue::Table(toml::map::Map::new()));
+    let providers =
+        doc["model_providers"].or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
     let providers_table = providers
         .as_table_mut()
         .context("Codex model_providers must be a table")?;
-    providers_table.insert(slot.to_string(), TomlValue::Table(entry));
+    providers_table.set_implicit(true);
 
-    fs::write(path, toml::to_string_pretty(&root)?)?;
+    let entry = providers_table
+        .entry(slot)
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+    let entry_table = entry
+        .as_table_mut()
+        .with_context(|| format!("model_providers.{slot} must be a table"))?;
+
+    entry_table["name"] = toml_edit::value(display);
+    entry_table["base_url"] = toml_edit::value(gateway_url);
+    entry_table["env_key"] = toml_edit::value(codex_slot_env_key(slot));
+    entry_table["requires_openai_auth"] = toml_edit::value(false);
+    // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
+    entry_table["wire_api"] = toml_edit::value("responses");
+    entry_table["supports_websockets"] = toml_edit::value(false);
+
+    fs::write(path, doc.to_string())?;
     Ok(())
 }
 
@@ -836,6 +823,7 @@ fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
 #[cfg(test)]
 mod codex_responses_tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn deepseek_official_is_chat_only_for_codex() {
@@ -848,6 +836,41 @@ mod codex_responses_tests {
         assert!(codex_host_supports_responses_api(
             "https://api.openai.com/v1"
         ));
+    }
+
+    #[test]
+    fn write_codex_provider_preserves_comments() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"# top comment
+model = "keep-me-later"
+
+# unrelated section
+[features]
+# feature comment
+rich_ui = true
+"#,
+        )
+        .unwrap();
+
+        write_codex_provider_config(
+            &path,
+            "https://example.com/v1",
+            "gpt-test",
+            CODEX_PERSONAL_SLOT,
+        )
+        .unwrap();
+
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("# top comment"));
+        assert!(rendered.contains("# feature comment"));
+        assert!(rendered.contains("rich_ui = true"));
+        assert!(rendered.contains("model = \"gpt-test\""));
+        assert!(rendered.contains("model_provider = \"personal\""));
+        assert!(rendered.contains("[model_providers.personal]"));
+        assert!(rendered.contains("base_url = \"https://example.com/v1\""));
     }
 }
 

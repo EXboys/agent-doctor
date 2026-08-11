@@ -52,9 +52,14 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
     let mut servers = Vec::new();
 
     if let Some((_, entry)) = active.as_ref() {
-        // Legacy / shared project JSON (Cursor-style). Codex itself reads config.toml.
+        // Project `.mcp.json` is Claude Code project-scope MCP (workspace isolation).
+        // Cursor may share the same file; Agent Doctor treats it as claude-code.
         let project_mcp = entry.path.join(".mcp.json");
-        servers.extend(read_servers_from_json(&project_mcp, "project", "shared"));
+        servers.extend(read_servers_from_json(
+            &project_mcp,
+            "project",
+            "claude-code",
+        ));
 
         // Codex: workspace CODEX_HOME/config.toml → [mcp_servers.*]
         let codex_config = entry.codex_home.join("config.toml");
@@ -401,7 +406,7 @@ fn is_real_agent_doctor_cli(path: &Path) -> bool {
 pub fn browser_configured_runtimes(report: &McpInventoryReport) -> Vec<String> {
     let mut map = BTreeMap::new();
     for item in report.servers.iter().filter(|s| s.is_browser) {
-        // Ignore Cursor-style project .mcp.json; Codex/Claude use their own configs.
+        // Ignore leftover mistaken paths / unknown shared scopes.
         if item.runtime_hint == "shared" {
             continue;
         }
@@ -465,16 +470,49 @@ mod tests {
             let broken = report
                 .servers
                 .iter()
-                .find(|s| s.name == "broken" && s.runtime_hint == "shared")
+                .find(|s| s.name == "broken" && s.scope == "project")
                 .unwrap();
             assert!(!broken.healthy);
+            assert_eq!(broken.runtime_hint, "claude-code");
             let browser = report
                 .servers
                 .iter()
-                .find(|s| s.name == "browser" && s.runtime_hint == "shared")
+                .find(|s| s.name == "browser" && s.runtime_hint == "claude-code")
                 .unwrap();
             assert!(browser.is_browser);
             assert!(report.browser_configured);
+            assert!(browser_configured_runtimes(&report).contains(&"claude-code".to_string()));
+        });
+    }
+
+    #[test]
+    fn inventories_global_codex_without_active_workspace() {
+        with_temp_home(|home| {
+            let codex = home.join(".codex");
+            fs::create_dir_all(&codex).unwrap();
+            fs::write(
+                codex.join("config.toml"),
+                r#"
+# keep me
+[mcp_servers.browser]
+command = "agent-doctor"
+args = ["mcp", "browser"]
+"#,
+            )
+            .unwrap();
+
+            let doc = WorkspacesDocument {
+                active: None,
+                workspaces: BTreeMap::new(),
+            };
+            let report = list_mcp_inventory_with_doc(&doc);
+            let browser = report
+                .servers
+                .iter()
+                .find(|s| s.runtime_hint == "codex" && s.name == "browser")
+                .expect("global codex browser");
+            assert!(browser.is_browser);
+            assert!(browser_configured_runtimes(&report).contains(&"codex".to_string()));
         });
     }
 
