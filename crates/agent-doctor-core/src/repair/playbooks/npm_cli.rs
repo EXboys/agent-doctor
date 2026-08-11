@@ -170,9 +170,7 @@ fn rewire_gateway_from_active_mode() -> Result<()> {
             }
             Ok(())
         }
-        _ => bail!(
-            "no active Personal/Team mode — configure a provider first, then switch mode"
-        ),
+        _ => bail!("no active Personal/Team mode — configure a provider first, then switch mode"),
     }
 }
 
@@ -236,9 +234,7 @@ mod tests {
             ),
         ]);
         let items = suggest_codex_repairs(&probe);
-        assert!(items
-            .iter()
-            .any(|i| i.id == "fix-codex-gateway-from-mode"));
+        assert!(items.iter().any(|i| i.id == "fix-codex-gateway-from-mode"));
         assert!(items.iter().any(|i| i.id == "fix-codex-browser-mcp"));
     }
 }

@@ -107,10 +107,7 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
 }
 
 /// Attach Browser MCP probe checks for Claude Code / Codex.
-pub fn probe_browser_mcp_for_runtime(
-    runtime_id: &str,
-    checks: &mut Vec<crate::probe::ProbeCheck>,
-) {
+pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::probe::ProbeCheck>) {
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
 

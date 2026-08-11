@@ -76,9 +76,7 @@ pub(crate) fn probe_mode_drift(
                 SensitivityLevel::ConfigShape,
             ));
         }
-    } else if !expected_url.is_empty()
-        && (runtime_id == "claude-code" || runtime_id == "codex")
-    {
+    } else if !expected_url.is_empty() && (runtime_id == "claude-code" || runtime_id == "codex") {
         checks.push(ProbeCheck::new(
             "mode.overlay_mismatch",
             "Mode overlay vs live gateway",
