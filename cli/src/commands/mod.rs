@@ -3,6 +3,7 @@ pub mod connect;
 pub mod doctor;
 pub mod install;
 pub mod mcp;
+pub mod mode;
 pub mod open_session;
 pub mod policy;
 pub mod preferred_runtime;

@@ -425,7 +425,34 @@ type ModeSwitchReport = {
     effector_ok?: boolean | null;
     probe_ok?: boolean | null;
   }>;
+  browser_mcp?: {
+    results: Array<{
+      runtime: string;
+      ok: boolean;
+      config_path?: string | null;
+      message: string;
+    }>;
+  } | null;
 };
+
+const modeWithBrowserMcpEl = document.querySelector<HTMLInputElement>("#mode-with-browser-mcp")!;
+
+function wantsBrowserMcp(): boolean {
+  return Boolean(modeWithBrowserMcpEl?.checked);
+}
+
+function formatBrowserMcpHint(report: ModeSwitchReport): string | null {
+  const results = report.browser_mcp?.results;
+  if (!results?.length) {
+    return null;
+  }
+  const ok = results.filter((item) => item.ok).length;
+  const fail = results.find((item) => !item.ok);
+  if (fail) {
+    return t("mode.browserMcpFail", { detail: fail.message });
+  }
+  return t("mode.browserMcpOk", { ok: String(ok), total: String(results.length) });
+}
 
 function formatModeSwitchHint(report: ModeSwitchReport): string {
   const parts: string[] = [];
@@ -445,6 +472,10 @@ function formatModeSwitchHint(report: ModeSwitchReport): string {
   }
   if (report.warnings?.length) {
     parts.push(t("mode.warnings", { count: String(report.warnings.length) }));
+  }
+  const mcpHint = formatBrowserMcpHint(report);
+  if (mcpHint) {
+    parts.push(mcpHint);
   }
   return parts.join(" · ");
 }
@@ -792,25 +823,29 @@ function setModeSwitchBusy(busy: boolean) {
 
 async function enablePersonalMode() {
   if (modeSwitchInFlight) return;
-  if (lastModeStatus?.mode === "personal") {
-    syncProviderPanelToMode("personal");
-    showModeHint(t("mode.alreadyPersonal"));
-    return;
-  }
   if (!lastModeStatus?.personal_ready) {
     showModeHint(t("mode.personalNotReady"));
     syncProviderPanelToMode("personal");
+    setMainTab("provider");
     return;
   }
+  const wasAlready = lastModeStatus.mode === "personal";
   setModeSwitchBusy(true);
   showModeHint(t("mode.switching"));
   try {
     const report = await invoke<ModeSwitchReport>("switch_to_personal_mode_command", {
       providerId: lastModeStatus.personal_active_id,
+      withBrowserMcp: wantsBrowserMcp(),
     });
     await loadModeStatus();
     await loadPersonalProviderStatus();
-    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }), formatModeSwitchDetail(report));
+    const hint = formatModeSwitchHint(report);
+    showModeHint(
+      t("mode.switchOk", {
+        message: wasAlready ? `${t("mode.alreadyPersonal")} · ${hint}` : hint,
+      }),
+      formatModeSwitchDetail(report),
+    );
     // Doctor rescan is secondary — don't block the switch UI on it.
     void refresh();
   } catch (error) {
@@ -823,27 +858,74 @@ async function enablePersonalMode() {
 
 async function enableTeamMode() {
   if (modeSwitchInFlight) return;
-  if (lastModeStatus?.mode === "team") {
-    syncProviderPanelToMode("team");
-    showModeHint(t("mode.alreadyTeam"));
-    return;
-  }
   if (!lastModeStatus?.team_ready) {
     showModeHint(t("mode.teamNotReady"));
     syncProviderPanelToMode("team");
+    setMainTab("provider");
     return;
   }
+  const wasAlready = lastModeStatus.mode === "team";
   setModeSwitchBusy(true);
   showModeHint(t("mode.switching"));
   try {
-    const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command");
+    const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command", {
+      withBrowserMcp: wantsBrowserMcp(),
+    });
     await loadModeStatus();
     await loadEvotownStatus();
-    showModeHint(t("mode.switchOk", { message: formatModeSwitchHint(report) }), formatModeSwitchDetail(report));
+    const hint = formatModeSwitchHint(report);
+    showModeHint(
+      t("mode.switchOk", {
+        message: wasAlready ? `${t("mode.alreadyTeam")} · ${hint}` : hint,
+      }),
+      formatModeSwitchDetail(report),
+    );
     void refresh();
   } catch (error) {
     showModeHint(t("mode.switchFailed", { error: String(error) }));
     await loadModeStatus();
+  } finally {
+    setModeSwitchBusy(false);
+  }
+}
+
+async function rewireCurrentMode(hintEl?: HTMLElement | null) {
+  if (modeSwitchInFlight) return;
+  const mode = lastModeStatus?.mode;
+  if (mode !== "personal" && mode !== "team") {
+    setMainTab("provider");
+    showModeHint(t("mode.pickSide"));
+    if (hintEl) {
+      hintEl.hidden = false;
+      hintEl.textContent = t("runtime.installWireNext");
+    }
+    return;
+  }
+  setModeSwitchBusy(true);
+  if (hintEl) {
+    hintEl.hidden = false;
+    hintEl.textContent = t("mode.switching");
+  }
+  try {
+    const report = await invoke<ModeSwitchReport>("rewire_current_mode_command", {
+      withBrowserMcp: wantsBrowserMcp(),
+    });
+    await loadModeStatus();
+    const message = t("mode.switchOk", {
+      message: `${t("mode.rewireOk")} · ${formatModeSwitchHint(report)}`,
+    });
+    showModeHint(message, formatModeSwitchDetail(report));
+    if (hintEl) {
+      hintEl.textContent = message;
+    }
+    void refresh();
+  } catch (error) {
+    const message = t("mode.rewireFailed", { error: String(error) });
+    showModeHint(message);
+    if (hintEl) {
+      hintEl.hidden = false;
+      hintEl.textContent = message;
+    }
   } finally {
     setModeSwitchBusy(false);
   }
@@ -1504,6 +1586,11 @@ function renderRuntimeCardActions(
   if (canOpenSession(runtime.id)) {
     parts.push(
       `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`,
+    );
+  }
+  if (runtime.id === "claude-code" || runtime.id === "codex") {
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>`,
     );
   }
   const diagnoseClass = runtimeHasProblems(runtime.id) ? "btn-secondary" : "btn-ghost";
@@ -3810,6 +3897,17 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "install-runtime" && runtimeCard) {
     void installRuntimeFromCard(runtimeCard);
+    return;
+  }
+
+  if (action === "go-provider") {
+    setMainTab("provider");
+    return;
+  }
+
+  if (action === "wire-runtime" && runtimeCard) {
+    const hint = runtimeCard.querySelector<HTMLElement>("[data-repair-hint]");
+    void rewireCurrentMode(hint);
     return;
   }
 

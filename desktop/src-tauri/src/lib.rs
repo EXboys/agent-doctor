@@ -26,8 +26,8 @@ use agent_doctor_core::{
 };
 use agent_doctor_mcp::{
     browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
-    resolve_profile_directory, resolve_user_data_dir, BrowserMcpStatus, McpConfigureOptions,
-    DEFAULT_BROWSER_MCP_PORT,
+    resolve_profile_directory, resolve_user_data_dir, wire_browser_mcp, BrowserMcpStatus,
+    BrowserMcpWireReport, McpConfigureOptions, WireBrowserMcpOptions, DEFAULT_BROWSER_MCP_PORT,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -698,13 +698,46 @@ fn get_mode_status_command() -> ModeStatus {
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ModeSwitchDesktopReport {
+    #[serde(flatten)]
+    switch: ModeSwitchReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    browser_mcp: Option<BrowserMcpWireReport>,
+}
+
+fn wire_browser_mcp_for_desktop() -> Result<BrowserMcpWireReport, String> {
+    let discovery = discover_chrome().map_err(|error| error.to_string())?;
+    let binary = resolve_agent_doctor_binary().map_err(|error| error.to_string())?;
+    let workspaces = load_workspaces().unwrap_or_default();
+    let active_entry = workspaces
+        .active
+        .as_ref()
+        .and_then(|name| workspaces.workspaces.get(name));
+    let mut options = WireBrowserMcpOptions::with_binary(binary);
+    options.project_path = active_entry.map(|entry| entry.path.clone());
+    options.codex_home = active_entry.map(|entry| entry.codex_home.clone());
+    Ok(wire_browser_mcp(&discovery, &options))
+}
+
 #[tauri::command]
 async fn switch_to_personal_mode_command(
     app: tauri::AppHandle,
     provider_id: Option<String>,
-) -> Result<ModeSwitchReport, String> {
+    with_browser_mcp: Option<bool>,
+) -> Result<ModeSwitchDesktopReport, String> {
     let report = tauri::async_runtime::spawn_blocking(move || {
-        switch_to_personal_mode(provider_id.as_deref()).map_err(|error| error.to_string())
+        let switch =
+            switch_to_personal_mode(provider_id.as_deref()).map_err(|error| error.to_string())?;
+        let browser_mcp = if with_browser_mcp.unwrap_or(false) {
+            Some(wire_browser_mcp_for_desktop()?)
+        } else {
+            None
+        };
+        Ok::<_, String>(ModeSwitchDesktopReport {
+            switch,
+            browser_mcp,
+        })
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -713,14 +746,49 @@ async fn switch_to_personal_mode_command(
 }
 
 #[tauri::command]
-async fn switch_to_team_mode_command(app: tauri::AppHandle) -> Result<ModeSwitchReport, String> {
-    let report = tauri::async_runtime::spawn_blocking(|| {
-        switch_to_team_mode().map_err(|error| error.to_string())
+async fn switch_to_team_mode_command(
+    app: tauri::AppHandle,
+    with_browser_mcp: Option<bool>,
+) -> Result<ModeSwitchDesktopReport, String> {
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let switch = switch_to_team_mode().map_err(|error| error.to_string())?;
+        let browser_mcp = if with_browser_mcp.unwrap_or(false) {
+            Some(wire_browser_mcp_for_desktop()?)
+        } else {
+            None
+        };
+        Ok::<_, String>(ModeSwitchDesktopReport {
+            switch,
+            browser_mcp,
+        })
     })
     .await
     .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
     Ok(report)
+}
+
+#[tauri::command]
+fn wire_browser_mcp_command() -> Result<BrowserMcpWireReport, String> {
+    wire_browser_mcp_for_desktop()
+}
+
+#[tauri::command]
+async fn rewire_current_mode_command(
+    app: tauri::AppHandle,
+    with_browser_mcp: Option<bool>,
+) -> Result<ModeSwitchDesktopReport, String> {
+    let status = load_mode_status().map_err(|error| error.to_string())?;
+    match status.mode.as_str() {
+        "personal" => {
+            switch_to_personal_mode_command(app, status.personal_active_id, with_browser_mcp).await
+        }
+        "team" => switch_to_team_mode_command(app, with_browser_mcp).await,
+        _ => Err(
+            "No active mode yet. Configure a Personal Provider or connect Evotown, then switch mode."
+                .into(),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -1167,6 +1235,8 @@ pub fn run() {
             get_mode_status_command,
             switch_to_personal_mode_command,
             switch_to_team_mode_command,
+            wire_browser_mcp_command,
+            rewire_current_mode_command,
             run_doctor_command,
             list_profiles_command,
             list_workspaces_command,
