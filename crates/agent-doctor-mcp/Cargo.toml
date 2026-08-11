@@ -11,4 +11,8 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.8"
+toml_edit.workspace = true
 tungstenite = { workspace = true, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile = "3"

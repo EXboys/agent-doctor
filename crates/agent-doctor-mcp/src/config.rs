@@ -93,17 +93,19 @@ fn resolve_codex_home(explicit: Option<&Path>) -> Result<PathBuf> {
 
 /// Find the MCP servers config path for a given runtime.
 ///
-/// - Claude Code: `~/.claude/settings.json` (`mcpServers` JSON)
+/// - Claude Code with `project_path`: `<project>/.mcp.json` (workspace isolation)
+/// - Claude Code without project: `~/.claude.json` (user-scope MCP)
 /// - Codex: `$CODEX_HOME/config.toml` (`[mcp_servers.*]` TOML) — **not** project `.mcp.json`
 pub fn mcp_servers_path(
     runtime: &str,
     project_path: Option<&Path>,
     codex_home: Option<&Path>,
 ) -> Result<PathBuf> {
-    let _ = project_path;
     match runtime {
-        // Claude Code reads user-scope MCP from ~/.claude.json (NOT settings.json).
         "claude-code" | "claude" => {
+            if let Some(project) = project_path {
+                return Ok(project.join(".mcp.json"));
+            }
             let path = home_dir()
                 .context("Cannot find home directory")?
                 .join(".claude.json");
@@ -210,36 +212,39 @@ fn write_mcp_servers_toml(
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
 
-    let mut doc: TomlValue = if config_path.exists() {
+    let mut doc = if config_path.exists() {
         let content = fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        toml::from_str(&content)
+        content
+            .parse::<toml_edit::DocumentMut>()
             .with_context(|| format!("Failed to parse {}", config_path.display()))?
     } else {
-        TomlValue::Table(toml::map::Map::new())
+        toml_edit::DocumentMut::new()
     };
 
-    let root = doc
-        .as_table_mut()
-        .context("Codex config.toml root must be a table")?;
-    let servers = root
-        .entry("mcp_servers".to_string())
-        .or_insert_with(|| TomlValue::Table(toml::map::Map::new()))
+    let servers = doc["mcp_servers"].or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+    let servers_table = servers
         .as_table_mut()
         .context("mcp_servers must be a table")?;
+    servers_table.set_implicit(true);
 
-    let mut entry = toml::map::Map::new();
-    entry.insert("command".into(), TomlValue::String(command.to_string()));
-    entry.insert(
-        "args".into(),
-        TomlValue::Array(args.iter().cloned().map(TomlValue::String).collect()),
-    );
+    let entry = servers_table
+        .entry(name)
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+    let entry_table = entry
+        .as_table_mut()
+        .with_context(|| format!("mcp_servers.{name} must be a table"))?;
+
+    entry_table["command"] = toml_edit::value(command);
+    let mut args_array = toml_edit::Array::new();
+    for arg in args {
+        args_array.push(arg.as_str());
+    }
+    entry_table["args"] = toml_edit::value(args_array);
     // Browser MCP may launch Chrome; give Codex more than the default 10s.
-    entry.insert("startup_timeout_sec".into(), TomlValue::Float(60.0));
-    servers.insert(name.to_string(), TomlValue::Table(entry));
+    entry_table["startup_timeout_sec"] = toml_edit::value(60.0);
 
-    let rendered = toml::to_string_pretty(&doc).context("serialize Codex config.toml")?;
-    fs::write(config_path, rendered)
+    fs::write(config_path, doc.to_string())
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
     Ok(())
 }
@@ -293,4 +298,55 @@ pub fn generate_config_snippet(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn claude_with_project_uses_mcp_json() {
+        let project = PathBuf::from("/tmp/ws-demo");
+        let path = mcp_servers_path("claude-code", Some(&project), None).unwrap();
+        assert_eq!(path, project.join(".mcp.json"));
+    }
+
+    #[test]
+    fn claude_without_project_uses_global_claude_json() {
+        let path = mcp_servers_path("claude-code", None, None).unwrap();
+        assert!(path.ends_with(".claude.json"));
+    }
+
+    #[test]
+    fn codex_toml_write_preserves_comments() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"# keep this comment
+model = "old"
+
+[features]
+# feature note
+foo = true
+"#,
+        )
+        .unwrap();
+
+        write_mcp_servers_toml(
+            &path,
+            "browser",
+            "/bin/agent-doctor",
+            &["mcp".into(), "browser".into()],
+        )
+        .unwrap();
+
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("# keep this comment"));
+        assert!(rendered.contains("# feature note"));
+        assert!(rendered.contains("foo = true"));
+        assert!(rendered.contains("[mcp_servers.browser]"));
+        assert!(rendered.contains("command = \"/bin/agent-doctor\""));
+    }
 }
