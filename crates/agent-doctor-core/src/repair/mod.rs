@@ -29,9 +29,10 @@ pub use planner::{
     PlannerOptions, PlannerResult, RepairPlanner,
 };
 pub use playbooks::{
-    apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
-    apply_openclaw_playbook_filtered, suggest_hermes_repairs, suggest_openclaw_repairs,
-    PlaybookApplyResult,
+    apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
+    apply_codex_playbook_filtered, apply_hermes_playbook, apply_hermes_playbook_filtered,
+    apply_openclaw_playbook, apply_openclaw_playbook_filtered, suggest_claude_code_repairs,
+    suggest_codex_repairs, suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult,
 };
 pub use repair_loop::{execute_repair_loop, RepairLoopOptions, RepairLoopReport, RepairLoopRound};
 pub use restore::{

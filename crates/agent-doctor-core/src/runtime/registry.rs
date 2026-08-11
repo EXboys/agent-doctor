@@ -15,9 +15,11 @@ use crate::probe::runtimes::{
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
-    apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
-    apply_openclaw_playbook_filtered, suggest_hermes_repairs, suggest_openclaw_repairs,
-    PlaybookApplyResult, SuggestedRepair,
+    apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
+    apply_codex_playbook_filtered, apply_hermes_playbook, apply_hermes_playbook_filtered,
+    apply_openclaw_playbook, apply_openclaw_playbook_filtered, suggest_claude_code_repairs,
+    suggest_codex_repairs, suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult,
+    SuggestedRepair,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,8 +184,8 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: claude_code_adapter,
         schema_probe: Some(schema_claude_code),
         deep_probe: None,
-        suggest_repairs: None,
-        apply_playbook: None,
+        suggest_repairs: Some(suggest_claude_code_repairs),
+        apply_playbook: Some(apply_claude_code_playbook),
         run_lifecycle: Some(run_claude_code_lifecycle_action),
     },
     RuntimeDescriptor {
@@ -196,8 +198,8 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: codex_adapter,
         schema_probe: Some(schema_codex),
         deep_probe: None,
-        suggest_repairs: None,
-        apply_playbook: None,
+        suggest_repairs: Some(suggest_codex_repairs),
+        apply_playbook: Some(apply_codex_playbook),
         run_lifecycle: Some(run_codex_lifecycle_action),
     },
 ];
@@ -281,6 +283,12 @@ pub fn apply_runtime_playbook_filtered(
     if runtime_id == "hermes" {
         return apply_hermes_playbook_filtered(probe, only_ids);
     }
+    if runtime_id == "claude-code" {
+        return apply_claude_code_playbook_filtered(probe, only_ids);
+    }
+    if runtime_id == "codex" {
+        return apply_codex_playbook_filtered(probe, only_ids);
+    }
     let apply = descriptor_by_id(runtime_id)
         .and_then(|entry| entry.apply_playbook)
         .with_context(|| format!("runtime '{runtime_id}' has no repair playbook"))?;
@@ -348,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_and_codex_wire_lifecycle() {
+    fn claude_and_codex_wire_lifecycle_and_playbook() {
         assert!(descriptor_by_id("claude-code")
             .expect("claude-code")
             .run_lifecycle
@@ -359,6 +367,16 @@ mod tests {
             .is_some());
         assert!(runtime_supports_lifecycle("claude-code"));
         assert!(runtime_supports_lifecycle("codex"));
+        assert!(runtime_supports_playbook("claude-code"));
+        assert!(runtime_supports_playbook("codex"));
+        assert!(descriptor_by_id("claude-code")
+            .expect("claude-code")
+            .suggest_repairs
+            .is_some());
+        assert!(descriptor_by_id("codex")
+            .expect("codex")
+            .apply_playbook
+            .is_some());
     }
 
     #[test]
