@@ -825,7 +825,7 @@ async function enablePersonalMode() {
   if (modeSwitchInFlight) return;
   if (!lastModeStatus?.personal_ready) {
     showModeHint(t("mode.personalNotReady"));
-    syncProviderViewToMode("personal");
+    syncProviderPanelToMode("personal");
     setMainTab("provider");
     return;
   }
@@ -860,7 +860,7 @@ async function enableTeamMode() {
   if (modeSwitchInFlight) return;
   if (!lastModeStatus?.team_ready) {
     showModeHint(t("mode.teamNotReady"));
-    syncProviderViewToMode("team");
+    syncProviderPanelToMode("team");
     setMainTab("provider");
     return;
   }

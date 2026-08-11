@@ -15,7 +15,11 @@ pub fn show(json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn switch_personal(provider_id: Option<&str>, with_browser_mcp: bool, json: bool) -> Result<()> {
+pub fn switch_personal(
+    provider_id: Option<&str>,
+    with_browser_mcp: bool,
+    json: bool,
+) -> Result<()> {
     let report = switch_to_personal_mode(provider_id)?;
     finish_switch(report, with_browser_mcp, json)
 }
@@ -47,7 +51,9 @@ fn finish_switch(report: ModeSwitchReport, with_browser_mcp: bool, json: bool) -
     if let Some(mcp) = browser_mcp {
         print_browser_mcp_report(&mcp);
     } else {
-        println!("\nOptional: re-run with --with-browser-mcp to write Browser MCP into Codex/Claude.");
+        println!(
+            "\nOptional: re-run with --with-browser-mcp to write Browser MCP into Codex/Claude."
+        );
     }
     Ok(())
 }
