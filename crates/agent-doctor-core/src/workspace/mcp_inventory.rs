@@ -59,6 +59,10 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         // Codex: workspace CODEX_HOME/config.toml → [mcp_servers.*]
         let codex_config = entry.codex_home.join("config.toml");
         servers.extend(read_servers_from_toml(&codex_config, "codex-home", "codex"));
+    } else {
+        // No active workspace — still inventory global Codex MCP so probes/UI see it.
+        let codex_config = home_join(".codex/config.toml");
+        servers.extend(read_servers_from_toml(&codex_config, "codex-home", "codex"));
     }
 
     // Claude Code user-scope MCP lives in ~/.claude.json (settings.json is ignored for MCP).
@@ -99,6 +103,75 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         healthy,
         issues,
         browser_configured,
+    }
+}
+
+/// Attach Browser MCP probe checks for Claude Code / Codex.
+pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::probe::ProbeCheck>) {
+    use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
+    use crate::repair::SensitivityLevel;
+
+    if runtime_id != "claude-code" && runtime_id != "codex" {
+        return;
+    }
+
+    let inventory = list_mcp_inventory_with_doc(&load_workspaces().unwrap_or_default());
+    let browser = inventory
+        .servers
+        .iter()
+        .find(|item| item.is_browser && item.runtime_hint == runtime_id);
+
+    match browser {
+        None => {
+            checks.push(ProbeCheck::new(
+                "mcp.browser.configured",
+                "Browser MCP configured",
+                ProbeStatus::Warn,
+                ProbeSeverity::Warning,
+                format!(
+                    "no browser MCP entry for {runtime_id}; write via repair or `agent-doctor mcp configure {runtime_id}`"
+                ),
+                SensitivityLevel::ConfigShape,
+            ));
+        }
+        Some(item) if !item.healthy => {
+            checks.push(ProbeCheck::new(
+                "mcp.browser.configured",
+                "Browser MCP configured",
+                ProbeStatus::Pass,
+                ProbeSeverity::Info,
+                format!("browser MCP present at {}", item.config_path),
+                SensitivityLevel::ConfigShape,
+            ));
+            checks.push(ProbeCheck::new(
+                "mcp.browser.healthy",
+                "Browser MCP command healthy",
+                ProbeStatus::Warn,
+                ProbeSeverity::Warning,
+                item.issue
+                    .clone()
+                    .unwrap_or_else(|| "browser MCP command path looks broken".to_string()),
+                SensitivityLevel::LocalPath,
+            ));
+        }
+        Some(item) => {
+            checks.push(ProbeCheck::new(
+                "mcp.browser.configured",
+                "Browser MCP configured",
+                ProbeStatus::Pass,
+                ProbeSeverity::Info,
+                format!("browser MCP present at {}", item.config_path),
+                SensitivityLevel::ConfigShape,
+            ));
+            checks.push(ProbeCheck::new(
+                "mcp.browser.healthy",
+                "Browser MCP command healthy",
+                ProbeStatus::Pass,
+                ProbeSeverity::Info,
+                "browser MCP command resolves".to_string(),
+                SensitivityLevel::LocalPath,
+            ));
+        }
     }
 }
 

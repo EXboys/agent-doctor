@@ -1448,6 +1448,10 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-hermes-api-key-duplicates": "repair.fix.apiKeyDedupe",
   "fix-hermes-api-key-scaffold": "repair.fix.apiKeyScaffold",
   "fix-hermes-config-from-profile": "repair.fix.configFromProfile",
+  "fix-claude-code-gateway-from-mode": "repair.fix.claudeGateway",
+  "fix-codex-gateway-from-mode": "repair.fix.codexGateway",
+  "fix-claude-code-browser-mcp": "repair.fix.claudeBrowserMcp",
+  "fix-codex-browser-mcp": "repair.fix.codexBrowserMcp",
 };
 
 function repairFixLabel(actionId: string): string {

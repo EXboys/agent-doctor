@@ -138,6 +138,7 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
     descriptor.run_deep_probe(&mut checks, &mut facts);
     probe_gateway(adapter, &mut checks, &mut facts);
     mode_drift::probe_mode_drift(adapter.id(), &mut checks, &mut facts);
+    crate::workspace::probe_browser_mcp_for_runtime(adapter.id(), &mut checks);
 
     Ok(RuntimeProbeReport {
         runtime_id: adapter.id().to_string(),
