@@ -1895,6 +1895,14 @@ body::before {
   white-space: normal;
 }
 
+.wiring-mcp-option {
+  margin: 0.5rem 0 0;
+}
+
+.install-wire-actions {
+  margin-top: 0.75rem;
+}
+
 /* `display: grid` above would otherwise override the HTML hidden attribute. */
 .install-progress[hidden] {
   display: none !important;

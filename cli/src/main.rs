@@ -92,9 +92,17 @@ enum Commands {
         /// Hermes provider id when creating config (default: openai)
         #[arg(long, default_value = "openai")]
         provider: String,
+        /// Also upsert Browser MCP (`browser` → agent-doctor) into Codex/Claude configs
+        #[arg(long)]
+        with_browser_mcp: bool,
         /// Emit JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Show or switch exclusive LLM mode (personal provider vs Evotown team)
+    Mode {
+        #[command(subcommand)]
+        action: ModeAction,
     },
     /// Manage MCP servers (browser control via CDP)
     Mcp {
@@ -250,6 +258,35 @@ enum PreferredRuntimeAction {
     Use {
         /// Runtime id
         runtime: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModeAction {
+    /// Show current personal/team mode and readiness
+    #[command(alias = "status")]
+    Show {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wire runtimes to the active personal provider
+    Personal {
+        /// Saved personal provider id (default: last active)
+        #[arg(long)]
+        provider_id: Option<String>,
+        /// Also upsert Browser MCP into Codex/Claude configs
+        #[arg(long)]
+        with_browser_mcp: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wire runtimes to Evotown / company gateway
+    Team {
+        /// Also upsert Browser MCP into Codex/Claude configs
+        #[arg(long)]
+        with_browser_mcp: bool,
         #[arg(long)]
         json: bool,
     },
@@ -556,8 +593,21 @@ fn main() -> Result<()> {
             url,
             key,
             provider,
+            with_browser_mcp,
             json,
-        } => commands::setup::run(&url, &key, Some(&provider), json)?,
+        } => commands::setup::run(&url, &key, Some(&provider), with_browser_mcp, json)?,
+        Commands::Mode { action } => match action {
+            ModeAction::Show { json } => commands::mode::show(json)?,
+            ModeAction::Personal {
+                provider_id,
+                with_browser_mcp,
+                json,
+            } => commands::mode::switch_personal(provider_id.as_deref(), with_browser_mcp, json)?,
+            ModeAction::Team {
+                with_browser_mcp,
+                json,
+            } => commands::mode::switch_team(with_browser_mcp, json)?,
+        },
         Commands::Sync {
             dry_run,
             only,

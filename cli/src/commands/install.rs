@@ -1,7 +1,8 @@
 use agent_doctor_core::{
-    execute_install, probe_health_summary, probe_issue_score, ExplainReport, InstallOptions,
-    InstallReport,
+    execute_install, needs_binary_install, probe_health_summary, probe_issue_score, ExplainReport,
+    InstallOptions, InstallReport,
 };
+use agent_doctor_mcp::wiring_next_steps_for_runtime;
 use anyhow::Result;
 
 pub fn run(
@@ -95,6 +96,15 @@ pub fn print_install_report(report: &InstallReport) {
         );
         if !loop_report.executed_action_ids.is_empty() {
             println!("Executed: {}", loop_report.executed_action_ids.join(", "));
+        }
+    }
+
+    if !needs_binary_install(&report.after_probe) {
+        if let Some(steps) = wiring_next_steps_for_runtime(&report.runtime_id) {
+            println!("\nWire runtime (install does not rewrite gateway/MCP configs):");
+            for step in steps {
+                println!("  - {step}");
+            }
         }
     }
 }

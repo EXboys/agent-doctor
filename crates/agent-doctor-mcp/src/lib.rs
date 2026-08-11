@@ -4,6 +4,7 @@ pub mod mcp;
 pub mod session;
 pub mod status;
 pub mod tools;
+pub mod wire;
 
 pub use browser::{
     cdp_port_is_headless, cdp_user_data_dir, connect_chrome, discover_chrome,
@@ -19,3 +20,7 @@ pub use mcp::{run_mcp_server, HandleResult, McpRequest, McpResponse, ToolDefinit
 pub use session::{LazyBrowser, SharedBrowser};
 pub use status::{browser_mcp_status, BrowserMcpStatus, DEFAULT_BROWSER_MCP_PORT};
 pub use tools::BrowserContext;
+pub use wire::{
+    wire_browser_mcp, wire_browser_mcp_defaults, wiring_next_steps_for_runtime,
+    BrowserMcpWireReport, BrowserMcpWireResult, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
+};

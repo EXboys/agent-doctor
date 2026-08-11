@@ -117,8 +117,8 @@
             </div>
             <div class="runtime-actions mcp-actions">
               <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
-              <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex</button>
-              <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude</button>
+              <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex 配置</button>
+              <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude 配置</button>
             </div>
             <details class="mcp-snippet">
               <summary data-i18n="mcp.snippetTitle">配置片段</summary>
@@ -153,6 +153,10 @@
               <button id="mode-use-personal" type="button" class="mode-switch-btn" data-mode="personal" data-i18n="mode.personal">个人</button>
               <button id="mode-use-team" type="button" class="mode-switch-btn" data-mode="team" data-i18n="mode.team">团队</button>
             </div>
+            <label class="mcp-option wiring-mcp-option" for="mode-with-browser-mcp">
+              <input id="mode-with-browser-mcp" type="checkbox" />
+              <span data-i18n="mode.withBrowserMcp">同时写入 Browser MCP（Codex / Claude 配置）</span>
+            </label>
             <p id="wiring-mode-footnote" class="section-footnote wiring-mode-footnote" aria-live="polite"></p>
           </section>
 
