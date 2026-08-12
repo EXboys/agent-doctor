@@ -902,3 +902,32 @@ pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
     }
     Ok(())
 }
+
+/// Drop ChatGPT-login auth.json before gateway launches.
+///
+/// Stored ChatGPT tokens make Codex talk to api.openai.com even when
+/// OPENAI_BASE_URL / openai_base_url point at the company gateway.
+pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
+    let path = home_join(".codex/auth.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&path)?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(());
+    };
+    let mode = value
+        .get("auth_mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let has_chatgpt_tokens = value.get("tokens").is_some()
+        || mode.eq_ignore_ascii_case("chatgpt")
+        || value.get("refresh_token").is_some()
+        || value.get("access_token").is_some();
+    if !has_chatgpt_tokens {
+        return Ok(());
+    }
+    let _ = crate::setup::backup_file(&path);
+    fs::remove_file(&path)?;
+    Ok(())
+}

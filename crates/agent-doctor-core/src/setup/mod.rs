@@ -4,10 +4,10 @@ mod personal;
 mod pipeline;
 
 pub use merge::{
-    apply_codex_slot, apply_hermes_slot, apply_openclaw_slot, clear_codex_placeholder_auth,
-    codex_host_supports_responses_api, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT, COMPANY_DEFAULT_MODEL,
-    HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT, OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID,
-    OPENCLAW_TEAM_SLOT,
+    apply_codex_slot, apply_hermes_slot, apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway,
+    clear_codex_placeholder_auth, codex_host_supports_responses_api, CODEX_PERSONAL_SLOT,
+    CODEX_TEAM_SLOT, COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT,
+    OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
 };
 pub use mode::{
     load_mode_status, switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport,

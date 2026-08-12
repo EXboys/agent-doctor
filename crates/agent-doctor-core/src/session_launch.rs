@@ -20,12 +20,13 @@ use crate::profile::{
 };
 use crate::setup::merge::{
     apply_claude_code, apply_codex_slot, codex_host_supports_responses_api, CODEX_PERSONAL_SLOT,
-    CODEX_TEAM_SLOT,
+    CODEX_TEAM_SLOT, COMPANY_DEFAULT_MODEL,
 };
 use crate::setup::{
-    anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth, evotown_agent_env_path,
-    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
-    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
+    clear_codex_placeholder_auth, evotown_agent_env_path, normalize_protocol,
+    write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
+    MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::{active_env_path, load_workspaces};
 
@@ -166,15 +167,24 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
         .as_ref()
         .map(|(_, _, _, slot)| slot == CODEX_TEAM_SLOT)
         .unwrap_or(false);
-    let refreshed = launch.and_then(|(url, key, model, slot)| {
-        apply_codex_slot(&url, &key, model.as_deref(), Some(&slot))
+    // ChatGPT login tokens in auth.json make Codex ignore gateway keys and hit api.openai.com.
+    if launch.is_some() {
+        let _ = clear_codex_chatgpt_auth_for_gateway();
+    }
+    let refreshed = launch.as_ref().and_then(|(url, key, model, slot)| {
+        apply_codex_slot(url, key, model.as_deref(), Some(slot))
             .ok()
             .filter(|r| r.applied)
-            .map(|_| url)
+            .map(|_| url.clone())
     });
 
+    // Also pass -c overrides so this process cannot fall back to built-in openai
+    // even if ~/.codex was stale, CODEX_HOME pointed elsewhere, or the user never
+    // re-ran mode switch. The launched command line itself proves the gateway.
+    let argv = codex_launch_argv(launch.as_ref());
+    let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
     let mut report =
-        open_in_terminal_with_key_pref("codex", &["codex"], cwd, prompt, prefer_team_keys)?;
+        open_in_terminal_with_key_pref("codex", &argv_refs, cwd, prompt, prefer_team_keys)?;
     if let Some(url) = refreshed {
         report.detail = format!(
             "Opened Codex after writing model_provider + openai_base_url={url} to ~/.codex/config.toml. {}",
@@ -182,6 +192,34 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
         );
     }
     Ok(report)
+}
+
+/// Build `codex -c model_provider=openai -c openai_base_url=… -c model=…`.
+///
+/// Force the built-in `openai` provider through the Agent Doctor gateway via
+/// `openai_base_url`. This does not require a pre-existing
+/// `[model_providers.company]` table (unlike `-c model_provider=company`).
+fn codex_launch_argv(launch: Option<&(String, String, Option<String>, String)>) -> Vec<String> {
+    let Some((url, _, model, _)) = launch else {
+        return vec!["codex".to_string()];
+    };
+    if !codex_host_supports_responses_api(url) {
+        return vec!["codex".to_string()];
+    }
+    let model_id = model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or(COMPANY_DEFAULT_MODEL);
+    vec![
+        "codex".to_string(),
+        "-c".to_string(),
+        "model_provider=openai".to_string(),
+        "-c".to_string(),
+        format!("openai_base_url={url}"),
+        "-c".to_string(),
+        format!("model={model_id}"),
+    ]
 }
 
 /// Resolve OpenAI-compatible gateway + key (+ optional model/slot) from active overlays.
@@ -775,5 +813,38 @@ mod tests {
             "sk-team".into(),
         )]))
         .is_none());
+    }
+
+    #[test]
+    fn codex_launch_argv_forces_openai_base_url_override() {
+        let launch = (
+            "https://www.skilllite.ai/api/gateway/v1".to_string(),
+            "sk-team".to_string(),
+            Some("deepseek-v4-flash".to_string()),
+            CODEX_TEAM_SLOT.to_string(),
+        );
+        let argv = codex_launch_argv(Some(&launch));
+        assert_eq!(argv[0], "codex");
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "-c" && w[1] == "model_provider=openai"));
+        assert!(argv.windows(2).any(|w| {
+            w[0] == "-c" && w[1] == "openai_base_url=https://www.skilllite.ai/api/gateway/v1"
+        }));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "-c" && w[1] == "model=deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn codex_launch_argv_skips_overrides_for_chat_only_hosts() {
+        let launch = (
+            "https://api.deepseek.com/v1".to_string(),
+            "sk-ds".to_string(),
+            None,
+            CODEX_PERSONAL_SLOT.to_string(),
+        );
+        assert_eq!(codex_launch_argv(Some(&launch)), vec!["codex".to_string()]);
+        assert_eq!(codex_launch_argv(None), vec!["codex".to_string()]);
     }
 }
