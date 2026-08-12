@@ -3,6 +3,7 @@
 //! Doctor stays the ops shell: connection, health, preferred runtime, and launch.
 //! Chat/TUI stays in the official CLI (Claude Code deep link or a system terminal).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,14 +12,14 @@ use serde::{Deserialize, Serialize};
 use url::form_urlencoded;
 
 use crate::evotown::{load_evotown_config, normalize_runtime};
-use crate::profile::agent_profile_path;
 #[cfg(windows)]
 use crate::profile::read_company_profile;
-#[cfg(windows)]
-use crate::setup::EVOTOWN_API_KEY_ENV;
+use crate::profile::{agent_profile_path, read_env_map, GATEWAY_URL_ENV};
+use crate::setup::merge::apply_claude_code;
 use crate::setup::{
-    clear_codex_placeholder_auth, evotown_agent_env_path, write_company_profile_with_gateway,
-    COMPANY_API_KEY_ENV,
+    anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth, evotown_agent_env_path,
+    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
+    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::{active_env_path, load_workspaces};
 
@@ -121,23 +122,102 @@ fn open_claude_code(
     prompt: Option<&str>,
     prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
+    let refreshed = match resolve_claude_launch_env() {
+        Some((url, key)) => apply_claude_code(&url, &key).ok().map(|_| url),
+        None => None,
+    };
+
     if prefer_deep_link {
         let link = claude_cli_deep_link(cwd, prompt);
         if open_url(&link).is_ok() {
+            let detail = if let Some(url) = refreshed.as_deref() {
+                format!(
+                    "Opened Claude Code via claude-cli:// deep link after writing ANTHROPIC_BASE_URL={url} to ~/.claude/settings.json (prompt pre-filled, not auto-sent). Restart Claude if it was already running."
+                )
+            } else {
+                "Opened Claude Code via claude-cli:// deep link (prompt pre-filled, not auto-sent)."
+                    .into()
+            };
             return Ok(OpenSessionReport {
                 runtime: "claude-code".into(),
                 method: OpenSessionMethod::DeepLink,
                 cwd: cwd.display().to_string(),
                 target: link,
-                detail: "Opened Claude Code via claude-cli:// deep link (prompt pre-filled, not auto-sent)."
-                    .into(),
+                detail,
             });
         }
     }
 
-    // Interactive CLI: start normally; deep link is preferred for prompt pre-fill.
+    // Interactive CLI: wrap exports ANTHROPIC_* so the process does not hit api.anthropic.com.
     let _ = prompt;
     open_in_terminal("claude-code", &["claude"], cwd, None)
+}
+
+/// Resolve Anthropic base URL + key from the active overlay / Evotown env.
+fn resolve_claude_launch_env() -> Option<(String, String)> {
+    let mut env = HashMap::new();
+    if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
+        if let Ok(map) = read_env_map(&path) {
+            env.extend(map);
+        }
+    }
+    if let Ok(path) = active_env_path() {
+        if path.exists() {
+            if let Ok(map) = read_env_map(&path) {
+                env.extend(map);
+            }
+        }
+    }
+    if let Some(path) = agent_profile_path().filter(|path| path.exists()) {
+        if let Ok(map) = read_env_map(&path) {
+            env.extend(map);
+        }
+    }
+    anthropic_launch_from_env(&env)
+}
+
+fn anthropic_launch_from_env(env: &HashMap<String, String>) -> Option<(String, String)> {
+    let api_key = [
+        "ANTHROPIC_API_KEY",
+        COMPANY_API_KEY_ENV,
+        EVOTOWN_API_KEY_ENV,
+        "OPENAI_API_KEY",
+    ]
+    .into_iter()
+    .find_map(|key| {
+        env.get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })?;
+
+    if let Some(url) = env
+        .get("ANTHROPIC_BASE_URL")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        return Some((url.to_string(), api_key));
+    }
+
+    let protocol = env
+        .get(PROVIDER_PROTOCOL_ENV)
+        .map(|value| normalize_protocol(value));
+    if protocol.as_deref() == Some(PROTOCOL_ANTHROPIC) {
+        if let Some(url) = env
+            .get(GATEWAY_URL_ENV)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            return Some((url.to_string(), api_key));
+        }
+    }
+
+    let evotown = env
+        .get("AGENT_DOCTOR_EVOTOWN_URL")
+        .or_else(|| env.get(EVOTOWN_URL_ENV))
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())?;
+    Some((anthropic_gateway_url_from_evotown_base(evotown), api_key))
 }
 
 fn open_in_terminal(
@@ -186,19 +266,21 @@ fn wrap_with_company_env(command: &str) -> String {
         if parts.is_empty() {
             return command.to_string();
         }
-        // Company Codex slot reads EVOTOWN_API_KEY; keep COMPANY alias for other CLIs.
+        // Codex reads OPENAI_BASE_URL / OPENAI_API_KEY; Claude Code reads
+        // ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY. profile.env uses AGENT_DOCTOR_*.
         format!(
-            "set -a && {} && set +a && export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{EVOTOWN_API_KEY:-$OPENAI_API_KEY}}}}\" && {command}",
-            parts.join(" && ")
+            "set -a && {} && set +a && {} && {command}",
+            parts.join(" && "),
+            unix_key_and_base_exports()
         )
     }
 
     #[cfg(windows)]
     {
-        let api_key = read_company_profile()
-            .ok()
-            .flatten()
-            .and_then(|profile| profile.api_key)
+        let profile = read_company_profile().ok().flatten();
+        let api_key = profile
+            .as_ref()
+            .and_then(|p| p.api_key.clone())
             .filter(|key| !key.trim().is_empty())
             .or_else(|| {
                 load_evotown_config()
@@ -206,16 +288,45 @@ fn wrap_with_company_env(command: &str) -> String {
                     .map(|config| config.api_key)
                     .filter(|key| !key.trim().is_empty())
             });
-        match api_key {
-            Some(key) => {
+        let gateway = profile
+            .as_ref()
+            .and_then(|p| p.gateway_url.clone())
+            .filter(|url| !url.trim().is_empty());
+        match (api_key, gateway) {
+            (Some(key), Some(url)) => {
                 let escaped = key.replace('\'', "''");
+                let escaped_url = url.replace('\'', "''");
+                let anthropic_url = anthropic_gateway_url_from_evotown_base(
+                    &crate::setup::evotown_base_from_gateway(&url),
+                );
+                let escaped_anthropic = anthropic_url.replace('\'', "''");
                 format!(
-                    "$env:OPENAI_API_KEY='{escaped}'; $env:{EVOTOWN_API_KEY_ENV}='{escaped}'; $env:{COMPANY_API_KEY_ENV}='{escaped}'; {command}"
+                    "$env:OPENAI_API_KEY='{escaped}'; $env:{EVOTOWN_API_KEY_ENV}='{escaped}'; $env:{COMPANY_API_KEY_ENV}='{escaped}'; $env:OPENAI_BASE_URL='{escaped_url}'; $env:ANTHROPIC_API_KEY='{escaped}'; $env:ANTHROPIC_BASE_URL='{escaped_anthropic}'; {command}"
                 )
             }
-            None => command.to_string(),
+            (Some(key), None) => {
+                let escaped = key.replace('\'', "''");
+                format!(
+                    "$env:OPENAI_API_KEY='{escaped}'; $env:{EVOTOWN_API_KEY_ENV}='{escaped}'; $env:{COMPANY_API_KEY_ENV}='{escaped}'; $env:ANTHROPIC_API_KEY='{escaped}'; {command}"
+                )
+            }
+            _ => command.to_string(),
         }
     }
+}
+
+#[cfg(not(windows))]
+fn unix_key_and_base_exports() -> String {
+    format!(
+        "export {COMPANY_API_KEY_ENV}=\"${{{COMPANY_API_KEY_ENV}:-${{EVOTOWN_API_KEY:-$OPENAI_API_KEY}}}}\" && \
+export OPENAI_API_KEY=\"${{{COMPANY_API_KEY_ENV}:-${{EVOTOWN_API_KEY:-$OPENAI_API_KEY}}}}\" && \
+export {EVOTOWN_API_KEY_ENV}=\"${{{EVOTOWN_API_KEY_ENV}:-${{{COMPANY_API_KEY_ENV}:-$OPENAI_API_KEY}}}}\" && \
+export OPENAI_BASE_URL=\"${{{GATEWAY_URL_ENV}:-$OPENAI_BASE_URL}}\" && \
+export ANTHROPIC_API_KEY=\"${{ANTHROPIC_API_KEY:-${{{COMPANY_API_KEY_ENV}:-${{EVOTOWN_API_KEY:-$OPENAI_API_KEY}}}}}}\" && \
+_ad_ev=\"${{AGENT_DOCTOR_EVOTOWN_URL:-$EVOTOWN_URL}}\" && \
+export ANTHROPIC_BASE_URL=\"${{ANTHROPIC_BASE_URL:-${{_ad_ev:+${{_ad_ev%/}}/api/gateway/anthropic}}}}\" && \
+unset _ad_ev"
+    )
 }
 
 /// If Evotown is configured but profile.env is missing, recreate it so Doctor/Codex share one key.
@@ -402,5 +513,89 @@ mod tests {
         // Without a profile file, wrap still returns a runnable command.
         let wrapped = wrap_with_company_env("codex");
         assert!(wrapped.contains("codex"));
+    }
+
+    #[test]
+    fn wrap_exports_openai_base_url_alias() {
+        let wrapped = wrap_with_company_env("codex");
+        if wrapped != "codex" {
+            assert!(
+                wrapped.contains("OPENAI_BASE_URL"),
+                "expected OPENAI_BASE_URL export, got {wrapped}"
+            );
+            assert!(
+                wrapped.contains("OPENAI_API_KEY"),
+                "expected OPENAI_API_KEY export, got {wrapped}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_exports_anthropic_aliases() {
+        let wrapped = wrap_with_company_env("claude");
+        if wrapped != "claude" {
+            assert!(
+                wrapped.contains("ANTHROPIC_BASE_URL"),
+                "expected ANTHROPIC_BASE_URL export, got {wrapped}"
+            );
+            assert!(
+                wrapped.contains("ANTHROPIC_API_KEY"),
+                "expected ANTHROPIC_API_KEY export, got {wrapped}"
+            );
+        }
+    }
+
+    #[test]
+    fn anthropic_launch_prefers_explicit_base_url() {
+        let env = HashMap::from([
+            (
+                "ANTHROPIC_BASE_URL".into(),
+                "https://proxy.example/anthropic".into(),
+            ),
+            (COMPANY_API_KEY_ENV.into(), "sk-company".into()),
+            (
+                "AGENT_DOCTOR_EVOTOWN_URL".into(),
+                "https://www.skilllite.ai".into(),
+            ),
+        ]);
+        let (url, key) = anthropic_launch_from_env(&env).unwrap();
+        assert_eq!(url, "https://proxy.example/anthropic");
+        assert_eq!(key, "sk-company");
+    }
+
+    #[test]
+    fn anthropic_launch_derives_team_gateway_from_evotown() {
+        let env = HashMap::from([
+            (COMPANY_API_KEY_ENV.into(), "sk-team".into()),
+            (
+                "AGENT_DOCTOR_EVOTOWN_URL".into(),
+                "https://www.skilllite.ai".into(),
+            ),
+        ]);
+        let (url, key) = anthropic_launch_from_env(&env).unwrap();
+        assert_eq!(url, "https://www.skilllite.ai/api/gateway/anthropic");
+        assert_eq!(key, "sk-team");
+    }
+
+    #[test]
+    fn anthropic_launch_uses_personal_anthropic_gateway() {
+        let env = HashMap::from([
+            (PROVIDER_PROTOCOL_ENV.into(), PROTOCOL_ANTHROPIC.into()),
+            (GATEWAY_URL_ENV.into(), "https://api.anthropic.com".into()),
+            (COMPANY_API_KEY_ENV.into(), "sk-ant".into()),
+        ]);
+        let (url, key) = anthropic_launch_from_env(&env).unwrap();
+        assert_eq!(url, "https://api.anthropic.com");
+        assert_eq!(key, "sk-ant");
+    }
+
+    #[test]
+    fn anthropic_launch_skips_personal_openai_without_evotown() {
+        let env = HashMap::from([
+            (PROVIDER_PROTOCOL_ENV.into(), "openai".into()),
+            (GATEWAY_URL_ENV.into(), "https://api.deepseek.com/v1".into()),
+            (COMPANY_API_KEY_ENV.into(), "sk-ds".into()),
+        ]);
+        assert!(anthropic_launch_from_env(&env).is_none());
     }
 }

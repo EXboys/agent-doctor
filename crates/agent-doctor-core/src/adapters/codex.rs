@@ -37,11 +37,18 @@ impl CodexAdapter {
     }
 
     fn provider_base_url(value: &Value, provider: &str) -> Option<String> {
-        Self::provider_table(value, provider)?
-            .get("base_url")
+        Self::provider_table(value, provider)
+            .and_then(|table| table.get("base_url"))
             .and_then(Value::as_str)
             .filter(|url| !url.is_empty())
             .map(str::to_string)
+            .or_else(|| {
+                value
+                    .get("openai_base_url")
+                    .and_then(Value::as_str)
+                    .filter(|url| !url.is_empty())
+                    .map(str::to_string)
+            })
     }
 
     fn provider_env_key(value: &Value, provider: &str) -> Option<String> {

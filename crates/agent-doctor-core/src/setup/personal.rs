@@ -728,6 +728,10 @@ pub(crate) fn write_personal_profile(
     writeln!(file, "{COMPANY_API_KEY_ENV}={api_key}")?;
     writeln!(file, "COMPANY_API_KEY={api_key}")?;
     writeln!(file, "{OPENAI_API_KEY_ENV}={api_key}")?;
+    if normalize_protocol(protocol) == PROTOCOL_ANTHROPIC {
+        writeln!(file, "ANTHROPIC_BASE_URL={gateway_url}")?;
+        writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
+    }
 
     #[cfg(unix)]
     {

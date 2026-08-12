@@ -20,7 +20,7 @@ pub use personal::{
     verify_personal_provider_with_protocol, PersonalProviderListItem, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
-    PROTOCOL_OPENAI,
+    PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
 };
 pub use pipeline::{
     apply_mode_switch, effector_label, probe_endpoint_bundle, project_bundle, runtime_strategies,
@@ -220,6 +220,7 @@ pub fn write_evotown_agent_env(
             default_evotown_skills_dir().display()
         ),
         format!("# Gateway for OpenAI-compatible clients: {base}/api/gateway/v1"),
+        format!("# Gateway for Claude Code: {base}/api/gateway/anthropic"),
     ];
 
     fs::write(&path, lines.join("\n") + "\n")?;
@@ -256,6 +257,9 @@ pub fn write_company_profile_with_gateway(
     writeln!(file, "AGENT_DOCTOR_EVOTOWN_URL={evotown_base}")?;
     writeln!(file, "{COMPANY_API_KEY_ENV}={api_key}")?;
     writeln!(file, "COMPANY_API_KEY={api_key}")?;
+    let anthropic_url = anthropic_gateway_url_from_evotown_base(evotown_base);
+    writeln!(file, "ANTHROPIC_BASE_URL={anthropic_url}")?;
+    writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
 
     #[cfg(unix)]
     {

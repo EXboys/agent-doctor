@@ -91,6 +91,13 @@ pub fn write_company_baseline(
     writeln!(file, "{GATEWAY_URL_ENV}={gateway_url}")?;
     if let Some(base) = evotown_base.filter(|b| !b.trim().is_empty()) {
         writeln!(file, "AGENT_DOCTOR_EVOTOWN_URL={base}")?;
+        let trimmed = base.trim().trim_end_matches('/');
+        let origin = trimmed
+            .strip_suffix("/api/gateway/v1")
+            .unwrap_or(trimmed)
+            .trim_end_matches('/');
+        writeln!(file, "ANTHROPIC_BASE_URL={origin}/api/gateway/anthropic")?;
+        writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
     }
     writeln!(file, "{COMPANY_API_KEY_ENV}={api_key}")?;
     writeln!(file, "COMPANY_API_KEY={api_key}")?;

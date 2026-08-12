@@ -745,7 +745,7 @@ pub fn apply_codex_slot(
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),
         message: format!(
-            "set model_provider={slot} (wire_api=responses, env_key={env_key}, model={model_id}); additive model_providers"
+            "set model_provider={slot} + openai_base_url (wire_api=responses, env_key={env_key}, model={model_id})"
         ),
         ..Default::default()
     })
@@ -778,6 +778,9 @@ fn write_codex_provider_config(
 
     doc["model"] = toml_edit::value(model_id);
     doc["model_provider"] = toml_edit::value(slot);
+    // Codex 0.14x still falls back to the built-in `openai` provider (api.openai.com)
+    // unless this top-level override is set — custom model_providers alone is not enough.
+    doc["openai_base_url"] = toml_edit::value(gateway_url);
 
     let display = if slot == CODEX_TEAM_SLOT {
         "Company Gateway"
@@ -869,6 +872,7 @@ rich_ui = true
         assert!(rendered.contains("rich_ui = true"));
         assert!(rendered.contains("model = \"gpt-test\""));
         assert!(rendered.contains("model_provider = \"personal\""));
+        assert!(rendered.contains("openai_base_url = \"https://example.com/v1\""));
         assert!(rendered.contains("[model_providers.personal]"));
         assert!(rendered.contains("base_url = \"https://example.com/v1\""));
     }

@@ -317,21 +317,7 @@ fn project_one_runtime(
                 Some(slot),
             )
         }
-        (PROTOCOL_OPENAI, "claude-code") => Ok(RuntimeSetupResult {
-            runtime_id: "claude-code".into(),
-            display_name: display_name.into(),
-            applied: false,
-            message: "skipped — OpenAI protocol; Claude Code needs Anthropic protocol".into(),
-            effector: Some(effector_label(EffectorKind::None).into()),
-            ..Default::default()
-        }),
-        (PROTOCOL_ANTHROPIC, "claude-code") => {
-            let url = bundle
-                .anthropic_gateway_url
-                .as_deref()
-                .unwrap_or(&bundle.gateway_url);
-            merge::apply_claude_code(url, &bundle.api_key)
-        }
+        (_, "claude-code") => project_claude_code(bundle, display_name),
         (PROTOCOL_ANTHROPIC, other) => Ok(RuntimeSetupResult {
             runtime_id: other.into(),
             display_name: display_name.into(),
@@ -348,6 +334,41 @@ fn project_one_runtime(
             ..Default::default()
         }),
     }
+}
+
+/// Claude Code needs an Anthropic Messages endpoint.
+/// Team Evotown still uses OpenAI protocol for Codex/Hermes, but also exposes
+/// `/api/gateway/anthropic` — do not skip Claude just because protocol is openai.
+fn claude_code_target_url(bundle: &EndpointBundle) -> Option<&str> {
+    if let Some(url) = bundle
+        .anthropic_gateway_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    {
+        return Some(url);
+    }
+    if bundle.protocol == PROTOCOL_ANTHROPIC {
+        let url = bundle.gateway_url.trim();
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+    None
+}
+
+fn project_claude_code(bundle: &EndpointBundle, display_name: &str) -> Result<RuntimeSetupResult> {
+    let Some(url) = claude_code_target_url(bundle) else {
+        return Ok(RuntimeSetupResult {
+            runtime_id: "claude-code".into(),
+            display_name: display_name.into(),
+            applied: false,
+            message: "skipped — no Anthropic-compatible gateway for Claude Code".into(),
+            effector: Some(effector_label(EffectorKind::None).into()),
+            ..Default::default()
+        });
+    };
+    merge::apply_claude_code(url, &bundle.api_key)
 }
 
 fn annotate_runtimes_with_strategy_and_probe(
@@ -517,6 +538,12 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
 
     set_active_personal_provider_id(&entry.id)?;
 
+    let anthropic_gateway_url = if protocol == PROTOCOL_ANTHROPIC {
+        Some(gateway_url.clone())
+    } else {
+        None
+    };
+
     Ok(EndpointBundle {
         mode: MODE_PERSONAL.to_string(),
         label: entry.name.clone(),
@@ -526,7 +553,7 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
         protocol,
         source_id: format!("personal:{}", entry.id),
         hermes_provider: "custom".to_string(),
-        anthropic_gateway_url: None,
+        anthropic_gateway_url,
         personal_provider_id: Some(entry.id.clone()),
         personal_provider_name: Some(entry.name.clone()),
     })
@@ -670,6 +697,53 @@ mod tests {
         assert_eq!(
             effector_label(EffectorKind::ManualRestart),
             "manual_restart"
+        );
+    }
+
+    fn sample_bundle(protocol: &str, anthropic_gateway_url: Option<&str>) -> EndpointBundle {
+        EndpointBundle {
+            mode: MODE_TEAM.to_string(),
+            label: "test".into(),
+            gateway_url: "https://www.skilllite.ai/api/gateway/v1".into(),
+            api_key: "sk-test".into(),
+            model: "gpt-4o".into(),
+            protocol: protocol.into(),
+            source_id: "team:evotown".into(),
+            hermes_provider: "openai".into(),
+            anthropic_gateway_url: anthropic_gateway_url.map(str::to_string),
+            personal_provider_id: None,
+            personal_provider_name: None,
+        }
+    }
+
+    #[test]
+    fn team_openai_still_targets_evotown_anthropic_for_claude() {
+        let bundle = sample_bundle(
+            PROTOCOL_OPENAI,
+            Some("https://www.skilllite.ai/api/gateway/anthropic"),
+        );
+        assert_eq!(
+            claude_code_target_url(&bundle),
+            Some("https://www.skilllite.ai/api/gateway/anthropic")
+        );
+    }
+
+    #[test]
+    fn personal_openai_without_anthropic_gateway_skips_claude() {
+        let mut bundle = sample_bundle(PROTOCOL_OPENAI, None);
+        bundle.mode = MODE_PERSONAL.to_string();
+        bundle.gateway_url = "https://api.deepseek.com/v1".into();
+        assert!(claude_code_target_url(&bundle).is_none());
+    }
+
+    #[test]
+    fn personal_anthropic_uses_gateway_url_when_slot_missing() {
+        let mut bundle = sample_bundle(PROTOCOL_ANTHROPIC, None);
+        bundle.mode = MODE_PERSONAL.to_string();
+        bundle.gateway_url = "https://api.anthropic.com".into();
+        assert_eq!(
+            claude_code_target_url(&bundle),
+            Some("https://api.anthropic.com")
         );
     }
 }
