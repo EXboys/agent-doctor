@@ -14,12 +14,18 @@ use url::form_urlencoded;
 use crate::evotown::{load_evotown_config, normalize_runtime};
 #[cfg(windows)]
 use crate::profile::read_company_profile;
-use crate::profile::{agent_profile_path, read_env_map, GATEWAY_URL_ENV};
-use crate::setup::merge::apply_claude_code;
+use crate::profile::{
+    agent_profile_path, company_baseline_path, read_env_map, GATEWAY_URL_ENV,
+    PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
+};
+use crate::setup::merge::{
+    apply_claude_code, apply_codex_slot, codex_host_supports_responses_api, CODEX_PERSONAL_SLOT,
+    CODEX_TEAM_SLOT,
+};
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, clear_codex_placeholder_auth, evotown_agent_env_path,
     normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
-    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::{active_env_path, load_workspaces};
 
@@ -102,10 +108,7 @@ pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSess
         "claude-code" => {
             open_claude_code(&cwd, options.prompt.as_deref(), options.prefer_deep_link)
         }
-        "codex" => {
-            let _ = clear_codex_placeholder_auth();
-            open_in_terminal("codex", &["codex"], &cwd, options.prompt.as_deref())
-        }
+        "codex" => open_codex(&cwd, options.prompt.as_deref()),
         "hermes" => open_in_terminal("hermes", &["hermes"], &cwd, options.prompt.as_deref()),
         "openclaw" => open_in_terminal(
             "openclaw",
@@ -153,8 +156,59 @@ fn open_claude_code(
     open_in_terminal("claude-code", &["claude"], cwd, None)
 }
 
-/// Resolve Anthropic base URL + key from the active overlay / Evotown env.
-fn resolve_claude_launch_env() -> Option<(String, String)> {
+fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
+    let _ = clear_codex_placeholder_auth();
+    // Mirror Claude: rewrite ~/.codex/config.toml before launch. Env OPENAI_BASE_URL alone is
+    // not enough — Codex 0.14x still routes via model_provider / openai_base_url in config.toml,
+    // and without that it silently hits api.openai.com (401 with company keys).
+    let launch = resolve_codex_launch_env();
+    let prefer_team_keys = launch
+        .as_ref()
+        .map(|(_, _, _, slot)| slot == CODEX_TEAM_SLOT)
+        .unwrap_or(false);
+    let refreshed = launch.and_then(|(url, key, model, slot)| {
+        apply_codex_slot(&url, &key, model.as_deref(), Some(&slot))
+            .ok()
+            .filter(|r| r.applied)
+            .map(|_| url)
+    });
+
+    let mut report =
+        open_in_terminal_with_key_pref("codex", &["codex"], cwd, prompt, prefer_team_keys)?;
+    if let Some(url) = refreshed {
+        report.detail = format!(
+            "Opened Codex after writing model_provider + openai_base_url={url} to ~/.codex/config.toml. {}",
+            report.detail
+        );
+    }
+    Ok(report)
+}
+
+/// Resolve OpenAI-compatible gateway + key (+ optional model/slot) from active overlays.
+///
+/// When the active personal host cannot speak Codex Responses API (e.g. DeepSeek),
+/// fall back to the durable team baseline so launch does not silently use api.openai.com.
+fn resolve_codex_launch_env() -> Option<(String, String, Option<String>, String)> {
+    let env = collect_launch_env_map();
+    if let Some(launch) = codex_launch_from_env(&env) {
+        if launch.3 == CODEX_PERSONAL_SLOT && !codex_host_supports_responses_api(&launch.0) {
+            if let Some(team) = codex_launch_from_company_baseline() {
+                return Some(team);
+            }
+        }
+        return Some(launch);
+    }
+    codex_launch_from_company_baseline()
+}
+
+fn codex_launch_from_company_baseline() -> Option<(String, String, Option<String>, String)> {
+    let path = company_baseline_path().filter(|path| path.exists())?;
+    let map = read_env_map(&path).ok()?;
+    let (url, key, model, _) = codex_launch_from_env(&map)?;
+    Some((url, key, model, CODEX_TEAM_SLOT.to_string()))
+}
+
+fn collect_launch_env_map() -> HashMap<String, String> {
     let mut env = HashMap::new();
     if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
         if let Ok(map) = read_env_map(&path) {
@@ -173,7 +227,55 @@ fn resolve_claude_launch_env() -> Option<(String, String)> {
             env.extend(map);
         }
     }
-    anthropic_launch_from_env(&env)
+    env
+}
+
+fn codex_launch_from_env(
+    env: &HashMap<String, String>,
+) -> Option<(String, String, Option<String>, String)> {
+    let gateway_url = env
+        .get(GATEWAY_URL_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)?;
+
+    let api_key = [COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV, "OPENAI_API_KEY"]
+        .into_iter()
+        .find_map(|key| {
+            env.get(key)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })?;
+
+    let model = env
+        .get(MODEL_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let slot = match env.get(PROVIDER_KIND_ENV).map(|v| v.trim()) {
+        Some(PROVIDER_KIND_PERSONAL) => CODEX_PERSONAL_SLOT.to_string(),
+        Some(PROVIDER_KIND_COMPANY) => CODEX_TEAM_SLOT.to_string(),
+        _ => {
+            // Legacy profiles omit PROVIDER_KIND — infer from gateway host.
+            if gateway_url
+                .to_ascii_lowercase()
+                .contains("api.deepseek.com")
+            {
+                CODEX_PERSONAL_SLOT.to_string()
+            } else {
+                CODEX_TEAM_SLOT.to_string()
+            }
+        }
+    };
+
+    Some((gateway_url, api_key, model, slot))
+}
+
+/// Resolve Anthropic base URL + key from the active overlay / Evotown env.
+fn resolve_claude_launch_env() -> Option<(String, String)> {
+    anthropic_launch_from_env(&collect_launch_env_map())
 }
 
 fn anthropic_launch_from_env(env: &HashMap<String, String>) -> Option<(String, String)> {
@@ -224,12 +326,22 @@ fn open_in_terminal(
     runtime: &str,
     argv: &[&str],
     cwd: &Path,
+    prompt: Option<&str>,
+) -> Result<OpenSessionReport> {
+    open_in_terminal_with_key_pref(runtime, argv, cwd, prompt, false)
+}
+
+fn open_in_terminal_with_key_pref(
+    runtime: &str,
+    argv: &[&str],
+    cwd: &Path,
     _prompt: Option<&str>,
+    prefer_team_keys: bool,
 ) -> Result<OpenSessionReport> {
     if argv.is_empty() {
         bail!("empty terminal command for {runtime}");
     }
-    let command_line = wrap_with_company_env(&shell_join(argv));
+    let command_line = wrap_with_company_env_pref(&shell_join(argv), prefer_team_keys);
     launch_system_terminal(cwd, &command_line)?;
     Ok(OpenSessionReport {
         runtime: runtime.into(),
@@ -245,7 +357,7 @@ fn open_in_terminal(
 
 /// Prefix a shell command so Evotown / company API keys and workspace env are available.
 /// Prefer sourcing env files (never inline secrets into the displayed command).
-fn wrap_with_company_env(command: &str) -> String {
+fn wrap_with_company_env_pref(command: &str, prefer_team_keys: bool) -> String {
     let _ = ensure_profile_env_from_evotown();
 
     #[cfg(not(windows))]
@@ -263,6 +375,13 @@ fn wrap_with_company_env(command: &str) -> String {
         if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
             parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
         }
+        // When Codex is forced onto the team slot (e.g. personal DeepSeek cannot speak
+        // Responses API), re-source the durable baseline last so EVOTOWN/COMPANY keys win.
+        if prefer_team_keys {
+            if let Some(path) = company_baseline_path().filter(|path| path.exists()) {
+                parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
+            }
+        }
         if parts.is_empty() {
             return command.to_string();
         }
@@ -277,6 +396,7 @@ fn wrap_with_company_env(command: &str) -> String {
 
     #[cfg(windows)]
     {
+        let _ = prefer_team_keys;
         let profile = read_company_profile().ok().flatten();
         let api_key = profile
             .as_ref()
@@ -511,13 +631,13 @@ mod tests {
     #[test]
     fn wraps_command_with_exported_key_when_no_profile_env() {
         // Without a profile file, wrap still returns a runnable command.
-        let wrapped = wrap_with_company_env("codex");
+        let wrapped = wrap_with_company_env_pref("codex", false);
         assert!(wrapped.contains("codex"));
     }
 
     #[test]
     fn wrap_exports_openai_base_url_alias() {
-        let wrapped = wrap_with_company_env("codex");
+        let wrapped = wrap_with_company_env_pref("codex", false);
         if wrapped != "codex" {
             assert!(
                 wrapped.contains("OPENAI_BASE_URL"),
@@ -532,7 +652,7 @@ mod tests {
 
     #[test]
     fn wrap_exports_anthropic_aliases() {
-        let wrapped = wrap_with_company_env("claude");
+        let wrapped = wrap_with_company_env_pref("claude", false);
         if wrapped != "claude" {
             assert!(
                 wrapped.contains("ANTHROPIC_BASE_URL"),
@@ -597,5 +717,63 @@ mod tests {
             (COMPANY_API_KEY_ENV.into(), "sk-ds".into()),
         ]);
         assert!(anthropic_launch_from_env(&env).is_none());
+    }
+
+    #[test]
+    fn codex_launch_reads_gateway_key_model_and_company_slot() {
+        let env = HashMap::from([
+            (
+                GATEWAY_URL_ENV.into(),
+                "https://www.skilllite.ai/api/gateway/v1".into(),
+            ),
+            (COMPANY_API_KEY_ENV.into(), "sk-team".into()),
+            (MODEL_ENV.into(), "deepseek-v4-flash".into()),
+            (PROVIDER_KIND_ENV.into(), PROVIDER_KIND_COMPANY.into()),
+        ]);
+        let (url, key, model, slot) = codex_launch_from_env(&env).unwrap();
+        assert_eq!(url, "https://www.skilllite.ai/api/gateway/v1");
+        assert_eq!(key, "sk-team");
+        assert_eq!(model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(slot, CODEX_TEAM_SLOT);
+    }
+
+    #[test]
+    fn codex_launch_personal_slot_from_provider_kind() {
+        let env = HashMap::from([
+            (GATEWAY_URL_ENV.into(), "https://api.deepseek.com/v1".into()),
+            (COMPANY_API_KEY_ENV.into(), "sk-ds".into()),
+            (PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into()),
+        ]);
+        let (_, _, _, slot) = codex_launch_from_env(&env).unwrap();
+        assert_eq!(slot, CODEX_PERSONAL_SLOT);
+    }
+
+    #[test]
+    fn codex_launch_infers_team_slot_without_provider_kind() {
+        let env = HashMap::from([
+            (
+                GATEWAY_URL_ENV.into(),
+                "https://www.skilllite.ai/api/gateway/v1".into(),
+            ),
+            (EVOTOWN_API_KEY_ENV.into(), "evk_team".into()),
+        ]);
+        let (_, key, model, slot) = codex_launch_from_env(&env).unwrap();
+        assert_eq!(key, "evk_team");
+        assert!(model.is_none());
+        assert_eq!(slot, CODEX_TEAM_SLOT);
+    }
+
+    #[test]
+    fn codex_launch_requires_gateway_and_key() {
+        assert!(codex_launch_from_env(&HashMap::from([(
+            GATEWAY_URL_ENV.into(),
+            "https://www.skilllite.ai/api/gateway/v1".into(),
+        )]))
+        .is_none());
+        assert!(codex_launch_from_env(&HashMap::from([(
+            COMPANY_API_KEY_ENV.into(),
+            "sk-team".into(),
+        )]))
+        .is_none());
     }
 }
