@@ -4,8 +4,16 @@
 //! Chat/TUI stays in the official CLI (Claude Code deep link or a system terminal).
 
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::fs::{self, OpenOptions};
+#[cfg(target_os = "macos")]
+use std::io::Write;
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -522,26 +530,34 @@ fn open_url(url: &str) -> Result<()> {
 }
 
 fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
-    let cwd_str = cwd.to_string_lossy();
     #[cfg(target_os = "macos")]
     {
-        // Prefer Terminal.app script so cwd + command stay interactive.
+        // Terminal.app's AppleScript `do script` truncates long command strings
+        // (commonly at 1024 bytes). Codex provider overrides can exceed that, so
+        // put the full command in a private temporary script and only send its
+        // short path through AppleScript. The script removes itself immediately.
+        let launch_script = write_macos_terminal_launch_script(cwd, command_line)?;
+        let invoke_script = shell_single_quote(&launch_script.to_string_lossy());
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd {cwd} && {cmd}\"",
-            cwd = escape_applescript(&cwd_str),
-            cmd = escape_applescript(command_line),
+            "tell application \"Terminal\" to do script \"{cmd}\"",
+            cmd = escape_applescript(&invoke_script),
         );
-        let status = Command::new("osascript")
-            .args(["-e", &script])
-            .status()
-            .context("failed to launch Terminal.app")?;
+        let status = match Command::new("osascript").args(["-e", &script]).status() {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = fs::remove_file(&launch_script);
+                return Err(error).context("failed to launch Terminal.app");
+            }
+        };
         if !status.success() {
+            let _ = fs::remove_file(&launch_script);
             bail!("osascript exited with {status}");
         }
         Ok(())
     }
     #[cfg(target_os = "linux")]
     {
+        let cwd_str = cwd.to_string_lossy();
         let shell_cmd = format!(
             "cd {} && exec {}",
             shell_single_quote(&cwd_str),
@@ -564,6 +580,7 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
+        let cwd_str = cwd.to_string_lossy();
         let cd = cwd_str.replace('\'', "''");
         let cmd = command_line.replace('\'', "''");
         let ps = format!("Set-Location -LiteralPath '{cd}'; {cmd}");
@@ -598,6 +615,47 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
         let _ = (cwd, command_line);
         bail!("system terminal launch is not supported on this platform");
     }
+}
+
+#[cfg(target_os = "macos")]
+fn write_macos_terminal_launch_script(cwd: &Path, command_line: &str) -> Result<PathBuf> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir();
+
+    for attempt in 0..16 {
+        let path = dir.join(format!(
+            "agent-doctor-terminal-{}-{nonce}-{attempt}.sh",
+            std::process::id()
+        ));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&path);
+        let mut file = match file {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).context("failed to create terminal launch script");
+            }
+        };
+
+        let script_path = shell_single_quote(&path.to_string_lossy());
+        let cwd = shell_single_quote(&cwd.to_string_lossy());
+        if let Err(error) = writeln!(
+            file,
+            "#!/bin/sh\nrm -f -- {script_path}\ncd {cwd} && {command_line}"
+        ) {
+            let _ = fs::remove_file(&path);
+            return Err(error).context("failed to write terminal launch script");
+        }
+        return Ok(path);
+    }
+
+    bail!("failed to allocate a unique terminal launch script")
 }
 
 fn shell_join(argv: &[&str]) -> String {
@@ -863,5 +921,18 @@ mod tests {
         let argv = codex_launch_argv(Some(&launch));
         assert!(!argv.iter().any(|part| part.starts_with("model=")));
         assert_eq!(codex_launch_argv(None), vec!["codex".to_string()]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_terminal_script_preserves_long_commands_and_removes_itself() {
+        let command = format!("codex {}", "x".repeat(2048));
+        let path = write_macos_terminal_launch_script(Path::new("/tmp/demo project"), &command)
+            .expect("launch script");
+        let rendered = fs::read_to_string(&path).expect("read launch script");
+        assert!(rendered.contains(&command));
+        assert!(rendered.contains("cd '/tmp/demo project' && codex"));
+        assert!(rendered.contains("rm -f -- "));
+        fs::remove_file(path).expect("remove launch script");
     }
 }
