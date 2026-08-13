@@ -5,6 +5,7 @@ mod inventory;
 mod jobs;
 mod policy;
 mod preferred_runtime;
+mod register;
 mod sync;
 
 pub use client::{check_evotown_connectivity, EvotownClient, EvotownHealthReport};
@@ -31,6 +32,10 @@ pub use policy::{execute_policy_pull, PolicyPullReport};
 pub use preferred_runtime::{
     preferred_runtime_status, read_preferred_runtime_from_env_file, resolve_preferred_runtime,
     set_preferred_runtime, PreferredRuntimeStatus,
+};
+pub use register::{
+    execute_register, resolve_engine_type, RegisterOptions, RegisterReport,
+    BOOTSTRAP_INGEST_TOKEN_ENV, ENGINE_ID_ENV, ENGINE_INGEST_TOKEN_ENV,
 };
 pub use sync::{execute_sync, SkillSyncOutcome, SyncOptions, SyncReport};
 

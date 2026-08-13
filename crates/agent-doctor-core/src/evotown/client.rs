@@ -34,6 +34,10 @@ impl EvotownClient {
         self.request(Method::GET, path, None)
     }
 
+    pub fn post_json(&self, path: &str, body: Value) -> Result<Value> {
+        self.request(Method::POST, path, Some(body))
+    }
+
     pub fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let url = self.resolve_url(path);
         let response = self

@@ -23,15 +23,15 @@ pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter}
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
-    execute_evotown_onboarding, execute_job, execute_policy_pull, execute_sync,
+    execute_evotown_onboarding, execute_job, execute_policy_pull, execute_register, execute_sync,
     is_known_dispatch_runtime, known_dispatch_runtimes, list_skills_inventory,
     list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
     mount_synced_skills, normalize_runtime, preferred_runtime_status, resolve_preferred_runtime,
     resolve_runtime, run_connect_loop, set_preferred_runtime, unmount_synced_skills, AssignedJob,
     ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
-    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, SkillAgentUsage,
-    SkillInventoryItem, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncOptions, SyncReport,
+    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, RegisterOptions,
+    RegisterReport, SkillAgentUsage, SkillInventoryItem, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
 };
 pub use exec::{ExecBackend, ExecOutput, LocalBackend};
 pub use install::{

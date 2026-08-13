@@ -86,7 +86,7 @@ pub fn set_preferred_runtime(runtime: &str) -> Result<PreferredRuntimeStatus> {
     }
 
     let path = evotown_agent_env_path().context("could not resolve evotown.agent.env path")?;
-    upsert_env_key(&path, EVOTOWN_RUNTIME_ENV, &normalized)?;
+    crate::setup::upsert_evotown_agent_env_key(&path, EVOTOWN_RUNTIME_ENV, &normalized)?;
 
     let mut status = preferred_runtime_status();
     // Ensure we reflect the value just written even if process env overrides.
@@ -97,48 +97,6 @@ pub fn set_preferred_runtime(runtime: &str) -> Result<PreferredRuntimeStatus> {
         .any(|rt| rt.id == normalized && rt.installed);
     status.env_path = Some(path.display().to_string());
     Ok(status)
-}
-
-fn upsert_env_key(path: &Path, key: &str, value: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let mut lines: Vec<String> = if path.exists() {
-        fs::read_to_string(path)?
-            .lines()
-            .map(|l| l.to_string())
-            .collect()
-    } else {
-        vec!["# Evotown employee agent config — written by Agent Doctor".to_string()]
-    };
-
-    let mut replaced = false;
-    for line in lines.iter_mut() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
-            continue;
-        }
-        let Some((k, _)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if k.trim() == key {
-            *line = format!("{key}={value}");
-            replaced = true;
-            break;
-        }
-    }
-    if !replaced {
-        lines.push(format!("{key}={value}"));
-    }
-
-    fs::write(path, lines.join("\n") + "\n")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -155,7 +113,8 @@ mod tests {
             "EVOTOWN_URL=https://www.skilllite.ai\nEVOTOWN_ENGINE_ID=doctor-1\nEVOTOWN_RUNTIME=openclaw\n",
         )
         .unwrap();
-        upsert_env_key(&path, EVOTOWN_RUNTIME_ENV, "claude-code").unwrap();
+        crate::setup::upsert_evotown_agent_env_key(&path, EVOTOWN_RUNTIME_ENV, "claude-code")
+            .unwrap();
         let raw = fs::read_to_string(&path).unwrap();
         assert!(raw.contains("EVOTOWN_URL=https://www.skilllite.ai"));
         assert!(raw.contains("EVOTOWN_ENGINE_ID=doctor-1"));

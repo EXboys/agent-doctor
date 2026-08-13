@@ -192,6 +192,77 @@ pub fn evotown_agent_env_path() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join("evotown").join("evotown.agent.env"))
 }
 
+/// Upsert a single `KEY=value` line in `evotown.agent.env` without wiping other keys.
+pub fn upsert_evotown_agent_env_key(path: &Path, key: &str, value: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut lines: Vec<String> = if path.exists() {
+        fs::read_to_string(path)?
+            .lines()
+            .map(|l| l.to_string())
+            .collect()
+    } else {
+        vec!["# Evotown employee agent config — written by Agent Doctor".to_string()]
+    };
+
+    let mut replaced = false;
+    for line in lines.iter_mut() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
+            continue;
+        }
+        let Some((k, _)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if k.trim() == key {
+            *line = format!("{key}={value}");
+            replaced = true;
+            break;
+        }
+    }
+    if !replaced {
+        lines.push(format!("{key}={value}"));
+    }
+
+    fs::write(path, lines.join("\n") + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Remove KEY=… lines (used when retiring legacy `EVOTOWN_INGEST_TOKEN`).
+pub fn remove_evotown_agent_env_key(path: &Path, key: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let lines: Vec<String> = fs::read_to_string(path)?
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
+                return true;
+            }
+            trimmed
+                .split_once('=')
+                .map(|(k, _)| k.trim() != key)
+                .unwrap_or(true)
+        })
+        .map(|l| l.to_string())
+        .collect();
+    fs::write(path, lines.join("\n") + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
 pub fn default_evotown_skills_dir() -> PathBuf {
     dirs::home_dir()
         .map(|home| home.join(".evotown").join("skills"))
@@ -208,8 +279,35 @@ pub fn write_evotown_agent_env(
         fs::create_dir_all(parent)?;
     }
 
+    // Preserve engine register credentials across setup rewrites.
+    let existing = if path.exists() {
+        fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let preserve_keys = [
+        "EVOTOWN_ENGINE_ID",
+        "EVOTOWN_ENGINE_INGEST_TOKEN",
+        "EVOTOWN_TEAM_ID",
+        "EVOTOWN_ENGINE_NAME",
+        "EVOTOWN_DEPLOYMENT_KIND",
+    ];
+    let mut preserved: Vec<String> = Vec::new();
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
+            continue;
+        }
+        let Some((key, _)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if preserve_keys.contains(&key.trim()) {
+            preserved.push(trimmed.to_string());
+        }
+    }
+
     let base = base_url.trim().trim_end_matches('/');
-    let lines = [
+    let mut lines = vec![
         "# Evotown employee agent config — written by Agent Doctor setup".to_string(),
         format!("{EVOTOWN_URL_ENV}={base}"),
         format!("{EVOTOWN_API_KEY_ENV}={api_key}"),
@@ -222,6 +320,7 @@ pub fn write_evotown_agent_env(
         format!("# Gateway for OpenAI-compatible clients: {base}/api/gateway/v1"),
         format!("# Gateway for Claude Code: {base}/api/gateway/anthropic"),
     ];
+    lines.extend(preserved);
 
     fs::write(&path, lines.join("\n") + "\n")?;
     #[cfg(unix)]

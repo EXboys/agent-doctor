@@ -55,7 +55,8 @@ pub fn load_doctor_node_config() -> Result<DoctorNodeConfig> {
     )?;
     if !path.exists() {
         bail!(
-            "missing {} — run `agent-doctor setup --url <evotown> --key evk_...` then register an engine",
+            "missing {} — run `agent-doctor setup --url <evotown> --key evk_...` then \
+             `agent-doctor register --bootstrap-token <IT-token>`",
             path.display()
         );
     }
@@ -80,8 +81,8 @@ pub fn load_doctor_node_config_from_path(path: &Path) -> Result<DoctorNodeConfig
         .filter(|v| !v.is_empty())
         .with_context(|| {
             format!(
-                "EVOTOWN_ENGINE_ID is required in {} — register with \
-                 `evotown-agent-setup.py register --save-token`",
+                "EVOTOWN_ENGINE_ID is required in {} — run \
+                 `agent-doctor register --bootstrap-token <IT-token>`",
                 path.display()
             )
         })?;
@@ -95,7 +96,7 @@ pub fn load_doctor_node_config_from_path(path: &Path) -> Result<DoctorNodeConfig
         .with_context(|| {
             format!(
                 "EVOTOWN_ENGINE_INGEST_TOKEN (evi_…) is required in {} — run \
-                 `evotown-agent-setup.py register --save-token` with IT bootstrap token",
+                 `agent-doctor register --bootstrap-token <IT-token>`",
                 path.display()
             )
         })?;
