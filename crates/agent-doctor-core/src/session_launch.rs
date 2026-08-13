@@ -19,7 +19,8 @@ use crate::profile::{
     PROVIDER_KIND_PERSONAL,
 };
 use crate::setup::merge::{
-    apply_claude_code, apply_codex_slot, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
+    apply_claude_code, apply_codex_slot, codex_slot_display_name, codex_slot_env_key,
+    CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
 };
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
@@ -188,29 +189,54 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
     Ok(report)
 }
 
-/// Build `codex -c model_provider=openai -c openai_base_url=… -c model=…`.
+/// Build a self-contained `codex -c …` invocation that defines the whole slot
+/// provider table inline, so launch does not depend on `~/.codex/config.toml`
+/// being present or current.
 ///
-/// Force the built-in `openai` provider through the Agent Doctor gateway via
-/// `openai_base_url`. This does not require a pre-existing
-/// `[model_providers.company]` table (unlike `-c model_provider=company`).
+/// Do NOT route through Codex's built-in `openai` provider: it carries
+/// `supports_websockets` and `requires_openai_auth`, which make third-party
+/// gateways reject the handshake with 401 on `wss://<host>/v1/responses`.
+/// The inline table mirrors exactly what `write_codex_provider_config` writes.
 fn codex_launch_argv(launch: Option<&(String, String, Option<String>, String)>) -> Vec<String> {
-    let Some((url, _, model, _)) = launch else {
+    let Some((url, _, model, slot)) = launch else {
         return vec!["codex".to_string()];
     };
-    let mut argv = vec![
-        "codex".to_string(),
-        "-c".to_string(),
-        "model_provider=openai".to_string(),
-        "-c".to_string(),
-        format!("openai_base_url={url}"),
-    ];
+    let mut argv = vec!["codex".to_string()];
+    let mut set = |key: &str, value: String| {
+        argv.push("-c".to_string());
+        argv.push(format!("{key}={value}"));
+    };
+    let prefix = format!("model_providers.{slot}");
+    set(
+        &format!("{prefix}.name"),
+        toml_string(codex_slot_display_name(slot)),
+    );
+    set(&format!("{prefix}.base_url"), toml_string(url));
+    set(
+        &format!("{prefix}.env_key"),
+        toml_string(codex_slot_env_key(slot)),
+    );
+    set(&format!("{prefix}.wire_api"), toml_string("responses"));
+    set(
+        &format!("{prefix}.requires_openai_auth"),
+        "false".to_string(),
+    );
+    set(
+        &format!("{prefix}.supports_websockets"),
+        "false".to_string(),
+    );
+    set("model_provider", toml_string(slot));
     // Only pin the model when the active profile names one; otherwise leave the
     // user's own `model` in config.toml alone.
     if let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
-        argv.push("-c".to_string());
-        argv.push(format!("model={model_id}"));
+        set("model", toml_string(model_id));
     }
     argv
+}
+
+/// Quote a value as a TOML basic string so `codex -c key=value` parses it as a string.
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Resolve OpenAI-compatible gateway + key (+ optional model/slot) from active overlays.
@@ -769,8 +795,12 @@ mod tests {
         .is_none());
     }
 
+    fn has_override(argv: &[String], expected: &str) -> bool {
+        argv.windows(2).any(|w| w[0] == "-c" && w[1] == expected)
+    }
+
     #[test]
-    fn codex_launch_argv_forces_openai_base_url_override() {
+    fn codex_launch_argv_defines_team_provider_inline() {
         let launch = (
             "https://www.skilllite.ai/api/gateway/v1".to_string(),
             "sk-team".to_string(),
@@ -779,19 +809,20 @@ mod tests {
         );
         let argv = codex_launch_argv(Some(&launch));
         assert_eq!(argv[0], "codex");
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "-c" && w[1] == "model_provider=openai"));
-        assert!(argv.windows(2).any(|w| {
-            w[0] == "-c" && w[1] == "openai_base_url=https://www.skilllite.ai/api/gateway/v1"
-        }));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "-c" && w[1] == "model=deepseek-v4-flash"));
+        assert!(has_override(&argv, "model_provider=\"company\""));
+        assert!(has_override(
+            &argv,
+            "model_providers.company.base_url=\"https://www.skilllite.ai/api/gateway/v1\""
+        ));
+        assert!(has_override(
+            &argv,
+            "model_providers.company.env_key=\"EVOTOWN_API_KEY\""
+        ));
+        assert!(has_override(&argv, "model=\"deepseek-v4-flash\""));
     }
 
     #[test]
-    fn codex_launch_argv_overrides_personal_gateway_too() {
+    fn codex_launch_argv_never_uses_builtin_openai_provider() {
         let launch = (
             "https://api.deepseek.com/v1".to_string(),
             "sk-ds".to_string(),
@@ -799,12 +830,26 @@ mod tests {
             CODEX_PERSONAL_SLOT.to_string(),
         );
         let argv = codex_launch_argv(Some(&launch));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "-c" && w[1] == "openai_base_url=https://api.deepseek.com/v1"));
-        assert!(argv
-            .windows(2)
-            .any(|w| w[0] == "-c" && w[1] == "model=deepseek-v4-flash"));
+        // Built-in `openai` negotiates websockets + OpenAI auth, which third-party
+        // gateways reject with 401 on wss://<host>/v1/responses.
+        assert!(!has_override(&argv, "model_provider=\"openai\""));
+        assert!(has_override(&argv, "model_provider=\"personal\""));
+        assert!(has_override(
+            &argv,
+            "model_providers.personal.supports_websockets=false"
+        ));
+        assert!(has_override(
+            &argv,
+            "model_providers.personal.requires_openai_auth=false"
+        ));
+        assert!(has_override(
+            &argv,
+            "model_providers.personal.wire_api=\"responses\""
+        ));
+        assert!(has_override(
+            &argv,
+            "model_providers.personal.base_url=\"https://api.deepseek.com/v1\""
+        ));
     }
 
     #[test]

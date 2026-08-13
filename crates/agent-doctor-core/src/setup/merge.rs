@@ -726,7 +726,15 @@ pub fn apply_codex_slot(
     })
 }
 
-fn codex_slot_env_key(slot: &str) -> &'static str {
+pub(crate) fn codex_slot_display_name(slot: &str) -> &'static str {
+    if slot == CODEX_TEAM_SLOT {
+        "Company Gateway"
+    } else {
+        "Personal Provider"
+    }
+}
+
+pub(crate) fn codex_slot_env_key(slot: &str) -> &'static str {
     if slot == CODEX_TEAM_SLOT {
         // Prefer Evotown key so personal DeepSeek OPENAI_API_KEY does not shadow team.
         "EVOTOWN_API_KEY"
@@ -757,11 +765,7 @@ fn write_codex_provider_config(
     // unless this top-level override is set — custom model_providers alone is not enough.
     doc["openai_base_url"] = toml_edit::value(gateway_url);
 
-    let display = if slot == CODEX_TEAM_SLOT {
-        "Company Gateway"
-    } else {
-        "Personal Provider"
-    };
+    let display = codex_slot_display_name(slot);
 
     let providers =
         doc["model_providers"].or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
