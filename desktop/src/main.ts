@@ -142,6 +142,23 @@ interface EvotownStatus {
   bundle_id: string | null;
 }
 
+interface EngineRegisterStatus {
+  registered: boolean;
+  engine_id: string | null;
+  env_path: string | null;
+}
+
+interface RegisterReport {
+  base_url: string;
+  engine_id: string;
+  engine_type: string;
+  ingest_token_issued: boolean;
+  ingest_token: string | null;
+  saved_to: string | null;
+  rotated: boolean;
+  detail: string;
+}
+
 interface OnboardingReport {
   setup: {
     gateway_url: string;
@@ -328,6 +345,16 @@ const evotownKeyEl = document.querySelector<HTMLInputElement>("#evotown-key")!;
 const evotownConnectEl = document.querySelector<HTMLButtonElement>("#evotown-connect")!;
 const evotownResyncEl = document.querySelector<HTMLButtonElement>("#evotown-resync")!;
 const evotownHintEl = document.querySelector<HTMLElement>("#evotown-hint")!;
+const evotownEngineEl = document.querySelector<HTMLElement>("#evotown-engine")!;
+const evotownEngineBadgeEl = document.querySelector<HTMLElement>("#evotown-engine-badge")!;
+const evotownEngineStatusEl = document.querySelector<HTMLElement>("#evotown-engine-status")!;
+const evotownEngineFormEl = document.querySelector<HTMLFormElement>("#evotown-engine-form")!;
+const evotownBootstrapEl = document.querySelector<HTMLInputElement>("#evotown-bootstrap")!;
+const evotownEngineIdEl = document.querySelector<HTMLInputElement>("#evotown-engine-id")!;
+const evotownEngineRotateEl = document.querySelector<HTMLInputElement>("#evotown-engine-rotate")!;
+const evotownEngineRegisterEl =
+  document.querySelector<HTMLButtonElement>("#evotown-engine-register")!;
+const evotownEngineHintEl = document.querySelector<HTMLElement>("#evotown-engine-hint")!;
 const skillsInventoryEl = document.querySelector<HTMLElement>("#skills-inventory")!;
 const skillsRefreshEl = document.querySelector<HTMLButtonElement>("#skills-refresh")!;
 const skillsMountAllEl = document.querySelector<HTMLButtonElement>("#skills-mount-all")!;
@@ -2026,12 +2053,16 @@ function renderEvotownStatus(status: EvotownStatus) {
     evotownConnectedMetaEl.title = status.api_key_hint ?? "";
     evotownUrlEl.value = status.base_url;
     evotownResyncEl.hidden = false;
+    evotownEngineEl.hidden = false;
+    void loadEngineRegisterStatus();
     void loadSkillsInventory();
   } else {
     evotownStatusEl.textContent = t("evotown.notConfigured");
     evotownConnectedMetaEl.textContent = "";
     evotownConnectedMetaEl.title = "";
     evotownResyncEl.hidden = true;
+    evotownEngineEl.hidden = true;
+    evotownEngineHintEl.textContent = "";
     skillsInventoryEl.hidden = true;
   }
 }
@@ -2610,6 +2641,59 @@ async function runEvotownOnboarding() {
   } finally {
     evotownConnectEl.disabled = false;
     evotownResyncEl.disabled = false;
+  }
+}
+
+async function loadEngineRegisterStatus() {
+  try {
+    const status = await invoke<EngineRegisterStatus>("get_engine_register_status_command");
+    if (status.registered && status.engine_id) {
+      evotownEngineStatusEl.textContent = t("evotown.engineReady", { id: status.engine_id });
+      evotownEngineBadgeEl.hidden = false;
+      evotownEngineBadgeEl.className = "badge ok";
+      evotownEngineBadgeEl.textContent = t("evotown.engineBadgeOk");
+      if (!evotownEngineIdEl.value.trim()) {
+        evotownEngineIdEl.value = status.engine_id;
+      }
+    } else {
+      evotownEngineStatusEl.textContent = t("evotown.engineMissing");
+      evotownEngineBadgeEl.hidden = false;
+      evotownEngineBadgeEl.className = "badge muted";
+      evotownEngineBadgeEl.textContent = t("evotown.engineBadgeMissing");
+    }
+  } catch (error) {
+    evotownEngineStatusEl.textContent = t("evotown.engineRegisterFailed", {
+      error: String(error),
+    });
+    evotownEngineBadgeEl.hidden = true;
+  }
+}
+
+async function runEngineRegister() {
+  const bootstrap = evotownBootstrapEl.value.trim();
+  if (!bootstrap) {
+    evotownEngineHintEl.textContent = t("evotown.engineTokenRequired");
+    return;
+  }
+
+  evotownEngineRegisterEl.disabled = true;
+  evotownEngineHintEl.textContent = t("evotown.engineRegistering");
+  try {
+    const report = await invoke<RegisterReport>("run_engine_register_command", {
+      bootstrapToken: bootstrap,
+      engineId: evotownEngineIdEl.value.trim() || null,
+      rotate: evotownEngineRotateEl.checked,
+    });
+    evotownBootstrapEl.value = "";
+    evotownEngineRotateEl.checked = false;
+    await loadEngineRegisterStatus();
+    evotownEngineHintEl.textContent = t("evotown.engineRegisterOk", { id: report.engine_id });
+  } catch (error) {
+    evotownEngineHintEl.textContent = t("evotown.engineRegisterFailed", {
+      error: String(error),
+    });
+  } finally {
+    evotownEngineRegisterEl.disabled = false;
   }
 }
 
@@ -4056,6 +4140,11 @@ evotownFormEl.addEventListener("submit", (event) => {
 
 evotownResyncEl.addEventListener("click", () => {
   void resyncEvotownSkills();
+});
+
+evotownEngineFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void runEngineRegister();
 });
 
 skillsRefreshEl.addEventListener("click", () => {

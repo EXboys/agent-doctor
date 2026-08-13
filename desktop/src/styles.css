@@ -1132,7 +1132,7 @@ body::before {
   color: var(--text-soft);
 }
 
-.evotown-section.is-connected .evotown-form .field-row {
+.evotown-section.is-connected #evotown-form .field-row {
   display: none;
 }
 
@@ -1142,6 +1142,36 @@ body::before {
 
 .evotown-section.is-connected #evotown-resync {
   display: inline-flex;
+}
+
+.evotown-engine {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+.section-label-compact {
+  margin-bottom: 0;
+}
+
+.section-label-compact h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.field-row-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.field-row-check input {
+  margin: 0;
 }
 
 .skills-inventory {
