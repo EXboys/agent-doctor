@@ -259,6 +259,31 @@
               </div>
             </form>
             <p id="evotown-hint" class="section-footnote"></p>
+            <div id="evotown-engine" class="evotown-engine" hidden>
+              <div class="section-label section-label-compact">
+                <h3 data-i18n="evotown.engineTitle">引擎注册</h3>
+                <span id="evotown-engine-badge" class="badge muted" hidden></span>
+              </div>
+              <p id="evotown-engine-status" class="section-hint" data-i18n="evotown.engineLoading">检查引擎…</p>
+              <form id="evotown-engine-form" class="evotown-form" autocomplete="off">
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="evotown.bootstrapToken">Bootstrap</span>
+                  <input id="evotown-bootstrap" class="field-input" type="password" placeholder="IT bootstrap token" autocomplete="off" />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="evotown.engineId">Engine ID</span>
+                  <input id="evotown-engine-id" class="field-input" type="text" placeholder="optional" autocomplete="off" />
+                </label>
+                <label class="field-row field-row-check">
+                  <input id="evotown-engine-rotate" type="checkbox" />
+                  <span data-i18n="evotown.engineRotate">轮换 evi_ token</span>
+                </label>
+                <div class="evotown-actions">
+                  <button id="evotown-engine-register" type="submit" class="btn-primary" data-i18n="evotown.engineRegister">注册引擎</button>
+                </div>
+              </form>
+              <p id="evotown-engine-hint" class="section-footnote"></p>
+            </div>
             <div id="skills-inventory" class="skills-inventory" hidden>
               <div class="skills-inventory-head">
                 <h3 data-i18n="skills.title">Skills</h3>

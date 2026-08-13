@@ -2,24 +2,25 @@ use agent_doctor_core::{
     activate_personal_provider, add_host, add_project, apply_profile_model,
     browser_configured_runtimes, build_repair_preview_from_bundle, delete_personal_provider,
     evotown_status, execute_evotown_onboarding, execute_install_with_progress,
-    execute_personal_provider_setup, execute_repair, execute_sync, init_workspace,
+    execute_personal_provider_setup, execute_register, execute_repair, execute_sync, init_workspace,
     list_mcp_inventory, list_personal_providers, list_runtime_backup_ids,
-    list_skills_inventory_with_options, load_evotown_config, load_mode_status,
-    load_personal_provider_status, load_profiles, load_remote_hosts, load_workspaces,
-    mount_synced_skills, needs_binary_install, open_interactive_session, probe_runtime,
-    remove_host, remove_project, resolve_agent_doctor_binary, restore_runtime_backup, run_doctor,
-    run_remote_doctor, runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
-    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills, upsert_personal_provider,
-    use_profile, use_workspace_with_options, verify_personal_provider_with_protocol,
-    workspace_doctor, workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus,
-    HermesAdapter, HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions,
-    InstallProgressEvent, InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport,
-    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
-    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus, ProfilesDocument,
-    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions,
-    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions,
-    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
+    list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
+    load_mode_status, load_personal_provider_status, load_profiles, load_remote_hosts,
+    load_workspaces, mount_synced_skills, needs_binary_install, open_interactive_session,
+    probe_runtime, remove_host, remove_project, resolve_agent_doctor_binary, restore_runtime_backup,
+    run_doctor, run_remote_doctor, runtime_supports_playbook, set_runtime_model,
+    suggest_runtime_repairs, switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills,
+    upsert_personal_provider, use_profile, use_workspace_with_options,
+    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
+    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
+    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
+    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
+    ProfilesDocument, RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport,
+    RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
+    RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
     UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
     WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
     WorkspacesDocument,
@@ -432,6 +433,57 @@ fn run_sync_command() -> Result<SyncReport, String> {
             bundle_id: None,
         },
     )
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct EngineRegisterStatus {
+    registered: bool,
+    engine_id: Option<String>,
+    env_path: Option<String>,
+}
+
+#[tauri::command]
+fn get_engine_register_status_command() -> EngineRegisterStatus {
+    let env_path = agent_doctor_core::evotown_agent_env_path().map(|p| p.display().to_string());
+    match load_doctor_node_config() {
+        Ok(config) => EngineRegisterStatus {
+            registered: true,
+            engine_id: Some(config.engine_id),
+            env_path: Some(config.config_source),
+        },
+        Err(_) => EngineRegisterStatus {
+            registered: false,
+            engine_id: None,
+            env_path,
+        },
+    }
+}
+
+#[tauri::command]
+fn run_engine_register_command(
+    bootstrap_token: String,
+    engine_id: Option<String>,
+    rotate: bool,
+) -> Result<RegisterReport, String> {
+    let token = bootstrap_token.trim();
+    if token.is_empty() {
+        return Err("bootstrap token is required".into());
+    }
+    execute_register(&RegisterOptions {
+        bootstrap_token: Some(token.to_string()),
+        engine_id: engine_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        engine_type: None,
+        runtime: None,
+        display_name: None,
+        owner_team: None,
+        deployment_kind: None,
+        engine_version: None,
+        rotate,
+        save_token: true,
+    })
     .map_err(|error| error.to_string())
 }
 
@@ -1219,6 +1271,8 @@ pub fn run() {
             get_evotown_status_command,
             run_evotown_onboarding_command,
             run_sync_command,
+            get_engine_register_status_command,
+            run_engine_register_command,
             list_skills_inventory_command,
             list_mcp_inventory_command,
             mcp_status_command,
