@@ -472,6 +472,66 @@ fn process_command_line(pid: u32) -> Option<String> {
     }
 }
 
+fn process_parent_pid(pid: u32) -> Option<u32> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+fn automation_markers_from_command(cmd: &str, ancestor: bool) -> Vec<String> {
+    let lower = cmd.to_ascii_lowercase();
+    let mut markers = Vec::new();
+    if lower.contains("--enable-automation") {
+        markers.push("--enable-automation".to_string());
+    }
+    if lower.contains("--test-type=webdriver") {
+        markers.push("--test-type=webdriver".to_string());
+    }
+    if lower.contains("chromedriver") {
+        markers.push(if ancestor {
+            "ChromeDriver ancestor process".to_string()
+        } else {
+            "ChromeDriver listener process".to_string()
+        });
+    }
+    markers
+}
+
+/// Return strong signs that the browser listening on `port` belongs to
+/// ChromeDriver rather than a Chrome process launched directly for CDP.
+///
+/// This is intentionally conservative: generic headless/CDP flags are not
+/// considered suspicious because Agent Doctor uses them itself.
+pub fn cdp_automation_markers(port: u16) -> Vec<String> {
+    let mut markers = Vec::new();
+    for pid in pids_listening_on_port(port) {
+        if let Some(cmd) = process_command_line(pid) {
+            markers.extend(automation_markers_from_command(&cmd, false));
+        }
+
+        // ChromeDriver normally remains an ancestor of the browser process.
+        // Walk a few levels to account for shell/wrapper processes.
+        let mut current = pid;
+        for _ in 0..4 {
+            let Some(parent) = process_parent_pid(current).filter(|parent| *parent > 1) else {
+                break;
+            };
+            if let Some(cmd) = process_command_line(parent) {
+                markers.extend(automation_markers_from_command(&cmd, true));
+            }
+            current = parent;
+        }
+    }
+    markers.sort();
+    markers.dedup();
+    markers
+}
+
 /// Whether the Chrome (or Chromium) listening on `port` was started with `--headless`.
 /// Returns `None` if nothing is listening or the mode cannot be determined.
 pub fn cdp_port_is_headless(port: u16) -> Option<bool> {
@@ -648,5 +708,29 @@ mod tests {
                 discovery.binary_path, discovery.version
             );
         }
+    }
+
+    #[test]
+    fn detects_strong_chromedriver_process_markers() {
+        assert_eq!(
+            automation_markers_from_command(
+                "/tmp/chrome --remote-debugging-port=9222 --enable-automation",
+                false
+            ),
+            vec!["--enable-automation"]
+        );
+        assert_eq!(
+            automation_markers_from_command("/opt/bin/chromedriver --port=9515", true),
+            vec!["ChromeDriver ancestor process"]
+        );
+    }
+
+    #[test]
+    fn accepts_direct_cdp_chrome_command() {
+        assert!(automation_markers_from_command(
+            "/Applications/Google Chrome --remote-debugging-port=9222 --headless=new",
+            false
+        )
+        .is_empty());
     }
 }
