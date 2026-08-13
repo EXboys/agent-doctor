@@ -21,7 +21,7 @@
 - [x] `agent-doctor connect` — WebSocket presence + inventory + **job.assign execution** (Claude/Codex CLI, OpenClaw/Hermes hooks)
 - [ ] Company profile: `--url` + API key (generic non-Evotown control planes)
 - [ ] Compliance report export for IT / DevEx support workflows
-- [ ] `agent-doctor register` — migrate engine register from evotown-agent-setup.py
+- [x] `agent-doctor register` — migrate engine register from evotown-agent-setup.py
 
 ### Hermes repair (shipped vs planned)
 

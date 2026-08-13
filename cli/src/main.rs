@@ -139,6 +139,36 @@ enum Commands {
         #[arg(long, default_value_t = 60)]
         max_backoff: u64,
     },
+    /// Register this machine as an Evotown engine (writes evi_ for connect)
+    Register {
+        /// IT bootstrap ingest token (or set EVOTOWN_INGEST_TOKEN)
+        #[arg(long = "bootstrap-token")]
+        bootstrap_token: Option<String>,
+        /// Engine id (default: <runtime>-<user> or existing EVOTOWN_ENGINE_ID)
+        #[arg(long = "engine-id")]
+        engine_id: Option<String>,
+        /// Evotown engine_type (default: derived from --runtime)
+        #[arg(long = "engine-type")]
+        engine_type: Option<String>,
+        /// Preferred local runtime / engine type hint (openclaw, hermes, claude-code, …)
+        #[arg(long)]
+        runtime: Option<String>,
+        /// Display name in Evotown fleet
+        #[arg(long = "name")]
+        display_name: Option<String>,
+        /// Owner team id
+        #[arg(long = "team")]
+        owner_team: Option<String>,
+        /// Mint a new evi_ even if this engine_id already exists
+        #[arg(long)]
+        rotate: bool,
+        /// Print the issued token but do not write evotown.agent.env
+        #[arg(long = "no-save-token")]
+        no_save_token: bool,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Default local agent runtime for Evotown job dispatch (`EVOTOWN_RUNTIME`)
     #[command(name = "preferred-runtime")]
     PreferredRuntime {
@@ -620,6 +650,31 @@ fn main() -> Result<()> {
             heartbeat_interval,
             max_backoff,
         } => commands::connect::run(inventory_interval, heartbeat_interval, max_backoff)?,
+        Commands::Register {
+            bootstrap_token,
+            engine_id,
+            engine_type,
+            runtime,
+            display_name,
+            owner_team,
+            rotate,
+            no_save_token,
+            json,
+        } => commands::register::run(
+            agent_doctor_core::RegisterOptions {
+                bootstrap_token,
+                engine_id,
+                engine_type,
+                runtime,
+                display_name,
+                owner_team,
+                deployment_kind: None,
+                engine_version: None,
+                rotate,
+                save_token: !no_save_token,
+            },
+            json,
+        )?,
         Commands::PreferredRuntime { action } => match action {
             PreferredRuntimeAction::Show { json } => commands::preferred_runtime::show(json)?,
             PreferredRuntimeAction::Use { runtime, json } => {

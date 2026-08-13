@@ -8,6 +8,7 @@ pub mod open_session;
 pub mod policy;
 pub mod preferred_runtime;
 pub mod profile;
+pub mod register;
 pub mod remote;
 pub mod repair;
 pub mod setup;

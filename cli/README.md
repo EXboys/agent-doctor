@@ -25,6 +25,7 @@ cargo run -p agent-doctor -- doctor --json
 | `setup --url --key` | Evotown/company profile → profile.env + evotown.agent.env + runtime configs |
 | `sync` | Pull SkillHub bundle from Evotown (replaces `evotown-agent-setup.py sync`) |
 | `policy pull` | Cache Evotown policies to `~/.config/evotown/policies-cache.json` |
+| `register` | Register laptop engine; write `evi_` (replaces `evotown-agent-setup.py register`) |
 | `connect` | WebSocket presence + inventory + job.assign execution |
 | `preferred-runtime show/use` | Default local runtime for Evotown dispatch (`EVOTOWN_RUNTIME`) |
 | `open <runtime>` | Open interactive CLI (Claude Code deep link, else system terminal) |

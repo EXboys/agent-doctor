@@ -31,7 +31,8 @@ With **Evotown** (first-party control plane) — the **B** increment on top of d
 agent-doctor setup --url https://your-evotown.example.com --key evk_...
 agent-doctor sync          # Pull private SkillHub bundle
 agent-doctor policy pull   # Cache policies locally
-agent-doctor connect       # WebSocket online + inventory (needs evi_ after register)
+agent-doctor register --bootstrap-token <IT-token>  # Write evi_ for connect
+agent-doctor connect       # WebSocket online + inventory + job.assign
 ```
 
 See [docs/enterprise.md](docs/enterprise.md) and [docs/product-boundary.md](docs/product-boundary.md).
