@@ -672,17 +672,6 @@ pub fn apply_codex(
     apply_codex_slot(gateway_url, _api_key, model, None)
 }
 
-/// Hosts that speak OpenAI Chat Completions but not Codex's required `/v1/responses`.
-/// Pointing Codex `wire_api = "responses"` at these yields HTTP 404.
-pub fn codex_host_supports_responses_api(gateway_url: &str) -> bool {
-    let lower = gateway_url.to_ascii_lowercase();
-    // Official DeepSeek API: chat/completions only (verified 2026-07).
-    if lower.contains("api.deepseek.com") {
-        return false;
-    }
-    true
-}
-
 /// Additive Codex wiring: upsert `model_providers.{company|personal}`, point
 /// `model_provider` at the active slot, leave the other slot intact.
 ///
@@ -703,20 +692,6 @@ pub fn apply_codex_slot(
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| infer_codex_hermes_slot(gateway_url).to_string());
-
-    if slot == CODEX_PERSONAL_SLOT && !codex_host_supports_responses_api(gateway_url) {
-        return Ok(RuntimeSetupResult {
-            runtime_id: "codex".to_string(),
-            display_name: "Codex CLI".to_string(),
-            applied: false,
-            message: format!(
-                "skipped — Codex requires OpenAI Responses API (/v1/responses); \
-                 {gateway_url} only exposes chat/completions (404 on /responses). \
-                 Use Team/Evotown for Codex, or put a Responses→Chat bridge in front."
-            ),
-            ..Default::default()
-        });
-    }
 
     let path = home_join(".codex/config.toml");
     let backup_path = backup_file(&path)?;
@@ -829,16 +804,22 @@ mod codex_responses_tests {
     use tempfile::tempdir;
 
     #[test]
-    fn deepseek_official_is_chat_only_for_codex() {
-        assert!(!codex_host_supports_responses_api(
-            "https://api.deepseek.com/v1"
-        ));
-        assert!(codex_host_supports_responses_api(
-            "https://www.skilllite.ai/api/gateway/v1"
-        ));
-        assert!(codex_host_supports_responses_api(
-            "https://api.openai.com/v1"
-        ));
+    fn personal_slot_is_wired_for_any_openai_compatible_host() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        write_codex_provider_config(
+            &path,
+            "https://api.deepseek.com/v1",
+            "deepseek-v4-flash",
+            CODEX_PERSONAL_SLOT,
+        )
+        .unwrap();
+
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("model_provider = \"personal\""));
+        assert!(rendered.contains("openai_base_url = \"https://api.deepseek.com/v1\""));
+        assert!(rendered.contains("base_url = \"https://api.deepseek.com/v1\""));
+        assert!(rendered.contains("model = \"deepseek-v4-flash\""));
     }
 
     #[test]

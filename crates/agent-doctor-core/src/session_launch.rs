@@ -15,12 +15,11 @@ use crate::evotown::{load_evotown_config, normalize_runtime};
 #[cfg(windows)]
 use crate::profile::read_company_profile;
 use crate::profile::{
-    agent_profile_path, company_baseline_path, read_env_map, GATEWAY_URL_ENV,
-    PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
+    agent_profile_path, read_env_map, GATEWAY_URL_ENV, PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV,
+    PROVIDER_KIND_PERSONAL,
 };
 use crate::setup::merge::{
-    apply_claude_code, apply_codex_slot, codex_host_supports_responses_api, CODEX_PERSONAL_SLOT,
-    CODEX_TEAM_SLOT, COMPANY_DEFAULT_MODEL,
+    apply_claude_code, apply_codex_slot, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
 };
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
@@ -163,10 +162,6 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
     // not enough — Codex 0.14x still routes via model_provider / openai_base_url in config.toml,
     // and without that it silently hits api.openai.com (401 with company keys).
     let launch = resolve_codex_launch_env();
-    let prefer_team_keys = launch
-        .as_ref()
-        .map(|(_, _, _, slot)| slot == CODEX_TEAM_SLOT)
-        .unwrap_or(false);
     // ChatGPT login tokens in auth.json make Codex ignore gateway keys and hit api.openai.com.
     if launch.is_some() {
         let _ = clear_codex_chatgpt_auth_for_gateway();
@@ -183,8 +178,7 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
     // re-ran mode switch. The launched command line itself proves the gateway.
     let argv = codex_launch_argv(launch.as_ref());
     let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
-    let mut report =
-        open_in_terminal_with_key_pref("codex", &argv_refs, cwd, prompt, prefer_team_keys)?;
+    let mut report = open_in_terminal("codex", &argv_refs, cwd, prompt)?;
     if let Some(url) = refreshed {
         report.detail = format!(
             "Opened Codex after writing model_provider + openai_base_url={url} to ~/.codex/config.toml. {}",
@@ -203,47 +197,25 @@ fn codex_launch_argv(launch: Option<&(String, String, Option<String>, String)>) 
     let Some((url, _, model, _)) = launch else {
         return vec!["codex".to_string()];
     };
-    if !codex_host_supports_responses_api(url) {
-        return vec!["codex".to_string()];
-    }
-    let model_id = model
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .unwrap_or(COMPANY_DEFAULT_MODEL);
-    vec![
+    let mut argv = vec![
         "codex".to_string(),
         "-c".to_string(),
         "model_provider=openai".to_string(),
         "-c".to_string(),
         format!("openai_base_url={url}"),
-        "-c".to_string(),
-        format!("model={model_id}"),
-    ]
+    ];
+    // Only pin the model when the active profile names one; otherwise leave the
+    // user's own `model` in config.toml alone.
+    if let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        argv.push("-c".to_string());
+        argv.push(format!("model={model_id}"));
+    }
+    argv
 }
 
 /// Resolve OpenAI-compatible gateway + key (+ optional model/slot) from active overlays.
-///
-/// When the active personal host cannot speak Codex Responses API (e.g. DeepSeek),
-/// fall back to the durable team baseline so launch does not silently use api.openai.com.
 fn resolve_codex_launch_env() -> Option<(String, String, Option<String>, String)> {
-    let env = collect_launch_env_map();
-    if let Some(launch) = codex_launch_from_env(&env) {
-        if launch.3 == CODEX_PERSONAL_SLOT && !codex_host_supports_responses_api(&launch.0) {
-            if let Some(team) = codex_launch_from_company_baseline() {
-                return Some(team);
-            }
-        }
-        return Some(launch);
-    }
-    codex_launch_from_company_baseline()
-}
-
-fn codex_launch_from_company_baseline() -> Option<(String, String, Option<String>, String)> {
-    let path = company_baseline_path().filter(|path| path.exists())?;
-    let map = read_env_map(&path).ok()?;
-    let (url, key, model, _) = codex_launch_from_env(&map)?;
-    Some((url, key, model, CODEX_TEAM_SLOT.to_string()))
+    codex_launch_from_env(&collect_launch_env_map())
 }
 
 fn collect_launch_env_map() -> HashMap<String, String> {
@@ -364,22 +336,12 @@ fn open_in_terminal(
     runtime: &str,
     argv: &[&str],
     cwd: &Path,
-    prompt: Option<&str>,
-) -> Result<OpenSessionReport> {
-    open_in_terminal_with_key_pref(runtime, argv, cwd, prompt, false)
-}
-
-fn open_in_terminal_with_key_pref(
-    runtime: &str,
-    argv: &[&str],
-    cwd: &Path,
     _prompt: Option<&str>,
-    prefer_team_keys: bool,
 ) -> Result<OpenSessionReport> {
     if argv.is_empty() {
         bail!("empty terminal command for {runtime}");
     }
-    let command_line = wrap_with_company_env_pref(&shell_join(argv), prefer_team_keys);
+    let command_line = wrap_with_company_env(&shell_join(argv));
     launch_system_terminal(cwd, &command_line)?;
     Ok(OpenSessionReport {
         runtime: runtime.into(),
@@ -395,7 +357,7 @@ fn open_in_terminal_with_key_pref(
 
 /// Prefix a shell command so Evotown / company API keys and workspace env are available.
 /// Prefer sourcing env files (never inline secrets into the displayed command).
-fn wrap_with_company_env_pref(command: &str, prefer_team_keys: bool) -> String {
+fn wrap_with_company_env(command: &str) -> String {
     let _ = ensure_profile_env_from_evotown();
 
     #[cfg(not(windows))]
@@ -413,13 +375,6 @@ fn wrap_with_company_env_pref(command: &str, prefer_team_keys: bool) -> String {
         if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
             parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
         }
-        // When Codex is forced onto the team slot (e.g. personal DeepSeek cannot speak
-        // Responses API), re-source the durable baseline last so EVOTOWN/COMPANY keys win.
-        if prefer_team_keys {
-            if let Some(path) = company_baseline_path().filter(|path| path.exists()) {
-                parts.push(format!(". {}", shell_single_quote(&path.to_string_lossy())));
-            }
-        }
         if parts.is_empty() {
             return command.to_string();
         }
@@ -434,7 +389,6 @@ fn wrap_with_company_env_pref(command: &str, prefer_team_keys: bool) -> String {
 
     #[cfg(windows)]
     {
-        let _ = prefer_team_keys;
         let profile = read_company_profile().ok().flatten();
         let api_key = profile
             .as_ref()
@@ -669,13 +623,13 @@ mod tests {
     #[test]
     fn wraps_command_with_exported_key_when_no_profile_env() {
         // Without a profile file, wrap still returns a runnable command.
-        let wrapped = wrap_with_company_env_pref("codex", false);
+        let wrapped = wrap_with_company_env("codex");
         assert!(wrapped.contains("codex"));
     }
 
     #[test]
     fn wrap_exports_openai_base_url_alias() {
-        let wrapped = wrap_with_company_env_pref("codex", false);
+        let wrapped = wrap_with_company_env("codex");
         if wrapped != "codex" {
             assert!(
                 wrapped.contains("OPENAI_BASE_URL"),
@@ -690,7 +644,7 @@ mod tests {
 
     #[test]
     fn wrap_exports_anthropic_aliases() {
-        let wrapped = wrap_with_company_env_pref("claude", false);
+        let wrapped = wrap_with_company_env("claude");
         if wrapped != "claude" {
             assert!(
                 wrapped.contains("ANTHROPIC_BASE_URL"),
@@ -837,14 +791,32 @@ mod tests {
     }
 
     #[test]
-    fn codex_launch_argv_skips_overrides_for_chat_only_hosts() {
+    fn codex_launch_argv_overrides_personal_gateway_too() {
+        let launch = (
+            "https://api.deepseek.com/v1".to_string(),
+            "sk-ds".to_string(),
+            Some("deepseek-v4-flash".to_string()),
+            CODEX_PERSONAL_SLOT.to_string(),
+        );
+        let argv = codex_launch_argv(Some(&launch));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "-c" && w[1] == "openai_base_url=https://api.deepseek.com/v1"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "-c" && w[1] == "model=deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn codex_launch_argv_omits_model_when_profile_has_none() {
         let launch = (
             "https://api.deepseek.com/v1".to_string(),
             "sk-ds".to_string(),
             None,
             CODEX_PERSONAL_SLOT.to_string(),
         );
-        assert_eq!(codex_launch_argv(Some(&launch)), vec!["codex".to_string()]);
+        let argv = codex_launch_argv(Some(&launch));
+        assert!(!argv.iter().any(|part| part.starts_with("model=")));
         assert_eq!(codex_launch_argv(None), vec!["codex".to_string()]);
     }
 }
