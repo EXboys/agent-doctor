@@ -5,8 +5,9 @@ use std::sync::Mutex;
 use anyhow::{Context, Result};
 
 use crate::browser::{
-    cdp_port_is_headless, cdp_user_data_dir, connect_chrome, discover_chrome, kill_chrome_on_port,
-    launch_chrome, profile_locked_by_other_chrome, stop_chrome, ChromeInstance,
+    cdp_automation_markers, cdp_port_is_headless, cdp_user_data_dir, connect_chrome,
+    discover_chrome, kill_chrome_on_port, launch_chrome, profile_locked_by_other_chrome,
+    stop_chrome, ChromeInstance,
 };
 use crate::tools::BrowserContext;
 
@@ -59,8 +60,18 @@ impl LazyBrowser {
             }
             discovery.profile_directory =
                 crate::browser::resolve_profile_directory(self.profile_directory.as_deref());
-            let instance = match connect_chrome(self.port) {
+            let mut instance = match connect_chrome(self.port) {
                 Ok(existing) => {
+                    let automation_markers = cdp_automation_markers(self.port);
+                    if !automation_markers.is_empty() {
+                        anyhow::bail!(
+                            "Refusing Chrome CDP on port {} because it appears to be owned by \
+                             ChromeDriver ({}). Stop Selenium/ChromeDriver and retry so Agent \
+                             Doctor can launch a clean Chrome instance.",
+                            self.port,
+                            automation_markers.join(", ")
+                        );
+                    }
                     // Prefer reusing CDP, but never keep a headless Chrome when the
                     // user asked for a visible window (and vice versa).
                     let existing_headless = cdp_port_is_headless(self.port);
@@ -137,7 +148,20 @@ impl LazyBrowser {
                     )
                 })?;
 
-            let ctx = BrowserContext::connect(&ws_endpoint)?;
+            let mut ctx = BrowserContext::connect(&ws_endpoint)?;
+            let chrome_driver_artifacts = ctx.chrome_driver_artifacts().unwrap_or_default();
+            if !chrome_driver_artifacts.is_empty() {
+                // Only stop processes launched by this session. An externally owned
+                // browser must be stopped by its owner (usually ChromeDriver).
+                let _ = stop_chrome(&mut instance);
+                anyhow::bail!(
+                    "Refusing Chrome CDP on port {} because the page contains ChromeDriver \
+                     globals ({}). Stop Selenium/ChromeDriver and retry so Agent Doctor can \
+                     launch a clean Chrome instance.",
+                    self.port,
+                    chrome_driver_artifacts.join(", ")
+                );
+            }
             eprintln!("Chrome CDP ready: {ws_endpoint}");
             self.chrome = Some(instance);
             self.ctx = Some(ctx);

@@ -511,6 +511,22 @@ impl BrowserContext {
             .unwrap_or(json!(null)))
     }
 
+    /// Detect globals injected by ChromeDriver's automation bootstrap.
+    pub fn chrome_driver_artifacts(&mut self) -> Result<Vec<String>> {
+        let value = self.evaluate(
+            r#"Object.getOwnPropertyNames(globalThis)
+                .filter((name) => /^cdc_[A-Za-z0-9_]{10,}$/.test(name))
+                .sort()"#,
+        )?;
+        Ok(value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect())
+    }
+
     /// Scroll the page by a delta.
     pub fn scroll(&mut self, delta_x: f64, delta_y: f64) -> Result<Value> {
         self.send_command(

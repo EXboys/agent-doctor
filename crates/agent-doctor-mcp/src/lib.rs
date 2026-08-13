@@ -7,8 +7,8 @@ pub mod tools;
 pub mod wire;
 
 pub use browser::{
-    cdp_port_is_headless, cdp_user_data_dir, connect_chrome, discover_chrome,
-    isolated_chrome_user_data_dir, kill_chrome_on_port, launch_chrome,
+    cdp_automation_markers, cdp_port_is_headless, cdp_user_data_dir, connect_chrome,
+    discover_chrome, isolated_chrome_user_data_dir, kill_chrome_on_port, launch_chrome,
     profile_locked_by_other_chrome, resolve_profile_directory, resolve_user_data_dir, stop_chrome,
     system_chrome_user_data_dir, BrowserDiscovery, ChromeInstance,
 };
