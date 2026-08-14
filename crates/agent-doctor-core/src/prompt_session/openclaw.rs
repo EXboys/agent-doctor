@@ -1,4 +1,7 @@
-//! OpenClaw ask backend (`openclaw agent exec --message` + optional `--json` / `--session-id`).
+//! OpenClaw ask backend (`openclaw agent --local --agent … --session-id … --json`).
+//!
+//! Always pass session selectors (`--agent` + `--session-id`). JSON goes to stdout and
+//! diagnostics to stderr — Ask surfaces only the assistant reply, not CLI chrome.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -60,8 +63,23 @@ fn run_openclaw(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    // Always own a session id so Ask can resume natively and avoid stuffing chat history
+    // into `--message` (which previously polluted OpenClaw into `NO_REPLY`).
+    let openclaw_session_id = resume_session_id
+        .map(str::to_string)
+        .unwrap_or_else(fresh_openclaw_session_id);
 
-    let mut cmd = build_openclaw_command(prompt, &cwd, resume_session_id, timeout_sec)?;
+    if super::mcp_ensure::wants_browser_mcp(options) {
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: "mcp".into(),
+            message: "browser MCP is not wired for OpenClaw Ask yet — use Claude Code or Codex Ask"
+                .into(),
+        });
+    }
+
+    let mut cmd =
+        build_openclaw_command(prompt, &cwd, &openclaw_session_id, timeout_sec)?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -77,21 +95,10 @@ fn run_openclaw(
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
     let mut emit = |event: PromptSessionEvent| {
-        match &event {
-            PromptSessionEvent::Delta { text, .. } => {
-                if let Ok(mut guard) = display_for_cb.lock() {
-                    guard.push_str(text);
-                }
+        if let PromptSessionEvent::Delta { text, .. } = &event {
+            if let Ok(mut guard) = display_for_cb.lock() {
+                guard.push_str(text);
             }
-            PromptSessionEvent::StdoutLine { line, .. } => {
-                if let Ok(mut guard) = display_for_cb.lock() {
-                    if !guard.is_empty() {
-                        guard.push('\n');
-                    }
-                    guard.push_str(line);
-                }
-            }
-            _ => {}
         }
         on_event(event);
     };
@@ -115,22 +122,31 @@ fn run_openclaw(
             let runtime_thread_id = parsed
                 .as_ref()
                 .and_then(|v| extract_openclaw_session_id(v))
-                .or_else(|| resume_session_id.map(str::to_string));
+                .unwrap_or_else(|| openclaw_session_id.clone());
 
-            let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
             let combined = if !reply.trim().is_empty() {
                 reply.clone()
-            } else if !display.trim().is_empty() {
-                display
+            } else if status != PromptSessionStatus::Succeeded {
+                extract_openclaw_error_text(&stderr)
+                    .or_else(|| extract_openclaw_error_text(&stdout))
+                    .unwrap_or_else(|| summarize_openclaw_failure(&stderr, &stdout))
             } else {
-                combine_output(&stdout, &stderr)
+                String::new()
             };
 
-            if status == PromptSessionStatus::Succeeded && !reply.trim().is_empty() {
+            if !reply.trim().is_empty() {
                 emit(PromptSessionEvent::Delta {
                     session_id: session_id.clone(),
                     text: reply,
                 });
+            } else if status != PromptSessionStatus::Succeeded && !combined.trim().is_empty() {
+                let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
+                if display.trim().is_empty() {
+                    emit(PromptSessionEvent::Delta {
+                        session_id: session_id.clone(),
+                        text: combined.clone(),
+                    });
+                }
             }
 
             let summary = summarize(&combined, &status, &runtime);
@@ -149,7 +165,7 @@ fn run_openclaw(
                 summary: summary.clone(),
                 log_excerpt: combined,
                 duration_ms,
-                runtime_thread_id,
+                runtime_thread_id: Some(runtime_thread_id),
             }
         }
         Err(err) => {
@@ -171,28 +187,59 @@ fn run_openclaw(
                 summary: summary.clone(),
                 log_excerpt: summary,
                 duration_ms,
-                runtime_thread_id: resume_session_id.map(str::to_string),
+                runtime_thread_id: Some(openclaw_session_id),
             }
         }
     };
     Ok(report)
 }
 
+fn fresh_openclaw_session_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id() as u128;
+    // UUID-shaped id accepted by `--session-id`.
+    let a = (nanos ^ (pid << 64)) as u64;
+    let b = (nanos.wrapping_mul(0x9e37_79b9_7f4a_7c15)) as u64;
+    format!(
+        "{:08x}-{:04x}-4{:03x}-a{:03x}-{:012x}",
+        (a >> 32) as u32,
+        ((a >> 16) & 0xffff) as u16,
+        (a & 0x0fff) as u16,
+        ((b >> 48) & 0x0fff) as u16,
+        b & 0xffff_ffff_ffff
+    )
+}
+
+fn resolve_openclaw_agent() -> String {
+    std::env::var("AGENT_DOCTOR_OPENCLAW_AGENT")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "main".into())
+}
+
 fn build_openclaw_command(
     prompt: &str,
     cwd: &Path,
-    resume_session_id: Option<&str>,
+    session_id: &str,
     timeout_sec: u64,
 ) -> Result<Command> {
     let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_OPENCLAW_BIN").unwrap_or_else(|_| "openclaw".into());
+    let agent = resolve_openclaw_agent();
     let mut cmd = Command::new(&bin);
     cmd.arg("agent")
-        .arg("exec")
+        .arg("--local")
+        .arg("--agent")
+        .arg(&agent)
+        .arg("--session-id")
+        .arg(session_id)
         .arg("--message")
         .arg(prompt)
-        .arg("--cwd")
-        .arg(cwd.display().to_string())
         .arg("--json")
         .arg("--timeout")
         .arg(timeout_sec.to_string())
@@ -200,9 +247,6 @@ fn build_openclaw_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    if let Some(sid) = resume_session_id {
-        cmd.arg("--session-id").arg(sid);
-    }
     apply_overlay_env(&mut cmd, &overlay);
     Ok(cmd)
 }
@@ -258,20 +302,16 @@ where
         };
         for (is_stdout, line) in drained {
             if is_stdout {
-                // JSON payloads are parsed at the end; skip noisy intermediate lines in UI.
-                if line.trim_start().starts_with('{') {
-                    continue;
-                }
-                on_event(PromptSessionEvent::StdoutLine {
-                    session_id: session_id.to_string(),
-                    line,
-                });
-            } else if !is_runtime_stderr_noise(&line) {
-                on_event(PromptSessionEvent::StderrLine {
-                    session_id: session_id.to_string(),
-                    line,
-                });
+                // JSON is parsed at completion; never stream fragments into the chat bubble.
+                continue;
             }
+            if is_openclaw_stderr_noise(&line) || is_runtime_stderr_noise(&line) {
+                continue;
+            }
+            on_event(PromptSessionEvent::StderrLine {
+                session_id: session_id.to_string(),
+                line,
+            });
         }
     };
 
@@ -318,7 +358,26 @@ fn parse_openclaw_json_output(stdout: &str) -> Option<Value> {
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
         return Some(value);
     }
-    // Prefer the last JSON object in mixed output.
+    // Pretty-printed JSON: take the first balanced `{ … }` block.
+    if let Some(start) = trimmed.find('{') {
+        let slice = &trimmed[start..];
+        let mut depth = 0i32;
+        for (i, ch) in slice.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Ok(value) = serde_json::from_str::<Value>(&slice[..=i]) {
+                            return Some(value);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     for line in trimmed.lines().rev() {
         let line = line.trim();
         if line.starts_with('{') {
@@ -330,8 +389,34 @@ fn parse_openclaw_json_output(stdout: &str) -> Option<Value> {
     None
 }
 
+fn normalize_openclaw_reply_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.eq_ignore_ascii_case("NO_REPLY")
+        || trimmed.eq_ignore_ascii_case("no_reply")
+        || trimmed == "∅"
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 fn extract_openclaw_reply(value: &Value) -> Option<String> {
+    // Prefer visible payloads / final text over deep meta dumps.
+    if let Some(arr) = value.get("payloads").and_then(|v| v.as_array()) {
+        let parts: Vec<String> = arr
+            .iter()
+            .filter_map(|item| item.get("text").and_then(value_to_text))
+            .filter_map(|s| normalize_openclaw_reply_text(&s))
+            .collect();
+        if !parts.is_empty() {
+            return Some(parts.join("\n"));
+        }
+    }
     const KEYS: &[&str] = &[
+        "final",
         "reply",
         "message",
         "text",
@@ -339,27 +424,42 @@ fn extract_openclaw_reply(value: &Value) -> Option<String> {
         "output",
         "content",
         "response",
+        "finalAssistantVisibleText",
+        "finalAssistantRawText",
     ];
     for key in KEYS {
         if let Some(text) = value.get(*key).and_then(value_to_text) {
-            if !text.trim().is_empty() {
-                return Some(text);
+            if let Some(normalized) = normalize_openclaw_reply_text(&text) {
+                return Some(normalized);
             }
         }
     }
-    if let Some(obj) = value.get("data") {
-        return extract_openclaw_reply(obj);
-    }
-    if let Some(obj) = value.get("result") {
-        if obj.is_object() {
-            return extract_openclaw_reply(obj);
+    for nest in ["data", "result", "meta"] {
+        if let Some(obj) = value.get(nest) {
+            if obj.is_object() {
+                // Avoid walking the huge systemPromptReport tree for false positives.
+                if nest == "meta" {
+                    if let Some(text) = obj
+                        .get("finalAssistantVisibleText")
+                        .or_else(|| obj.get("finalAssistantRawText"))
+                        .and_then(value_to_text)
+                        .and_then(|t| normalize_openclaw_reply_text(&t))
+                    {
+                        return Some(text);
+                    }
+                    continue;
+                }
+                if let Some(text) = extract_openclaw_reply(obj) {
+                    return Some(text);
+                }
+            }
         }
     }
     None
 }
 
 fn extract_openclaw_session_id(value: &Value) -> Option<String> {
-    for key in ["sessionId", "session_id", "session", "id"] {
+    for key in ["sessionId", "session_id", "session"] {
         if let Some(sid) = value
             .get(key)
             .and_then(|v| v.as_str())
@@ -370,9 +470,60 @@ fn extract_openclaw_session_id(value: &Value) -> Option<String> {
         }
     }
     value
-        .get("data")
+        .get("meta")
+        .and_then(|m| m.get("agentMeta"))
         .and_then(extract_openclaw_session_id)
+        .or_else(|| value.get("meta").and_then(extract_openclaw_session_id))
+        .or_else(|| value.get("data").and_then(extract_openclaw_session_id))
         .or_else(|| value.get("result").and_then(extract_openclaw_session_id))
+}
+
+fn extract_openclaw_error_text(text: &str) -> Option<String> {
+    let mut lines: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || is_openclaw_stderr_noise(line) {
+            continue;
+        }
+        if trimmed.starts_with("Error:")
+            || trimmed.starts_with("OpenClaw does not recognize")
+            || trimmed.contains("HTTP 401")
+            || trimmed.contains("does not recognize option")
+        {
+            lines.push(trimmed);
+        }
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn summarize_openclaw_failure(stderr: &str, stdout: &str) -> String {
+    let compact = combine_output(stderr, stdout);
+    let trimmed = compact.trim();
+    if trimmed.is_empty() {
+        "openclaw failed".into()
+    } else if trimmed.len() > 400 {
+        format!("{}…", &trimmed[..400])
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn is_openclaw_stderr_noise(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("[agents/")
+        || lower.starts_with("[provider-")
+        || lower.starts_with("[model-")
+        || lower.contains("tool policy removed")
+        || lower.contains("model-fetch")
+        || lower.contains("provider-transport")
 }
 
 fn value_to_text(value: &Value) -> Option<String> {
@@ -430,6 +581,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_local_json_payloads_and_meta_session() {
+        let raw = r#"{
+          "payloads":[{"text":"hey","mediaUrl":null}],
+          "meta":{"agentMeta":{"sessionId":"oc-meta-1"}}
+        }"#;
+        let value = parse_openclaw_json_output(raw).unwrap();
+        assert_eq!(extract_openclaw_reply(&value).as_deref(), Some("hey"));
+        assert_eq!(
+            extract_openclaw_session_id(&value).as_deref(),
+            Some("oc-meta-1")
+        );
+    }
+
+    #[test]
+    fn ignores_no_reply_sentinel() {
+        let raw = r#"{
+          "payloads":[],
+          "meta":{"finalAssistantVisibleText":"NO_REPLY","agentMeta":{"sessionId":"oc-2"}}
+        }"#;
+        let value = parse_openclaw_json_output(raw).unwrap();
+        assert_eq!(extract_openclaw_reply(&value), None);
+        assert_eq!(
+            extract_openclaw_session_id(&value).as_deref(),
+            Some("oc-2")
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn streams_json_reply_and_succeeds() {
@@ -438,7 +617,7 @@ mod tests {
         let bin = write_fake_bin(
             dir.path(),
             "fake-openclaw",
-            "#!/bin/bash\necho '{\"reply\":\"openclaw-ok\",\"sessionId\":\"oc-sid\"}'\nexit 0\n",
+            "#!/bin/bash\necho '{\"payloads\":[{\"text\":\"openclaw-ok\"}],\"meta\":{\"agentMeta\":{\"sessionId\":\"oc-sid\"}}}'\nexit 0\n",
         );
         std::env::set_var("AGENT_DOCTOR_OPENCLAW_BIN", &bin);
         let events = StdMutex::new(Vec::new());
@@ -452,6 +631,7 @@ mod tests {
                     dangerously_skip_permissions: false,
                     full_auto: true,
                     resume_thread_id: None,
+                    selected_mcps: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -466,5 +646,8 @@ mod tests {
             e,
             PromptSessionEvent::Delta { text, .. } if text.contains("openclaw-ok")
         )));
+        assert!(!evs
+            .iter()
+            .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
     }
 }

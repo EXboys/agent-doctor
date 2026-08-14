@@ -10,6 +10,7 @@ mod codex_app_server;
 mod control;
 mod env;
 mod hermes;
+mod mcp_ensure;
 mod openclaw;
 mod util;
 
@@ -53,6 +54,9 @@ pub struct PromptSessionOptions {
     /// Resume an existing thread/session id when set (Codex/Claude/Hermes/OpenClaw).
     #[serde(default)]
     pub resume_thread_id: Option<String>,
+    /// MCP server names selected in Ask (e.g. `browser`). Wired into Claude/Codex config before spawn.
+    #[serde(default)]
+    pub selected_mcps: Vec<String>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -226,6 +230,7 @@ mod tests {
                 dangerously_skip_permissions: false,
                 full_auto: false,
                 resume_thread_id: None,
+                selected_mcps: Vec::new(),
             },
             |_| {},
         )
@@ -241,6 +246,7 @@ mod tests {
                 dangerously_skip_permissions: false,
                 full_auto: false,
                 resume_thread_id: None,
+                selected_mcps: Vec::new(),
             },
             |_| {},
         )
@@ -300,6 +306,7 @@ time.sleep(30)
                 dangerously_skip_permissions: false,
                 full_auto: true,
                 resume_thread_id: None,
+                selected_mcps: Vec::new(),
             },
             cancel,
             None,

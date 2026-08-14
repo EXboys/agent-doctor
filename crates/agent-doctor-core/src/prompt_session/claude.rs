@@ -14,6 +14,7 @@ use super::control::PromptSessionControl;
 use super::env::{
     apply_claude_env, apply_overlay_env, collect_overlay_env, format_command_display,
 };
+use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, force_stop_child, is_runtime_stderr_noise, join_reader, push_capped, summarize,
 };
@@ -64,12 +65,24 @@ fn run_claude(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
+    let overlay = collect_overlay_env();
+    if wants_browser_mcp(options) {
+        if let Some(note) = ensure_browser_mcp_for_ask("claude-code", &cwd, &overlay) {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+    }
+
     let mut cmd = build_claude_command(
         prompt,
         &cwd,
         options.dangerously_skip_permissions,
         interactive,
         resume_session_id,
+        &overlay,
     )?;
     let command_display = format_command_display(&cmd);
 
@@ -211,8 +224,8 @@ fn build_claude_command(
     skip_permissions: bool,
     interactive_permissions: bool,
     resume_session_id: Option<&str>,
+    overlay: &std::collections::HashMap<String, String>,
 ) -> Result<Command> {
-    let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
     let mut cmd = Command::new(bin);
     cmd.arg("-p")
@@ -223,6 +236,10 @@ fn build_claude_command(
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let mcp_config = cwd.join(".mcp.json");
+    if mcp_config.is_file() {
+        cmd.arg("--mcp-config").arg(&mcp_config);
+    }
     if let Some(sid) = resume_session_id {
         cmd.arg("--resume").arg(sid);
     }
@@ -240,7 +257,8 @@ fn build_claude_command(
                     "MultiEdit",
                     "NotebookEdit",
                     "WebFetch",
-                    "WebSearch"
+                    "WebSearch",
+                    "mcp__browser__*"
                 ]
             }
         });
@@ -254,8 +272,8 @@ fn build_claude_command(
     } else {
         cmd.arg(prompt).stdin(Stdio::null());
     }
-    apply_overlay_env(&mut cmd, &overlay);
-    apply_claude_env(&mut cmd, &overlay);
+    apply_overlay_env(&mut cmd, overlay);
+    apply_claude_env(&mut cmd, overlay);
     Ok(cmd)
 }
 
@@ -787,6 +805,7 @@ mod tests {
                     dangerously_skip_permissions: false,
                     full_auto: false,
                     resume_thread_id: None,
+                    selected_mcps: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -855,6 +874,7 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
                     dangerously_skip_permissions: false,
                     full_auto: false,
                     resume_thread_id: None,
+                    selected_mcps: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 Some(control),
