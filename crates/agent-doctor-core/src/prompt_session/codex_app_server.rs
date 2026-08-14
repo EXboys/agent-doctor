@@ -15,6 +15,7 @@ use super::env::{
     apply_codex_env, apply_overlay_env, codex_provider_config_args, collect_overlay_env,
     format_command_display, prepare_codex_home, resolve_codex_overlay,
 };
+use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, force_stop_child, humanize_runtime_error, is_runtime_stderr_noise, join_reader,
     push_capped, summarize,
@@ -110,6 +111,15 @@ fn run_codex_app_server(
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let overlay = collect_overlay_env();
     prepare_codex_home(&overlay);
+    if wants_browser_mcp(options) {
+        if let Some(note) = ensure_browser_mcp_for_ask("codex", &cwd, &overlay) {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+    }
 
     let mut cmd = build_app_server_command(&cwd, &overlay)?;
     let command_display = format_command_display(&cmd);
@@ -947,6 +957,7 @@ time.sleep(5)
                     dangerously_skip_permissions: false,
                     full_auto: false,
                     resume_thread_id: None,
+                    selected_mcps: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 Some(control),

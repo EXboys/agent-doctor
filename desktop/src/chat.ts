@@ -1621,6 +1621,7 @@ async function sendAsk(): Promise<void> {
   const userText = cleaned || text || t("chat.attachOnlyPrompt");
   const constraint = buildMentionConstraint(mentions);
   const promptUserText = constraint ? `${constraint}\n\n${userText}` : userText;
+  const selectedMcps = mentions.filter((m) => m.kind === "mcp").map((m) => m.id);
 
   await ensureListener();
   persistMessage("user", userText, { attachments });
@@ -1652,6 +1653,7 @@ async function sendAsk(): Promise<void> {
         (runtime === "claude-code" || runtime === "hermes") && elevated,
       fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
       resumeThreadId,
+      selectedMcps,
     });
     setDisplayedCwd(report.cwd);
     if (report.runtime_thread_id?.trim()) {

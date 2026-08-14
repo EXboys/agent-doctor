@@ -35,6 +35,7 @@ pub fn bind_hermes(profile: &str, project_path: &Path) -> Result<RuntimeBindRepo
     }
 
     write_hermes_terminal_cwd(&profile_dir, project_path)?;
+    seed_hermes_profile_credentials(&profile_dir)?;
     activate_hermes_profile(profile)?;
 
     Ok(RuntimeBindReport {
@@ -353,6 +354,71 @@ fn write_hermes_terminal_cwd(profile_dir: &Path, project_path: &Path) -> Result<
 
     let raw = serde_yaml::to_string(&mapping)?;
     fs::write(&config_path, raw).with_context(|| format!("write {}", config_path.display()))
+}
+
+/// Seed isolated Hermes profile credentials from the default `~/.hermes` install.
+/// Workspace profiles often only get `terminal.cwd`; without model/.env Hermes falls back
+/// to OpenRouter and fails Ask with HTTP 401.
+fn seed_hermes_profile_credentials(profile_dir: &Path) -> Result<()> {
+    let default_home = home_join(".hermes");
+    if paths_equal(profile_dir, &default_home) {
+        return Ok(());
+    }
+
+    let src_env = default_home.join(".env");
+    let dst_env = profile_dir.join(".env");
+    if src_env.exists() && !dst_env.exists() {
+        fs::copy(&src_env, &dst_env).with_context(|| {
+            format!(
+                "seed {} from {}",
+                dst_env.display(),
+                src_env.display()
+            )
+        })?;
+    }
+
+    let src_config = default_home.join("config.yaml");
+    let dst_config = profile_dir.join("config.yaml");
+    if !src_config.exists() {
+        return Ok(());
+    }
+    let src_raw = fs::read_to_string(&src_config)
+        .with_context(|| format!("read {}", src_config.display()))?;
+    let src_root: YamlValue =
+        serde_yaml::from_str(&src_raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()));
+    let Some(src_model) = src_root
+        .as_mapping()
+        .and_then(|m| m.get(YamlValue::from("model")))
+        .cloned()
+    else {
+        return Ok(());
+    };
+
+    let mut dst_root: YamlValue = if dst_config.exists() {
+        let raw = fs::read_to_string(&dst_config)
+            .with_context(|| format!("read {}", dst_config.display()))?;
+        serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
+    } else {
+        YamlValue::Mapping(Mapping::new())
+    };
+    let dst_map = dst_root
+        .as_mapping_mut()
+        .context("Hermes profile config root must be a mapping")?;
+    let needs_model = match dst_map.get(YamlValue::from("model")) {
+        Some(YamlValue::Mapping(m)) => m
+            .get(YamlValue::from("provider"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_none(),
+        _ => true,
+    };
+    if needs_model {
+        dst_map.insert(YamlValue::from("model"), src_model);
+        fs::write(&dst_config, serde_yaml::to_string(&dst_root)?)
+            .with_context(|| format!("write {}", dst_config.display()))?;
+    }
+    Ok(())
 }
 
 fn seed_openclaw_workspace_files(workspace_path: &Path) -> Result<()> {
