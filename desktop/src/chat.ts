@@ -1,6 +1,7 @@
 import { getLocale, t, type MessageKey } from "./i18n";
 import { renderMarkdown } from "./markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -90,22 +91,66 @@ interface SessionStore {
   sessions: ChatSession[];
 }
 
+interface SkillAgentUsage {
+  runtime: string;
+  scope: string;
+  path: string;
+  mounted: boolean;
+}
+
+interface SkillInventoryItem {
+  skill_id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  agents: SkillAgentUsage[];
+}
+
+interface SkillsInventoryReport {
+  skills: SkillInventoryItem[];
+}
+
+interface McpInventoryItem {
+  name: string;
+  scope: string;
+  healthy: boolean;
+  issue: string | null;
+  is_browser: boolean;
+  runtime_hint: string;
+}
+
+interface McpInventoryReport {
+  workspace_name: string | null;
+  workspace_path: string | null;
+  servers: McpInventoryItem[];
+}
+
+type MentionKind = "skill" | "mcp";
+
+interface MentionRef {
+  kind: MentionKind;
+  id: string;
+  label: string;
+}
+
 const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
 const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 const MAX_SESSIONS = 40;
 const MAX_CONTEXT_MESSAGES = 12;
 const MAX_ATTACHMENTS = 8;
+const MENTION_TOKEN_RE = /@(?:skill|mcp):([^\s@]+)/gi;
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "avif"];
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
-const runtimeLabelEl = document.querySelector<HTMLElement>("#chat-runtime-label")!;
 const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
-const attachFileEl = document.querySelector<HTMLButtonElement>("#chat-attach-file")!;
-const attachImageEl = document.querySelector<HTMLButtonElement>("#chat-attach-image")!;
+const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
 const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
+const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
+const mentionsEl = document.querySelector<HTMLElement>("#chat-mentions")!;
+const mentionMenuEl = document.querySelector<HTMLElement>("#chat-mention-menu")!;
 const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!;
 const newSessionEl = document.querySelector<HTMLButtonElement>("#chat-new")!;
 const terminalEl = document.querySelector<HTMLButtonElement>("#chat-terminal")!;
@@ -113,10 +158,17 @@ const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
 const logEl = document.querySelector<HTMLElement>("#chat-log")!;
 const statusEl = document.querySelector<HTMLElement>("#chat-status")!;
 const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
-const liveEl = document.querySelector<HTMLElement>("#chat-live")!;
-const liveLabelEl = document.querySelector<HTMLElement>("#chat-live-label")!;
-const liveElapsedEl = document.querySelector<HTMLElement>("#chat-live-elapsed")!;
 const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
+const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
+const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
+const resourcesToggleEl = document.querySelector<HTMLButtonElement>("#chat-resources-toggle")!;
+const resourcesLabelEl = document.querySelector<HTMLElement>("#chat-resources-label")!;
+const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#chat-resources-refresh")!;
+const openResourcesEl = document.querySelector<HTMLButtonElement>("#chat-open-resources")!;
+const skillsListEl = document.querySelector<HTMLElement>("#chat-skills-list")!;
+const skillsEmptyEl = document.querySelector<HTMLElement>("#chat-skills-empty")!;
+const mcpListEl = document.querySelector<HTMLElement>("#chat-mcp-list")!;
+const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
 
 /** Locked by main-page Ask entry (`?runtime=` / ask-window-focus). Not switched in-chat. */
 let currentRuntime: AskRuntime = "claude-code";
@@ -128,16 +180,31 @@ let assistantBubble: HTMLElement | null = null;
 let assistantMessageId: string | null = null;
 let assistantRaw = "";
 let activityEl: HTMLElement | null = null;
-let startedAt = 0;
-let elapsedTimer: number | null = null;
 let pendingText = "";
 let flushRaf = 0;
 let pendingAttachments: ChatAttachment[] = [];
 /** True once any assistant text was rendered this turn (avoids result-fallback duplicates). */
 let turnHadAssistantText = false;
+let mountedSkills: SkillInventoryItem[] = [];
+let enabledMcps: McpInventoryItem[] = [];
+let workspaceCwd: string | null = null;
+let selectedMentions: MentionRef[] = [];
+let mentionMenuIndex = 0;
+let mentionQuery: { kind: MentionKind | "any"; q: string; start: number; end: number } | null =
+  null;
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function autoResizePrompt(): void {
+  promptEl.style.height = "auto";
+  const styles = window.getComputedStyle(promptEl);
+  const maxHeight = Number.parseFloat(styles.maxHeight);
+  const next = Number.isFinite(maxHeight)
+    ? Math.min(promptEl.scrollHeight, maxHeight)
+    : promptEl.scrollHeight;
+  promptEl.style.height = `${next}px`;
 }
 
 function selectedRuntime(): AskRuntime {
@@ -150,7 +217,6 @@ function runtimeDisplayName(runtime: AskRuntime): string {
 
 function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
   currentRuntime = runtime;
-  runtimeLabelEl.textContent = runtimeDisplayName(runtime);
   updateElevatedLabel();
   if (opts?.syncSession) {
     const session = activeSession();
@@ -159,6 +225,7 @@ function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }
       saveStore();
     }
   }
+  void loadAskResources();
 }
 
 function loadStore(): SessionStore {
@@ -258,11 +325,14 @@ function applyI18n(): void {
     if (key) el.textContent = t(key);
   });
   promptEl.placeholder = t("chat.placeholder");
+  attachEl.title = t("chat.attach");
+  attachEl.setAttribute("aria-label", t("chat.attach"));
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
   updateElevatedLabel();
   syncActionButton();
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
+  updateResourcesSummary();
 }
 
 function updateElevatedLabel(): void {
@@ -299,23 +369,10 @@ function setBusy(next: boolean): void {
   promptEl.disabled = next;
   elevatedEl.disabled = next;
   newSessionEl.disabled = next;
-  attachFileEl.disabled = next;
-  attachImageEl.disabled = next;
-  liveEl.hidden = !next;
+  attachEl.disabled = next;
   sessionListEl.classList.toggle("is-busy", next);
   syncActionButton();
-  if (next) {
-    startedAt = performance.now();
-    if (elapsedTimer != null) window.clearInterval(elapsedTimer);
-    elapsedTimer = window.setInterval(() => {
-      const sec = ((performance.now() - startedAt) / 1000).toFixed(1);
-      liveElapsedEl.textContent = `${sec}s`;
-    }, 120);
-  } else {
-    if (elapsedTimer != null) {
-      window.clearInterval(elapsedTimer);
-      elapsedTimer = null;
-    }
+  if (!next) {
     settleActivity();
     if (assistantBubble) assistantBubble.classList.remove("is-streaming");
   }
@@ -340,10 +397,6 @@ function isQuietPhase(phase: string): boolean {
   );
 }
 
-function setLiveLabel(message: string): void {
-  liveLabelEl.textContent = message.trim() || t("chat.live");
-}
-
 /** Drop ephemeral progress rows so they don't litter the transcript. */
 function clearEphemeralActivity(): void {
   settleActivity();
@@ -360,11 +413,8 @@ function pushActivity(phase: string, message: string): void {
   const text = message.trim() || phase;
   if (!text) return;
 
-  // Quiet lifecycle → header only (avoids "正在请求 / 本轮完成 / 已开始" spam).
-  if (isQuietPhase(phase) || phase === "writing") {
-    setLiveLabel(text);
-    return;
-  }
+  // Quiet lifecycle chatter — skip (no header live pill).
+  if (isQuietPhase(phase) || phase === "writing") return;
 
   const kind = activityKind(phase);
 
@@ -375,7 +425,6 @@ function pushActivity(phase: string, message: string): void {
       last.classList.add("is-live");
       last.classList.remove("is-done");
       activityEl = last;
-      setLiveLabel(t("chat.toolRunning", { cmd: text }));
       return;
     }
   }
@@ -399,7 +448,6 @@ function pushActivity(phase: string, message: string): void {
     if (kind === "tool") row.dataset.signature = text;
     if (kind === "tool") {
       row.innerHTML = `<span class="chat-tool-badge" aria-hidden="true">$</span><code class="chat-activity-text chat-tool-cmd"></code>`;
-      setLiveLabel(t("chat.toolRunning", { cmd: text }));
     } else {
       row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
     }
@@ -814,36 +862,67 @@ function renderPendingAttachments(): void {
   }
 }
 
-async function pickAttachments(kind: AttachKind): Promise<void> {
+function addAttachmentPaths(paths: string[]): void {
+  if (busy || paths.length === 0) return;
+  let added = 0;
+  for (const path of paths) {
+    const trimmed = path.trim();
+    if (!trimmed) continue;
+    if (pendingAttachments.some((a) => a.path === trimmed)) continue;
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+      setStatus(t("chat.attachLimit", { n: String(MAX_ATTACHMENTS) }), "warn");
+      break;
+    }
+    const name = fileNameFromPath(trimmed);
+    pendingAttachments.push({
+      id: uid(),
+      path: trimmed,
+      name,
+      kind: isImagePath(trimmed) ? "image" : "file",
+    });
+    added += 1;
+  }
+  if (added > 0) renderPendingAttachments();
+}
+
+async function pickAttachments(): Promise<void> {
   if (busy) return;
   try {
     const selected = await open({
       multiple: true,
-      title: kind === "image" ? t("chat.attachPickImage") : t("chat.attachPickFile"),
-      filters:
-        kind === "image"
-          ? [{ name: "Images", extensions: IMAGE_EXTS }]
-          : undefined,
+      title: t("chat.attachPick"),
     });
     if (!selected) return;
     const paths = (Array.isArray(selected) ? selected : [selected]).filter(Boolean);
-    for (const path of paths) {
-      if (pendingAttachments.some((a) => a.path === path)) continue;
-      if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-        setStatus(t("chat.attachLimit", { n: String(MAX_ATTACHMENTS) }), "warn");
-        break;
-      }
-      const name = fileNameFromPath(path);
-      pendingAttachments.push({
-        id: uid(),
-        path,
-        name,
-        kind: kind === "image" || isImagePath(path) ? "image" : "file",
-      });
-    }
-    renderPendingAttachments();
+    addAttachmentPaths(paths);
   } catch (error) {
     setStatus(t("chat.attachFailed", { error: String(error) }), "error");
+  }
+}
+
+function setComposerDropTarget(active: boolean): void {
+  composerBoxEl.classList.toggle("is-drop-target", active && !busy);
+}
+
+async function setupFileDrop(): Promise<void> {
+  try {
+    await getCurrentWebview().onDragDropEvent((event) => {
+      const type = event.payload.type;
+      if (type === "enter" || type === "over") {
+        setComposerDropTarget(true);
+        return;
+      }
+      if (type === "leave") {
+        setComposerDropTarget(false);
+        return;
+      }
+      if (type === "drop") {
+        setComposerDropTarget(false);
+        addAttachmentPaths(event.payload.paths ?? []);
+      }
+    });
+  } catch {
+    /* browser preview without Tauri drag-drop */
   }
 }
 
@@ -1027,6 +1106,328 @@ function preferPlainSummary(summary: string): string {
   return trimmed;
 }
 
+function shortCwdLabel(cwd: string): string {
+  const trimmed = cwd.trim();
+  if (!trimmed || trimmed === "—") return "—";
+  const parts = trimmed.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] || trimmed;
+}
+
+function displayCwd(): string {
+  const live = cwdEl.dataset.cwd?.trim() || cwdEl.textContent?.trim();
+  if (live && live !== "—") return live;
+  return workspaceCwd?.trim() || "—";
+}
+
+function setDisplayedCwd(cwd: string): void {
+  const value = cwd.trim() || "—";
+  cwdEl.dataset.cwd = value;
+  cwdEl.textContent = value;
+  cwdEl.title = value;
+  updateResourcesSummary();
+}
+
+function setResourcesOpen(open: boolean): void {
+  shellEl.classList.toggle("is-resources-open", open);
+  resourcesToggleEl.classList.toggle("is-open", open);
+  resourcesToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+  resourcesPanelEl.setAttribute("aria-hidden", open ? "false" : "true");
+}
+
+function toggleResourcesPanel(): void {
+  setResourcesOpen(!shellEl.classList.contains("is-resources-open"));
+}
+
+function updateResourcesSummary(): void {
+  const cwd = displayCwd();
+  resourcesLabelEl.textContent = t("chat.resourcesSummary", {
+    cwd: shortCwdLabel(cwd),
+    skills: String(mountedSkills.length),
+    mcp: String(enabledMcps.length),
+  });
+  resourcesLabelEl.title = cwd;
+}
+
+function mcpMatchesRuntime(server: McpInventoryItem, runtime: AskRuntime): boolean {
+  const hint = server.runtime_hint.trim();
+  return hint === runtime || hint === "shared" || hint === "";
+}
+
+function skillMountedForRuntime(skill: SkillInventoryItem, runtime: AskRuntime): boolean {
+  return skill.agents.some((agent) => agent.runtime === runtime && agent.mounted);
+}
+
+function mentionKey(m: MentionRef): string {
+  return `${m.kind}:${m.id}`;
+}
+
+function hasMention(kind: MentionKind, id: string): boolean {
+  return selectedMentions.some((m) => m.kind === kind && m.id === id);
+}
+
+function upsertMention(mention: MentionRef): void {
+  if (hasMention(mention.kind, mention.id)) return;
+  selectedMentions.push(mention);
+  renderMentions();
+  renderResourceChips();
+}
+
+function removeMention(kind: MentionKind, id: string): void {
+  selectedMentions = selectedMentions.filter((m) => !(m.kind === kind && m.id === id));
+  renderMentions();
+  renderResourceChips();
+}
+
+function toggleMention(mention: MentionRef): void {
+  if (hasMention(mention.kind, mention.id)) removeMention(mention.kind, mention.id);
+  else upsertMention(mention);
+}
+
+function clearMentions(): void {
+  selectedMentions = [];
+  renderMentions();
+  renderResourceChips();
+}
+
+function renderMentions(): void {
+  mentionsEl.replaceChildren();
+  mentionsEl.hidden = selectedMentions.length === 0;
+  for (const mention of selectedMentions) {
+    const chip = document.createElement("span");
+    chip.className = "chat-mention-chip";
+    const label = document.createElement("span");
+    label.textContent =
+      mention.kind === "skill"
+        ? t("chat.mentionSkill", { name: mention.label })
+        : t("chat.mentionMcp", { name: mention.label });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", t("chat.mentionRemove"));
+    remove.textContent = "×";
+    remove.addEventListener("click", () => removeMention(mention.kind, mention.id));
+    chip.append(label, remove);
+    mentionsEl.appendChild(chip);
+  }
+}
+
+function renderResourceChips(): void {
+  skillsListEl.replaceChildren();
+  mcpListEl.replaceChildren();
+  skillsEmptyEl.hidden = mountedSkills.length > 0;
+  mcpEmptyEl.hidden = enabledMcps.length > 0;
+
+  for (const skill of mountedSkills) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-res-chip";
+    if (hasMention("skill", skill.skill_id)) btn.classList.add("is-active");
+    btn.textContent = skill.name || skill.skill_id;
+    btn.title = skill.description || skill.skill_id;
+    btn.addEventListener("click", () =>
+      toggleMention({
+        kind: "skill",
+        id: skill.skill_id,
+        label: skill.name || skill.skill_id,
+      }),
+    );
+    skillsListEl.appendChild(btn);
+  }
+
+  for (const server of enabledMcps) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-res-chip";
+    if (!server.healthy) btn.classList.add("is-warn");
+    if (hasMention("mcp", server.name)) btn.classList.add("is-active");
+    btn.textContent = server.is_browser ? `${server.name} · browser` : server.name;
+    btn.title = server.issue || `${server.scope} · ${server.runtime_hint}`;
+    btn.addEventListener("click", () =>
+      toggleMention({
+        kind: "mcp",
+        id: server.name,
+        label: server.name,
+      }),
+    );
+    mcpListEl.appendChild(btn);
+  }
+
+  updateResourcesSummary();
+}
+
+async function loadAskResources(): Promise<void> {
+  const runtime = selectedRuntime();
+  try {
+    const [skillsReport, mcpReport] = await Promise.all([
+      invoke<SkillsInventoryReport>("list_skills_inventory_command", { remoteStats: false }),
+      invoke<McpInventoryReport>("list_mcp_inventory_command"),
+    ]);
+    workspaceCwd = mcpReport.workspace_path;
+    if (mcpReport.workspace_path && (!cwdEl.dataset.cwd || cwdEl.dataset.cwd === "—")) {
+      setDisplayedCwd(mcpReport.workspace_path);
+    }
+    mountedSkills = (skillsReport.skills ?? []).filter((skill) =>
+      skillMountedForRuntime(skill, runtime),
+    );
+    enabledMcps = (mcpReport.servers ?? []).filter((server) => mcpMatchesRuntime(server, runtime));
+    // Drop mentions that no longer exist for this runtime.
+    selectedMentions = selectedMentions.filter((m) => {
+      if (m.kind === "skill") return mountedSkills.some((s) => s.skill_id === m.id);
+      return enabledMcps.some((s) => s.name === m.id);
+    });
+    renderMentions();
+    renderResourceChips();
+  } catch (error) {
+    setStatus(t("chat.resourcesLoadFailed", { error: String(error) }), "warn");
+  }
+}
+
+async function openMainResources(): Promise<void> {
+  try {
+    await invoke("focus_main_tab_command", { tab: "resources" });
+  } catch (error) {
+    setStatus(String(error), "error");
+  }
+}
+
+function parseMentionsFromText(text: string): MentionRef[] {
+  const found: MentionRef[] = [];
+  const seen = new Set<string>();
+  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
+    const raw = match[0];
+    const id = (match[1] || "").trim();
+    if (!id) continue;
+    const kind: MentionKind = raw.toLowerCase().startsWith("@mcp:") ? "mcp" : "skill";
+    const key = `${kind}:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label =
+      kind === "skill"
+        ? mountedSkills.find((s) => s.skill_id === id || s.name === id)?.name || id
+        : enabledMcps.find((s) => s.name === id)?.name || id;
+    found.push({ kind, id, label });
+  }
+  return found;
+}
+
+function stripMentionTokens(text: string): string {
+  return text
+    .replace(MENTION_TOKEN_RE, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function mergeMentionsForSend(userText: string): MentionRef[] {
+  const fromText = parseMentionsFromText(userText);
+  const map = new Map<string, MentionRef>();
+  for (const m of [...selectedMentions, ...fromText]) {
+    map.set(mentionKey(m), m);
+  }
+  return [...map.values()];
+}
+
+function buildMentionConstraint(mentions: MentionRef[]): string {
+  if (mentions.length === 0) return "";
+  const list = mentions
+    .map((m) =>
+      m.kind === "skill" ? `- Skill: ${m.label} (id: ${m.id})` : `- MCP server: ${m.label}`,
+    )
+    .join("\n");
+  return t("chat.mentionHint", { list });
+}
+
+function mentionCandidates(): MentionRef[] {
+  const skills = mountedSkills.map((s) => ({
+    kind: "skill" as const,
+    id: s.skill_id,
+    label: s.name || s.skill_id,
+  }));
+  const mcps = enabledMcps.map((s) => ({
+    kind: "mcp" as const,
+    id: s.name,
+    label: s.name,
+  }));
+  return [...skills, ...mcps];
+}
+
+function detectMentionQuery(): typeof mentionQuery {
+  const value = promptEl.value;
+  const caret = promptEl.selectionStart ?? value.length;
+  const before = value.slice(0, caret);
+  const match = before.match(/(?:^|\s)(@(?:skill:|mcp:)?([^\s@]*))$/i);
+  if (!match || match.index == null) return null;
+  const token = match[1];
+  const q = match[2] || "";
+  const start = match.index + (match[0].startsWith("@") ? 0 : 1);
+  const end = caret;
+  let kind: MentionKind | "any" = "any";
+  const lower = token.toLowerCase();
+  if (lower.startsWith("@skill:")) kind = "skill";
+  else if (lower.startsWith("@mcp:")) kind = "mcp";
+  return { kind, q, start, end };
+}
+
+function filteredMentionOptions(): MentionRef[] {
+  if (!mentionQuery) return [];
+  const q = mentionQuery.q.toLowerCase();
+  return mentionCandidates().filter((item) => {
+    if (mentionQuery!.kind !== "any" && item.kind !== mentionQuery!.kind) return false;
+    if (!q) return true;
+    return item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
+  });
+}
+
+function hideMentionMenu(): void {
+  mentionQuery = null;
+  mentionMenuEl.hidden = true;
+  mentionMenuEl.replaceChildren();
+}
+
+function renderMentionMenu(): void {
+  mentionQuery = detectMentionQuery();
+  const options = filteredMentionOptions();
+  if (!mentionQuery || options.length === 0) {
+    hideMentionMenu();
+    return;
+  }
+  mentionMenuIndex = Math.max(0, Math.min(mentionMenuIndex, options.length - 1));
+  mentionMenuEl.replaceChildren();
+  options.forEach((option, index) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-mention-option";
+    if (index === mentionMenuIndex) btn.classList.add("is-active");
+    btn.setAttribute("role", "option");
+    const title = document.createElement("strong");
+    title.textContent =
+      option.kind === "skill"
+        ? t("chat.mentionSkill", { name: option.label })
+        : t("chat.mentionMcp", { name: option.label });
+    const sub = document.createElement("span");
+    sub.textContent = `@${option.kind}:${option.id}`;
+    btn.append(title, sub);
+    btn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      applyMentionOption(option);
+    });
+    mentionMenuEl.appendChild(btn);
+  });
+  mentionMenuEl.hidden = false;
+}
+
+function applyMentionOption(option: MentionRef): void {
+  if (!mentionQuery) return;
+  const value = promptEl.value;
+  const token = `@${option.kind}:${option.id} `;
+  promptEl.value = `${value.slice(0, mentionQuery.start)}${token}${value.slice(mentionQuery.end)}`;
+  const next = mentionQuery.start + token.length;
+  promptEl.setSelectionRange(next, next);
+  upsertMention(option);
+  hideMentionMenu();
+  autoResizePrompt();
+  promptEl.focus();
+}
+
 function buildPromptWithHistory(userText: string, attachments: ChatAttachment[]): string {
   const session = activeSession();
   // Native resume already carries thread history — only send this turn.
@@ -1077,23 +1478,20 @@ async function ensureListener(): Promise<void> {
     const payload = event.payload;
     switch (payload.type) {
       case "started":
-        cwdEl.textContent = payload.cwd;
+        setDisplayedCwd(payload.cwd);
         assistantBubble = null;
         assistantMessageId = null;
         assistantRaw = "";
         pendingText = "";
         turnHadAssistantText = false;
-        setLiveLabel(t("chat.phaseStarting"));
         break;
       case "status":
         pushActivity(payload.phase, payload.message);
         break;
       case "delta":
-        setLiveLabel(t("chat.phaseStreaming"));
         queueAssistantText(payload.text);
         break;
       case "stdout_line":
-        setLiveLabel(t("chat.phaseStreaming"));
         queueAssistantText(`${payload.line}\n`);
         break;
       case "stderr_line":
@@ -1115,7 +1513,6 @@ async function ensureListener(): Promise<void> {
         }
         clearEphemeralActivity();
         sealAssistantBubble();
-        setLiveLabel(t("chat.live"));
         // Disable any unanswered permission cards if the session ended.
         for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
           card.classList.remove("is-pending");
@@ -1188,7 +1585,7 @@ async function sendAsk(): Promise<void> {
   if (busy) return;
   const text = promptEl.value.trim();
   const attachments = [...pendingAttachments];
-  if (!text && attachments.length === 0) {
+  if (!text && attachments.length === 0 && selectedMentions.length === 0) {
     setStatus(t("chat.emptyPrompt"), "warn");
     return;
   }
@@ -1197,11 +1594,19 @@ async function sendAsk(): Promise<void> {
   const elevated = elevatedEl.checked;
   if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
 
-  const userText = text || t("chat.attachOnlyPrompt");
+  const mentions = mergeMentionsForSend(text);
+  const cleaned = stripMentionTokens(text);
+  const userText = cleaned || text || t("chat.attachOnlyPrompt");
+  const constraint = buildMentionConstraint(mentions);
+  const promptUserText = constraint ? `${constraint}\n\n${userText}` : userText;
+
   await ensureListener();
   persistMessage("user", userText, { attachments });
   appendBubble("user", userText, { persist: false, attachments });
   promptEl.value = "";
+  hideMentionMenu();
+  clearMentions();
+  autoResizePrompt();
   pendingAttachments = [];
   renderPendingAttachments();
   assistantBubble = null;
@@ -1210,10 +1615,9 @@ async function sendAsk(): Promise<void> {
   pendingText = "";
   turnHadAssistantText = false;
   setBusy(true);
-  setLiveLabel(t("chat.phaseStarting"));
   setStatus(t("chat.running", { runtime }), "muted");
 
-  const prompt = buildPromptWithHistory(userText, attachments);
+  const prompt = buildPromptWithHistory(promptUserText, attachments);
   const resumeThreadId = activeSession().runtimeThreadId?.trim() || null;
 
   try {
@@ -1226,7 +1630,7 @@ async function sendAsk(): Promise<void> {
       fullAuto: runtime === "codex" && elevated,
       resumeThreadId,
     });
-    cwdEl.textContent = report.cwd;
+    setDisplayedCwd(report.cwd);
     if (report.runtime_thread_id?.trim()) {
       const session = activeSession();
       session.runtimeThreadId = report.runtime_thread_id.trim();
@@ -1249,22 +1653,70 @@ function boot(): void {
   readInitialRuntime();
   applyI18n();
   renderActiveMessages();
+  void loadAskResources();
+  void setupFileDrop();
 
   actionEl.addEventListener("click", () => {
     if (busy) void cancelAsk();
     else void sendAsk();
   });
-  attachFileEl.addEventListener("click", () => void pickAttachments("file"));
-  attachImageEl.addEventListener("click", () => void pickAttachments("image"));
+  attachEl.addEventListener("click", () => void pickAttachments());
   clearEl.addEventListener("click", clearActiveSession);
   newSessionEl.addEventListener("click", startNewSession);
   terminalEl.addEventListener("click", () => void openTerminal());
+  resourcesToggleEl.addEventListener("click", () => {
+    toggleResourcesPanel();
+  });
+  resourcesRefreshEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void loadAskResources();
+  });
+  openResourcesEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void openMainResources();
+  });
   elevatedEl.addEventListener("change", () => {
     if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
       elevatedEl.checked = false;
     }
   });
+  promptEl.addEventListener("input", () => {
+    autoResizePrompt();
+    renderMentionMenu();
+  });
   promptEl.addEventListener("keydown", (event) => {
+    if (!mentionMenuEl.hidden) {
+      const options = filteredMentionOptions();
+      if (event.key === "ArrowDown" && options.length > 0) {
+        event.preventDefault();
+        mentionMenuIndex = (mentionMenuIndex + 1) % options.length;
+        renderMentionMenu();
+        return;
+      }
+      if (event.key === "ArrowUp" && options.length > 0) {
+        event.preventDefault();
+        mentionMenuIndex = (mentionMenuIndex - 1 + options.length) % options.length;
+        renderMentionMenu();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        hideMentionMenu();
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && options[mentionMenuIndex]) {
+        event.preventDefault();
+        applyMentionOption(options[mentionMenuIndex]);
+        return;
+      }
+      if (event.key === "Tab" && options[mentionMenuIndex]) {
+        event.preventDefault();
+        applyMentionOption(options[mentionMenuIndex]);
+        return;
+      }
+    }
     if (event.key !== "Enter") return;
     // Shift+Enter keeps a newline for multi-line prompts.
     if (event.shiftKey) return;
@@ -1283,16 +1735,23 @@ function boot(): void {
       promptEl.dataset.composing = "0";
     }, 0);
   });
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Node)) return;
+    if (mentionMenuEl.contains(event.target) || promptEl.contains(event.target)) return;
+    hideMentionMenu();
+  });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {
     const runtime = event.payload?.runtime;
     if (runtime === "claude-code" || runtime === "codex") {
       ensureRuntimeSession(runtime);
     }
+    void loadAskResources();
     promptEl.focus();
   });
 
   void ensureListener();
+  autoResizePrompt();
   promptEl.focus();
 }
 

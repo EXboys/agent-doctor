@@ -1202,6 +1202,24 @@ fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<()
     open_or_focus_ask_window(&app, runtime.as_deref())
 }
 
+/// Focus the main window and ask it to open a tab (e.g. `resources`).
+#[tauri::command]
+fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    show_main_window(&app);
+    if let Some(window) = app.get_webview_window("main") {
+        let tab = tab
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("resources");
+        let _ = window.emit(
+            "main-navigate",
+            serde_json::json!({ "tab": tab }),
+        );
+    }
+    Ok(())
+}
+
 fn build_repair_preview_response(
     report: RuntimeProbeReport,
     last_execute: Option<RepairExecuteSummary>,
@@ -1517,6 +1535,7 @@ pub fn run() {
             open_path_command,
             open_session_command,
             open_ask_window_command,
+            focus_main_tab_command,
             start_prompt_session_command,
             cancel_prompt_session_command,
             resolve_permission_session_command

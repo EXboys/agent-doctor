@@ -7,7 +7,31 @@
     <link rel="stylesheet" href="/src/chat.css" />
   </head>
   <body>
-    <div class="chat-shell">
+    <div class="chat-shell" id="chat-shell">
+      <aside id="chat-resources-panel" class="chat-resources-panel" aria-hidden="true">
+        <div class="chat-resources-panel-inner">
+          <div class="chat-resources-panel-head">
+            <strong data-i18n="chat.resourcesPanelTitle">Resources</strong>
+            <div class="chat-resources-actions">
+              <button id="chat-resources-refresh" type="button" class="btn-link" data-i18n="chat.resourcesRefresh">刷新</button>
+              <button id="chat-open-resources" type="button" class="btn-link" data-i18n="chat.openResources">管理</button>
+            </div>
+          </div>
+          <p id="chat-cwd" class="chat-cwd" title="">—</p>
+          <section class="chat-resources-section">
+            <h3 data-i18n="chat.skillsTitle">Skills</h3>
+            <div id="chat-skills-list" class="chat-chip-list" role="list"></div>
+            <p id="chat-skills-empty" class="chat-resources-empty" hidden data-i18n="chat.skillsEmpty">当前 runtime 暂无已挂载 skill</p>
+          </section>
+          <section class="chat-resources-section">
+            <h3 data-i18n="chat.mcpTitle">MCP</h3>
+            <div id="chat-mcp-list" class="chat-chip-list" role="list"></div>
+            <p id="chat-mcp-empty" class="chat-resources-empty" hidden data-i18n="chat.mcpEmpty">当前 runtime 暂无 MCP</p>
+          </section>
+          <p class="chat-resources-hint" data-i18n="chat.resourcesHint">点击加入本轮优先；完整 CLI 用「打开终端」。</p>
+        </div>
+      </aside>
+
       <aside class="chat-side">
         <div class="chat-brand">
           <div class="chat-brand-mark" aria-hidden="true">AD</div>
@@ -23,10 +47,16 @@
           <div id="chat-sessions" class="chat-sessions" role="list"></div>
         </div>
 
-        <div class="chat-runtime-locked">
-          <span data-i18n="chat.runtime">Runtime</span>
-          <strong id="chat-runtime-label">Claude Code</strong>
-        </div>
+        <button
+          id="chat-resources-toggle"
+          type="button"
+          class="chat-resources-toggle"
+          aria-expanded="false"
+          aria-controls="chat-resources-panel"
+        >
+          <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
+          <span id="chat-resources-label" class="chat-resources-label">—</span>
+        </button>
 
         <label class="chat-elevated">
           <input id="chat-elevated" type="checkbox" />
@@ -45,35 +75,37 @@
 
       <main class="chat-main">
         <header class="chat-top">
-          <div>
-            <h1 id="chat-title">对话</h1>
-            <p id="chat-cwd" class="chat-cwd">—</p>
-          </div>
-          <div id="chat-live" class="chat-live" hidden>
-            <span class="chat-live-dot"></span>
-            <span id="chat-live-label" data-i18n="chat.live">流式输出中</span>
-            <span id="chat-live-elapsed" class="chat-live-elapsed">0.0s</span>
-          </div>
+          <h1 id="chat-title" class="chat-title">对话</h1>
         </header>
 
         <div id="chat-log" class="chat-log" aria-live="polite"></div>
 
         <footer class="chat-composer">
-          <div class="chat-composer-toolbar">
-            <button id="chat-attach-file" type="button" class="btn-attach" data-i18n="chat.attachFile">上传文件</button>
-            <button id="chat-attach-image" type="button" class="btn-attach" data-i18n="chat.attachImage">上传图片</button>
-          </div>
+          <div id="chat-mentions" class="chat-mentions" hidden></div>
           <div id="chat-attachments" class="chat-attachments" hidden></div>
-          <div class="chat-composer-row">
-            <textarea
-              id="chat-prompt"
-              class="chat-prompt"
-              rows="3"
-              placeholder="在当前工作区问一句…"
-              spellcheck="false"
-            ></textarea>
-            <div class="chat-composer-actions">
-              <button id="chat-action" type="button" class="btn-primary" data-i18n="chat.send">发送</button>
+          <div class="chat-composer-box">
+            <div class="chat-prompt-wrap">
+              <textarea
+                id="chat-prompt"
+                class="chat-prompt"
+                rows="1"
+                placeholder="在当前工作区问一句… 可用 @skill: / @mcp:"
+                spellcheck="false"
+              ></textarea>
+              <div id="chat-mention-menu" class="chat-mention-menu" hidden role="listbox"></div>
+            </div>
+            <div class="chat-composer-bar">
+              <button
+                id="chat-attach"
+                type="button"
+                class="btn-composer-icon"
+                data-i18n-title="chat.attach"
+                aria-label="上传文件或图片"
+                title="上传文件或图片"
+              >
+                <span aria-hidden="true">+</span>
+              </button>
+              <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
             </div>
           </div>
         </footer>

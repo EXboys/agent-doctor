@@ -4456,6 +4456,13 @@ void listen<DoctorReport>("doctor-report", (event) => {
   void renderReport(event.payload);
 });
 
+void listen<{ tab?: string }>("main-navigate", (event) => {
+  const tab = event.payload?.tab;
+  if (tab === "diagnose" || tab === "resources" || tab === "provider" || tab === "workspace") {
+    setMainTab(tab);
+  }
+});
+
 void listen("workspace-changed", () => {
   void loadWorkspaces();
   void loadMcpStatus();
