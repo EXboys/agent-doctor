@@ -1614,7 +1614,11 @@ function renderRuntimeCardActions(
   }
 
   const parts: string[] = [];
-  const isAskRuntime = runtime.id === "claude-code" || runtime.id === "codex";
+  const isAskRuntime =
+    runtime.id === "claude-code" ||
+    runtime.id === "codex" ||
+    runtime.id === "hermes" ||
+    runtime.id === "openclaw";
   if (isAskRuntime) {
     // Default: open the in-app light ask UI; Terminal is optional.
     parts.push(
@@ -4002,7 +4006,12 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "ask-session" && runtimeCard) {
     const runtime = runtimeCard.dataset.runtime;
-    if (runtime === "claude-code" || runtime === "codex") {
+    if (
+      runtime === "claude-code" ||
+      runtime === "codex" ||
+      runtime === "hermes" ||
+      runtime === "openclaw"
+    ) {
       void openAskWindow(runtime);
     }
     return;

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 
-export type AskRuntime = "claude-code" | "codex";
+export type AskRuntime = "claude-code" | "codex" | "hermes" | "openclaw";
 
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 
@@ -123,7 +123,11 @@ function setHint(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"
 
 function selectedRuntime(): AskRuntime {
   const { runtime } = els();
-  return runtime?.value === "codex" ? "codex" : "claude-code";
+  const value = runtime?.value;
+  if (value === "codex" || value === "hermes" || value === "openclaw" || value === "claude-code") {
+    return value;
+  }
+  return "claude-code";
 }
 
 function elevatedFlags(runtime: AskRuntime): {
@@ -133,8 +137,8 @@ function elevatedFlags(runtime: AskRuntime): {
   const { elevated } = els();
   const on = Boolean(elevated?.checked);
   return {
-    dangerously_skip_permissions: runtime === "claude-code" && on,
-    full_auto: runtime === "codex" && on,
+    dangerously_skip_permissions: (runtime === "claude-code" || runtime === "hermes") && on,
+    full_auto: (runtime === "codex" || runtime === "openclaw") && on,
   };
 }
 
@@ -195,8 +199,16 @@ function updateElevatedLabel(): void {
   if (!label) {
     return;
   }
-  label.textContent =
-    selectedRuntime() === "codex" ? t("ask.elevatedCodex") : t("ask.elevatedClaude");
+  const runtime = selectedRuntime();
+  if (runtime === "codex") {
+    label.textContent = t("ask.elevatedCodex");
+  } else if (runtime === "hermes") {
+    label.textContent = t("ask.elevatedHermes");
+  } else if (runtime === "openclaw") {
+    label.textContent = t("ask.elevatedOpenclaw");
+  } else {
+    label.textContent = t("ask.elevatedClaude");
+  }
 }
 
 export function initAskPanel(hooks: AskPanelHooks): void {

@@ -192,9 +192,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// One-shot non-interactive ask via `claude -p` / `codex exec` (streams output)
+    /// One-shot non-interactive ask via Claude / Codex / Hermes / OpenClaw (streams output)
     Ask {
-        /// Runtime id: claude-code or codex
+        /// Runtime id: claude-code, codex, hermes, or openclaw
         runtime: String,
         /// Prompt text
         prompt: String,

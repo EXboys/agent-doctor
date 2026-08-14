@@ -1,13 +1,16 @@
-//! Light Ask sessions for Claude Code and Codex.
+//! Light Ask sessions for Claude Code, Codex, Hermes, and OpenClaw.
 //!
 //! UI consumes a shared [`PromptSessionEvent`] stream. Each runtime is an
-//! [`AskBackend`] adapter (Claude: `control_request`; Codex: `app-server`).
+//! [`AskBackend`] adapter (Claude: `control_request`; Codex: `app-server`;
+//! Hermes/OpenClaw: headless CLI).
 
 mod backend;
 mod claude;
 mod codex_app_server;
 mod control;
 mod env;
+mod hermes;
+mod openclaw;
 mod util;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,6 +25,8 @@ pub use control::PromptSessionControl;
 
 use claude::ClaudeAskBackend;
 use codex_app_server::CodexAskBackend;
+use hermes::HermesAskBackend;
+use openclaw::OpenClawAskBackend;
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -39,13 +44,13 @@ pub struct PromptSessionOptions {
     pub cwd: Option<std::path::PathBuf>,
     #[serde(default = "default_timeout_sec")]
     pub timeout_sec: u64,
-    /// Claude Code only. Default false — UI must confirm before enabling.
+    /// Claude Code / Hermes. Default false — UI must confirm before enabling.
     #[serde(default)]
     pub dangerously_skip_permissions: bool,
-    /// Codex only. Default false — skip app-server approval prompts when true.
+    /// Codex / OpenClaw elevated mode. Default false.
     #[serde(default)]
     pub full_auto: bool,
-    /// Resume an existing Codex thread id or Claude session id when set.
+    /// Resume an existing thread/session id when set (Codex/Claude/Hermes/OpenClaw).
     #[serde(default)]
     pub resume_thread_id: Option<String>,
 }
@@ -182,7 +187,11 @@ where
     match runtime.as_str() {
         "claude-code" => ClaudeAskBackend.run(options, cancel, control, &mut on_event),
         "codex" => CodexAskBackend.run(options, cancel, control, &mut on_event),
-        other => bail!("ask supports only claude-code or codex (got '{other}')"),
+        "hermes" => HermesAskBackend.run(options, cancel, control, &mut on_event),
+        "openclaw" => OpenClawAskBackend.run(options, cancel, control, &mut on_event),
+        other => bail!(
+            "ask supports claude-code, codex, hermes, or openclaw (got '{other}')"
+        ),
     }
 }
 
@@ -225,7 +234,7 @@ mod tests {
 
         let err = run_prompt_session(
             &PromptSessionOptions {
-                runtime: "hermes".into(),
+                runtime: "not-a-runtime".into(),
                 prompt: "hi".into(),
                 cwd: None,
                 timeout_sec: 30,
@@ -236,7 +245,7 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
-        assert!(format!("{err:#}").contains("claude-code or codex"));
+        assert!(format!("{err:#}").contains("claude-code, codex, hermes, or openclaw"));
     }
 
     #[test]
