@@ -5,7 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-type AskRuntime = "claude-code" | "codex";
+type AskRuntime = "claude-code" | "codex" | "hermes" | "openclaw";
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 type ChatRole = "user" | "assistant" | "meta" | "permission";
 type AttachKind = "file" | "image";
@@ -212,7 +212,19 @@ function selectedRuntime(): AskRuntime {
 }
 
 function runtimeDisplayName(runtime: AskRuntime): string {
-  return runtime === "codex" ? "Codex" : "Claude Code";
+  if (runtime === "codex") return "Codex";
+  if (runtime === "hermes") return "Hermes";
+  if (runtime === "openclaw") return "OpenClaw";
+  return "Claude Code";
+}
+
+function isAskRuntime(value: string | null | undefined): value is AskRuntime {
+  return (
+    value === "claude-code" ||
+    value === "codex" ||
+    value === "hermes" ||
+    value === "openclaw"
+  );
 }
 
 function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
@@ -336,8 +348,16 @@ function applyI18n(): void {
 }
 
 function updateElevatedLabel(): void {
-  elevatedLabelEl.textContent =
-    selectedRuntime() === "codex" ? t("chat.elevatedCodex") : t("chat.elevatedClaude");
+  const runtime = selectedRuntime();
+  if (runtime === "codex") {
+    elevatedLabelEl.textContent = t("chat.elevatedCodex");
+  } else if (runtime === "hermes") {
+    elevatedLabelEl.textContent = t("chat.elevatedHermes");
+  } else if (runtime === "openclaw") {
+    elevatedLabelEl.textContent = t("chat.elevatedOpenclaw");
+  } else {
+    elevatedLabelEl.textContent = t("chat.elevatedClaude");
+  }
 }
 
 function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {
@@ -1103,6 +1123,8 @@ function preferPlainSummary(summary: string): string {
   }
   if (/^claude-code (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   if (/^codex (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
+  if (/^hermes (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
+  if (/^openclaw (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   return trimmed;
 }
 
@@ -1550,7 +1572,7 @@ async function ensureListener(): Promise<void> {
 function readInitialRuntime(): void {
   const params = new URLSearchParams(window.location.search);
   const runtime = params.get("runtime");
-  if (runtime === "claude-code" || runtime === "codex") {
+  if (isAskRuntime(runtime)) {
     ensureRuntimeSession(runtime);
   } else {
     setCurrentRuntime(activeSession().runtime);
@@ -1626,8 +1648,9 @@ async function sendAsk(): Promise<void> {
       prompt,
       cwd: null,
       timeoutSec: 600,
-      dangerouslySkipPermissions: runtime === "claude-code" && elevated,
-      fullAuto: runtime === "codex" && elevated,
+      dangerouslySkipPermissions:
+        (runtime === "claude-code" || runtime === "hermes") && elevated,
+      fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
       resumeThreadId,
     });
     setDisplayedCwd(report.cwd);
@@ -1743,7 +1766,7 @@ function boot(): void {
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {
     const runtime = event.payload?.runtime;
-    if (runtime === "claude-code" || runtime === "codex") {
+    if (isAskRuntime(runtime)) {
       ensureRuntimeSession(runtime);
     }
     void loadAskResources();

@@ -37,6 +37,8 @@ pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
         PROVIDER_PROTOCOL_ENV,
         "AGENT_DOCTOR_CLAUDE_BIN",
         "AGENT_DOCTOR_CODEX_BIN",
+        "AGENT_DOCTOR_HERMES_BIN",
+        "AGENT_DOCTOR_OPENCLAW_BIN",
     ] {
         if let Ok(v) = std::env::var(key as &str) {
             if !v.trim().is_empty() {
