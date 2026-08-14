@@ -2314,6 +2314,113 @@ body::before {
   background: var(--surface);
 }
 
+.ask-section {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.ask-section.is-focused {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.ask-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.ask-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ask-select {
+  min-width: 132px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+.ask-elevated {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.ask-prompt {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.ask-prompt:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  border-color: var(--primary);
+}
+
+.ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ask-meta {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+}
+
+.ask-log {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#ask-hint.is-ok {
+  color: var(--success);
+}
+
+#ask-hint.is-warn {
+  color: var(--warn);
+}
+
+#ask-hint.is-error {
+  color: var(--danger);
+}
+
 .widget-footer {
   display: flex;
   flex-direction: column;

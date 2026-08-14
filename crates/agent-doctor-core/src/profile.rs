@@ -122,9 +122,25 @@ pub fn read_env_map(path: &Path) -> Result<HashMap<String, String>> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        env.insert(key.trim().to_string(), value.trim().to_string());
+        env.insert(
+            key.trim().to_string(),
+            unquote_env_value(value.trim()),
+        );
     }
     Ok(env)
+}
+
+/// Undo shell quoting written for `source`-able env files (e.g. active-workspace.env).
+/// Without this, programmatic readers treat `'…/Application Support/…'` as a literal path.
+pub fn unquote_env_value(value: &str) -> String {
+    let v = value.trim();
+    if let Some(inner) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        return inner.replace("'\\''", "'");
+    }
+    if let Some(inner) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        return inner.replace("\\\"", "\"").replace("\\\\", "\\");
+    }
+    v.to_string()
 }
 
 fn profile_from_env(env: &HashMap<String, String>) -> CompanyProfile {
@@ -243,6 +259,35 @@ pub fn ensure_company_baseline_snapshot_from_active() -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn unquote_env_value_strips_shell_quotes() {
+        assert_eq!(unquote_env_value("plain"), "plain");
+        assert_eq!(
+            unquote_env_value(
+                "'/Users/airlu/Library/Application Support/agent-doctor/workspaces/x/codex-home'"
+            ),
+            "/Users/airlu/Library/Application Support/agent-doctor/workspaces/x/codex-home"
+        );
+        assert_eq!(unquote_env_value("'a'\\''b'"), "a'b");
+        assert_eq!(unquote_env_value("\"quoted\""), "quoted");
+    }
+
+    #[test]
+    fn read_env_map_unquotes_shell_quoted_values() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("active.env");
+        fs::write(
+            &path,
+            "CODEX_HOME='/Users/me/Library/Application Support/ws/codex-home'\n",
+        )
+        .unwrap();
+        let env = read_env_map(&path).unwrap();
+        assert_eq!(
+            env.get("CODEX_HOME").map(String::as_str),
+            Some("/Users/me/Library/Application Support/ws/codex-home")
+        );
+    }
 
     #[test]
     fn writes_and_reads_company_profile() {

@@ -8,6 +8,7 @@ pub mod lifecycle;
 pub mod presets;
 pub mod probe;
 pub mod profile;
+pub mod prompt_session;
 pub mod remote;
 pub mod repair;
 pub mod runtime;
@@ -54,6 +55,10 @@ pub use probe::{
 pub use profile::{
     agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
     read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
+};
+pub use prompt_session::{
+    run_prompt_session, run_prompt_session_with_cancel, PromptSessionCancel, PromptSessionControl,
+    PromptSessionEvent, PromptSessionOptions, PromptSessionReport, PromptSessionStatus,
 };
 pub use remote::{
     add_host, add_project, list_hosts, list_projects, load_remote_hosts, remote_hosts_path,

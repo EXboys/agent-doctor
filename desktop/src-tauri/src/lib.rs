@@ -8,18 +8,20 @@ use agent_doctor_core::{
     load_mode_status, load_personal_provider_status, load_profiles, load_remote_hosts,
     load_workspaces, mount_synced_skills, needs_binary_install, open_interactive_session,
     probe_runtime, remove_host, remove_project, resolve_agent_doctor_binary,
-    restore_runtime_backup, run_doctor, run_remote_doctor, runtime_supports_playbook,
-    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode, switch_to_team_mode,
-    unmount_synced_skills, upsert_personal_provider, use_profile, use_workspace_with_options,
+    restore_runtime_backup, run_doctor, run_prompt_session_with_cancel, run_remote_doctor,
+    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
+    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills,
+    upsert_personal_provider, use_profile, use_workspace_with_options,
     verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
     ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
     InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
     ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
     OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
     PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
-    ProfilesDocument, RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport,
-    RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
-    RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
+    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport, RemoteDoctorOptions,
+    RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport,
+    RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
     SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
     UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
     WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
@@ -34,8 +36,22 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder,
+};
 use tauri_plugin_opener::OpenerExt;
+
+const ASK_WINDOW_LABEL: &str = "ask";
+const ASK_WINDOW_WIDTH: f64 = 980.0;
+const ASK_WINDOW_HEIGHT: f64 = 640.0;
+const ASK_WINDOW_MARGIN: f64 = 16.0;
+
+/// At most one light ask session at a time (panel UX).
+#[derive(Default)]
+struct PromptSessionState {
+    cancel: Mutex<Option<PromptSessionCancel>>,
+    control: Mutex<Option<PromptSessionControl>>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct McpProgressEvent {
@@ -1003,6 +1019,185 @@ fn open_session_command(
     .map_err(|err| format!("{err:#}"))
 }
 
+#[tauri::command]
+async fn start_prompt_session_command(
+    app: AppHandle,
+    state: State<'_, PromptSessionState>,
+    runtime: String,
+    prompt: String,
+    cwd: Option<String>,
+    timeout_sec: Option<u64>,
+    dangerously_skip_permissions: Option<bool>,
+    full_auto: Option<bool>,
+) -> Result<PromptSessionReport, String> {
+    {
+        let guard = state.cancel.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Err("another ask session is already running".into());
+        }
+    }
+
+    let cancel = PromptSessionCancel::new();
+    let control = PromptSessionControl::new();
+    {
+        let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
+        *guard = Some(cancel.clone());
+    }
+    {
+        let mut guard = state.control.lock().map_err(|e| e.to_string())?;
+        *guard = Some(control.clone());
+    }
+
+    let options = PromptSessionOptions {
+        runtime,
+        prompt,
+        cwd: cwd.map(PathBuf::from),
+        timeout_sec: timeout_sec.unwrap_or(600),
+        dangerously_skip_permissions: dangerously_skip_permissions.unwrap_or(false),
+        full_auto: full_auto.unwrap_or(false),
+    };
+
+    // Interactive Allow/Deny when Claude skip is off, or Codex full-auto is off.
+    let control_for_run = {
+        let runtime = options.runtime.as_str();
+        let claude_ask = runtime == "claude-code" && !options.dangerously_skip_permissions;
+        let codex_ask = runtime == "codex" && !options.full_auto;
+        if claude_ask || codex_ask {
+            Some(control)
+        } else {
+            None
+        }
+    };
+
+    let app_for_emit = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_prompt_session_with_cancel(
+            &options,
+            cancel,
+            control_for_run,
+            |event: PromptSessionEvent| {
+                // Emit once. `AppHandle::emit` already broadcasts to every webview;
+                // also targeting the ask window duplicated every chat event.
+                let _ = app_for_emit.emit("prompt-session-event", &event);
+            },
+        )
+    })
+    .await;
+
+    if let Ok(mut guard) = state.cancel.lock() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = state.control.lock() {
+        *guard = None;
+    }
+
+    let report = result
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(report)
+}
+
+#[tauri::command]
+fn cancel_prompt_session_command(state: State<'_, PromptSessionState>) -> Result<bool, String> {
+    let guard = state.cancel.lock().map_err(|e| e.to_string())?;
+    if let Some(cancel) = guard.as_ref() {
+        cancel.request();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn resolve_permission_session_command(
+    app: AppHandle,
+    state: State<'_, PromptSessionState>,
+    session_id: String,
+    request_id: String,
+    allow: bool,
+) -> Result<bool, String> {
+    let guard = state.control.lock().map_err(|e| e.to_string())?;
+    let Some(control) = guard.as_ref() else {
+        return Err("no active ask session for permission reply".into());
+    };
+    control
+        .respond_permission(&request_id, allow)
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = app.emit(
+        "prompt-session-event",
+        &PromptSessionEvent::PermissionResolved {
+            session_id,
+            request_id,
+            allowed: allow,
+        },
+    );
+    Ok(true)
+}
+
+fn position_ask_window_right(window: &tauri::WebviewWindow) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let work_x = work.position.x as f64 / scale;
+    let work_y = work.position.y as f64 / scale;
+    let work_w = work.size.width as f64 / scale;
+    let work_h = work.size.height as f64 / scale;
+
+    let width = ASK_WINDOW_WIDTH.min(work_w - ASK_WINDOW_MARGIN * 2.0).max(640.0);
+    let height = ASK_WINDOW_HEIGHT.min(work_h - ASK_WINDOW_MARGIN * 2.0).max(480.0);
+    let x = work_x + work_w - width - ASK_WINDOW_MARGIN;
+    let y = work_y + ASK_WINDOW_MARGIN;
+
+    let _ = window.set_size(LogicalSize::new(width, height));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<(), String> {
+    let runtime = runtime
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("claude-code");
+
+    if let Some(existing) = app.get_webview_window(ASK_WINDOW_LABEL) {
+        position_ask_window_right(&existing);
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        let _ = existing.emit(
+            "ask-window-focus",
+            serde_json::json!({ "runtime": runtime }),
+        );
+        return Ok(());
+    }
+
+    let url = format!("chat.html?runtime={runtime}");
+    let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App(url.into()))
+        .title("Agent Doctor — Ask")
+        .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+        .min_inner_size(720.0, 480.0)
+        .resizable(true)
+        .visible(false)
+        .build()
+        .map_err(|err| format!("failed to open ask window: {err}"))?;
+
+    position_ask_window_right(&window);
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
+    open_or_focus_ask_window(&app, runtime.as_deref())
+}
+
 fn build_repair_preview_response(
     report: RuntimeProbeReport,
     last_execute: Option<RepairExecuteSummary>,
@@ -1260,6 +1455,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(Mutex::new(TrayCompactState::default()));
+            app.manage(PromptSessionState::default());
             show_main_window(app.handle());
             setup_tray(app);
             if let Some(window) = app.get_webview_window("main") {
@@ -1315,7 +1511,11 @@ pub fn run() {
             run_repair_rollback_command,
             install_runtime_command,
             open_path_command,
-            open_session_command
+            open_session_command,
+            open_ask_window_command,
+            start_prompt_session_command,
+            cancel_prompt_session_command,
+            resolve_permission_session_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

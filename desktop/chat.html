@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — Ask</title>
+    <link rel="stylesheet" href="/src/chat.css" />
+  </head>
+  <body>
+    <div class="chat-shell">
+      <aside class="chat-side">
+        <div class="chat-brand">
+          <div class="chat-brand-mark" aria-hidden="true">AD</div>
+          <div>
+            <p class="chat-brand-name">Agent Doctor</p>
+            <p class="chat-brand-sub" data-i18n="chat.subtitle">应用内问答</p>
+          </div>
+        </div>
+
+        <button id="chat-new" type="button" class="btn-side btn-new" data-i18n="chat.newSession">新建会话</button>
+        <div class="chat-session-block">
+          <p class="chat-session-label" data-i18n="chat.sessions">会话记录</p>
+          <div id="chat-sessions" class="chat-sessions" role="list"></div>
+        </div>
+
+        <div class="chat-runtime-locked">
+          <span data-i18n="chat.runtime">Runtime</span>
+          <strong id="chat-runtime-label">Claude Code</strong>
+        </div>
+
+        <label class="chat-elevated">
+          <input id="chat-elevated" type="checkbox" />
+          <span id="chat-elevated-label" data-i18n="chat.elevatedClaude">跳过权限确认</span>
+        </label>
+        <p class="chat-permission-hint" data-i18n="chat.permissionHint">未跳过/未全自动时，工具调用会在对话里弹出「允许 / 拒绝」（Claude 与 Codex）。</p>
+
+        <div class="chat-side-actions">
+          <button id="chat-terminal" type="button" class="btn-side" data-i18n="chat.terminal">打开终端</button>
+          <button id="chat-clear" type="button" class="btn-side btn-side-muted" data-i18n="chat.clear">清空当前</button>
+        </div>
+
+        <p id="chat-status" class="chat-status" aria-live="polite"></p>
+        <p class="chat-footnote" data-i18n="chat.footnote">默认贴屏幕右侧 · 完整交互请用终端</p>
+      </aside>
+
+      <main class="chat-main">
+        <header class="chat-top">
+          <div>
+            <h1 id="chat-title">对话</h1>
+            <p id="chat-cwd" class="chat-cwd">—</p>
+          </div>
+          <div id="chat-live" class="chat-live" hidden>
+            <span class="chat-live-dot"></span>
+            <span data-i18n="chat.live">流式输出中</span>
+            <span id="chat-live-elapsed" class="chat-live-elapsed">0.0s</span>
+          </div>
+        </header>
+
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+
+        <footer class="chat-composer">
+          <div class="chat-composer-toolbar">
+            <button id="chat-attach-file" type="button" class="btn-attach" data-i18n="chat.attachFile">上传文件</button>
+            <button id="chat-attach-image" type="button" class="btn-attach" data-i18n="chat.attachImage">上传图片</button>
+          </div>
+          <div id="chat-attachments" class="chat-attachments" hidden></div>
+          <div class="chat-composer-row">
+            <textarea
+              id="chat-prompt"
+              class="chat-prompt"
+              rows="3"
+              placeholder="在当前工作区问一句…"
+              spellcheck="false"
+            ></textarea>
+            <div class="chat-composer-actions">
+              <button id="chat-action" type="button" class="btn-primary" data-i18n="chat.send">发送</button>
+            </div>
+          </div>
+        </footer>
+      </main>
+    </div>
+    <script type="module" src="/src/chat.ts"></script>
+  </body>
+</html>
