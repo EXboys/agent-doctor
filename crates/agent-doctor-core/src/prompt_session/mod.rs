@@ -45,6 +45,9 @@ pub struct PromptSessionOptions {
     /// Codex only. Default false — skip app-server approval prompts when true.
     #[serde(default)]
     pub full_auto: bool,
+    /// Resume an existing Codex thread id or Claude session id when set.
+    #[serde(default)]
+    pub resume_thread_id: Option<String>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -120,6 +123,9 @@ pub struct PromptSessionReport {
     pub summary: String,
     pub log_excerpt: String,
     pub duration_ms: u64,
+    /// Codex thread id or Claude session id for the next turn's resume.
+    #[serde(default)]
+    pub runtime_thread_id: Option<String>,
 }
 
 /// Cooperative cancel flag shared with a running session.
@@ -210,6 +216,7 @@ mod tests {
                 timeout_sec: 30,
                 dangerously_skip_permissions: false,
                 full_auto: false,
+                resume_thread_id: None,
             },
             |_| {},
         )
@@ -224,6 +231,7 @@ mod tests {
                 timeout_sec: 30,
                 dangerously_skip_permissions: false,
                 full_auto: false,
+                resume_thread_id: None,
             },
             |_| {},
         )
@@ -282,6 +290,7 @@ time.sleep(30)
                 timeout_sec: 60,
                 dangerously_skip_permissions: false,
                 full_auto: true,
+                resume_thread_id: None,
             },
             cancel,
             None,

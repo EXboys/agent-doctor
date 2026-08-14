@@ -58,12 +58,18 @@ fn run_claude(
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let interactive = !options.dangerously_skip_permissions && control.is_some();
+    let resume_session_id = options
+        .resume_thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let mut cmd = build_claude_command(
         prompt,
         &cwd,
         options.dangerously_skip_permissions,
         interactive,
+        resume_session_id,
     )?;
     let command_display = format_command_display(&cmd);
 
@@ -155,6 +161,8 @@ fn run_claude(
                 display
             };
             let summary = summarize(&combined, &status, &runtime);
+            let runtime_thread_id = extract_claude_session_id(&stdout)
+                .or_else(|| resume_session_id.map(str::to_string));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: status.clone(),
@@ -170,6 +178,7 @@ fn run_claude(
                 summary: summary.clone(),
                 log_excerpt: combined,
                 duration_ms,
+                runtime_thread_id,
             }
         }
         Err(err) => {
@@ -189,6 +198,7 @@ fn run_claude(
                 summary: summary.clone(),
                 log_excerpt: summary,
                 duration_ms,
+                runtime_thread_id: resume_session_id.map(str::to_string),
             }
         }
     };
@@ -200,6 +210,7 @@ fn build_claude_command(
     cwd: &Path,
     skip_permissions: bool,
     interactive_permissions: bool,
+    resume_session_id: Option<&str>,
 ) -> Result<Command> {
     let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
@@ -212,6 +223,9 @@ fn build_claude_command(
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(sid) = resume_session_id {
+        cmd.arg("--resume").arg(sid);
+    }
     if skip_permissions {
         cmd.arg(prompt)
             .arg("--dangerously-skip-permissions")
@@ -607,6 +621,22 @@ fn parse_claude_stream_line(
 }
 
 /// Pull the final answer out of Claude Code stream-json when live deltas were empty.
+fn extract_claude_session_id(stdout: &str) -> Option<String> {
+    for line in stdout.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if let Some(sid) = value
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(sid.to_string());
+        }
+    }
+    None
+}
 
 fn extract_claude_result_text(stdout: &str) -> Option<String> {
     for line in stdout.lines().rev() {
@@ -756,6 +786,7 @@ mod tests {
                     timeout_sec: 30,
                     dangerously_skip_permissions: false,
                     full_auto: false,
+                    resume_thread_id: None,
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -823,6 +854,7 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
                     timeout_sec: 15,
                     dangerously_skip_permissions: false,
                     full_auto: false,
+                    resume_thread_id: None,
                 },
                 PromptSessionCancel::new(),
                 Some(control),

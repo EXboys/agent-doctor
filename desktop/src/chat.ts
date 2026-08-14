@@ -6,7 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 type AskRuntime = "claude-code" | "codex";
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
-type ChatRole = "user" | "assistant" | "meta";
+type ChatRole = "user" | "assistant" | "meta" | "permission";
 type AttachKind = "file" | "image";
 
 interface PromptSessionReport {
@@ -17,6 +17,7 @@ interface PromptSessionReport {
   exit_code: number | null;
   summary: string;
   duration_ms: number;
+  runtime_thread_id?: string | null;
 }
 
 type PromptSessionEvent =
@@ -54,12 +55,23 @@ interface ChatAttachment {
   kind: AttachKind;
 }
 
+interface PermissionMeta {
+  requestId: string;
+  toolName: string;
+  detail: string;
+  /** Backend prompt-session id used for resolve_permission_session_command */
+  backendSessionId?: string;
+  /** null = pending/expired without decision */
+  allowed: boolean | null;
+}
+
 interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   at: number;
   attachments?: ChatAttachment[];
+  permission?: PermissionMeta;
 }
 
 interface ChatSession {
@@ -69,6 +81,8 @@ interface ChatSession {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** Codex thread id / Claude session id for native resume */
+  runtimeThreadId?: string | null;
 }
 
 interface SessionStore {
@@ -76,7 +90,8 @@ interface SessionStore {
   sessions: ChatSession[];
 }
 
-const STORAGE_KEY = "agent-doctor.chat.sessions.v1";
+const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
+const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 const MAX_SESSIONS = 40;
 const MAX_CONTEXT_MESSAGES = 12;
 const MAX_ATTACHMENTS = 8;
@@ -99,6 +114,7 @@ const logEl = document.querySelector<HTMLElement>("#chat-log")!;
 const statusEl = document.querySelector<HTMLElement>("#chat-status")!;
 const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
 const liveEl = document.querySelector<HTMLElement>("#chat-live")!;
+const liveLabelEl = document.querySelector<HTMLElement>("#chat-live-label")!;
 const liveElapsedEl = document.querySelector<HTMLElement>("#chat-live-elapsed")!;
 const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
 
@@ -147,10 +163,14 @@ function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }
 
 function loadStore(): SessionStore {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as SessionStore;
       if (parsed?.sessions?.length && parsed.activeId) {
+        parsed.sessions = parsed.sessions.map((session) => ({
+          ...session,
+          messages: coalesceAssistantFragments(session.messages ?? []),
+        }));
         return parsed;
       }
     }
@@ -159,6 +179,30 @@ function loadStore(): SessionStore {
   }
   const session = createEmptySession(currentRuntime);
   return { activeId: session.id, sessions: [session] };
+}
+
+/** Repair historical “one token = one message” fragmentation from early Codex streaming. */
+function coalesceAssistantFragments(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const message of messages) {
+    const prev = out[out.length - 1];
+    const gap = prev ? message.at - prev.at : Number.POSITIVE_INFINITY;
+    const canMerge =
+      message.role === "assistant" &&
+      prev?.role === "assistant" &&
+      !message.permission &&
+      !prev.permission &&
+      gap >= 0 &&
+      gap < 250 &&
+      message.content.length <= 16;
+    if (canMerge && prev) {
+      prev.content += message.content;
+      prev.at = message.at;
+      continue;
+    }
+    out.push({ ...message, attachments: message.attachments ? [...message.attachments] : undefined });
+  }
+  return out;
 }
 
 function saveStore(): void {
@@ -174,6 +218,7 @@ function createEmptySession(runtime: AskRuntime): ChatSession {
     createdAt: now,
     updatedAt: now,
     messages: [],
+    runtimeThreadId: null,
   };
 }
 
@@ -284,14 +329,58 @@ function activityKind(phase: string): "tool" | "think" | "write" | "info" | "err
   return "info";
 }
 
+/** Lifecycle chatter that belongs in the header live pill, not the transcript. */
+function isQuietPhase(phase: string): boolean {
+  return (
+    phase === "starting" ||
+    phase === "requesting" ||
+    phase === "writing" ||
+    phase === "streaming" ||
+    phase === "info"
+  );
+}
+
+function setLiveLabel(message: string): void {
+  liveLabelEl.textContent = message.trim() || t("chat.live");
+}
+
+/** Drop ephemeral progress rows so they don't litter the transcript. */
+function clearEphemeralActivity(): void {
+  settleActivity();
+  for (const row of logEl.querySelectorAll<HTMLElement>(".chat-activity")) {
+    const phase = row.dataset.phase ?? "";
+    const kind = row.dataset.kind ?? "";
+    if (kind === "tool" || kind === "error" || kind === "think") continue;
+    if (isQuietPhase(phase) || phase === "writing") row.remove();
+  }
+}
+
 /** Render progress / tool calls inline in the chat stream (not a side panel). */
 function pushActivity(phase: string, message: string): void {
   const text = message.trim() || phase;
   if (!text) return;
+
+  // Quiet lifecycle → header only (avoids "正在请求 / 本轮完成 / 已开始" spam).
+  if (isQuietPhase(phase) || phase === "writing") {
+    setLiveLabel(text);
+    return;
+  }
+
   const kind = activityKind(phase);
-  // Soft phases (writing / requesting) must not seal the streaming bubble —
-  // otherwise Codex token deltas become one localStorage message each.
-  const softPhase = kind === "write" || phase === "requesting" || phase === "starting";
+
+  // Deduplicate identical consecutive tool chips (started+completed, or retries).
+  if (kind === "tool") {
+    const last = logEl.querySelector<HTMLElement>(".chat-activity.kind-tool:last-of-type");
+    if (last?.dataset.signature === text) {
+      last.classList.add("is-live");
+      last.classList.remove("is-done");
+      activityEl = last;
+      setLiveLabel(t("chat.toolRunning", { cmd: text }));
+      return;
+    }
+  }
+
+  const softPhase = kind === "write";
   const shouldAppend =
     !activityEl ||
     (!softPhase &&
@@ -300,7 +389,6 @@ function pushActivity(phase: string, message: string): void {
         activityEl.dataset.phase !== phase));
 
   if (shouldAppend) {
-    // Keep chronological order: flush text, close open assistant bubble, then append.
     flushPendingTextSync();
     sealAssistantBubble();
     settleActivity();
@@ -308,7 +396,13 @@ function pushActivity(phase: string, message: string): void {
     row.className = `chat-activity is-live kind-${kind}`;
     row.dataset.phase = phase;
     row.dataset.kind = kind;
-    row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
+    if (kind === "tool") row.dataset.signature = text;
+    if (kind === "tool") {
+      row.innerHTML = `<span class="chat-tool-badge" aria-hidden="true">$</span><code class="chat-activity-text chat-tool-cmd"></code>`;
+      setLiveLabel(t("chat.toolRunning", { cmd: text }));
+    } else {
+      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
+    }
     const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
     label.textContent = text;
     logEl.appendChild(row);
@@ -319,16 +413,6 @@ function pushActivity(phase: string, message: string): void {
     activityEl.className = `chat-activity is-live kind-${kind}`;
     const label = activityEl.querySelector<HTMLElement>(".chat-activity-text");
     if (label) label.textContent = text;
-  } else if (softPhase) {
-    const row = document.createElement("div");
-    row.className = `chat-activity is-live kind-${kind}`;
-    row.dataset.phase = phase;
-    row.dataset.kind = kind;
-    row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
-    const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
-    label.textContent = text;
-    logEl.appendChild(row);
-    activityEl = row;
   }
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -352,67 +436,111 @@ function pushPermissionCard(payload: {
   sealAssistantBubble();
   settleActivity();
 
-  const card = document.createElement("div");
-  card.className = "chat-permission is-pending";
-  card.dataset.requestId = payload.request_id;
+  const persisted = persistMessage("permission", payload.detail.trim() || payload.tool_name, {
+    permission: {
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      detail: payload.detail.trim() || payload.tool_name,
+      backendSessionId: payload.session_id,
+      allowed: null,
+    },
+  });
 
-  const title = document.createElement("div");
-  title.className = "chat-permission-title";
-  title.textContent = t("chat.permissionTitle", { tool: payload.tool_name });
-
-  const detail = document.createElement("pre");
-  detail.className = "chat-permission-detail";
-  detail.textContent = payload.detail.trim() || payload.tool_name;
-
-  const actions = document.createElement("div");
-  actions.className = "chat-permission-actions";
-
-  const allowBtn = document.createElement("button");
-  allowBtn.type = "button";
-  allowBtn.className = "chat-permission-allow";
-  allowBtn.textContent = t("chat.permissionAllow");
-
-  const denyBtn = document.createElement("button");
-  denyBtn.type = "button";
-  denyBtn.className = "chat-permission-deny";
-  denyBtn.textContent = t("chat.permissionDeny");
-
-  const setBusy = (busyLocal: boolean) => {
-    allowBtn.disabled = busyLocal;
-    denyBtn.disabled = busyLocal;
-  };
-
-  const resolve = async (allow: boolean) => {
-    if (card.dataset.resolved === "1") return;
-    setBusy(true);
-    try {
-      await invoke<boolean>("resolve_permission_session_command", {
-        sessionId: payload.session_id,
-        requestId: payload.request_id,
-        allow,
-      });
-      // permission_resolved event updates the card; keep disabled meanwhile
-    } catch (error) {
-      setBusy(false);
-      setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
-    }
-  };
-
-  allowBtn.addEventListener("click", () => void resolve(true));
-  denyBtn.addEventListener("click", () => void resolve(false));
-  actions.append(allowBtn, denyBtn);
-  card.append(title, detail, actions);
+  const card = renderPermissionCard(persisted, true);
   logEl.appendChild(card);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLElement {
+  const meta = message.permission;
+  const card = document.createElement("div");
+  const allowed = meta?.allowed;
+  card.className =
+    allowed === true
+      ? "chat-permission is-allowed"
+      : allowed === false
+        ? "chat-permission is-denied"
+        : interactive
+          ? "chat-permission is-pending"
+          : "chat-permission is-expired";
+  card.dataset.requestId = meta?.requestId ?? "";
+  card.dataset.messageId = message.id;
+  if (allowed != null) card.dataset.resolved = "1";
+
+  const title = document.createElement("div");
+  title.className = "chat-permission-title";
+  title.textContent = t("chat.permissionTitle", { tool: meta?.toolName ?? "tool" });
+
+  const detail = document.createElement("pre");
+  detail.className = "chat-permission-detail";
+  detail.textContent = meta?.detail || message.content;
+
+  const actions = document.createElement("div");
+  actions.className = "chat-permission-actions";
+
+  if (interactive && allowed == null && meta) {
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.className = "chat-permission-allow";
+    allowBtn.textContent = t("chat.permissionAllow");
+    const denyBtn = document.createElement("button");
+    denyBtn.type = "button";
+    denyBtn.className = "chat-permission-deny";
+    denyBtn.textContent = t("chat.permissionDeny");
+    const setLocalBusy = (busyLocal: boolean) => {
+      allowBtn.disabled = busyLocal;
+      denyBtn.disabled = busyLocal;
+    };
+    const resolve = async (allow: boolean) => {
+      if (card.dataset.resolved === "1") return;
+      setLocalBusy(true);
+      try {
+        await invoke<boolean>("resolve_permission_session_command", {
+          sessionId: meta.backendSessionId ?? "",
+          requestId: meta.requestId,
+          allow,
+        });
+      } catch (error) {
+        setLocalBusy(false);
+        setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
+      }
+    };
+    allowBtn.addEventListener("click", () => void resolve(true));
+    denyBtn.addEventListener("click", () => void resolve(false));
+    actions.append(allowBtn, denyBtn);
+  } else {
+    const badge = document.createElement("span");
+    badge.className = "chat-permission-result";
+    badge.textContent =
+      allowed === true
+        ? t("chat.permissionAllowed")
+        : allowed === false
+          ? t("chat.permissionDenied")
+          : t("chat.permissionExpired");
+    actions.appendChild(badge);
+  }
+
+  card.append(title, detail, actions);
+  return card;
+}
+
 function markPermissionResolved(requestId: string, allowed: boolean): void {
+  const session = activeSession();
+  const message = session.messages.find(
+    (m) => m.role === "permission" && m.permission?.requestId === requestId,
+  );
+  if (message?.permission) {
+    message.permission.allowed = allowed;
+    touchSession(session);
+    saveStore();
+  }
+
   const card = logEl.querySelector<HTMLElement>(
     `.chat-permission[data-request-id="${CSS.escape(requestId)}"]`,
   );
   if (!card) return;
   card.dataset.resolved = "1";
-  card.classList.remove("is-pending");
+  card.classList.remove("is-pending", "is-expired");
   card.classList.add(allowed ? "is-allowed" : "is-denied");
   const actions = card.querySelector(".chat-permission-actions");
   if (actions) {
@@ -613,6 +741,7 @@ function clearActiveSession(): void {
   const session = activeSession();
   session.messages = [];
   session.title = "";
+  session.runtimeThreadId = null;
   session.updatedAt = Date.now();
   saveStore();
   assistantBubble = null;
@@ -752,7 +881,7 @@ function renderAttachmentStrip(attachments: ChatAttachment[] | undefined): HTMLE
 function persistMessage(
   role: ChatRole,
   content: string,
-  opts?: { id?: string; attachments?: ChatAttachment[] },
+  opts?: { id?: string; attachments?: ChatAttachment[]; permission?: PermissionMeta },
 ): ChatMessage {
   const session = activeSession();
   const message: ChatMessage = {
@@ -761,6 +890,7 @@ function persistMessage(
     content,
     at: Date.now(),
     attachments: opts?.attachments?.length ? opts.attachments : undefined,
+    permission: opts?.permission,
   };
   session.messages.push(message);
   if (role === "user" && !session.title.trim()) {
@@ -824,6 +954,8 @@ function renderActiveMessages(): void {
       bubble.dataset.messageId = message.id;
       bubble.innerHTML = renderMarkdown(message.content);
       logEl.appendChild(bubble);
+    } else if (message.role === "permission") {
+      logEl.appendChild(renderPermissionCard(message, false));
     } else {
       const bubble = document.createElement("div");
       bubble.className = `chat-bubble ${message.role}`;
@@ -896,8 +1028,21 @@ function preferPlainSummary(summary: string): string {
 }
 
 function buildPromptWithHistory(userText: string, attachments: ChatAttachment[]): string {
-  const prior = activeSession()
-    .messages.filter((m) => m.role === "user" || m.role === "assistant")
+  const session = activeSession();
+  // Native resume already carries thread history — only send this turn.
+  if (session.runtimeThreadId?.trim()) {
+    const parts: string[] = [];
+    if (attachments.length > 0) {
+      parts.push(
+        `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
+      );
+    }
+    parts.push(userText);
+    return parts.join("\n\n");
+  }
+
+  const prior = session.messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
     .filter((m) => m.content.trim() || m.attachments?.length)
     .slice(0, -1)
     .slice(-MAX_CONTEXT_MESSAGES);
@@ -933,25 +1078,22 @@ async function ensureListener(): Promise<void> {
     switch (payload.type) {
       case "started":
         cwdEl.textContent = payload.cwd;
-        appendBubble("meta", t("chat.startedMeta", { runtime: payload.runtime }), {
-          persist: false,
-        });
         assistantBubble = null;
         assistantMessageId = null;
         assistantRaw = "";
         pendingText = "";
         turnHadAssistantText = false;
-        pushActivity("starting", t("chat.phaseStarting"));
+        setLiveLabel(t("chat.phaseStarting"));
         break;
       case "status":
         pushActivity(payload.phase, payload.message);
         break;
       case "delta":
-        settleActivity();
+        setLiveLabel(t("chat.phaseStreaming"));
         queueAssistantText(payload.text);
         break;
       case "stdout_line":
-        settleActivity();
+        setLiveLabel(t("chat.phaseStreaming"));
         queueAssistantText(`${payload.line}\n`);
         break;
       case "stderr_line":
@@ -971,8 +1113,9 @@ async function ensureListener(): Promise<void> {
           const fallback = preferPlainSummary(payload.summary);
           if (fallback) appendAssistantChunk(fallback);
         }
-        settleActivity();
+        clearEphemeralActivity();
         sealAssistantBubble();
+        setLiveLabel(t("chat.live"));
         // Disable any unanswered permission cards if the session ended.
         for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
           card.classList.remove("is-pending");
@@ -990,14 +1133,17 @@ async function ensureListener(): Promise<void> {
         if (!turnHadAssistantText) {
           appendBubble("meta", t("chat.emptyReply"), { persist: false });
         }
-        appendBubble(
-          "meta",
-          t("chat.completed", {
-            status: payload.status,
-            code: payload.exit_code == null ? "—" : String(payload.exit_code),
-          }),
-          { persist: false },
-        );
+        // Success stays silent in the transcript; failures get one short note.
+        if (payload.status !== "succeeded") {
+          appendBubble(
+            "meta",
+            t("chat.completed", {
+              status: payload.status,
+              code: payload.exit_code == null ? "—" : String(payload.exit_code),
+            }),
+            { persist: false },
+          );
+        }
         renderSessionList();
         break;
     }
@@ -1055,6 +1201,7 @@ async function sendAsk(): Promise<void> {
   await ensureListener();
   persistMessage("user", userText, { attachments });
   appendBubble("user", userText, { persist: false, attachments });
+  promptEl.value = "";
   pendingAttachments = [];
   renderPendingAttachments();
   assistantBubble = null;
@@ -1063,10 +1210,11 @@ async function sendAsk(): Promise<void> {
   pendingText = "";
   turnHadAssistantText = false;
   setBusy(true);
-  pushActivity("starting", t("chat.phaseStarting"));
+  setLiveLabel(t("chat.phaseStarting"));
   setStatus(t("chat.running", { runtime }), "muted");
 
   const prompt = buildPromptWithHistory(userText, attachments);
+  const resumeThreadId = activeSession().runtimeThreadId?.trim() || null;
 
   try {
     const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
@@ -1076,12 +1224,18 @@ async function sendAsk(): Promise<void> {
       timeoutSec: 600,
       dangerouslySkipPermissions: runtime === "claude-code" && elevated,
       fullAuto: runtime === "codex" && elevated,
+      resumeThreadId,
     });
     cwdEl.textContent = report.cwd;
+    if (report.runtime_thread_id?.trim()) {
+      const session = activeSession();
+      session.runtimeThreadId = report.runtime_thread_id.trim();
+      touchSession(session);
+      saveStore();
+    }
     const tone =
       report.status === "succeeded" ? "ok" : report.status === "cancelled" ? "warn" : "error";
     setStatus(t("chat.done", { status: report.status, ms: String(report.duration_ms) }), tone);
-    promptEl.value = "";
   } catch (error) {
     setStatus(t("chat.failed", { error: String(error) }), "error");
     appendBubble("meta", String(error), { persist: false });
@@ -1111,10 +1265,23 @@ function boot(): void {
     }
   });
   promptEl.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      void sendAsk();
-    }
+    if (event.key !== "Enter") return;
+    // Shift+Enter keeps a newline for multi-line prompts.
+    if (event.shiftKey) return;
+    // IME candidate confirm (Chinese etc.): Enter commits the composition, not send.
+    if (event.isComposing || event.keyCode === 229 || promptEl.dataset.composing === "1") return;
+    event.preventDefault();
+    if (busy) return;
+    void sendAsk();
+  });
+  promptEl.addEventListener("compositionstart", () => {
+    promptEl.dataset.composing = "1";
+  });
+  promptEl.addEventListener("compositionend", () => {
+    // Defer clear so the Enter that ends composition doesn't also send.
+    window.setTimeout(() => {
+      promptEl.dataset.composing = "0";
+    }, 0);
   });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {
