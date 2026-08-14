@@ -30,6 +30,7 @@ pub fn run(
         timeout_sec,
         dangerously_skip_permissions: skip_permissions,
         full_auto,
+        resume_thread_id: None,
     };
 
     let report = run_prompt_session_with_cancel(&options, cancel, None, |event| {

@@ -1029,6 +1029,7 @@ async fn start_prompt_session_command(
     timeout_sec: Option<u64>,
     dangerously_skip_permissions: Option<bool>,
     full_auto: Option<bool>,
+    resume_thread_id: Option<String>,
 ) -> Result<PromptSessionReport, String> {
     {
         let guard = state.cancel.lock().map_err(|e| e.to_string())?;
@@ -1055,6 +1056,9 @@ async fn start_prompt_session_command(
         timeout_sec: timeout_sec.unwrap_or(600),
         dangerously_skip_permissions: dangerously_skip_permissions.unwrap_or(false),
         full_auto: full_auto.unwrap_or(false),
+        resume_thread_id: resume_thread_id
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
     };
 
     // Interactive Allow/Deny when Claude skip is off, or Codex full-auto is off.

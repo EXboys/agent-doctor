@@ -16,7 +16,8 @@ use super::env::{
     format_command_display, prepare_codex_home, resolve_codex_overlay,
 };
 use super::util::{
-    combine_output, force_stop_child, is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    combine_output, force_stop_child, humanize_runtime_error, is_runtime_stderr_noise, join_reader,
+    push_capped, summarize,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -42,6 +43,49 @@ impl AskBackend for CodexAskBackend {
 
 fn next_rpc_id() -> u64 {
     RPC_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Interactive Ask approval policy.
+///
+/// Use `on-request` (not `untrusted` / UnlessTrusted): the latter rejects
+/// `require_escalated` and breaks agent turns. Trusted projects may still
+/// auto-approve safe commands; sandbox escapes / explicit approvals still hit UI.
+pub(crate) fn interactive_approval_policy() -> Value {
+    json!("on-request")
+}
+
+pub(crate) fn elevated_approval_policy() -> Value {
+    json!("never")
+}
+
+/// `thread/start` SandboxMode — kebab-case enum.
+pub(crate) fn thread_sandbox_mode() -> &'static str {
+    "workspace-write"
+}
+
+/// `turn/start` SandboxPolicy — camelCase `type`.
+pub(crate) fn turn_sandbox_policy(cwd: &str) -> Value {
+    json!({
+        "type": "workspaceWrite",
+        "writableRoots": [cwd],
+        "networkAccess": true
+    })
+}
+
+fn codex_ask_developer_instructions() -> String {
+    "Do not use require_escalated or ask for elevated permissions. \
+     Use ordinary shell/file/network tools; the host UI will show Allow/Deny when approval is required. \
+     When creating or editing files with apply_patch, every hunk MUST start with one of: \
+     '*** Add File: {path}', '*** Delete File: {path}', or '*** Update File: {path}'. \
+     Never put file contents on the hunk header line. Example to add a file:\n\
+     *** Begin Patch\n\
+     *** Add File: path/to/file.txt\n\
+     +line one\n\
+     +line two\n\
+     *** End Patch\n\
+     Prefer apply_patch for file writes; if apply_patch fails validation, fix the hunk headers and retry \
+     (or fall back to a simple shell write of the file contents)."
+        .to_string()
 }
 
 fn run_codex_app_server(
@@ -89,22 +133,17 @@ fn run_codex_app_server(
     }
 
     let interactive = !options.full_auto && has_ui_control;
-    // Interactive Ask needs Allow/Deny without Codex's UnlessTrusted (`untrusted`)
-    // mode — that mode rejects `require_escalated` and breaks agent turns that try
-    // to demo confirmation. Prefer granular prompts (sandbox / rules / permissions).
     let approval_policy = if interactive {
-        json!({
-            "granular": {
-                "mcp_elicitations": true,
-                "rules": true,
-                "sandbox_approval": true,
-                "request_permissions": true,
-                "skill_approval": true
-            }
-        })
+        interactive_approval_policy()
     } else {
-        json!("never")
+        elevated_approval_policy()
     };
+    let resume_thread_id = options
+        .resume_thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
@@ -128,7 +167,10 @@ fn run_codex_app_server(
         on_event(event);
     };
 
-    let result = (|| -> Result<(PromptSessionStatus, Option<i32>, String, String)> {
+    let result = (|| -> Result<(
+        (PromptSessionStatus, Option<i32>, String, String),
+        Option<String>,
+    )> {
         // initialize
         let init_id = next_rpc_id();
         control.write_line(
@@ -147,29 +189,37 @@ fn run_codex_app_server(
         )?;
         control.write_line(&json!({ "method": "initialized", "params": {} }).to_string())?;
 
-        // thread/start
+        // thread/start or thread/resume
         let thread_id_rpc = next_rpc_id();
+        let thread_params = if let Some(ref tid) = resume_thread_id {
+            json!({
+                "threadId": tid,
+                "cwd": cwd.display().to_string(),
+                "approvalPolicy": approval_policy.clone(),
+                "sandbox": thread_sandbox_mode(),
+                "approvalsReviewer": "user",
+                "developerInstructions": interactive.then(|| codex_ask_developer_instructions()),
+            })
+        } else {
+            json!({
+                "cwd": cwd.display().to_string(),
+                "approvalPolicy": approval_policy.clone(),
+                "sandbox": thread_sandbox_mode(),
+                "serviceName": "agent_doctor_ask",
+                "approvalsReviewer": "user",
+                "developerInstructions": interactive.then(|| codex_ask_developer_instructions()),
+            })
+        };
+        let thread_method = if resume_thread_id.is_some() {
+            "thread/resume"
+        } else {
+            "thread/start"
+        };
         control.write_line(
             &json!({
-                "method": "thread/start",
+                "method": thread_method,
                 "id": thread_id_rpc,
-                "params": {
-                    "cwd": cwd.display().to_string(),
-                    "approvalPolicy": approval_policy.clone(),
-                    "sandbox": "workspace-write",
-                    "serviceName": "agent_doctor_ask",
-                    "approvalsReviewer": "user",
-                    "developerInstructions": if interactive {
-                        Some(
-                            "Do not use require_escalated or ask for elevated permissions. \
-                             Use ordinary shell/file/network tools; the host UI will show \
-                             Allow/Deny when approval is required."
-                                .to_string(),
-                        )
-                    } else {
-                        None
-                    }
-                }
+                "params": thread_params
             })
             .to_string(),
         )?;
@@ -178,7 +228,7 @@ fn run_codex_app_server(
             session_id: session_id.clone(),
             waiting_thread: Some(thread_id_rpc),
             waiting_turn: None,
-            thread_id: None,
+            thread_id: resume_thread_id.clone(),
             turn_done: false,
             interactive,
             cwd: cwd.display().to_string(),
@@ -187,21 +237,22 @@ fn run_codex_app_server(
             saw_agent_delta: false,
         };
 
-        pump_app_server(
+        let outcome = pump_app_server(
             &mut child,
             timeout_sec,
             cancel.handle(),
             &control,
             &mut state,
             &mut emit,
-        )
+        )?;
+        Ok((outcome, state.thread_id))
     })();
 
     control.close();
     let duration_ms = started.elapsed().as_millis() as u64;
 
     let report = match result {
-        Ok((status, exit_code, stdout, stderr)) => {
+        Ok(((status, exit_code, stdout, stderr), runtime_thread_id)) => {
             let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
             let combined = if display.trim().is_empty() {
                 combine_output(&stdout, &stderr)
@@ -224,12 +275,13 @@ fn run_codex_app_server(
                 summary: summary.clone(),
                 log_excerpt: combined,
                 duration_ms,
+                runtime_thread_id,
             }
         }
         Err(err) => {
             let _ = child.kill();
             let _ = child.wait();
-            let summary = format!("{err:#}");
+            let summary = humanize_runtime_error(&format!("{err:#}"));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: PromptSessionStatus::Failed,
@@ -245,6 +297,7 @@ fn run_codex_app_server(
                 summary: summary.clone(),
                 log_excerpt: summary,
                 duration_ms,
+                runtime_thread_id: resume_thread_id,
             }
         }
     };
@@ -340,7 +393,7 @@ where
             } else if !is_runtime_stderr_noise(&line) {
                 on_event(PromptSessionEvent::StderrLine {
                     session_id: state.session_id.clone(),
-                    line,
+                    line: humanize_runtime_error(&line),
                 });
             }
         }
@@ -458,7 +511,7 @@ where
             .unwrap_or("codex app-server error");
         on_event(PromptSessionEvent::StderrLine {
             session_id: state.session_id.clone(),
-            line: msg.to_string(),
+            line: humanize_runtime_error(msg),
         });
         if state.waiting_thread == id_num || state.waiting_turn == id_num {
             state.turn_done = true;
@@ -493,11 +546,7 @@ where
                     "cwd": state.cwd,
                     "approvalPolicy": state.approval_policy,
                     // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).
-                    "sandboxPolicy": {
-                        "type": "workspaceWrite",
-                        "writableRoots": [state.cwd],
-                        "networkAccess": true
-                    }
+                    "sandboxPolicy": turn_sandbox_policy(&state.cwd)
                 }
             })
             .to_string(),
@@ -600,7 +649,7 @@ fn handle_notification<F>(
                 .unwrap_or("Codex turn failed");
             on_event(PromptSessionEvent::StderrLine {
                 session_id: state.session_id.clone(),
-                line: msg.to_string(),
+                line: humanize_runtime_error(msg),
             });
         }
         "item/agentMessage/delta" => {
@@ -641,39 +690,43 @@ fn handle_notification<F>(
                 }
                 "agent_message" => {}
                 "commandExecution" | "fileChange" | "mcpToolCall" => {
-                    let label = item
-                        .get("command")
-                        .and_then(|v| {
-                            if let Some(s) = v.as_str() {
-                                Some(s.to_string())
-                            } else if let Some(arr) = v.as_array() {
-                                Some(
-                                    arr.iter()
-                                        .filter_map(|x| x.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(" "),
-                                )
-                            } else {
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            item.get("tool")
-                                .and_then(|v| v.as_str())
-                                .map(str::to_string)
-                        })
-                        .unwrap_or_else(|| item_type.to_string());
-                    on_event(PromptSessionEvent::Status {
-                        session_id: state.session_id.clone(),
-                        phase: "tool".into(),
-                        message: format!("工具：{label}"),
-                    });
+                    // Emit once on start — completed would duplicate the same chip in UI.
+                    if method == "item/started" {
+                        let label = item
+                            .get("command")
+                            .and_then(|v| {
+                                if let Some(s) = v.as_str() {
+                                    Some(s.to_string())
+                                } else if let Some(arr) = v.as_array() {
+                                    Some(
+                                        arr.iter()
+                                            .filter_map(|x| x.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(" "),
+                                    )
+                                } else {
+                                    None
+                                }
+                            })
+                            .or_else(|| {
+                                item.get("tool")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or_else(|| item_type.to_string());
+                        let label = shorten_tool_label(&label);
+                        on_event(PromptSessionEvent::Status {
+                            session_id: state.session_id.clone(),
+                            phase: "tool".into(),
+                            message: label,
+                        });
+                    }
                 }
                 "error" => {
                     if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
                         on_event(PromptSessionEvent::StderrLine {
                             session_id: state.session_id.clone(),
-                            line: msg.to_string(),
+                            line: humanize_runtime_error(msg),
                         });
                     }
                 }
@@ -684,7 +737,7 @@ fn handle_notification<F>(
             if let Some(msg) = params.get("message").and_then(|v| v.as_str()) {
                 on_event(PromptSessionEvent::StderrLine {
                     session_id: state.session_id.clone(),
-                    line: msg.to_string(),
+                    line: humanize_runtime_error(msg),
                 });
             }
         }
@@ -733,9 +786,43 @@ pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, St
     (tool_name, detail, params.to_string())
 }
 
+/// Collapse shell wrappers like `/bin/zsh -lc 'pwd'` → `pwd` for compact UI chips.
+fn shorten_tool_label(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return t.to_string();
+    }
+    // `/bin/zsh -lc 'cmd'` or `zsh -lc "cmd"`
+    if let Some(idx) = t.find(" -lc ") {
+        let rest = t[idx + 5..].trim();
+        let unquoted = rest
+            .strip_prefix('\'')
+            .and_then(|s| s.strip_suffix('\''))
+            .or_else(|| rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+            .unwrap_or(rest)
+            .trim();
+        if !unquoted.is_empty() {
+            return unquoted.to_string();
+        }
+    }
+    // argv form: /bin/zsh -lc pwd
+    let parts: Vec<&str> = t.split_whitespace().collect();
+    if parts.len() >= 3 && parts[1] == "-lc" {
+        return parts[2..].join(" ");
+    }
+    t.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortens_zsh_lc_wrappers() {
+        assert_eq!(shorten_tool_label("/bin/zsh -lc pwd"), "pwd");
+        assert_eq!(shorten_tool_label("/bin/zsh -lc 'ls -la'"), "ls -la");
+        assert_eq!(shorten_tool_label("echo hi"), "echo hi");
+    }
 
     #[test]
     fn permission_from_command_approval() {
@@ -748,6 +835,16 @@ mod tests {
             permission_from_codex("item/commandExecution/requestApproval", &params);
         assert_eq!(tool, "Bash");
         assert_eq!(detail, "network");
+    }
+
+    #[test]
+    fn interactive_policy_is_on_request_not_unless_trusted() {
+        assert_eq!(interactive_approval_policy(), json!("on-request"));
+        assert_eq!(elevated_approval_policy(), json!("never"));
+        assert_eq!(thread_sandbox_mode(), "workspace-write");
+        let policy = turn_sandbox_policy("/tmp/proj");
+        assert_eq!(policy["type"], "workspaceWrite");
+        assert_eq!(policy["writableRoots"][0], "/tmp/proj");
     }
 
     #[cfg(unix)]
@@ -796,11 +893,14 @@ assert msg["method"] == "initialized"
 # thread/start
 msg = read()
 assert msg["method"] == "thread/start"
+assert msg["params"]["approvalPolicy"] == "on-request"
+assert msg["params"]["sandbox"] == "workspace-write"
 print(json.dumps({"id": msg["id"], "result": {"thread": {"id": "thr_1"}}}), flush=True)
 
 # turn/start
 msg = read()
 assert msg["method"] == "turn/start"
+assert msg["params"]["sandboxPolicy"]["type"] == "workspaceWrite"
 print(json.dumps({"id": msg["id"], "result": {"turn": {"id": "turn_1", "status": "inProgress"}}}), flush=True)
 print(json.dumps({"method": "turn/started", "params": {"turn": {"id": "turn_1"}}}), flush=True)
 print(json.dumps({
@@ -819,7 +919,6 @@ print(json.dumps({
   "params": {"item": {"id": "i1", "type": "agent_message", "text": "codex-ok"}}
 }), flush=True)
 print(json.dumps({"method": "turn/completed", "params": {"turn": {"id": "turn_1"}}}), flush=True)
-# keep process alive until killed
 import time
 time.sleep(5)
 "##,
@@ -847,6 +946,7 @@ time.sleep(5)
                     timeout_sec: 10,
                     dangerously_skip_permissions: false,
                     full_auto: false,
+                    resume_thread_id: None,
                 },
                 PromptSessionCancel::new(),
                 Some(control),
@@ -876,6 +976,7 @@ time.sleep(5)
                 })
                 .collect::<Vec<_>>()
         );
+        assert_eq!(report.runtime_thread_id.as_deref(), Some("thr_1"));
         let evs = events.lock().unwrap();
         assert!(evs.iter().any(|e| matches!(
             e,

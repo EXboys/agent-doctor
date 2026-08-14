@@ -277,16 +277,17 @@ html, body {
 .chat-activity {
   align-self: flex-start;
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  max-width: min(720px, 94%);
-  padding: 8px 12px;
-  border-radius: 12px;
+  max-width: min(640px, 92%);
+  margin: 2px 0;
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid var(--line);
   background: #f7f9fc;
   color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .chat-activity.is-live {
@@ -296,19 +297,50 @@ html, body {
 }
 
 .chat-activity.is-done {
-  opacity: 0.78;
+  opacity: 0.72;
 }
 
 .chat-activity.kind-tool {
-  border-color: rgba(20, 184, 166, 0.28);
-  background: #f2fbf9;
+  border-color: rgba(20, 184, 166, 0.22);
+  background: #f3fbf8;
+  color: #0f766e;
+}
+
+.chat-activity.kind-tool.is-live {
+  border-color: rgba(20, 184, 166, 0.4);
+}
+
+.chat-tool-badge {
+  flex: 0 0 auto;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.chat-tool-cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 36rem;
+  background: transparent;
+  color: inherit;
 }
 
 .chat-activity.kind-think {
   border-style: dashed;
+  border-radius: 12px;
 }
 
 .chat-activity.kind-error {
+  border-radius: 12px;
   border-color: rgba(214, 69, 69, 0.28);
   background: #fff6f6;
   color: var(--danger);
