@@ -192,6 +192,28 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// One-shot non-interactive ask via `claude -p` / `codex exec` (streams output)
+    Ask {
+        /// Runtime id: claude-code or codex
+        runtime: String,
+        /// Prompt text
+        prompt: String,
+        /// Working directory (default: active workspace or cwd)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Timeout in seconds (default 600)
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+        /// Claude Code: pass --dangerously-skip-permissions (default off)
+        #[arg(long)]
+        skip_permissions: bool,
+        /// Codex: pass --full-auto (default off)
+        #[arg(long)]
+        full_auto: bool,
+        /// Emit final report JSON (suppresses streamed human output)
+        #[arg(long)]
+        json: bool,
+    },
     /// Cache policies from control plane (not yet implemented)
     Policy {
         #[command(subcommand)]
@@ -692,6 +714,23 @@ fn main() -> Result<()> {
             cwd.as_deref(),
             prompt.as_deref(),
             terminal,
+            json,
+        )?,
+        Commands::Ask {
+            runtime,
+            prompt,
+            cwd,
+            timeout,
+            skip_permissions,
+            full_auto,
+            json,
+        } => commands::ask::run(
+            &runtime,
+            &prompt,
+            cwd.as_deref(),
+            timeout,
+            skip_permissions,
+            full_auto,
             json,
         )?,
         Commands::Policy { action } => match action {

@@ -1614,14 +1614,21 @@ function renderRuntimeCardActions(
   }
 
   const parts: string[] = [];
-  if (canOpenSession(runtime.id)) {
+  const isAskRuntime = runtime.id === "claude-code" || runtime.id === "codex";
+  if (isAskRuntime) {
+    // Default: open the in-app light ask UI; Terminal is optional.
     parts.push(
-      `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`,
+      `<button type="button" class="btn-primary" data-action="ask-session">${t("runtime.openUi")}</button>`,
     );
-  }
-  if (runtime.id === "claude-code" || runtime.id === "codex") {
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
+    );
     parts.push(
       `<button type="button" class="btn-secondary" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>`,
+    );
+  } else if (canOpenSession(runtime.id)) {
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`,
     );
   }
   const diagnoseClass = runtimeHasProblems(runtime.id) ? "btn-secondary" : "btn-ghost";
@@ -3701,7 +3708,15 @@ async function rollbackRepairRuntimeCard(card: HTMLElement) {
   }
 }
 
-async function openSessionFromCard(card: HTMLElement) {
+async function openAskWindow(runtime: string): Promise<void> {
+  try {
+    await invoke("open_ask_window_command", { runtime });
+  } catch (error) {
+    setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+  }
+}
+
+async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {
   const runtime = card.dataset.runtime;
   const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
   const openButton = card.querySelector<HTMLButtonElement>('[data-action="open-session"]');
@@ -3718,7 +3733,7 @@ async function openSessionFromCard(card: HTMLElement) {
       runtime,
       cwd: null,
       prompt: null,
-      terminal: null,
+      terminal: forceTerminal ? true : null,
     });
     const method = report.method === "deep-link" ? "deep-link" : "terminal";
     if (hint) {
@@ -3979,7 +3994,17 @@ runtimesEl.addEventListener("click", (event) => {
   }
 
   if (action === "open-session" && runtimeCard) {
-    void openSessionFromCard(runtimeCard);
+    const forceTerminal =
+      target.closest<HTMLElement>("[data-action='open-session']")?.dataset.openTerminal === "1";
+    void openSessionFromCard(runtimeCard, forceTerminal);
+    return;
+  }
+
+  if (action === "ask-session" && runtimeCard) {
+    const runtime = runtimeCard.dataset.runtime;
+    if (runtime === "claude-code" || runtime === "codex") {
+      void openAskWindow(runtime);
+    }
     return;
   }
 
@@ -4448,6 +4473,7 @@ updateLangButtons();
 refreshPresetGroupLabels();
 applyProviderPreset("custom");
 showPersonalListView();
+
 modeUsePersonalEl.addEventListener("click", () => {
   void enablePersonalMode();
 });
