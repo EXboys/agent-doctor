@@ -134,11 +134,11 @@ fn run_openclaw(
             let parsed = parse_openclaw_json_output(&stdout);
             let reply = parsed
                 .as_ref()
-                .and_then(|v| extract_openclaw_reply(v))
+                .and_then(extract_openclaw_reply)
                 .unwrap_or_default();
             let runtime_thread_id = parsed
                 .as_ref()
-                .and_then(|v| extract_openclaw_session_id(v))
+                .and_then(extract_openclaw_session_id)
                 .unwrap_or_else(|| openclaw_session_id.clone());
 
             // `openclaw --json` only returns the final reply. Tool chips live in the
@@ -336,7 +336,7 @@ where
     let stdout_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_out, &line);
             if let Ok(mut guard) = q_out.lock() {
                 guard.push((true, line));
@@ -349,7 +349,7 @@ where
     let stderr_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_err, &line);
             if let Ok(mut guard) = q_err.lock() {
                 guard.push((false, line));
@@ -695,10 +695,10 @@ fn value_to_text(value: &Value) -> Option<String> {
             .filter_map(|item| {
                 if let Some(s) = item.as_str() {
                     Some(s.to_string())
-                } else if let Some(s) = item.get("text").and_then(|v| v.as_str()) {
-                    Some(s.to_string())
                 } else {
-                    None
+                    item.get("text")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
                 }
             })
             .collect();
