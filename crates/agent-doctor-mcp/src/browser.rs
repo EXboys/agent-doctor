@@ -301,13 +301,7 @@ fn chrome_version_via_plutil(binary: &PathBuf) -> Option<String> {
                 return None;
             }
             let output = Command::new("plutil")
-                .args([
-                    "-extract",
-                    "CFBundleShortVersionString",
-                    "raw",
-                    "-o",
-                    "-",
-                ])
+                .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
                 .arg(&plist)
                 .output()
                 .ok()?;

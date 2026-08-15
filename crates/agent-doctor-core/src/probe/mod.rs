@@ -503,7 +503,8 @@ fn probe_gateway(
                         return false;
                     }
                     let remain = deadline.saturating_duration_since(Instant::now());
-                    TcpStream::connect_timeout(&addr, remain.min(Duration::from_millis(400))).is_ok()
+                    TcpStream::connect_timeout(&addr, remain.min(Duration::from_millis(400)))
+                        .is_ok()
                 });
                 checks.push(ProbeCheck::new(
                     "gateway.connectivity",

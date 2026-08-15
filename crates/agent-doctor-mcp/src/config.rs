@@ -345,7 +345,11 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
     Ok(())
 }
 
-fn write_claude_style_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+fn write_claude_style_browser_mcp(
+    config_path: &Path,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
     let mut servers = read_mcp_servers(config_path)?;
     let entry = json!({ "command": command, "args": args });
     if let Some(obj) = servers.as_object_mut() {
@@ -389,10 +393,7 @@ fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) 
         YamlValue::String("command".into()),
         YamlValue::String(command.to_string()),
     );
-    let args_seq: Vec<YamlValue> = args
-        .iter()
-        .map(|a| YamlValue::String(a.clone()))
-        .collect();
+    let args_seq: Vec<YamlValue> = args.iter().map(|a| YamlValue::String(a.clone())).collect();
     entry.insert(
         YamlValue::String("args".into()),
         YamlValue::Sequence(args_seq),
@@ -503,8 +504,7 @@ mod tests {
     #[test]
     fn openclaw_with_workspace_uses_mcp_json_mirror() {
         let ws = PathBuf::from("/tmp/oc-ws");
-        let path =
-            mcp_servers_path_with_openclaw("openclaw", None, None, None, Some(&ws)).unwrap();
+        let path = mcp_servers_path_with_openclaw("openclaw", None, None, None, Some(&ws)).unwrap();
         assert_eq!(path, ws.join(".mcp.json"));
     }
 

@@ -9,22 +9,22 @@ use agent_doctor_core::{
     load_workspaces, mount_synced_skills, needs_binary_install, open_interactive_session,
     probe_runtime, remove_host, remove_project, resolve_agent_doctor_binary,
     restore_runtime_backup, run_doctor, run_prompt_session_with_cancel, run_remote_doctor,
-    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode,
-    switch_to_team_mode, unmount_synced_skills, upsert_personal_provider, use_profile,
-    use_workspace_with_options, verify_personal_provider_with_protocol, workspace_doctor,
-    workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
-    HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions, InstallProgressEvent,
-    InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport, OnboardingOptions,
-    OnboardingReport, OpenSessionOptions, OpenSessionReport, PersonalProviderOptions,
-    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
-    PersonalProvidersDocument, ProbeStatus, ProfilesDocument, PromptSessionCancel,
-    PromptSessionControl, PromptSessionEvent, PromptSessionOptions, PromptSessionReport,
-    RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument,
-    RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
-    RuntimeProbeReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions,
-    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
-    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode, switch_to_team_mode,
+    unmount_synced_skills, upsert_personal_provider, use_profile, use_workspace_with_options,
+    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
+    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
+    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
+    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
+    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions,
+    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
+    UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
+    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
+    WorkspacesDocument,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -621,7 +621,10 @@ fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
 }
 
 #[tauri::command]
-fn mcp_status_command(port: Option<u16>, probe_chrome: Option<bool>) -> Result<McpModuleStatus, String> {
+fn mcp_status_command(
+    port: Option<u16>,
+    probe_chrome: Option<bool>,
+) -> Result<McpModuleStatus, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
@@ -1097,9 +1100,7 @@ fn run_browser_smoke_summary() -> BrowserSmokeSummary {
             detail: if report.ok {
                 format!(
                     "CDP navigate ok → {} ({}) — not an MCP tool-path check",
-                    report
-                        .title
-                        .unwrap_or_else(|| report.url.clone()),
+                    report.title.unwrap_or_else(|| report.url.clone()),
                     report.final_url.unwrap_or(report.url)
                 )
             } else {
