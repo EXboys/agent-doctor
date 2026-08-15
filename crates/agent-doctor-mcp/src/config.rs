@@ -11,7 +11,7 @@ use crate::browser::BrowserDiscovery;
 /// Options for configuring an MCP server entry in a runtime's config.
 #[derive(Debug, Clone)]
 pub struct McpConfigureOptions {
-    /// The runtime to configure (codex, claude-code)
+    /// The runtime to configure (codex, claude-code, hermes, openclaw)
     pub runtime: String,
     /// Port for the Chrome debugging endpoint
     pub port: u16,
@@ -28,6 +28,8 @@ pub struct McpConfigureOptions {
     pub project_path: Option<PathBuf>,
     /// Codex home directory (`CODEX_HOME` / workspace codex-home). Required for Codex.
     pub codex_home: Option<PathBuf>,
+    /// Hermes home (`HERMES_HOME` / workspace profile). Defaults to `~/.hermes`.
+    pub hermes_home: Option<PathBuf>,
 }
 
 /// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
@@ -91,15 +93,39 @@ fn resolve_codex_home(explicit: Option<&Path>) -> Result<PathBuf> {
         .context("Cannot resolve Codex home (set CODEX_HOME or pass codex_home)")
 }
 
+fn resolve_hermes_home(explicit: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return Ok(path.to_path_buf());
+    }
+    if let Ok(from_env) = std::env::var("HERMES_HOME") {
+        let path = PathBuf::from(from_env.trim());
+        if !path.as_os_str().is_empty() {
+            return Ok(path);
+        }
+    }
+    home_dir()
+        .map(|home| home.join(".hermes"))
+        .context("Cannot resolve Hermes home (set HERMES_HOME or pass hermes_home)")
+}
+
+fn resolve_openclaw_config_path() -> Result<PathBuf> {
+    home_dir()
+        .map(|home| home.join(".openclaw/openclaw.json"))
+        .context("Cannot find home directory for OpenClaw config")
+}
+
 /// Find the MCP servers config path for a given runtime.
 ///
 /// - Claude Code with `project_path`: `<project>/.mcp.json` (workspace isolation)
 /// - Claude Code without project: `~/.claude.json` (user-scope MCP)
 /// - Codex: `$CODEX_HOME/config.toml` (`[mcp_servers.*]` TOML) — **not** project `.mcp.json`
+/// - Hermes: `$HERMES_HOME/config.yaml` (`mcp_servers.*`)
+/// - OpenClaw: `~/.openclaw/openclaw.json` (`mcp.servers.*`)
 pub fn mcp_servers_path(
     runtime: &str,
     project_path: Option<&Path>,
     codex_home: Option<&Path>,
+    hermes_home: Option<&Path>,
 ) -> Result<PathBuf> {
     match runtime {
         "claude-code" | "claude" => {
@@ -112,7 +138,11 @@ pub fn mcp_servers_path(
             Ok(path)
         }
         "codex" => Ok(resolve_codex_home(codex_home)?.join("config.toml")),
-        _ => anyhow::bail!("Unsupported runtime: {runtime}. Supported: codex, claude-code"),
+        "hermes" => Ok(resolve_hermes_home(hermes_home)?.join("config.yaml")),
+        "openclaw" => resolve_openclaw_config_path(),
+        _ => anyhow::bail!(
+            "Unsupported runtime: {runtime}. Supported: codex, claude-code, hermes, openclaw"
+        ),
     }
 }
 
@@ -255,6 +285,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
         &options.runtime,
         options.project_path.as_deref(),
         options.codex_home.as_deref(),
+        options.hermes_home.as_deref(),
     )?;
     let command = options.binary.to_string_lossy().to_string();
     let args = browser_mcp_args(
@@ -276,9 +307,106 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
             }
             write_mcp_servers(&config_path, &servers)?;
         }
+        "hermes" => write_hermes_browser_mcp(&config_path, &command, &args)?,
+        "openclaw" => write_openclaw_browser_mcp(&config_path, &command, &args)?,
         other => anyhow::bail!("Unsupported runtime: {other}"),
     }
 
+    Ok(())
+}
+
+fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    use serde_yaml::{Mapping, Value as YamlValue};
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let mut root: YamlValue = if config_path.exists() {
+        let raw = fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
+    } else {
+        YamlValue::Mapping(Mapping::new())
+    };
+
+    let root_map = root
+        .as_mapping_mut()
+        .context("Hermes config.yaml root must be a mapping")?;
+    let servers_key = YamlValue::String("mcp_servers".into());
+    if !root_map.contains_key(&servers_key) {
+        root_map.insert(servers_key.clone(), YamlValue::Mapping(Mapping::new()));
+    }
+    let servers = root_map
+        .get_mut(&servers_key)
+        .and_then(YamlValue::as_mapping_mut)
+        .context("mcp_servers must be a mapping")?;
+
+    let mut entry = Mapping::new();
+    entry.insert(
+        YamlValue::String("command".into()),
+        YamlValue::String(command.to_string()),
+    );
+    let args_seq: Vec<YamlValue> = args
+        .iter()
+        .map(|a| YamlValue::String(a.clone()))
+        .collect();
+    entry.insert(
+        YamlValue::String("args".into()),
+        YamlValue::Sequence(args_seq),
+    );
+    servers.insert(
+        YamlValue::String("browser".into()),
+        YamlValue::Mapping(entry),
+    );
+
+    fs::write(config_path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn write_openclaw_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let mut doc: Value = if config_path.exists() {
+        let raw = fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        serde_json::from_str(&raw)
+            .with_context(|| format!("Failed to parse {}", config_path.display()))?
+    } else {
+        json!({})
+    };
+
+    let entry = json!({ "command": command, "args": args });
+    let root = doc
+        .as_object_mut()
+        .context("openclaw.json root must be an object")?;
+
+    // Official shape: mcp.servers.browser
+    let mcp = root.entry("mcp".to_string()).or_insert_with(|| json!({}));
+    let mcp_obj = mcp
+        .as_object_mut()
+        .context("openclaw.json mcp must be an object")?;
+    let servers = mcp_obj
+        .entry("servers".to_string())
+        .or_insert_with(|| json!({}));
+    let servers_obj = servers
+        .as_object_mut()
+        .context("openclaw.json mcp.servers must be an object")?;
+    servers_obj.insert("browser".to_string(), entry.clone());
+
+    // Compat: some community docs use top-level mcpServers
+    if let Some(legacy) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        legacy.insert("browser".to_string(), entry);
+    }
+
+    let updated = serde_json::to_string_pretty(&doc)?;
+    fs::write(config_path, format!("{updated}\n"))
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
     Ok(())
 }
 
@@ -308,14 +436,64 @@ mod tests {
     #[test]
     fn claude_with_project_uses_mcp_json() {
         let project = PathBuf::from("/tmp/ws-demo");
-        let path = mcp_servers_path("claude-code", Some(&project), None).unwrap();
+        let path = mcp_servers_path("claude-code", Some(&project), None, None).unwrap();
         assert_eq!(path, project.join(".mcp.json"));
     }
 
     #[test]
     fn claude_without_project_uses_global_claude_json() {
-        let path = mcp_servers_path("claude-code", None, None).unwrap();
+        let path = mcp_servers_path("claude-code", None, None, None).unwrap();
         assert!(path.ends_with(".claude.json"));
+    }
+
+    #[test]
+    fn hermes_uses_config_yaml_under_hermes_home() {
+        let home = PathBuf::from("/tmp/hermes-profile");
+        let path = mcp_servers_path("hermes", None, None, Some(&home)).unwrap();
+        assert_eq!(path, home.join("config.yaml"));
+    }
+
+    #[test]
+    fn openclaw_uses_openclaw_json() {
+        let path = mcp_servers_path("openclaw", None, None, None).unwrap();
+        assert!(path.ends_with(".openclaw/openclaw.json"));
+    }
+
+    #[test]
+    fn hermes_yaml_write_preserves_other_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        fs::write(&path, "model:\n  provider: openai\n").unwrap();
+        write_hermes_browser_mcp(
+            &path,
+            "/bin/agent-doctor",
+            &["mcp".into(), "browser".into()],
+        )
+        .unwrap();
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("provider: openai"));
+        assert!(rendered.contains("mcp_servers:"));
+        assert!(rendered.contains("command: /bin/agent-doctor"));
+    }
+
+    #[test]
+    fn openclaw_json_write_uses_mcp_servers() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("openclaw.json");
+        fs::write(&path, r#"{"env":{"vars":{}}}"#).unwrap();
+        write_openclaw_browser_mcp(
+            &path,
+            "/bin/agent-doctor",
+            &["mcp".into(), "browser".into()],
+        )
+        .unwrap();
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            doc.pointer("/mcp/servers/browser/command")
+                .and_then(|v| v.as_str()),
+            Some("/bin/agent-doctor")
+        );
+        assert!(doc.pointer("/env/vars").is_some());
     }
 
     #[test]

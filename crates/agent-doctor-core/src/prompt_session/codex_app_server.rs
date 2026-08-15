@@ -73,20 +73,26 @@ pub(crate) fn turn_sandbox_policy(cwd: &str) -> Value {
     })
 }
 
-fn codex_ask_developer_instructions() -> String {
-    "Do not use require_escalated or ask for elevated permissions. \
-     Use ordinary shell/file/network tools; the host UI will show Allow/Deny when approval is required. \
-     When creating or editing files with apply_patch, every hunk MUST start with one of: \
-     '*** Add File: {path}', '*** Delete File: {path}', or '*** Update File: {path}'. \
-     Never put file contents on the hunk header line. Example to add a file:\n\
-     *** Begin Patch\n\
-     *** Add File: path/to/file.txt\n\
-     +line one\n\
-     +line two\n\
-     *** End Patch\n\
-     Prefer apply_patch for file writes; if apply_patch fails validation, fix the hunk headers and retry \
-     (or fall back to a simple shell write of the file contents)."
-        .to_string()
+fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
+    let mut text = String::from(
+        "Do not use require_escalated or ask for elevated permissions. \
+         Use ordinary shell/file/network tools when they are appropriate; the host UI will show Allow/Deny when approval is required. \
+         When creating or editing files with apply_patch, every hunk MUST start with one of: \
+         '*** Add File: {path}', '*** Delete File: {path}', or '*** Update File: {path}'. \
+         Never put file contents on the hunk header line. Example to add a file:\n\
+         *** Begin Patch\n\
+         *** Add File: path/to/file.txt\n\
+         +line one\n\
+         +line two\n\
+         *** End Patch\n\
+         Prefer apply_patch for file writes; if apply_patch fails validation, fix the hunk headers and retry \
+         (or fall back to a simple shell write of the file contents).",
+    );
+    if browser_mcp {
+        text.push_str("\n\n");
+        text.push_str(super::mcp_ensure::browser_mcp_tool_instructions());
+    }
+    text
 }
 
 fn run_codex_app_server(
@@ -111,7 +117,8 @@ fn run_codex_app_server(
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let overlay = collect_overlay_env();
     prepare_codex_home(&overlay);
-    if wants_browser_mcp(options) {
+    let browser_mcp = wants_browser_mcp(options);
+    if browser_mcp {
         if let Some(note) = ensure_browser_mcp_for_ask("codex", &cwd, &overlay) {
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.clone(),
@@ -154,6 +161,12 @@ fn run_codex_app_server(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+
+    let developer_instructions = if browser_mcp || interactive {
+        Some(codex_ask_developer_instructions(browser_mcp))
+    } else {
+        None
+    };
 
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
@@ -208,7 +221,7 @@ fn run_codex_app_server(
                 "approvalPolicy": approval_policy.clone(),
                 "sandbox": thread_sandbox_mode(),
                 "approvalsReviewer": "user",
-                "developerInstructions": interactive.then(|| codex_ask_developer_instructions()),
+                "developerInstructions": developer_instructions.clone(),
             })
         } else {
             json!({
@@ -217,7 +230,7 @@ fn run_codex_app_server(
                 "sandbox": thread_sandbox_mode(),
                 "serviceName": "agent_doctor_ask",
                 "approvalsReviewer": "user",
-                "developerInstructions": interactive.then(|| codex_ask_developer_instructions()),
+                "developerInstructions": developer_instructions.clone(),
             })
         };
         let thread_method = if resume_thread_id.is_some() {
@@ -242,7 +255,15 @@ fn run_codex_app_server(
             turn_done: false,
             interactive,
             cwd: cwd.display().to_string(),
-            prompt: prompt.to_string(),
+            prompt: if browser_mcp {
+                format!(
+                    "{}\n\n{}",
+                    super::mcp_ensure::browser_mcp_tool_instructions(),
+                    prompt
+                )
+            } else {
+                prompt.to_string()
+            },
             approval_policy,
             saw_agent_delta: false,
         };
@@ -314,7 +335,10 @@ fn run_codex_app_server(
     Ok(report)
 }
 
-fn build_app_server_command(cwd: &std::path::Path, overlay: &std::collections::HashMap<String, String>) -> Result<Command> {
+fn build_app_server_command(
+    cwd: &std::path::Path,
+    overlay: &std::collections::HashMap<String, String>,
+) -> Result<Command> {
     let bin = std::env::var("AGENT_DOCTOR_CODEX_BIN").unwrap_or_else(|_| "codex".into());
     let mut cmd = Command::new(bin);
     cmd.arg("app-server");
@@ -489,8 +513,10 @@ where
     }
 
     // Server-initiated request (approvals)
-    if let (Some(id), Some(method)) = (value.get("id"), value.get("method").and_then(|m| m.as_str()))
-    {
+    if let (Some(id), Some(method)) = (
+        value.get("id"),
+        value.get("method").and_then(|m| m.as_str()),
+    ) {
         return handle_server_request(method, id, value.get("params"), control, state, on_event);
     }
 
@@ -866,9 +892,7 @@ mod tests {
         use std::sync::Mutex as StdMutex;
         use tempfile::tempdir;
 
-        let _guard = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         fn write_fake_bin(dir: &Path, name: &str, script: &str) -> PathBuf {
             use std::os::unix::fs::PermissionsExt;

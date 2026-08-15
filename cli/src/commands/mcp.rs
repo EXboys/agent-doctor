@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use agent_doctor_mcp::{
     browser_mcp_status, cdp_user_data_dir, configure_for, connect_chrome, discover_chrome,
-    isolated_chrome_user_data_dir, kill_chrome_on_port, launch_chrome, resolve_profile_directory,
-    resolve_user_data_dir, system_chrome_user_data_dir, BrowserDiscovery, LazyBrowser,
-    McpConfigureOptions,
+    isolated_chrome_user_data_dir, kill_chrome_on_port, launch_chrome, parse_browser_family,
+    resolve_profile_directory, resolve_user_data_dir, smoke_browser_navigate,
+    system_chrome_user_data_dir, BrowserDiscovery, LazyBrowser, McpConfigureOptions, SmokeOptions,
 };
 use anyhow::{bail, Context, Result};
 
@@ -114,6 +114,9 @@ pub fn run_configure(
         binary: binary.clone(),
         project_path: None,
         codex_home: std::env::var("CODEX_HOME")
+            .ok()
+            .map(std::path::PathBuf::from),
+        hermes_home: std::env::var("HERMES_HOME")
             .ok()
             .map(std::path::PathBuf::from),
     };
@@ -266,6 +269,42 @@ pub fn run_chrome_attach_daily(port: u16, profile_directory: &str, json: bool) -
         println!("  Tip: write MCP config with this --user-data-dir, then restart Claude.");
     }
     std::mem::forget(instance);
+    Ok(())
+}
+
+/// Headless navigate smoke for CI / release verification (Chrome or Edge).
+pub fn run_smoke(
+    browser: &str,
+    url: &str,
+    port: Option<u16>,
+    headed: bool,
+    json: bool,
+) -> Result<()> {
+    let family = parse_browser_family(browser)?;
+    let options = SmokeOptions {
+        family,
+        url: url.to_string(),
+        headless: !headed,
+        port,
+    };
+    let report = smoke_browser_navigate(&options)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        println!("✓ Browser CDP smoke OK ({browser})");
+        println!("  Binary: {}", report.binary);
+        if let Some(version) = &report.version {
+            println!("  Version: {version}");
+        }
+        println!("  Port: {}", report.port);
+        println!(
+            "  URL: {}",
+            report.final_url.as_deref().unwrap_or(&report.url)
+        );
+        if let Some(title) = &report.title {
+            println!("  Title: {title}");
+        }
+    }
     Ok(())
 }
 

@@ -92,7 +92,7 @@ enum Commands {
         /// Hermes provider id when creating config (default: openai)
         #[arg(long, default_value = "openai")]
         provider: String,
-        /// Also upsert Browser MCP (`browser` → agent-doctor) into Codex/Claude configs
+        /// Also upsert Browser MCP (`browser` → agent-doctor) into Codex/Claude/Hermes/OpenClaw
         #[arg(long)]
         with_browser_mcp: bool,
         /// Emit JSON
@@ -328,7 +328,7 @@ enum ModeAction {
         /// Saved personal provider id (default: last active)
         #[arg(long)]
         provider_id: Option<String>,
-        /// Also upsert Browser MCP into Codex/Claude configs
+        /// Also upsert Browser MCP into Codex/Claude/Hermes/OpenClaw
         #[arg(long)]
         with_browser_mcp: bool,
         #[arg(long)]
@@ -336,7 +336,7 @@ enum ModeAction {
     },
     /// Wire runtimes to Evotown / company gateway
     Team {
-        /// Also upsert Browser MCP into Codex/Claude configs
+        /// Also upsert Browser MCP into Codex/Claude/Hermes/OpenClaw
         #[arg(long)]
         with_browser_mcp: bool,
         #[arg(long)]
@@ -541,7 +541,7 @@ enum McpAction {
     },
     /// Configure browser MCP for a runtime (codex, claude-code)
     Configure {
-        /// Runtime id (codex or claude-code)
+        /// Runtime id (codex, claude-code, hermes, or openclaw)
         runtime: String,
         /// Chrome DevTools Protocol port
         #[arg(long, default_value_t = 9222)]
@@ -563,6 +563,24 @@ enum McpAction {
     Chrome {
         #[command(subcommand)]
         action: McpChromeAction,
+    },
+    /// Headless CDP navigate smoke (Chrome / Edge) for CI and local checks
+    Smoke {
+        /// Browser family: chrome, edge, chromium, or auto
+        #[arg(long, default_value = "auto")]
+        browser: String,
+        /// URL to open
+        #[arg(long, default_value = "https://example.com/")]
+        url: String,
+        /// Fixed CDP port (default: ephemeral free port)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Show the browser window (default: headless)
+        #[arg(long)]
+        headed: bool,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -774,6 +792,13 @@ fn main() -> Result<()> {
                     json,
                 } => commands::mcp::run_chrome_attach_daily(port, &profile_directory, json)?,
             },
+            McpAction::Smoke {
+                browser,
+                url,
+                port,
+                headed,
+                json,
+            } => commands::mcp::run_smoke(&browser, &url, port, headed, json)?,
         },
         Commands::Workspace { action } => match action {
             WorkspaceAction::Init {

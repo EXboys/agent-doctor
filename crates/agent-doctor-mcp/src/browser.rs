@@ -25,9 +25,64 @@ pub struct ChromeInstance {
     pub ws_endpoint: Option<String>,
 }
 
+/// Which Chromium-family browser to prefer when discovering a binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserFamily {
+    /// Prefer Chrome, then Edge, then Chromium/Brave.
+    #[default]
+    Auto,
+    Chrome,
+    Edge,
+    Chromium,
+}
+
+impl BrowserFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Chrome => "chrome",
+            Self::Edge => "edge",
+            Self::Chromium => "chromium",
+        }
+    }
+}
+
 /// Discover Chrome on the local machine (macOS first, Linux fallback).
 pub fn discover_chrome() -> Result<BrowserDiscovery> {
-    let binary_path = find_chrome_binary().context("Chrome not found on this system")?;
+    discover_browser(BrowserFamily::Auto)
+}
+
+/// Discover a Chromium-family browser, optionally pinning Chrome vs Edge.
+pub fn discover_browser(family: BrowserFamily) -> Result<BrowserDiscovery> {
+    if let Ok(custom) = std::env::var("AGENT_DOCTOR_BROWSER_BINARY") {
+        let path = PathBuf::from(custom.trim());
+        if path.as_os_str().is_empty() {
+            // fall through
+        } else if path.exists() {
+            return discovery_from_binary(path);
+        } else {
+            anyhow::bail!(
+                "AGENT_DOCTOR_BROWSER_BINARY points to missing binary: {}",
+                path.display()
+            );
+        }
+    }
+
+    let binary_path = find_chrome_binary(family).with_context(|| {
+        format!(
+            "{} not found on this system",
+            match family {
+                BrowserFamily::Edge => "Microsoft Edge",
+                BrowserFamily::Chromium => "Chromium",
+                BrowserFamily::Chrome => "Google Chrome",
+                BrowserFamily::Auto => "Chrome/Edge/Chromium",
+            }
+        )
+    })?;
+    discovery_from_binary(binary_path)
+}
+
+fn discovery_from_binary(binary_path: PathBuf) -> Result<BrowserDiscovery> {
     let user_data_dir = resolve_user_data_dir(None, Some(&binary_path));
     let profile_directory = resolve_profile_directory(None);
     let version = detect_chrome_version(&binary_path);
@@ -40,29 +95,11 @@ pub fn discover_chrome() -> Result<BrowserDiscovery> {
     })
 }
 
-fn find_chrome_binary() -> Result<PathBuf> {
-    let candidates: &[&str] = if cfg!(target_os = "macos") {
-        &[
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Chrome.app/Contents/MacOS/Chrome",
-            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ]
-    } else if cfg!(target_os = "linux") {
-        &[
-            "google-chrome",
-            "google-chrome-stable",
-            "chromium",
-            "chromium-browser",
-            "chrome",
-        ]
-    } else {
-        &["chrome", "msedge"]
-    };
+fn find_chrome_binary(family: BrowserFamily) -> Result<PathBuf> {
+    let candidates = browser_binary_candidates(family);
 
     // Check absolute paths first
-    for candidate in candidates {
+    for candidate in &candidates {
         let p = PathBuf::from(candidate);
         if p.is_absolute() && p.exists() {
             return Ok(p);
@@ -71,7 +108,7 @@ fn find_chrome_binary() -> Result<PathBuf> {
 
     // Check PATH for non-absolute candidates
     if let Ok(path) = std::env::var("PATH") {
-        for candidate in candidates {
+        for candidate in &candidates {
             let p = PathBuf::from(candidate);
             if !p.is_absolute() {
                 for dir in std::env::split_paths(&path) {
@@ -84,7 +121,58 @@ fn find_chrome_binary() -> Result<PathBuf> {
         }
     }
 
-    anyhow::bail!("Could not find Chrome/Chromium binary. Install Google Chrome or chromium.")
+    anyhow::bail!(
+        "Could not find {} binary. Install Google Chrome, Microsoft Edge, or Chromium.",
+        family.as_str()
+    )
+}
+
+fn browser_binary_candidates(family: BrowserFamily) -> Vec<&'static str> {
+    if cfg!(target_os = "macos") {
+        match family {
+            BrowserFamily::Chrome => vec![
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chrome.app/Contents/MacOS/Chrome",
+            ],
+            BrowserFamily::Edge => {
+                vec!["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+            }
+            BrowserFamily::Chromium => vec![
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            ],
+            BrowserFamily::Auto => vec![
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chrome.app/Contents/MacOS/Chrome",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            ],
+        }
+    } else if cfg!(target_os = "linux") {
+        match family {
+            BrowserFamily::Chrome => vec!["google-chrome", "google-chrome-stable", "chrome"],
+            BrowserFamily::Edge => vec!["microsoft-edge", "microsoft-edge-stable", "msedge"],
+            BrowserFamily::Chromium => vec!["chromium", "chromium-browser"],
+            BrowserFamily::Auto => vec![
+                "google-chrome",
+                "google-chrome-stable",
+                "microsoft-edge",
+                "microsoft-edge-stable",
+                "msedge",
+                "chromium",
+                "chromium-browser",
+                "chrome",
+            ],
+        }
+    } else {
+        match family {
+            BrowserFamily::Chrome => vec!["chrome", "google-chrome"],
+            BrowserFamily::Edge => vec!["msedge", "microsoft-edge"],
+            BrowserFamily::Chromium => vec!["chromium"],
+            BrowserFamily::Auto => vec!["chrome", "msedge", "chromium"],
+        }
+    }
 }
 
 fn home_dir() -> PathBuf {
@@ -194,7 +282,7 @@ pub fn resolve_profile_directory(explicit: Option<&str>) -> String {
 
 /// Default profile used when launching Chrome for MCP (everyday Chrome).
 fn default_user_data_dir() -> PathBuf {
-    resolve_user_data_dir(None, find_chrome_binary().ok().as_ref())
+    resolve_user_data_dir(None, find_chrome_binary(BrowserFamily::Auto).ok().as_ref())
 }
 
 fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
@@ -248,6 +336,14 @@ pub fn launch_chrome(
 
     if headless {
         cmd.arg("--headless=new");
+    }
+
+    // GitHub Actions / containers often lack a usable sandbox user namespace.
+    if std::env::var_os("CI").is_some()
+        || std::env::var_os("AGENT_DOCTOR_CHROME_NO_SANDBOX").is_some()
+    {
+        cmd.arg("--no-sandbox");
+        cmd.arg("--disable-dev-shm-usage");
     }
 
     // NOTE: Deliberately omit --enable-automation so navigator.webdriver is not set
@@ -322,21 +418,72 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
         }
     }
 
-    // Create a blank page target and use its debugger URL.
-    let created = chrome_http_json(port, "/json/new?about:blank")
-        .context("Failed to create a Chrome page target via /json/new")?;
-    created
-        .get("webSocketDebuggerUrl")
+    create_blank_page_ws_endpoint(port)
+}
+
+/// Create a blank page target and return its page WebSocket URL.
+///
+/// Compatibility notes (C-end / multi-Chrome):
+/// - Chromium **111+** (Chrome ~111+, Edge matching) requires `PUT /json/new`.
+/// - Older Chromium accepted `GET /json/new`.
+/// - We try PUT first, then GET, so one code path covers common Stable/Beta/Edge builds
+///   without hard-coding major versions.
+fn create_blank_page_ws_endpoint(port: u16) -> Result<String> {
+    let mut errors = Vec::new();
+    for method in ["PUT", "GET"] {
+        match chrome_http_json_method(port, method, "/json/new?about:blank") {
+            Ok(created) => {
+                if let Some(ws) = created
+                    .get("webSocketDebuggerUrl")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                {
+                    return Ok(ws);
+                }
+                errors.push(format!(
+                    "{method} /json/new returned JSON without webSocketDebuggerUrl"
+                ));
+            }
+            Err(err) => errors.push(format!("{method} /json/new: {err:#}")),
+        }
+    }
+
+    let version_hint = chrome_devtools_version_summary(port).unwrap_or_else(|| "unknown".into());
+    anyhow::bail!(
+        "Failed to create a Chrome page target via /json/new (Chrome DevTools {version_hint}). \
+         Tried PUT then GET. Details: {}",
+        errors.join(" | ")
+    )
+}
+
+/// Best-effort Chrome DevTools version string from `/json/version` for diagnostics.
+pub(crate) fn chrome_devtools_version_summary(port: u16) -> Option<String> {
+    let value = chrome_http_json(port, "/json/version").ok()?;
+    let browser = value
+        .get("Browser")
         .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .context("Chrome /json/new response missing webSocketDebuggerUrl")
+        .unwrap_or("Chrome");
+    let proto = value
+        .get("Protocol-Version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    Some(format!("{browser}, CDP {proto}"))
 }
 
 /// GET a Chrome DevTools HTTP endpoint and parse the JSON body.
+pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Value> {
+    chrome_http_json_method(port, "GET", path)
+}
+
+/// Call a Chrome DevTools HTTP endpoint with an explicit method and parse JSON.
 ///
 /// Chrome's CDP HTTP server may keep the socket open; reads until
 /// Content-Length bytes are received instead of waiting for EOF.
-pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Value> {
+pub(crate) fn chrome_http_json_method(
+    port: u16,
+    method: &str,
+    path: &str,
+) -> Result<serde_json::Value> {
     let addr = format!("127.0.0.1:{port}");
     let mut stream = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(800))
         .with_context(|| format!("Cannot connect to Chrome on {addr}"))?;
@@ -349,8 +496,9 @@ pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Valu
 
     // Chrome's CDP HTTP server expects HTTP/1.1 and may keep the socket open;
     // read until Content-Length bytes are received instead of waiting for EOF.
+    let method = method.trim().to_ascii_uppercase();
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: */*\r\nContent-Length: 0\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())
@@ -393,7 +541,7 @@ pub(crate) fn chrome_http_json(port: u16, path: &str) -> Result<serde_json::Valu
     let response_str = String::from_utf8_lossy(&response);
     if !response_str.contains("200") {
         anyhow::bail!(
-            "Chrome CDP HTTP {path} failed: {}",
+            "Chrome CDP HTTP {method} {path} failed: {}",
             &response_str[..response_str.len().min(200)]
         );
     }

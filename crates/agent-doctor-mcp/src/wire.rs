@@ -12,7 +12,7 @@ use crate::config::{configure_for, mcp_servers_path, McpConfigureOptions};
 use crate::status::DEFAULT_BROWSER_MCP_PORT;
 
 /// Default runtimes that accept Agent Doctor Browser MCP wiring.
-pub const BROWSER_MCP_WIRE_RUNTIMES: &[&str] = &["codex", "claude-code"];
+pub const BROWSER_MCP_WIRE_RUNTIMES: &[&str] = &["codex", "claude-code", "hermes", "openclaw"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserMcpWireResult {
@@ -36,6 +36,7 @@ pub struct WireBrowserMcpOptions {
     pub binary: PathBuf,
     pub project_path: Option<PathBuf>,
     pub codex_home: Option<PathBuf>,
+    pub hermes_home: Option<PathBuf>,
     /// When empty, wires [`BROWSER_MCP_WIRE_RUNTIMES`].
     pub runtimes: Vec<String>,
 }
@@ -50,6 +51,7 @@ impl WireBrowserMcpOptions {
             binary,
             project_path: None,
             codex_home: None,
+            hermes_home: None,
             runtimes: Vec::new(),
         }
     }
@@ -88,6 +90,7 @@ pub fn wire_browser_mcp(
             binary: options.binary.clone(),
             project_path: options.project_path.clone(),
             codex_home: options.codex_home.clone(),
+            hermes_home: options.hermes_home.clone(),
         };
 
         match configure_for(discovery, &configure) {
@@ -96,6 +99,7 @@ pub fn wire_browser_mcp(
                     runtime,
                     options.project_path.as_deref(),
                     options.codex_home.as_deref(),
+                    options.hermes_home.as_deref(),
                 )
                 .ok()
                 .map(|p| p.display().to_string());
@@ -129,13 +133,13 @@ pub fn wire_browser_mcp_defaults(binary: &Path) -> Result<BrowserMcpWireReport> 
     ))
 }
 
-/// Human-readable next steps after installing Claude Code / Codex.
+/// Human-readable next steps after installing Claude Code / Codex / Hermes / OpenClaw.
 pub fn wiring_next_steps_for_runtime(runtime: &str) -> Option<Vec<String>> {
     match runtime {
-        "claude-code" | "claude" | "codex" => Some(vec![
+        "claude-code" | "claude" | "codex" | "hermes" | "openclaw" => Some(vec![
             "Configure a Personal Provider or connect Evotown (Team), then switch mode to write LLM gateway settings into this runtime.".to_string(),
             "CLI: `agent-doctor mode personal` or `agent-doctor mode team` (add `--with-browser-mcp` to also write Browser MCP).".to_string(),
-            "Optional Browser MCP only: `agent-doctor mcp configure <codex|claude-code>`.".to_string(),
+            "Optional Browser MCP only: `agent-doctor mcp configure <codex|claude-code|hermes|openclaw>`.".to_string(),
         ]),
         _ => None,
     }
@@ -146,14 +150,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wiring_hints_cover_claude_and_codex() {
+    fn wiring_hints_cover_four_runtimes() {
         assert!(wiring_next_steps_for_runtime("claude-code").is_some());
         assert!(wiring_next_steps_for_runtime("codex").is_some());
-        assert!(wiring_next_steps_for_runtime("hermes").is_none());
+        assert!(wiring_next_steps_for_runtime("hermes").is_some());
+        assert!(wiring_next_steps_for_runtime("openclaw").is_some());
     }
 
     #[test]
     fn default_wire_runtimes_are_stable() {
-        assert_eq!(BROWSER_MCP_WIRE_RUNTIMES, &["codex", "claude-code"]);
+        assert_eq!(
+            BROWSER_MCP_WIRE_RUNTIMES,
+            &["codex", "claude-code", "hermes", "openclaw"]
+        );
     }
 }

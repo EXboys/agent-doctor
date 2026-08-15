@@ -10,6 +10,7 @@ authors.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 toml = "0.8"
 toml_edit.workspace = true
 tungstenite = { workspace = true, features = ["handshake"] }

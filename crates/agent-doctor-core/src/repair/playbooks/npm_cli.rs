@@ -52,15 +52,29 @@ fn suggest_npm_cli_repairs(
                 auto_fixable: mode_ready,
             });
         }
+    }
 
+    items.extend(suggest_browser_mcp_repairs(runtime_id, display, probe));
+    items
+}
+
+/// Suggest Browser MCP write/repair for any supported Ask runtime.
+pub(crate) fn suggest_browser_mcp_repairs(
+    runtime_id: &str,
+    display: &str,
+    probe: &RuntimeProbeReport,
+) -> Vec<SuggestedRepair> {
+    let mut items = Vec::new();
+    for check in &probe.checks {
         if check.id == "mcp.browser.configured"
             && matches!(check.status, ProbeStatus::Warn | ProbeStatus::Fail)
         {
             items.push(SuggestedRepair {
                 id: format!("fix-{runtime_id}-browser-mcp"),
                 title: format!("Write Browser MCP into {display} config"),
-                description: "Upsert mcpServers/mcp_servers.browser → agent-doctor (keeps other MCP entries)."
-                    .to_string(),
+                description:
+                    "Upsert mcpServers/mcp_servers.browser → agent-doctor (keeps other MCP entries)."
+                        .to_string(),
                 auto_fixable: true,
             });
         }
@@ -75,7 +89,6 @@ fn suggest_npm_cli_repairs(
             });
         }
     }
-
     items
 }
 
@@ -133,6 +146,26 @@ fn apply_npm_cli_playbook(
     Ok(result)
 }
 
+/// Apply Browser MCP wire when probe says configured/healthy is bad.
+pub(crate) fn apply_browser_mcp_repair(
+    runtime_id: &str,
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    let mut result = PlaybookApplyResult::default();
+    let browser_id = format!("fix-{runtime_id}-browser-mcp");
+    if should_run(&browser_id, only_ids) && needs_browser_mcp_rewire(probe) {
+        match wire_browser_mcp_for_runtime(runtime_id) {
+            Ok(()) => result.executed.push(browser_id),
+            Err(error) => result.skipped.push(SkippedRepairAction {
+                id: browser_id,
+                reason: error.to_string(),
+            }),
+        }
+    }
+    Ok(result)
+}
+
 fn needs_gateway_rewire(probe: &RuntimeProbeReport) -> bool {
     probe.checks.iter().any(|check| {
         check.id == "mode.overlay_mismatch"
@@ -184,6 +217,10 @@ fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
             if let Some(entry) = doc.workspaces.get(active) {
                 options.project_path = Some(entry.path.clone());
                 options.codex_home = Some(entry.codex_home.clone());
+                options.hermes_home = Some(
+                    crate::adapters::util::home_join(".hermes/profiles")
+                        .join(&entry.hermes_profile),
+                );
             }
         }
     }

@@ -368,13 +368,8 @@ fn seed_hermes_profile_credentials(profile_dir: &Path) -> Result<()> {
     let src_env = default_home.join(".env");
     let dst_env = profile_dir.join(".env");
     if src_env.exists() && !dst_env.exists() {
-        fs::copy(&src_env, &dst_env).with_context(|| {
-            format!(
-                "seed {} from {}",
-                dst_env.display(),
-                src_env.display()
-            )
-        })?;
+        fs::copy(&src_env, &dst_env)
+            .with_context(|| format!("seed {} from {}", dst_env.display(), src_env.display()))?;
     }
 
     let src_config = default_home.join("config.yaml");

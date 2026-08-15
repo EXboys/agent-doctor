@@ -37,6 +37,76 @@ jobs:
       - name: Build CLI
         run: cargo build --release -p agent-doctor
 
+  desktop-cli-bundle:
+    name: Desktop bundles agent-doctor-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Prebuild CLI into Tauri resources
+        run: bash desktop/scripts/prebuild-cli.sh
+
+      - name: Assert bundled binary exists and runs
+        run: |
+          test -x desktop/src-tauri/resources/agent-doctor-cli
+          desktop/src-tauri/resources/agent-doctor-cli --version
+          # Resource path must stay discoverable relative to a fake app exe layout.
+          mkdir -p /tmp/ad-app-macos/Contents/MacOS /tmp/ad-app-macos/Contents/Resources
+          cp desktop/src-tauri/resources/agent-doctor-cli /tmp/ad-app-macos/Contents/Resources/
+          test -x /tmp/ad-app-macos/Contents/Resources/agent-doctor-cli
+
+  browser-cdp-smoke:
+    name: Browser CDP smoke (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, edge]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Google Chrome
+        if: matrix.browser == 'chrome'
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+          install-dependencies: true
+
+      - name: Install Microsoft Edge
+        if: matrix.browser == 'edge'
+        id: setup-edge
+        uses: browser-actions/setup-edge@v1
+        with:
+          edge-version: stable
+
+      - name: Build CLI
+        run: cargo build --release -p agent-doctor
+
+      - name: CDP navigate smoke
+        run: |
+          if [ "${{ matrix.browser }}" = "chrome" ]; then
+            export AGENT_DOCTOR_BROWSER_BINARY="${{ steps.setup-chrome.outputs.chrome-path }}"
+          else
+            export AGENT_DOCTOR_BROWSER_BINARY="${{ steps.setup-edge.outputs.edge-path }}"
+          fi
+          echo "Using browser binary: $AGENT_DOCTOR_BROWSER_BINARY"
+          "$AGENT_DOCTOR_BROWSER_BINARY" --version || true
+          ./target/release/agent-doctor mcp smoke \
+            --browser "${{ matrix.browser }}" \
+            --url https://example.com/ \
+            --json
+        env:
+          CI: true
+
   rust-desktop:
     name: Rust desktop (Tauri)
     runs-on: macos-latest

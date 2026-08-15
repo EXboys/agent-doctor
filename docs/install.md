@@ -74,11 +74,24 @@ gh release download --repo EXboys/agent-doctor --pattern '*.dmg'
 # CLI
 cargo install --path cli --locked
 
-# Desktop dev
+# Desktop: bundle CLI into Tauri resources (required for Browser MCP on clean installs)
 cd desktop
 npm install
+npm run bundle:cli
 npm run tauri dev
 ```
+
+`npm run tauri -- build` already runs `scripts/prebuild-cli.sh` via `beforeBuildCommand`, so release `.app` / installers ship `agent-doctor-cli` under `Contents/Resources/` (macOS) or beside the exe (Windows/Linux).
+
+### Browser CDP smoke (Chrome / Edge)
+
+```bash
+cargo build --release -p agent-doctor
+./target/release/agent-doctor mcp smoke --browser chrome --url https://example.com/
+./target/release/agent-doctor mcp smoke --browser edge --url https://example.com/
+```
+
+CI runs the same smoke matrix on every PR (see `.github/workflows/ci.yml`).
 
 ## Create a release (maintainers)
 

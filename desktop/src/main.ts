@@ -997,13 +997,6 @@ const langSwitchEl = document.querySelector<HTMLElement>(".lang-switch")!;
 const healthPillEl = document.querySelector<HTMLElement>("#health-pill")!;
 const healthLabelEl = document.querySelector<HTMLElement>("#health-label")!;
 
-const PROVIDER_LABELS: Record<string, string> = {
-  deepseek: "DeepSeek",
-  openai: "OpenAI",
-  anthropic: "Claude",
-  ollama: "Ollama",
-};
-
 const RUNTIME_SHORT: Record<string, string> = {
   openclaw: "OC",
   hermes: "HE",
@@ -1011,107 +1004,10 @@ const RUNTIME_SHORT: Record<string, string> = {
   codex: "CX",
 };
 
-interface HermesModelOption {
-  provider: string;
-  model: string;
-  base_url: string;
-  label: string;
-  group: "common" | "saved" | "custom";
-}
-
-const COMMON_HERMES_MODELS: HermesModelOption[] = [
-  {
-    provider: "deepseek",
-    model: "deepseek-v4-flash",
-    base_url: "https://api.deepseek.com/v1",
-    label: "DeepSeek · deepseek-v4-flash",
-    group: "common",
-  },
-  {
-    provider: "openai",
-    model: "gpt-4o",
-    base_url: "https://api.openai.com/v1",
-    label: "OpenAI · gpt-4o",
-    group: "common",
-  },
-  {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    base_url: "https://api.openai.com/v1",
-    label: "OpenAI · gpt-4o-mini",
-    group: "common",
-  },
-  {
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    base_url: "https://api.anthropic.com/v1",
-    label: "Claude · claude-sonnet-4-20250514",
-    group: "common",
-  },
-  {
-    provider: "ollama",
-    model: "llama3.2",
-    base_url: "http://127.0.0.1:11434/v1",
-    label: "Ollama · llama3.2",
-    group: "common",
-  },
-];
-
-const MODEL_PRESET_CUSTOM = "__custom__";
-
-function modelPresetKey(option: Pick<HermesModelOption, "provider" | "model" | "base_url">): string {
-  return `${option.provider}|${option.model}|${option.base_url}`;
-}
-
-function buildHermesModelOptions(): HermesModelOption[] {
-  const seen = new Set<string>();
-  const options: HermesModelOption[] = [];
-
-  const push = (option: HermesModelOption) => {
-    const key = modelPresetKey(option);
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    options.push(option);
-  };
-
-  for (const option of COMMON_HERMES_MODELS) {
-    push(option);
-  }
-
-  const activeProfile = lastProfiles?.active;
-  const profiles = lastProfiles?.profiles;
-  if (activeProfile && profiles?.[activeProfile]) {
-    for (const saved of effectiveModels(profiles[activeProfile])) {
-      push({
-        ...saved,
-        label: modelChipLabel(saved),
-        group: "saved",
-      });
-    }
-  }
-
-  return options;
-}
-
-function findMatchingPreset(
-  current: Pick<HermesSettings, "provider" | "model" | "base_url">,
-): string {
-  const key = modelPresetKey(current);
-  for (const option of buildHermesModelOptions()) {
-    if (modelPresetKey(option) === key) {
-      return key;
-    }
-  }
-  return MODEL_PRESET_CUSTOM;
-}
-
 let lastReport: DoctorReport | null = null;
 let lastProfiles: ProfilesDocument | null = null;
 let lastWorkspaces: WorkspacesDocument | null = null;
 let hermesModel: HermesSettings | null = null;
-let hermesEditing = false;
 let activeRuntimeId: string | null = null;
 
 type RepairStatusFilter = "all" | RepairPreviewResponse["checks"][number]["status"];
@@ -1145,45 +1041,6 @@ function runtimeClass(id: string): string {
     return id;
   }
   return "default";
-}
-
-function effectiveModels(
-  entry: ProfileEntry | undefined,
-): Array<Pick<HermesSettings, "provider" | "model" | "base_url">> {
-  if (!entry) {
-    return [];
-  }
-  if (entry.models && entry.models.length > 0) {
-    return entry.models;
-  }
-  return entry.hermes ? [entry.hermes] : [];
-}
-
-function modelChipLabel(model: Pick<HermesSettings, "provider" | "model">): string {
-  const provider = PROVIDER_LABELS[model.provider] ?? model.provider;
-  return `${provider} · ${model.model}`;
-}
-
-function applyModelPresetToCard(card: HTMLElement, presetKey: string): void {
-  if (presetKey === MODEL_PRESET_CUSTOM) {
-    return;
-  }
-  const [provider, model, baseUrl] = presetKey.split("|");
-  if (!provider || !model || !baseUrl) {
-    return;
-  }
-  const providerEl = card.querySelector<HTMLInputElement>('[data-field="provider"]');
-  const modelEl = card.querySelector<HTMLInputElement>('[data-field="model"]');
-  const baseUrlEl = card.querySelector<HTMLInputElement>('[data-field="base_url"]');
-  if (providerEl) {
-    providerEl.value = provider;
-  }
-  if (modelEl) {
-    modelEl.value = model;
-  }
-  if (baseUrlEl) {
-    baseUrlEl.value = baseUrl;
-  }
 }
 
 function setStatusBanner(
@@ -1231,86 +1088,6 @@ function metaRow(labelKey: Parameters<typeof t>[0], value: string): string {
       <p class="meta-value">${escapeHtml(value)}</p>
     </div>
   `;
-}
-
-function metaInput(
-  labelKey: Parameters<typeof t>[0],
-  field: string,
-  value: string,
-  inputType = "text",
-  placeholder = "",
-): string {
-  return `
-    <label class="meta-row meta-row-edit">
-      <span class="meta-label">${t(labelKey)}</span>
-      <input class="meta-input" data-field="${field}" type="${inputType}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" />
-    </label>
-  `;
-}
-
-function metaSelect(
-  labelKey: Parameters<typeof t>[0],
-  field: string,
-  options: Array<{ value: string; label: string; group?: string }>,
-  selectedValue: string,
-): string {
-  const groups = new Map<string, Array<{ value: string; label: string }>>();
-  for (const option of options) {
-    const group = option.group ?? "";
-    if (!groups.has(group)) {
-      groups.set(group, []);
-    }
-    groups.get(group)!.push(option);
-  }
-
-  const body = [...groups.entries()]
-    .map(([group, items]) => {
-      const opts = items
-        .map(
-          (item) =>
-            `<option value="${escapeHtml(item.value)}" ${item.value === selectedValue ? "selected" : ""}>${escapeHtml(item.label)}</option>`,
-        )
-        .join("");
-      if (!group) {
-        return opts;
-      }
-      const groupLabel =
-        group === "common"
-          ? t("meta.modelGroupCommon")
-          : group === "saved"
-            ? t("meta.modelGroupSaved")
-            : "";
-      if (!groupLabel) {
-        return opts;
-      }
-      return `<optgroup label="${escapeHtml(groupLabel)}">${opts}</optgroup>`;
-    })
-    .join("");
-
-  return `
-    <label class="meta-row meta-row-edit">
-      <span class="meta-label">${t(labelKey)}</span>
-      <select class="meta-input meta-select" data-field="${field}">${body}</select>
-    </label>
-  `;
-}
-
-function renderHermesModelPresetSelect(
-  current: Pick<HermesSettings, "provider" | "model" | "base_url">,
-): string {
-  const selected = findMatchingPreset(current);
-  const options = buildHermesModelOptions().map((option) => ({
-    value: modelPresetKey(option),
-    label: option.label,
-    group: option.group,
-  }));
-  options.push({
-    value: MODEL_PRESET_CUSTOM,
-    label: t("meta.modelCustom"),
-    group: "custom",
-  });
-
-  return metaSelect("meta.modelPreset", "model-preset", options, selected);
 }
 
 function renderApiKeyRow(settings: HermesSettings): string {
@@ -1435,7 +1212,7 @@ function renderRepairPreview(
     : "";
 
   const applyButton = report.can_apply_repair
-    ? `<button type="button" class="btn-secondary repair-apply-btn" data-action="apply-repair">${t("repair.applyFixes")}</button>`
+    ? `<button type="button" class="btn-primary repair-apply-btn" data-action="apply-repair">${t("repair.applyFixes")}</button>`
     : "";
 
   const rollbackButton =
@@ -1451,12 +1228,37 @@ function renderRepairPreview(
     ? ""
     : `<p class="repair-plan">${escapeHtml(report.plan_summary)}</p>`;
 
+  const healthy = summary.fail === 0 && summary.warn === 0;
+  const isAskRuntime =
+    report.runtime_id === "claude-code" ||
+    report.runtime_id === "codex" ||
+    report.runtime_id === "hermes" ||
+    report.runtime_id === "openclaw";
+  const funnel = isAskRuntime
+    ? `<div class="repair-funnel">
+        <p class="repair-funnel-title">${escapeHtml(t("repair.funnelTitle"))}</p>
+        <ol class="repair-funnel-steps">
+          <li class="repair-funnel-step done">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
+          <li class="repair-funnel-step ${report.last_execute || healthy ? "done" : report.can_apply_repair ? "active" : ""}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
+          <li class="repair-funnel-step ${healthy || report.last_execute ? "active" : ""}">${escapeHtml(t("repair.funnelStepAsk"))}</li>
+        </ol>
+        ${
+          healthy || report.last_execute
+            ? `<button type="button" class="btn-primary" data-action="ask-session">${escapeHtml(t("repair.funnelAskCta"))}</button>`
+            : report.can_apply_repair
+              ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.funnelApplyHint"))}</p>`
+              : ""
+        }
+      </div>`
+    : "";
+
   return `
     <div class="repair-panel">
       <div class="repair-panel-head">
         <strong>${escapeHtml(report.display_name)}</strong>
         <span>${t("runtime.diagnosisReady")}</span>
       </div>
+      ${funnel}
       <div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
         ${summaryChips}
       </div>
@@ -1479,6 +1281,8 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-codex-gateway-from-mode": "repair.fix.codexGateway",
   "fix-claude-code-browser-mcp": "repair.fix.claudeBrowserMcp",
   "fix-codex-browser-mcp": "repair.fix.codexBrowserMcp",
+  "fix-hermes-browser-mcp": "repair.fix.hermesBrowserMcp",
+  "fix-openclaw-browser-mcp": "repair.fix.openclawBrowserMcp",
 };
 
 function repairFixLabel(actionId: string): string {
@@ -1549,6 +1353,22 @@ function mountRepairPreview(hint: HTMLElement, report: RepairPreviewResponse): v
   const card = runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
   if (card) {
     mountRelatedResources(card, runtime);
+    refreshRuntimeCardActions(card, runtime);
+  }
+}
+
+function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
+  const runtime = lastReport?.runtimes.find((item) => item.id === runtimeId);
+  if (!runtime) {
+    return;
+  }
+  const actions = card.querySelector(".card-actions");
+  if (!actions) {
+    return;
+  }
+  const html = renderRuntimeCardActions(runtime);
+  if (html) {
+    actions.innerHTML = html;
   }
 }
 
@@ -1605,10 +1425,7 @@ function runtimeHasProblems(runtimeId: string): boolean {
   return report.summary.fail > 0 || report.summary.warn > 0;
 }
 
-function renderRuntimeCardActions(
-  runtime: RuntimeDoctorResult,
-  options?: { includeEdit?: boolean },
-): string {
+function renderRuntimeCardActions(runtime: RuntimeDoctorResult): string {
   if (!runtime.installed) {
     return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
   }
@@ -1639,14 +1456,16 @@ function renderRuntimeCardActions(
   parts.push(
     `<button type="button" class="${diagnoseClass}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
   );
+  // Card-level Apply for every Ask runtime once diagnose found auto-fixable items.
+  const preview = repairPreviewByRuntime.get(runtime.id);
+  if (isAskRuntime && preview?.can_apply_repair) {
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.applyFixes")}</button>`,
+    );
+  }
   parts.push(
     `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`,
   );
-  if (options?.includeEdit) {
-    parts.push(
-      `<button type="button" class="btn-ghost" data-action="edit-hermes">${t("runtime.edit")}</button>`,
-    );
-  }
   return parts.join("");
 }
 
@@ -1721,61 +1540,30 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     api_key_hint: null,
   };
 
-  const actionButtons = hermesEditing ? "" : renderRuntimeCardActions(runtime, { includeEdit: true });
-
-  const meta = hermesEditing
-    ? [
-        renderHermesModelPresetSelect(model),
-        metaInput("meta.provider", "provider", model.provider),
-        metaInput("meta.model", "model", model.model),
-        metaInput("meta.gateway", "base_url", model.base_url),
-        model.api_key_env
-          ? metaInput(
-              "meta.apiKey",
-              "api_key",
-              "",
-              "password",
-              t("meta.apiKeyPlaceholder"),
-            )
-          : "",
-      ].join("")
-    : [
-        model.provider ? metaRow("meta.provider", model.provider) : "",
-        model.model ? metaRow("meta.model", model.model) : "",
-        model.base_url ? metaRow("meta.gateway", model.base_url) : "",
-        renderApiKeyRow(model),
-        runtime.profile.key_source
-          ? metaRow("meta.secrets", runtime.profile.key_source)
-          : "",
-        runtime.version ? metaRow("meta.version", runtime.version) : "",
-        runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
-        runtime.config_paths.length
-          ? metaRow("meta.config", runtime.config_paths.join("\n"))
-          : "",
-      ]
-        .filter(Boolean)
-        .join("");
-
-  const actions = hermesEditing
-    ? `
-      <div class="card-actions">
-        <button type="button" class="btn-secondary" data-action="cancel-hermes">${t("runtime.cancel")}</button>
-        <button type="button" class="btn-primary" data-action="save-hermes">${t("runtime.save")}</button>
-      </div>
-      <p class="card-hint" data-hermes-hint>${t("runtime.saveHint")}</p>
-    `
-    : actionButtons
-      ? `<div class="card-actions">${actionButtons}</div>`
-      : "";
+  const actionButtons = renderRuntimeCardActions(runtime);
+  const meta = [
+    model.provider ? metaRow("meta.provider", model.provider) : "",
+    model.model ? metaRow("meta.model", model.model) : "",
+    model.base_url ? metaRow("meta.gateway", model.base_url) : "",
+    renderApiKeyRow(model),
+    runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
+    runtime.version ? metaRow("meta.version", runtime.version) : "",
+    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
+    runtime.config_paths.length
+      ? metaRow("meta.config", runtime.config_paths.join("\n"))
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
 
   return `
-    <article class="runtime hermes ${hermesEditing ? "is-editing" : ""}" data-runtime="hermes">
+    <article class="runtime hermes" data-runtime="hermes">
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="badge ok">${t("runtime.installed")}</span>
       </div>
       ${meta ? `<div class="meta-grid">${meta}</div>` : ""}
-      ${actions}
+      ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
       ${renderRelatedResourcesHtml("hermes")}
       <div class="card-hint repair-hint" data-repair-hint hidden></div>
     </article>
@@ -1895,7 +1683,6 @@ async function renderReport(report: DoctorReport) {
     await loadHermesModel();
   } else {
     hermesModel = null;
-    hermesEditing = false;
   }
 
   if (report.runtimes.length === 0) {
@@ -3603,49 +3390,6 @@ async function refresh() {
   }
 }
 
-async function saveHermesCard(card: HTMLElement) {
-  const hint = card.querySelector<HTMLElement>("[data-hermes-hint]");
-  const saveBtn = card.querySelector<HTMLButtonElement>('[data-action="save-hermes"]');
-  const draft = readHermesDraft(card);
-
-  saveBtn?.setAttribute("disabled", "true");
-  if (hint) {
-    hint.textContent = t("runtime.saving");
-  }
-
-  try {
-    await invoke<{ restart_hint: string; backup_path: string | null }>("set_hermes_model_command", {
-      provider: draft.provider,
-      model: draft.model,
-      baseUrl: draft.base_url,
-      apiKey: draft.api_key ? draft.api_key : null,
-    });
-
-    const activeProfile = lastProfiles?.active;
-    if (activeProfile) {
-      const profileReport = await invoke<{ restart_hint: string }>("apply_profile_model_command", {
-        profile: activeProfile,
-        provider: draft.provider,
-        model: draft.model,
-        baseUrl: draft.base_url,
-      });
-      if (hint) {
-        hint.textContent = profileReport.restart_hint;
-      }
-    }
-
-    hermesEditing = false;
-    await loadProfiles();
-    await refresh();
-  } catch (error) {
-    if (hint) {
-      hint.textContent = String(error);
-    }
-  } finally {
-    saveBtn?.removeAttribute("disabled");
-  }
-}
-
 async function applyPreset() {
   const name = selectedPresetName;
   if (!name) {
@@ -3662,7 +3406,6 @@ async function applyPreset() {
     presetHintEl.textContent = applied
       ? t("presets.updated", { list: applied })
       : report.skipped.join("; ");
-    hermesEditing = false;
     await loadProfiles();
     await refresh();
   } catch (error) {
@@ -3897,22 +3640,6 @@ async function diagnoseRuntimeCard(card: HTMLElement) {
   }
 }
 
-function readHermesDraft(card: HTMLElement): {
-  provider: string;
-  model: string;
-  base_url: string;
-  api_key: string;
-} {
-  const read = (field: string) =>
-    card.querySelector<HTMLInputElement>(`[data-field="${field}"]`)?.value.trim() ?? "";
-  return {
-    provider: read("provider"),
-    model: read("model"),
-    base_url: read("base_url"),
-    api_key: read("api_key"),
-  };
-}
-
 function updateLangButtons() {
   const current = getLocale();
   langSwitchEl.querySelectorAll<HTMLButtonElement>(".lang-btn").forEach((button) => {
@@ -3957,19 +3684,8 @@ runtimeTabsEl.addEventListener("click", (event) => {
     return;
   }
   activeRuntimeId = runtimeId;
-  hermesEditing = false;
   if (lastReport) {
     void renderReport(lastReport);
-  }
-});
-
-runtimesEl.addEventListener("change", (event) => {
-  const target = event.target as HTMLElement;
-  if (target instanceof HTMLSelectElement && target.dataset.field === "model-preset") {
-    const card = target.closest<HTMLElement>('[data-runtime="hermes"]');
-    if (card) {
-      applyModelPresetToCard(card, target.value);
-    }
   }
 });
 
@@ -4046,33 +3762,6 @@ runtimesEl.addEventListener("click", (event) => {
   const guideBtn = target.closest<HTMLButtonElement>('[data-action="open-repair-guide"]');
   if (guideBtn?.dataset.guidePath) {
     void openRepairGuide(decodeURIComponent(guideBtn.dataset.guidePath));
-    return;
-  }
-
-  const card = target.closest<HTMLElement>('[data-runtime="hermes"]');
-  if (!card) {
-    return;
-  }
-
-  if (action === "edit-hermes") {
-    hermesEditing = true;
-    activeRuntimeId = "hermes";
-    if (lastReport) {
-      void renderReport(lastReport);
-    }
-    return;
-  }
-
-  if (action === "cancel-hermes") {
-    hermesEditing = false;
-    if (lastReport) {
-      void renderReport(lastReport);
-    }
-    return;
-  }
-
-  if (action === "save-hermes") {
-    void saveHermesCard(card);
   }
 });
 

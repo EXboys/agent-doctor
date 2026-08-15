@@ -295,7 +295,7 @@ async function startAsk(hooks: AskPanelHooks): Promise<void> {
     const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
       runtime,
       prompt: text,
-      cwd: null,
+      cwd: null, // backend resolves active workspace when null
       timeoutSec: 600,
       dangerouslySkipPermissions: flags.dangerously_skip_permissions,
       fullAuto: flags.full_auto,

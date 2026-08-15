@@ -35,10 +35,7 @@ impl PromptSessionControl {
 
     pub(crate) fn remember_claude_tool_input(&self, request_id: &str, input: Value) {
         if let Ok(mut guard) = self.pending.lock() {
-            guard.insert(
-                request_id.to_string(),
-                PendingReply::ClaudeTool { input },
-            );
+            guard.insert(request_id.to_string(), PendingReply::ClaudeTool { input });
         }
     }
 

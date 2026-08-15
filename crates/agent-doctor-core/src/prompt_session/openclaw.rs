@@ -69,17 +69,26 @@ fn run_openclaw(
         .map(str::to_string)
         .unwrap_or_else(fresh_openclaw_session_id);
 
+    let overlay = collect_overlay_env();
+    let mut prompt_text = prompt.to_string();
     if super::mcp_ensure::wants_browser_mcp(options) {
-        on_event(PromptSessionEvent::Status {
-            session_id: session_id.clone(),
-            phase: "mcp".into(),
-            message: "browser MCP is not wired for OpenClaw Ask yet — use Claude Code or Codex Ask"
-                .into(),
-        });
+        if let Some(note) =
+            super::mcp_ensure::ensure_browser_mcp_for_ask("openclaw", &cwd, &overlay)
+        {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+        prompt_text = format!(
+            "{}\n\n{}",
+            super::mcp_ensure::browser_mcp_tool_instructions(),
+            prompt
+        );
     }
 
-    let mut cmd =
-        build_openclaw_command(prompt, &cwd, &openclaw_session_id, timeout_sec)?;
+    let mut cmd = build_openclaw_command(&prompt_text, &cwd, &openclaw_session_id, timeout_sec)?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -214,11 +223,17 @@ fn fresh_openclaw_session_id() -> String {
     )
 }
 
-fn resolve_openclaw_agent() -> String {
-    std::env::var("AGENT_DOCTOR_OPENCLAW_AGENT")
-        .ok()
+fn resolve_openclaw_agent(overlay: &std::collections::HashMap<String, String>) -> String {
+    overlay
+        .get("OPENCLAW_AGENT_ID")
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("AGENT_DOCTOR_OPENCLAW_AGENT")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_else(|| "main".into())
 }
 
@@ -230,7 +245,7 @@ fn build_openclaw_command(
 ) -> Result<Command> {
     let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_OPENCLAW_BIN").unwrap_or_else(|_| "openclaw".into());
-    let agent = resolve_openclaw_agent();
+    let agent = resolve_openclaw_agent(&overlay);
     let mut cmd = Command::new(&bin);
     cmd.arg("agent")
         .arg("--local")
@@ -574,11 +589,11 @@ mod tests {
     fn parses_json_reply_and_session() {
         let raw = r#"{"reply":"openclaw-ok","sessionId":"oc-1"}"#;
         let value = parse_openclaw_json_output(raw).unwrap();
-        assert_eq!(extract_openclaw_reply(&value).as_deref(), Some("openclaw-ok"));
         assert_eq!(
-            extract_openclaw_session_id(&value).as_deref(),
-            Some("oc-1")
+            extract_openclaw_reply(&value).as_deref(),
+            Some("openclaw-ok")
         );
+        assert_eq!(extract_openclaw_session_id(&value).as_deref(), Some("oc-1"));
     }
 
     #[test]
@@ -603,10 +618,7 @@ mod tests {
         }"#;
         let value = parse_openclaw_json_output(raw).unwrap();
         assert_eq!(extract_openclaw_reply(&value), None);
-        assert_eq!(
-            extract_openclaw_session_id(&value).as_deref(),
-            Some("oc-2")
-        );
+        assert_eq!(extract_openclaw_session_id(&value).as_deref(), Some("oc-2"));
     }
 
     #[cfg(unix)]

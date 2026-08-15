@@ -1284,8 +1284,27 @@ async function loadAskResources(): Promise<void> {
       invoke<McpInventoryReport>("list_mcp_inventory_command"),
     ]);
     workspaceCwd = mcpReport.workspace_path;
-    if (mcpReport.workspace_path && (!cwdEl.dataset.cwd || cwdEl.dataset.cwd === "—")) {
-      setDisplayedCwd(mcpReport.workspace_path);
+    try {
+      const doc = await invoke<{
+        active: string | null;
+        workspaces: Record<string, { path: string }>;
+      }>("list_workspaces_command");
+      if (doc.active && doc.workspaces[doc.active]?.path) {
+        workspaceCwd = doc.workspaces[doc.active].path;
+        cwdEl.dataset.workspace = doc.active;
+        setDisplayedCwd(workspaceCwd);
+        cwdEl.title = `${t("ask.workspaceActive", { name: doc.active })} · ${workspaceCwd}`;
+      } else {
+        cwdEl.dataset.workspace = "";
+        if (mcpReport.workspace_path) {
+          setDisplayedCwd(mcpReport.workspace_path);
+        }
+        cwdEl.title = t("ask.workspaceNone");
+      }
+    } catch {
+      if (mcpReport.workspace_path && (!cwdEl.dataset.cwd || cwdEl.dataset.cwd === "—")) {
+        setDisplayedCwd(mcpReport.workspace_path);
+      }
     }
     mountedSkills = (skillsReport.skills ?? []).filter((skill) =>
       skillMountedForRuntime(skill, runtime),
@@ -1351,11 +1370,57 @@ function mergeMentionsForSend(userText: string): MentionRef[] {
 function buildMentionConstraint(mentions: MentionRef[]): string {
   if (mentions.length === 0) return "";
   const list = mentions
-    .map((m) =>
-      m.kind === "skill" ? `- Skill: ${m.label} (id: ${m.id})` : `- MCP server: ${m.label}`,
-    )
+    .map((m) => {
+      if (m.kind === "skill") return `- Skill: ${m.label} (id: ${m.id})`;
+      if (m.id.toLowerCase() === "browser" || m.label.toLowerCase().includes("browser")) {
+        return `- MCP server: ${m.label} — use tools browser_navigate / browser_click / browser_screenshot (never shell open/curl)`;
+      }
+      return `- MCP server: ${m.label}`;
+    })
     .join("\n");
   return t("chat.mentionHint", { list });
+}
+
+function promptRequestsBrowserMcp(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (
+    text.includes("浏览器") ||
+    lower.includes("browser mcp") ||
+    lower.includes("@mcp:browser") ||
+    lower.includes("browser_navigate") ||
+    lower.includes("open browser") ||
+    lower.includes("launch browser") ||
+    lower.includes("navigate to")
+  ) {
+    return true;
+  }
+  if (
+    (lower.includes("open ") || lower.includes("visit ") || lower.includes("go to ")) &&
+    (lower.includes("http://") ||
+      lower.includes("https://") ||
+      lower.includes(".com") ||
+      lower.includes(".cn") ||
+      lower.includes("baidu") ||
+      lower.includes("google"))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function ensureBrowserMention(mentions: MentionRef[], userText: string): MentionRef[] {
+  if (!promptRequestsBrowserMcp(userText)) return mentions;
+  if (mentions.some((m) => m.kind === "mcp" && m.id.toLowerCase().includes("browser"))) {
+    return mentions;
+  }
+  const browser = enabledMcps.find(
+    (s) => s.is_browser || s.name.toLowerCase() === "browser" || s.name.toLowerCase().includes("browser"),
+  );
+  if (!browser) return mentions;
+  return [
+    ...mentions,
+    { kind: "mcp", id: browser.name, label: browser.name },
+  ];
 }
 
 function mentionCandidates(): MentionRef[] {
@@ -1616,7 +1681,7 @@ async function sendAsk(): Promise<void> {
   const elevated = elevatedEl.checked;
   if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
 
-  const mentions = mergeMentionsForSend(text);
+  const mentions = ensureBrowserMention(mergeMentionsForSend(text), text);
   const cleaned = stripMentionTokens(text);
   const userText = cleaned || text || t("chat.attachOnlyPrompt");
   const constraint = buildMentionConstraint(mentions);
@@ -1647,7 +1712,7 @@ async function sendAsk(): Promise<void> {
     const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
       runtime,
       prompt,
-      cwd: null,
+      cwd: workspaceCwd?.trim() || null,
       timeoutSec: 600,
       dangerouslySkipPermissions:
         (runtime === "claude-code" || runtime === "hermes") && elevated,
