@@ -109,13 +109,9 @@ pub fn wire_browser_mcp(
                 .ok()
                 .map(|p| p.display().to_string());
                 let message = if runtime == "openclaw" && options.openclaw_workspace.is_some() {
-                    format!(
-                        "wrote browser MCP for openclaw (global ~/.openclaw + workspace .mcp.json mirror; runtime is still global)"
-                    )
+                    "wrote browser MCP for openclaw (global ~/.openclaw + workspace .mcp.json mirror; runtime is still global)".to_string()
                 } else if runtime == "openclaw" {
-                    format!(
-                        "wrote browser MCP for openclaw (global ~/.openclaw — not per-workspace isolated)"
-                    )
+                    "wrote browser MCP for openclaw (global ~/.openclaw — not per-workspace isolated)".to_string()
                 } else {
                     format!("wrote browser MCP entry for {runtime}")
                 };

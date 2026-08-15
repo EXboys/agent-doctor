@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -285,14 +285,14 @@ fn default_user_data_dir() -> PathBuf {
     resolve_user_data_dir(None, find_chrome_binary(BrowserFamily::Auto).ok().as_ref())
 }
 
-fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
+fn detect_chrome_version(binary: &Path) -> Option<String> {
     // Never spawn Google Chrome / Chromium just to read --version.
     // Executing the app binary on macOS often handoffs to a running instance
     // and focuses a browser window (Resources tab / status checks).
     chrome_version_from_app_bundle(binary).or_else(|| chrome_version_via_plutil(binary))
 }
 
-fn chrome_version_via_plutil(binary: &PathBuf) -> Option<String> {
+fn chrome_version_via_plutil(binary: &Path) -> Option<String> {
     let mut dir = binary.parent()?.to_path_buf();
     for _ in 0..4 {
         if dir.extension().and_then(|e| e.to_str()) == Some("app") {
@@ -319,7 +319,7 @@ fn chrome_version_via_plutil(binary: &PathBuf) -> Option<String> {
     None
 }
 
-fn chrome_version_from_app_bundle(binary: &PathBuf) -> Option<String> {
+fn chrome_version_from_app_bundle(binary: &Path) -> Option<String> {
     let mut dir = binary.parent()?.to_path_buf();
     // .../Foo.app/Contents/MacOS/Google Chrome → climb to Foo.app
     for _ in 0..4 {
