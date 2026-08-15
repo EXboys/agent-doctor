@@ -252,7 +252,9 @@ fn resolve_openclaw_agent(overlay: &std::collections::HashMap<String, String>) -
 }
 
 /// Bind/create workspace OpenClaw agent before Ask spawn (fixes missing agents.list).
-fn ensure_openclaw_agent_ready(overlay: &std::collections::HashMap<String, String>) -> Option<String> {
+fn ensure_openclaw_agent_ready(
+    overlay: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     let agent = resolve_openclaw_agent(overlay);
     if agent == "main" {
         return None;
@@ -410,12 +412,8 @@ where
     Ok((status, exit_code, stdout, stderr))
 }
 
-fn emit_openclaw_turn_tools<F>(
-    session_id: &str,
-    agent: &str,
-    runtime_thread_id: &str,
-    emit: &mut F,
-) where
+fn emit_openclaw_turn_tools<F>(session_id: &str, agent: &str, runtime_thread_id: &str, emit: &mut F)
+where
     F: FnMut(PromptSessionEvent),
 {
     let Some(path) = resolve_openclaw_session_jsonl(agent, runtime_thread_id) else {
@@ -470,10 +468,7 @@ fn collect_last_turn_openclaw_tools_from(text: &str) -> Vec<String> {
             continue;
         };
         let message = value.get("message").unwrap_or(&value);
-        let role = message
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("");
         if role == "user" {
             tools.clear();
             continue;
@@ -501,7 +496,10 @@ fn collect_last_turn_openclaw_tools_from(text: &str) -> Vec<String> {
                 message.get("tool_name"),
                 message.pointer("/details/mcpTool"),
             ] {
-                if let Some(name) = key.and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty())
+                if let Some(name) = key
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
                 {
                     tools.push(name.to_string());
                 }

@@ -147,10 +147,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
 
-    if !matches!(
-        runtime_id,
-        "claude-code" | "codex" | "hermes" | "openclaw"
-    ) {
+    if !matches!(runtime_id, "claude-code" | "codex" | "hermes" | "openclaw") {
         return;
     }
 
@@ -237,9 +234,7 @@ workspace .mcp.json is an Agent Doctor inventory mirror, not per-workspace MCP i
             "{base}; OpenClaw MCP is global — switching workspaces does not swap MCP servers \
 (workspace .mcp.json mirror missing; re-run repair/wire with an active workspace)"
         ),
-        _ => format!(
-            "{base}; OpenClaw MCP is global (~/.openclaw) — not isolated per workspace"
-        ),
+        _ => format!("{base}; OpenClaw MCP is global (~/.openclaw) — not isolated per workspace"),
     }
 }
 
@@ -340,10 +335,7 @@ fn read_servers_from_openclaw(
     };
 
     let mut out = Vec::new();
-    if let Some(map) = value
-        .pointer("/mcp/servers")
-        .and_then(JsonValue::as_object)
-    {
+    if let Some(map) = value.pointer("/mcp/servers").and_then(JsonValue::as_object) {
         out.extend(map.iter().map(|(name, entry)| {
             item_from_command_args(
                 name,

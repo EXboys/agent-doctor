@@ -718,10 +718,7 @@ fn handle_notification<F>(
             }
         }
         "mcpServer/startupStatus/updated" => {
-            let name = params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("mcp");
+            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("mcp");
             let status = params
                 .get("status")
                 .and_then(|v| v.as_str())

@@ -132,9 +132,7 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
     }
 
     items.extend(super::npm_cli::suggest_browser_mcp_repairs(
-        "openclaw",
-        "OpenClaw",
-        probe,
+        "openclaw", "OpenClaw", probe,
     ));
     items
 }

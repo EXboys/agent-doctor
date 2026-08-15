@@ -700,10 +700,17 @@ mod tests {
 
         let raw = fs::read_to_string(openclaw.join("openclaw.json")).unwrap();
         let value: JsonValue = serde_json::from_str(&raw).unwrap();
-        let list = value.pointer("/agents/list").and_then(|v| v.as_array()).unwrap();
-        assert!(list.iter().any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
+        let list = value
+            .pointer("/agents/list")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert!(list
+            .iter()
+            .any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
         assert_eq!(
-            value.pointer("/agents/defaults/workspace").and_then(|v| v.as_str()),
+            value
+                .pointer("/agents/defaults/workspace")
+                .and_then(|v| v.as_str()),
             Some(ws.to_str().unwrap())
         );
 
