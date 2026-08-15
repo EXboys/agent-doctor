@@ -64,6 +64,14 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         // Codex: workspace CODEX_HOME/config.toml → [mcp_servers.*]
         let codex_config = entry.codex_home.join("config.toml");
         servers.extend(read_servers_from_toml(&codex_config, "codex-home", "codex"));
+
+        // OpenClaw workspace mirror (AD isolation narrative; runtime still loads global).
+        let openclaw_ws_mcp = entry.openclaw_workspace.join(".mcp.json");
+        servers.extend(read_servers_from_json(
+            &openclaw_ws_mcp,
+            "openclaw-workspace",
+            "openclaw",
+        ));
     } else {
         // No active workspace — still inventory global Codex MCP so probes/UI see it.
         let codex_config = home_join(".codex/config.toml");
@@ -93,11 +101,11 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         "hermes",
     ));
 
-    // OpenClaw: ~/.openclaw/openclaw.json (`mcp.servers` + legacy `mcpServers`)
+    // OpenClaw runtime config: ~/.openclaw/openclaw.json (`mcp.servers` + legacy `mcpServers`)
     let openclaw_config = home_join(".openclaw/openclaw.json");
     servers.extend(read_servers_from_openclaw(
         &openclaw_config,
-        "openclaw",
+        "openclaw-global",
         "openclaw",
     ));
 
@@ -147,10 +155,16 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
     }
 
     let inventory = list_mcp_inventory_with_doc(&load_workspaces().unwrap_or_default());
+    // Prefer workspace-scoped entries (Claude project / OpenClaw mirror) over globals.
     let browser = inventory
         .servers
         .iter()
-        .find(|item| item.is_browser && item.runtime_hint == runtime_id);
+        .filter(|item| item.is_browser && item.runtime_hint == runtime_id)
+        .max_by_key(|item| match item.scope.as_str() {
+            "project" | "openclaw-workspace" | "codex-home" | "hermes-home" => 2,
+            "openclaw-global" | "claude-user" => 1,
+            _ => 0,
+        });
 
     match browser {
         None => {
@@ -171,7 +185,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
                 "Browser MCP configured",
                 ProbeStatus::Pass,
                 ProbeSeverity::Info,
-                format!("browser MCP present at {}", item.config_path),
+                openclaw_browser_detail(runtime_id, item),
                 SensitivityLevel::ConfigShape,
             ));
             checks.push(ProbeCheck::new(
@@ -191,7 +205,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
                 "Browser MCP configured",
                 ProbeStatus::Pass,
                 ProbeSeverity::Info,
-                format!("browser MCP present at {}", item.config_path),
+                openclaw_browser_detail(runtime_id, item),
                 SensitivityLevel::ConfigShape,
             ));
             checks.push(ProbeCheck::new(
@@ -203,6 +217,29 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
                 SensitivityLevel::LocalPath,
             ));
         }
+    }
+}
+
+fn openclaw_browser_detail(runtime_id: &str, item: &McpInventoryItem) -> String {
+    let base = format!(
+        "browser MCP present at {} [{}]",
+        item.config_path, item.scope
+    );
+    if runtime_id != "openclaw" {
+        return base;
+    }
+    match item.scope.as_str() {
+        "openclaw-workspace" => format!(
+            "{base}; OpenClaw runtime still loads ~/.openclaw/openclaw.json globally — \
+workspace .mcp.json is an Agent Doctor inventory mirror, not per-workspace MCP isolation"
+        ),
+        "openclaw-global" => format!(
+            "{base}; OpenClaw MCP is global — switching workspaces does not swap MCP servers \
+(workspace .mcp.json mirror missing; re-run repair/wire with an active workspace)"
+        ),
+        _ => format!(
+            "{base}; OpenClaw MCP is global (~/.openclaw) — not isolated per workspace"
+        ),
     }
 }
 

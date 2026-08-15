@@ -11,8 +11,18 @@ use serde_json::Value;
 enum PendingReply {
     /// Claude Code `control_response` with updated tool input.
     ClaudeTool { input: Value },
-    /// Codex app-server JSON-RPC result `{ decision }`.
-    CodexRpc,
+    /// Codex app-server JSON-RPC result (shape depends on the request method).
+    CodexRpc { kind: CodexReplyKind },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum CodexReplyKind {
+    /// `item/*/requestApproval` → `{ decision: accept|decline }`.
+    Decision,
+    /// `mcpServer/elicitation/request` → `{ action, content }`.
+    Elicitation,
+    /// `item/permissions/requestApproval` → `{ permissions, scope }`.
+    Permissions { requested: Value },
 }
 
 /// Bidirectional control channel for Ask permission prompts (Claude or Codex).
@@ -39,9 +49,9 @@ impl PromptSessionControl {
         }
     }
 
-    pub(crate) fn remember_codex_rpc(&self, request_id: &str) {
+    pub(crate) fn remember_codex_reply(&self, request_id: &str, kind: CodexReplyKind) {
         if let Ok(mut guard) = self.pending.lock() {
-            guard.insert(request_id.to_string(), PendingReply::CodexRpc);
+            guard.insert(request_id.to_string(), PendingReply::CodexRpc { kind });
         }
     }
 
@@ -93,16 +103,40 @@ impl PromptSessionControl {
         }
     }
 
-    fn codex_payload(request_id: &str, allow: bool) -> Value {
-        let decision = if allow { "accept" } else { "decline" };
+    fn codex_payload(request_id: &str, allow: bool, kind: &CodexReplyKind) -> Value {
         let id: Value = request_id
             .parse::<i64>()
             .map(Value::from)
             .unwrap_or_else(|_| Value::String(request_id.to_string()));
-        serde_json::json!({
-            "id": id,
-            "result": { "decision": decision }
-        })
+        let result = match kind {
+            CodexReplyKind::Decision => {
+                let decision = if allow { "accept" } else { "decline" };
+                serde_json::json!({ "decision": decision })
+            }
+            CodexReplyKind::Elicitation => {
+                if allow {
+                    serde_json::json!({ "action": "accept", "content": {} })
+                } else {
+                    serde_json::json!({ "action": "decline", "content": null })
+                }
+            }
+            CodexReplyKind::Permissions { requested } => {
+                if allow {
+                    serde_json::json!({
+                        "decision": "accept",
+                        "permissions": requested,
+                        "scope": "turn"
+                    })
+                } else {
+                    serde_json::json!({
+                        "decision": "decline",
+                        "permissions": {},
+                        "scope": "turn"
+                    })
+                }
+            }
+        };
+        serde_json::json!({ "id": id, "result": result })
     }
 
     /// Allow or deny a pending permission request (Claude control or Codex RPC).
@@ -113,13 +147,13 @@ impl PromptSessionControl {
         }
 
         let payload = match self.take_pending(request_id) {
-            Some(PendingReply::CodexRpc) => Self::codex_payload(request_id, allow),
+            Some(PendingReply::CodexRpc { kind }) => Self::codex_payload(request_id, allow, &kind),
             Some(PendingReply::ClaudeTool { input }) => {
                 Self::claude_payload(request_id, allow, input)
             }
             None => {
                 // No remembered pending yet (race / stale id). Prefer Claude shape for
-                // non-numeric ids; for numeric ids wait until remember_codex_rpc.
+                // non-numeric ids; for numeric ids wait until remember_codex_reply.
                 if request_id.chars().all(|c| c.is_ascii_digit()) {
                     bail!("no pending Codex approval for request_id={request_id}");
                 }

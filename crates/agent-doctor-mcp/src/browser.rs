@@ -286,11 +286,71 @@ fn default_user_data_dir() -> PathBuf {
 }
 
 fn detect_chrome_version(binary: &PathBuf) -> Option<String> {
-    let output = Command::new(binary).arg("--version").output().ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
+    // Never spawn Google Chrome / Chromium just to read --version.
+    // Executing the app binary on macOS often handoffs to a running instance
+    // and focuses a browser window (Resources tab / status checks).
+    chrome_version_from_app_bundle(binary).or_else(|| chrome_version_via_plutil(binary))
+}
+
+fn chrome_version_via_plutil(binary: &PathBuf) -> Option<String> {
+    let mut dir = binary.parent()?.to_path_buf();
+    for _ in 0..4 {
+        if dir.extension().and_then(|e| e.to_str()) == Some("app") {
+            let plist = dir.join("Contents/Info.plist");
+            if !plist.exists() {
+                return None;
+            }
+            let output = Command::new("plutil")
+                .args([
+                    "-extract",
+                    "CFBundleShortVersionString",
+                    "raw",
+                    "-o",
+                    "-",
+                ])
+                .arg(&plist)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if version.is_empty() {
+                return None;
+            }
+            return Some(format!("Google Chrome {version}"));
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}
+
+fn chrome_version_from_app_bundle(binary: &PathBuf) -> Option<String> {
+    let mut dir = binary.parent()?.to_path_buf();
+    // .../Foo.app/Contents/MacOS/Google Chrome → climb to Foo.app
+    for _ in 0..4 {
+        if dir.extension().and_then(|e| e.to_str()) == Some("app") {
+            let plist = dir.join("Contents/Info.plist");
+            return read_bundle_short_version(&plist);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}
+
+fn read_bundle_short_version(plist_path: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(plist_path).ok()?;
+    // Keep this dependency-free: Info.plist for Chrome is XML with the key nearby.
+    let key = "<key>CFBundleShortVersionString</key>";
+    let idx = raw.find(key)?;
+    let after = &raw[idx + key.len()..];
+    let start = after.find("<string>")? + "<string>".len();
+    let end = after[start..].find("</string>")?;
+    let version = after[start..start + end].trim();
+    if version.is_empty() {
         None
+    } else {
+        Some(format!("Google Chrome {version}"))
     }
 }
 

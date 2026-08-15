@@ -549,6 +549,47 @@ html, body {
   white-space: nowrap;
 }
 
+.chat-workspace-block {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+
+.chat-workspace-label {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.chat-workspace-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.chat-workspace-select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 5px 8px;
+}
+
+.chat-workspace-hint {
+  margin: 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: var(--faint);
+}
+
 .chat-resources-actions {
   display: inline-flex;
   gap: 8px;

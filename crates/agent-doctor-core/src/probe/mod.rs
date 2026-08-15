@@ -1,7 +1,7 @@
 use std::fs;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -497,10 +497,14 @@ fn probe_gateway(
     match gateway_socket_addr(&url) {
         Some(addr) => match addr.to_socket_addrs() {
             Ok(addrs) => {
-                let timeout = Duration::from_millis(750);
-                let reachable = addrs
-                    .into_iter()
-                    .any(|addr| TcpStream::connect_timeout(&addr, timeout).is_ok());
+                let deadline = Instant::now() + Duration::from_millis(800);
+                let reachable = addrs.into_iter().any(|addr| {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    let remain = deadline.saturating_duration_since(Instant::now());
+                    TcpStream::connect_timeout(&addr, remain.min(Duration::from_millis(400))).is_ok()
+                });
                 checks.push(ProbeCheck::new(
                     "gateway.connectivity",
                     "Gateway connectivity",

@@ -27,9 +27,10 @@ use agent_doctor_core::{
     WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use agent_doctor_mcp::{
-    browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
-    resolve_profile_directory, resolve_user_data_dir, wire_browser_mcp, BrowserMcpStatus,
-    BrowserMcpWireReport, McpConfigureOptions, WireBrowserMcpOptions, DEFAULT_BROWSER_MCP_PORT,
+    browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
+    resolve_profile_directory, resolve_user_data_dir, smoke_browser_navigate, wire_browser_mcp,
+    BrowserMcpStatus, BrowserMcpWireReport, McpConfigureOptions, SmokeOptions,
+    WireBrowserMcpOptions, DEFAULT_BROWSER_MCP_PORT,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -45,6 +46,9 @@ const ASK_WINDOW_LABEL: &str = "ask";
 const ASK_WINDOW_WIDTH: f64 = 980.0;
 const ASK_WINDOW_HEIGHT: f64 = 640.0;
 const ASK_WINDOW_MARGIN: f64 = 16.0;
+const MAIN_WINDOW_MARGIN: f64 = 16.0;
+const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
+const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 
 /// At most one light ask session at a time (panel UX).
 #[derive(Default)]
@@ -167,6 +171,104 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+#[derive(Debug, Serialize)]
+struct WindowSizeReport {
+    width: f64,
+    height: f64,
+}
+
+fn main_window_logical_size(window: &tauri::WebviewWindow) -> Result<(f64, f64), String> {
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let inner = window.inner_size().map_err(|error| error.to_string())?;
+    Ok((inner.width as f64 / scale, inner.height as f64 / scale))
+}
+
+/// Resize the main window; omit width/height to only report the current size.
+/// Clamps to the monitor work area and shifts left if expanding would overflow.
+#[tauri::command]
+fn resize_main_window_command(
+    app: AppHandle,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<WindowSizeReport, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window missing".to_string())?;
+    let (current_w, current_h) = main_window_logical_size(&window)?;
+    if width.is_none() && height.is_none() {
+        return Ok(WindowSizeReport {
+            width: current_w,
+            height: current_h,
+        });
+    }
+
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let (max_w, max_h, work_x, work_y, work_w, work_h, scale) = if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let work = monitor.work_area();
+        let work_x = work.position.x as f64 / scale;
+        let work_y = work.position.y as f64 / scale;
+        let work_w = work.size.width as f64 / scale;
+        let work_h = work.size.height as f64 / scale;
+        (
+            (work_w - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_WIDTH),
+            (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT),
+            work_x,
+            work_y,
+            work_w,
+            work_h,
+            scale,
+        )
+    } else {
+        (
+            1600.0,
+            1200.0,
+            0.0,
+            0.0,
+            1600.0,
+            1200.0,
+            window.scale_factor().unwrap_or(1.0),
+        )
+    };
+
+    let new_w = width
+        .unwrap_or(current_w)
+        .clamp(MAIN_WINDOW_MIN_WIDTH, max_w.min(900.0));
+    let new_h = height
+        .unwrap_or(current_h)
+        .clamp(MAIN_WINDOW_MIN_HEIGHT, max_h);
+
+    window
+        .set_size(LogicalSize::new(new_w, new_h))
+        .map_err(|error| error.to_string())?;
+
+    if let Ok(pos) = window.outer_position() {
+        let x = pos.x as f64 / scale;
+        let y = pos.y as f64 / scale;
+        let mut nx = x;
+        let mut ny = y;
+        if x + new_w > work_x + work_w - MAIN_WINDOW_MARGIN {
+            nx = (work_x + work_w - MAIN_WINDOW_MARGIN - new_w).max(work_x + MAIN_WINDOW_MARGIN);
+        }
+        if y + new_h > work_y + work_h - MAIN_WINDOW_MARGIN {
+            ny = (work_y + work_h - MAIN_WINDOW_MARGIN - new_h).max(work_y + MAIN_WINDOW_MARGIN);
+        }
+        if (nx - x).abs() > 0.5 || (ny - y).abs() > 0.5 {
+            let _ = window.set_position(LogicalPosition::new(nx, ny));
+        }
+    }
+
+    let (final_w, final_h) = main_window_logical_size(&window).unwrap_or((new_w, new_h));
+    Ok(WindowSizeReport {
+        width: final_w,
+        height: final_h,
+    })
 }
 
 fn publish_doctor_report(app: &tauri::AppHandle, report: &DoctorReport) {
@@ -519,12 +621,13 @@ fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
 }
 
 #[tauri::command]
-fn mcp_status_command(port: Option<u16>) -> Result<McpModuleStatus, String> {
+fn mcp_status_command(port: Option<u16>, probe_chrome: Option<bool>) -> Result<McpModuleStatus, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
     let binary = resolve_agent_doctor_binary().map_err(|error| error.to_string())?;
-    let browser = browser_mcp_status(port);
+    let probe_live = probe_chrome.unwrap_or(false);
+    let browser = browser_mcp_status_with_probe(port, probe_live);
     let user_data = browser
         .user_data_dir
         .as_ref()
@@ -625,17 +728,19 @@ fn mcp_configure_command(
                 .join(".hermes/profiles")
                 .join(&entry.hermes_profile)
         }),
+        openclaw_workspace: active_entry.map(|entry| entry.openclaw_workspace.clone()),
     };
     configure_for(&discovery, &options).map_err(|error| {
         emit("write", &error.to_string(), true, false);
         error.to_string()
     })?;
 
-    let config_path = agent_doctor_mcp::mcp_servers_path(
+    let config_path = agent_doctor_mcp::mcp_servers_path_with_openclaw(
         &runtime,
         options.project_path.as_deref(),
         options.codex_home.as_deref(),
         options.hermes_home.as_deref(),
+        options.openclaw_workspace.as_deref(),
     )
     .map_err(|error| error.to_string())?;
 
@@ -802,6 +907,7 @@ fn wire_browser_mcp_for_desktop() -> Result<BrowserMcpWireReport, String> {
             .join(".hermes/profiles")
             .join(&entry.hermes_profile)
     });
+    options.openclaw_workspace = active_entry.map(|entry| entry.openclaw_workspace.clone());
     Ok(wire_browser_mcp(&discovery, &options))
 }
 
@@ -942,24 +1048,35 @@ fn apply_profile_model_command(
 }
 
 #[tauri::command]
-fn run_repair_preview_command(runtime: String) -> Result<RepairPreviewResponse, String> {
-    let report = probe_runtime(&runtime).map_err(|error| error.to_string())?;
-    Ok(build_repair_preview_response(report, None))
+async fn run_repair_preview_command(runtime: String) -> Result<RepairPreviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = probe_runtime(&runtime).map_err(|error| error.to_string())?;
+        Ok(build_repair_preview_response(report, None))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn run_repair_execute_command(
-    app: tauri::AppHandle,
+async fn run_repair_execute_command(
+    app: AppHandle,
     runtime: String,
 ) -> Result<RepairPreviewResponse, String> {
-    let result = execute_repair(
-        &runtime,
-        &RepairExecuteOptions {
-            apply_confirmed_writes: true,
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    let execute = RepairExecuteSummary::from(&result);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        execute_repair(
+            &runtime,
+            &RepairExecuteOptions {
+                apply_confirmed_writes: true,
+            },
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let mut execute = RepairExecuteSummary::from(&result);
+    // Do not auto-launch Chrome here — CDP smoke can block the UI for ~10s.
+    // The diagnose panel has an explicit "Browser CDP smoke" button.
+    execute.browser_smoke = None;
     let doctor = run_doctor();
     remember_tray_health(&app, &doctor);
     update_tray_tooltip(&app);
@@ -967,6 +1084,40 @@ fn run_repair_execute_command(
         result.after_probe,
         Some(execute),
     ))
+}
+
+/// CDP navigate smoke (Chrome launch). Keep this off the Repair/Diagnose hot path.
+fn run_browser_smoke_summary() -> BrowserSmokeSummary {
+    match smoke_browser_navigate(&SmokeOptions {
+        headless: true,
+        ..SmokeOptions::default()
+    }) {
+        Ok(report) => BrowserSmokeSummary {
+            ok: report.ok,
+            detail: if report.ok {
+                format!(
+                    "CDP navigate ok → {} ({}) — not an MCP tool-path check",
+                    report
+                        .title
+                        .unwrap_or_else(|| report.url.clone()),
+                    report.final_url.unwrap_or(report.url)
+                )
+            } else {
+                format!("CDP navigate failed: {}", report.detail)
+            },
+        },
+        Err(err) => BrowserSmokeSummary {
+            ok: false,
+            detail: format!("CDP navigate failed: {err}"),
+        },
+    }
+}
+
+#[tauri::command]
+async fn run_browser_smoke_command() -> Result<BrowserSmokeSummary, String> {
+    tauri::async_runtime::spawn_blocking(run_browser_smoke_summary)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1329,6 +1480,12 @@ struct SkippedRepairItem {
 }
 
 #[derive(Debug, Serialize)]
+struct BrowserSmokeSummary {
+    ok: bool,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
 struct RepairExecuteSummary {
     backup_id: String,
     backup_root: String,
@@ -1337,6 +1494,8 @@ struct RepairExecuteSummary {
     verification_summary: String,
     rollback_hint: String,
     guide_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    browser_smoke: Option<BrowserSmokeSummary>,
 }
 
 impl From<&RepairExecuteReport> for RepairExecuteSummary {
@@ -1356,6 +1515,7 @@ impl From<&RepairExecuteReport> for RepairExecuteSummary {
             verification_summary: report.audit.verification_summary.clone(),
             rollback_hint: report.audit.rollback_hint.clone(),
             guide_path: report.guide_path.clone(),
+            browser_smoke: None,
         }
     }
 }
@@ -1556,12 +1716,14 @@ pub fn run() {
             apply_profile_model_command,
             run_repair_preview_command,
             run_repair_execute_command,
+            run_browser_smoke_command,
             run_repair_rollback_command,
             install_runtime_command,
             open_path_command,
             open_session_command,
             open_ask_window_command,
             focus_main_tab_command,
+            resize_main_window_command,
             start_prompt_session_command,
             cancel_prompt_session_command,
             resolve_permission_session_command

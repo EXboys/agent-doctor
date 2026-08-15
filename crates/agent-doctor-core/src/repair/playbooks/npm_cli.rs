@@ -221,6 +221,7 @@ fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
                     crate::adapters::util::home_join(".hermes/profiles")
                         .join(&entry.hermes_profile),
                 );
+                options.openclaw_workspace = Some(entry.openclaw_workspace.clone());
             }
         }
     }

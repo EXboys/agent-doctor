@@ -25,7 +25,25 @@ pub(crate) fn wants_browser_mcp(options: &PromptSessionOptions) -> bool {
     {
         return true;
     }
-    prompt_requests_browser_mcp(&options.prompt)
+    prompt_requests_browser_mcp(last_user_prompt_for_intent(&options.prompt))
+}
+
+/// Ask UI may prepend conversation history. Only the current user turn should
+/// decide whether this turn needs browser MCP (otherwise a later "你好" still
+/// injects BROWSER MCP REQUIRED and can hang on MCP startup).
+pub(crate) fn last_user_prompt_for_intent(prompt: &str) -> &str {
+    let prompt = prompt.trim();
+    let rest = if let Some(idx) = prompt.rfind("\nUser: ") {
+        prompt[idx + "\nUser: ".len()..].trim()
+    } else if let Some(stripped) = prompt.strip_prefix("User: ") {
+        stripped.trim()
+    } else {
+        prompt
+    };
+    rest.strip_suffix("\n\nAssistant:")
+        .or_else(|| rest.strip_suffix("\nAssistant:"))
+        .unwrap_or(rest)
+        .trim()
 }
 
 pub(crate) fn prompt_requests_browser_mcp(prompt: &str) -> bool {
@@ -123,11 +141,13 @@ pub(crate) fn ensure_browser_mcp_for_ask(
         Err(err) => return Some(format!("browser MCP skipped: {err}")),
     };
 
-    let (project_path, codex_home, hermes_home) = resolve_workspace_paths(project_cwd, overlay);
+    let (project_path, codex_home, hermes_home, openclaw_workspace) =
+        resolve_workspace_paths(project_cwd, overlay);
     let mut options = WireBrowserMcpOptions::with_binary(binary);
     options.project_path = project_path;
     options.codex_home = codex_home;
     options.hermes_home = hermes_home;
+    options.openclaw_workspace = openclaw_workspace;
     options.runtimes = vec![runtime.to_string()];
 
     let report = wire_browser_mcp(&discovery, &options);
@@ -156,7 +176,12 @@ pub(crate) fn ensure_browser_mcp_for_ask(
 fn resolve_workspace_paths(
     project_cwd: &Path,
     overlay: &HashMap<String, String>,
-) -> (Option<PathBuf>, Option<PathBuf>, Option<PathBuf>) {
+) -> (
+    Option<PathBuf>,
+    Option<PathBuf>,
+    Option<PathBuf>,
+    Option<PathBuf>,
+) {
     let doc = load_workspaces().unwrap_or_default();
     let active = doc
         .active
@@ -187,7 +212,14 @@ fn resolve_workspace_paths(
             })
         });
 
-    (project_path, codex_home, hermes_home)
+    let openclaw_workspace = overlay
+        .get("OPENCLAW_WORKSPACE")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| active.map(|entry| entry.openclaw_workspace.clone()));
+
+    (project_path, codex_home, hermes_home, openclaw_workspace)
 }
 
 fn dirs_home() -> PathBuf {
@@ -233,5 +265,8 @@ mod tests {
         assert!(wants_browser_mcp(&opts));
         opts.prompt = "open https://www.baidu.com".into();
         assert!(wants_browser_mcp(&opts));
+        opts.prompt = "Conversation so far:\n\nUser: 打开浏览器访问百度\n\nAssistant: opened\n\nUser: 你好\n\nAssistant:".into();
+        assert!(!wants_browser_mcp(&opts));
+        assert_eq!(last_user_prompt_for_intent(&opts.prompt), "你好");
     }
 }

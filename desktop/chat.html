@@ -17,7 +17,15 @@
               <button id="chat-open-resources" type="button" class="btn-link" data-i18n="chat.openResources">管理</button>
             </div>
           </div>
-          <p id="chat-cwd" class="chat-cwd" title="">—</p>
+          <div class="chat-workspace-block">
+            <label class="chat-workspace-label" for="chat-workspace-select" data-i18n="ask.workspaceSwitch">工作区</label>
+            <div class="chat-workspace-row">
+              <select id="chat-workspace-select" class="chat-workspace-select" aria-label="Workspace"></select>
+              <button id="chat-workspace-activate" type="button" class="btn-secondary btn-compact" data-i18n="ask.workspaceActivate">激活</button>
+            </div>
+            <p id="chat-cwd" class="chat-cwd" title="">—</p>
+            <p id="chat-workspace-hint" class="chat-workspace-hint" data-i18n="ask.workspaceHint"></p>
+          </div>
           <section class="chat-resources-section">
             <h3 data-i18n="chat.skillsTitle">Skills</h3>
             <div id="chat-skills-list" class="chat-chip-list" role="list"></div>
