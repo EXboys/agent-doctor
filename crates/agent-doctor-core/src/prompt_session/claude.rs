@@ -66,7 +66,8 @@ fn run_claude(
         .filter(|s| !s.is_empty());
 
     let overlay = collect_overlay_env();
-    if wants_browser_mcp(options) {
+    let browser_mcp = wants_browser_mcp(options);
+    if browser_mcp {
         if let Some(note) = ensure_browser_mcp_for_ask("claude-code", &cwd, &overlay) {
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.clone(),
@@ -76,8 +77,18 @@ fn run_claude(
         }
     }
 
+    let effective_prompt = if browser_mcp {
+        format!(
+            "{}\n\n{}",
+            super::mcp_ensure::browser_mcp_tool_instructions(),
+            prompt
+        )
+    } else {
+        prompt.to_string()
+    };
+
     let mut cmd = build_claude_command(
-        prompt,
+        &effective_prompt,
         &cwd,
         options.dangerously_skip_permissions,
         interactive,
@@ -104,7 +115,7 @@ fn run_claude(
                     "type": "user",
                     "message": {
                         "role": "user",
-                        "content": [{ "type": "text", "text": prompt }]
+                        "content": [{ "type": "text", "text": effective_prompt }]
                     }
                 });
                 if let Err(err) = control.write_line(&user_msg.to_string()) {
@@ -153,7 +164,11 @@ fn run_claude(
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
         Ok((status, exit_code, stdout, stderr)) => {
-            let recovered = if display_text.lock().map(|g| g.trim().is_empty()).unwrap_or(true) {
+            let recovered = if display_text
+                .lock()
+                .map(|g| g.trim().is_empty())
+                .unwrap_or(true)
+            {
                 extract_claude_result_text(&stdout)
             } else {
                 None
@@ -428,7 +443,6 @@ fn permission_detail(
     }
 }
 
-
 fn parse_claude_stream_line(
     session_id: &str,
     line: &str,
@@ -472,7 +486,10 @@ fn parse_claude_stream_line(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let request = value.get("request").cloned().unwrap_or(serde_json::Value::Null);
+            let request = value
+                .get("request")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             let subtype = request
                 .get("subtype")
                 .and_then(|v| v.as_str())
@@ -549,10 +566,7 @@ fn parse_claude_stream_line(
                         }
                     }
                     "tool_use" => {
-                        let name = block
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("tool");
+                        let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
                         out.push(PromptSessionEvent::Status {
                             session_id: session_id.to_string(),
                             phase: "tool".into(),
@@ -690,10 +704,7 @@ fn extract_claude_result_text(stdout: &str) -> Option<String> {
         if value.get("type").and_then(|v| v.as_str()) != Some("assistant") {
             continue;
         }
-        let Some(content) = value
-            .pointer("/message/content")
-            .and_then(|v| v.as_array())
-        else {
+        let Some(content) = value.pointer("/message/content").and_then(|v| v.as_array()) else {
             continue;
         };
         for block in content {
@@ -716,8 +727,6 @@ fn extract_claude_result_text(stdout: &str) -> Option<String> {
         Some(parts.join("\n\n"))
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -784,9 +793,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn streams_stdout_and_succeeds() {
-        let _guard = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let bin = write_fake_bin(
             dir.path(),
@@ -824,9 +831,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn interactive_permission_allow_via_control() {
-        let _guard = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let bin = write_fake_bin(
             dir.path(),
@@ -858,7 +863,10 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
         thread::spawn(move || {
             for _ in 0..100 {
                 thread::sleep(Duration::from_millis(30));
-                if control_for_reply.respond_permission("req-allow-1", true).is_ok() {
+                if control_for_reply
+                    .respond_permission("req-allow-1", true)
+                    .is_ok()
+                {
                     return;
                 }
             }

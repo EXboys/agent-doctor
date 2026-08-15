@@ -122,10 +122,7 @@ pub fn read_env_map(path: &Path) -> Result<HashMap<String, String>> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        env.insert(
-            key.trim().to_string(),
-            unquote_env_value(value.trim()),
-        );
+        env.insert(key.trim().to_string(), unquote_env_value(value.trim()));
     }
     Ok(env)
 }

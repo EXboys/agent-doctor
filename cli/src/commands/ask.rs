@@ -63,9 +63,7 @@ pub fn run(
                 eprintln!("… {message}");
             }
             PromptSessionEvent::PermissionRequest {
-                tool_name,
-                detail,
-                ..
+                tool_name, detail, ..
             } => {
                 eprintln!("[permission] {tool_name}: {detail}");
                 eprintln!("(inline allow/deny is available in the desktop chat window)");

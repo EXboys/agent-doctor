@@ -67,16 +67,25 @@ fn run_hermes(
         .filter(|s| !s.is_empty());
     let yolo = options.dangerously_skip_permissions || options.full_auto;
 
+    let overlay = collect_overlay_env();
+    let mut prompt_text = prompt.to_string();
     if super::mcp_ensure::wants_browser_mcp(options) {
-        on_event(PromptSessionEvent::Status {
-            session_id: session_id.clone(),
-            phase: "mcp".into(),
-            message: "browser MCP is not wired for Hermes Ask yet — use Claude Code or Codex Ask"
-                .into(),
-        });
+        if let Some(note) = super::mcp_ensure::ensure_browser_mcp_for_ask("hermes", &cwd, &overlay)
+        {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+        prompt_text = format!(
+            "{}\n\n{}",
+            super::mcp_ensure::browser_mcp_tool_instructions(),
+            prompt
+        );
     }
 
-    let mut cmd = build_hermes_command(prompt, &cwd, resume_session_id, yolo)?;
+    let mut cmd = build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo)?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -520,14 +529,11 @@ Session: 20260814223955a98b96
 
     #[test]
     fn prepare_hermes_home_writes_model_pointer_and_env() {
-        use std::collections::HashMap;
         use super::super::env::prepare_hermes_home;
+        use std::collections::HashMap;
         let dir = tempdir().unwrap();
         let mut overlay = HashMap::new();
-        overlay.insert(
-            "HERMES_HOME".into(),
-            dir.path().display().to_string(),
-        );
+        overlay.insert("HERMES_HOME".into(), dir.path().display().to_string());
         overlay.insert(
             "AGENT_DOCTOR_GATEWAY_URL".into(),
             "https://example.test/v1".into(),
@@ -580,6 +586,8 @@ Session: 20260814223955a98b96
             e,
             PromptSessionEvent::Delta { text, .. } if text.contains("hermes-ok")
         )));
-        assert!(!evs.iter().any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
+        assert!(!evs
+            .iter()
+            .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
     }
 }

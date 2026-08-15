@@ -2009,6 +2009,46 @@ body::before {
   gap: 6px;
 }
 
+.repair-funnel {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 28%, transparent);
+}
+
+.repair-funnel-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.repair-funnel-steps {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.repair-funnel-step {
+  opacity: 0.55;
+}
+
+.repair-funnel-step.done,
+.repair-funnel-step.active {
+  opacity: 1;
+}
+
+.repair-funnel-step.active {
+  font-weight: 600;
+}
+
+.repair-funnel-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
 .repair-panel {
   margin-top: 8px;
   padding: 9px;

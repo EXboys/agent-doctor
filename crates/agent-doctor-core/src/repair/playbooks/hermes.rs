@@ -89,6 +89,9 @@ pub fn suggest_hermes_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair
         }
     }
 
+    items.extend(super::npm_cli::suggest_browser_mcp_repairs(
+        "hermes", "Hermes", probe,
+    ));
     items
 }
 
@@ -176,6 +179,10 @@ pub fn apply_hermes_playbook_filtered(
             }),
         }
     }
+
+    let browser = super::npm_cli::apply_browser_mcp_repair("hermes", probe, only_ids)?;
+    result.executed.extend(browser.executed);
+    result.skipped.extend(browser.skipped);
 
     Ok(result)
 }

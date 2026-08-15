@@ -9,23 +9,22 @@ use agent_doctor_core::{
     load_workspaces, mount_synced_skills, needs_binary_install, open_interactive_session,
     probe_runtime, remove_host, remove_project, resolve_agent_doctor_binary,
     restore_runtime_backup, run_doctor, run_prompt_session_with_cancel, run_remote_doctor,
-    runtime_supports_playbook, set_runtime_model, suggest_runtime_repairs,
-    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills,
-    upsert_personal_provider, use_profile, use_workspace_with_options,
-    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
-    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
-    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
-    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
-    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
-    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport, RemoteDoctorOptions,
-    RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport,
-    RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
-    SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
-    UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
-    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
-    WorkspacesDocument,
+    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode,
+    switch_to_team_mode, unmount_synced_skills, upsert_personal_provider, use_profile,
+    use_workspace_with_options, verify_personal_provider_with_protocol, workspace_doctor,
+    workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
+    HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions, InstallProgressEvent,
+    InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport, OnboardingOptions,
+    OnboardingReport, OpenSessionOptions, OpenSessionReport, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
+    PersonalProvidersDocument, ProbeStatus, ProfilesDocument, PromptSessionCancel,
+    PromptSessionControl, PromptSessionEvent, PromptSessionOptions, PromptSessionReport,
+    RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument,
+    RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
+    RuntimeProbeReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
+    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions,
+    UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
 use agent_doctor_mcp::{
     browser_mcp_status, configure_for, discover_chrome, generate_config_snippet,
@@ -37,7 +36,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_opener::OpenerExt;
 
@@ -617,6 +617,14 @@ fn mcp_configure_command(
         binary: binary.clone(),
         project_path,
         codex_home,
+        hermes_home: active_entry.map(|entry| {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default()
+                .join(".hermes/profiles")
+                .join(&entry.hermes_profile)
+        }),
     };
     configure_for(&discovery, &options).map_err(|error| {
         emit("write", &error.to_string(), true, false);
@@ -627,6 +635,7 @@ fn mcp_configure_command(
         &runtime,
         options.project_path.as_deref(),
         options.codex_home.as_deref(),
+        options.hermes_home.as_deref(),
     )
     .map_err(|error| error.to_string())?;
 
@@ -785,6 +794,14 @@ fn wire_browser_mcp_for_desktop() -> Result<BrowserMcpWireReport, String> {
     let mut options = WireBrowserMcpOptions::with_binary(binary);
     options.project_path = active_entry.map(|entry| entry.path.clone());
     options.codex_home = active_entry.map(|entry| entry.codex_home.clone());
+    options.hermes_home = active_entry.map(|entry| {
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".hermes/profiles")
+            .join(&entry.hermes_profile)
+    });
     Ok(wire_browser_mcp(&discovery, &options))
 }
 
@@ -1161,8 +1178,12 @@ fn position_ask_window_right(window: &tauri::WebviewWindow) {
     let work_w = work.size.width as f64 / scale;
     let work_h = work.size.height as f64 / scale;
 
-    let width = ASK_WINDOW_WIDTH.min(work_w - ASK_WINDOW_MARGIN * 2.0).max(640.0);
-    let height = ASK_WINDOW_HEIGHT.min(work_h - ASK_WINDOW_MARGIN * 2.0).max(480.0);
+    let width = ASK_WINDOW_WIDTH
+        .min(work_w - ASK_WINDOW_MARGIN * 2.0)
+        .max(640.0);
+    let height = ASK_WINDOW_HEIGHT
+        .min(work_h - ASK_WINDOW_MARGIN * 2.0)
+        .max(480.0);
     let x = work_x + work_w - width - ASK_WINDOW_MARGIN;
     let y = work_y + ASK_WINDOW_MARGIN;
 
@@ -1219,10 +1240,7 @@ fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(), Str
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("resources");
-        let _ = window.emit(
-            "main-navigate",
-            serde_json::json!({ "tab": tab }),
-        );
+        let _ = window.emit("main-navigate", serde_json::json!({ "tab": tab }));
     }
     Ok(())
 }
@@ -1233,8 +1251,9 @@ fn build_repair_preview_response(
 ) -> RepairPreviewResponse {
     let plan = build_repair_preview_from_bundle(report.to_diagnostic_bundle());
     let suggested = suggest_runtime_repairs(&report.runtime_id, &report);
-    let can_apply_repair = runtime_supports_playbook(&report.runtime_id)
-        || suggested.iter().any(|item| item.auto_fixable);
+    // Show Apply only when there is at least one auto-fixable suggestion.
+    // Playbook registration alone is not enough (avoids empty "Apply" on healthy runtimes).
+    let can_apply_repair = suggested.iter().any(|item| item.auto_fixable);
     let backup_ids = list_runtime_backup_ids(&report.runtime_id).unwrap_or_default();
     let mut summary = RepairPreviewSummary::default();
     let checks = report

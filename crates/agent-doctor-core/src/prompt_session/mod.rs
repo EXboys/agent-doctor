@@ -149,8 +149,7 @@ impl PromptSessionCancel {
     }
 
     pub fn request(&self) {
-        self.inner
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.inner.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn is_requested(&self) -> bool {
@@ -193,16 +192,14 @@ where
         "codex" => CodexAskBackend.run(options, cancel, control, &mut on_event),
         "hermes" => HermesAskBackend.run(options, cancel, control, &mut on_event),
         "openclaw" => OpenClawAskBackend.run(options, cancel, control, &mut on_event),
-        other => bail!(
-            "ask supports claude-code, codex, hermes, or openclaw (got '{other}')"
-        ),
+        other => bail!("ask supports claude-code, codex, hermes, or openclaw (got '{other}')"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::util::TEST_ENV_LOCK;
+    use super::*;
     use std::thread;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -268,9 +265,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn cancels_long_running_process() {
-        let _guard = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         // Codex path now uses app-server; fake script answers handshake then sleeps.
         let bin = write_fake_bin(

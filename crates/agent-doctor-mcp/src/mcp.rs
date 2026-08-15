@@ -79,7 +79,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "browser_navigate".into(),
-            description: "Navigate to a URL and wait for the page to load".into(),
+            description: "Navigate to a URL and wait for the page to load. After navigate, call browser_snapshot to get @eN refs before clicking or filling.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -92,35 +92,152 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "browser_click".into(),
-            description: "Click an element identified by CSS selector".into(),
+            name: "browser_snapshot".into(),
+            description: "REQUIRED before click/fill: list interactive elements with stable @eN refs (agent-browser style). Re-run after navigation, form submit, or DOM changes — old refs become stale.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "interactive": {
+                        "type": "boolean",
+                        "description": "Only interactive elements (default true)",
+                        "default": true
+                    },
+                    "cursor": {
+                        "type": "boolean",
+                        "description": "Also include cursor:pointer nodes (default false)",
+                        "default": false
+                    },
                     "selector": {
                         "type": "string",
-                        "description": "CSS selector for the element to click"
+                        "description": "Optional CSS scope; only snapshot inside this element"
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "browser_click".into(),
+            description: "Click an element by snapshot ref (@e1) or CSS selector. Prefer @eN from browser_snapshot.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Snapshot ref like @e1 (preferred)"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector (fallback when no ref)"
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "browser_fill".into(),
+            description: "Clear and fill an input by snapshot ref (@eN) or CSS selector. Prefer @eN from browser_snapshot.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Snapshot ref like @e2"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector fallback"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to fill"
                     }
                 },
-                "required": ["selector"]
+                "required": ["text"]
             }),
         },
         ToolDefinition {
             name: "browser_type".into(),
-            description: "Type text into an element identified by CSS selector".into(),
+            description: "Type into an element by snapshot ref (@eN) or CSS selector (clears first, same as fill).".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Snapshot ref like @e2"
+                    },
                     "selector": {
                         "type": "string",
-                        "description": "CSS selector for the input element"
+                        "description": "CSS selector fallback"
                     },
                     "text": {
                         "type": "string",
                         "description": "Text to type"
                     }
                 },
-                "required": ["selector", "text"]
+                "required": ["text"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_find".into(),
+            description: "Semantic locator when refs are awkward: strategy=role|label|text|placeholder|testid. Returns @eN (and can click/fill immediately via action).".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "strategy": {
+                        "type": "string",
+                        "description": "role | label | text | placeholder | testid"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Text / role name / test id to match"
+                    },
+                    "exact": {
+                        "type": "boolean",
+                        "description": "Require exact match (default false)",
+                        "default": false
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Optional: click | fill | type"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text for fill/type action"
+                    }
+                },
+                "required": ["strategy", "query"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_state_save".into(),
+            description: "Save cookies + localStorage/sessionStorage to a file or named session (for login reuse).".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Explicit JSON path"
+                    },
+                    "session": {
+                        "type": "string",
+                        "description": "Named session under agent-doctor browser-sessions/"
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "browser_state_load".into(),
+            description: "Restore cookies + storage from path or named session. Reload/navigate afterward if the app is already open.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Explicit JSON path"
+                    },
+                    "session": {
+                        "type": "string",
+                        "description": "Named session under agent-doctor browser-sessions/"
+                    }
+                }
             }),
         },
         ToolDefinition {
@@ -195,21 +312,28 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_wait".into(),
-            description: "Wait for an element to appear on the page".into(),
+            description: "Wait for selector/@eN, URL pattern, load state (load|domcontentloaded|networkidle), or timeout_ms.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "selector": {
                         "type": "string",
-                        "description": "CSS selector to wait for"
+                        "description": "CSS selector or @eN ref to wait for"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "URL substring or glob (e.g. **/dashboard)"
+                    },
+                    "load": {
+                        "type": "string",
+                        "description": "load | domcontentloaded | networkidle"
                     },
                     "timeout_ms": {
                         "type": "number",
                         "description": "Maximum wait time in milliseconds",
                         "default": 10000
                     }
-                },
-                "required": ["selector"]
+                }
             }),
         },
         ToolDefinition {
@@ -262,6 +386,29 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
     ]
+}
+
+fn tool_target(args: &Value) -> Result<String> {
+    if let Some(r) = args.get("ref").and_then(Value::as_str) {
+        let t = r.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    if let Some(s) = args.get("selector").and_then(Value::as_str) {
+        let t = s.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    // Back-compat: some clients send the target as `element`.
+    if let Some(s) = args.get("element").and_then(Value::as_str) {
+        let t = s.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    anyhow::bail!("Missing 'ref' or 'selector' argument")
 }
 
 fn debug_log(msg: impl AsRef<str>) {
@@ -442,23 +589,61 @@ fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Val
                 .context("Missing 'url' argument")?;
             ctx.navigate(url)
         }
-        "browser_click" => {
-            let selector = args
+        "browser_snapshot" => {
+            let interactive = args
+                .get("interactive")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let cursor = args.get("cursor").and_then(Value::as_bool).unwrap_or(false);
+            let scope = args
                 .get("selector")
                 .and_then(Value::as_str)
-                .context("Missing 'selector' argument")?;
-            ctx.click(selector)
+                .filter(|s| !s.is_empty());
+            ctx.snapshot(interactive, cursor, scope)
         }
-        "browser_type" => {
-            let selector = args
-                .get("selector")
-                .and_then(Value::as_str)
-                .context("Missing 'selector' argument")?;
+        "browser_click" => {
+            let target = tool_target(args)?;
+            ctx.click(&target)
+        }
+        "browser_fill" => {
+            let target = tool_target(args)?;
             let text = args
                 .get("text")
                 .and_then(Value::as_str)
                 .context("Missing 'text' argument")?;
-            ctx.type_text(selector, text)
+            ctx.fill(&target, text)
+        }
+        "browser_type" => {
+            let target = tool_target(args)?;
+            let text = args
+                .get("text")
+                .and_then(Value::as_str)
+                .context("Missing 'text' argument")?;
+            ctx.type_text(&target, text)
+        }
+        "browser_find" => {
+            let strategy = args
+                .get("strategy")
+                .and_then(Value::as_str)
+                .context("Missing 'strategy'")?;
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .context("Missing 'query'")?;
+            let exact = args.get("exact").and_then(Value::as_bool).unwrap_or(false);
+            let action = args.get("action").and_then(Value::as_str);
+            let text = args.get("text").and_then(Value::as_str);
+            ctx.find(strategy, query, exact, action, text)
+        }
+        "browser_state_save" => {
+            let path = args.get("path").and_then(Value::as_str);
+            let session = args.get("session").and_then(Value::as_str);
+            ctx.state_save(path, session)
+        }
+        "browser_state_load" => {
+            let path = args.get("path").and_then(Value::as_str);
+            let session = args.get("session").and_then(Value::as_str);
+            ctx.state_load(path, session)
         }
         "browser_screenshot" => {
             let data = ctx.screenshot()?;
@@ -492,13 +677,29 @@ fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Val
         "browser_wait" => {
             let selector = args
                 .get("selector")
+                .or_else(|| args.get("ref"))
                 .and_then(Value::as_str)
-                .context("Missing 'selector' argument")?;
+                .filter(|s| !s.is_empty());
+            let url = args
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            let load = args
+                .get("load")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             let timeout = args
                 .get("timeout_ms")
                 .and_then(Value::as_u64)
                 .unwrap_or(10000);
-            ctx.wait_for_selector(selector, timeout)
+            if selector.is_none()
+                && url.is_none()
+                && load.is_none()
+                && args.get("timeout_ms").is_none()
+            {
+                anyhow::bail!("browser_wait requires selector, url, load, or timeout_ms");
+            }
+            ctx.wait(selector, url, load, timeout)
         }
         "browser_get_links" => ctx.get_links(),
         "browser_new_tab" => {

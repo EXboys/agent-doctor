@@ -1,8 +1,6 @@
 use anyhow::Result;
 
-use super::{
-    PromptSessionCancel, PromptSessionControl, PromptSessionOptions, PromptSessionReport,
-};
+use super::{PromptSessionCancel, PromptSessionControl, PromptSessionOptions, PromptSessionReport};
 
 /// Ask-session backend for a single runtime (Claude Code, Codex, …).
 ///

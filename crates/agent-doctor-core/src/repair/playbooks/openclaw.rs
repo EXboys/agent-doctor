@@ -131,6 +131,11 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
         }
     }
 
+    items.extend(super::npm_cli::suggest_browser_mcp_repairs(
+        "openclaw",
+        "OpenClaw",
+        probe,
+    ));
     items
 }
 
@@ -286,6 +291,10 @@ pub fn apply_openclaw_playbook_filtered(
             }),
         }
     }
+
+    let browser = super::npm_cli::apply_browser_mcp_repair("openclaw", probe, only_ids)?;
+    result.executed.extend(browser.executed);
+    result.skipped.extend(browser.skipped);
 
     Ok(result)
 }

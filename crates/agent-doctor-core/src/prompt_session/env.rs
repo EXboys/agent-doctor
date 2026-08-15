@@ -6,9 +6,10 @@ use anyhow::{Context, Result};
 
 use crate::profile::{agent_profile_path, read_env_map, COMPANY_API_KEY_ENV, GATEWAY_URL_ENV};
 use crate::setup::{
-    anthropic_gateway_url_from_evotown_base, apply_codex_slot, clear_codex_chatgpt_auth_for_gateway,
-    clear_codex_placeholder_auth, evotown_agent_env_path, normalize_protocol, EVOTOWN_API_KEY_ENV,
-    EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    anthropic_gateway_url_from_evotown_base, apply_codex_slot,
+    clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth, evotown_agent_env_path,
+    normalize_protocol, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC,
+    PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::active_env_path;
 
@@ -157,16 +158,19 @@ pub(crate) fn resolve_hermes_overlay(
     Some((url, key, model))
 }
 
-fn ensure_hermes_model_config(home: &PathBuf, gateway_url: &str, model: Option<&str>) -> Result<()> {
+fn ensure_hermes_model_config(
+    home: &PathBuf,
+    gateway_url: &str,
+    model: Option<&str>,
+) -> Result<()> {
     use serde_yaml::{Mapping, Value as YamlValue};
     let path = home.join("config.yaml");
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let mut root: YamlValue = if path.exists() {
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let raw =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
     } else {
         YamlValue::Mapping(Mapping::new())
@@ -207,8 +211,7 @@ fn ensure_hermes_model_config(home: &PathBuf, gateway_url: &str, model: Option<&
 
 fn upsert_dotenv_key(path: &PathBuf, key: &str, value: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let mut lines: Vec<String> = if path.exists() {
         std::fs::read_to_string(path)?
@@ -354,10 +357,7 @@ pub(crate) fn codex_provider_config_args(
         }),
     );
     set(&format!("{prefix}.base_url"), toml_string(url));
-    set(
-        &format!("{prefix}.env_key"),
-        toml_string("OPENAI_API_KEY"),
-    );
+    set(&format!("{prefix}.env_key"), toml_string("OPENAI_API_KEY"));
     set(&format!("{prefix}.wire_api"), toml_string("responses"));
     set(
         &format!("{prefix}.requires_openai_auth"),

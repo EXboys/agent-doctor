@@ -38,7 +38,7 @@ pub fn run(
         print_browser_mcp_report(&mcp);
     } else {
         println!(
-            "\nOptional: re-run with --with-browser-mcp to write Browser MCP into Codex/Claude."
+            "\nOptional: re-run with --with-browser-mcp to write Browser MCP into Codex/Claude/Hermes/OpenClaw."
         );
     }
     Ok(())

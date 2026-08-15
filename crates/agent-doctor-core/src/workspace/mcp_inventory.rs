@@ -78,6 +78,29 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         "claude-code",
     ));
 
+    // Hermes: active workspace profile home, else ~/.hermes/config.yaml
+    let hermes_config = active
+        .as_ref()
+        .map(|(_, entry)| {
+            home_join(".hermes/profiles")
+                .join(&entry.hermes_profile)
+                .join("config.yaml")
+        })
+        .unwrap_or_else(|| home_join(".hermes/config.yaml"));
+    servers.extend(read_servers_from_yaml(
+        &hermes_config,
+        "hermes-home",
+        "hermes",
+    ));
+
+    // OpenClaw: ~/.openclaw/openclaw.json (`mcp.servers` + legacy `mcpServers`)
+    let openclaw_config = home_join(".openclaw/openclaw.json");
+    servers.extend(read_servers_from_openclaw(
+        &openclaw_config,
+        "openclaw",
+        "openclaw",
+    ));
+
     // Legacy mistaken path — still surface if present so users can clean it up.
     let settings = home_join(".claude/settings.json");
     servers.extend(read_servers_from_json(
@@ -111,12 +134,15 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
     }
 }
 
-/// Attach Browser MCP probe checks for Claude Code / Codex.
+/// Attach Browser MCP probe checks for Claude / Codex / Hermes / OpenClaw.
 pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::probe::ProbeCheck>) {
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
 
-    if runtime_id != "claude-code" && runtime_id != "codex" {
+    if !matches!(
+        runtime_id,
+        "claude-code" | "codex" | "hermes" | "openclaw"
+    ) {
         return;
     }
 
@@ -215,6 +241,117 @@ fn read_servers_from_json(path: &Path, scope: &str, runtime_hint: &str) -> Vec<M
             )
         })
         .collect()
+}
+
+fn read_servers_from_yaml(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(map) = value
+        .get("mcp_servers")
+        .and_then(serde_yaml::Value::as_mapping)
+    else {
+        return Vec::new();
+    };
+
+    map.iter()
+        .filter_map(|(name, entry)| {
+            let name = name.as_str()?;
+            let command = entry.get("command").and_then(serde_yaml::Value::as_str);
+            let args = entry
+                .get("args")
+                .and_then(serde_yaml::Value::as_sequence)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(serde_yaml::Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some(item_from_command_args(
+                name,
+                command,
+                args,
+                path,
+                scope,
+                runtime_hint,
+            ))
+        })
+        .collect()
+}
+
+fn read_servers_from_openclaw(
+    path: &Path,
+    scope: &str,
+    runtime_hint: &str,
+) -> Vec<McpInventoryItem> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<JsonValue>(&raw) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    if let Some(map) = value
+        .pointer("/mcp/servers")
+        .and_then(JsonValue::as_object)
+    {
+        out.extend(map.iter().map(|(name, entry)| {
+            item_from_command_args(
+                name,
+                entry.get("command").and_then(JsonValue::as_str),
+                entry
+                    .get("args")
+                    .and_then(JsonValue::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                path,
+                scope,
+                runtime_hint,
+            )
+        }));
+    }
+    if let Some(map) = value.get("mcpServers").and_then(JsonValue::as_object) {
+        for (name, entry) in map {
+            if out.iter().any(|item| item.name == *name) {
+                continue;
+            }
+            out.push(item_from_command_args(
+                name,
+                entry.get("command").and_then(JsonValue::as_str),
+                entry
+                    .get("args")
+                    .and_then(JsonValue::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                path,
+                scope,
+                runtime_hint,
+            ));
+        }
+    }
+    out
 }
 
 fn read_servers_from_toml(path: &Path, scope: &str, runtime_hint: &str) -> Vec<McpInventoryItem> {
@@ -422,8 +559,12 @@ mod tests {
     use tempfile::tempdir;
 
     use super::super::WorkspaceEntry;
+    use std::sync::Mutex;
+
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().unwrap();
         let previous = std::env::var_os("HOME");
         // SAFETY: test-only HOME override, restored after the closure.
@@ -437,6 +578,54 @@ mod tests {
             Ok(value) => value,
             Err(payload) => std::panic::resume_unwind(payload),
         }
+    }
+
+    #[test]
+    fn inventories_hermes_and_openclaw_browser() {
+        with_temp_home(|home| {
+            let hermes = home.join(".hermes/profiles/demo");
+            fs::create_dir_all(&hermes).unwrap();
+            fs::write(
+                hermes.join("config.yaml"),
+                "mcp_servers:\n  browser:\n    command: agent-doctor\n    args: [mcp, browser]\n",
+            )
+            .unwrap();
+
+            let openclaw = home.join(".openclaw");
+            fs::create_dir_all(&openclaw).unwrap();
+            fs::write(
+                openclaw.join("openclaw.json"),
+                r#"{"mcp":{"servers":{"browser":{"command":"agent-doctor","args":["mcp","browser"]}}}}"#,
+            )
+            .unwrap();
+
+            let project = home.join("proj");
+            fs::create_dir_all(&project).unwrap();
+            let mut workspaces = BTreeMap::new();
+            workspaces.insert(
+                "demo".into(),
+                WorkspaceEntry {
+                    path: project,
+                    hermes_profile: "demo".into(),
+                    codex_home: home.join("codex"),
+                    openclaw_agent_id: "demo".into(),
+                    openclaw_workspace: home.join("oc"),
+                },
+            );
+            let doc = WorkspacesDocument {
+                active: Some("demo".into()),
+                workspaces,
+            };
+            let report = list_mcp_inventory_with_doc(&doc);
+            assert!(report
+                .servers
+                .iter()
+                .any(|s| s.runtime_hint == "hermes" && s.is_browser));
+            assert!(report
+                .servers
+                .iter()
+                .any(|s| s.runtime_hint == "openclaw" && s.is_browser));
+        });
     }
 
     #[test]
