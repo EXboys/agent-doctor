@@ -106,6 +106,7 @@ interface RepairPreviewResponse {
     verification_summary: string;
     rollback_hint: string;
     guide_path: string | null;
+    browser_smoke?: { ok: boolean; detail: string } | null;
   } | null;
 }
 
@@ -562,6 +563,8 @@ function toggleAgentsWsPicker(): void {
 function updateAgentsWorkspaceChip(doc: WorkspacesDocument): void {
   const active = doc.active ?? selectedWorkspaceName ?? null;
   agentsWsNameEl.textContent = active ?? t("workspaces.noActive");
+  agentsWsChipEl.classList.toggle("is-empty", !doc.active);
+  agentsWsChipEl.classList.toggle("needs-attention", !doc.active);
   renderAgentsWorkspaceQuickList(doc);
 }
 
@@ -610,6 +613,13 @@ async function applyAgentsWorkspaceQuick(name: string): Promise<void> {
   try {
     await invoke("use_workspace_command", { name });
     await loadWorkspaces();
+    // Refresh CTA now that workspace is active.
+    if (activeRuntimeId && lastReport) {
+      const card = runtimesEl.querySelector<HTMLElement>(`[data-runtime="${activeRuntimeId}"]`);
+      if (card) {
+        refreshRuntimeCardActions(card, activeRuntimeId);
+      }
+    }
   } catch {
     await loadWorkspaces();
   }
@@ -961,6 +971,10 @@ async function rewireCurrentMode(hintEl?: HTMLElement | null) {
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
+const widgetEl = document.querySelector<HTMLElement>(".widget")!;
+const widgetPrimaryEl = document.querySelector<HTMLElement>(".widget-primary")!;
+const diagnoseDetailEl = document.querySelector<HTMLElement>("#diagnose-detail")!;
+const diagnoseDetailBodyEl = document.querySelector<HTMLElement>("#diagnose-detail-body")!;
 const refreshBtn = document.querySelector<HTMLButtonElement>("#refresh")!;
 const spinnerEl = refreshBtn.querySelector<HTMLElement>(".spinner")!;
 const installedCountEl = document.querySelector<HTMLElement>("#installed-count")!;
@@ -1082,10 +1096,11 @@ function updateHealthStrip(installed: number, total: number, scanning = false): 
 }
 
 function metaRow(labelKey: Parameters<typeof t>[0], value: string): string {
+  const compact = value.replace(/\s*\n\s*/g, " · ");
   return `
     <div class="meta-row">
       <span class="meta-label">${t(labelKey)}</span>
-      <p class="meta-value">${escapeHtml(value)}</p>
+      <p class="meta-value" title="${escapeHtml(compact)}">${escapeHtml(compact)}</p>
     </div>
   `;
 }
@@ -1145,7 +1160,7 @@ function renderRepairPreview(
         ? `<span class="repair-check-detail">${escapeHtml(check.details[0])}${check.details.length > 1 ? ` +${check.details.length - 1}` : ""}</span>`
         : "";
       return `
-        <li class="repair-check">
+        <li class="repair-check is-${statusClass}">
           <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
           <span class="repair-check-body">
             <strong>${escapeHtml(check.title)}</strong>
@@ -1211,22 +1226,14 @@ function renderRepairPreview(
     `
     : "";
 
-  const applyButton = report.can_apply_repair
-    ? `<button type="button" class="btn-primary repair-apply-btn" data-action="apply-repair">${t("repair.applyFixes")}</button>`
-    : "";
-
   const rollbackButton =
     report.backup_ids.length > 0
-      ? `<button type="button" class="btn-secondary repair-rollback-btn" data-action="rollback-repair">${t("repair.rollback")}</button>`
+      ? `<button type="button" class="btn-ghost repair-rollback-btn" data-action="rollback-repair">${t("repair.rollback")}</button>`
       : "";
 
   const executeResult = report.last_execute
     ? renderRepairExecuteResult(report.last_execute)
     : "";
-
-  const planLine = report.last_execute
-    ? ""
-    : `<p class="repair-plan">${escapeHtml(report.plan_summary)}</p>`;
 
   const healthy = summary.fail === 0 && summary.warn === 0;
   const isAskRuntime =
@@ -1234,39 +1241,68 @@ function renderRepairPreview(
     report.runtime_id === "codex" ||
     report.runtime_id === "hermes" ||
     report.runtime_id === "openclaw";
+  const funnelNeedsRepair = isAskRuntime && report.can_apply_repair && !healthy && !report.last_execute;
+  const funnelCta =
+    healthy || report.last_execute
+      ? `<button type="button" class="btn-primary btn-compact" data-action="ask-verify">${escapeHtml(t("repair.funnelAskVerifyCta"))}</button>`
+      : funnelNeedsRepair
+        ? `<button type="button" class="btn-primary btn-compact" data-action="apply-repair">${escapeHtml(t("repair.oneClick"))}</button>`
+        : "";
   const funnel = isAskRuntime
     ? `<div class="repair-funnel">
-        <p class="repair-funnel-title">${escapeHtml(t("repair.funnelTitle"))}</p>
-        <ol class="repair-funnel-steps">
-          <li class="repair-funnel-step done">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
-          <li class="repair-funnel-step ${report.last_execute || healthy ? "done" : report.can_apply_repair ? "active" : ""}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
-          <li class="repair-funnel-step ${healthy || report.last_execute ? "active" : ""}">${escapeHtml(t("repair.funnelStepAsk"))}</li>
-        </ol>
+        <div class="repair-funnel-bar">
+          <ol class="repair-funnel-steps">
+            <li class="repair-funnel-step done">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
+            <li class="repair-funnel-step ${report.last_execute || healthy ? "done" : report.can_apply_repair ? "active" : ""}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
+            <li class="repair-funnel-step ${healthy || report.last_execute ? "active" : ""}">${escapeHtml(t("repair.funnelStepAsk"))}</li>
+          </ol>
+          ${funnelCta}
+        </div>
         ${
-          healthy || report.last_execute
-            ? `<button type="button" class="btn-primary" data-action="ask-session">${escapeHtml(t("repair.funnelAskCta"))}</button>`
-            : report.can_apply_repair
-              ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.funnelApplyHint"))}</p>`
-              : ""
+          report.runtime_id === "openclaw"
+            ? `<p class="repair-funnel-hint" title="${escapeHtml(t("repair.openclawMcpNote"))}">${escapeHtml(t("repair.openclawMcpNote"))}</p>`
+            : ""
         }
       </div>`
     : "";
+  const applyButton =
+    report.can_apply_repair && !funnelNeedsRepair
+      ? `<button type="button" class="btn-primary repair-apply-btn" data-action="apply-repair">${t("repair.applyFixes")}</button>`
+      : "";
+  const headBits = [
+    `${summary.pass} ${t("repair.pass")}`,
+    summary.warn ? `${summary.warn} ${t("repair.warn")}` : "",
+    summary.fail ? `${summary.fail} ${t("repair.fail")}` : "",
+    summary.not_checked ? `${summary.not_checked} ${t("repair.notChecked")}` : "",
+  ].filter(Boolean);
 
   return `
-    <div class="repair-panel">
+    <div class="repair-panel" data-runtime="${escapeHtml(report.runtime_id)}">
       <div class="repair-panel-head">
         <strong>${escapeHtml(report.display_name)}</strong>
-        <span>${t("runtime.diagnosisReady")}</span>
+        <span>${escapeHtml(headBits.join(" · "))}</span>
+        <button type="button" class="repair-panel-close" data-action="close-diagnose-detail">${escapeHtml(t("repair.closeDetail"))}</button>
       </div>
       ${funnel}
+      ${suggested}
       <div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
         ${summaryChips}
       </div>
       <ul class="repair-checks">${checks}${emptyList}</ul>
-      ${suggested}
-      <div class="repair-panel-actions">${applyButton}${rollbackButton}</div>
+      ${
+        applyButton || rollbackButton
+          ? `<div class="repair-panel-actions">${applyButton}${rollbackButton}</div>`
+          : ""
+      }
       ${executeResult}
-      ${planLine}
+      ${
+        isAskRuntime
+          ? `<div class="repair-smoke-row">
+              <button type="button" class="btn-ghost" data-action="browser-smoke">${escapeHtml(t("repair.runBrowserSmoke"))}</button>
+              <span class="repair-smoke-slot" data-browser-smoke-slot></span>
+            </div>`
+          : ""
+      }
     </div>
   `;
 }
@@ -1317,6 +1353,12 @@ function renderRepairExecuteResult(
 
   const verify = formatVerificationSummary(execute.verification_summary);
 
+  const smoke = execute.browser_smoke
+    ? `<p class="repair-browser-smoke ${execute.browser_smoke.ok ? "ok" : "fail"}"><strong>${escapeHtml(
+        execute.browser_smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail"),
+      )}</strong> ${escapeHtml(execute.browser_smoke.detail)}</p>`
+    : "";
+
   const guideBlock = execute.guide_path
     ? `<p class="repair-guide"><button type="button" class="btn-link repair-guide-btn" data-action="open-repair-guide" data-guide-path="${encodeURIComponent(execute.guide_path)}">${escapeHtml(t("repair.openGuide"))}</button></p>`
     : "";
@@ -1333,6 +1375,9 @@ function renderRepairExecuteResult(
       ${skippedBlock}
       ${guideBlock}
       <p class="repair-verify"><strong>${escapeHtml(t("repair.verifyTitle"))}:</strong> ${escapeHtml(verify)}</p>
+      ${smoke}
+      <p class="repair-funnel-hint">${escapeHtml(t("repair.funnelAskVerifyHint"))}</p>
+      <button type="button" class="btn-primary" data-action="ask-verify">${escapeHtml(t("repair.funnelAskVerifyCta"))}</button>
     </div>
   `;
 }
@@ -1345,16 +1390,151 @@ function formatVerificationSummary(summary: string): string {
   return `${match[1]} → ${match[2]}`;
 }
 
-function mountRepairPreview(hint: HTMLElement, report: RepairPreviewResponse): void {
+type WindowSizeReport = { width: number; height: number };
+
+const MAIN_COMPACT_WIDTH = 420;
+const MAIN_DETAIL_EXTRA = 360;
+const MAIN_DETAIL_MAX_WIDTH = 900;
+
+let compactWidthBeforeDetail: number | null = null;
+let diagnoseDetailOpen = false;
+const dismissedDiagnoseRuntimes = new Set<string>();
+
+function runtimeCardEl(runtime: string): HTMLElement | null {
+  return runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
+}
+
+async function readMainWindowSize(): Promise<WindowSizeReport> {
+  return invoke<WindowSizeReport>("resize_main_window_command", {
+    width: null,
+    height: null,
+  });
+}
+
+async function setMainWindowWidth(width: number): Promise<WindowSizeReport> {
+  return invoke<WindowSizeReport>("resize_main_window_command", {
+    width,
+    height: null,
+  });
+}
+
+function diagnoseRuntimeLabel(runtimeId: string): string {
+  return (
+    lastReport?.runtimes.find((item) => item.id === runtimeId)?.display_name ?? runtimeId
+  );
+}
+
+function showDiagnosePending(runtimeId: string, message: string): void {
+  diagnoseDetailBodyEl.innerHTML = `
+    <div class="repair-panel is-pending" data-runtime="${escapeHtml(runtimeId)}">
+      <div class="repair-panel-head">
+        <strong>${escapeHtml(diagnoseRuntimeLabel(runtimeId))}</strong>
+        <span>${escapeHtml(message)}</span>
+      </div>
+      <div class="repair-pending">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>${escapeHtml(message)}</span>
+      </div>
+    </div>
+  `;
+  diagnoseDetailEl.dataset.runtime = runtimeId;
+  void expandDiagnoseWindowIfNeeded();
+}
+
+async function expandDiagnoseWindowIfNeeded(): Promise<void> {
+  const compactCol = Math.round(widgetPrimaryEl.getBoundingClientRect().width);
+  if (!diagnoseDetailOpen && compactCol > 0) {
+    widgetEl.style.setProperty("--compact-col", `${compactCol}px`);
+  }
+  diagnoseDetailEl.hidden = false;
+  widgetEl.classList.add("is-detail-open");
+  if (diagnoseDetailOpen) {
+    return;
+  }
+  try {
+    const size = await readMainWindowSize();
+    compactWidthBeforeDetail = size.width;
+  } catch {
+    compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
+  }
+  diagnoseDetailOpen = true;
+  const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+  const target = Math.min(
+    MAIN_DETAIL_MAX_WIDTH,
+    Math.max(compact, MAIN_COMPACT_WIDTH) + MAIN_DETAIL_EXTRA,
+  );
+  await setMainWindowWidth(target);
+}
+
+async function openDiagnoseDetail(report: RepairPreviewResponse): Promise<void> {
+  const filter = repairFilterByRuntime.get(report.runtime_id) ?? "all";
+  diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, filter);
+  diagnoseDetailEl.dataset.runtime = report.runtime_id;
+  await expandDiagnoseWindowIfNeeded();
+  const card = runtimeCardEl(report.runtime_id);
+  if (card) {
+    refreshRuntimeCardActions(card, report.runtime_id);
+  }
+}
+
+async function closeDiagnoseDetail(opts?: {
+  keepContent?: boolean;
+  skipDismiss?: boolean;
+}): Promise<void> {
+  const runtime = diagnoseDetailEl.dataset.runtime;
+  if (!opts?.keepContent && !opts?.skipDismiss && runtime) {
+    dismissedDiagnoseRuntimes.add(runtime);
+  }
+  widgetEl.classList.remove("is-detail-open");
+  widgetEl.style.removeProperty("--compact-col");
+  diagnoseDetailEl.hidden = true;
+  if (!opts?.keepContent) {
+    diagnoseDetailBodyEl.replaceChildren();
+    delete diagnoseDetailEl.dataset.runtime;
+  }
+  if (!diagnoseDetailOpen) {
+    return;
+  }
+  diagnoseDetailOpen = false;
+  if (runtime) {
+    const card = runtimeCardEl(runtime);
+    if (card) {
+      refreshRuntimeCardActions(card, runtime);
+    }
+  }
+  const target = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+  compactWidthBeforeDetail = null;
+  await setMainWindowWidth(target);
+}
+
+function preferredRepairFilter(report: RepairPreviewResponse): RepairStatusFilter {
+  if (report.summary.fail > 0) {
+    return "fail";
+  }
+  if (report.summary.warn > 0) {
+    return "warn";
+  }
+  return "all";
+}
+
+function mountRepairPreview(report: RepairPreviewResponse, opts?: { resetFilter?: boolean }): void {
   const runtime = report.runtime_id;
+  dismissedDiagnoseRuntimes.delete(runtime);
   repairPreviewByRuntime.set(runtime, report);
-  const filter = repairFilterByRuntime.get(runtime) ?? "all";
-  hint.innerHTML = renderRepairPreview(report, filter);
-  const card = runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
+  if (opts?.resetFilter || !repairFilterByRuntime.has(runtime)) {
+    repairFilterByRuntime.set(runtime, preferredRepairFilter(report));
+  }
+  const card = runtimeCardEl(runtime);
+  const hint = card?.querySelector<HTMLElement>("[data-repair-hint]");
+  if (hint && !hint.querySelector("[data-install-progress]")) {
+    hint.hidden = true;
+    hint.replaceChildren();
+  }
   if (card) {
     mountRelatedResources(card, runtime);
     refreshRuntimeCardActions(card, runtime);
   }
+  void openDiagnoseDetail(report);
 }
 
 function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
@@ -1374,15 +1554,13 @@ function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
 
 function applyRepairFilter(runtime: string, filter: RepairStatusFilter): void {
   const report = repairPreviewByRuntime.get(runtime);
-  const card = runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
-  const hint = card?.querySelector<HTMLElement>("[data-repair-hint]");
-  if (!report || !hint) {
+  if (!report) {
     return;
   }
   const current = repairFilterByRuntime.get(runtime) ?? "all";
   const next = current === filter && filter !== "all" ? "all" : filter;
   repairFilterByRuntime.set(runtime, next);
-  hint.innerHTML = renderRepairPreview(report, next);
+  diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, next);
 }
 
 function repairCheckStatusLabel(
@@ -1425,47 +1603,89 @@ function runtimeHasProblems(runtimeId: string): boolean {
   return report.summary.fail > 0 || report.summary.warn > 0;
 }
 
+function runtimeIsHealthy(runtimeId: string): boolean {
+  const report = repairPreviewByRuntime.get(runtimeId);
+  if (!report) {
+    return false;
+  }
+  return report.summary.fail === 0 && report.summary.warn === 0;
+}
+
+function hasActiveWorkspace(): boolean {
+  return Boolean(lastWorkspaces?.active);
+}
+
 function renderRuntimeCardActions(runtime: RuntimeDoctorResult): string {
   if (!runtime.installed) {
     return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
   }
 
-  const parts: string[] = [];
   const isAskRuntime =
     runtime.id === "claude-code" ||
     runtime.id === "codex" ||
     runtime.id === "hermes" ||
     runtime.id === "openclaw";
-  if (isAskRuntime) {
-    // Default: open the in-app light ask UI; Terminal is optional.
-    parts.push(
-      `<button type="button" class="btn-primary" data-action="ask-session">${t("runtime.openUi")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>`,
-    );
-  } else if (canOpenSession(runtime.id)) {
-    parts.push(
-      `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`,
-    );
+  if (!isAskRuntime) {
+    return canOpenSession(runtime.id)
+      ? `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`
+      : "";
   }
-  const diagnoseClass = runtimeHasProblems(runtime.id) ? "btn-secondary" : "btn-ghost";
-  parts.push(
-    `<button type="button" class="${diagnoseClass}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-  );
-  // Card-level Apply for every Ask runtime once diagnose found auto-fixable items.
+
+  const parts: string[] = [];
   const preview = repairPreviewByRuntime.get(runtime.id);
-  if (isAskRuntime && preview?.can_apply_repair) {
+  const canRepair = Boolean(preview?.can_apply_repair);
+  const healthy = runtimeIsHealthy(runtime.id);
+  const diagnosed = Boolean(preview);
+  const detailOpenForThis =
+    !diagnoseDetailEl.hidden && diagnoseDetailEl.dataset.runtime === runtime.id;
+
+  // Funnel CTA: workspace → repair → Ask (verify). Diagnose starts the loop.
+  // When the right-hand diagnose module is open, keep the primary CTA there.
+  if (!hasActiveWorkspace()) {
     parts.push(
-      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.applyFixes")}</button>`,
+      `<button type="button" class="btn-primary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
+    );
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+  } else if (canRepair) {
+    if (!detailOpenForThis) {
+      parts.push(
+        `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
+      );
+    }
+    parts.push(
+      `<button type="button" class="${detailOpenForThis ? "btn-primary" : "btn-secondary"}" data-action="ask-session">${t("repair.funnelAskCta")}</button>`,
+    );
+  } else if (healthy || (diagnosed && preview?.last_execute)) {
+    if (!detailOpenForThis) {
+      parts.push(
+        `<button type="button" class="btn-primary" data-action="ask-verify">${t("repair.funnelAskVerifyCta")}</button>`,
+      );
+    }
+    parts.push(
+      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+  } else {
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
     );
   }
-  parts.push(
-    `<button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>`,
-  );
+
+  parts.push(`
+    <details class="runtime-advanced">
+      <summary>${escapeHtml(t("runtime.advanced"))}</summary>
+      <div class="runtime-advanced-actions">
+        <button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>
+        <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
+        <button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>
+      </div>
+    </details>
+  `);
+
   return parts.join("");
 }
 
@@ -1505,15 +1725,23 @@ function extractRelatedTags(report: RepairPreviewResponse | undefined): RelatedT
 
 function renderRelatedResourcesHtml(runtimeId: string): string {
   const tags = extractRelatedTags(repairPreviewByRuntime.get(runtimeId));
-  const tagsHtml = tags.length
-    ? tags
-        .map((tag) => {
-          const label = tag.kind === "skill" ? "Skill" : "MCP";
-          const broken = tag.broken ? ` · ${t("agents.relatedMissing")}` : "";
-          return `<span class="mini-tag ${tag.kind}${tag.broken ? " broken" : ""}">${label} · ${escapeHtml(tag.name)}${broken}</span>`;
-        })
-        .join("")
-    : `<span class="tone-soft">${escapeHtml(t("agents.relatedEmpty"))}</span>`;
+  const broken = tags.filter((tag) => tag.broken);
+  if (tags.length === 0) {
+    return `<div class="mounted is-empty" data-related-resources hidden></div>`;
+  }
+  if (broken.length === 0) {
+    return `
+      <div class="mounted is-quiet" data-related-resources>
+        <span class="tone-soft">${escapeHtml(t("agents.relatedOk", { n: String(tags.length) }))}</span>
+      </div>
+    `;
+  }
+  const tagsHtml = broken
+    .map((tag) => {
+      const label = tag.kind === "skill" ? "Skill" : "MCP";
+      return `<span class="mini-tag ${tag.kind} broken">${label} · ${escapeHtml(tag.name)} · ${t("agents.relatedMissing")}</span>`;
+    })
+    .join("");
   return `
     <div class="mounted" data-related-resources>
       <h3>${escapeHtml(t("agents.relatedTitle"))}</h3>
@@ -1550,7 +1778,7 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
     runtime.config_paths.length
-      ? metaRow("meta.config", runtime.config_paths.join("\n"))
+      ? metaRow("meta.config", runtime.config_paths.join(" · "))
       : "",
   ]
     .filter(Boolean)
@@ -1581,7 +1809,7 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
   const rows = [
     runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
-    runtime.config_paths.length ? metaRow("meta.config", runtime.config_paths.join("\n")) : "",
+    runtime.config_paths.length ? metaRow("meta.config", runtime.config_paths.join(" · ")) : "",
     runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
     !runtime.installed ? metaRow("meta.status", t("runtime.notDetected")) : "",
   ]
@@ -1689,6 +1917,7 @@ async function renderReport(report: DoctorReport) {
     activeRuntimeId = null;
     runtimeTabsEl.innerHTML = "";
     runtimesEl.innerHTML = `<div class="empty-state">${t("runtimes.empty")}</div>`;
+    void closeDiagnoseDetail({ skipDismiss: true });
     return;
   }
 
@@ -1698,6 +1927,12 @@ async function renderReport(report: DoctorReport) {
 
   const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
   runtimesEl.innerHTML = activeRuntime ? renderRuntimeCard(activeRuntime) : "";
+  const preview = selectedId ? repairPreviewByRuntime.get(selectedId) : undefined;
+  if (preview && !dismissedDiagnoseRuntimes.has(selectedId)) {
+    mountRepairPreview(preview);
+  } else {
+    void closeDiagnoseDetail({ skipDismiss: true });
+  }
 }
 
 function setPresetTriggerLabel(name: string | null) {
@@ -2286,7 +2521,10 @@ function renderResourcesList() {
 
 async function loadMcpStatus() {
   try {
-    const status = await invoke<McpModuleStatus>("mcp_status_command", { port: null });
+    const status = await invoke<McpModuleStatus>("mcp_status_command", {
+      port: null,
+      probeChrome: false,
+    });
     renderMcpBrowserStatus(status);
     renderResourcesList();
   } catch (error) {
@@ -3435,9 +3673,8 @@ async function rollbackRepairRuntimeCard(card: HTMLElement) {
       backup: null,
     });
     const report = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
-    repairFilterByRuntime.set(runtime, "all");
-    mountRepairPreview(hint, report);
-    hint.insertAdjacentHTML(
+    mountRepairPreview(report, { resetFilter: true });
+    diagnoseDetailBodyEl.insertAdjacentHTML(
       "afterbegin",
       `<p class="repair-rollback-ok">${escapeHtml(
         t("repair.rollbackDone", { id: restore.backup_id, count: String(restore.restored_files.length) }),
@@ -3460,6 +3697,45 @@ async function openAskWindow(runtime: string): Promise<void> {
     await invoke("open_ask_window_command", { runtime });
   } catch (error) {
     setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+  }
+}
+
+const ASK_VERIFY_DRAFT_KEY = "agent-doctor.ask.verifyDraft";
+
+async function openAskWindowForVerify(runtime: string): Promise<void> {
+  try {
+    localStorage.setItem(
+      ASK_VERIFY_DRAFT_KEY,
+      JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
+    );
+    await invoke("open_ask_window_command", { runtime });
+  } catch (error) {
+    setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+  }
+}
+
+async function runBrowserSmokeFromCard(root: HTMLElement): Promise<void> {
+  const host = diagnoseDetailEl.hidden ? root : diagnoseDetailEl;
+  const slot = host.querySelector<HTMLElement>("[data-browser-smoke-slot]");
+  const button = host.querySelector<HTMLButtonElement>('[data-action="browser-smoke"]');
+  button?.setAttribute("disabled", "true");
+  if (slot) {
+    slot.className = "repair-smoke-slot";
+    slot.textContent = t("repair.browserSmokeRunning");
+  }
+  try {
+    const smoke = await invoke<{ ok: boolean; detail: string }>("run_browser_smoke_command");
+    if (slot) {
+      slot.className = `repair-smoke-slot ${smoke.ok ? "ok" : "fail"}`;
+      slot.textContent = `${smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail")}: ${smoke.detail}`;
+    }
+  } catch (error) {
+    if (slot) {
+      slot.className = "repair-smoke-slot fail";
+      slot.textContent = `${t("repair.browserSmokeFail")}: ${String(error)}`;
+    }
+  } finally {
+    button?.removeAttribute("disabled");
   }
 }
 
@@ -3604,10 +3880,10 @@ async function applyRepairRuntimeCard(card: HTMLElement) {
   applyButton?.setAttribute("disabled", "true");
   hint.hidden = false;
   hint.textContent = t("repair.applying");
+  showDiagnosePending(runtime, t("repair.applying"));
   try {
     const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", { runtime });
-    repairFilterByRuntime.set(runtime, "all");
-    mountRepairPreview(hint, report);
+    mountRepairPreview(report, { resetFilter: true });
     if (runtime === "hermes") {
       await loadHermesModel();
     }
@@ -3617,6 +3893,38 @@ async function applyRepairRuntimeCard(card: HTMLElement) {
     diagnoseButton?.removeAttribute("disabled");
     applyButton?.removeAttribute("disabled");
   }
+}
+
+/** Diagnose if needed, then apply playbook (gateway + browser MCP) in one click. */
+async function oneClickRepairRuntimeCard(card: HTMLElement) {
+  const runtime = card.dataset.runtime;
+  const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
+  if (!runtime || !hint) {
+    return;
+  }
+
+  let preview = repairPreviewByRuntime.get(runtime);
+  if (!preview) {
+    hint.hidden = false;
+    hint.textContent = t("runtime.diagnosing");
+    showDiagnosePending(runtime, t("runtime.diagnosing"));
+    try {
+      preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
+      mountRepairPreview(preview, { resetFilter: true });
+    } catch (error) {
+      hint.hidden = false;
+      hint.textContent = String(error);
+      return;
+    }
+  }
+
+  if (!preview.can_apply_repair) {
+    hint.hidden = false;
+    mountRepairPreview(preview);
+    return;
+  }
+
+  await applyRepairRuntimeCard(card);
 }
 
 async function diagnoseRuntimeCard(card: HTMLElement) {
@@ -3629,10 +3937,10 @@ async function diagnoseRuntimeCard(card: HTMLElement) {
   button?.setAttribute("disabled", "true");
   hint.hidden = false;
   hint.textContent = t("runtime.diagnosing");
+  showDiagnosePending(runtime, t("runtime.diagnosing"));
   try {
     const report = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
-    repairFilterByRuntime.set(runtime, "all");
-    mountRepairPreview(hint, report);
+    mountRepairPreview(report, { resetFilter: true });
   } catch (error) {
     hint.textContent = String(error);
   } finally {
@@ -3733,6 +4041,24 @@ runtimesEl.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "ask-verify" && runtimeCard) {
+    const runtime = runtimeCard.dataset.runtime;
+    if (
+      runtime === "claude-code" ||
+      runtime === "codex" ||
+      runtime === "hermes" ||
+      runtime === "openclaw"
+    ) {
+      void openAskWindowForVerify(runtime);
+    }
+    return;
+  }
+
+  if (action === "browser-smoke" && runtimeCard) {
+    void runBrowserSmokeFromCard(runtimeCard);
+    return;
+  }
+
   if (action === "install-runtime" && runtimeCard) {
     void installRuntimeFromCard(runtimeCard);
     return;
@@ -3743,6 +4069,15 @@ runtimesEl.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "activate-workspace") {
+    if (!lastWorkspaces || Object.keys(lastWorkspaces.workspaces).length === 0) {
+      setMainTab("workspace");
+      return;
+    }
+    toggleAgentsWsPicker();
+    return;
+  }
+
   if (action === "wire-runtime" && runtimeCard) {
     const hint = runtimeCard.querySelector<HTMLElement>("[data-repair-hint]");
     void rewireCurrentMode(hint);
@@ -3750,12 +4085,74 @@ runtimesEl.addEventListener("click", (event) => {
   }
 
   if (action === "apply-repair" && runtimeCard) {
-    void applyRepairRuntimeCard(runtimeCard);
+    void oneClickRepairRuntimeCard(runtimeCard);
     return;
   }
 
   if (action === "rollback-repair" && runtimeCard) {
     void rollbackRepairRuntimeCard(runtimeCard);
+    return;
+  }
+
+  const guideBtn = target.closest<HTMLButtonElement>('[data-action="open-repair-guide"]');
+  if (guideBtn?.dataset.guidePath) {
+    void openRepairGuide(decodeURIComponent(guideBtn.dataset.guidePath));
+  }
+});
+
+diagnoseDetailEl.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  const filterBtn = target.closest<HTMLButtonElement>("[data-repair-filter]");
+  if (filterBtn && !filterBtn.disabled) {
+    const runtime =
+      filterBtn.closest<HTMLElement>("[data-runtime]")?.dataset.runtime ||
+      diagnoseDetailEl.dataset.runtime;
+    const filter = filterBtn.dataset.repairFilter as RepairStatusFilter | undefined;
+    if (runtime && filter) {
+      applyRepairFilter(runtime, filter);
+    }
+    return;
+  }
+
+  const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
+  if (!action) {
+    return;
+  }
+
+  if (action === "close-diagnose-detail") {
+    void closeDiagnoseDetail();
+    return;
+  }
+
+  const runtime =
+    target.closest<HTMLElement>("[data-runtime]")?.dataset.runtime ||
+    diagnoseDetailEl.dataset.runtime;
+  const card = runtime ? runtimeCardEl(runtime) : null;
+
+  if (action === "ask-verify" && runtime) {
+    if (
+      runtime === "claude-code" ||
+      runtime === "codex" ||
+      runtime === "hermes" ||
+      runtime === "openclaw"
+    ) {
+      void openAskWindowForVerify(runtime);
+    }
+    return;
+  }
+
+  if (action === "browser-smoke") {
+    void runBrowserSmokeFromCard(diagnoseDetailEl);
+    return;
+  }
+
+  if (action === "apply-repair" && card) {
+    void oneClickRepairRuntimeCard(card);
+    return;
+  }
+
+  if (action === "rollback-repair" && card) {
+    void rollbackRepairRuntimeCard(card);
     return;
   }
 
@@ -4192,5 +4589,6 @@ void loadRemoteProjects();
 void loadEvotownStatus();
 void loadPersonalProviderStatus();
 void loadModeStatus();
-void loadMcpStatus();
+// Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
+// wake Chrome until the user opens Resources or clicks Browser smoke.
 void refresh();

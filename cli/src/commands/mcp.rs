@@ -119,6 +119,9 @@ pub fn run_configure(
         hermes_home: std::env::var("HERMES_HOME")
             .ok()
             .map(std::path::PathBuf::from),
+        openclaw_workspace: std::env::var("OPENCLAW_WORKSPACE")
+            .ok()
+            .map(std::path::PathBuf::from),
     };
 
     configure_for(&discovery, &options)?;

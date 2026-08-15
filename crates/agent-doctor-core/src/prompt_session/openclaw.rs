@@ -3,7 +3,8 @@
 //! Always pass session selectors (`--agent` + `--session-id`). JSON goes to stdout and
 //! diagnostics to stderr — Ask surfaces only the assistant reply, not CLI chrome.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -70,6 +71,13 @@ fn run_openclaw(
         .unwrap_or_else(fresh_openclaw_session_id);
 
     let overlay = collect_overlay_env();
+    if let Some(note) = ensure_openclaw_agent_ready(&overlay) {
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: "workspace".into(),
+            message: note,
+        });
+    }
     let mut prompt_text = prompt.to_string();
     if super::mcp_ensure::wants_browser_mcp(options) {
         if let Some(note) =
@@ -132,6 +140,12 @@ fn run_openclaw(
                 .as_ref()
                 .and_then(|v| extract_openclaw_session_id(v))
                 .unwrap_or_else(|| openclaw_session_id.clone());
+
+            // `openclaw --json` only returns the final reply. Tool chips live in the
+            // session jsonl (`browser__browser_navigate`), so surface them before the
+            // assistant text — Ask verify used to miss the MCP pathway entirely.
+            let agent = resolve_openclaw_agent(&overlay);
+            emit_openclaw_turn_tools(&session_id, &agent, &runtime_thread_id, &mut emit);
 
             let combined = if !reply.trim().is_empty() {
                 reply.clone()
@@ -235,6 +249,37 @@ fn resolve_openclaw_agent(overlay: &std::collections::HashMap<String, String>) -
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "main".into())
+}
+
+/// Bind/create workspace OpenClaw agent before Ask spawn (fixes missing agents.list).
+fn ensure_openclaw_agent_ready(overlay: &std::collections::HashMap<String, String>) -> Option<String> {
+    let agent = resolve_openclaw_agent(overlay);
+    if agent == "main" {
+        return None;
+    }
+    let workspace = overlay
+        .get("OPENCLAW_WORKSPACE")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            crate::workspace::load_workspaces().ok().and_then(|doc| {
+                doc.active
+                    .as_ref()
+                    .and_then(|name| doc.workspaces.get(name))
+                    .map(|entry| entry.openclaw_workspace.clone())
+            })
+        })?;
+
+    match crate::workspace::backends::bind_openclaw(&agent, &workspace) {
+        Ok(report) => Some(format!(
+            "OpenClaw agent ready: {} ({})",
+            agent, report.detail
+        )),
+        Err(err) => Some(format!(
+            "OpenClaw agent '{agent}' missing and bind failed ({err}); Ask may fall back if spawn fails"
+        )),
+    }
 }
 
 fn build_openclaw_command(
@@ -363,6 +408,107 @@ where
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
     let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
     Ok((status, exit_code, stdout, stderr))
+}
+
+fn emit_openclaw_turn_tools<F>(
+    session_id: &str,
+    agent: &str,
+    runtime_thread_id: &str,
+    emit: &mut F,
+) where
+    F: FnMut(PromptSessionEvent),
+{
+    let Some(path) = resolve_openclaw_session_jsonl(agent, runtime_thread_id) else {
+        return;
+    };
+    let tools = collect_last_turn_openclaw_tools(&path);
+    let mut seen = std::collections::HashSet::new();
+    for name in tools {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        emit(PromptSessionEvent::Status {
+            session_id: session_id.to_string(),
+            phase: "tool".into(),
+            message: format!("调用工具 {name}…"),
+        });
+    }
+}
+
+fn resolve_openclaw_session_jsonl(agent: &str, session_id: &str) -> Option<PathBuf> {
+    let agent = agent.trim();
+    let session_id = session_id.trim();
+    if agent.is_empty()
+        || session_id.is_empty()
+        || agent.contains(['/', '\\'])
+        || session_id.contains(['/', '\\'])
+    {
+        return None;
+    }
+    let home = dirs::home_dir()?;
+    let path = home
+        .join(".openclaw")
+        .join("agents")
+        .join(agent)
+        .join("sessions")
+        .join(format!("{session_id}.jsonl"));
+    path.is_file().then_some(path)
+}
+
+/// Tools used after the last user message in an OpenClaw session jsonl.
+fn collect_last_turn_openclaw_tools(path: &Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    collect_last_turn_openclaw_tools_from(&text)
+}
+
+fn collect_last_turn_openclaw_tools_from(text: &str) -> Vec<String> {
+    let mut tools = Vec::new();
+    for line in text.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let message = value.get("message").unwrap_or(&value);
+        let role = message
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if role == "user" {
+            tools.clear();
+            continue;
+        }
+        if let Some(arr) = message.get("content").and_then(|v| v.as_array()) {
+            for item in arr {
+                let ty = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if ty == "toolCall" || ty == "tool_use" || ty == "functionCall" {
+                    if let Some(name) = item
+                        .get("name")
+                        .or_else(|| item.get("toolName"))
+                        .or_else(|| item.pointer("/function/name"))
+                        .and_then(|v| v.as_str())
+                    {
+                        if !name.is_empty() {
+                            tools.push(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        if role == "toolResult" || role == "tool" {
+            for key in [
+                message.get("toolName"),
+                message.get("tool_name"),
+                message.pointer("/details/mcpTool"),
+            ] {
+                if let Some(name) = key.and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty())
+                {
+                    tools.push(name.to_string());
+                }
+            }
+        }
+    }
+    tools
 }
 
 fn parse_openclaw_json_output(stdout: &str) -> Option<Value> {
@@ -619,6 +765,27 @@ mod tests {
         let value = parse_openclaw_json_output(raw).unwrap();
         assert_eq!(extract_openclaw_reply(&value), None);
         assert_eq!(extract_openclaw_session_id(&value).as_deref(), Some("oc-2"));
+    }
+
+    #[test]
+    fn last_turn_tools_from_openclaw_session_jsonl() {
+        let raw = r#"
+{"type":"message","message":{"role":"user","content":"old turn with browser_navigate"}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","name":"exec"}]}}
+{"type":"message","message":{"role":"user","content":"请用 browser MCP"}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"toolCall","name":"browser__browser_navigate","arguments":{"url":"https://example.com/"}}]}}
+{"type":"message","message":{"role":"toolResult","toolName":"browser__browser_navigate","details":{"mcpServer":"browser","mcpTool":"browser_navigate"}}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"Example Domain"}]}}
+"#;
+        let tools = collect_last_turn_openclaw_tools_from(raw);
+        assert_eq!(
+            tools,
+            vec![
+                "browser__browser_navigate".to_string(),
+                "browser__browser_navigate".to_string(),
+                "browser_navigate".to_string(),
+            ]
+        );
     }
 
     #[cfg(unix)]

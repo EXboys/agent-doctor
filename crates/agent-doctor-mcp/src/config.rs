@@ -30,6 +30,10 @@ pub struct McpConfigureOptions {
     pub codex_home: Option<PathBuf>,
     /// Hermes home (`HERMES_HOME` / workspace profile). Defaults to `~/.hermes`.
     pub hermes_home: Option<PathBuf>,
+    /// OpenClaw agent workspace dir. When set, also mirrors Browser MCP into
+    /// `<openclaw_workspace>/.mcp.json` (workspace-aware inventory / isolation narrative).
+    /// OpenClaw runtime still loads `~/.openclaw/openclaw.json`.
+    pub openclaw_workspace: Option<PathBuf>,
 }
 
 /// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
@@ -120,12 +124,24 @@ fn resolve_openclaw_config_path() -> Result<PathBuf> {
 /// - Claude Code without project: `~/.claude.json` (user-scope MCP)
 /// - Codex: `$CODEX_HOME/config.toml` (`[mcp_servers.*]` TOML) — **not** project `.mcp.json`
 /// - Hermes: `$HERMES_HOME/config.yaml` (`mcp_servers.*`)
-/// - OpenClaw: `~/.openclaw/openclaw.json` (`mcp.servers.*`)
+/// - OpenClaw: workspace `.mcp.json` when `openclaw_workspace` is set (inventory + mirror);
+///   otherwise `~/.openclaw/openclaw.json` (`mcp.servers.*`)
 pub fn mcp_servers_path(
     runtime: &str,
     project_path: Option<&Path>,
     codex_home: Option<&Path>,
     hermes_home: Option<&Path>,
+) -> Result<PathBuf> {
+    mcp_servers_path_with_openclaw(runtime, project_path, codex_home, hermes_home, None)
+}
+
+/// Like [`mcp_servers_path`], with optional OpenClaw workspace mirror path.
+pub fn mcp_servers_path_with_openclaw(
+    runtime: &str,
+    project_path: Option<&Path>,
+    codex_home: Option<&Path>,
+    hermes_home: Option<&Path>,
+    openclaw_workspace: Option<&Path>,
 ) -> Result<PathBuf> {
     match runtime {
         "claude-code" | "claude" => {
@@ -139,7 +155,12 @@ pub fn mcp_servers_path(
         }
         "codex" => Ok(resolve_codex_home(codex_home)?.join("config.toml")),
         "hermes" => Ok(resolve_hermes_home(hermes_home)?.join("config.yaml")),
-        "openclaw" => resolve_openclaw_config_path(),
+        "openclaw" => {
+            if let Some(ws) = openclaw_workspace {
+                return Ok(ws.join(".mcp.json"));
+            }
+            resolve_openclaw_config_path()
+        }
         _ => anyhow::bail!(
             "Unsupported runtime: {runtime}. Supported: codex, claude-code, hermes, openclaw"
         ),
@@ -281,11 +302,12 @@ fn write_mcp_servers_toml(
 
 /// Configure the browser MCP server for a given runtime.
 pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOptions) -> Result<()> {
-    let config_path = mcp_servers_path(
+    let config_path = mcp_servers_path_with_openclaw(
         &options.runtime,
         options.project_path.as_deref(),
         options.codex_home.as_deref(),
         options.hermes_home.as_deref(),
+        options.openclaw_workspace.as_deref(),
     )?;
     let command = options.binary.to_string_lossy().to_string();
     let args = browser_mcp_args(
@@ -308,11 +330,30 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
             write_mcp_servers(&config_path, &servers)?;
         }
         "hermes" => write_hermes_browser_mcp(&config_path, &command, &args)?,
-        "openclaw" => write_openclaw_browser_mcp(&config_path, &command, &args)?,
+        "openclaw" => {
+            // Runtime loads global openclaw.json; also mirror into workspace .mcp.json
+            // so inventory / Doctor narrative matches Claude project isolation.
+            let global = resolve_openclaw_config_path()?;
+            write_openclaw_browser_mcp(&global, &command, &args)?;
+            if options.openclaw_workspace.is_some() {
+                write_claude_style_browser_mcp(&config_path, &command, &args)?;
+            }
+        }
         other => anyhow::bail!("Unsupported runtime: {other}"),
     }
 
     Ok(())
+}
+
+fn write_claude_style_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    let mut servers = read_mcp_servers(config_path)?;
+    let entry = json!({ "command": command, "args": args });
+    if let Some(obj) = servers.as_object_mut() {
+        obj.insert("browser".to_string(), entry);
+    } else {
+        servers = json!({ "browser": entry });
+    }
+    write_mcp_servers(config_path, &servers)
 }
 
 fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
@@ -457,6 +498,14 @@ mod tests {
     fn openclaw_uses_openclaw_json() {
         let path = mcp_servers_path("openclaw", None, None, None).unwrap();
         assert!(path.ends_with(".openclaw/openclaw.json"));
+    }
+
+    #[test]
+    fn openclaw_with_workspace_uses_mcp_json_mirror() {
+        let ws = PathBuf::from("/tmp/oc-ws");
+        let path =
+            mcp_servers_path_with_openclaw("openclaw", None, None, None, Some(&ws)).unwrap();
+        assert_eq!(path, ws.join(".mcp.json"));
     }
 
     #[test]

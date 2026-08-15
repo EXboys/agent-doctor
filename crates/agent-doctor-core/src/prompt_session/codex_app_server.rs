@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::backend::AskBackend;
-use super::control::PromptSessionControl;
+use super::control::{CodexReplyKind, PromptSessionControl};
 use super::env::{
     apply_codex_env, apply_overlay_env, codex_provider_config_args, collect_overlay_env,
     format_command_display, prepare_codex_home, resolve_codex_overlay,
@@ -238,6 +238,15 @@ fn run_codex_app_server(
         } else {
             "thread/start"
         };
+        emit(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: "starting".into(),
+            message: if resume_thread_id.is_some() {
+                "正在恢复 Codex 会话…".into()
+            } else {
+                "正在启动 Codex 会话…".into()
+            },
+        });
         control.write_line(
             &json!({
                 "method": thread_method,
@@ -560,6 +569,8 @@ where
         let thread_id = value
             .pointer("/result/thread/id")
             .or_else(|| value.pointer("/result/thread/sessionId"))
+            .or_else(|| value.pointer("/result/threadId"))
+            .or_else(|| value.pointer("/result/id"))
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .context("thread/start missing thread id")?;
@@ -615,39 +626,36 @@ where
         other => other.to_string(),
     };
 
-    match method {
-        "item/commandExecution/requestApproval"
-        | "item/fileChange/requestApproval"
-        | "item/permissions/requestApproval" => {
-            if !state.interactive {
-                let _ = control.decline_codex_rpc(id);
-                return Ok(());
-            }
-            let params = params.cloned().unwrap_or(Value::Null);
-            let (tool_name, detail, input_json) = permission_from_codex(method, &params);
-            control.remember_codex_rpc(&request_id);
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: "permission".into(),
-                message: format!("等待确认：{tool_name}"),
-            });
-            on_event(PromptSessionEvent::PermissionRequest {
-                session_id: state.session_id.clone(),
-                request_id,
-                tool_name,
-                detail,
-                input_json,
-            });
+    let params = params.cloned().unwrap_or(Value::Null);
+    if let Some(kind) = codex_reply_kind(method, &params) {
+        if !state.interactive {
+            control.remember_codex_reply(&request_id, kind);
+            let _ = control.respond_permission(&request_id, false);
+            return Ok(());
         }
-        other => {
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: "info".into(),
-                message: format!("auto-decline unsupported request: {other}"),
-            });
-            let _ = control.decline_codex_rpc(id);
-        }
+        let (tool_name, detail, input_json) = permission_from_codex(method, &params);
+        control.remember_codex_reply(&request_id, kind);
+        on_event(PromptSessionEvent::Status {
+            session_id: state.session_id.clone(),
+            phase: "permission".into(),
+            message: format!("等待确认：{tool_name}"),
+        });
+        on_event(PromptSessionEvent::PermissionRequest {
+            session_id: state.session_id.clone(),
+            request_id,
+            tool_name,
+            detail,
+            input_json,
+        });
+        return Ok(());
     }
+
+    on_event(PromptSessionEvent::Status {
+        session_id: state.session_id.clone(),
+        phase: "info".into(),
+        message: format!("auto-decline unsupported request: {method}"),
+    });
+    let _ = control.decline_codex_rpc(id);
     Ok(())
 }
 
@@ -670,6 +678,15 @@ fn handle_notification<F>(
         }
         "turn/completed" | "turn/finished" => {
             state.turn_done = true;
+            if !state.saw_agent_delta {
+                if let Some(text) = turn_completed_agent_text(&params) {
+                    state.saw_agent_delta = true;
+                    on_event(PromptSessionEvent::Delta {
+                        session_id: state.session_id.clone(),
+                        text,
+                    });
+                }
+            }
             on_event(PromptSessionEvent::Status {
                 session_id: state.session_id.clone(),
                 phase: "writing".into(),
@@ -689,22 +706,37 @@ fn handle_notification<F>(
             });
         }
         "item/agentMessage/delta" => {
-            if let Some(text) = params
-                .get("delta")
-                .or_else(|| params.pointer("/item/text"))
-                .and_then(|v| v.as_str())
-            {
-                if !text.is_empty() {
-                    // Do NOT emit Status on every delta — the chat UI seals the
-                    // assistant bubble on phase changes, which otherwise stores
-                    // one localStorage message per token.
-                    state.saw_agent_delta = true;
-                    on_event(PromptSessionEvent::Delta {
-                        session_id: state.session_id.clone(),
-                        text: text.to_string(),
-                    });
-                }
+            if let Some(text) = json_delta_text(&params) {
+                // Do NOT emit Status on every delta — the chat UI seals the
+                // assistant bubble on phase changes, which otherwise stores
+                // one localStorage message per token.
+                state.saw_agent_delta = true;
+                on_event(PromptSessionEvent::Delta {
+                    session_id: state.session_id.clone(),
+                    text,
+                });
             }
+        }
+        "mcpServer/startupStatus/updated" => {
+            let name = params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("mcp");
+            let status = params
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("starting");
+            let error = params.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let message = if error.is_empty() {
+                format!("MCP {name}: {status}")
+            } else {
+                format!("MCP {name}: {status} ({error})")
+            };
+            on_event(PromptSessionEvent::Status {
+                session_id: state.session_id.clone(),
+                phase: if status == "failed" { "error" } else { "mcp" }.into(),
+                message,
+            });
         }
         "item/completed" | "item/started" => {
             let item = params.get("item").cloned().unwrap_or(Value::Null);
@@ -712,20 +744,21 @@ fn handle_notification<F>(
             match item_type {
                 // Prefer streamed deltas; only fall back to the completed payload
                 // when no delta arrived (some turns emit text only on completed).
-                "agent_message" if method == "item/completed" => {
+                // Official app-server uses camelCase `agentMessage`; older builds used snake_case.
+                t if is_agent_message_type(t) && method == "item/completed" => {
                     if !state.saw_agent_delta {
-                        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                            if !text.is_empty() {
-                                on_event(PromptSessionEvent::Delta {
-                                    session_id: state.session_id.clone(),
-                                    text: text.to_string(),
-                                });
-                            }
+                        if let Some(text) = agent_item_text(&item) {
+                            state.saw_agent_delta = true;
+                            on_event(PromptSessionEvent::Delta {
+                                session_id: state.session_id.clone(),
+                                text,
+                            });
                         }
                     }
                 }
-                "agent_message" => {}
-                "commandExecution" | "fileChange" | "mcpToolCall" => {
+                t if is_agent_message_type(t) => {}
+                "commandExecution" | "command_execution" | "fileChange" | "file_change"
+                | "mcpToolCall" | "mcp_tool_call" => {
                     // Emit once on start — completed would duplicate the same chip in UI.
                     if method == "item/started" {
                         let label = item
@@ -748,6 +781,14 @@ fn handle_notification<F>(
                                 item.get("tool")
                                     .and_then(|v| v.as_str())
                                     .map(str::to_string)
+                            })
+                            .or_else(|| {
+                                let server = item.get("server").and_then(|v| v.as_str());
+                                let tool = item.get("tool").and_then(|v| v.as_str());
+                                match (server, tool) {
+                                    (Some(s), Some(t)) => Some(format!("{s}/{t}")),
+                                    _ => None,
+                                }
                             })
                             .unwrap_or_else(|| item_type.to_string());
                         let label = shorten_tool_label(&label);
@@ -781,13 +822,114 @@ fn handle_notification<F>(
     }
 }
 
-pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, String, String) {
-    let tool_name = match method {
-        "item/fileChange/requestApproval" => "FileChange",
-        "item/permissions/requestApproval" => "Permissions",
-        _ => "Bash",
+fn is_agent_message_type(item_type: &str) -> bool {
+    item_type == "agentMessage" || item_type == "agent_message"
+}
+
+fn json_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Object(map) => map
+            .get("text")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        Value::Array(items) => {
+            let joined = items
+                .iter()
+                .filter_map(json_text)
+                .collect::<Vec<_>>()
+                .join("");
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
+            }
+        }
+        _ => None,
     }
-    .to_string();
+}
+
+fn json_delta_text(params: &Value) -> Option<String> {
+    params
+        .get("delta")
+        .and_then(json_text)
+        .or_else(|| params.pointer("/item/text").and_then(json_text))
+}
+
+fn agent_item_text(item: &Value) -> Option<String> {
+    json_text(&item.get("text").cloned().unwrap_or(Value::Null))
+        .or_else(|| json_text(&item.get("content").cloned().unwrap_or(Value::Null)))
+        .or_else(|| json_text(&item.get("message").cloned().unwrap_or(Value::Null)))
+}
+
+fn turn_completed_agent_text(params: &Value) -> Option<String> {
+    if let Some(text) = params
+        .pointer("/turn/lastAgentMessage")
+        .or_else(|| params.pointer("/lastAgentMessage"))
+        .or_else(|| params.pointer("/turn/last_agent_message"))
+        .and_then(json_text)
+    {
+        return Some(text);
+    }
+    let items = params
+        .pointer("/turn/items")
+        .or_else(|| params.get("items"))
+        .and_then(|v| v.as_array())?;
+    for item in items.iter().rev() {
+        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if is_agent_message_type(item_type) {
+            if let Some(text) = agent_item_text(item) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn codex_reply_kind(method: &str, params: &Value) -> Option<CodexReplyKind> {
+    let lower = method.to_ascii_lowercase();
+    if lower.contains("elicitation") {
+        return Some(CodexReplyKind::Elicitation);
+    }
+    if lower.contains("permissions") && lower.contains("requestapproval") {
+        let requested = params
+            .get("permissions")
+            .cloned()
+            .unwrap_or(Value::Object(Default::default()));
+        return Some(CodexReplyKind::Permissions { requested });
+    }
+    if lower.contains("requestapproval")
+        || lower.ends_with("requestuserinput")
+        || lower.contains("requestuserinput")
+    {
+        return Some(CodexReplyKind::Decision);
+    }
+    None
+}
+
+pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, String, String) {
+    let tool_name = if method.contains("fileChange") || method.contains("file_change") {
+        "FileChange".to_string()
+    } else if method.contains("permissions") {
+        "Permissions".to_string()
+    } else if method.to_ascii_lowercase().contains("elicitation") {
+        params
+            .get("serverName")
+            .or_else(|| params.get("server"))
+            .and_then(|v| v.as_str())
+            .map(|s| format!("MCP {s}"))
+            .unwrap_or_else(|| "MCP".to_string())
+    } else if method.to_ascii_lowercase().contains("requestuserinput") {
+        params
+            .get("tool")
+            .or_else(|| params.get("toolName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Tool")
+            .to_string()
+    } else {
+        "Bash".to_string()
+    };
 
     let detail = params
         .get("reason")
@@ -795,6 +937,14 @@ pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, St
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+        .or_else(|| {
+            params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
         .or_else(|| {
             params.get("command").and_then(|v| {
                 if let Some(s) = v.as_str() {
@@ -858,6 +1008,41 @@ mod tests {
         assert_eq!(shorten_tool_label("/bin/zsh -lc pwd"), "pwd");
         assert_eq!(shorten_tool_label("/bin/zsh -lc 'ls -la'"), "ls -la");
         assert_eq!(shorten_tool_label("echo hi"), "echo hi");
+    }
+
+    #[test]
+    fn reads_camel_case_agent_message_without_deltas() {
+        assert!(is_agent_message_type("agentMessage"));
+        assert!(is_agent_message_type("agent_message"));
+        assert_eq!(
+            agent_item_text(&json!({"type": "agentMessage", "text": "你好"})).as_deref(),
+            Some("你好")
+        );
+        assert_eq!(
+            json_delta_text(&json!({"delta": {"text": "hi"}})).as_deref(),
+            Some("hi")
+        );
+        assert_eq!(
+            turn_completed_agent_text(&json!({
+                "turn": {
+                    "status": "completed",
+                    "items": [
+                        {"type": "agentMessage", "text": "hello from turn"}
+                    ]
+                }
+            }))
+            .as_deref(),
+            Some("hello from turn")
+        );
+        assert!(codex_reply_kind(
+            "item/tool/requestUserInput",
+            &json!({"tool": "browser_navigate"})
+        )
+        .is_some());
+        assert!(matches!(
+            codex_reply_kind("mcpServer/elicitation/request", &json!({})),
+            Some(CodexReplyKind::Elicitation)
+        ));
     }
 
     #[test]

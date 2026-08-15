@@ -123,6 +123,7 @@ pub fn bind_openclaw(agent_id: &str, workspace_path: &Path) -> Result<RuntimeBin
 
     seed_openclaw_workspace_files(workspace_path)?;
     upsert_openclaw_agent(agent_id, workspace_path)?;
+    ensure_openclaw_agent_via_cli(agent_id, workspace_path)?;
 
     Ok(RuntimeBindReport {
         runtime_id: "openclaw",
@@ -506,12 +507,25 @@ fn upsert_openclaw_agent(agent_id: &str, workspace_path: &Path) -> Result<()> {
     let mut value: JsonValue =
         serde_json::from_str(&raw).with_context(|| format!("parse {}", config_path.display()))?;
 
+    // Older OpenClaw configs may only have `agents.defaults` — create `list` if missing.
+    {
+        let agents_obj = value
+            .as_object_mut()
+            .context("openclaw.json root must be an object")?
+            .entry("agents")
+            .or_insert_with(|| json!({}));
+        let agents_map = agents_obj
+            .as_object_mut()
+            .context("openclaw.json agents must be an object")?;
+        if !agents_map.contains_key("list") {
+            agents_map.insert("list".to_string(), json!([]));
+        }
+    }
+
     let agents = value
         .pointer_mut("/agents/list")
-        .and_then(JsonValue::as_array_mut);
-    let Some(agents) = agents else {
-        return Ok(());
-    };
+        .and_then(JsonValue::as_array_mut)
+        .context("openclaw.json agents.list must be an array")?;
 
     let workspace_str = workspace_path.display().to_string();
     for agent in agents.iter_mut() {
@@ -549,6 +563,43 @@ fn upsert_openclaw_agent(agent_id: &str, workspace_path: &Path) -> Result<()> {
     let updated = serde_json::to_string_pretty(&value)?;
     fs::write(&config_path, format!("{updated}\n"))
         .with_context(|| format!("write {}", config_path.display()))
+}
+
+/// Ensure OpenClaw CLI knows the agent (filesystem + routing), not only openclaw.json.
+fn ensure_openclaw_agent_via_cli(agent_id: &str, workspace_path: &Path) -> Result<()> {
+    if openclaw_agent_known(agent_id) {
+        return Ok(());
+    }
+    if find_binary("openclaw").is_none() {
+        return Ok(());
+    }
+    let capture = run_openclaw(&[
+        "agents",
+        "add",
+        agent_id,
+        "--non-interactive",
+        "--workspace",
+        &workspace_path.display().to_string(),
+    ])?;
+    if capture.success || openclaw_agent_known(agent_id) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "failed to create OpenClaw agent '{agent_id}': {}{}",
+        capture.stderr.trim(),
+        if capture.stdout.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", capture.stdout.trim())
+        }
+    )
+}
+
+fn openclaw_agent_known(agent_id: &str) -> bool {
+    if home_join(".openclaw/agents").join(agent_id).is_dir() {
+        return true;
+    }
+    openclaw_agent_workspace(agent_id).is_some()
 }
 
 pub(crate) fn run_openclaw(args: &[&str]) -> Result<ShellCapture> {
@@ -620,10 +671,45 @@ pub fn workspace_paths_match(expected: &Path, actual: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_hermes_profile_list_finds_active_marker() {
         let text = "  work\n◆ foo-app\n  bar\n";
         assert_eq!(parse_hermes_profile_list(text).as_deref(), Some("foo-app"));
+    }
+
+    #[test]
+    fn upsert_openclaw_agent_creates_agents_list_when_missing() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        let prev = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", home) };
+
+        let openclaw = home.join(".openclaw");
+        fs::create_dir_all(&openclaw).unwrap();
+        fs::write(
+            openclaw.join("openclaw.json"),
+            r#"{"agents":{"defaults":{"model":{"primary":"personal/x"}}}}"#,
+        )
+        .unwrap();
+        let ws = home.join("ws");
+        fs::create_dir_all(&ws).unwrap();
+
+        upsert_openclaw_agent("agent-doctor", &ws).unwrap();
+
+        let raw = fs::read_to_string(openclaw.join("openclaw.json")).unwrap();
+        let value: JsonValue = serde_json::from_str(&raw).unwrap();
+        let list = value.pointer("/agents/list").and_then(|v| v.as_array()).unwrap();
+        assert!(list.iter().any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
+        assert_eq!(
+            value.pointer("/agents/defaults/workspace").and_then(|v| v.as_str()),
+            Some(ws.to_str().unwrap())
+        );
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
     }
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::browser::{
     discover_chrome, resolve_profile_directory, resolve_user_data_dir, BrowserDiscovery,
 };
-use crate::config::{configure_for, mcp_servers_path, McpConfigureOptions};
+use crate::config::{configure_for, mcp_servers_path_with_openclaw, McpConfigureOptions};
 use crate::status::DEFAULT_BROWSER_MCP_PORT;
 
 /// Default runtimes that accept Agent Doctor Browser MCP wiring.
@@ -37,6 +37,8 @@ pub struct WireBrowserMcpOptions {
     pub project_path: Option<PathBuf>,
     pub codex_home: Option<PathBuf>,
     pub hermes_home: Option<PathBuf>,
+    /// OpenClaw agent workspace — mirrors Browser MCP into `<ws>/.mcp.json`.
+    pub openclaw_workspace: Option<PathBuf>,
     /// When empty, wires [`BROWSER_MCP_WIRE_RUNTIMES`].
     pub runtimes: Vec<String>,
 }
@@ -52,6 +54,7 @@ impl WireBrowserMcpOptions {
             project_path: None,
             codex_home: None,
             hermes_home: None,
+            openclaw_workspace: None,
             runtimes: Vec::new(),
         }
     }
@@ -91,23 +94,36 @@ pub fn wire_browser_mcp(
             project_path: options.project_path.clone(),
             codex_home: options.codex_home.clone(),
             hermes_home: options.hermes_home.clone(),
+            openclaw_workspace: options.openclaw_workspace.clone(),
         };
 
         match configure_for(discovery, &configure) {
             Ok(()) => {
-                let config_path = mcp_servers_path(
+                let config_path = mcp_servers_path_with_openclaw(
                     runtime,
                     options.project_path.as_deref(),
                     options.codex_home.as_deref(),
                     options.hermes_home.as_deref(),
+                    options.openclaw_workspace.as_deref(),
                 )
                 .ok()
                 .map(|p| p.display().to_string());
+                let message = if runtime == "openclaw" && options.openclaw_workspace.is_some() {
+                    format!(
+                        "wrote browser MCP for openclaw (global ~/.openclaw + workspace .mcp.json mirror; runtime is still global)"
+                    )
+                } else if runtime == "openclaw" {
+                    format!(
+                        "wrote browser MCP for openclaw (global ~/.openclaw — not per-workspace isolated)"
+                    )
+                } else {
+                    format!("wrote browser MCP entry for {runtime}")
+                };
                 results.push(BrowserMcpWireResult {
                     runtime: runtime.to_string(),
                     ok: true,
                     config_path,
-                    message: format!("wrote browser MCP entry for {runtime}"),
+                    message,
                 });
             }
             Err(err) => {

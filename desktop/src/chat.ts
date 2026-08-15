@@ -158,6 +158,9 @@ const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
 const logEl = document.querySelector<HTMLElement>("#chat-log")!;
 const statusEl = document.querySelector<HTMLElement>("#chat-status")!;
 const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
+const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-workspace-select")!;
+const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
+const workspaceHintEl = document.querySelector<HTMLElement>("#chat-workspace-hint")!;
 const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
 const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
 const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
@@ -175,6 +178,7 @@ let currentRuntime: AskRuntime = "claude-code";
 
 let store: SessionStore = loadStore();
 let busy = false;
+let busyGen = 0;
 let unlisten: UnlistenFn | null = null;
 let assistantBubble: HTMLElement | null = null;
 let assistantMessageId: string | null = null;
@@ -188,6 +192,10 @@ let turnHadAssistantText = false;
 let mountedSkills: SkillInventoryItem[] = [];
 let enabledMcps: McpInventoryItem[] = [];
 let workspaceCwd: string | null = null;
+let workspaceDoc: {
+  active: string | null;
+  workspaces: Record<string, { path: string }>;
+} | null = null;
 let selectedMentions: MentionRef[] = [];
 let mentionMenuIndex = 0;
 let mentionQuery: { kind: MentionKind | "any"; q: string; start: number; end: number } | null =
@@ -385,6 +393,7 @@ function syncActionButton(): void {
 }
 
 function setBusy(next: boolean): void {
+  if (next) busyGen += 1;
   busy = next;
   promptEl.disabled = next;
   elevatedEl.disabled = next;
@@ -408,13 +417,7 @@ function activityKind(phase: string): "tool" | "think" | "write" | "info" | "err
 
 /** Lifecycle chatter that belongs in the header live pill, not the transcript. */
 function isQuietPhase(phase: string): boolean {
-  return (
-    phase === "starting" ||
-    phase === "requesting" ||
-    phase === "writing" ||
-    phase === "streaming" ||
-    phase === "info"
-  );
+  return phase === "writing" || phase === "streaming" || phase === "info";
 }
 
 /** Drop ephemeral progress rows so they don't litter the transcript. */
@@ -1289,19 +1292,26 @@ async function loadAskResources(): Promise<void> {
         active: string | null;
         workspaces: Record<string, { path: string }>;
       }>("list_workspaces_command");
+      workspaceDoc = doc;
+      renderWorkspaceSwitcher(doc);
       if (doc.active && doc.workspaces[doc.active]?.path) {
         workspaceCwd = doc.workspaces[doc.active].path;
         cwdEl.dataset.workspace = doc.active;
         setDisplayedCwd(workspaceCwd);
         cwdEl.title = `${t("ask.workspaceActive", { name: doc.active })} · ${workspaceCwd}`;
+        workspaceHintEl.textContent = t("ask.workspaceHint");
       } else {
         cwdEl.dataset.workspace = "";
         if (mcpReport.workspace_path) {
           setDisplayedCwd(mcpReport.workspace_path);
+        } else {
+          setDisplayedCwd("—");
         }
         cwdEl.title = t("ask.workspaceNone");
+        workspaceHintEl.textContent = t("ask.workspaceNone");
       }
     } catch {
+      workspaceDoc = null;
       if (mcpReport.workspace_path && (!cwdEl.dataset.cwd || cwdEl.dataset.cwd === "—")) {
         setDisplayedCwd(mcpReport.workspace_path);
       }
@@ -1319,6 +1329,67 @@ async function loadAskResources(): Promise<void> {
     renderResourceChips();
   } catch (error) {
     setStatus(t("chat.resourcesLoadFailed", { error: String(error) }), "warn");
+  }
+}
+
+function renderWorkspaceSwitcher(doc: {
+  active: string | null;
+  workspaces: Record<string, { path: string }>;
+}): void {
+  const names = Object.keys(doc.workspaces).sort();
+  workspaceSelectEl.innerHTML = "";
+  if (names.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = t("ask.workspaceEmpty");
+    workspaceSelectEl.appendChild(opt);
+    workspaceSelectEl.disabled = true;
+    workspaceActivateEl.disabled = true;
+    return;
+  }
+
+  workspaceSelectEl.disabled = false;
+  workspaceActivateEl.disabled = false;
+  for (const name of names) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    const path = doc.workspaces[name]?.path ?? "";
+    opt.textContent = path ? `${name} · ${shortCwdLabel(path)}` : name;
+    if (name === doc.active) {
+      opt.selected = true;
+    }
+    workspaceSelectEl.appendChild(opt);
+  }
+  if (!doc.active && names[0]) {
+    workspaceSelectEl.value = names[0];
+  }
+  workspaceActivateEl.disabled = Boolean(doc.active && workspaceSelectEl.value === doc.active);
+}
+
+async function activateSelectedWorkspace(): Promise<void> {
+  const name = workspaceSelectEl.value.trim();
+  if (!name) {
+    setStatus(t("ask.workspaceEmpty"), "warn");
+    return;
+  }
+  workspaceActivateEl.disabled = true;
+  setStatus(t("ask.workspaceActivating", { name }), "muted");
+  try {
+    await invoke("use_workspace_command", { name });
+    setStatus(t("ask.workspaceActivated", { name }), "ok");
+    await loadAskResources();
+  } catch (error) {
+    setStatus(String(error), "error");
+  } finally {
+    workspaceActivateEl.disabled = false;
+  }
+}
+
+async function openMainWorkspace(): Promise<void> {
+  try {
+    await invoke("focus_main_tab_command", { tab: "workspace" });
+  } catch (error) {
+    setStatus(String(error), "error");
   }
 }
 
@@ -1571,15 +1642,19 @@ async function ensureListener(): Promise<void> {
         assistantRaw = "";
         pendingText = "";
         turnHadAssistantText = false;
+        pushActivity("think", t("chat.waitingModel"));
         break;
       case "status":
         pushActivity(payload.phase, payload.message);
+        noteVerifyBrowserSignal(payload.message, "status");
         break;
       case "delta":
         queueAssistantText(payload.text);
+        noteVerifyBrowserSignal(payload.text, "assistant");
         break;
       case "stdout_line":
         queueAssistantText(`${payload.line}\n`);
+        noteVerifyBrowserSignal(payload.line, "assistant");
         break;
       case "stderr_line":
         pushActivity("error", payload.line);
@@ -1587,6 +1662,7 @@ async function ensureListener(): Promise<void> {
         break;
       case "permission_request":
         pushPermissionCard(payload);
+        noteVerifyBrowserSignal(payload.tool_name, "tool");
         break;
       case "permission_resolved":
         markPermissionResolved(payload.request_id, payload.allowed);
@@ -1598,6 +1674,7 @@ async function ensureListener(): Promise<void> {
           const fallback = preferPlainSummary(payload.summary);
           if (fallback) appendAssistantChunk(fallback);
         }
+        noteVerifyBrowserSignal(assistantRaw, "assistant");
         clearEphemeralActivity();
         sealAssistantBubble();
         // Disable any unanswered permission cards if the session ended.
@@ -1617,6 +1694,9 @@ async function ensureListener(): Promise<void> {
         if (!turnHadAssistantText) {
           appendBubble("meta", t("chat.emptyReply"), { persist: false });
         }
+        reportVerifyMcpIfNeeded();
+        applyVerifyMcpFooter();
+        setBusy(false);
         // Success stays silent in the transcript; failures get one short note.
         if (payload.status !== "succeeded") {
           appendBubble(
@@ -1644,6 +1724,120 @@ function readInitialRuntime(): void {
   }
 }
 
+const ASK_VERIFY_DRAFT_KEY = "agent-doctor.ask.verifyDraft";
+
+/** When true, this Ask turn is a browser MCP pathway verify. */
+let verifyMcpTurn = false;
+let verifySawBrowserNavigate = false;
+let verifyMcpReported = false;
+let verifyTurnText = "";
+
+function looksLikeBrowserToolCall(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("browser_navigate") ||
+    lower.includes("browser_snapshot") ||
+    lower.includes("browser_get_text") ||
+    lower.includes("browser__browser_") ||
+    /mcp__browser__/.test(lower) ||
+    /browser\.(navigate|snapshot|click)/.test(lower)
+  );
+}
+
+/** OpenClaw often replies with the page title and never streams the tool name. */
+function looksLikeBrowserMcpVerifyEvidence(message: string): boolean {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes("browser mcp ready") ||
+    lower.includes("browser mcp skipped") ||
+    lower.includes("browser mcp wire") ||
+    lower.includes("watching for browser")
+  ) {
+    return false;
+  }
+  const hasUrl = lower.includes("example.com");
+  const hasTitle = lower.includes("example domain");
+  const claimedUse =
+    /已用\s*browser\s*mcp/.test(message) ||
+    /\bused\s+browser\s+mcp\b/.test(lower) ||
+    /with\s+browser\s+mcp/.test(lower);
+  return (hasUrl && hasTitle) || (claimedUse && (hasUrl || hasTitle));
+}
+
+function noteVerifyBrowserSignal(text: string, source: "status" | "assistant" | "tool"): void {
+  if (!verifyMcpTurn || verifySawBrowserNavigate || !text) return;
+  if (source === "assistant") {
+    verifyTurnText += `${text}\n`;
+  }
+  if (source === "status") {
+    // Wiring notes like "browser MCP ready" are not tool calls.
+    if (looksLikeBrowserToolCall(text)) verifySawBrowserNavigate = true;
+    return;
+  }
+  if (looksLikeBrowserToolCall(text) || looksLikeBrowserMcpVerifyEvidence(text)) {
+    verifySawBrowserNavigate = true;
+  }
+}
+
+function applyVerifyEvidenceFromAssistant(): void {
+  if (!verifyMcpTurn || verifySawBrowserNavigate) return;
+  const corpus = [verifyTurnText, assistantRaw, pendingText].filter(Boolean).join("\n");
+  if (looksLikeBrowserToolCall(corpus) || looksLikeBrowserMcpVerifyEvidence(corpus)) {
+    verifySawBrowserNavigate = true;
+  }
+}
+
+function reportVerifyMcpIfNeeded(): void {
+  if (!verifyMcpTurn || verifyMcpReported) return;
+  applyVerifyEvidenceFromAssistant();
+  verifyMcpReported = true;
+  appendBubble(
+    "meta",
+    verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
+    { persist: false },
+  );
+}
+
+function applyVerifyMcpFooter(): void {
+  if (!verifyMcpTurn) return;
+  applyVerifyEvidenceFromAssistant();
+  setStatus(
+    verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
+    verifySawBrowserNavigate ? "ok" : "error",
+  );
+}
+
+function applyVerifyDraftIfAny(): void {
+  const raw = localStorage.getItem(ASK_VERIFY_DRAFT_KEY);
+  if (!raw?.trim()) {
+    return;
+  }
+  localStorage.removeItem(ASK_VERIFY_DRAFT_KEY);
+
+  let prompt = raw.trim();
+  let autoSend = false;
+  try {
+    const parsed = JSON.parse(raw) as { prompt?: string; autoSend?: boolean };
+    if (typeof parsed.prompt === "string" && parsed.prompt.trim()) {
+      prompt = parsed.prompt.trim();
+      autoSend = Boolean(parsed.autoSend);
+    }
+  } catch {
+    // Legacy plain-string draft.
+  }
+
+  promptEl.value = prompt;
+  autoResizePrompt();
+  setStatus(t("chat.verifyDraftReady"), "ok");
+  if (autoSend) {
+    window.setTimeout(() => {
+      if (!busy && promptEl.value.trim()) {
+        void sendAsk({ verifyMcp: true });
+      }
+    }, 450);
+  }
+}
+
 async function openTerminal(): Promise<void> {
   try {
     await invoke("open_session_command", {
@@ -1659,16 +1853,29 @@ async function openTerminal(): Promise<void> {
 }
 
 async function cancelAsk(): Promise<void> {
+  const gen = busyGen;
   try {
-    await invoke<boolean>("cancel_prompt_session_command");
+    const stopped = await invoke<boolean>("cancel_prompt_session_command");
     setStatus(t("chat.cancelling"), "warn");
-    pushActivity("info", t("chat.cancelling"));
+    pushActivity("think", t("chat.cancelling"));
+    if (!stopped && busy && busyGen === gen) {
+      setBusy(false);
+      setStatus(t("chat.forceStopped"), "warn");
+      return;
+    }
+    window.setTimeout(() => {
+      if (busy && busyGen === gen) {
+        setBusy(false);
+        setStatus(t("chat.forceStopped"), "warn");
+      }
+    }, 2500);
   } catch (error) {
+    setBusy(false);
     setStatus(t("chat.cancelFailed", { error: String(error) }), "error");
   }
 }
 
-async function sendAsk(): Promise<void> {
+async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   if (busy) return;
   const text = promptEl.value.trim();
   const attachments = [...pendingAttachments];
@@ -1680,6 +1887,14 @@ async function sendAsk(): Promise<void> {
   const runtime = selectedRuntime();
   const elevated = elevatedEl.checked;
   if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
+
+  verifyMcpTurn = Boolean(opts?.verifyMcp);
+  verifySawBrowserNavigate = false;
+  verifyMcpReported = false;
+  verifyTurnText = "";
+  if (verifyMcpTurn) {
+    pushActivity("info", t("chat.verifyMcpWatching"));
+  }
 
   const mentions = ensureBrowserMention(mergeMentionsForSend(text), text);
   const cleaned = stripMentionTokens(text);
@@ -1704,6 +1919,7 @@ async function sendAsk(): Promise<void> {
   turnHadAssistantText = false;
   setBusy(true);
   setStatus(t("chat.running", { runtime }), "muted");
+  pushActivity("think", t("chat.waitingModel"));
 
   const prompt = buildPromptWithHistory(promptUserText, attachments);
   const resumeThreadId = activeSession().runtimeThreadId?.trim() || null;
@@ -1729,13 +1945,44 @@ async function sendAsk(): Promise<void> {
     }
     const tone =
       report.status === "succeeded" ? "ok" : report.status === "cancelled" ? "warn" : "error";
-    setStatus(t("chat.done", { status: report.status, ms: String(report.duration_ms) }), tone);
+    if (verifyMcpTurn) {
+      applyVerifyMcpFooter();
+    } else {
+      setStatus(t("chat.done", { status: report.status, ms: String(report.duration_ms) }), tone);
+    }
   } catch (error) {
-    setStatus(t("chat.failed", { error: String(error) }), "error");
-    appendBubble("meta", String(error), { persist: false });
+    const message = String(error);
+    if (/already running/i.test(message)) {
+      try {
+        await invoke<boolean>("cancel_prompt_session_command");
+      } catch {
+        /* ignore */
+      }
+      setStatus(t("chat.forceStopped"), "warn");
+      appendBubble("meta", t("chat.forceStopped"), { persist: false });
+    } else {
+      setStatus(t("chat.failed", { error: message }), "error");
+      appendBubble("meta", message, { persist: false });
+    }
   } finally {
+    applyVerifyEvidenceFromAssistant();
+    if (verifySawBrowserNavigate) {
+      reportVerifyMcpIfNeeded();
+      applyVerifyMcpFooter();
+    }
     setBusy(false);
     renderSessionList();
+    const wasVerify = verifyMcpTurn;
+    if (wasVerify && !verifyMcpReported) {
+      window.setTimeout(() => {
+        applyVerifyEvidenceFromAssistant();
+        reportVerifyMcpIfNeeded();
+        applyVerifyMcpFooter();
+        verifyMcpTurn = false;
+      }, 80);
+    } else {
+      verifyMcpTurn = false;
+    }
   }
 }
 
@@ -1743,8 +1990,11 @@ function boot(): void {
   readInitialRuntime();
   applyI18n();
   renderActiveMessages();
-  void loadAskResources();
   void setupFileDrop();
+  void (async () => {
+    await loadAskResources();
+    applyVerifyDraftIfAny();
+  })();
 
   actionEl.addEventListener("click", () => {
     if (busy) void cancelAsk();
@@ -1767,6 +2017,20 @@ function boot(): void {
     event.stopPropagation();
     void openMainResources();
   });
+  workspaceActivateEl.addEventListener("click", () => void activateSelectedWorkspace());
+  workspaceSelectEl.addEventListener("change", () => {
+    const name = workspaceSelectEl.value.trim();
+    if (!name || !workspaceDoc) {
+      return;
+    }
+    const path = workspaceDoc.workspaces[name]?.path;
+    if (path) {
+      cwdEl.textContent = path;
+      cwdEl.title = path;
+    }
+    workspaceActivateEl.disabled = workspaceDoc.active === name;
+  });
+  workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());
   elevatedEl.addEventListener("change", () => {
     if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
       elevatedEl.checked = false;
@@ -1836,7 +2100,10 @@ function boot(): void {
     if (isAskRuntime(runtime)) {
       ensureRuntimeSession(runtime);
     }
-    void loadAskResources();
+    void (async () => {
+      await loadAskResources();
+      applyVerifyDraftIfAny();
+    })();
     promptEl.focus();
   });
 

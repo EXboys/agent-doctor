@@ -28,8 +28,17 @@ pub struct BrowserMcpStatus {
 }
 
 pub fn browser_mcp_status(port: u16) -> BrowserMcpStatus {
+    browser_mcp_status_with_probe(port, true)
+}
+
+/// When `probe_live` is false, skip CDP connect so UI status never wakes Chrome.
+pub fn browser_mcp_status_with_probe(port: u16, probe_live: bool) -> BrowserMcpStatus {
     let discovery = discover_chrome().ok();
-    let connected = connect_chrome(port).ok();
+    let connected = if probe_live {
+        connect_chrome(port).ok()
+    } else {
+        None
+    };
     let system = system_chrome_user_data_dir(discovery.as_ref().map(|d| &d.binary_path));
     let isolated = isolated_chrome_user_data_dir();
 

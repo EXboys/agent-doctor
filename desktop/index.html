@@ -55,6 +55,8 @@
         </div>
       </section>
 
+      <div class="widget-body">
+      <div class="widget-primary">
       <nav class="main-tabs main-tabs-4" id="main-tabs" role="tablist" aria-label="Main sections">
         <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.agents">Agents</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="resources" data-i18n="nav.resources">资源</button>
@@ -64,26 +66,26 @@
 
       <div class="main-panels">
         <section class="main-panel is-active" id="panel-diagnose" role="tabpanel" data-main-panel="diagnose">
-          <div class="ws-chip" id="agents-ws-chip">
-            <span class="ws-chip-label">
-              <span data-i18n="agents.wsCurrent">当前工作区</span>
-              <strong id="agents-ws-name">—</strong>
-            </span>
-            <span class="ws-chip-actions">
-              <button id="agents-ws-quick" type="button" class="ws-chip-btn" data-i18n="agents.wsQuickSwitch">切换 ▾</button>
-              <button id="agents-ws-manage" type="button" class="ws-chip-btn ws-chip-btn-muted" data-i18n="workspaces.manage">管理</button>
-            </span>
-          </div>
-          <div class="ws-quick-picker" id="agents-ws-picker" hidden>
-            <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
-            <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切工作区</p>
-          </div>
+            <div class="ws-chip" id="agents-ws-chip">
+              <span class="ws-chip-label">
+                <span data-i18n="agents.wsCurrent">当前工作区</span>
+                <strong id="agents-ws-name">—</strong>
+              </span>
+              <span class="ws-chip-actions">
+                <button id="agents-ws-quick" type="button" class="ws-chip-btn" data-i18n="agents.wsQuickSwitch">切换 ▾</button>
+                <button id="agents-ws-manage" type="button" class="ws-chip-btn ws-chip-btn-muted" data-i18n="workspaces.manage">管理</button>
+              </span>
+            </div>
+            <div class="ws-quick-picker" id="agents-ws-picker" hidden>
+              <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
+              <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切工作区</p>
+            </div>
 
-          <section class="widget-section runtime-section">
-            <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
-            <span id="runtime-count" class="sr-only">—</span>
-            <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
-          </section>
+            <section class="widget-section runtime-section">
+              <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
+              <span id="runtime-count" class="sr-only">—</span>
+              <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
+            </section>
         </section>
 
         <section class="main-panel" id="panel-resources" role="tabpanel" data-main-panel="resources" hidden>
@@ -388,6 +390,11 @@
             <p id="preset-hint" class="section-footnote"></p>
           </section>
         </section>
+      </div>
+      </div>
+      <aside id="diagnose-detail" class="diagnose-detail" hidden>
+        <div id="diagnose-detail-body"></div>
+      </aside>
       </div>
 
       <footer class="widget-footer">
