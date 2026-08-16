@@ -250,7 +250,7 @@ where
     let stdout_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_out, &line);
             if let Ok(mut guard) = q_out.lock() {
                 guard.push((true, line));
@@ -263,7 +263,7 @@ where
     let stderr_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_err, &line);
             if let Ok(mut guard) = q_err.lock() {
                 guard.push((false, line));

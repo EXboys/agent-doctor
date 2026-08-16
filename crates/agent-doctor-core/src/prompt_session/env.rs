@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -158,11 +158,7 @@ pub(crate) fn resolve_hermes_overlay(
     Some((url, key, model))
 }
 
-fn ensure_hermes_model_config(
-    home: &PathBuf,
-    gateway_url: &str,
-    model: Option<&str>,
-) -> Result<()> {
+fn ensure_hermes_model_config(home: &Path, gateway_url: &str, model: Option<&str>) -> Result<()> {
     use serde_yaml::{Mapping, Value as YamlValue};
     let path = home.join("config.yaml");
     if let Some(parent) = path.parent() {
@@ -209,7 +205,7 @@ fn ensure_hermes_model_config(
     Ok(())
 }
 
-fn upsert_dotenv_key(path: &PathBuf, key: &str, value: &str) -> Result<()> {
+fn upsert_dotenv_key(path: &Path, key: &str, value: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }

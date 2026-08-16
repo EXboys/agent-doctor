@@ -26,6 +26,11 @@ use super::{
 };
 use crate::session_launch::resolve_session_cwd;
 
+type CodexPumpOutcome = (
+    (PromptSessionStatus, Option<i32>, String, String),
+    Option<String>,
+);
+
 static RPC_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub struct CodexAskBackend;
@@ -190,10 +195,7 @@ fn run_codex_app_server(
         on_event(event);
     };
 
-    let result = (|| -> Result<(
-        (PromptSessionStatus, Option<i32>, String, String),
-        Option<String>,
-    )> {
+    let result = (|| -> Result<CodexPumpOutcome> {
         // initialize
         let init_id = next_rpc_id();
         control.write_line(
@@ -400,7 +402,7 @@ where
     let stdout_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_out, &line);
             if let Ok(mut guard) = q_out.lock() {
                 guard.push((true, line));
@@ -413,7 +415,7 @@ where
     let stderr_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             push_capped(&acc_err, &line);
             if let Ok(mut guard) = q_err.lock() {
                 guard.push((false, line));
