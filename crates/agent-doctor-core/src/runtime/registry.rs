@@ -3,23 +3,27 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::adapter::RuntimeAdapter;
-use crate::adapters::{ClaudeCodeAdapter, CodexAdapter, HermesAdapter, OpenClawAdapter};
+use crate::adapters::{
+    ClaudeCodeAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter,
+};
 use crate::lifecycle::{
-    run_claude_code_lifecycle, run_codex_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
+    run_claude_code_lifecycle, run_codex_lifecycle, run_deepseek_harness_lifecycle,
+    run_hermes_lifecycle, run_openclaw_lifecycle, DeepSeekHarnessLifecycleAction,
     HermesLifecycleAction, NpmCliLifecycleAction, OpenClawLifecycleAction,
 };
 use crate::probe::runtimes::{
-    openclaw_probe_deep, probe_deep, schema_claude_code, schema_codex, schema_hermes,
-    schema_openclaw,
+    deepseek_harness_probe_deep, openclaw_probe_deep, probe_deep, schema_claude_code, schema_codex,
+    schema_deepseek_harness, schema_hermes, schema_openclaw,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
-    apply_codex_playbook_filtered, apply_hermes_playbook, apply_hermes_playbook_filtered,
-    apply_openclaw_playbook, apply_openclaw_playbook_filtered, suggest_claude_code_repairs,
-    suggest_codex_repairs, suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult,
-    SuggestedRepair,
+    apply_codex_playbook_filtered, apply_deepseek_harness_playbook,
+    apply_deepseek_harness_playbook_filtered, apply_hermes_playbook,
+    apply_hermes_playbook_filtered, apply_openclaw_playbook, apply_openclaw_playbook_filtered,
+    suggest_claude_code_repairs, suggest_codex_repairs, suggest_deepseek_harness_repairs,
+    suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult, SuggestedRepair,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,6 +100,7 @@ const OPENCLAW_ENV: &[&str] = &["OPENCLAW", "EVOTOWN", "OPENAI", "ANTHROPIC"];
 const CLAUDE_ENV: &[&str] = &["ANTHROPIC", "CLAUDE"];
 const CODEX_ENV: &[&str] = &["OPENAI", "CODEX"];
 const HERMES_ENV: &[&str] = &["HERMES", "OPENAI", "ANTHROPIC", "DEEPSEEK", "GOOGLE"];
+const DEEPSEEK_HARNESS_ENV: &[&str] = &["DSH", "DEEPSEEK"];
 
 fn openclaw_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(OpenClawAdapter)
@@ -113,6 +118,10 @@ fn hermes_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(HermesAdapter)
 }
 
+fn deepseek_harness_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(DeepSeekHarnessAdapter)
+}
+
 fn run_openclaw_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
     let action = match action {
         RuntimeLifecycleAction::Install => OpenClawLifecycleAction::Install,
@@ -127,6 +136,14 @@ fn run_hermes_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
         RuntimeLifecycleAction::Update => HermesLifecycleAction::Update,
     };
     run_hermes_lifecycle(action)
+}
+
+fn run_deepseek_harness_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => DeepSeekHarnessLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => DeepSeekHarnessLifecycleAction::Update,
+    };
+    run_deepseek_harness_lifecycle(action)
 }
 
 fn run_claude_code_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -175,6 +192,20 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         run_lifecycle: Some(run_hermes_lifecycle_action),
     },
     RuntimeDescriptor {
+        id: "deepseek-harness",
+        probe: RuntimeProbeSpec {
+            binary_name: "dsh",
+            config_format: ConfigFormat::Yaml,
+            env_keywords: DEEPSEEK_HARNESS_ENV,
+        },
+        create_adapter: deepseek_harness_adapter,
+        schema_probe: Some(schema_deepseek_harness),
+        deep_probe: Some(deepseek_harness_probe_deep),
+        suggest_repairs: Some(suggest_deepseek_harness_repairs),
+        apply_playbook: Some(apply_deepseek_harness_playbook),
+        run_lifecycle: Some(run_deepseek_harness_lifecycle_action),
+    },
+    RuntimeDescriptor {
         id: "claude-code",
         probe: RuntimeProbeSpec {
             binary_name: "claude",
@@ -209,6 +240,10 @@ pub fn all_runtime_ids() -> impl Iterator<Item = &'static str> {
 }
 
 pub fn descriptor_by_id(runtime_id: &str) -> Option<&'static RuntimeDescriptor> {
+    let runtime_id = match runtime_id.trim().to_ascii_lowercase().as_str() {
+        "dsh" | "deepseek" | "deepseek_harness" => "deepseek-harness",
+        _ => runtime_id,
+    };
     RUNTIME_REGISTRY.iter().find(|entry| entry.id == runtime_id)
 }
 
@@ -277,11 +312,17 @@ pub fn apply_runtime_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
+    let runtime_id = descriptor_by_id(runtime_id)
+        .map(|descriptor| descriptor.id)
+        .unwrap_or(runtime_id);
     if runtime_id == "openclaw" {
         return apply_openclaw_playbook_filtered(probe, only_ids);
     }
     if runtime_id == "hermes" {
         return apply_hermes_playbook_filtered(probe, only_ids);
+    }
+    if runtime_id == "deepseek-harness" {
+        return apply_deepseek_harness_playbook_filtered(probe, only_ids);
     }
     if runtime_id == "claude-code" {
         return apply_claude_code_playbook_filtered(probe, only_ids);
@@ -321,7 +362,16 @@ mod tests {
     #[test]
     fn registry_has_unique_ids_in_stable_order() {
         let ids: Vec<_> = RUNTIME_REGISTRY.iter().map(|entry| entry.id).collect();
-        assert_eq!(ids, vec!["openclaw", "hermes", "claude-code", "codex"]);
+        assert_eq!(
+            ids,
+            vec![
+                "openclaw",
+                "hermes",
+                "deepseek-harness",
+                "claude-code",
+                "codex"
+            ]
+        );
         let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len());
     }
@@ -353,6 +403,21 @@ mod tests {
         assert!(hermes.apply_playbook.is_some());
         assert!(hermes.run_lifecycle.is_some());
         assert!(hermes.deep_probe.is_some());
+    }
+
+    #[test]
+    fn deepseek_harness_entry_is_fully_wired_and_aliases_resolve() {
+        let runtime = descriptor_by_id("deepseek-harness").expect("deepseek-harness");
+        assert_eq!(runtime.probe.binary_name, "dsh");
+        assert!(runtime.schema_probe.is_some());
+        assert!(runtime.deep_probe.is_some());
+        assert!(runtime.suggest_repairs.is_some());
+        assert!(runtime.apply_playbook.is_some());
+        assert!(runtime.run_lifecycle.is_some());
+        assert_eq!(
+            descriptor_by_id("dsh").map(|item| item.id),
+            Some(runtime.id)
+        );
     }
 
     #[test]

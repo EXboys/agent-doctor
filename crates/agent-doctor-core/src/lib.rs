@@ -20,7 +20,11 @@ pub use adapter::{
     AdapterDiscovery, ApplyReport, RuntimeAdapter, RuntimeModelPreset, RuntimeModelState,
     RuntimeProfile,
 };
-pub use adapters::{CodexAdapter, HermesAdapter, HermesSettings, OpenClawAdapter};
+pub use adapters::{
+    CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, HermesSettings, OpenClawAdapter,
+    DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, DEEPSEEK_HARNESS_CLI,
+    DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID, DEEPSEEK_HARNESS_VERSION,
+};
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
@@ -40,8 +44,10 @@ pub use install::{
     InstallOptions, InstallProgressEvent, InstallReport,
 };
 pub use lifecycle::{
-    hermes_shell_command, openclaw_shell_command, run_hermes_lifecycle, run_openclaw_lifecycle,
-    HermesLifecycleAction, OpenClawLifecycleAction,
+    deepseek_harness_install_shell_command, deepseek_harness_shell_command,
+    deepseek_harness_update_shell_command, hermes_shell_command, openclaw_shell_command,
+    run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
+    DeepSeekHarnessLifecycleAction, HermesLifecycleAction, OpenClawLifecycleAction,
 };
 pub use presets::{
     apply_profile_model, default_local_hermes_preset, default_work_models, effective_models,
@@ -68,10 +74,12 @@ pub use remote::{
     RemoteProjectEntry, RemoteRuntimeDoctorResult, SshBackend,
 };
 pub use repair::{
-    allowed_paths_for_runtime, apply_hermes_playbook, apply_hermes_playbook_filtered,
-    build_repair_preview, build_repair_preview_from_bundle, execute_repair, execute_repair_loop,
-    explain_runtime, list_runtime_backup_ids, mask_secret_value, merge_env_with_vault,
-    probe_health_summary, probe_issue_score, restore_runtime_backup, suggest_hermes_repairs,
+    allowed_paths_for_runtime, apply_deepseek_harness_playbook,
+    apply_deepseek_harness_playbook_filtered, apply_hermes_playbook,
+    apply_hermes_playbook_filtered, build_repair_preview, build_repair_preview_from_bundle,
+    execute_repair, execute_repair_loop, explain_runtime, list_runtime_backup_ids,
+    mask_secret_value, merge_env_with_vault, probe_health_summary, probe_issue_score,
+    restore_runtime_backup, suggest_deepseek_harness_repairs, suggest_hermes_repairs,
     unmask_file_content, AiRepairPlanner, AuditReport, BackupSnapshot, DeterministicPlanner,
     DiagnosticBundle, DiagnosticFact, ExplainCheck, ExplainInput, ExplainInstallFailure,
     ExplainReport, ExplainSuggestion, LlmConfig, MaskedFileSnippet, MaskedRepairContext,

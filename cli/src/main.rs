@@ -27,7 +27,7 @@ enum Commands {
     },
     /// Rule-based install for registered runtimes (rule install when available, else AI)
     Install {
-        /// Runtime id (e.g. openclaw, hermes)
+        /// Runtime id (e.g. openclaw, hermes, deepseek-harness)
         runtime: String,
         /// AI diagnosis after install (or on failure)
         #[arg(long)]
@@ -57,7 +57,7 @@ enum Commands {
     },
     /// Back up, diagnose, and repair a runtime
     Repair {
-        /// Runtime id (e.g. openclaw, hermes, claude-code, codex)
+        /// Runtime id (e.g. openclaw, hermes, deepseek-harness, claude-code, codex)
         runtime: String,
         /// Execute backup, typed actions, re-probe verification, and write audit metadata
         #[arg(long, conflicts_with = "rollback")]
@@ -177,7 +177,7 @@ enum Commands {
     },
     /// Open an interactive CLI session (Claude Code deep link / system terminal)
     Open {
-        /// Runtime id: claude-code, codex, hermes, openclaw
+        /// Runtime id: claude-code, codex, deepseek-harness, hermes, openclaw
         runtime: String,
         /// Working directory (default: active workspace or cwd)
         #[arg(long)]
@@ -192,9 +192,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// One-shot non-interactive ask via Claude / Codex / Hermes / OpenClaw (streams output)
+    /// One-shot non-interactive ask via Claude / Codex / DeepSeek Harness / Hermes / OpenClaw
     Ask {
-        /// Runtime id: claude-code, codex, hermes, or openclaw
+        /// Runtime id: claude-code, codex, deepseek-harness, hermes, or openclaw
         runtime: String,
         /// Prompt text
         prompt: String,

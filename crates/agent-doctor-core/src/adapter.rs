@@ -42,6 +42,9 @@ pub trait RuntimeAdapter: Send + Sync {
     fn display_name(&self) -> &'static str;
     fn discover(&self) -> AdapterDiscovery;
     fn config_paths(&self) -> Vec<PathBuf>;
+    fn config_paths_required(&self) -> bool {
+        true
+    }
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile>;
 
     fn read_model(&self) -> anyhow::Result<Option<RuntimeModelState>> {

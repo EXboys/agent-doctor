@@ -1,3 +1,6 @@
+use crate::lifecycle::deepseek_harness::{
+    deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
+};
 use crate::lifecycle::hermes::{hermes_install_shell_command, hermes_update_shell_command};
 use crate::lifecycle::npm_cli::{
     claude_code_install_shell_command, claude_code_update_shell_command,
@@ -11,6 +14,10 @@ pub fn runtime_allowed_bash_commands(runtime_id: &str) -> Vec<String> {
         "hermes" => vec![
             hermes_install_shell_command(),
             hermes_update_shell_command(),
+        ],
+        "deepseek-harness" => vec![
+            deepseek_harness_install_shell_command(),
+            deepseek_harness_update_shell_command(),
         ],
         "openclaw" => vec![
             openclaw_install_shell_command(),
@@ -45,6 +52,11 @@ pub fn bash_command_allowed_for_runtime(runtime_id: &str, command: &str) -> bool
                 || sub.starts_with("--version")
                 || sub.starts_with("-V")
                 || sub.starts_with("version"));
+    }
+
+    if trimmed.starts_with("dsh ") && runtime_id == "deepseek-harness" {
+        let sub = trimmed.trim_start_matches("dsh ").trim();
+        return sub.starts_with("--version") || sub.starts_with("-V") || sub.starts_with("version");
     }
 
     if trimmed.starts_with("openclaw ") {

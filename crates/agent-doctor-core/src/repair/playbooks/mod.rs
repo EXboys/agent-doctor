@@ -1,7 +1,12 @@
+pub mod deepseek_harness;
 pub mod hermes;
 pub mod npm_cli;
 pub mod openclaw;
 
+pub use deepseek_harness::{
+    apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,
+    suggest_deepseek_harness_repairs,
+};
 pub use hermes::PlaybookApplyResult;
 pub use hermes::{apply_hermes_playbook, apply_hermes_playbook_filtered, suggest_hermes_repairs};
 pub use npm_cli::{

@@ -277,6 +277,8 @@ fn probe_configs(
         return;
     }
 
+    let config_paths_required = adapter.config_paths_required();
+    let mut existing_paths = 0usize;
     for path in config_paths {
         let path_text = path.display().to_string();
         facts.push(DiagnosticFact::new(
@@ -286,16 +288,19 @@ fn probe_configs(
         ));
 
         if !path.exists() {
-            checks.push(ProbeCheck::new(
-                format!("config.exists:{}", path.display()),
-                "Config exists",
-                ProbeStatus::Warn,
-                ProbeSeverity::Warning,
-                format!("config file not found at {}", path.display()),
-                SensitivityLevel::LocalPath,
-            ));
+            if config_paths_required {
+                checks.push(ProbeCheck::new(
+                    format!("config.exists:{}", path.display()),
+                    "Config exists",
+                    ProbeStatus::Warn,
+                    ProbeSeverity::Warning,
+                    format!("config file not found at {}", path.display()),
+                    SensitivityLevel::LocalPath,
+                ));
+            }
             continue;
         }
+        existing_paths += 1;
 
         checks.push(ProbeCheck::new(
             format!("config.exists:{}", path.display()),
@@ -339,6 +344,16 @@ fn probe_configs(
                 SensitivityLevel::LocalPath,
             )),
         }
+    }
+    if !config_paths_required && existing_paths == 0 {
+        checks.push(ProbeCheck::new(
+            "config.optional",
+            "Optional configuration",
+            ProbeStatus::NotApplicable,
+            ProbeSeverity::Info,
+            "no optional configuration files exist; runtime defaults and environment wiring are used",
+            SensitivityLevel::Public,
+        ));
     }
 }
 

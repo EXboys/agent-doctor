@@ -31,6 +31,8 @@ pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
         "ANTHROPIC_BASE_URL",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "DEEPSEEK_API_KEY",
+        "DEEPSEEK_BASE_URL",
         "CODEX_HOME",
         COMPANY_API_KEY_ENV,
         EVOTOWN_API_KEY_ENV,
@@ -42,6 +44,7 @@ pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
         "AGENT_DOCTOR_CODEX_BIN",
         "AGENT_DOCTOR_HERMES_BIN",
         "AGENT_DOCTOR_OPENCLAW_BIN",
+        "AGENT_DOCTOR_DSH_BIN",
     ] {
         if let Ok(v) = std::env::var(key as &str) {
             if !v.trim().is_empty() {
@@ -89,6 +92,35 @@ pub(crate) fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, Stri
             cmd.env("OPENAI_MODEL", &model_id);
         }
     }
+}
+
+pub(crate) fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    let (url, key) = resolve_deepseek_harness_overlay(overlay);
+    if let Some(key) = key {
+        cmd.env("DEEPSEEK_API_KEY", key);
+    }
+    if let Some(url) = url {
+        cmd.env("DEEPSEEK_BASE_URL", url);
+    }
+}
+
+pub(crate) fn resolve_deepseek_harness_overlay(
+    overlay: &HashMap<String, String>,
+) -> (Option<String>, Option<String>) {
+    let direct_key = overlay
+        .get("DEEPSEEK_API_KEY")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let direct_url = overlay
+        .get("DEEPSEEK_BASE_URL")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let compatible = resolve_hermes_overlay(overlay);
+    let key = direct_key.or_else(|| compatible.as_ref().map(|(_, key, _)| key.clone()));
+    let url = direct_url.or_else(|| compatible.map(|(url, _, _)| url));
+    (url, key)
 }
 
 pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {

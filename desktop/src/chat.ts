@@ -5,7 +5,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-type AskRuntime = "claude-code" | "codex" | "hermes" | "openclaw";
+type AskRuntime =
+  | "claude-code"
+  | "codex"
+  | "hermes"
+  | "openclaw"
+  | "deepseek-harness";
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 type ChatRole = "user" | "assistant" | "meta" | "permission";
 type AttachKind = "file" | "image";
@@ -225,6 +230,7 @@ function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "codex") return "Codex";
   if (runtime === "hermes") return "Hermes";
   if (runtime === "openclaw") return "OpenClaw";
+  if (runtime === "deepseek-harness") return "DeepSeek Harness";
   return "Claude Code";
 }
 
@@ -233,7 +239,8 @@ function isAskRuntime(value: string | null | undefined): value is AskRuntime {
     value === "claude-code" ||
     value === "codex" ||
     value === "hermes" ||
-    value === "openclaw"
+    value === "openclaw" ||
+    value === "deepseek-harness"
   );
 }
 
@@ -359,6 +366,13 @@ function applyI18n(): void {
 
 function updateElevatedLabel(): void {
   const runtime = selectedRuntime();
+  if (runtime === "deepseek-harness") {
+    elevatedLabelEl.textContent = t("chat.elevatedDeepseekHarness");
+    elevatedEl.checked = false;
+    elevatedEl.disabled = true;
+    return;
+  }
+  elevatedEl.disabled = busy;
   if (runtime === "codex") {
     elevatedLabelEl.textContent = t("chat.elevatedCodex");
   } else if (runtime === "hermes") {
@@ -398,7 +412,7 @@ function setBusy(next: boolean): void {
   if (next) busyGen += 1;
   busy = next;
   promptEl.disabled = next;
-  elevatedEl.disabled = next;
+  elevatedEl.disabled = next || selectedRuntime() === "deepseek-harness";
   newSessionEl.disabled = next;
   attachEl.disabled = next;
   sessionListEl.classList.toggle("is-busy", next);
@@ -1230,6 +1244,7 @@ function preferPlainSummary(summary: string): string {
   if (/^codex (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   if (/^hermes (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   if (/^openclaw (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
+  if (/^deepseek-harness (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   return trimmed;
 }
 
@@ -1991,7 +2006,7 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   }
 
   const runtime = selectedRuntime();
-  const elevated = elevatedEl.checked;
+  const elevated = selectedRuntime() !== "deepseek-harness" && elevatedEl.checked;
   if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
 
   verifyMcpTurn = Boolean(opts?.verifyMcp);

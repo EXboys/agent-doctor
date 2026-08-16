@@ -1772,6 +1772,11 @@ body::before {
   background: rgba(59, 130, 246, 0.06);
 }
 
+.card-actions > .btn-ghost[data-open-terminal="1"] {
+  padding: 8px 12px;
+  font-size: 0.78rem;
+}
+
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -1803,6 +1808,10 @@ body::before {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 10px;
+}
+
+.runtime-tabs > .runtime-tab:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .runtime-head .runtime-tabs {
@@ -1979,6 +1988,19 @@ body::before {
 .badge.muted {
   background: var(--surface-inset);
   color: var(--text-soft);
+}
+
+.badge.preview {
+  background: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
+}
+
+.runtime-badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .meta-grid {

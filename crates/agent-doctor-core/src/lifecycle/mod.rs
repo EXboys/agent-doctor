@@ -1,8 +1,14 @@
+pub mod deepseek_harness;
 pub mod hermes;
 pub mod npm_cli;
 pub mod openclaw;
 mod runner;
 
+pub use deepseek_harness::{
+    deepseek_harness_install_shell_command, deepseek_harness_shell_command,
+    deepseek_harness_update_shell_command, run_deepseek_harness_lifecycle,
+    DeepSeekHarnessLifecycleAction,
+};
 pub use hermes::{
     hermes_install_shell_command, hermes_shell_command, run_hermes_lifecycle, HermesLifecycleAction,
 };

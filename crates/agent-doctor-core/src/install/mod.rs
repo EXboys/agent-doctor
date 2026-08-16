@@ -4,7 +4,8 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::lifecycle::{
-    claude_code_install_shell_command, codex_install_shell_command, hermes_install_shell_command,
+    claude_code_install_shell_command, codex_install_shell_command,
+    deepseek_harness_install_shell_command, hermes_install_shell_command,
     openclaw_install_shell_command, run_shell_command_streaming, write_install_log,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
@@ -286,6 +287,7 @@ where
 fn install_shell_command(runtime_id: &str) -> Option<String> {
     match runtime_id {
         "hermes" => Some(hermes_install_shell_command()),
+        "deepseek-harness" => Some(deepseek_harness_install_shell_command()),
         "openclaw" => Some(openclaw_install_shell_command()),
         "claude-code" => Some(claude_code_install_shell_command()),
         "codex" => Some(codex_install_shell_command()),
@@ -296,6 +298,7 @@ fn install_shell_command(runtime_id: &str) -> Option<String> {
 fn install_action_id(runtime_id: &str) -> &'static str {
     match runtime_id {
         "hermes" => "fix-hermes-install",
+        "deepseek-harness" => "fix-deepseek-harness-install",
         "openclaw" => "fix-openclaw-install",
         "claude-code" => "fix-claude-code-install",
         "codex" => "fix-codex-install",
@@ -394,6 +397,10 @@ fn manual_fallback_steps(
                     "Manual: see https://github.com/NousResearch/hermes-agent install docs"
                         .to_string(),
                 );
+            }
+            "deepseek-harness" => {
+                steps.push("Retry: agent-doctor install deepseek-harness".to_string());
+                steps.push("Manual: npm install --global @deepseek-ai/dsh@0.1.0-rc.6".to_string());
             }
             "openclaw" => {
                 steps.push("Retry: agent-doctor install openclaw".to_string());

@@ -2,7 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 
-export type AskRuntime = "claude-code" | "codex" | "hermes" | "openclaw";
+export type AskRuntime =
+  | "claude-code"
+  | "codex"
+  | "hermes"
+  | "openclaw"
+  | "deepseek-harness";
 
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 
@@ -100,7 +105,7 @@ function setBusy(next: boolean): void {
     runtime.disabled = next;
   }
   if (elevated) {
-    elevated.disabled = next;
+    elevated.disabled = next || !supportsElevatedMode(selectedRuntime());
   }
 }
 
@@ -124,10 +129,20 @@ function setHint(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"
 function selectedRuntime(): AskRuntime {
   const { runtime } = els();
   const value = runtime?.value;
-  if (value === "codex" || value === "hermes" || value === "openclaw" || value === "claude-code") {
+  if (
+    value === "codex" ||
+    value === "hermes" ||
+    value === "openclaw" ||
+    value === "deepseek-harness" ||
+    value === "claude-code"
+  ) {
     return value;
   }
   return "claude-code";
+}
+
+function supportsElevatedMode(runtime: AskRuntime): boolean {
+  return runtime !== "deepseek-harness";
 }
 
 function elevatedFlags(runtime: AskRuntime): {
@@ -135,7 +150,7 @@ function elevatedFlags(runtime: AskRuntime): {
   full_auto: boolean;
 } {
   const { elevated } = els();
-  const on = Boolean(elevated?.checked);
+  const on = supportsElevatedMode(runtime) && Boolean(elevated?.checked);
   return {
     dangerously_skip_permissions: (runtime === "claude-code" || runtime === "hermes") && on,
     full_auto: (runtime === "codex" || runtime === "openclaw") && on,
@@ -200,6 +215,18 @@ function updateElevatedLabel(): void {
     return;
   }
   const runtime = selectedRuntime();
+  const { elevated } = els();
+  if (runtime === "deepseek-harness") {
+    label.textContent = t("ask.elevatedDeepseekHarness");
+    if (elevated) {
+      elevated.checked = false;
+      elevated.disabled = true;
+    }
+    return;
+  }
+  if (elevated) {
+    elevated.disabled = busy;
+  }
   if (runtime === "codex") {
     label.textContent = t("ask.elevatedCodex");
   } else if (runtime === "hermes") {

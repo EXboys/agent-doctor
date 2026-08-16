@@ -1,4 +1,4 @@
-//! Light Ask sessions for Claude Code, Codex, Hermes, and OpenClaw.
+//! Light Ask sessions for Claude Code, Codex, DeepSeek Harness, Hermes, and OpenClaw.
 //!
 //! UI consumes a shared [`PromptSessionEvent`] stream. Each runtime is an
 //! [`AskBackend`] adapter (Claude: `control_request`; Codex: `app-server`;
@@ -8,7 +8,8 @@ mod backend;
 mod claude;
 mod codex_app_server;
 mod control;
-mod env;
+mod deepseek_harness;
+pub(crate) mod env;
 mod hermes;
 mod mcp_ensure;
 mod openclaw;
@@ -26,6 +27,7 @@ pub use control::PromptSessionControl;
 
 use claude::ClaudeAskBackend;
 use codex_app_server::CodexAskBackend;
+use deepseek_harness::DeepSeekHarnessAskBackend;
 use hermes::HermesAskBackend;
 use openclaw::OpenClawAskBackend;
 
@@ -190,9 +192,14 @@ where
     match runtime.as_str() {
         "claude-code" => ClaudeAskBackend.run(options, cancel, control, &mut on_event),
         "codex" => CodexAskBackend.run(options, cancel, control, &mut on_event),
+        "deepseek-harness" => {
+            DeepSeekHarnessAskBackend.run(options, cancel, control, &mut on_event)
+        }
         "hermes" => HermesAskBackend.run(options, cancel, control, &mut on_event),
         "openclaw" => OpenClawAskBackend.run(options, cancel, control, &mut on_event),
-        other => bail!("ask supports claude-code, codex, hermes, or openclaw (got '{other}')"),
+        other => bail!(
+            "ask supports claude-code, codex, deepseek-harness, hermes, or openclaw (got '{other}')"
+        ),
     }
 }
 
@@ -248,7 +255,8 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
-        assert!(format!("{err:#}").contains("claude-code, codex, hermes, or openclaw"));
+        assert!(format!("{err:#}")
+            .contains("claude-code, codex, deepseek-harness, hermes, or openclaw"));
     }
 
     #[test]

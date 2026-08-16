@@ -168,6 +168,7 @@ pub fn normalize_runtime(raw: &str) -> String {
         "codex" | "openai-codex" => "codex".into(),
         "openclaw" | "claw" => "openclaw".into(),
         "hermes" => "hermes".into(),
+        "deepseek-harness" | "deepseek_harness" | "deepseek" | "dsh" => "deepseek-harness".into(),
         other => other.to_string(),
     }
 }
@@ -463,5 +464,7 @@ mod tests {
     fn normalize_aliases() {
         assert_eq!(normalize_runtime("claude"), "claude-code");
         assert_eq!(normalize_runtime("OpenClaw"), "openclaw");
+        assert_eq!(normalize_runtime("dsh"), "deepseek-harness");
+        assert_eq!(normalize_runtime("deepseek_harness"), "deepseek-harness");
     }
 }

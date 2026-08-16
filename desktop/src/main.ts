@@ -1016,7 +1016,25 @@ const RUNTIME_SHORT: Record<string, string> = {
   hermes: "HE",
   "claude-code": "CC",
   codex: "CX",
+  "deepseek-harness": "DSH",
 };
+
+const ASK_RUNTIME_IDS = new Set([
+  "claude-code",
+  "codex",
+  "hermes",
+  "openclaw",
+  "deepseek-harness",
+]);
+const BROWSER_MCP_RUNTIME_IDS = new Set(["claude-code", "codex", "hermes", "openclaw"]);
+
+function isAskRuntimeId(runtimeId: string): boolean {
+  return ASK_RUNTIME_IDS.has(runtimeId);
+}
+
+function supportsBrowserMcp(runtimeId: string): boolean {
+  return BROWSER_MCP_RUNTIME_IDS.has(runtimeId);
+}
 
 let lastReport: DoctorReport | null = null;
 let lastProfiles: ProfilesDocument | null = null;
@@ -1232,19 +1250,16 @@ function renderRepairPreview(
       : "";
 
   const executeResult = report.last_execute
-    ? renderRepairExecuteResult(report.last_execute)
+    ? renderRepairExecuteResult(report.runtime_id, report.last_execute)
     : "";
 
   const healthy = summary.fail === 0 && summary.warn === 0;
-  const isAskRuntime =
-    report.runtime_id === "claude-code" ||
-    report.runtime_id === "codex" ||
-    report.runtime_id === "hermes" ||
-    report.runtime_id === "openclaw";
+  const isAskRuntime = isAskRuntimeId(report.runtime_id);
+  const canVerifyBrowserMcp = supportsBrowserMcp(report.runtime_id);
   const funnelNeedsRepair = isAskRuntime && report.can_apply_repair && !healthy && !report.last_execute;
   const funnelCta =
     healthy || report.last_execute
-      ? `<button type="button" class="btn-primary btn-compact" data-action="ask-verify">${escapeHtml(t("repair.funnelAskVerifyCta"))}</button>`
+      ? `<button type="button" class="btn-primary btn-compact" data-action="${canVerifyBrowserMcp ? "ask-verify" : "ask-session"}">${escapeHtml(canVerifyBrowserMcp ? t("repair.funnelAskVerifyCta") : t("runtime.ask"))}</button>`
       : funnelNeedsRepair
         ? `<button type="button" class="btn-primary btn-compact" data-action="apply-repair">${escapeHtml(t("repair.oneClick"))}</button>`
         : "";
@@ -1296,7 +1311,7 @@ function renderRepairPreview(
       }
       ${executeResult}
       ${
-        isAskRuntime
+        canVerifyBrowserMcp
           ? `<div class="repair-smoke-row">
               <button type="button" class="btn-ghost" data-action="browser-smoke">${escapeHtml(t("repair.runBrowserSmoke"))}</button>
               <span class="repair-smoke-slot" data-browser-smoke-slot></span>
@@ -1327,6 +1342,7 @@ function repairFixLabel(actionId: string): string {
 }
 
 function renderRepairExecuteResult(
+  runtimeId: string,
   execute: NonNullable<RepairPreviewResponse["last_execute"]>,
 ): string {
   const playbookExecuted = execute.executed.filter((id) => id.startsWith("fix-"));
@@ -1353,7 +1369,8 @@ function renderRepairExecuteResult(
 
   const verify = formatVerificationSummary(execute.verification_summary);
 
-  const smoke = execute.browser_smoke
+  const canVerifyBrowserMcp = supportsBrowserMcp(runtimeId);
+  const smoke = canVerifyBrowserMcp && execute.browser_smoke
     ? `<p class="repair-browser-smoke ${execute.browser_smoke.ok ? "ok" : "fail"}"><strong>${escapeHtml(
         execute.browser_smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail"),
       )}</strong> ${escapeHtml(execute.browser_smoke.detail)}</p>`
@@ -1376,8 +1393,8 @@ function renderRepairExecuteResult(
       ${guideBlock}
       <p class="repair-verify"><strong>${escapeHtml(t("repair.verifyTitle"))}:</strong> ${escapeHtml(verify)}</p>
       ${smoke}
-      <p class="repair-funnel-hint">${escapeHtml(t("repair.funnelAskVerifyHint"))}</p>
-      <button type="button" class="btn-primary" data-action="ask-verify">${escapeHtml(t("repair.funnelAskVerifyCta"))}</button>
+      ${canVerifyBrowserMcp ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.funnelAskVerifyHint"))}</p>` : ""}
+      <button type="button" class="btn-primary" data-action="${canVerifyBrowserMcp ? "ask-verify" : "ask-session"}">${escapeHtml(canVerifyBrowserMcp ? t("repair.funnelAskVerifyCta") : t("runtime.ask"))}</button>
     </div>
   `;
 }
@@ -1623,11 +1640,7 @@ function renderRuntimeCardActions(
     return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
   }
 
-  const isAskRuntime =
-    runtime.id === "claude-code" ||
-    runtime.id === "codex" ||
-    runtime.id === "hermes" ||
-    runtime.id === "openclaw";
+  const isAskRuntime = isAskRuntimeId(runtime.id);
   if (!isAskRuntime) {
     return canOpenSession(runtime.id)
       ? `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`
@@ -1663,7 +1676,7 @@ function renderRuntimeCardActions(
   } else if (healthy || (diagnosed && preview?.last_execute)) {
     if (!detailOpenForThis) {
       parts.push(
-        `<button type="button" class="btn-primary" data-action="ask-verify">${t("repair.funnelAskVerifyCta")}</button>`,
+        `<button type="button" class="btn-primary" data-action="${supportsBrowserMcp(runtime.id) ? "ask-verify" : "ask-session"}">${supportsBrowserMcp(runtime.id) ? t("repair.funnelAskVerifyCta") : t("runtime.ask")}</button>`,
       );
     }
     parts.push(
@@ -1857,18 +1870,32 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
   const advancedMeta = runtimeAdvancedMeta(runtime);
   const actionButtons = renderRuntimeCardActions(runtime, advancedMeta);
   const summaryMeta = runtime.installed
-    ? runtime.profile.gateway_url
-      ? metaRow("meta.gateway", runtime.profile.gateway_url)
-      : runtime.version
-        ? metaRow("meta.version", runtime.version)
-        : ""
+    ? runtime.id === "deepseek-harness"
+      ? [
+          runtime.version ? metaRow("meta.version", runtime.version) : "",
+          runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
+        ]
+          .filter(Boolean)
+          .join("")
+      : runtime.profile.gateway_url
+        ? metaRow("meta.gateway", runtime.profile.gateway_url)
+        : runtime.version
+          ? metaRow("meta.version", runtime.version)
+          : ""
     : metaRow("meta.status", t("runtime.notDetected"));
+  const previewBadge =
+    runtime.id === "deepseek-harness"
+      ? `<span class="badge preview">${escapeHtml(t("runtime.developerPreview"))}</span>`
+      : "";
 
   return `
     <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
-        <span class="badge ${badgeClass}">${state}</span>
+        <span class="runtime-badges">
+          ${previewBadge}
+          <span class="badge ${badgeClass}">${state}</span>
+        </span>
       </div>
       ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
       ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
@@ -1884,7 +1911,7 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
 }
 
 function canOpenSession(runtimeId: string): boolean {
-  return ["claude-code", "codex", "hermes", "openclaw"].includes(runtimeId);
+  return isAskRuntimeId(runtimeId);
 }
 
 function resolveActiveRuntimeId(runtimes: RuntimeDoctorResult[]): string | null {
@@ -1921,6 +1948,10 @@ function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string):
           ? t("runtime.configAttention")
           : t("runtime.installed");
       const tabMeta = [stateLabel, runtime.version].filter(Boolean).join(" · ");
+      const displayMeta =
+        runtime.id === "deepseek-harness"
+          ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")
+          : tabMeta;
       return `
         <button
           type="button"
@@ -1931,7 +1962,7 @@ function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string):
         >
           <span class="runtime-tab-dot ${runtimeTabDotClass(runtime)}" aria-hidden="true"></span>
           <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
-          <span class="runtime-tab-meta">${escapeHtml(tabMeta)}</span>
+          <span class="runtime-tab-meta">${escapeHtml(displayMeta)}</span>
         </button>
       `;
     })
@@ -2170,6 +2201,7 @@ const RUNTIME_LABELS: Record<string, string> = {
   openclaw: "OpenClaw",
   "claude-code": "Claude",
   codex: "Codex",
+  "deepseek-harness": "DeepSeek Harness",
 };
 
 function renderSkillsInventory(report: SkillsInventoryReport) {
@@ -2487,14 +2519,24 @@ function buildResourceRows(): ResourceRow[] {
     const primary = servers[0];
     const runtimes = [...new Set(servers.map((server) => server.runtime_hint))]
       .sort((a, b) => {
-        const order = ["claude-code", "codex", "hermes", "openclaw", "shared"];
-        return order.indexOf(a) - order.indexOf(b);
+        const order = [
+          "claude-code",
+          "codex",
+          "hermes",
+          "openclaw",
+          "deepseek-harness",
+          "shared",
+        ];
+        const left = order.indexOf(a);
+        const right = order.indexOf(b);
+        return (left < 0 ? order.length : left) - (right < 0 ? order.length : right);
       })
       .map((runtime) => {
         if (runtime === "claude-code") return "Claude";
         if (runtime === "codex") return "Codex";
         if (runtime === "openclaw") return "OpenClaw";
         if (runtime === "hermes") return "Hermes";
+        if (runtime === "deepseek-harness") return "DeepSeek Harness";
         if (runtime === "shared") return "Shared";
         return runtime;
       });
@@ -4110,12 +4152,7 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "ask-session" && runtimeCard) {
     const runtime = runtimeCard.dataset.runtime;
-    if (
-      runtime === "claude-code" ||
-      runtime === "codex" ||
-      runtime === "hermes" ||
-      runtime === "openclaw"
-    ) {
+    if (runtime && isAskRuntimeId(runtime)) {
       void openAskWindow(runtime);
     }
     return;
@@ -4123,12 +4160,7 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "ask-verify" && runtimeCard) {
     const runtime = runtimeCard.dataset.runtime;
-    if (
-      runtime === "claude-code" ||
-      runtime === "codex" ||
-      runtime === "hermes" ||
-      runtime === "openclaw"
-    ) {
+    if (runtime && supportsBrowserMcp(runtime)) {
       void openAskWindowForVerify(runtime);
     }
     return;
@@ -4209,13 +4241,15 @@ diagnoseDetailEl.addEventListener("click", (event) => {
     diagnoseDetailEl.dataset.runtime;
   const card = runtime ? runtimeCardEl(runtime) : null;
 
+  if (action === "ask-session" && runtime) {
+    if (isAskRuntimeId(runtime)) {
+      void openAskWindow(runtime);
+    }
+    return;
+  }
+
   if (action === "ask-verify" && runtime) {
-    if (
-      runtime === "claude-code" ||
-      runtime === "codex" ||
-      runtime === "hermes" ||
-      runtime === "openclaw"
-    ) {
+    if (supportsBrowserMcp(runtime)) {
       void openAskWindowForVerify(runtime);
     }
     return;

@@ -118,6 +118,7 @@ pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSess
             open_claude_code(&cwd, options.prompt.as_deref(), options.prefer_deep_link)
         }
         "codex" => open_codex(&cwd, options.prompt.as_deref()),
+        "deepseek-harness" => open_in_terminal("deepseek-harness", &["dsh", "web"], &cwd, None),
         "hermes" => open_in_terminal("hermes", &["hermes"], &cwd, options.prompt.as_deref()),
         "openclaw" => open_in_terminal(
             "openclaw",
@@ -702,6 +703,11 @@ mod tests {
             claude_cli_deep_link(Path::new(""), None),
             "claude-cli://open"
         );
+    }
+
+    #[test]
+    fn shell_join_preserves_official_dsh_web_entrypoint() {
+        assert_eq!(shell_join(&["dsh", "web"]), "dsh web");
     }
 
     #[test]
