@@ -1189,6 +1189,7 @@ fn open_session_command(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn start_prompt_session_command(
     app: AppHandle,
     state: State<'_, PromptSessionState>,
