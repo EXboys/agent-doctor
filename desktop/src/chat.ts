@@ -184,6 +184,8 @@ let assistantBubble: HTMLElement | null = null;
 let assistantMessageId: string | null = null;
 let assistantRaw = "";
 let activityEl: HTMLElement | null = null;
+let lifecycleActivityEl: HTMLElement | null = null;
+let toolGroupEl: HTMLDetailsElement | null = null;
 let pendingText = "";
 let flushRaf = 0;
 let pendingAttachments: ChatAttachment[] = [];
@@ -403,6 +405,7 @@ function setBusy(next: boolean): void {
   syncActionButton();
   if (!next) {
     settleActivity();
+    finishToolGroup(true);
     if (assistantBubble) assistantBubble.classList.remove("is-streaming");
   }
 }
@@ -420,15 +423,76 @@ function isQuietPhase(phase: string): boolean {
   return phase === "writing" || phase === "streaming" || phase === "info";
 }
 
+/** Remove the transient lifecycle row once a more meaningful event replaces it. */
+function dismissLifecycleActivity(): void {
+  if (!lifecycleActivityEl) return;
+  if (activityEl === lifecycleActivityEl) activityEl = null;
+  lifecycleActivityEl.remove();
+  lifecycleActivityEl = null;
+}
+
+function cleanToolLabel(text: string): string {
+  const cleaned = text
+    .replace(/^(?:调用工具|call(?:ing)? tool)\s*/i, "")
+    .replace(/[….\s]+$/g, "")
+    .trim();
+  const aliases = cleaned.split("__").filter(Boolean);
+  return aliases.length > 1 ? aliases[aliases.length - 1] : cleaned || text;
+}
+
+function toolSignature(text: string): string {
+  return cleanToolLabel(text).toLocaleLowerCase();
+}
+
+function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
+  const count = group.querySelectorAll(".chat-activity.kind-tool").length;
+  const label = group.querySelector<HTMLElement>(".chat-tool-group-label");
+  if (!label) return;
+  if (getLocale() === "zh") {
+    label.textContent = live ? `正在调用工具 · ${count}` : `已调用 ${count} 个工具`;
+  } else {
+    label.textContent = live ? `Using tools · ${count}` : `${count} tool${count === 1 ? "" : "s"} used`;
+  }
+  group.classList.toggle("is-live", live);
+}
+
+function ensureToolGroup(): HTMLDetailsElement {
+  if (toolGroupEl?.isConnected) return toolGroupEl;
+  const group = document.createElement("details");
+  group.className = "chat-tool-group is-live";
+  group.open = true;
+  group.innerHTML = `
+    <summary class="chat-tool-group-summary">
+      <span class="chat-tool-group-icon" aria-hidden="true">$</span>
+      <span class="chat-tool-group-label"></span>
+      <span class="chat-tool-group-chevron" aria-hidden="true"></span>
+    </summary>
+    <div class="chat-tool-list"></div>
+  `;
+  logEl.appendChild(group);
+  toolGroupEl = group;
+  updateToolGroupSummary(group, true);
+  return group;
+}
+
+function finishToolGroup(collapse = true): void {
+  if (!toolGroupEl) return;
+  if (activityEl && toolGroupEl.contains(activityEl)) settleActivity();
+  updateToolGroupSummary(toolGroupEl, false);
+  if (collapse) toolGroupEl.open = false;
+  toolGroupEl = null;
+}
+
 /** Drop ephemeral progress rows so they don't litter the transcript. */
 function clearEphemeralActivity(): void {
   settleActivity();
+  finishToolGroup(true);
   for (const row of logEl.querySelectorAll<HTMLElement>(".chat-activity")) {
-    const phase = row.dataset.phase ?? "";
     const kind = row.dataset.kind ?? "";
-    if (kind === "tool" || kind === "error" || kind === "think") continue;
-    if (isQuietPhase(phase) || phase === "writing") row.remove();
+    if (kind === "tool" || kind === "error") continue;
+    row.remove();
   }
+  lifecycleActivityEl = null;
 }
 
 /** Render progress / tool calls inline in the chat stream (not a side panel). */
@@ -436,29 +500,66 @@ function pushActivity(phase: string, message: string): void {
   const text = message.trim() || phase;
   if (!text) return;
 
-  // Quiet lifecycle chatter — skip (no header live pill).
+  // The permission card that follows carries this state and its resolution.
+  if (phase === "permission") return;
+
+  // Quiet lifecycle chatter — skip.
   if (isQuietPhase(phase) || phase === "writing") return;
 
   const kind = activityKind(phase);
 
-  // Deduplicate identical consecutive tool chips (started+completed, or retries).
   if (kind === "tool") {
-    const last = logEl.querySelector<HTMLElement>(".chat-activity.kind-tool:last-of-type");
-    if (last?.dataset.signature === text) {
+    dismissLifecycleActivity();
+    flushPendingTextSync();
+    sealAssistantBubble();
+
+    const group = ensureToolGroup();
+    const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
+    const signature = toolSignature(text);
+    const last = list.querySelector<HTMLElement>(".chat-activity.kind-tool:last-child");
+    if (last?.dataset.signature === signature) {
       last.classList.add("is-live");
       last.classList.remove("is-done");
       activityEl = last;
+      updateToolGroupSummary(group, true);
       return;
     }
+
+    settleActivity();
+    const row = document.createElement("div");
+    row.className = "chat-activity is-live kind-tool";
+    row.dataset.phase = phase;
+    row.dataset.kind = kind;
+    row.dataset.signature = signature;
+    row.innerHTML = `<span class="chat-tool-step" aria-hidden="true"></span><code class="chat-activity-text chat-tool-cmd"></code>`;
+    row.querySelector<HTMLElement>(".chat-activity-text")!.textContent = cleanToolLabel(text);
+    list.appendChild(row);
+    activityEl = row;
+    updateToolGroupSummary(group, true);
+    logEl.scrollTop = logEl.scrollHeight;
+    return;
+  }
+
+  // Waiting/requesting/thinking are one evolving state, not transcript entries.
+  if (kind !== "error") {
+    if (lifecycleActivityEl?.isConnected) {
+      lifecycleActivityEl.dataset.phase = phase;
+      lifecycleActivityEl.className = `chat-activity is-live kind-${kind}`;
+      const label = lifecycleActivityEl.querySelector<HTMLElement>(".chat-activity-text");
+      if (label) label.textContent = text;
+      activityEl = lifecycleActivityEl;
+      logEl.scrollTop = logEl.scrollHeight;
+      return;
+    }
+  } else {
+    dismissLifecycleActivity();
   }
 
   const softPhase = kind === "write";
   const shouldAppend =
     !activityEl ||
     (!softPhase &&
-      (kind === "tool" ||
-        activityEl.dataset.kind === "tool" ||
-        activityEl.dataset.phase !== phase));
+      (activityEl.dataset.kind === "tool" || activityEl.dataset.phase !== phase));
 
   if (shouldAppend) {
     flushPendingTextSync();
@@ -468,16 +569,12 @@ function pushActivity(phase: string, message: string): void {
     row.className = `chat-activity is-live kind-${kind}`;
     row.dataset.phase = phase;
     row.dataset.kind = kind;
-    if (kind === "tool") row.dataset.signature = text;
-    if (kind === "tool") {
-      row.innerHTML = `<span class="chat-tool-badge" aria-hidden="true">$</span><code class="chat-activity-text chat-tool-cmd"></code>`;
-    } else {
-      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
-    }
+    row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
     const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
     label.textContent = text;
     logEl.appendChild(row);
     activityEl = row;
+    if (kind !== "error") lifecycleActivityEl = row;
   } else if (activityEl) {
     activityEl.dataset.phase = phase;
     activityEl.dataset.kind = kind;
@@ -506,6 +603,8 @@ function pushPermissionCard(payload: {
   flushPendingTextSync();
   sealAssistantBubble();
   settleActivity();
+  finishToolGroup(true);
+  dismissLifecycleActivity();
 
   const persisted = persistMessage("permission", payload.detail.trim() || payload.tool_name, {
     permission: {
@@ -662,6 +761,9 @@ function sealAssistantBubble(): void {
 
 function appendAssistantChunk(chunk: string): void {
   if (!chunk) return;
+  if (activityEl?.dataset.kind === "tool") settleActivity();
+  finishToolGroup(true);
+  dismissLifecycleActivity();
   turnHadAssistantText = true;
   const bubble = ensureAssistantBubble();
   assistantRaw += chunk;
@@ -1588,9 +1690,13 @@ function applyMentionOption(option: MentionRef): void {
 
 function buildPromptWithHistory(userText: string, attachments: ChatAttachment[]): string {
   const session = activeSession();
+  const responseStyle =
+    "Response style: answer the user directly and concisely. Lead with the result. " +
+    "Use short sections or bullets only when they improve clarity. Do not narrate hidden reasoning, " +
+    "routine progress, tool-selection decisions, retries, or permission flow. Do not repeat the request.";
   // Native resume already carries thread history — only send this turn.
   if (session.runtimeThreadId?.trim()) {
-    const parts: string[] = [];
+    const parts: string[] = [responseStyle];
     if (attachments.length > 0) {
       parts.push(
         `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
@@ -1606,7 +1712,7 @@ function buildPromptWithHistory(userText: string, attachments: ChatAttachment[])
     .slice(0, -1)
     .slice(-MAX_CONTEXT_MESSAGES);
 
-  const parts: string[] = [];
+  const parts: string[] = [responseStyle];
   if (prior.length > 0) {
     const transcript = prior
       .map((m) => {

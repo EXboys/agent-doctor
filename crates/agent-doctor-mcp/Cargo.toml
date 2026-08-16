@@ -1,6 +1,6 @@
 [package]
 name = "agent-doctor-mcp"
-description = "Browser MCP server for AI agent runtimes — Chrome discovery, anti-detection launch, CDP-based browser control"
+description = "Browser MCP server for AI agent runtimes — Chrome discovery and CDP-based browser control"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

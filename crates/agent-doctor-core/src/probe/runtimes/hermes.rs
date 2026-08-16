@@ -136,13 +136,19 @@ fn probe_env_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
 fn probe_env_permissions(_path: &Path, _checks: &mut Vec<ProbeCheck>) {}
 
 pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
-    let provider = facts
-        .iter()
-        .find(|fact| fact.key == "hermes.provider")
+    let provider_index = facts.iter().position(|fact| fact.key == "hermes.provider");
+    let configured_provider = provider_index
+        .and_then(|index| facts.get(index))
         .map(|fact| fact.value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .unwrap_or_default();
+    let base_url = facts
+        .iter()
+        .find(|fact| fact.key == "gateway.url")
+        .map(|fact| fact.value.as_str())
+        .unwrap_or_default();
+    let provider = HermesAdapter::effective_provider(&configured_provider, base_url);
 
-    let Some(provider) = provider else {
+    if provider.is_empty() {
         checks.push(ProbeCheck::new(
             "hermes.provider",
             "Hermes provider",
@@ -152,7 +158,18 @@ pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<Diagnosti
             SensitivityLevel::ConfigShape,
         ));
         return;
-    };
+    }
+
+    if provider != configured_provider {
+        if let Some(index) = provider_index {
+            facts[index].value = provider.clone();
+        }
+        facts.push(DiagnosticFact::new(
+            "hermes.provider.configured",
+            configured_provider,
+            SensitivityLevel::ConfigShape,
+        ));
+    }
 
     let api_key_env = HermesAdapter::provider_api_key_env(&provider);
     match api_key_env {

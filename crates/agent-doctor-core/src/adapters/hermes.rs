@@ -42,6 +42,9 @@ impl HermesAdapter {
     pub fn provider_api_key_env(provider: &str) -> Option<String> {
         let provider = provider.trim().to_lowercase();
         let known = match provider.as_str() {
+            // Hermes resolves bare `provider: custom` as an OpenAI-compatible
+            // endpoint and reads OPENAI_API_KEY at runtime.
+            "custom" => Some("OPENAI_API_KEY"),
             "deepseek" => Some("DEEPSEEK_API_KEY"),
             "openai" => Some("OPENAI_API_KEY"),
             "anthropic" => Some("ANTHROPIC_API_KEY"),
@@ -61,6 +64,30 @@ impl HermesAdapter {
                 Some(format!("{}_API_KEY", provider.to_uppercase()))
             }
         })
+    }
+
+    pub(crate) fn effective_provider(provider: &str, base_url: &str) -> String {
+        let configured = provider.trim().to_lowercase();
+        if !configured.is_empty() {
+            return configured;
+        }
+        let url = base_url.trim().to_lowercase();
+        if url.contains("api.deepseek.com") {
+            return "deepseek".to_string();
+        }
+        if url.contains("api.openai.com") {
+            return "openai".to_string();
+        }
+        if url.contains("openrouter.ai") {
+            return "openrouter".to_string();
+        }
+        if url.contains("generativelanguage.googleapis.com") {
+            return "google".to_string();
+        }
+        if url.contains("localhost:11434") || url.contains("127.0.0.1:11434") {
+            return "ollama".to_string();
+        }
+        configured
     }
 
     fn mask_api_key(value: &str) -> String {
@@ -180,12 +207,13 @@ impl HermesAdapter {
             model: None,
             base_url: None,
         });
-        let provider = model.provider.unwrap_or_default();
+        let base_url = model.base_url.unwrap_or_default();
+        let provider = Self::effective_provider(&model.provider.unwrap_or_default(), &base_url);
         let api_key = Self::read_api_key_status(&provider)?;
         Ok(HermesSettings {
             provider: provider.clone(),
             model: model.model.unwrap_or_default(),
-            base_url: model.base_url.unwrap_or_default(),
+            base_url,
             api_key_env: api_key.as_ref().map(|status| status.env_var.clone()),
             api_key_configured: api_key.as_ref().is_some_and(|status| status.configured),
             api_key_hint: api_key.and_then(|status| status.hint),
@@ -347,6 +375,30 @@ fn backup_config(path: &Path, original: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn preserves_explicit_custom_and_infers_missing_provider() {
+        assert_eq!(
+            HermesAdapter::effective_provider("custom", "https://api.deepseek.com/v1"),
+            "custom"
+        );
+        assert_eq!(
+            HermesAdapter::effective_provider("", "https://api.deepseek.com/v1"),
+            "deepseek"
+        );
+        assert_eq!(
+            HermesAdapter::effective_provider("", "http://127.0.0.1:11434/v1"),
+            "ollama"
+        );
+        assert_eq!(
+            HermesAdapter::effective_provider("anthropic", "https://api.deepseek.com/v1"),
+            "anthropic"
+        );
+        assert_eq!(
+            HermesAdapter::provider_api_key_env("custom").as_deref(),
+            Some("OPENAI_API_KEY")
+        );
+    }
 
     #[test]
     fn apply_model_updates_hermes_yaml() {

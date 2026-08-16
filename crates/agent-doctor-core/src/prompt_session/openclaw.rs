@@ -108,6 +108,10 @@ fn run_openclaw(
 
     let started = Instant::now();
     let mut child = cmd.spawn().context("failed to spawn openclaw")?;
+    let agent = resolve_openclaw_agent(&overlay);
+    let tool_trace_path = openclaw_session_jsonl_path(&agent, &openclaw_session_id);
+    let mut emitted_tools = std::collections::HashSet::new();
+    let mut tool_trace_len = 0;
 
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
@@ -125,6 +129,9 @@ fn run_openclaw(
         &mut child,
         timeout_sec,
         cancel.handle(),
+        tool_trace_path.as_deref(),
+        &mut emitted_tools,
+        &mut tool_trace_len,
         &mut emit,
     );
 
@@ -144,8 +151,13 @@ fn run_openclaw(
             // `openclaw --json` only returns the final reply. Tool chips live in the
             // session jsonl (`browser__browser_navigate`), so surface them before the
             // assistant text — Ask verify used to miss the MCP pathway entirely.
-            let agent = resolve_openclaw_agent(&overlay);
-            emit_openclaw_turn_tools(&session_id, &agent, &runtime_thread_id, &mut emit);
+            emit_openclaw_turn_tools(
+                &session_id,
+                &agent,
+                &runtime_thread_id,
+                &mut emitted_tools,
+                &mut emit,
+            );
 
             let combined = if !reply.trim().is_empty() {
                 reply.clone()
@@ -318,6 +330,9 @@ fn pump_lines<F>(
     child: &mut Child,
     timeout_sec: u64,
     cancel: Arc<AtomicBool>,
+    tool_trace_path: Option<&Path>,
+    emitted_tools: &mut std::collections::HashSet<String>,
+    tool_trace_len: &mut u64,
     on_event: &mut F,
 ) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
 where
@@ -378,8 +393,21 @@ where
     };
 
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut next_tool_poll = Instant::now();
     let (status, exit_code) = loop {
         drain(on_event);
+        if Instant::now() >= next_tool_poll {
+            if let Some(path) = tool_trace_path {
+                emit_openclaw_tools_from_path(
+                    session_id,
+                    path,
+                    emitted_tools,
+                    tool_trace_len,
+                    on_event,
+                );
+            }
+            next_tool_poll = Instant::now() + Duration::from_millis(120);
+        }
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
@@ -406,34 +434,32 @@ where
     join_reader(stdout_handle, Duration::from_millis(500));
     join_reader(stderr_handle, Duration::from_millis(500));
     drain(on_event);
+    if let Some(path) = tool_trace_path {
+        emit_openclaw_tools_from_path(session_id, path, emitted_tools, tool_trace_len, on_event);
+    }
 
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
     let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
     Ok((status, exit_code, stdout, stderr))
 }
 
-fn emit_openclaw_turn_tools<F>(session_id: &str, agent: &str, runtime_thread_id: &str, emit: &mut F)
-where
+fn emit_openclaw_turn_tools<F>(
+    session_id: &str,
+    agent: &str,
+    runtime_thread_id: &str,
+    emitted_tools: &mut std::collections::HashSet<String>,
+    emit: &mut F,
+) where
     F: FnMut(PromptSessionEvent),
 {
     let Some(path) = resolve_openclaw_session_jsonl(agent, runtime_thread_id) else {
         return;
     };
-    let tools = collect_last_turn_openclaw_tools(&path);
-    let mut seen = std::collections::HashSet::new();
-    for name in tools {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        emit(PromptSessionEvent::Status {
-            session_id: session_id.to_string(),
-            phase: "tool".into(),
-            message: format!("调用工具 {name}…"),
-        });
-    }
+    let mut trace_len = 0;
+    emit_openclaw_tools_from_path(session_id, &path, emitted_tools, &mut trace_len, emit);
 }
 
-fn resolve_openclaw_session_jsonl(agent: &str, session_id: &str) -> Option<PathBuf> {
+fn openclaw_session_jsonl_path(agent: &str, session_id: &str) -> Option<PathBuf> {
     let agent = agent.trim();
     let session_id = session_id.trim();
     if agent.is_empty()
@@ -450,7 +476,41 @@ fn resolve_openclaw_session_jsonl(agent: &str, session_id: &str) -> Option<PathB
         .join(agent)
         .join("sessions")
         .join(format!("{session_id}.jsonl"));
+    Some(path)
+}
+
+fn resolve_openclaw_session_jsonl(agent: &str, session_id: &str) -> Option<PathBuf> {
+    let path = openclaw_session_jsonl_path(agent, session_id)?;
     path.is_file().then_some(path)
+}
+
+fn emit_openclaw_tools_from_path<F>(
+    session_id: &str,
+    path: &Path,
+    emitted_tools: &mut std::collections::HashSet<String>,
+    trace_len: &mut u64,
+    emit: &mut F,
+) where
+    F: FnMut(PromptSessionEvent),
+{
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    let current_len = metadata.len();
+    if current_len == *trace_len {
+        return;
+    }
+    *trace_len = current_len;
+    for name in collect_last_turn_openclaw_tools(path) {
+        if !emitted_tools.insert(name.clone()) {
+            continue;
+        }
+        emit(PromptSessionEvent::Status {
+            session_id: session_id.to_string(),
+            phase: "tool".into(),
+            message: format!("调用工具 {name}…"),
+        });
+    }
 }
 
 /// Tools used after the last user message in an OpenClaw session jsonl.
@@ -784,6 +844,47 @@ mod tests {
                 "browser_navigate".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn emits_new_openclaw_tools_as_session_trace_grows() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"message\":{\"role\":\"user\",\"content\":\"test\"}}\n",
+                "{\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"name\":\"browser_navigate\"}]}}\n",
+            ),
+        )
+        .unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        let mut trace_len = 0;
+        let mut events = Vec::new();
+        emit_openclaw_tools_from_path("s1", &path, &mut seen, &mut trace_len, &mut |event| {
+            events.push(event)
+        });
+        assert_eq!(events.len(), 1);
+
+        fs::write(
+            &path,
+            concat!(
+                "{\"message\":{\"role\":\"user\",\"content\":\"test\"}}\n",
+                "{\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"name\":\"browser_navigate\"}]}}\n",
+                "{\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"name\":\"browser_screenshot\"}]}}\n",
+            ),
+        )
+        .unwrap();
+        emit_openclaw_tools_from_path("s1", &path, &mut seen, &mut trace_len, &mut |event| {
+            events.push(event)
+        });
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[1],
+            PromptSessionEvent::Status { message, .. } if message.contains("browser_screenshot")
+        ));
     }
 
     #[cfg(unix)]

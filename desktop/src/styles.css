@@ -1799,19 +1799,14 @@ body::before {
 }
 
 .runtime-tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  margin-bottom: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  margin-bottom: 10px;
 }
 
 .runtime-head .runtime-tabs {
   margin-bottom: 0;
-}
-
-.runtime-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .runtime-tabs.is-loading {
@@ -1820,19 +1815,22 @@ body::before {
 }
 
 .runtime-tab {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 5px;
+  column-gap: 6px;
+  row-gap: 2px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface-muted);
   color: var(--text-muted);
-  padding: 6px 8px;
+  padding: 8px 10px;
   font-size: 0.66rem;
   font-weight: 700;
+  text-align: left;
   cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
+  min-width: 0;
   transition: all 0.15s ease;
 }
 
@@ -1849,8 +1847,21 @@ body::before {
 }
 
 .runtime-tab-label {
-  max-width: 96px;
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.runtime-tab-meta {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 0.58rem;
+  font-weight: 500;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2071,6 +2082,17 @@ body::before {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.runtime-advanced-meta {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.runtime-advanced-meta + .runtime-advanced-actions {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .card-hint {

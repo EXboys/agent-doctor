@@ -1546,7 +1546,7 @@ function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
   if (!actions) {
     return;
   }
-  const html = renderRuntimeCardActions(runtime);
+  const html = renderRuntimeCardActions(runtime, runtimeAdvancedMeta(runtime));
   if (html) {
     actions.innerHTML = html;
   }
@@ -1615,7 +1615,10 @@ function hasActiveWorkspace(): boolean {
   return Boolean(lastWorkspaces?.active);
 }
 
-function renderRuntimeCardActions(runtime: RuntimeDoctorResult): string {
+function renderRuntimeCardActions(
+  runtime: RuntimeDoctorResult,
+  advancedContent = "",
+): string {
   if (!runtime.installed) {
     return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
   }
@@ -1675,11 +1678,15 @@ function renderRuntimeCardActions(runtime: RuntimeDoctorResult): string {
     );
   }
 
+  parts.push(
+    `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
+  );
+
   parts.push(`
     <details class="runtime-advanced">
       <summary>${escapeHtml(t("runtime.advanced"))}</summary>
+      ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
       <div class="runtime-advanced-actions">
-        <button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>
         <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
         <button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>
       </div>
@@ -1758,6 +1765,43 @@ function mountRelatedResources(card: HTMLElement, runtime: string): void {
   el.outerHTML = renderRelatedResourcesHtml(runtime);
 }
 
+function genericRuntimeAdvancedMeta(
+  runtime: RuntimeDoctorResult,
+  includeVersion = true,
+): string {
+  return [
+    runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
+    includeVersion && runtime.version ? metaRow("meta.version", runtime.version) : "",
+    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
+    runtime.config_paths.length
+      ? metaRow("meta.config", runtime.config_paths.join(" · "))
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function hermesAdvancedMeta(runtime: RuntimeDoctorResult): string {
+  const model = hermesModel;
+  const keyNeedsAttention = Boolean(
+    model?.api_key_env && !model.api_key_configured,
+  );
+  return [
+    model?.provider ? metaRow("meta.provider", model.provider) : "",
+    model?.base_url ? metaRow("meta.gateway", model.base_url) : "",
+    model && !keyNeedsAttention ? renderApiKeyRow(model) : "",
+    genericRuntimeAdvancedMeta(runtime),
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function runtimeAdvancedMeta(runtime: RuntimeDoctorResult): string {
+  return runtime.id === "hermes"
+    ? hermesAdvancedMeta(runtime)
+    : genericRuntimeAdvancedMeta(runtime, Boolean(runtime.profile.gateway_url));
+}
+
 function renderHermesCard(runtime: RuntimeDoctorResult): string {
   const model = hermesModel ?? {
     provider: "",
@@ -1768,29 +1812,34 @@ function renderHermesCard(runtime: RuntimeDoctorResult): string {
     api_key_hint: null,
   };
 
-  const actionButtons = renderRuntimeCardActions(runtime);
-  const meta = [
-    model.provider ? metaRow("meta.provider", model.provider) : "",
-    model.model ? metaRow("meta.model", model.model) : "",
-    model.base_url ? metaRow("meta.gateway", model.base_url) : "",
-    renderApiKeyRow(model),
-    runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
-    runtime.version ? metaRow("meta.version", runtime.version) : "",
-    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
-    runtime.config_paths.length
-      ? metaRow("meta.config", runtime.config_paths.join(" · "))
-      : "",
+  const keyNeedsAttention = Boolean(model.api_key_env && !model.api_key_configured);
+  const providerLabel =
+    model.provider === "custom"
+      ? model.base_url.toLowerCase().includes("deepseek")
+        ? `DeepSeek · ${t("meta.openaiCompatible")}`
+        : t("meta.openaiCompatible")
+      : model.provider;
+  const modelSummary = [providerLabel, model.model].filter(Boolean).join(" · ");
+  const summaryMeta = [
+    modelSummary ? metaRow("meta.model", modelSummary) : "",
+    keyNeedsAttention ? renderApiKeyRow(model) : "",
   ]
     .filter(Boolean)
     .join("");
+  const advancedMeta = hermesAdvancedMeta(runtime);
+  const actionButtons = renderRuntimeCardActions(runtime, advancedMeta);
+  const badgeClass = keyNeedsAttention ? "warn" : "ok";
+  const badgeText = keyNeedsAttention
+    ? t("runtime.configAttention")
+    : t("runtime.installed");
 
   return `
     <article class="runtime hermes" data-runtime="hermes">
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
-        <span class="badge ok">${t("runtime.installed")}</span>
+        <span class="badge ${badgeClass}">${badgeText}</span>
       </div>
-      ${meta ? `<div class="meta-grid">${meta}</div>` : ""}
+      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
       ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
       ${renderRelatedResourcesHtml("hermes")}
       <div class="card-hint repair-hint" data-repair-hint hidden></div>
@@ -1805,16 +1854,15 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
 
   const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
   const badgeClass = runtime.installed ? "ok" : "muted";
-  const actionButtons = renderRuntimeCardActions(runtime);
-  const rows = [
-    runtime.version ? metaRow("meta.version", runtime.version) : "",
-    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
-    runtime.config_paths.length ? metaRow("meta.config", runtime.config_paths.join(" · ")) : "",
-    runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
-    !runtime.installed ? metaRow("meta.status", t("runtime.notDetected")) : "",
-  ]
-    .filter(Boolean)
-    .join("");
+  const advancedMeta = runtimeAdvancedMeta(runtime);
+  const actionButtons = renderRuntimeCardActions(runtime, advancedMeta);
+  const summaryMeta = runtime.installed
+    ? runtime.profile.gateway_url
+      ? metaRow("meta.gateway", runtime.profile.gateway_url)
+      : runtime.version
+        ? metaRow("meta.version", runtime.version)
+        : ""
+    : metaRow("meta.status", t("runtime.notDetected"));
 
   return `
     <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
@@ -1822,7 +1870,7 @@ function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="badge ${badgeClass}">${state}</span>
       </div>
-      ${rows ? `<div class="meta-grid">${rows}</div>` : ""}
+      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
       ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
       ${renderRelatedResourcesHtml(runtime.id)}
       <div class="card-hint repair-hint" data-repair-hint hidden></div>
@@ -1867,6 +1915,12 @@ function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string):
         runtime.id === "claude-code"
           ? "Claude"
           : runtime.display_name.replace(/\s+Code$/i, "");
+      const stateLabel = !runtime.installed
+        ? t("runtime.notInstalled")
+        : runtimeHasProblems(runtime.id)
+          ? t("runtime.configAttention")
+          : t("runtime.installed");
+      const tabMeta = [stateLabel, runtime.version].filter(Boolean).join(" · ");
       return `
         <button
           type="button"
@@ -1877,6 +1931,7 @@ function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string):
         >
           <span class="runtime-tab-dot ${runtimeTabDotClass(runtime)}" aria-hidden="true"></span>
           <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
+          <span class="runtime-tab-meta">${escapeHtml(tabMeta)}</span>
         </button>
       `;
     })
@@ -2242,11 +2297,6 @@ async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
   }
 }
 
-function scopeLabel(scope: string): string {
-  if (scope === "project") return t("resources.scopeProject");
-  return t("resources.scopeGlobal");
-}
-
 function isShowBrowserUi(): boolean {
   return mcpShowUiEl.checked;
 }
@@ -2382,7 +2432,10 @@ function refreshMcpSnippet() {
 
 function renderMcpBrowserStatus(status: McpModuleStatus) {
   lastMcpStatus = status;
-  mcpCountEl.textContent = String(status.inventory.total);
+  const uniqueMcpNames = new Set(
+    status.inventory.servers.map((server) => server.name.trim().toLowerCase()),
+  );
+  mcpCountEl.textContent = String(uniqueMcpNames.size);
 
   const chrome = status.browser;
   mcpChromeEl.textContent = chrome.chrome_found
@@ -2422,20 +2475,47 @@ function renderMcpBrowserStatus(status: McpModuleStatus) {
 function buildResourceRows(): ResourceRow[] {
   const rows: ResourceRow[] = [];
 
+  const mcpGroups = new Map<string, McpInventoryItem[]>();
   for (const server of lastMcpStatus?.inventory.servers ?? []) {
-    const scope = `${scopeLabel(server.scope)} · ${server.runtime_hint}`;
-    const meta = server.is_browser
-      ? t("resources.mcpBrowser")
-      : server.healthy
-        ? t("resources.mcpHealthy")
-        : server.issue || t("resources.mcpIssue");
+    const key = server.name.trim().toLowerCase();
+    const group = mcpGroups.get(key) ?? [];
+    group.push(server);
+    mcpGroups.set(key, group);
+  }
+
+  for (const servers of mcpGroups.values()) {
+    const primary = servers[0];
+    const runtimes = [...new Set(servers.map((server) => server.runtime_hint))]
+      .sort((a, b) => {
+        const order = ["claude-code", "codex", "hermes", "openclaw", "shared"];
+        return order.indexOf(a) - order.indexOf(b);
+      })
+      .map((runtime) => {
+        if (runtime === "claude-code") return "Claude";
+        if (runtime === "codex") return "Codex";
+        if (runtime === "openclaw") return "OpenClaw";
+        if (runtime === "hermes") return "Hermes";
+        if (runtime === "shared") return "Shared";
+        return runtime;
+      });
+    const issues = servers.filter((server) => !server.healthy);
+    const bindingLabel = t("resources.mcpBindings", { count: String(servers.length) });
+    const meta =
+      issues.length > 0
+        ? t("resources.mcpBindingIssues", {
+            issues: String(issues.length),
+            count: String(servers.length),
+          })
+        : primary.is_browser
+          ? `${t("resources.mcpBrowser")} · ${bindingLabel}`
+          : `${t("resources.mcpHealthy")} · ${bindingLabel}`;
     rows.push({
       kind: "mcp",
-      name: server.name,
-      sub: scope,
+      name: primary.name,
+      sub: runtimes.join(" · "),
       meta,
-      tone: server.healthy ? (server.is_browser ? "ok" : "ok") : "bad",
-      issue: !server.healthy,
+      tone: issues.length > 0 ? "bad" : "ok",
+      issue: issues.length > 0,
     });
   }
 

@@ -348,12 +348,12 @@ fn read_bundle_short_version(plist_path: &std::path::Path) -> Option<String> {
     }
 }
 
-/// Launch Chrome with anti-detection settings.
+/// Launch Chrome for direct CDP control.
 ///
-/// Anti-detection measures:
-/// - Disables AutomationControlled Blink feature
-/// - Does NOT pass --enable-automation flag
-/// - Does NOT pass --remote-debugging-pipe (less conspicuous)
+/// Keep the command line close to a normal Chrome launch:
+/// - Does NOT pass --enable-automation
+/// - Does NOT alter Blink feature flags (Chrome warns about unsupported flags)
+/// - Uses a fixed CDP port instead of --remote-debugging-port=0
 ///
 /// Uses `discovery.user_data_dir` (defaults to the everyday Chrome profile).
 /// That profile cannot be opened while a normal Chrome instance already holds
@@ -382,8 +382,6 @@ pub fn launch_chrome(
             "--profile-directory={}",
             discovery.profile_directory
         ))
-        // Anti-detection: disable Blink automation flag
-        .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--window-size=1280,800");
@@ -400,7 +398,8 @@ pub fn launch_chrome(
         cmd.arg("--disable-dev-shm-usage");
     }
 
-    // NOTE: Deliberately omit --enable-automation so navigator.webdriver is not set
+    // Deliberately omit --enable-automation. CDP does not require it, and Chrome
+    // would otherwise expose automation UI and navigator.webdriver.
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
 
