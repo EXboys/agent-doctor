@@ -193,7 +193,7 @@ pub fn backups_root() -> Result<PathBuf> {
 pub fn create_runtime_backup_snapshot(runtime_id: &str) -> Result<BackupSnapshot> {
     let adapter =
         adapter_by_id(runtime_id).with_context(|| format!("unknown runtime '{runtime_id}'"))?;
-    let config_paths = adapter.config_paths();
+    let config_paths = adapter.all_config_paths();
     let snapshot_id = format!("{runtime_id}-{}", unix_seconds());
     let snapshot_root = backups_root()?.join(&snapshot_id);
     fs::create_dir_all(&snapshot_root)?;

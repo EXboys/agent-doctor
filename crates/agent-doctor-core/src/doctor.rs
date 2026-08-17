@@ -49,7 +49,7 @@ pub fn run_doctor() -> DoctorReport {
                 version: discovery.version,
                 binary_path: discovery.binary_path.map(|path| path.display().to_string()),
                 config_paths: adapter
-                    .config_paths()
+                    .all_config_paths()
                     .into_iter()
                     .map(|path| path.display().to_string())
                     .collect(),

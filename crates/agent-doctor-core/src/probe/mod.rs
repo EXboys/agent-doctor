@@ -195,23 +195,18 @@ fn probe_binary(
         SensitivityLevel::LocalPath,
     ));
 
-    let conflict_status = if binaries.len() > 1 {
-        ProbeStatus::Warn
-    } else {
-        ProbeStatus::Pass
-    };
+    let conflict_status = ProbeStatus::Pass;
     checks.push(
         ProbeCheck::new(
             "binary.path_conflict",
             "Multiple installs",
             conflict_status,
+            ProbeSeverity::Info,
             if binaries.len() > 1 {
-                ProbeSeverity::Warning
-            } else {
-                ProbeSeverity::Info
-            },
-            if binaries.len() > 1 {
-                format!("found {} candidate binaries", binaries.len())
+                format!(
+                    "found {} candidate binaries (PATH order wins; not a defect)",
+                    binaries.len()
+                )
             } else {
                 "no duplicate install candidates found".to_string()
             },
@@ -266,8 +261,9 @@ fn probe_configs(
     checks: &mut Vec<ProbeCheck>,
     facts: &mut Vec<DiagnosticFact>,
 ) {
-    let config_paths = adapter.config_paths();
-    if config_paths.is_empty() {
+    let required_paths = adapter.config_paths();
+    let optional_paths = adapter.optional_config_paths();
+    if required_paths.is_empty() && optional_paths.is_empty() {
         checks.push(ProbeCheck::new(
             "config.paths",
             "Config paths",
@@ -281,7 +277,11 @@ fn probe_configs(
 
     let config_paths_required = adapter.config_paths_required();
     let mut existing_paths = 0usize;
-    for path in config_paths {
+    let config_paths = required_paths
+        .into_iter()
+        .map(|path| (path, true))
+        .chain(optional_paths.into_iter().map(|path| (path, false)));
+    for (path, required) in config_paths {
         let path_text = path.display().to_string();
         facts.push(DiagnosticFact::new(
             "config.path",
@@ -290,7 +290,7 @@ fn probe_configs(
         ));
 
         if !path.exists() {
-            if config_paths_required {
+            if required && config_paths_required {
                 checks.push(ProbeCheck::new(
                     format!("config.exists:{}", path.display()),
                     "Config exists",
@@ -376,40 +376,58 @@ fn probe_env_conflicts(
     checks: &mut Vec<ProbeCheck>,
     facts: &mut Vec<DiagnosticFact>,
 ) {
-    let conflicts = collect_env_conflicts(ctx.env_keywords);
-    if conflicts.is_empty() {
+    let entries = collect_env_conflicts(ctx.env_keywords);
+    let (status, severity, message) = env_entries_check(&entries);
+    if entries.is_empty() {
         checks.push(ProbeCheck::new(
             "env.conflicts",
-            "Environment conflicts",
-            ProbeStatus::Pass,
-            ProbeSeverity::Info,
-            "no matching environment variables found in process or common shell files",
+            "Environment variables",
+            status,
+            severity,
+            message,
             SensitivityLevel::ConfigShape,
         ));
         return;
     }
 
-    for conflict in &conflicts {
+    for entry in &entries {
         facts.push(DiagnosticFact::new(
-            "env.conflict",
-            conflict.clone(),
+            "env.entry",
+            entry.clone(),
             SensitivityLevel::SensitiveLog,
         ));
     }
     checks.push(
         ProbeCheck::new(
             "env.conflicts",
-            "Environment conflicts",
-            ProbeStatus::Warn,
-            ProbeSeverity::Warning,
-            format!(
-                "found {} environment entries that may override runtime config",
-                conflicts.len()
-            ),
+            "Environment variables",
+            status,
+            severity,
+            message,
             SensitivityLevel::SensitiveLog,
         )
-        .with_details(conflicts),
+        .with_details(entries),
     );
+}
+
+/// Presence of API/gateway env vars is expected after wiring. Do not warn.
+fn env_entries_check(entries: &[String]) -> (ProbeStatus, ProbeSeverity, String) {
+    if entries.is_empty() {
+        (
+            ProbeStatus::Pass,
+            ProbeSeverity::Info,
+            "no matching environment variables found in process or common shell files".to_string(),
+        )
+    } else {
+        (
+            ProbeStatus::Pass,
+            ProbeSeverity::Info,
+            format!(
+                "found {} environment entries (wiring and shells often set these; not a defect)",
+                entries.len()
+            ),
+        )
+    }
 }
 
 fn collect_env_conflicts(keywords: &[&str]) -> Vec<String> {
@@ -612,14 +630,6 @@ fn probe_path_references(
     let mut refs = Vec::new();
     collect_path_references(parsed, &mut refs);
     if refs.is_empty() {
-        checks.push(ProbeCheck::new(
-            format!("paths.references:{}", config_path.display()),
-            "MCP/Skills path references",
-            ProbeStatus::NotChecked,
-            ProbeSeverity::Info,
-            "no obvious MCP/Skills path references found",
-            SensitivityLevel::ConfigShape,
-        ));
         return;
     }
 
@@ -791,5 +801,18 @@ mod tests {
         collect_json_paths("", &value, &mut refs);
         assert_eq!(refs.len(), 1);
         assert!(refs[0].contains("missing-mcp"));
+    }
+
+    #[test]
+    fn env_entries_are_informational_not_warnings() {
+        let (empty_status, _, empty_msg) = env_entries_check(&[]);
+        assert_eq!(empty_status, ProbeStatus::Pass);
+        assert!(empty_msg.contains("no matching"));
+
+        let (present_status, present_severity, present_msg) =
+            env_entries_check(&["process:OPENAI_API_KEY=[REDACTED]".into()]);
+        assert_eq!(present_status, ProbeStatus::Pass);
+        assert_eq!(present_severity, ProbeSeverity::Info);
+        assert!(present_msg.contains("not a defect"));
     }
 }

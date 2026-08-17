@@ -5,7 +5,7 @@ use crate::runtime::{adapter_by_id, bash_command_allowed_for_runtime};
 /// Paths the repair agent may read or edit for a runtime.
 pub fn allowed_paths_for_runtime(runtime_id: &str) -> Vec<PathBuf> {
     let mut paths = adapter_by_id(runtime_id)
-        .map(|adapter| adapter.config_paths())
+        .map(|adapter| adapter.all_config_paths())
         .unwrap_or_default();
 
     if let Some(config_dir) = dirs::config_dir() {

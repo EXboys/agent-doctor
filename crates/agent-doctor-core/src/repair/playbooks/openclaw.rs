@@ -38,7 +38,10 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
             });
         }
 
-        if check.id.starts_with("config.exists:") && check.status == ProbeStatus::Warn {
+        if check.id.starts_with("config.exists:")
+            && check.status == ProbeStatus::Warn
+            && check.id.contains("openclaw.json")
+        {
             items.push(SuggestedRepair {
                 id: "fix-openclaw-create-config".to_string(),
                 title: "Create OpenClaw config".to_string(),
@@ -308,7 +311,11 @@ fn openclaw_config_missing(probe: &RuntimeProbeReport) -> bool {
     probe
         .checks
         .iter()
-        .any(|check| check.id.starts_with("config.exists:") && check.status == ProbeStatus::Warn)
+        .any(|check| {
+            check.id.starts_with("config.exists:")
+                && check.status == ProbeStatus::Warn
+                && check.id.contains("openclaw.json")
+        })
 }
 
 fn openclaw_gateway_missing(probe: &RuntimeProbeReport) -> bool {

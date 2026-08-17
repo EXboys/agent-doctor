@@ -408,7 +408,17 @@ fn probe_remote_runtime(
 
     // config files under remote HOME (relative paths from local adapter config_paths)
     let local_home = dirs::home_dir();
-    for local_config in adapter.config_paths() {
+    for (local_config, required) in adapter
+        .config_paths()
+        .into_iter()
+        .map(|path| (path, true))
+        .chain(
+            adapter
+                .optional_config_paths()
+                .into_iter()
+                .map(|path| (path, false)),
+        )
+    {
         let relative = match local_home
             .as_ref()
             .and_then(|h| local_config.strip_prefix(h).ok())
@@ -422,14 +432,16 @@ fn probe_remote_runtime(
         let remote_config = remote_home.join(&relative);
         match backend.exists(&remote_config) {
             Ok(false) => {
-                checks.push(ProbeCheck::new(
-                    format!("config.exists.{}", relative.display()),
-                    "Config exists",
-                    ProbeStatus::Warn,
-                    ProbeSeverity::Warning,
-                    format!("missing {}", remote_config.display()),
-                    SensitivityLevel::LocalPath,
-                ));
+                if required {
+                    checks.push(ProbeCheck::new(
+                        format!("config.exists.{}", relative.display()),
+                        "Config exists",
+                        ProbeStatus::Warn,
+                        ProbeSeverity::Warning,
+                        format!("missing {}", remote_config.display()),
+                        SensitivityLevel::LocalPath,
+                    ));
+                }
                 continue;
             }
             Err(err) => {

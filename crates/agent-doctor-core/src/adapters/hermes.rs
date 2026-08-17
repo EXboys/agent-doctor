@@ -300,7 +300,12 @@ impl RuntimeAdapter for HermesAdapter {
     }
 
     fn config_paths(&self) -> Vec<PathBuf> {
-        vec![Self::config_path(), Self::secrets_path()]
+        vec![Self::config_path()]
+    }
+
+    fn optional_config_paths(&self) -> Vec<PathBuf> {
+        // Created by key scaffold / wiring. Missing is not a defect on its own.
+        vec![Self::secrets_path()]
     }
 
     fn read_profile(&self) -> Result<RuntimeProfile> {
@@ -447,5 +452,17 @@ mod tests {
             .unwrap();
         let value = HermesAdapter::read_env_value(&env_path, "DEEPSEEK_API_KEY").unwrap();
         assert_eq!(value.as_deref(), Some("sk-test-secret-key"));
+    }
+
+    #[test]
+    fn env_file_is_optional_not_required() {
+        let required = HermesAdapter.config_paths();
+        let optional = HermesAdapter.optional_config_paths();
+        assert!(required.iter().all(|path| {
+            path.file_name().and_then(|name| name.to_str()) != Some(".env")
+        }));
+        assert!(optional.iter().any(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some(".env")
+        }));
     }
 }

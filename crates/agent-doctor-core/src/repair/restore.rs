@@ -51,7 +51,7 @@ pub fn load_backup_snapshot(runtime_id: &str, backup_id: &str) -> Result<BackupS
 
     let adapter =
         adapter_by_id(runtime_id).with_context(|| format!("unknown runtime '{runtime_id}'"))?;
-    let config_paths = adapter.config_paths();
+    let config_paths = adapter.all_config_paths();
     let mut files = Vec::new();
 
     for entry in fs::read_dir(&root)? {

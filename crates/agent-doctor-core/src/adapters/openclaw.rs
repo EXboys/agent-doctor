@@ -20,10 +20,12 @@ impl RuntimeAdapter for OpenClawAdapter {
     }
 
     fn config_paths(&self) -> Vec<PathBuf> {
-        vec![
-            home_join(".openclaw/openclaw.json"),
-            home_join(".openclaw/.env"),
-        ]
+        vec![home_join(".openclaw/openclaw.json")]
+    }
+
+    fn optional_config_paths(&self) -> Vec<PathBuf> {
+        // Secrets overlay. Missing is not a defect; wiring/scaffold creates it when needed.
+        vec![home_join(".openclaw/.env")]
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
@@ -104,4 +106,24 @@ pub fn configured_base_url(value: &serde_json::Value) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .filter(|u| !u.trim().is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_file_is_optional_not_required() {
+        let required = OpenClawAdapter.config_paths();
+        let optional = OpenClawAdapter.optional_config_paths();
+        assert!(required.iter().any(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("openclaw.json")
+        }));
+        assert!(required.iter().all(|path| {
+            path.file_name().and_then(|name| name.to_str()) != Some(".env")
+        }));
+        assert!(optional.iter().any(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some(".env")
+        }));
+    }
 }

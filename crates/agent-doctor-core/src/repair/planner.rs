@@ -38,7 +38,7 @@ pub fn build_masked_repair_context(
     let redactor = Redactor::new(RedactionPolicy::default());
     let bundle = probe.to_diagnostic_bundle();
     let config_paths = adapter_by_id(runtime_id)
-        .map(|adapter| adapter.config_paths())
+        .map(|adapter| adapter.all_config_paths())
         .unwrap_or_default();
     let (masked_files, vault) = load_masked_config_snippets(&config_paths);
 

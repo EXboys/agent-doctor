@@ -45,6 +45,15 @@ pub trait RuntimeAdapter: Send + Sync {
     fn config_paths_required(&self) -> bool {
         true
     }
+    /// Credentials or overlays that may be absent (no warn, no repair).
+    fn optional_config_paths(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn all_config_paths(&self) -> Vec<PathBuf> {
+        let mut paths = self.config_paths();
+        paths.extend(self.optional_config_paths());
+        paths
+    }
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile>;
 
     fn read_model(&self) -> anyhow::Result<Option<RuntimeModelState>> {

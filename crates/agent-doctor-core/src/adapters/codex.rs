@@ -103,7 +103,12 @@ impl RuntimeAdapter for CodexAdapter {
     }
 
     fn config_paths(&self) -> Vec<PathBuf> {
-        vec![Self::config_path(), Self::auth_path()]
+        vec![Self::config_path()]
+    }
+
+    fn optional_config_paths(&self) -> Vec<PathBuf> {
+        // ChatGPT login file. Env-key / gateway auth does not need it; missing is not a defect.
+        vec![Self::auth_path()]
     }
 
     fn read_profile(&self) -> Result<RuntimeProfile> {
@@ -172,5 +177,17 @@ env_key = "COMPANY_API_KEY"
             .as_deref(),
             Some("COMPANY_API_KEY")
         );
+    }
+
+    #[test]
+    fn auth_json_is_optional_not_required() {
+        let required = CodexAdapter.config_paths();
+        let optional = CodexAdapter.optional_config_paths();
+        assert!(required.iter().all(|path| {
+            path.file_name().and_then(|name| name.to_str()) != Some("auth.json")
+        }));
+        assert!(optional.iter().any(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("auth.json")
+        }));
     }
 }
