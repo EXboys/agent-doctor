@@ -181,10 +181,7 @@ pub fn discover_binary(name: &str) -> AdapterDiscovery {
 }
 
 fn read_version(binary: &PathBuf, flags: &[&str]) -> Option<String> {
-    match read_version_result_with_flags(binary, flags) {
-        Ok(version) => version,
-        Err(_) => None,
-    }
+    read_version_result_with_flags(binary, flags).unwrap_or_default()
 }
 
 pub fn read_version_result(binary: &PathBuf) -> Result<Option<String>, String> {
