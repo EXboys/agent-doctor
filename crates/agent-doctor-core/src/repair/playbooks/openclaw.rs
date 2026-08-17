@@ -121,12 +121,12 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
 
         if check.id == "openclaw.api_key.configured" && check.status == ProbeStatus::Warn {
             items.push(SuggestedRepair {
-                id: "fix-openclaw-api-key-scaffold".to_string(),
-                title: "Prepare OpenClaw API key placeholders".to_string(),
-                description: "Add env.vars placeholders and a local setup guide (secret is not \
-                    auto-filled)."
-                    .to_string(),
-                auto_fixable: true,
+                id: "configure-openclaw-api-key".to_string(),
+                title: "Configure an OpenClaw API key".to_string(),
+                description:
+                    "Add the key in Agent Doctor wiring or OpenClaw configuration; secrets are never auto-filled."
+                        .to_string(),
+                auto_fixable: false,
             });
         }
     }

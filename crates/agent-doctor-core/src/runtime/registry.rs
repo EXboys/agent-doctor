@@ -290,6 +290,8 @@ pub fn suggest_runtime_repairs(
         );
     }
 
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|item| seen.insert(item.id.clone()));
     items
 }
 

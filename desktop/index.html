@@ -8,15 +8,20 @@
   </head>
   <body>
     <main class="widget">
-      <header class="widget-toolbar">
-        <div class="brand">
+      <header class="widget-toolbar" data-tauri-drag-region>
+        <div class="window-controls" role="group" aria-label="Window controls">
+          <button id="window-close" type="button" class="window-control close" data-i18n-title="window.close" aria-label="Close"></button>
+          <button id="window-minimize" type="button" class="window-control minimize" data-i18n-title="window.minimize" aria-label="Minimize"></button>
+          <button id="window-maximize" type="button" class="window-control maximize" data-i18n-title="window.maximize" aria-label="Maximize"></button>
+        </div>
+        <div class="brand" data-tauri-drag-region>
           <div class="brand-icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
               <path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
             </svg>
           </div>
-          <p class="brand-name" data-i18n="app.eyebrow">Agent Doctor</p>
+          <p class="brand-name" data-i18n="app.eyebrow" data-tauri-drag-region>Agent Doctor</p>
         </div>
         <div class="toolbar-actions">
           <div class="lang-switch" role="group" aria-label="Language">
@@ -80,6 +85,21 @@
               <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
               <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切工作区</p>
             </div>
+
+            <section class="agents-security-overview" aria-live="polite">
+              <div class="agents-readiness-ring" id="agents-readiness-ring">
+                <strong id="agents-readiness-value">—</strong>
+                <span data-i18n="agents.readiness">运行时就绪</span>
+              </div>
+              <div class="agents-security-copy">
+                <h2 id="agents-security-title" data-i18n="agents.securityTitle">Agent 环境状态</h2>
+                <p id="agents-security-desc">—</p>
+                <div class="agents-security-stats">
+                  <span id="agents-security-installed">—</span>
+                  <span id="agents-security-issues">—</span>
+                </div>
+              </div>
+            </section>
 
             <section class="widget-section runtime-section">
               <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
@@ -392,9 +412,6 @@
         </section>
       </div>
       </div>
-      <aside id="diagnose-detail" class="diagnose-detail" hidden>
-        <div id="diagnose-detail-body"></div>
-      </aside>
       </div>
 
       <footer class="widget-footer">
@@ -402,6 +419,9 @@
         <span id="footer-copy" data-i18n="app.footer">本机 Runtime · 诊断修复</span>
       </footer>
     </main>
+    <aside id="diagnose-detail" class="diagnose-detail" hidden>
+      <div id="diagnose-detail-body"></div>
+    </aside>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

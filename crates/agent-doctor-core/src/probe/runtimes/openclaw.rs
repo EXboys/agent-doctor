@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::util::home_join;
+use crate::prompt_session::env::{collect_overlay_env, resolve_hermes_overlay};
 use crate::repair::{DiagnosticFact, SensitivityLevel};
 
 use super::super::config::{parse_env_file, ParsedConfig};
@@ -95,6 +96,47 @@ pub(crate) fn probe_schema(
 pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
     probe_dotenv_file(&openclaw_env_path(), checks, facts);
     probe_json_api_keys(&openclaw_config_path(), checks, facts);
+    normalize_api_key_checks(checks, facts);
+}
+
+fn normalize_api_key_checks(checks: &mut Vec<ProbeCheck>, facts: &[DiagnosticFact]) {
+    let file_configured = facts.iter().any(|fact| {
+        fact.key.starts_with("openclaw.api_key.") && fact.value.eq_ignore_ascii_case("true")
+    });
+    let overlay = collect_overlay_env();
+    let wiring_configured = resolve_hermes_overlay(&overlay).is_some()
+        || ["OPENCLAW_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+            .iter()
+            .any(|key| {
+                overlay
+                    .get(*key)
+                    .is_some_and(|value| !value.trim().is_empty())
+            });
+    let configured = file_configured || wiring_configured;
+
+    checks.retain(|check| check.id != "openclaw.api_key.configured");
+    checks.push(ProbeCheck::new(
+        "openclaw.api_key.configured",
+        "OpenClaw API key configured",
+        if configured {
+            ProbeStatus::Pass
+        } else {
+            ProbeStatus::Warn
+        },
+        if configured {
+            ProbeSeverity::Info
+        } else {
+            ProbeSeverity::Warning
+        },
+        if file_configured {
+            "an effective API key is configured in OpenClaw files"
+        } else if wiring_configured {
+            "an effective API key is available from Agent Doctor wiring"
+        } else {
+            "no non-empty OpenAI, Anthropic, or OpenClaw API key is configured"
+        },
+        SensitivityLevel::ConfigShape,
+    ));
 }
 
 fn openclaw_config_path() -> PathBuf {

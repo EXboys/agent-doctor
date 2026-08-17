@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   applyStaticI18n,
@@ -971,10 +972,20 @@ async function rewireCurrentMode(hintEl?: HTMLElement | null) {
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
-const widgetEl = document.querySelector<HTMLElement>(".widget")!;
-const widgetPrimaryEl = document.querySelector<HTMLElement>(".widget-primary")!;
+const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
+const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
+const agentsSecurityTitleEl = document.querySelector<HTMLElement>("#agents-security-title")!;
+const agentsSecurityDescEl = document.querySelector<HTMLElement>("#agents-security-desc")!;
+const agentsSecurityInstalledEl =
+  document.querySelector<HTMLElement>("#agents-security-installed")!;
+const agentsSecurityIssuesEl = document.querySelector<HTMLElement>("#agents-security-issues")!;
 const diagnoseDetailEl = document.querySelector<HTMLElement>("#diagnose-detail")!;
 const diagnoseDetailBodyEl = document.querySelector<HTMLElement>("#diagnose-detail-body")!;
+const widgetToolbarEl = document.querySelector<HTMLElement>(".widget-toolbar")!;
+const windowCloseEl = document.querySelector<HTMLButtonElement>("#window-close")!;
+const windowMinimizeEl = document.querySelector<HTMLButtonElement>("#window-minimize")!;
+const windowMaximizeEl = document.querySelector<HTMLButtonElement>("#window-maximize")!;
+const mainWindow = getCurrentWindow();
 const refreshBtn = document.querySelector<HTMLButtonElement>("#refresh")!;
 const spinnerEl = refreshBtn.querySelector<HTMLElement>(".spinner")!;
 const installedCountEl = document.querySelector<HTMLElement>("#installed-count")!;
@@ -1046,6 +1057,7 @@ type RepairStatusFilter = "all" | RepairPreviewResponse["checks"][number]["statu
 
 const repairPreviewByRuntime = new Map<string, RepairPreviewResponse>();
 const repairFilterByRuntime = new Map<string, RepairStatusFilter>();
+const repairConfirmRuntimeIds = new Set<string>();
 let selectedPresetName = "";
 let selectedWorkspaceName = "";
 let presetMenuOpen = false;
@@ -1111,6 +1123,32 @@ function updateHealthStrip(installed: number, total: number, scanning = false): 
     installed: String(installed),
     total: String(total),
   });
+}
+
+function updateAgentsSecurityOverview(report: DoctorReport): void {
+  const installed = report.runtimes.filter((runtime) => runtime.installed).length;
+  const total = report.runtimes.length;
+  const issueCount = [...repairPreviewByRuntime.values()].reduce(
+    (count, preview) => count + preview.summary.fail + preview.summary.warn,
+    0,
+  );
+  const readiness = total > 0 ? Math.round((installed / total) * 100) : 0;
+  agentsReadinessRingEl.style.setProperty("--readiness", String(readiness));
+  agentsReadinessValueEl.textContent = total > 0 ? `${installed}/${total}` : "—";
+  agentsSecurityTitleEl.textContent =
+    installed === total && total > 0 ? t("agents.securityReady") : t("agents.securityTitle");
+  agentsSecurityDescEl.textContent = t("agents.securityDesc", {
+    installed: String(installed),
+    total: String(total),
+    issues: String(issueCount),
+  });
+  agentsSecurityInstalledEl.textContent = t("agents.runtimeAvailable", {
+    count: String(installed),
+  });
+  agentsSecurityIssuesEl.textContent = t("agents.knownIssues", {
+    count: String(issueCount),
+  });
+  agentsSecurityIssuesEl.classList.toggle("has-issues", issueCount > 0);
 }
 
 function metaRow(labelKey: Parameters<typeof t>[0], value: string): string {
@@ -1225,19 +1263,25 @@ function renderRepairPreview(
         <p class="repair-suggested-title">${escapeHtml(t("repair.suggestedTitle"))}</p>
         <ul class="repair-suggested-list">
           ${report.suggested_repairs
-            .map(
-              (item) => `
-            <li class="repair-suggested-item">
-              <span class="repair-suggested-badge ${item.auto_fixable ? "ok" : "muted"}">${
-                item.auto_fixable ? t("repair.autoFixable") : t("repair.manualOnly")
-              }</span>
-              <span class="repair-suggested-body">
-                <strong>${escapeHtml(item.title)}</strong>
-                <span>${escapeHtml(item.description)}</span>
-              </span>
-            </li>
-          `,
-            )
+            .map((item) => {
+              const manualAction =
+                item.id === "configure-openclaw-api-key" ||
+                item.id === "configure-deepseek-harness-credentials"
+                  ? `<button type="button" class="btn-ghost repair-suggested-action" data-action="go-wiring">${escapeHtml(t("repair.goWiring"))}</button>`
+                  : "";
+              return `
+                <li class="repair-suggested-item">
+                  <span class="repair-suggested-badge ${item.auto_fixable ? "ok" : "muted"}">${
+                    item.auto_fixable ? t("repair.autoFixable") : t("repair.manualOnly")
+                  }</span>
+                  <span class="repair-suggested-body">
+                    <strong>${escapeHtml(item.title)}</strong>
+                    <span>${escapeHtml(item.description)}</span>
+                  </span>
+                  ${manualAction}
+                </li>
+              `;
+            })
             .join("")}
         </ul>
       </div>
@@ -1257,11 +1301,13 @@ function renderRepairPreview(
   const isAskRuntime = isAskRuntimeId(report.runtime_id);
   const canVerifyBrowserMcp = supportsBrowserMcp(report.runtime_id);
   const funnelNeedsRepair = isAskRuntime && report.can_apply_repair && !healthy && !report.last_execute;
+  const showRepairConfirm =
+    funnelNeedsRepair && repairConfirmRuntimeIds.has(report.runtime_id);
   const funnelCta =
     healthy || report.last_execute
       ? `<button type="button" class="btn-primary btn-compact" data-action="${canVerifyBrowserMcp ? "ask-verify" : "ask-session"}">${escapeHtml(canVerifyBrowserMcp ? t("repair.funnelAskVerifyCta") : t("runtime.ask"))}</button>`
       : funnelNeedsRepair
-        ? `<button type="button" class="btn-primary btn-compact" data-action="apply-repair">${escapeHtml(t("repair.oneClick"))}</button>`
+        ? `<button type="button" class="btn-primary btn-compact" data-action="preview-repair">${escapeHtml(t("repair.previewFixes"))}</button>`
         : "";
   const funnel = isAskRuntime
     ? `<div class="repair-funnel">
@@ -1279,6 +1325,37 @@ function renderRepairPreview(
             : ""
         }
       </div>`
+    : "";
+  const autoFixItems = report.suggested_repairs.filter((item) => item.auto_fixable);
+  const repairConfirm = showRepairConfirm
+    ? `
+      <div class="repair-confirm-card">
+        <div class="repair-confirm-head">
+          <span class="repair-confirm-icon" aria-hidden="true">↻</span>
+          <span>
+            <strong>${escapeHtml(t("repair.previewTitle"))}</strong>
+            <small>${escapeHtml(t("repair.previewCount", { count: String(autoFixItems.length) }))}</small>
+          </span>
+        </div>
+        <ul class="repair-confirm-list">
+          ${autoFixItems
+            .map(
+              (item) =>
+                `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.description)}</span></li>`,
+            )
+            .join("")}
+        </ul>
+        <div class="repair-confirm-safety">
+          <span>${escapeHtml(t("repair.previewBackup"))}</span>
+          <span>${escapeHtml(t("repair.previewNoSecrets"))}</span>
+          <span>${escapeHtml(t("repair.previewRecheck"))}</span>
+        </div>
+        <div class="repair-confirm-actions">
+          <button type="button" class="btn-secondary" data-action="cancel-repair-preview">${escapeHtml(t("repair.cancel"))}</button>
+          <button type="button" class="btn-primary" data-action="confirm-repair">${escapeHtml(t("repair.confirmFix"))}</button>
+        </div>
+      </div>
+    `
     : "";
   const applyButton =
     report.can_apply_repair && !funnelNeedsRepair
@@ -1299,19 +1376,24 @@ function renderRepairPreview(
         <button type="button" class="repair-panel-close" data-action="close-diagnose-detail">${escapeHtml(t("repair.closeDetail"))}</button>
       </div>
       ${funnel}
-      ${suggested}
-      <div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
-        ${summaryChips}
-      </div>
-      <ul class="repair-checks">${checks}${emptyList}</ul>
+      ${repairConfirm}
+      ${showRepairConfirm ? "" : suggested}
       ${
-        applyButton || rollbackButton
+        showRepairConfirm
+          ? ""
+          : `<div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
+              ${summaryChips}
+            </div>
+            <ul class="repair-checks">${checks}${emptyList}</ul>`
+      }
+      ${
+        !showRepairConfirm && (applyButton || rollbackButton)
           ? `<div class="repair-panel-actions">${applyButton}${rollbackButton}</div>`
           : ""
       }
-      ${executeResult}
+      ${showRepairConfirm ? "" : executeResult}
       ${
-        canVerifyBrowserMcp
+        canVerifyBrowserMcp && !showRepairConfirm
           ? `<div class="repair-smoke-row">
               <button type="button" class="btn-ghost" data-action="browser-smoke">${escapeHtml(t("repair.runBrowserSmoke"))}</button>
               <span class="repair-smoke-slot" data-browser-smoke-slot></span>
@@ -1407,30 +1489,29 @@ function formatVerificationSummary(summary: string): string {
   return `${match[1]} → ${match[2]}`;
 }
 
-type WindowSizeReport = { width: number; height: number };
-
 const MAIN_COMPACT_WIDTH = 420;
-const MAIN_DETAIL_EXTRA = 360;
-const MAIN_DETAIL_MAX_WIDTH = 900;
+const MAIN_DETAIL_EXTRA = 380;
 
-let compactWidthBeforeDetail: number | null = null;
 let diagnoseDetailOpen = false;
+let compactWidthBeforeDetail: number | null = null;
 const dismissedDiagnoseRuntimes = new Set<string>();
 
 function runtimeCardEl(runtime: string): HTMLElement | null {
   return runtimesEl.querySelector<HTMLElement>(`[data-runtime="${runtime}"]`);
 }
 
-async function readMainWindowSize(): Promise<WindowSizeReport> {
+async function setMainWindowWidth(width: number): Promise<WindowSizeReport> {
   return invoke<WindowSizeReport>("resize_main_window_command", {
-    width: null,
+    width,
     height: null,
   });
 }
 
-async function setMainWindowWidth(width: number): Promise<WindowSizeReport> {
+type WindowSizeReport = { width: number; height: number };
+
+async function readMainWindowSize(): Promise<WindowSizeReport> {
   return invoke<WindowSizeReport>("resize_main_window_command", {
-    width,
+    width: null,
     height: null,
   });
 }
@@ -1447,6 +1528,16 @@ function showDiagnosePending(runtimeId: string, message: string): void {
       <div class="repair-panel-head">
         <strong>${escapeHtml(diagnoseRuntimeLabel(runtimeId))}</strong>
         <span>${escapeHtml(message)}</span>
+        <button type="button" class="repair-panel-close" data-action="close-diagnose-detail">${escapeHtml(t("repair.closeDetail"))}</button>
+      </div>
+      <div class="repair-funnel">
+        <div class="repair-funnel-bar">
+          <ol class="repair-funnel-steps">
+            <li class="repair-funnel-step active">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
+            <li class="repair-funnel-step">${escapeHtml(t("repair.funnelStepRepair"))}</li>
+            <li class="repair-funnel-step">${escapeHtml(t("repair.funnelStepAsk"))}</li>
+          </ol>
+        </div>
       </div>
       <div class="repair-pending">
         <span class="spinner" aria-hidden="true"></span>
@@ -1459,28 +1550,22 @@ function showDiagnosePending(runtimeId: string, message: string): void {
 }
 
 async function expandDiagnoseWindowIfNeeded(): Promise<void> {
-  const compactCol = Math.round(widgetPrimaryEl.getBoundingClientRect().width);
-  if (!diagnoseDetailOpen && compactCol > 0) {
-    widgetEl.style.setProperty("--compact-col", `${compactCol}px`);
-  }
   diagnoseDetailEl.hidden = false;
-  widgetEl.classList.add("is-detail-open");
   if (diagnoseDetailOpen) {
     return;
   }
   try {
-    const size = await readMainWindowSize();
-    compactWidthBeforeDetail = size.width;
+    compactWidthBeforeDetail = (await readMainWindowSize()).width;
   } catch {
     compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
   }
-  diagnoseDetailOpen = true;
   const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
-  const target = Math.min(
-    MAIN_DETAIL_MAX_WIDTH,
-    Math.max(compact, MAIN_COMPACT_WIDTH) + MAIN_DETAIL_EXTRA,
-  );
-  await setMainWindowWidth(target);
+  document.body.style.setProperty("--compact-window-width", `${compact}px`);
+  document.body.classList.add("is-diagnose-layout");
+  diagnoseDetailOpen = true;
+  await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  document.body.classList.add("is-diagnose-open");
 }
 
 async function openDiagnoseDetail(report: RepairPreviewResponse): Promise<void> {
@@ -1499,18 +1584,20 @@ async function closeDiagnoseDetail(opts?: {
   skipDismiss?: boolean;
 }): Promise<void> {
   const runtime = diagnoseDetailEl.dataset.runtime;
+  if (runtime) {
+    repairConfirmRuntimeIds.delete(runtime);
+  }
   if (!opts?.keepContent && !opts?.skipDismiss && runtime) {
     dismissedDiagnoseRuntimes.add(runtime);
   }
-  widgetEl.classList.remove("is-detail-open");
-  widgetEl.style.removeProperty("--compact-col");
+  document.body.classList.remove("is-diagnose-open");
+  if (diagnoseDetailOpen) {
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+  }
   diagnoseDetailEl.hidden = true;
   if (!opts?.keepContent) {
     diagnoseDetailBodyEl.replaceChildren();
     delete diagnoseDetailEl.dataset.runtime;
-  }
-  if (!diagnoseDetailOpen) {
-    return;
   }
   diagnoseDetailOpen = false;
   if (runtime) {
@@ -1519,9 +1606,11 @@ async function closeDiagnoseDetail(opts?: {
       refreshRuntimeCardActions(card, runtime);
     }
   }
-  const target = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+  const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
   compactWidthBeforeDetail = null;
-  await setMainWindowWidth(target);
+  await setMainWindowWidth(compact);
+  document.body.classList.remove("is-diagnose-layout");
+  document.body.style.removeProperty("--compact-window-width");
 }
 
 function preferredRepairFilter(report: RepairPreviewResponse): RepairStatusFilter {
@@ -1538,6 +1627,9 @@ function mountRepairPreview(report: RepairPreviewResponse, opts?: { resetFilter?
   const runtime = report.runtime_id;
   dismissedDiagnoseRuntimes.delete(runtime);
   repairPreviewByRuntime.set(runtime, report);
+  if (lastReport) {
+    updateAgentsSecurityOverview(lastReport);
+  }
   if (opts?.resetFilter || !repairFilterByRuntime.has(runtime)) {
     repairFilterByRuntime.set(runtime, preferredRepairFilter(report));
   }
@@ -1987,6 +2079,7 @@ async function renderReport(report: DoctorReport) {
   lastScanEl.textContent = formatTime(new Date());
   runtimeCountEl.textContent = `${installed}/${total}`;
   updateHealthStrip(installed, total);
+  updateAgentsSecurityOverview(report);
 
   setStatusBanner(
     report.profile_env_exists ? "ok" : "warn",
@@ -4197,7 +4290,14 @@ runtimesEl.addEventListener("click", (event) => {
   }
 
   if (action === "apply-repair" && runtimeCard) {
-    void oneClickRepairRuntimeCard(runtimeCard);
+    const runtime = runtimeCard.dataset.runtime;
+    if (runtime) {
+      repairConfirmRuntimeIds.add(runtime);
+      const report = repairPreviewByRuntime.get(runtime);
+      if (report) {
+        void openDiagnoseDetail(report);
+      }
+    }
     return;
   }
 
@@ -4260,7 +4360,34 @@ diagnoseDetailEl.addEventListener("click", (event) => {
     return;
   }
 
-  if (action === "apply-repair" && card) {
+  if (action === "go-wiring") {
+    void closeDiagnoseDetail();
+    setMainTab("provider");
+    return;
+  }
+
+  if (action === "preview-repair" && runtime) {
+    repairConfirmRuntimeIds.add(runtime);
+    const report = repairPreviewByRuntime.get(runtime);
+    if (report) {
+      void openDiagnoseDetail(report);
+    }
+    return;
+  }
+
+  if (action === "cancel-repair-preview" && runtime) {
+    repairConfirmRuntimeIds.delete(runtime);
+    const report = repairPreviewByRuntime.get(runtime);
+    if (report) {
+      void openDiagnoseDetail(report);
+    }
+    return;
+  }
+
+  if ((action === "confirm-repair" || action === "apply-repair") && card) {
+    if (runtime) {
+      repairConfirmRuntimeIds.delete(runtime);
+    }
     void oneClickRepairRuntimeCard(card);
     return;
   }
@@ -4482,6 +4609,24 @@ personalListEl.addEventListener("click", (event) => {
   }
 });
 
+windowCloseEl.addEventListener("click", () => {
+  void mainWindow.close();
+});
+
+windowMinimizeEl.addEventListener("click", () => {
+  void mainWindow.minimize();
+});
+
+windowMaximizeEl.addEventListener("click", () => {
+  void mainWindow.toggleMaximize();
+});
+
+widgetToolbarEl.addEventListener("dblclick", (event) => {
+  if (!(event.target as HTMLElement).closest("button")) {
+    void mainWindow.toggleMaximize();
+  }
+});
+
 refreshBtn.addEventListener("click", () => {
   void refresh();
 });
@@ -4697,6 +4842,9 @@ modeUseTeamEl.addEventListener("click", () => {
   void enableTeamMode();
 });
 
+// A webview reload can preserve the native width from an open diagnose panel
+// while resetting the frontend's detail state. Always restore compact startup.
+void setMainWindowWidth(MAIN_COMPACT_WIDTH);
 void loadProfiles();
 void loadWorkspaces();
 void loadRemoteProjects();
