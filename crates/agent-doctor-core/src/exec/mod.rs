@@ -6,8 +6,10 @@ use std::time::Duration;
 use anyhow::Result;
 
 mod local;
+mod process;
 
 pub use local::LocalBackend;
+pub use process::{run_output, RunError, SHORT_PROBE_TIMEOUT};
 
 /// Read-only / command execution surface used by remote doctor (and later repair).
 pub trait ExecBackend {

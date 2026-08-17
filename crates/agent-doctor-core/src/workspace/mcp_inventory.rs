@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::adapters::util::{find_all_binaries, find_binary, home_join};
+use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
 
 use super::{load_workspaces, WorkspacesDocument};
 
@@ -471,8 +472,28 @@ fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
 /// (`exec hermes -p agent-doctor …`), which is not the Agent Doctor CLI.
 pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     let mut candidates = Vec::new();
-    candidates.extend(find_all_binaries("agent-doctor-cli"));
-    candidates.extend(find_all_binaries("agent-doctor"));
+
+    // Bundled CLI first. PATH scan can spawn a GUI stub / npm shim and hang on Windows.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            #[cfg(windows)]
+            {
+                candidates.push(dir.join("resources/agent-doctor-cli.exe"));
+                candidates.push(dir.join("agent-doctor-cli.exe"));
+                candidates.push(dir.join("../Resources/agent-doctor-cli.exe"));
+            }
+            candidates.push(dir.join("agent-doctor-cli"));
+            candidates.push(dir.join("../Resources/agent-doctor-cli"));
+            candidates.push(dir.join("resources/agent-doctor-cli"));
+            candidates.push(dir.join("resources/agent-doctor"));
+            candidates.push(dir.join("../Resources/agent-doctor"));
+            candidates.push(dir.join("agent-doctor"));
+            #[cfg(windows)]
+            {
+                candidates.push(dir.join("agent-doctor.exe"));
+            }
+        }
+    }
 
     // Prefer an in-tree release/debug build when developing from source.
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
@@ -488,28 +509,9 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
             candidates.push(root.join(rel));
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            // Same folder as the desktop binary (Contents/MacOS on macOS).
-            candidates.push(dir.join("agent-doctor-cli"));
-            candidates.push(dir.join("agent-doctor"));
-            #[cfg(windows)]
-            {
-                candidates.push(dir.join("agent-doctor-cli.exe"));
-                candidates.push(dir.join("agent-doctor.exe"));
-            }
-            // Tauri bundle.resources → Contents/Resources/ (macOS) or resources/ beside exe.
-            candidates.push(dir.join("../Resources/agent-doctor-cli"));
-            candidates.push(dir.join("../Resources/agent-doctor"));
-            candidates.push(dir.join("resources/agent-doctor-cli"));
-            candidates.push(dir.join("resources/agent-doctor"));
-            #[cfg(windows)]
-            {
-                candidates.push(dir.join("../Resources/agent-doctor-cli.exe"));
-                candidates.push(dir.join("resources/agent-doctor-cli.exe"));
-            }
-        }
-    }
+
+    candidates.extend(find_all_binaries("agent-doctor-cli"));
+    candidates.extend(find_all_binaries("agent-doctor"));
 
     for path in candidates {
         if is_real_agent_doctor_cli(&path) {
@@ -523,8 +525,17 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     )
 }
 
+fn looks_like_desktop_gui(path: &Path) -> bool {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    stem == "agent doctor" || stem == "agent-doctor-desktop"
+}
+
 fn is_real_agent_doctor_cli(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || looks_like_desktop_gui(path) {
         return false;
     }
     // Skip shell wrappers such as `exec hermes -p agent-doctor "$@"`.
@@ -537,35 +548,21 @@ fn is_real_agent_doctor_cli(path: &Path) -> bool {
         }
     }
 
-    // Prefer a cheap --version probe (works even when Chrome discovery fails in
-    // GUI / sandboxed environments). Fall back to mcp status for older builds.
-    if let Ok(output) = std::process::Command::new(path)
-        .args(["--version"])
-        .output()
-    {
-        if output.status.success() {
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            if text.to_ascii_lowercase().contains("agent-doctor") {
-                return true;
-            }
-        }
-    }
-
-    let Ok(output) = std::process::Command::new(path)
-        .args(["mcp", "status", "--json"])
-        .output()
-    else {
+    // Identity is `--version` only. Never fall back to `mcp status` — that can
+    // open Chrome / wait on CDP and freeze "Apply repair" on Windows.
+    let Ok(output) = run_output(path, &["--version"], SHORT_PROBE_TIMEOUT) else {
         return false;
     };
     if !output.status.success() {
         return false;
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.contains("chrome_found") || stdout.contains("cdp_connected")
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .to_ascii_lowercase();
+    text.contains("agent-doctor")
 }
 
 /// Group configured browser MCP entries by runtime hint.

@@ -1,6 +1,8 @@
 use std::fs;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -510,7 +512,7 @@ fn probe_gateway(
     ));
 
     match gateway_socket_addr(&url) {
-        Some(addr) => match addr.to_socket_addrs() {
+        Some(addr) => match resolve_socket_addrs(&addr, Duration::from_millis(800)) {
             Ok(addrs) => {
                 let deadline = Instant::now() + Duration::from_millis(800);
                 let reachable = addrs.into_iter().any(|addr| {
@@ -558,6 +560,28 @@ fn probe_gateway(
             ProbeSeverity::Warning,
             "gateway URL could not be parsed for connectivity check",
             SensitivityLevel::ConfigShape,
+        )),
+    }
+}
+
+fn resolve_socket_addrs(
+    host_port: &str,
+    timeout: Duration,
+) -> Result<Vec<std::net::SocketAddr>, std::io::Error> {
+    let host_port = host_port.to_string();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(
+            host_port
+                .to_socket_addrs()
+                .map(|iter| iter.collect::<Vec<_>>()),
+        );
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("DNS timed out after {}ms", timeout.as_millis()),
         )),
     }
 }

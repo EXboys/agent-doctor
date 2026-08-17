@@ -1080,9 +1080,13 @@ async fn run_repair_execute_command(
     // Do not auto-launch Chrome here — CDP smoke can block the UI for ~10s.
     // The diagnose panel has an explicit "Browser CDP smoke" button.
     execute.browser_smoke = None;
-    let doctor = run_doctor();
-    remember_tray_health(&app, &doctor);
-    update_tray_tooltip(&app);
+    // Tray refresh can spawn npm/version probes; never block Apply Repair on it.
+    let app_tray = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let doctor = run_doctor();
+        remember_tray_health(&app_tray, &doctor);
+        update_tray_tooltip(&app_tray);
+    });
     Ok(build_repair_preview_response(
         result.after_probe,
         Some(execute),
