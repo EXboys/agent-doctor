@@ -17,11 +17,16 @@ cargo run -p agent-doctor -- doctor --json
 
 | Command | Status |
 |---------|--------|
-| `doctor` | Implemented (OpenClaw, Hermes, Claude Code, Codex discovery); `--explain` for AI diagnosis |
+| `doctor` | Implemented (OpenClaw, Hermes, DeepSeek Harness, Claude Code, Codex); `--explain` for AI diagnosis |
 | `install <runtime>` | All registered runtimes: rule install when available; else / on failure → AI install |
+| `repair <runtime>` | Probe + preview; `--apply` playbook + backup; `--rollback` |
+| `ask <runtime>` | One-shot non-interactive prompt (Claude / Codex / DeepSeek Harness / Hermes / OpenClaw) |
+| `mcp browser/status/configure` | Browser MCP via CDP; wire into Codex / Claude / Hermes / OpenClaw |
+| `mode show/personal/team` | Exclusive personal provider vs Evotown team overlay |
 | `profile list/init/use` | Implemented (Hermes model switching) |
-| `config show` | Implemented (Hermes) |
+| `config show` | Implemented (Hermes and other registered runtimes) |
 | `workspace init/list/show/use/status/doctor/fix/matrix/direnv` | Per-project isolation for Hermes, Claude Code, Codex, OpenClaw |
+| `remote host/project/doctor` | Agentless SSH read-only doctor |
 | `setup --url --key` | Evotown/company profile → profile.env + evotown.agent.env + runtime configs |
 | `sync` | Pull SkillHub bundle from Evotown (replaces `evotown-agent-setup.py sync`) |
 | `policy pull` | Cache Evotown policies to `~/.config/evotown/policies-cache.json` |

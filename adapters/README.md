@@ -35,6 +35,7 @@ Adapter implementations live under `crates/agent-doctor-core/src/adapters/`. Use
 |---------|----------|----------------|
 | `openclaw` | P0 | `crates/agent-doctor-core/src/adapters/openclaw.rs` |
 | `hermes` | P0 | `crates/agent-doctor-core/src/adapters/hermes.rs` |
+| `deepseek-harness` | P0 | `crates/agent-doctor-core/src/adapters/deepseek_harness.rs` |
 | `claude-code` | P0 | `crates/agent-doctor-core/src/adapters/claude_code.rs` |
 | `codex` | P1 | `crates/agent-doctor-core/src/adapters/codex.rs` |
 | `skilllite` | P2 | — |

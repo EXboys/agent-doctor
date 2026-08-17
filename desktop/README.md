@@ -1,14 +1,19 @@
-# Desktop (Tauri menubar)
+# Desktop (Tauri companion)
 
-**Tauri 2** menubar companion that calls the same Rust core as the CLI (`agent-doctor-core`).
+**Tauri 2** tray + window that calls the same Rust core as the CLI (`agent-doctor-core`).
 
-## Features (MVP)
+Typical loop: **scan → diagnose → confirm repair → Ask re-check**.
 
-- System tray with **Show**, **Run doctor**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
-- Diagnose / personal provider (with URL templates) / Evotown tabs
-- Workspace picker: list and switch registered project workspaces
-- Hermes scene preset switching and API key status
-- Repair apply / rollback for supported runtimes
+![Agent Doctor desktop](../docs/screenshot-desktop.png)
+
+## Features
+
+- System tray: **Show**, **Run doctor**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
+- **Agents** — environment health, runtime inventory, Diagnose → Repair → Ask drawer
+- **Resources** — Skills / MCP inventory; Browser MCP into Codex / Claude / Hermes / OpenClaw
+- **Wiring** — exclusive personal provider vs Evotown team mode (URL templates, verify, apply)
+- **Workspace** — list/switch project isolation, remote VPS read-only doctor, Hermes scene presets
+- Repair apply / rollback for supported runtimes (Hermes, OpenClaw, DeepSeek Harness, plus Claude/Codex gateway + Browser MCP)
 - No separate business logic in the TypeScript UI layer
 
 See [docs/product-boundary.md](../docs/product-boundary.md) for personal vs team modes.
