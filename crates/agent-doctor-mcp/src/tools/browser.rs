@@ -1353,30 +1353,6 @@ fn wildcard_match(text: &str, pattern: &str) -> bool {
     go(text.as_bytes(), pattern.as_bytes())
 }
 
-#[cfg(test)]
-mod ref_tests {
-    use super::*;
-
-    #[test]
-    fn parses_snapshot_refs() {
-        assert_eq!(parse_ref_index("@e1"), Some(0));
-        assert_eq!(parse_ref_index("e12"), Some(11));
-        assert_eq!(parse_ref_index("@E3"), Some(2));
-        assert_eq!(parse_ref_index("#main"), None);
-        assert_eq!(parse_ref_index("@e"), None);
-    }
-
-    #[test]
-    fn url_glob_matches() {
-        assert!(url_matches(
-            "https://example.com/a/b",
-            "https://example.com/**"
-        ));
-        assert!(url_matches("https://example.com/login", "login"));
-        assert!(!url_matches("https://example.com", "https://other.com"));
-    }
-}
-
 fn parse_debug_port(ws_endpoint: &str) -> Option<u16> {
     let rest = ws_endpoint
         .strip_prefix("ws://")
@@ -1420,4 +1396,28 @@ fn page_ws_for_target(port: u16, target_id: &str) -> Result<String> {
         }
     }
     anyhow::bail!("target {target_id} not found in /json/list");
+}
+
+#[cfg(test)]
+mod ref_tests {
+    use super::*;
+
+    #[test]
+    fn parses_snapshot_refs() {
+        assert_eq!(parse_ref_index("@e1"), Some(0));
+        assert_eq!(parse_ref_index("e12"), Some(11));
+        assert_eq!(parse_ref_index("@E3"), Some(2));
+        assert_eq!(parse_ref_index("#main"), None);
+        assert_eq!(parse_ref_index("@e"), None);
+    }
+
+    #[test]
+    fn url_glob_matches() {
+        assert!(url_matches(
+            "https://example.com/a/b",
+            "https://example.com/**"
+        ));
+        assert!(url_matches("https://example.com/login", "login"));
+        assert!(!url_matches("https://example.com", "https://other.com"));
+    }
 }

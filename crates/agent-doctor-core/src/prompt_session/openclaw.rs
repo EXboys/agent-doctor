@@ -129,9 +129,11 @@ fn run_openclaw(
         &mut child,
         timeout_sec,
         cancel.handle(),
-        tool_trace_path.as_deref(),
-        &mut emitted_tools,
-        &mut tool_trace_len,
+        ToolTraceState {
+            path: tool_trace_path.as_deref(),
+            emitted_tools: &mut emitted_tools,
+            trace_len: &mut tool_trace_len,
+        },
         &mut emit,
     );
 
@@ -325,14 +327,18 @@ fn build_openclaw_command(
     Ok(cmd)
 }
 
+struct ToolTraceState<'a> {
+    path: Option<&'a Path>,
+    emitted_tools: &'a mut std::collections::HashSet<String>,
+    trace_len: &'a mut u64,
+}
+
 fn pump_lines<F>(
     session_id: &str,
     child: &mut Child,
     timeout_sec: u64,
     cancel: Arc<AtomicBool>,
-    tool_trace_path: Option<&Path>,
-    emitted_tools: &mut std::collections::HashSet<String>,
-    tool_trace_len: &mut u64,
+    tool_trace: ToolTraceState<'_>,
     on_event: &mut F,
 ) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
 where
@@ -397,12 +403,12 @@ where
     let (status, exit_code) = loop {
         drain(on_event);
         if Instant::now() >= next_tool_poll {
-            if let Some(path) = tool_trace_path {
+            if let Some(path) = tool_trace.path {
                 emit_openclaw_tools_from_path(
                     session_id,
                     path,
-                    emitted_tools,
-                    tool_trace_len,
+                    &mut *tool_trace.emitted_tools,
+                    &mut *tool_trace.trace_len,
                     on_event,
                 );
             }
@@ -434,8 +440,14 @@ where
     join_reader(stdout_handle, Duration::from_millis(500));
     join_reader(stderr_handle, Duration::from_millis(500));
     drain(on_event);
-    if let Some(path) = tool_trace_path {
-        emit_openclaw_tools_from_path(session_id, path, emitted_tools, tool_trace_len, on_event);
+    if let Some(path) = tool_trace.path {
+        emit_openclaw_tools_from_path(
+            session_id,
+            path,
+            &mut *tool_trace.emitted_tools,
+            &mut *tool_trace.trace_len,
+            on_event,
+        );
     }
 
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
