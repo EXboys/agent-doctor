@@ -98,13 +98,12 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-fn apply_no_window(cmd: &mut Command) {
+fn apply_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        _cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let _ = cmd;
 }
 
 fn kill_process_tree(pid: u32) {
