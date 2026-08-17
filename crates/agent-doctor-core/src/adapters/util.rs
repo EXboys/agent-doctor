@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::adapter::AdapterDiscovery;
+use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
 
 pub fn home_join(relative: &str) -> PathBuf {
     dirs::home_dir().expect("home directory").join(relative)
@@ -28,18 +30,33 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     find_binary_in_dirs(name, &std::env::split_paths(&path_var).collect::<Vec<_>>())
 }
 
+fn windows_shim_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        // Prefer .cmd/.exe over the npm shebang file named `claude` (no extension),
+        // which CreateProcess cannot run and which we used to try first.
+        return [".cmd", ".exe", ".bat"]
+            .into_iter()
+            .map(|ext| dir.join(format!("{name}{ext}")))
+            .collect();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (dir, name);
+        Vec::new()
+    }
+}
+
 fn find_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     for dir in dirs {
+        for candidate in windows_shim_candidates(dir, name) {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let exe_candidate = dir.join(format!("{name}.exe"));
-            if exe_candidate.is_file() {
-                return Some(exe_candidate);
-            }
         }
     }
     None
@@ -49,26 +66,36 @@ fn find_all_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut seen = BTreeSet::new();
     let mut found = Vec::new();
     for dir in dirs {
+        for candidate in windows_shim_candidates(dir, name) {
+            if candidate.is_file() && seen.insert(normalize_path_for_set(&candidate)) {
+                found.push(candidate);
+            }
+        }
         let candidate = dir.join(name);
         if candidate.is_file() && seen.insert(normalize_path_for_set(&candidate)) {
             found.push(candidate);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let exe_candidate = dir.join(format!("{name}.exe"));
-            if exe_candidate.is_file() && seen.insert(normalize_path_for_set(&exe_candidate)) {
-                found.push(exe_candidate);
-            }
         }
     }
     found
 }
 
 fn normalize_path_for_set(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .display()
-        .to_string()
+    // Avoid canonicalize(): on Windows it can block for tens of seconds on a
+    // disconnected network PATH entry.
+    #[cfg(windows)]
+    {
+        return path
+            .to_string_lossy()
+            .replace('/', "\\")
+            .to_ascii_lowercase();
+    }
+    #[cfg(not(windows))]
+    {
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+            .to_string()
+    }
 }
 
 fn common_binary_dirs() -> Vec<PathBuf> {
@@ -92,7 +119,12 @@ fn common_binary_dirs() -> Vec<PathBuf> {
 }
 
 fn npm_global_bin_dir() -> Option<PathBuf> {
-    let output = Command::new("npm").args(["prefix", "-g"]).output().ok()?;
+    static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    CACHED.get_or_init(npm_global_bin_dir_uncached).clone()
+}
+
+fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
+    let output = run_output(Path::new("npm"), &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -100,14 +132,23 @@ fn npm_global_bin_dir() -> Option<PathBuf> {
     if prefix.is_empty() {
         return None;
     }
-    Some(PathBuf::from(prefix).join("bin"))
+    let prefix = PathBuf::from(prefix);
+    #[cfg(windows)]
+    {
+        // `npm prefix -g` is already the directory that holds .cmd shims.
+        return Some(prefix);
+    }
+    #[cfg(not(windows))]
+    {
+        Some(prefix.join("bin"))
+    }
 }
 
 /// Use `where.exe` on Windows to find executables that may be in restricted
 /// directories (e.g. WindowsApps) where read_dir() would fail.
 #[cfg(target_os = "windows")]
 fn find_with_where_exe(name: &str) -> Option<PathBuf> {
-    let output = Command::new("where").arg(name).output().ok()?;
+    let output = run_output(Path::new("where"), &[name], Duration::from_secs(3)).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -140,24 +181,23 @@ pub fn discover_binary(name: &str) -> AdapterDiscovery {
 }
 
 fn read_version(binary: &PathBuf, flags: &[&str]) -> Option<String> {
-    for flag in flags {
-        let output = Command::new(binary).arg(flag).output().ok()?;
-        if !output.status.success() {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let line = text.lines().next()?.trim();
-        if !line.is_empty() {
-            return Some(line.to_string());
-        }
+    match read_version_result_with_flags(binary, flags) {
+        Ok(version) => version,
+        Err(_) => None,
     }
-    None
 }
 
 pub fn read_version_result(binary: &PathBuf) -> Result<Option<String>, String> {
+    read_version_result_with_flags(binary, &["--version", "-V", "version"])
+}
+
+fn read_version_result_with_flags(
+    binary: &PathBuf,
+    flags: &[&str],
+) -> Result<Option<String>, String> {
     let mut last_error = None;
-    for flag in ["--version", "-V", "version"] {
-        match Command::new(binary).arg(flag).output() {
+    for flag in flags {
+        match run_output(binary, &[flag], SHORT_PROBE_TIMEOUT) {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -174,6 +214,9 @@ pub fn read_version_result(binary: &PathBuf) -> Result<Option<String>, String> {
                 if !stderr.trim().is_empty() {
                     last_error = Some(format!("{flag}: {}", stderr.trim()));
                 }
+            }
+            Err(error) if error.timed_out() => {
+                return Err(format!("{flag} {error}"));
             }
             Err(error) => {
                 last_error = Some(format!("{flag}: {error}"));

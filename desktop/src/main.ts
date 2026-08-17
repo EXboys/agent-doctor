@@ -1522,7 +1522,13 @@ function diagnoseRuntimeLabel(runtimeId: string): string {
   );
 }
 
-function showDiagnosePending(runtimeId: string, message: string): void {
+function showDiagnosePending(
+  runtimeId: string,
+  message: string,
+  step: "diagnose" | "repair" = "diagnose",
+): void {
+  const diagnoseClass = step === "diagnose" ? "active" : "done";
+  const repairClass = step === "repair" ? "active" : "";
   diagnoseDetailBodyEl.innerHTML = `
     <div class="repair-panel is-pending" data-runtime="${escapeHtml(runtimeId)}">
       <div class="repair-panel-head">
@@ -1533,8 +1539,8 @@ function showDiagnosePending(runtimeId: string, message: string): void {
       <div class="repair-funnel">
         <div class="repair-funnel-bar">
           <ol class="repair-funnel-steps">
-            <li class="repair-funnel-step active">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
-            <li class="repair-funnel-step">${escapeHtml(t("repair.funnelStepRepair"))}</li>
+            <li class="repair-funnel-step ${diagnoseClass}">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
+            <li class="repair-funnel-step ${repairClass}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
             <li class="repair-funnel-step">${escapeHtml(t("repair.funnelStepAsk"))}</li>
           </ol>
         </div>
@@ -1543,6 +1549,7 @@ function showDiagnosePending(runtimeId: string, message: string): void {
         <span class="spinner" aria-hidden="true"></span>
         <span>${escapeHtml(message)}</span>
       </div>
+      ${step === "repair" ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.applyingHint"))}</p>` : ""}
     </div>
   `;
   diagnoseDetailEl.dataset.runtime = runtimeId;
@@ -4095,7 +4102,7 @@ async function applyRepairRuntimeCard(card: HTMLElement) {
   applyButton?.setAttribute("disabled", "true");
   hint.hidden = false;
   hint.textContent = t("repair.applying");
-  showDiagnosePending(runtime, t("repair.applying"));
+  showDiagnosePending(runtime, t("repair.applying"), "repair");
   try {
     const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", { runtime });
     mountRepairPreview(report, { resetFilter: true });
