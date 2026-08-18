@@ -183,11 +183,11 @@ env_key = "COMPANY_API_KEY"
     fn auth_json_is_optional_not_required() {
         let required = CodexAdapter.config_paths();
         let optional = CodexAdapter.optional_config_paths();
-        assert!(required.iter().all(|path| {
-            path.file_name().and_then(|name| name.to_str()) != Some("auth.json")
-        }));
-        assert!(optional.iter().any(|path| {
-            path.file_name().and_then(|name| name.to_str()) == Some("auth.json")
-        }));
+        assert!(required
+            .iter()
+            .all(|path| { path.file_name().and_then(|name| name.to_str()) != Some("auth.json") }));
+        assert!(optional
+            .iter()
+            .any(|path| { path.file_name().and_then(|name| name.to_str()) == Some("auth.json") }));
     }
 }

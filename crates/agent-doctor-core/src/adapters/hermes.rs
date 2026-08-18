@@ -458,11 +458,11 @@ mod tests {
     fn env_file_is_optional_not_required() {
         let required = HermesAdapter.config_paths();
         let optional = HermesAdapter.optional_config_paths();
-        assert!(required.iter().all(|path| {
-            path.file_name().and_then(|name| name.to_str()) != Some(".env")
-        }));
-        assert!(optional.iter().any(|path| {
-            path.file_name().and_then(|name| name.to_str()) == Some(".env")
-        }));
+        assert!(required
+            .iter()
+            .all(|path| { path.file_name().and_then(|name| name.to_str()) != Some(".env") }));
+        assert!(optional
+            .iter()
+            .any(|path| { path.file_name().and_then(|name| name.to_str()) == Some(".env") }));
     }
 }

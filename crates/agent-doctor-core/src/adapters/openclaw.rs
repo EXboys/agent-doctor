@@ -119,11 +119,11 @@ mod tests {
         assert!(required.iter().any(|path| {
             path.file_name().and_then(|name| name.to_str()) == Some("openclaw.json")
         }));
-        assert!(required.iter().all(|path| {
-            path.file_name().and_then(|name| name.to_str()) != Some(".env")
-        }));
-        assert!(optional.iter().any(|path| {
-            path.file_name().and_then(|name| name.to_str()) == Some(".env")
-        }));
+        assert!(required
+            .iter()
+            .all(|path| { path.file_name().and_then(|name| name.to_str()) != Some(".env") }));
+        assert!(optional
+            .iter()
+            .any(|path| { path.file_name().and_then(|name| name.to_str()) == Some(".env") }));
     }
 }

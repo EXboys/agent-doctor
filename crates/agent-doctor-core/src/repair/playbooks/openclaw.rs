@@ -308,14 +308,11 @@ fn openclaw_needs_install(probe: &RuntimeProbeReport) -> bool {
 }
 
 fn openclaw_config_missing(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| {
-            check.id.starts_with("config.exists:")
-                && check.status == ProbeStatus::Warn
-                && check.id.contains("openclaw.json")
-        })
+    probe.checks.iter().any(|check| {
+        check.id.starts_with("config.exists:")
+            && check.status == ProbeStatus::Warn
+            && check.id.contains("openclaw.json")
+    })
 }
 
 fn openclaw_gateway_missing(probe: &RuntimeProbeReport) -> bool {
