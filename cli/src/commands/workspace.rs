@@ -1,10 +1,10 @@
 use agent_doctor_core::{
-    enter_workspace, init_workspace, install_bash_hook, install_fish_hook, install_powershell_hook,
-    install_zsh_hook, load_workspaces, match_workspace_for_path, remove_workspace,
-    render_direnv_envrc, render_shell_env_for_name, use_workspace_with_options,
-    workspace_capability_matrix, workspace_doctor, workspace_fix, workspace_hook_status,
-    workspace_show, workspace_status, write_direnv_envrc, UseWorkspaceOptions,
-    WorkspaceCheckStatus, WorkspaceFixOptions, WorkspacesDocument,
+    ensure_default_workspace, enter_workspace, init_workspace, install_bash_hook,
+    install_fish_hook, install_powershell_hook, install_zsh_hook, load_workspaces,
+    match_workspace_for_path, remove_workspace, render_direnv_envrc, render_shell_env_for_name,
+    use_workspace_with_options, workspace_capability_matrix, workspace_doctor, workspace_fix,
+    workspace_hook_status, workspace_show, workspace_status, write_direnv_envrc,
+    UseWorkspaceOptions, WorkspaceCheckStatus, WorkspaceFixOptions, WorkspacesDocument,
 };
 use anyhow::{bail, Result};
 
@@ -28,7 +28,7 @@ pub fn init(path: Option<std::path::PathBuf>, name: Option<String>, git_root: bo
 }
 
 pub fn list(json: bool) -> Result<()> {
-    let doc = load_workspaces()?;
+    let doc = ensure_default_workspace().or_else(|_| load_workspaces())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&doc)?);
         return Ok(());

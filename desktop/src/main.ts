@@ -1558,19 +1558,22 @@ function showDiagnosePending(
 
 async function expandDiagnoseWindowIfNeeded(): Promise<void> {
   diagnoseDetailEl.hidden = false;
-  if (diagnoseDetailOpen) {
-    return;
-  }
-  try {
-    compactWidthBeforeDetail = (await readMainWindowSize()).width;
-  } catch {
-    compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
-  }
-  const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
-  document.body.style.setProperty("--compact-window-width", `${compact}px`);
   document.body.classList.add("is-diagnose-layout");
-  diagnoseDetailOpen = true;
-  await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
+  if (!diagnoseDetailOpen) {
+    try {
+      compactWidthBeforeDetail = (await readMainWindowSize()).width;
+    } catch {
+      compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
+    }
+    const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+    document.body.style.setProperty("--compact-window-width", `${compact}px`);
+    diagnoseDetailOpen = true;
+    try {
+      await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
+    } catch (error) {
+      setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+    }
+  }
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   document.body.classList.add("is-diagnose-open");
 }
@@ -1754,41 +1757,28 @@ function renderRuntimeCardActions(
   const detailOpenForThis =
     !diagnoseDetailEl.hidden && diagnoseDetailEl.dataset.runtime === runtime.id;
 
-  // Funnel CTA: workspace → repair → Ask (verify). Diagnose starts the loop.
-  // When the right-hand diagnose module is open, keep the primary CTA there.
   if (!hasActiveWorkspace()) {
     parts.push(
-      `<button type="button" class="btn-primary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
+      `<button type="button" class="btn-secondary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
     );
+  }
+  if (canRepair && !detailOpenForThis) {
     parts.push(
-      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
     );
-  } else if (canRepair) {
-    if (!detailOpenForThis) {
-      parts.push(
-        `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
-      );
-    }
+  } else if (!healthy && !diagnosed) {
     parts.push(
-      `<button type="button" class="${detailOpenForThis ? "btn-primary" : "btn-secondary"}" data-action="ask-session">${t("repair.funnelAskCta")}</button>`,
-    );
-  } else if (healthy || (diagnosed && preview?.last_execute)) {
-    if (!detailOpenForThis) {
-      parts.push(
-        `<button type="button" class="btn-primary" data-action="${supportsBrowserMcp(runtime.id) ? "ask-verify" : "ask-session"}">${supportsBrowserMcp(runtime.id) ? t("repair.funnelAskVerifyCta") : t("runtime.ask")}</button>`,
-      );
-    }
-    parts.push(
-      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+      `<button type="button" class="${hasActiveWorkspace() ? "btn-primary" : "btn-secondary"}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
     );
   } else {
     parts.push(
-      `<button type="button" class="btn-primary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
     );
   }
+
+  parts.push(
+    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+  );
 
   parts.push(
     `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
@@ -3961,14 +3951,21 @@ async function runBrowserSmokeFromCard(root: HTMLElement): Promise<void> {
   }
 }
 
+const openingSessionRuntimes = new Set<string>();
+
 async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {
   const runtime = card.dataset.runtime;
   const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
-  const openButton = card.querySelector<HTMLButtonElement>('[data-action="open-session"]');
-  if (!runtime) {
+  const openButtons = [
+    ...card.querySelectorAll<HTMLButtonElement>('[data-action="open-session"]'),
+  ];
+  if (!runtime || openingSessionRuntimes.has(runtime)) {
     return;
   }
-  openButton?.setAttribute("disabled", "true");
+  openingSessionRuntimes.add(runtime);
+  for (const button of openButtons) {
+    button.setAttribute("disabled", "true");
+  }
   if (hint) {
     hint.hidden = false;
     hint.textContent = t("runtime.opening");
@@ -3984,13 +3981,18 @@ async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {
     if (hint) {
       hint.textContent = t("runtime.openOk", { method });
     }
+    setStatusBanner("ok", t("runtime.openOk", { method }));
   } catch (error) {
     if (hint) {
       hint.hidden = false;
       hint.textContent = t("runtime.openFailed", { error: String(error) });
     }
+    setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
   } finally {
-    openButton?.removeAttribute("disabled");
+    openingSessionRuntimes.delete(runtime);
+    for (const button of openButtons) {
+      button.removeAttribute("disabled");
+    }
   }
 }
 
@@ -4378,6 +4380,10 @@ diagnoseDetailEl.addEventListener("click", (event) => {
     const report = repairPreviewByRuntime.get(runtime);
     if (report) {
       void openDiagnoseDetail(report);
+    } else if (card) {
+      void diagnoseRuntimeCard(card);
+    } else {
+      setStatusBanner("error", t("doctor.empty"));
     }
     return;
   }
