@@ -64,7 +64,7 @@ See [docs/enterprise.md](docs/enterprise.md) and [docs/product-boundary.md](docs
 
 ## Status
 
-**v0.1.28** — CLI + desktop for local agent ops. Not 1.0; the core loop is usable.
+**v0.1.29** — CLI + desktop for local agent ops. Not 1.0; the core loop is usable.
 
 **Shipped:** discovery and probes for OpenClaw, Hermes, DeepSeek Harness, Claude Code, and Codex; `repair --apply` / `--rollback` with backups; desktop Diagnose → Repair → Ask; workspace isolation; Browser MCP; exclusive personal / team mode; Evotown `setup` / `sync` / `connect`; read-only `remote` doctor over SSH.
 
