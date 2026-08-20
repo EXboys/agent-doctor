@@ -11,12 +11,14 @@ pub fn home_join(relative: &str) -> PathBuf {
 }
 
 pub fn find_binary(name: &str) -> Option<PathBuf> {
+    ensure_windows_user_path();
     find_in_path(name)
         .or_else(|| find_binary_in_dirs(name, &common_binary_dirs()))
         .or_else(|| find_with_where_exe(name))
 }
 
 pub fn find_all_binaries(name: &str) -> Vec<PathBuf> {
+    ensure_windows_user_path();
     let mut dirs = Vec::new();
     if let Some(path_var) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&path_var));
@@ -98,6 +100,26 @@ fn normalize_path_for_set(path: &Path) -> String {
     }
 }
 
+/// GUI apps (double-clicked `.exe`) inherit Explorer's PATH, which often
+/// omits nvm/npm shims that a developer terminal has. Prepend well-known
+/// Windows install locations so discovery matches `cargo run` from a shell.
+fn ensure_windows_user_path() {
+    #[cfg(windows)]
+    {
+        static ONCE: OnceLock<()> = OnceLock::new();
+        ONCE.get_or_init(|| {
+            let current = std::env::var_os("PATH").unwrap_or_default();
+            let mut dirs = common_binary_dirs();
+            dirs.extend(std::env::split_paths(&current));
+            if let Ok(joined) =
+                std::env::join_paths(dirs.iter().filter(|p| !p.as_os_str().is_empty()))
+            {
+                std::env::set_var("PATH", joined);
+            }
+        });
+    }
+}
+
 fn common_binary_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/opt/homebrew/bin"),
@@ -109,6 +131,31 @@ fn common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".cargo/bin"));
         dirs.push(home.join("bin"));
         dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".claude/local"));
+        #[cfg(windows)]
+        {
+            dirs.push(home.join(r"AppData\Roaming\npm"));
+            dirs.push(home.join(r"AppData\Local\Programs\nodejs"));
+            dirs.push(home.join(r"scoop\shims"));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        for key in ["ProgramFiles", "ProgramW6432"] {
+            if let Ok(root) = std::env::var(key) {
+                dirs.push(PathBuf::from(root).join("nodejs"));
+            }
+        }
+        if let Ok(nvm) = std::env::var("NVM_SYMLINK") {
+            dirs.push(PathBuf::from(nvm));
+        }
+        if let Ok(nvm_home) = std::env::var("NVM_HOME") {
+            dirs.push(PathBuf::from(nvm_home));
+        }
     }
 
     if let Some(npm_bin) = npm_global_bin_dir() {
@@ -272,8 +319,14 @@ mod tests {
         let dirs = common_binary_dirs();
         // Prefer suffix check: other tests temporarily mutate HOME in parallel.
         assert!(
-            dirs.iter().any(|d| d.ends_with(".local/bin")),
+            dirs.iter()
+                .any(|d| d.ends_with(".local/bin") || d.ends_with(r".local\bin")),
             "expected a …/.local/bin entry, got {dirs:?}"
+        );
+        assert!(
+            dirs.iter()
+                .any(|d| d.ends_with(".claude/local") || d.ends_with(r".claude\local")),
+            "expected a …/.claude/local entry, got {dirs:?}"
         );
         assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
     }

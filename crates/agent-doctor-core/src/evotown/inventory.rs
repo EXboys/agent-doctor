@@ -332,14 +332,7 @@ fn runtime_present(runtime_id: &str) -> bool {
 }
 
 fn which_exists(binary: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| {
-            std::env::split_paths(&paths).any(|dir| {
-                let candidate = dir.join(binary);
-                candidate.is_file()
-            })
-        })
-        .unwrap_or(false)
+    crate::adapters::util::find_binary(binary).is_some()
 }
 
 fn probe_claude_code(
