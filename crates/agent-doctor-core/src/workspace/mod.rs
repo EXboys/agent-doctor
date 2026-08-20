@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,9 @@ pub mod snapshot;
 
 const WORKSPACES_FILE: &str = "workspaces.yaml";
 const ACTIVE_ENV_FILE: &str = "active-workspace.env";
+pub const DEFAULT_WORKSPACE_NAME: &str = "default";
+
+static ENSURE_DEFAULT: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspacesDocument {
@@ -182,6 +186,53 @@ pub fn load_workspaces() -> Result<WorkspacesDocument> {
     }
     let raw = fs::read_to_string(&path)?;
     serde_yaml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn default_workspace_project_path() -> PathBuf {
+    dirs::home_dir()
+        .or_else(dirs::document_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Create and activate a `default` workspace (user home) when the registry is empty,
+/// or activate an existing entry when `active` is missing. Idempotent.
+pub fn ensure_default_workspace() -> Result<WorkspacesDocument> {
+    let _guard = ENSURE_DEFAULT
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+
+    let doc = load_workspaces()?;
+    if let Some(active) = doc.active.as_deref() {
+        if doc.workspaces.contains_key(active) {
+            return Ok(doc);
+        }
+    }
+
+    if let Some(name) = doc.workspaces.keys().next().cloned() {
+        use_workspace_with_options(
+            &name,
+            &UseWorkspaceOptions {
+                backup: false,
+                restart_gateways: false,
+            },
+        )?;
+        return load_workspaces();
+    }
+
+    let project_path = default_workspace_project_path();
+    let report = init_workspace(
+        Some(project_path),
+        Some(DEFAULT_WORKSPACE_NAME.to_string()),
+        false,
+    )?;
+    use_workspace_with_options(
+        &report.name,
+        &UseWorkspaceOptions {
+            backup: false,
+            restart_gateways: false,
+        },
+    )?;
+    load_workspaces()
 }
 
 pub fn save_workspaces(doc: &WorkspacesDocument) -> Result<PathBuf> {

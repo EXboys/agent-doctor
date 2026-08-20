@@ -1,27 +1,28 @@
 use agent_doctor_core::{
     activate_personal_provider, add_host, add_project, apply_profile_model,
     browser_configured_runtimes, build_repair_preview_from_bundle, delete_personal_provider,
-    evotown_status, execute_evotown_onboarding, execute_install_with_progress,
-    execute_personal_provider_setup, execute_register, execute_repair, execute_sync,
-    init_workspace, list_mcp_inventory, list_personal_providers, list_runtime_backup_ids,
-    list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
-    load_mode_status, load_personal_provider_status, load_profiles, load_remote_hosts,
-    load_workspaces, mount_synced_skills, needs_binary_install, open_interactive_session,
-    probe_runtime, remove_host, remove_project, resolve_agent_doctor_binary,
-    restore_runtime_backup, run_doctor, run_prompt_session_with_cancel, run_remote_doctor,
-    set_runtime_model, suggest_runtime_repairs, switch_to_personal_mode, switch_to_team_mode,
-    unmount_synced_skills, upsert_personal_provider, use_profile, use_workspace_with_options,
-    verify_personal_provider_with_protocol, workspace_doctor, workspace_fix, workspace_status,
-    ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    InitWorkspaceReport, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
-    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
-    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
-    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
-    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport,
-    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostsDocument, RepairExecuteOptions,
-    RepairExecuteReport, RestoreReport, RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions,
-    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
+    ensure_default_workspace, evotown_status, execute_evotown_onboarding,
+    execute_install_with_progress, execute_personal_provider_setup, execute_register,
+    execute_repair, execute_sync, init_workspace, list_mcp_inventory, list_personal_providers,
+    list_runtime_backup_ids, list_skills_inventory_with_options, load_doctor_node_config,
+    load_evotown_config, load_mode_status, load_personal_provider_status, load_profiles,
+    load_remote_hosts, load_workspaces, mount_synced_skills, needs_binary_install,
+    open_interactive_session, probe_runtime, remove_host, remove_project,
+    resolve_agent_doctor_binary, restore_runtime_backup, run_doctor,
+    run_prompt_session_with_cancel, run_remote_doctor, set_runtime_model, suggest_runtime_repairs,
+    switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills, upsert_personal_provider,
+    use_profile, use_workspace_with_options, verify_personal_provider_with_protocol,
+    workspace_doctor, workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus,
+    HermesAdapter, HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions,
+    InstallProgressEvent, InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport,
+    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
+    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
+    PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus, ProfilesDocument,
+    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
+    PromptSessionReport, RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport,
+    RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
+    RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
     UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
     WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
     WorkspacesDocument,
@@ -280,7 +281,7 @@ fn publish_doctor_report(app: &tauri::AppHandle, report: &DoctorReport) {
 
 #[tauri::command]
 fn list_workspaces_command() -> WorkspacesDocument {
-    load_workspaces().unwrap_or_default()
+    ensure_default_workspace().unwrap_or_else(|_| load_workspaces().unwrap_or_default())
 }
 
 #[tauri::command]
@@ -1177,19 +1178,23 @@ fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn open_session_command(
+async fn open_session_command(
     runtime: String,
     cwd: Option<String>,
     prompt: Option<String>,
     terminal: Option<bool>,
 ) -> Result<OpenSessionReport, String> {
-    open_interactive_session(&OpenSessionOptions {
-        runtime,
-        cwd: cwd.map(std::path::PathBuf::from),
-        prompt,
-        prefer_deep_link: !terminal.unwrap_or(false),
+    tauri::async_runtime::spawn_blocking(move || {
+        open_interactive_session(&OpenSessionOptions {
+            runtime,
+            cwd: cwd.map(std::path::PathBuf::from),
+            prompt,
+            prefer_deep_link: !terminal.unwrap_or(false),
+        })
+        .map_err(|err| format!("{err:#}"))
     })
-    .map_err(|err| format!("{err:#}"))
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -1372,7 +1377,7 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
         .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
-        .visible(false)
+        .visible(true)
         .build()
         .map_err(|err| format!("failed to open ask window: {err}"))?;
 

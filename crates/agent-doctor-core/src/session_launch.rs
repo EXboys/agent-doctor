@@ -4,15 +4,19 @@
 //! Chat/TUI stays in the official CLI (Claude Code deep link or a system terminal).
 
 use std::collections::HashMap;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::fs;
 #[cfg(target_os = "macos")]
-use std::fs::{self, OpenOptions};
-#[cfg(target_os = "macos")]
+use std::fs::OpenOptions;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::io::Write;
 #[cfg(target_os = "macos")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(target_os = "macos")]
+#[cfg(target_os = "windows")]
+use std::process::Stdio;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
@@ -36,7 +40,7 @@ use crate::setup::{
     write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
     MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
-use crate::workspace::{active_env_path, load_workspaces};
+use crate::workspace::{active_env_path, ensure_default_workspace, load_workspaces};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenSessionOptions {
@@ -73,7 +77,7 @@ pub fn resolve_session_cwd(explicit: Option<&Path>) -> PathBuf {
     if let Some(path) = explicit {
         return path.to_path_buf();
     }
-    if let Ok(doc) = load_workspaces() {
+    if let Ok(doc) = ensure_default_workspace().or_else(|_| load_workspaces()) {
         if let Some(active) = doc.active.as_deref() {
             if let Some(entry) = doc.workspaces.get(active) {
                 return entry.path.clone();
@@ -593,38 +597,7 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        let cwd_str = cwd.to_string_lossy();
-        let cd = cwd_str.replace('\'', "''");
-        let cmd = command_line.replace('\'', "''");
-        let ps = format!("Set-Location -LiteralPath '{cd}'; {cmd}");
-        // `--` stops Windows Terminal from treating `;` inside -Command as
-        // pane/tab separators (which surfaces as 0x80070002 / 找不到指定的文件).
-        let status = Command::new("wt")
-            .args([
-                "-d",
-                cwd_str.as_ref(),
-                "--",
-                "powershell",
-                "-NoExit",
-                "-Command",
-                &ps,
-            ])
-            .status();
-        if status.map(|s| s.success()).unwrap_or(false) {
-            return Ok(());
-        }
-        let status = Command::new("powershell")
-            .args([
-                "-NoExit",
-                "-Command",
-                &format!("Set-Location -LiteralPath '{cd}'; {cmd}"),
-            ])
-            .status()
-            .context("failed to launch PowerShell")?;
-        if !status.success() {
-            bail!("PowerShell exited with {status}");
-        }
-        Ok(())
+        launch_windows_terminal(cwd, command_line)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
@@ -671,6 +644,71 @@ fn write_macos_terminal_launch_script(cwd: &Path, command_line: &str) -> Result<
         return Ok(path);
     }
 
+    bail!("failed to allocate a unique terminal launch script")
+}
+
+/// GUI apps must not wait on a console process, and must not pass `$env:…; cmd`
+/// through `wt` / `cmd /C` — both treat `;` as extra windows.
+#[cfg(target_os = "windows")]
+fn launch_windows_terminal(cwd: &Path, command_line: &str) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+    let script = write_windows_terminal_launch_script(cwd, command_line)?;
+    let script_arg = script.to_string_lossy().into_owned();
+    let mut powershell = Command::new("powershell.exe");
+    powershell
+        .args(["-NoLogo", "-NoExit", "-File", &script_arg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NEW_CONSOLE);
+    match powershell.spawn() {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&script);
+            Err(error).context("failed to launch PowerShell")
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_windows_terminal_launch_script(cwd: &Path, command_line: &str) -> Result<PathBuf> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir();
+    let cwd = cwd.to_string_lossy().replace('\'', "''");
+    for attempt in 0..16 {
+        let path = dir.join(format!(
+            "agent-doctor-terminal-{}-{nonce}-{attempt}.ps1",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let script_path = path.to_string_lossy().replace('\'', "''");
+                if let Err(error) = write!(
+                    file,
+                    "Remove-Item -LiteralPath '{script_path}' -Force -ErrorAction SilentlyContinue\r\n\
+                     Set-Location -LiteralPath '{cwd}'\r\n\
+                     {command_line}\r\n"
+                ) {
+                    let _ = fs::remove_file(&path);
+                    return Err(error).context("failed to write terminal launch script");
+                }
+                return Ok(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).context("failed to create terminal launch script");
+            }
+        }
+    }
     bail!("failed to allocate a unique terminal launch script")
 }
 
