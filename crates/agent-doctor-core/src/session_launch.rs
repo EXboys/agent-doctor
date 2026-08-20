@@ -376,7 +376,9 @@ fn open_in_terminal(
     if argv.is_empty() {
         bail!("empty terminal command for {runtime}");
     }
-    let command_line = wrap_with_company_env(&shell_join(argv));
+    let resolved = resolve_launch_argv(argv);
+    let refs: Vec<&str> = resolved.iter().map(String::as_str).collect();
+    let command_line = wrap_with_company_env(&shell_join(&refs));
     launch_system_terminal(cwd, &command_line)?;
     Ok(OpenSessionReport {
         runtime: runtime.into(),
@@ -388,6 +390,16 @@ fn open_in_terminal(
             cwd.display()
         ),
     })
+}
+
+fn resolve_launch_argv(argv: &[&str]) -> Vec<String> {
+    let mut resolved: Vec<String> = argv.iter().map(|part| (*part).to_string()).collect();
+    if let Some(bin) = resolved.first_mut() {
+        if let Some(path) = crate::adapters::util::find_binary(bin) {
+            *bin = path.to_string_lossy().into_owned();
+        }
+    }
+    resolved
 }
 
 /// Prefix a shell command so Evotown / company API keys and workspace env are available.
@@ -585,10 +597,13 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
         let cd = cwd_str.replace('\'', "''");
         let cmd = command_line.replace('\'', "''");
         let ps = format!("Set-Location -LiteralPath '{cd}'; {cmd}");
+        // `--` stops Windows Terminal from treating `;` inside -Command as
+        // pane/tab separators (which surfaces as 0x80070002 / 找不到指定的文件).
         let status = Command::new("wt")
             .args([
                 "-d",
                 cwd_str.as_ref(),
+                "--",
                 "powershell",
                 "-NoExit",
                 "-Command",
@@ -660,18 +675,46 @@ fn write_macos_terminal_launch_script(cwd: &Path, command_line: &str) -> Result<
 }
 
 fn shell_join(argv: &[&str]) -> String {
-    argv.iter()
-        .map(|part| {
-            if part.is_empty()
-                || part.contains(|c: char| c.is_whitespace() || "\"'\\$`".contains(c))
-            {
-                shell_single_quote(part)
-            } else {
-                (*part).to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    #[cfg(windows)]
+    {
+        return argv
+            .iter()
+            .enumerate()
+            .map(|(index, part)| {
+                if index == 0 {
+                    let lower = part.to_ascii_lowercase();
+                    if lower.ends_with(".cmd")
+                        || lower.ends_with(".bat")
+                        || part.contains(char::is_whitespace)
+                    {
+                        return format!("& '{}'", part.replace('\'', "''"));
+                    }
+                    return (*part).to_string();
+                }
+                if part.is_empty() || part.contains(char::is_whitespace) || part.contains('\'') {
+                    format!("'{}'", part.replace('\'', "''"))
+                } else {
+                    (*part).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+    #[cfg(not(windows))]
+    {
+        argv.iter()
+            .map(|part| {
+                if part.is_empty()
+                    || part.contains(|c: char| c.is_whitespace() || "\"'\\$`".contains(c))
+                {
+                    shell_single_quote(part)
+                } else {
+                    (*part).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 fn shell_single_quote(value: &str) -> String {
@@ -708,6 +751,15 @@ mod tests {
     #[test]
     fn shell_join_preserves_official_dsh_web_entrypoint() {
         assert_eq!(shell_join(&["dsh", "web"]), "dsh web");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_join_calls_windows_cmd_shims() {
+        assert_eq!(
+            shell_join(&[r"C:\Users\zhang\AppData\Roaming\npm\claude.cmd"]),
+            r"& 'C:\Users\zhang\AppData\Roaming\npm\claude.cmd'"
+        );
     }
 
     #[test]

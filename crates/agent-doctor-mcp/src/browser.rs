@@ -47,7 +47,7 @@ impl BrowserFamily {
     }
 }
 
-/// Discover Chrome on the local machine (macOS first, Linux fallback).
+/// Discover Chrome / Edge / Chromium on the local machine.
 pub fn discover_chrome() -> Result<BrowserDiscovery> {
     discover_browser(BrowserFamily::Auto)
 }
@@ -96,25 +96,34 @@ fn discovery_from_binary(binary_path: PathBuf) -> Result<BrowserDiscovery> {
 }
 
 fn find_chrome_binary(family: BrowserFamily) -> Result<PathBuf> {
-    let candidates = browser_binary_candidates(family);
+    let mut candidates: Vec<PathBuf> = windows_browser_install_paths(family);
+    candidates.extend(
+        browser_binary_candidates(family)
+            .into_iter()
+            .map(PathBuf::from),
+    );
 
-    // Check absolute paths first
     for candidate in &candidates {
-        let p = PathBuf::from(candidate);
-        if p.is_absolute() && p.exists() {
-            return Ok(p);
+        if candidate.is_absolute() && candidate.exists() {
+            return Ok(candidate.clone());
         }
     }
 
-    // Check PATH for non-absolute candidates
     if let Ok(path) = std::env::var("PATH") {
         for candidate in &candidates {
-            let p = PathBuf::from(candidate);
-            if !p.is_absolute() {
-                for dir in std::env::split_paths(&path) {
-                    let full = dir.join(&p);
-                    if full.exists() {
-                        return Ok(full);
+            if candidate.is_absolute() {
+                continue;
+            }
+            for dir in std::env::split_paths(&path) {
+                let full = dir.join(candidate);
+                if full.exists() {
+                    return Ok(full);
+                }
+                #[cfg(windows)]
+                {
+                    let as_exe = dir.join(format!("{}.exe", candidate.display()));
+                    if as_exe.exists() {
+                        return Ok(as_exe);
                     }
                 }
             }
@@ -125,6 +134,56 @@ fn find_chrome_binary(family: BrowserFamily) -> Result<PathBuf> {
         "Could not find {} binary. Install Google Chrome, Microsoft Edge, or Chromium.",
         family.as_str()
     )
+}
+
+/// Official Windows install locations. GUI PATH almost never includes these.
+fn windows_browser_install_paths(family: BrowserFamily) -> Vec<PathBuf> {
+    #[cfg(not(windows))]
+    {
+        let _ = family;
+        Vec::new()
+    }
+    #[cfg(windows)]
+    {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for key in ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"] {
+            if let Ok(value) = std::env::var(key) {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    roots.push(PathBuf::from(trimmed));
+                }
+            }
+        }
+        let home = home_dir();
+        if !home.as_os_str().is_empty() {
+            roots.push(home.join("AppData").join("Local"));
+        }
+        browser_paths_for_windows_roots(family, &roots)
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn browser_paths_for_windows_roots(family: BrowserFamily, roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut push_unique = |path: PathBuf| {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    };
+
+    for root in roots {
+        if matches!(family, BrowserFamily::Chrome | BrowserFamily::Auto) {
+            push_unique(root.join("Google/Chrome/Application/chrome.exe"));
+        }
+        if matches!(family, BrowserFamily::Edge | BrowserFamily::Auto) {
+            push_unique(root.join("Microsoft/Edge/Application/msedge.exe"));
+        }
+        if matches!(family, BrowserFamily::Chromium | BrowserFamily::Auto) {
+            push_unique(root.join("Chromium/Application/chrome.exe"));
+            push_unique(root.join("BraveSoftware/Brave-Browser/Application/brave.exe"));
+        }
+    }
+    paths
 }
 
 fn browser_binary_candidates(family: BrowserFamily) -> Vec<&'static str> {
@@ -933,5 +992,16 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn windows_install_roots_include_chrome_and_edge_exe() {
+        let root = PathBuf::from(r"C:\Program Files");
+        let auto = browser_paths_for_windows_roots(BrowserFamily::Auto, &[root.clone()]);
+        assert!(auto.iter().any(|p| p.ends_with("chrome.exe")));
+        assert!(auto.iter().any(|p| p.ends_with("msedge.exe")));
+        let chrome_only = browser_paths_for_windows_roots(BrowserFamily::Chrome, &[root]);
+        assert!(chrome_only.iter().any(|p| p.ends_with("chrome.exe")));
+        assert!(!chrome_only.iter().any(|p| p.ends_with("msedge.exe")));
     }
 }
