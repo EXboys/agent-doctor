@@ -3932,6 +3932,11 @@ async function openAskWindow(runtime: string): Promise<void> {
       new Error(t("runtime.openTimeout")),
     );
   } catch (error) {
+    try {
+      await invoke("close_ask_window_command", { destroy: true });
+    } catch {
+      /* window may already be gone or the UI thread is stuck */
+    }
     setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
   }
 }
@@ -3950,6 +3955,11 @@ async function openAskWindowForVerify(runtime: string): Promise<void> {
       new Error(t("runtime.openTimeout")),
     );
   } catch (error) {
+    try {
+      await invoke("close_ask_window_command", { destroy: true });
+    } catch {
+      /* window may already be gone or the UI thread is stuck */
+    }
     setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
   }
 }

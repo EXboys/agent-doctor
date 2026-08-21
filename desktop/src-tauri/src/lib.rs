@@ -36,10 +36,11 @@ use agent_doctor_mcp::{
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
-    WebviewWindowBuilder,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 
@@ -198,8 +199,10 @@ where
         let _ = tx.send(f());
     })
     .map_err(|err| format!("failed to run on UI thread: {err}"))?;
-    rx.recv()
-        .map_err(|_| "UI thread dropped the window operation".to_string())?
+    rx.recv_timeout(Duration::from_secs(12))
+        .map_err(|_| {
+            "UI thread did not finish the window operation in time. If a blank Ask window is stuck, end Agent Doctor.exe in Task Manager, then reopen.".to_string()
+        })?
 }
 
 /// Resize the main window; omit width/height to only report the current size.
@@ -1378,44 +1381,82 @@ fn position_ask_window_right(window: &tauri::WebviewWindow) {
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
+fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
+    let hide = window.clone();
+    let _ = window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            // Hide instead of destroy so WebView2 is not rebuilt on the next Ask
+            // (rebuild on Windows can hang the UI thread and leave a blank shell).
+            api.prevent_close();
+            let _ = hide.hide();
+        }
+    });
+}
+
+fn create_ask_window(
+    app: &AppHandle,
+    runtime: &str,
+    visible: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let init_script = format!(
+        "window.__AD_ASK_RUNTIME__ = {};",
+        serde_json::Value::String(runtime.to_string())
+    );
+    // Load chat.html with no query string. WebView2 custom-protocol + `?query`
+    // often produces a titled, permanently blank Ask window.
+    let window =
+        WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
+            .title("Agent Doctor — Ask")
+            .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+            .min_inner_size(720.0, 480.0)
+            .resizable(true)
+            .closable(true)
+            .minimizable(true)
+            .decorations(true)
+            .visible(visible)
+            .initialization_script(&init_script)
+            .build()
+            .map_err(|err| format!("failed to open ask window: {err}"))?;
+    attach_ask_window_close_behavior(&window);
+    Ok(window)
+}
+
+fn ensure_ask_window(app: &AppHandle, runtime: &str) -> Result<tauri::WebviewWindow, String> {
+    if let Some(existing) = app.get_webview_window(ASK_WINDOW_LABEL) {
+        return Ok(existing);
+    }
+    create_ask_window(app, runtime, false)
+}
+
 fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<(), String> {
     let runtime = runtime
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("claude-code");
 
-    if let Some(existing) = app.get_webview_window(ASK_WINDOW_LABEL) {
-        position_ask_window_right(&existing);
-        let _ = existing.unminimize();
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        let _ = existing.emit(
-            "ask-window-focus",
-            serde_json::json!({ "runtime": runtime }),
-        );
-        return Ok(());
-    }
-
-    // Hash (not `?query`) so Windows WebView2 custom-protocol loads chat.html.
-    // Query strings often produce a titled, permanently blank Ask window.
-    let url = format!("chat.html#runtime={runtime}");
-    let init_script = format!(
-        "window.__AD_ASK_RUNTIME__ = {};",
-        serde_json::Value::String(runtime.to_string())
-    );
-    let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App(url.into()))
-        .title("Agent Doctor — Ask")
-        .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
-        .min_inner_size(720.0, 480.0)
-        .resizable(true)
-        .visible(true)
-        .initialization_script(&init_script)
-        .build()
-        .map_err(|err| format!("failed to open ask window: {err}"))?;
-
+    let window = ensure_ask_window(app, runtime)?;
     position_ask_window_right(&window);
+    let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    let _ = window.emit(
+        "ask-window-focus",
+        serde_json::json!({ "runtime": runtime }),
+    );
+    Ok(())
+}
+
+fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(ASK_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    if destroy {
+        window
+            .destroy()
+            .map_err(|err| format!("failed to close ask window: {err}"))?;
+    } else {
+        let _ = window.hide();
+    }
     Ok(())
 }
 
@@ -1424,6 +1465,14 @@ fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<()
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         open_or_focus_ask_window(&app_for_ui, runtime.as_deref())
+    })
+}
+
+#[tauri::command]
+fn close_ask_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        close_ask_window(&app_for_ui, destroy.unwrap_or(false))
     })
 }
 
@@ -1712,6 +1761,10 @@ pub fn run() {
             app.manage(PromptSessionState::default());
             show_main_window(app.handle());
             setup_tray(app);
+            // Pre-create Ask on the UI thread at startup. Creating it on first
+            // click can hang WebView2 on Windows (blank titled window, Close
+            // and Task Manager "End task" appear to do nothing).
+            let _ = ensure_ask_window(app.handle(), "claude-code");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -1768,6 +1821,7 @@ pub fn run() {
             open_path_command,
             open_session_command,
             open_ask_window_command,
+            close_ask_window_command,
             focus_main_tab_command,
             resize_main_window_command,
             start_prompt_session_command,

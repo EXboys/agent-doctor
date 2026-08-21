@@ -668,13 +668,9 @@ fn launch_windows_terminal(cwd: &Path, command_line: &str) -> Result<()> {
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
-        "-NoExit",
         "-File",
         &script_arg,
     ])
-    .stdin(Stdio::null())
-    .stdout(Stdio::null())
-    .stderr(Stdio::null())
     .creation_flags(CREATE_NEW_CONSOLE);
     match cmd.spawn() {
         Ok(_) => Ok(()),
@@ -691,6 +687,31 @@ fn windows_powershell_exe() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
         .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn render_windows_terminal_script(script_path: &str, cwd: &str, command_line: &str) -> String {
+    format!(
+        "Remove-Item -LiteralPath '{script_path}' -Force -ErrorAction SilentlyContinue\r\n\
+         Set-Location -LiteralPath '{cwd}'\r\n\
+         Write-Host 'Agent Doctor: starting session...'\r\n\
+         Write-Host ''\r\n\
+         $script:adFailed = $false\r\n\
+         try {{\r\n\
+         {command_line}\r\n\
+         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {{ $script:adFailed = $true }}\r\n\
+         }} catch {{\r\n\
+         Write-Host $_\r\n\
+         $script:adFailed = $true\r\n\
+         }}\r\n\
+         Write-Host ''\r\n\
+         if ($script:adFailed) {{\r\n\
+         Write-Host 'The command exited with an error. Press Enter to close this window.'\r\n\
+         }} else {{\r\n\
+         Write-Host 'Session ended. Press Enter to close this window.'\r\n\
+         }}\r\n\
+         [void][System.Console]::ReadLine()\r\n"
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -715,9 +736,8 @@ fn write_windows_terminal_launch_script(cwd: &Path, command_line: &str) -> Resul
                 let script_path = path.to_string_lossy().replace('\'', "''");
                 if let Err(error) = write!(
                     file,
-                    "Remove-Item -LiteralPath '{script_path}' -Force -ErrorAction SilentlyContinue\r\n\
-                     Set-Location -LiteralPath '{cwd}'\r\n\
-                     {command_line}\r\n"
+                    "{}",
+                    render_windows_terminal_script(&script_path, &cwd, command_line)
                 ) {
                     let _ = fs::remove_file(&path);
                     return Err(error).context("failed to write terminal launch script");
@@ -810,6 +830,19 @@ mod tests {
     #[test]
     fn shell_join_preserves_official_dsh_web_entrypoint() {
         assert_eq!(shell_join(&["dsh", "web"]), "dsh web");
+    }
+
+    #[test]
+    fn windows_terminal_script_keeps_console_visible() {
+        let body = render_windows_terminal_script(
+            r"C:\Temp\agent-doctor-terminal.ps1",
+            r"C:\Users\zhang\work",
+            "& 'C:\\Users\\zhang\\AppData\\Roaming\\npm\\claude.cmd'",
+        );
+        assert!(body.contains("Set-Location -LiteralPath 'C:\\Users\\zhang\\work'"));
+        assert!(body.contains("claude.cmd"));
+        assert!(body.contains("[System.Console]::ReadLine()"));
+        assert!(body.contains("starting session"));
     }
 
     #[cfg(windows)]

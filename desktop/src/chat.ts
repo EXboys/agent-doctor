@@ -167,6 +167,7 @@ const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-works
 const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#chat-workspace-hint")!;
 const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
+const closeEl = document.querySelector<HTMLButtonElement>("#chat-close")!;
 const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
 const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
 const resourcesToggleEl = document.querySelector<HTMLButtonElement>("#chat-resources-toggle")!;
@@ -2163,6 +2164,9 @@ function boot(): void {
   clearEl.addEventListener("click", clearActiveSession);
   newSessionEl.addEventListener("click", startNewSession);
   terminalEl.addEventListener("click", () => void openTerminal());
+  closeEl.addEventListener("click", () => {
+    void invoke("close_ask_window_command", { destroy: false });
+  });
   resourcesToggleEl.addEventListener("click", () => {
     toggleResourcesPanel();
   });
