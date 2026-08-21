@@ -1383,7 +1383,7 @@ fn position_ask_window_right(window: &tauri::WebviewWindow) {
 
 fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
     let hide = window.clone();
-    let _ = window.on_window_event(move |event| {
+    window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             // Hide instead of destroy so WebView2 is not rebuilt on the next Ask
             // (rebuild on Windows can hang the UI thread and leave a blank shell).
