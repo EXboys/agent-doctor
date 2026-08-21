@@ -116,13 +116,11 @@ where
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).with_context(|| format!("create {}", staging.display()))?;
 
-    let extract_result = (|| {
-        if archive.ends_with(".zip") {
-            extract_zip(&bytes, &staging, on_progress)
-        } else {
-            extract_tar_gz(&bytes, &staging, on_progress)
-        }
-    })();
+    let extract_result = if archive.ends_with(".zip") {
+        extract_zip(&bytes, &staging, on_progress)
+    } else {
+        extract_tar_gz(&bytes, &staging, on_progress)
+    };
     if let Err(error) = extract_result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
