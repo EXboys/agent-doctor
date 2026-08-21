@@ -18,7 +18,8 @@ use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{apply_overlay_env, collect_overlay_env, format_command_display};
 use super::util::{
-    combine_output, force_stop_child, is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    combine_output, command_from_cli, force_stop_child, is_runtime_stderr_noise, join_reader,
+    push_capped, summarize,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -307,7 +308,7 @@ fn build_openclaw_command(
     let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_OPENCLAW_BIN").unwrap_or_else(|_| "openclaw".into());
     let agent = resolve_openclaw_agent(&overlay);
-    let mut cmd = Command::new(&bin);
+    let mut cmd = command_from_cli(&bin);
     cmd.arg("agent")
         .arg("--local")
         .arg("--agent")

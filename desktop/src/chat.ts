@@ -178,7 +178,7 @@ const skillsEmptyEl = document.querySelector<HTMLElement>("#chat-skills-empty")!
 const mcpListEl = document.querySelector<HTMLElement>("#chat-mcp-list")!;
 const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
 
-/** Locked by main-page Ask entry (`?runtime=` / ask-window-focus). Not switched in-chat. */
+/** Locked by main-page Ask entry (`#runtime=` / ask-window-focus). Not switched in-chat. */
 let currentRuntime: AskRuntime = "claude-code";
 
 let store: SessionStore = loadStore();
@@ -1835,9 +1835,27 @@ async function ensureListener(): Promise<void> {
   });
 }
 
+function runtimeFromLocation(): string | null {
+  const injected = (window as Window & { __AD_ASK_RUNTIME__?: unknown }).__AD_ASK_RUNTIME__;
+  if (typeof injected === "string" && injected.trim()) {
+    return injected.trim();
+  }
+  const query = new URLSearchParams(window.location.search).get("runtime");
+  if (query) {
+    return query;
+  }
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) {
+    return null;
+  }
+  if (hash.startsWith("runtime=")) {
+    return decodeURIComponent(hash.slice("runtime=".length).split("&")[0] ?? "");
+  }
+  return new URLSearchParams(hash).get("runtime");
+}
+
 function readInitialRuntime(): void {
-  const params = new URLSearchParams(window.location.search);
-  const runtime = params.get("runtime");
+  const runtime = runtimeFromLocation();
   if (isAskRuntime(runtime)) {
     ensureRuntimeSession(runtime);
   } else {
@@ -1959,14 +1977,34 @@ function applyVerifyDraftIfAny(): void {
   }
 }
 
+function withTimeoutChat<T>(promise: Promise<T>, ms: number, timeoutError: Error): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(timeoutError), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function openTerminal(): Promise<void> {
   try {
-    await invoke("open_session_command", {
-      runtime: selectedRuntime(),
-      cwd: null,
-      prompt: null,
-      terminal: true,
-    });
+    await withTimeoutChat(
+      invoke("open_session_command", {
+        runtime: selectedRuntime(),
+        cwd: null,
+        prompt: null,
+        terminal: true,
+      }),
+      20_000,
+      new Error(t("chat.terminalFailed", { error: t("runtime.openTimeout") })),
+    );
     setStatus(t("chat.terminalOpened"), "ok");
   } catch (error) {
     setStatus(t("chat.terminalFailed", { error: String(error) }), "error");

@@ -1,7 +1,11 @@
-use std::process::Child;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use crate::adapters::util::find_binary;
+use crate::exec::{command_for_path, kill_process_tree};
 
 use super::{PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 
@@ -43,16 +47,25 @@ pub(crate) fn summarize(combined: &str, status: &PromptSessionStatus, runtime: &
     format!("{truncated}…")
 }
 
+pub(crate) fn command_from_cli(bin: &str) -> Command {
+    let trimmed = bin.trim();
+    let path = Path::new(trimmed);
+    let resolved = if path.is_absolute() || trimmed.contains('\\') || trimmed.contains('/') {
+        path.to_path_buf()
+    } else {
+        find_binary(trimmed).unwrap_or_else(|| PathBuf::from(trimmed))
+    };
+    command_for_path(&resolved)
+}
+
 pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
     #[cfg(unix)]
     {
         let _ = std::process::Command::new("pkill")
             .args(["-P", &pid.to_string()])
             .status();
-        let _ = std::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status();
     }
+    kill_process_tree(pid);
     let _ = child.kill();
     let _ = child.wait();
 }

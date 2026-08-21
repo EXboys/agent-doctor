@@ -10,15 +10,47 @@ pub fn home_join(relative: &str) -> PathBuf {
     dirs::home_dir().expect("home directory").join(relative)
 }
 
+/// User-local Node install used when the machine has no npm (no admin / winget).
+pub fn managed_nodejs_root() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(dirs::data_local_dir)
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("AgentDoctor").join("runtime").join("nodejs")
+    }
+    #[cfg(not(windows))]
+    {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local/share/agent-doctor/runtime/nodejs")
+    }
+}
+
+pub(crate) fn prepend_user_path(dir: &Path) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs = vec![dir.to_path_buf()];
+    dirs.extend(std::env::split_paths(&current));
+    if let Ok(joined) = std::env::join_paths(dirs.iter().filter(|p| !p.as_os_str().is_empty())) {
+        // SAFETY: process-local PATH update so child npm/node shims resolve.
+        std::env::set_var("PATH", joined);
+    }
+}
+
 pub fn find_binary(name: &str) -> Option<PathBuf> {
-    ensure_windows_user_path();
+    ensure_managed_runtime_path();
     find_in_path(name)
         .or_else(|| find_binary_in_dirs(name, &common_binary_dirs()))
         .or_else(|| find_with_where_exe(name))
 }
 
 pub fn find_all_binaries(name: &str) -> Vec<PathBuf> {
-    ensure_windows_user_path();
+    ensure_managed_runtime_path();
     let mut dirs = Vec::new();
     if let Some(path_var) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&path_var));
@@ -51,13 +83,16 @@ fn windows_shim_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
 
 fn find_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     for dir in dirs {
+        if is_slow_network_path(dir) {
+            continue;
+        }
         for candidate in windows_shim_candidates(dir, name) {
-            if candidate.is_file() {
+            if path_is_file(&candidate) {
                 return Some(candidate);
             }
         }
         let candidate = dir.join(name);
-        if candidate.is_file() {
+        if path_is_file(&candidate) {
             return Some(candidate);
         }
     }
@@ -68,13 +103,16 @@ fn find_all_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut seen = BTreeSet::new();
     let mut found = Vec::new();
     for dir in dirs {
+        if is_slow_network_path(dir) {
+            continue;
+        }
         for candidate in windows_shim_candidates(dir, name) {
-            if candidate.is_file() && seen.insert(normalize_path_for_set(&candidate)) {
+            if path_is_file(&candidate) && seen.insert(normalize_path_for_set(&candidate)) {
                 found.push(candidate);
             }
         }
         let candidate = dir.join(name);
-        if candidate.is_file() && seen.insert(normalize_path_for_set(&candidate)) {
+        if path_is_file(&candidate) && seen.insert(normalize_path_for_set(&candidate)) {
             found.push(candidate);
         }
     }
@@ -100,10 +138,91 @@ fn normalize_path_for_set(path: &Path) -> String {
     }
 }
 
+/// UNC / disconnected mapped drives make `is_file()` hang for a long time.
+fn is_slow_network_path(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let value = path.to_string_lossy();
+        value.starts_with("\\\\") || value.starts_with("//")
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn path_is_file(path: &Path) -> bool {
+    drive_prefix_reachable(path) && path.is_file()
+}
+
+fn drive_prefix_reachable(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+        static CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+
+        let value = path.to_string_lossy().replace('/', "\\");
+        if value.starts_with("\\\\") {
+            return false;
+        }
+        let bytes = value.as_bytes();
+        if bytes.len() < 2 || bytes[1] != b':' {
+            return true;
+        }
+        let root = format!("{}\\", &value[..2]);
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(guard) = cache.lock() {
+            if let Some(ok) = guard.get(&root) {
+                return *ok;
+            }
+        }
+        let ok = path_exists_bounded(Path::new(&root));
+        if let Ok(mut guard) = cache.lock() {
+            guard.insert(root, ok);
+        }
+        ok
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        true
+    }
+}
+
+#[cfg(windows)]
+fn path_exists_bounded(path: &Path) -> bool {
+    use std::sync::mpsc;
+    use std::thread;
+    let (tx, rx) = mpsc::channel();
+    let path = path.to_path_buf();
+    thread::spawn(move || {
+        let _ = tx.send(path.exists());
+    });
+    rx.recv_timeout(Duration::from_millis(250)).unwrap_or(false)
+}
+
 /// GUI apps (double-clicked `.exe`) inherit Explorer's PATH, which often
 /// omits nvm/npm shims that a developer terminal has. Prepend well-known
 /// Windows install locations so discovery matches `cargo run` from a shell.
-fn ensure_windows_user_path() {
+pub(crate) fn ensure_managed_runtime_path() {
+    ensure_windows_user_path();
+    #[cfg(not(windows))]
+    {
+        static ONCE: OnceLock<()> = OnceLock::new();
+        ONCE.get_or_init(|| {
+            let root = managed_nodejs_root();
+            prepend_user_path(&root.join("bin"));
+            prepend_user_path(&root);
+            if let Some(home) = dirs::home_dir() {
+                prepend_user_path(&home.join(".local/bin"));
+            }
+        });
+    }
+}
+
+pub(crate) fn ensure_windows_user_path() {
     #[cfg(windows)]
     {
         static ONCE: OnceLock<()> = OnceLock::new();
@@ -139,6 +258,10 @@ fn common_binary_dirs() -> Vec<PathBuf> {
             dirs.push(home.join(r"scoop\shims"));
         }
     }
+
+    let managed = managed_nodejs_root();
+    dirs.push(managed.clone());
+    dirs.push(managed.join("bin"));
 
     #[cfg(windows)]
     {
@@ -205,7 +328,7 @@ fn find_with_where_exe(name: &str) -> Option<PathBuf> {
         return None;
     }
     let candidate = PathBuf::from(first_line);
-    candidate.is_file().then_some(candidate)
+    path_is_file(&candidate).then_some(candidate)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -314,6 +437,18 @@ mod tests {
         assert_eq!(found, vec![bin]);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn skips_unc_and_unreachable_drive_prefix() {
+        assert!(is_slow_network_path(std::path::Path::new(
+            r"\\nas\share\bin"
+        )));
+        assert!(!is_slow_network_path(std::path::Path::new(r"C:\Users\bin")));
+        assert!(!drive_prefix_reachable(std::path::Path::new(
+            r"\\nas\share\bin"
+        )));
+    }
+
     #[test]
     fn common_binary_dirs_includes_home_local_bin() {
         let dirs = common_binary_dirs();
@@ -322,6 +457,11 @@ mod tests {
             dirs.iter()
                 .any(|d| d.ends_with(".local/bin") || d.ends_with(r".local\bin")),
             "expected a …/.local/bin entry, got {dirs:?}"
+        );
+        assert!(
+            dirs.iter()
+                .any(|d| d.ends_with("nodejs") || d.ends_with(r"nodejs")),
+            "expected managed nodejs dir, got {dirs:?}"
         );
         assert!(
             dirs.iter()

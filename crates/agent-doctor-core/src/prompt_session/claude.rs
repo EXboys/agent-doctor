@@ -16,7 +16,8 @@ use super::env::{
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
-    combine_output, force_stop_child, is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    combine_output, command_from_cli, force_stop_child, is_runtime_stderr_noise, join_reader,
+    push_capped, summarize,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -242,7 +243,7 @@ fn build_claude_command(
     overlay: &std::collections::HashMap<String, String>,
 ) -> Result<Command> {
     let bin = std::env::var("AGENT_DOCTOR_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-    let mut cmd = Command::new(bin);
+    let mut cmd = command_from_cli(&bin);
     cmd.arg("-p")
         .arg("--output-format")
         .arg("stream-json")

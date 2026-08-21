@@ -44,22 +44,31 @@ pub fn run_shell_command_streaming<F>(command_line: &str, on_line: F) -> Result<
 where
     F: FnMut(&str),
 {
+    crate::adapters::util::ensure_managed_runtime_path();
+
     #[cfg(unix)]
     let mut child = Command::new("bash")
         .arg("-c")
         .arg(command_line)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to start install shell")?;
 
     #[cfg(windows)]
-    let mut child = Command::new("cmd")
-        .args(["/C", command_line])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to start install shell")?;
+    let mut child = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        Command::new("cmd")
+            .args(["/C", command_line])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .context("failed to start install shell")?
+    };
 
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;

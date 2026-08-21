@@ -232,17 +232,40 @@ where
         log_path: None,
     })?;
 
+    if matches!(runtime_id, "claude-code" | "codex" | "deepseek-harness") {
+        on_progress(InstallProgressEvent {
+            runtime_id: runtime_id.to_string(),
+            phase: "installing".to_string(),
+            message: "Checking Node.js / npm…".to_string(),
+            percent: 12,
+        });
+        if let Err(error) = crate::lifecycle::nodejs::ensure_npm_with_progress(|line, node_pct| {
+            let percent = (10 + u16::from(node_pct) * 40 / 100) as u8;
+            on_progress(InstallProgressEvent {
+                runtime_id: runtime_id.to_string(),
+                phase: "output".to_string(),
+                message: line.to_string(),
+                percent,
+            });
+        }) {
+            return Err(InstallRunError {
+                reason: format!("Node.js / npm auto-install failed: {error:#}"),
+                log_path: None,
+            });
+        }
+    }
+
     on_progress(InstallProgressEvent {
         runtime_id: runtime_id.to_string(),
         phase: "installing".to_string(),
         message: format!("$ {command}"),
-        percent: 20,
+        percent: 52,
     });
 
     let mut line_count = 0u32;
     let capture = run_shell_command_streaming(&command, |line| {
         line_count = line_count.saturating_add(1);
-        let percent = (20 + (line_count.min(60) as u8)).min(80);
+        let percent = (52 + (line_count.min(30) as u8)).min(85);
         on_progress(InstallProgressEvent {
             runtime_id: runtime_id.to_string(),
             phase: "output".to_string(),
@@ -412,10 +435,18 @@ fn manual_fallback_steps(
             }
             "claude-code" => {
                 steps.push("Retry: agent-doctor install claude-code".to_string());
+                steps.push(
+                    "If npm is missing, Agent Doctor installs a user-local Node.js LTS automatically (needs network)."
+                        .to_string(),
+                );
                 steps.push("Manual: npm install -g @anthropic-ai/claude-code".to_string());
             }
             "codex" => {
                 steps.push("Retry: agent-doctor install codex".to_string());
+                steps.push(
+                    "If npm is missing, Agent Doctor installs a user-local Node.js LTS automatically (needs network)."
+                        .to_string(),
+                );
                 steps.push("Manual: npm install -g @openai/codex".to_string());
             }
             _ => steps.push(format!("Retry: agent-doctor install {runtime_id}")),

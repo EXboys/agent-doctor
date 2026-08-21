@@ -186,11 +186,36 @@ fn main_window_logical_size(window: &tauri::WebviewWindow) -> Result<(f64, f64),
     Ok((inner.width as f64 / scale, inner.height as f64 / scale))
 }
 
+/// Window create/resize must run on the UI thread. WebView2 on Windows
+/// otherwise yields a titled shell with a permanently blank page.
+fn run_on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(f());
+    })
+    .map_err(|err| format!("failed to run on UI thread: {err}"))?;
+    rx.recv()
+        .map_err(|_| "UI thread dropped the window operation".to_string())?
+}
+
 /// Resize the main window; omit width/height to only report the current size.
 /// Clamps to the monitor work area and shifts left if expanding would overflow.
 #[tauri::command]
 fn resize_main_window_command(
     app: AppHandle,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<WindowSizeReport, String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || resize_main_window(&app_for_ui, width, height))
+}
+
+fn resize_main_window(
+    app: &AppHandle,
     width: Option<f64>,
     height: Option<f64>,
 ) -> Result<WindowSizeReport, String> {
@@ -1371,13 +1396,20 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
         return Ok(());
     }
 
-    let url = format!("chat.html?runtime={runtime}");
+    // Hash (not `?query`) so Windows WebView2 custom-protocol loads chat.html.
+    // Query strings often produce a titled, permanently blank Ask window.
+    let url = format!("chat.html#runtime={runtime}");
+    let init_script = format!(
+        "window.__AD_ASK_RUNTIME__ = {};",
+        serde_json::Value::String(runtime.to_string())
+    );
     let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App(url.into()))
         .title("Agent Doctor — Ask")
         .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
         .visible(true)
+        .initialization_script(&init_script)
         .build()
         .map_err(|err| format!("failed to open ask window: {err}"))?;
 
@@ -1389,7 +1421,10 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
 
 #[tauri::command]
 fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
-    open_or_focus_ask_window(&app, runtime.as_deref())
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        open_or_focus_ask_window(&app_for_ui, runtime.as_deref())
+    })
 }
 
 /// Focus the main window and ask it to open a tab (e.g. `resources`).

@@ -531,13 +531,18 @@ fn open_url(url: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        let status = Command::new("cmd")
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        // `status()` can wait on the "choose an app" dialog if claude-cli://
+        // is unregistered, which froze the desktop on "Opening…".
+        Command::new("cmd")
             .args(["/C", "start", "", url])
-            .status()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
             .context("failed to run `start` for deep link")?;
-        if !status.success() {
-            bail!("`start` exited with {status}");
-        }
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -656,20 +661,36 @@ fn launch_windows_terminal(cwd: &Path, command_line: &str) -> Result<()> {
 
     let script = write_windows_terminal_launch_script(cwd, command_line)?;
     let script_arg = script.to_string_lossy().into_owned();
-    let mut powershell = Command::new("powershell.exe");
-    powershell
-        .args(["-NoLogo", "-NoExit", "-File", &script_arg])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NEW_CONSOLE);
-    match powershell.spawn() {
+    let powershell = windows_powershell_exe();
+    let mut cmd = Command::new(&powershell);
+    cmd.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-NoExit",
+        "-File",
+        &script_arg,
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .creation_flags(CREATE_NEW_CONSOLE);
+    match cmd.spawn() {
         Ok(_) => Ok(()),
         Err(error) => {
             let _ = fs::remove_file(&script);
             Err(error).context("failed to launch PowerShell")
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_powershell_exe() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
 }
 
 #[cfg(target_os = "windows")]

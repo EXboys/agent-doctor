@@ -56,6 +56,24 @@ body {
   padding: 10px;
 }
 
+html.is-opaque-shell,
+html.is-opaque-shell body {
+  background: var(--bg);
+}
+
+html.is-opaque-shell body {
+  padding: 0;
+}
+
+html.is-opaque-shell body::before {
+  inset: 0;
+  border-radius: 0;
+}
+
+html.is-opaque-shell .widget {
+  border-radius: 0;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -2354,6 +2372,14 @@ body.is-diagnose-open .diagnose-detail {
 .install-progress-fill.is-indeterminate {
   width: 40% !important;
   animation: install-progress-pulse 1.1s ease-in-out infinite;
+}
+
+.install-progress-head [data-install-status] {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes install-progress-pulse {

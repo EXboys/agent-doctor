@@ -34,6 +34,8 @@ fn npm_global_install_command(package: &str) -> String {
 }
 
 pub fn run_claude_code_lifecycle(action: NpmCliLifecycleAction) -> Result<()> {
+    crate::lifecycle::nodejs::ensure_npm()
+        .context("Node.js / npm is required to install Claude Code")?;
     let command = match action {
         NpmCliLifecycleAction::Install => claude_code_install_shell_command(),
         NpmCliLifecycleAction::Update => claude_code_update_shell_command(),
@@ -50,6 +52,7 @@ pub fn run_claude_code_lifecycle(action: NpmCliLifecycleAction) -> Result<()> {
 }
 
 pub fn run_codex_lifecycle(action: NpmCliLifecycleAction) -> Result<()> {
+    crate::lifecycle::nodejs::ensure_npm().context("Node.js / npm is required to install Codex")?;
     let command = match action {
         NpmCliLifecycleAction::Install => codex_install_shell_command(),
         NpmCliLifecycleAction::Update => codex_update_shell_command(),

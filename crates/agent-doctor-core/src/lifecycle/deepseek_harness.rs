@@ -23,6 +23,8 @@ pub fn deepseek_harness_shell_command(_action: DeepSeekHarnessLifecycleAction) -
 }
 
 pub fn run_deepseek_harness_lifecycle(action: DeepSeekHarnessLifecycleAction) -> Result<()> {
+    crate::lifecycle::nodejs::ensure_npm()
+        .context("Node.js / npm is required to install DeepSeek Harness")?;
     run_shell_command(&deepseek_harness_shell_command(action)).with_context(|| {
         format!(
             "DeepSeek Harness {} failed",

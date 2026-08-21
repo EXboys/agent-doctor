@@ -11,6 +11,10 @@ import {
   type MessageKey,
 } from "./i18n";
 
+if (navigator.userAgent.includes("Windows")) {
+  document.documentElement.classList.add("is-opaque-shell");
+}
+
 interface RuntimeDoctorResult {
   id: string;
   display_name: string;
@@ -3904,9 +3908,29 @@ async function rollbackRepairRuntimeCard(card: HTMLElement) {
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: Error): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(timeoutError), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function openAskWindow(runtime: string): Promise<void> {
   try {
-    await invoke("open_ask_window_command", { runtime });
+    await withTimeout(
+      invoke("open_ask_window_command", { runtime }),
+      15_000,
+      new Error(t("runtime.openTimeout")),
+    );
   } catch (error) {
     setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
   }
@@ -3920,7 +3944,11 @@ async function openAskWindowForVerify(runtime: string): Promise<void> {
       ASK_VERIFY_DRAFT_KEY,
       JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
     );
-    await invoke("open_ask_window_command", { runtime });
+    await withTimeout(
+      invoke("open_ask_window_command", { runtime }),
+      15_000,
+      new Error(t("runtime.openTimeout")),
+    );
   } catch (error) {
     setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
   }
@@ -3971,12 +3999,16 @@ async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {
     hint.textContent = t("runtime.opening");
   }
   try {
-    const report = await invoke<OpenSessionReport>("open_session_command", {
-      runtime,
-      cwd: null,
-      prompt: null,
-      terminal: forceTerminal ? true : null,
-    });
+    const report = await withTimeout(
+      invoke<OpenSessionReport>("open_session_command", {
+        runtime,
+        cwd: null,
+        prompt: null,
+        terminal: forceTerminal ? true : null,
+      }),
+      20_000,
+      new Error(t("runtime.openTimeout")),
+    );
     const method = report.method === "deep-link" ? "deep-link" : "terminal";
     if (hint) {
       hint.textContent = t("runtime.openOk", { method });
@@ -4032,23 +4064,33 @@ async function installRuntimeFromCard(card: HTMLElement) {
       return;
     }
     const { phase, message, percent } = event.payload;
+    const clamped = Math.min(100, Math.max(0, percent));
     if (statusEl) {
       statusEl.textContent =
         phase === "done"
           ? t("runtime.installOk")
           : phase === "verifying"
             ? t("runtime.installVerifying")
-            : t("runtime.installing");
+            : message.trim() || t("runtime.installing");
     }
     if (percentEl) {
-      percentEl.textContent = `${Math.min(100, Math.max(0, percent))}%`;
+      percentEl.textContent = `${clamped}%`;
     }
     if (fillEl) {
-      fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-      fillEl.classList.toggle("is-indeterminate", phase === "installing" || phase === "output");
+      fillEl.style.width = `${clamped}%`;
+      fillEl.classList.toggle("is-indeterminate", clamped < 2 && phase !== "done");
     }
     if (logEl && message.trim()) {
-      logLines.push(message);
+      const isByteProgress = /Downloading Node\.js .+\/|正在下载/.test(message);
+      if (
+        isByteProgress &&
+        logLines.length > 0 &&
+        /Downloading Node\.js .+\/|正在下载/.test(logLines[logLines.length - 1] ?? "")
+      ) {
+        logLines[logLines.length - 1] = message;
+      } else {
+        logLines.push(message);
+      }
       while (logLines.length > 40) {
         logLines.shift();
       }

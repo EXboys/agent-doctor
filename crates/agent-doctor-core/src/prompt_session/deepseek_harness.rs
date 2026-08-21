@@ -12,7 +12,7 @@ use super::control::PromptSessionControl;
 use super::env::{
     apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env, format_command_display,
 };
-use super::util::{force_stop_child, join_reader, push_capped, summarize};
+use super::util::{command_from_cli, force_stop_child, join_reader, push_capped, summarize};
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
@@ -117,7 +117,7 @@ fn build_command(prompt: &str, cwd: &Path) -> Command {
     let binary =
         std::env::var("AGENT_DOCTOR_DSH_BIN").unwrap_or_else(|_| DEEPSEEK_HARNESS_CLI.into());
     let overlay = collect_overlay_env();
-    let mut command = Command::new(binary);
+    let mut command = command_from_cli(&binary);
     command
         .arg("--profile")
         .arg("headless")

@@ -98,6 +98,14 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
     cmd
 }
 
+/// Build a spawnable CLI command. Windows wraps `.cmd`/`.bat` in `cmd /C`
+/// and hides the console so Tauri does not hang on npm shims.
+pub fn command_for_path(program: &Path) -> Command {
+    let mut cmd = build_command(program, &[]);
+    apply_no_window(&mut cmd);
+    cmd
+}
+
 fn apply_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
@@ -106,7 +114,7 @@ fn apply_no_window(_cmd: &mut Command) {
     }
 }
 
-fn kill_process_tree(pid: u32) {
+pub fn kill_process_tree(pid: u32) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

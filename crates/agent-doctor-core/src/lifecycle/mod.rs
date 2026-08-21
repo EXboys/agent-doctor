@@ -1,5 +1,6 @@
 pub mod deepseek_harness;
 pub mod hermes;
+pub mod nodejs;
 pub mod npm_cli;
 pub mod openclaw;
 mod runner;

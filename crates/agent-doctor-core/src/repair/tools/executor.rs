@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -490,17 +489,16 @@ fn mask_diff(diff: &str, path: &Path, vault: &mut SecretVault) -> String {
 }
 
 fn run_shell(command_line: &str) -> Result<std::process::Output> {
+    use std::time::Duration;
+    let timeout = Duration::from_secs(120);
     #[cfg(unix)]
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(command_line)
-        .output()
+    let output = crate::exec::run_output("bash", &["-c", command_line], timeout)
+        .map_err(|err| anyhow::anyhow!("{err}"))
         .context("failed to start bash")?;
 
     #[cfg(windows)]
-    let output = Command::new("cmd")
-        .args(["/C", command_line])
-        .output()
+    let output = crate::exec::run_output("cmd", &["/C", command_line], timeout)
+        .map_err(|err| anyhow::anyhow!("{err}"))
         .context("failed to start cmd")?;
 
     Ok(output)
