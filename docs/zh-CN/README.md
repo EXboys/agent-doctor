@@ -65,7 +65,7 @@ cd desktop && npm install && npm run tauri dev
 
 ## 当前状态
 
-**v0.1.30** — CLI + 桌面本机运维已可用，尚未到 1.0。
+**v0.1.31** — CLI + 桌面本机运维已可用，尚未到 1.0。
 
 已交付：五类 runtime 发现与探测、`repair --apply` / 回滚、桌面 Diagnose → Repair → Ask、工作区隔离、Browser MCP、个人/团队模式切换、Evotown 上线、SSH 只读 `remote` doctor。
 
