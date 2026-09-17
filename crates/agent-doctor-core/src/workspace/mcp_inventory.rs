@@ -172,7 +172,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
                 ProbeStatus::Warn,
                 ProbeSeverity::Warning,
                 format!(
-                    "no browser MCP entry for {runtime_id}; write via repair or `agent-doctor mcp configure {runtime_id}`"
+                    "no browser MCP entry for {runtime_id}; open Diagnose → Repair (or Resources → Browser MCP) to write it automatically"
                 ),
                 SensitivityLevel::ConfigShape,
             ));
@@ -513,9 +513,36 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     candidates.extend(find_all_binaries("agent-doctor-cli"));
     candidates.extend(find_all_binaries("agent-doctor"));
 
+    let mut saw_unrunnable: Option<PathBuf> = None;
     for path in candidates {
-        if is_real_agent_doctor_cli(&path) {
-            return Ok(path.canonicalize().unwrap_or(path));
+        match classify_agent_doctor_cli(&path) {
+            CliProbe::Real => return Ok(path.canonicalize().unwrap_or(path)),
+            CliProbe::Unrunnable => {
+                if saw_unrunnable.is_none() {
+                    saw_unrunnable = Some(path);
+                }
+            }
+            CliProbe::Skip => {}
+        }
+    }
+
+    if let Some(path) = saw_unrunnable {
+        #[cfg(windows)]
+        {
+            anyhow::bail!(
+                "Agent Doctor CLI was found at {} but could not start. \
+                 This usually means Microsoft Visual C++ Redistributable is missing \
+                 (VCRUNTIME140.dll). Reinstall Agent Doctor (newer builds include the runtime), \
+                 or install https://aka.ms/vc14/vc_redist.x64.exe and restart the app.",
+                path.display()
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            anyhow::bail!(
+                "Agent Doctor CLI was found at {} but could not start (`--version` failed).",
+                path.display()
+            );
         }
     }
 
@@ -534,16 +561,22 @@ fn looks_like_desktop_gui(path: &Path) -> bool {
     stem == "agent doctor" || stem == "agent-doctor-desktop"
 }
 
-fn is_real_agent_doctor_cli(path: &Path) -> bool {
+enum CliProbe {
+    Real,
+    Unrunnable,
+    Skip,
+}
+
+fn classify_agent_doctor_cli(path: &Path) -> CliProbe {
     if !path.is_file() || looks_like_desktop_gui(path) {
-        return false;
+        return CliProbe::Skip;
     }
     // Skip shell wrappers such as `exec hermes -p agent-doctor "$@"`.
     if let Ok(bytes) = fs::read(path) {
         if bytes.starts_with(b"#!") {
             let text = String::from_utf8_lossy(&bytes);
             if text.contains("hermes") {
-                return false;
+                return CliProbe::Skip;
             }
         }
     }
@@ -551,10 +584,10 @@ fn is_real_agent_doctor_cli(path: &Path) -> bool {
     // Identity is `--version` only. Never fall back to `mcp status` — that can
     // open Chrome / wait on CDP and freeze "Apply repair" on Windows.
     let Ok(output) = run_output(path, &["--version"], SHORT_PROBE_TIMEOUT) else {
-        return false;
+        return CliProbe::Unrunnable;
     };
     if !output.status.success() {
-        return false;
+        return CliProbe::Unrunnable;
     }
     let text = format!(
         "{}{}",
@@ -562,7 +595,11 @@ fn is_real_agent_doctor_cli(path: &Path) -> bool {
         String::from_utf8_lossy(&output.stderr)
     )
     .to_ascii_lowercase();
-    text.contains("agent-doctor")
+    if text.contains("agent-doctor") {
+        CliProbe::Real
+    } else {
+        CliProbe::Skip
+    }
 }
 
 /// Group configured browser MCP entries by runtime hint.

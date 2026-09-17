@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value as JsonValue};
 use serde_yaml::{Mapping, Value as YamlValue};
 
@@ -72,6 +72,15 @@ pub fn bind_claude_code(project_path: &Path) -> Result<RuntimeBindReport> {
 }
 
 pub fn bind_codex(codex_home: &Path) -> Result<RuntimeBindReport> {
+    bind_codex_for_project(codex_home, None)
+}
+
+/// Isolate `CODEX_HOME` and mark the workspace project (and user home) as trusted so
+/// Codex stops warning about disabled project-local config/hooks for 小白 installs.
+pub fn bind_codex_for_project(
+    codex_home: &Path,
+    project_path: Option<&Path>,
+) -> Result<RuntimeBindReport> {
     fs::create_dir_all(codex_home).with_context(|| format!("create {}", codex_home.display()))?;
 
     let default_home = home_join(".codex");
@@ -106,6 +115,15 @@ pub fn bind_codex(codex_home: &Path) -> Result<RuntimeBindReport> {
     )
     .ok();
 
+    let mut trust_paths = Vec::new();
+    if let Some(path) = project_path {
+        trust_paths.push(path.to_path_buf());
+    }
+    if let Some(home) = dirs::home_dir() {
+        trust_paths.push(home);
+    }
+    let _ = ensure_codex_projects_trusted(codex_home, &trust_paths);
+
     Ok(RuntimeBindReport {
         runtime_id: "codex",
         action: "isolate CODEX_HOME".to_string(),
@@ -115,6 +133,77 @@ pub fn bind_codex(codex_home: &Path) -> Result<RuntimeBindReport> {
         ),
         isolation_tier: "L2 (CODEX_HOME overlay — not native per-repo memory)",
     })
+}
+
+/// Write `[projects."<path>"].trust_level = "trusted"` for each path into Codex config.
+///
+/// Codex disables project-local config/hooks until the cwd (often the default home
+/// workspace) is trusted — Agent Doctor should do this automatically for end users.
+pub fn ensure_codex_projects_trusted(codex_home: &Path, project_paths: &[PathBuf]) -> Result<()> {
+    if project_paths.is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(codex_home).with_context(|| format!("create {}", codex_home.display()))?;
+    let config_path = codex_home.join("config.toml");
+    let mut doc = if config_path.exists() {
+        let raw = fs::read_to_string(&config_path)
+            .with_context(|| format!("read {}", config_path.display()))?;
+        raw.parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    let projects = doc
+        .entry("projects")
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+    let Some(projects_table) = projects.as_table_mut() else {
+        bail!("codex config `projects` is not a table");
+    };
+    projects_table.set_implicit(true);
+
+    let mut changed = false;
+    for path in project_paths {
+        if path.as_os_str().is_empty() {
+            continue;
+        }
+        let key = codex_project_trust_key(path);
+        if key.is_empty() {
+            continue;
+        }
+        let entry = projects_table
+            .entry(&key)
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+        let Some(table) = entry.as_table_mut() else {
+            continue;
+        };
+        let already = table
+            .get("trust_level")
+            .and_then(|v| v.as_str())
+            .map(|s| s.eq_ignore_ascii_case("trusted"))
+            .unwrap_or(false);
+        if already {
+            continue;
+        }
+        table["trust_level"] = toml_edit::value("trusted");
+        changed = true;
+    }
+
+    if changed || !config_path.exists() {
+        fs::write(&config_path, doc.to_string())
+            .with_context(|| format!("write {}", config_path.display()))?;
+    }
+    Ok(())
+}
+
+/// Normalize a path into the lookup key Codex uses for `[projects.<key>]`.
+pub fn codex_project_trust_key(path: &Path) -> String {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut s = resolved.to_string_lossy().replace('/', "\\");
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        s = stripped.to_string();
+    }
+    s.trim_end_matches(['\\', '/']).to_ascii_lowercase()
 }
 
 pub fn bind_openclaw(agent_id: &str, workspace_path: &Path) -> Result<RuntimeBindReport> {
@@ -718,5 +807,25 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("HOME", v) },
             None => unsafe { std::env::remove_var("HOME") },
         }
+    }
+
+    #[test]
+    fn trusts_codex_project_paths_in_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("codex-home");
+        let project = temp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+
+        ensure_codex_projects_trusted(&codex_home, &[project.clone()]).unwrap();
+
+        let raw = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+        let key = codex_project_trust_key(&project);
+        assert!(raw.contains("trust_level"));
+        assert!(raw.contains(&key) || raw.to_ascii_lowercase().contains(&key));
+
+        // Idempotent
+        ensure_codex_projects_trusted(&codex_home, &[project]).unwrap();
+        let raw2 = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+        assert_eq!(raw.matches("trust_level").count(), raw2.matches("trust_level").count());
     }
 }

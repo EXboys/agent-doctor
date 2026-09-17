@@ -50,6 +50,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build CLI
+        env:
+          # Fresh Windows PCs often lack VCRUNTIME140.dll; ship a static CRT CLI.
+          RUSTFLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-C target-feature=+crt-static' || '' }}
         run: cargo build --release -p agent-doctor --target ${{ matrix.target }}
 
       - name: Package CLI (Unix)

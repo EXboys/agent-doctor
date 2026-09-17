@@ -130,7 +130,8 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
         let _ = apply_codex_slot(&url, &key, model.as_deref(), Some(&slot));
     }
     if let Some(home) = overlay.get("CODEX_HOME").map(PathBuf::from) {
-        let _ = crate::workspace::backends::bind_codex(&home);
+        let project = crate::session_launch::resolve_session_cwd(None);
+        let _ = crate::workspace::backends::bind_codex_for_project(&home, Some(&project));
     }
 }
 

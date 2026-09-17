@@ -2303,7 +2303,8 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
   skillsDirEl.textContent = t("skills.dir", { dir: report.skills_dir });
   skillsFootnoteEl.textContent = t("skills.footnote");
   skillsListEl.replaceChildren();
-  skillsEmptyEl.textContent = t("skills.empty");
+  const needEvotown = report.remote_stats_error === "evotown_not_configured";
+  skillsEmptyEl.textContent = needEvotown ? t("skills.emptyNeedEvotown") : t("skills.empty");
 
   const empty = report.skills.length === 0;
   skillsEmptyEl.hidden = !empty;
@@ -2581,8 +2582,29 @@ function renderMcpBrowserStatus(status: McpModuleStatus) {
   syncUserDataDirPreference(status);
   refreshMcpSnippet();
 
+  const snippetError =
+    status.config_snippet &&
+    typeof status.config_snippet === "object" &&
+    status.config_snippet !== null &&
+    "error" in status.config_snippet
+      ? String((status.config_snippet as { error?: unknown }).error ?? "")
+      : "";
+  const cliBroken =
+    !status.binary.trim() ||
+    /VCRUNTIME|Visual C\+\+|could not start|Could not find the Agent Doctor CLI/i.test(
+      snippetError,
+    );
+  if (cliBroken) {
+    mcpFootnoteEl.textContent = t("mcp.cliUnresolved");
+  } else {
+    mcpFootnoteEl.textContent = "";
+  }
+
   mcpBrowserBadgeEl.classList.remove("ok", "warn", "muted", "bad");
-  if (!chrome.chrome_found) {
+  if (cliBroken) {
+    mcpBrowserBadgeEl.textContent = t("mcp.badgePartial");
+    mcpBrowserBadgeEl.classList.add("warn");
+  } else if (!chrome.chrome_found) {
     mcpBrowserBadgeEl.textContent = t("mcp.badgeMissing");
     mcpBrowserBadgeEl.classList.add("bad");
   } else if (status.configured_runtimes.length > 0) {
@@ -2593,7 +2615,7 @@ function renderMcpBrowserStatus(status: McpModuleStatus) {
     mcpBrowserBadgeEl.classList.add("warn");
   }
 
-  const canConfigure = chrome.chrome_found && !mcpConfigureInFlight;
+  const canConfigure = chrome.chrome_found && !cliBroken && !mcpConfigureInFlight;
   mcpConfigureCodexEl.disabled = !canConfigure;
   mcpConfigureClaudeEl.disabled = !canConfigure;
 }

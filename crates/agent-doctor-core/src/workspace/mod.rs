@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::adapters::util::home_join;
 
 use self::backends::{
-    bind_claude_code, bind_codex, bind_hermes, bind_openclaw, claude_mcp_summary_for_project,
-    codex_home_from_env, hermes_active_profile, hermes_gateway_profiles, openclaw_agent_workspace,
-    workspace_paths_match, RuntimeBindReport,
+    bind_claude_code, bind_codex_for_project, bind_hermes, bind_openclaw,
+    claude_mcp_summary_for_project, codex_home_from_env, hermes_active_profile,
+    hermes_gateway_profiles, openclaw_agent_workspace, workspace_paths_match, RuntimeBindReport,
 };
 use self::path::{
     cwd, default_workspace_name, paths_equal, resolve_project_path, sanitize_workspace_name,
@@ -280,7 +280,7 @@ pub fn init_workspace(
     let bindings = vec![
         bind_hermes(&hermes_profile, &project_path)?,
         bind_claude_code(&project_path)?,
-        bind_codex(&codex_home)?,
+        bind_codex_for_project(&codex_home, Some(&project_path))?,
         bind_openclaw(&openclaw_agent_id, &openclaw_workspace)?,
     ];
 
@@ -371,7 +371,7 @@ pub fn use_workspace_with_options(
     let bindings = vec![
         bind_hermes(&entry.hermes_profile, &entry.path)?,
         bind_claude_code(&entry.path)?,
-        bind_codex(&entry.codex_home)?,
+        bind_codex_for_project(&entry.codex_home, Some(&entry.path))?,
         bind_openclaw(&entry.openclaw_agent_id, &entry.openclaw_workspace)?,
     ];
 

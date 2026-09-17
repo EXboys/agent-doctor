@@ -54,6 +54,8 @@ Expand-Archive agent-doctor-*-windows-x86_64.zip -DestinationPath .
 Move-Item .\agent-doctor.exe "$env:LOCALAPPDATA\Programs\agent-doctor\"
 ```
 
+Desktop installers (NSIS `.exe`) build `agent-doctor-cli.exe` with a static VCRuntime (`+crt-static`), so fresh Windows PCs should not need a manual Visual C++ Redistributable install for the bundled CLI. If an older build still shows `VCRUNTIME140.dll` missing, install https://aka.ms/vc14/vc_redist.x64.exe once, or reinstall the latest Agent Doctor.
+
 ## Desktop (menubar app)
 
 After a release is published, download the desktop bundle for your platform from the same GitHub release:

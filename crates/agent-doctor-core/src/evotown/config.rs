@@ -54,8 +54,8 @@ pub fn load_evotown_config() -> Result<EvotownConfig> {
         return Ok(from_profile);
     }
     bail!(
-        "Evotown is not configured — run `agent-doctor setup --url <evotown-url> --key evk_...` \
-         or create ~/.config/evotown/evotown.agent.env"
+        "Evotown is not configured — open Agent Doctor → Provider to connect your team, \
+         or run `agent-doctor setup --url <evotown-url> --key evk_...`"
     )
 }
 

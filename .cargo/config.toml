@@ -4,3 +4,8 @@ test-cli = "test -p agent-doctor-core -p agent-doctor"
 
 [build]
 incremental = true
+
+# Windows release CLI / desktop-bundled CLI: avoid VCRUNTIME140.dll on clean PCs.
+# Desktop GUI still uses the dynamic CRT; only set when building agent-doctor via
+# scripts/prebuild-cli.sh or release.yml (RUSTFLAGS). Kept here as documentation
+# of the intended flag — do not enable globally (breaks some Tauri deps).

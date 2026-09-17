@@ -11,10 +11,20 @@ RESOURCES="$DESKTOP_DIR/src-tauri/resources"
 cd "$ROOT"
 mkdir -p "$RESOURCES"
 
+IS_WINDOWS=0
+if [[ "${OS:-}" == "Windows_NT" || "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+  IS_WINDOWS=1
+fi
+
 echo "Building agent-doctor CLI (release)…"
+if [[ "$IS_WINDOWS" -eq 1 ]]; then
+  # Static VCRuntime so bundled agent-doctor-cli.exe runs on fresh Windows
+  # without asking users to install Visual C++ Redistributable.
+  export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
+fi
 cargo build -p agent-doctor --release
 
-if [[ "${OS:-}" == "Windows_NT" || "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+if [[ "$IS_WINDOWS" -eq 1 ]]; then
   SRC="$ROOT/target/release/agent-doctor.exe"
   DEST="$RESOURCES/agent-doctor-cli.exe"
 else

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::client::EvotownClient;
-use super::config::{load_evotown_config, EvotownConfig};
+use super::config::{
+    default_skills_dir, default_skills_lock_path, load_evotown_config, EvotownConfig,
+};
 use crate::adapters::util::home_join;
 use crate::workspace::{load_workspaces, WorkspacesDocument};
 
@@ -59,8 +61,23 @@ pub fn list_skills_inventory() -> Result<SkillsInventoryReport> {
 pub fn list_skills_inventory_with_options(
     options: &SkillsInventoryOptions,
 ) -> Result<SkillsInventoryReport> {
-    let config = load_evotown_config()?;
-    list_skills_inventory_with_config(&config, options)
+    match load_evotown_config() {
+        Ok(config) => list_skills_inventory_with_config(&config, options),
+        Err(_) => {
+            // Personal-mode / fresh installs: do not fail the Resources panel.
+            let skills_dir = default_skills_dir();
+            Ok(SkillsInventoryReport {
+                skills_dir: skills_dir.display().to_string(),
+                lock_path: default_skills_lock_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                bundle_id: None,
+                skills: Vec::new(),
+                remote_stats_ok: false,
+                remote_stats_error: Some("evotown_not_configured".into()),
+            })
+        }
+    }
 }
 
 pub fn list_skills_inventory_with_config(

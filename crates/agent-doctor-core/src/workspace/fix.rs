@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 
 use super::backends::{
-    bind_claude_code, bind_codex, bind_hermes, bind_openclaw, scaffold_claude_mcp_isolation,
+    bind_claude_code, bind_codex_for_project, bind_hermes, bind_openclaw,
+    scaffold_claude_mcp_isolation,
 };
 use super::claude_mcp::migrate_claude_global_mcp_to_project;
 use super::gateway::restart_workspace_gateways;
@@ -106,7 +107,7 @@ pub fn workspace_fix(options: &WorkspaceFixOptions) -> Result<WorkspaceFixReport
                 | "workspace.codex.isolation_marker"
                 | "workspace.codex.shared_global_home" => {
                     write_active_env(&active_name, &entry)?;
-                    bind_codex(&entry.codex_home)?;
+                    bind_codex_for_project(&entry.codex_home, Some(&entry.path))?;
                     action.applied = true;
                     action.detail = format!(
                         "Refreshed isolated CODEX_HOME at {}",

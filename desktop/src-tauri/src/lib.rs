@@ -657,7 +657,12 @@ fn mcp_status_command(
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
-    let binary = resolve_agent_doctor_binary().map_err(|error| error.to_string())?;
+    let binary_result = resolve_agent_doctor_binary();
+    let binary = binary_result
+        .as_ref()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
     let probe_live = probe_chrome.unwrap_or(false);
     let browser = browser_mcp_status_with_probe(port, probe_live);
     let user_data = browser
@@ -666,18 +671,25 @@ fn mcp_status_command(
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(&browser.system_user_data_dir));
     let profile = browser.profile_directory.clone();
-    Ok(McpModuleStatus {
-        browser,
-        inventory,
-        configured_runtimes,
-        binary: binary.display().to_string(),
-        config_snippet: generate_config_snippet(
-            &binary,
+    let config_snippet = match binary_result.as_ref() {
+        Ok(path) => generate_config_snippet(
+            path,
             port,
             false,
             Some(user_data.as_path()),
             Some(profile.as_str()),
         ),
+        Err(error) => serde_json::json!({
+            "error": error.to_string(),
+            "hint": "cli_unresolved",
+        }),
+    };
+    Ok(McpModuleStatus {
+        browser,
+        inventory,
+        configured_runtimes,
+        binary,
+        config_snippet,
     })
 }
 
@@ -1759,6 +1771,18 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(TrayCompactState::default()));
             app.manage(PromptSessionState::default());
+            // Seed default workspace + auto-trust Codex project paths for end users.
+            let _ = ensure_default_workspace();
+            if let Ok(doc) = load_workspaces() {
+                if let Some(active) = doc.active.as_ref() {
+                    if let Some(entry) = doc.workspaces.get(active) {
+                        let _ = agent_doctor_core::workspace::backends::bind_codex_for_project(
+                            &entry.codex_home,
+                            Some(&entry.path),
+                        );
+                    }
+                }
+            }
             show_main_window(app.handle());
             setup_tray(app);
             // Pre-create Ask on the UI thread at startup. Creating it on first
