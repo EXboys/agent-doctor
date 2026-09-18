@@ -816,7 +816,7 @@ mod tests {
         let project = temp.path().join("proj");
         fs::create_dir_all(&project).unwrap();
 
-        ensure_codex_projects_trusted(&codex_home, &[project.clone()]).unwrap();
+        ensure_codex_projects_trusted(&codex_home, std::slice::from_ref(&project)).unwrap();
 
         let raw = fs::read_to_string(codex_home.join("config.toml")).unwrap();
         let key = codex_project_trust_key(&project);
