@@ -172,9 +172,10 @@ fn open_claude_code(
 
 fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
     let _ = clear_codex_placeholder_auth();
-    // Mirror Claude: rewrite ~/.codex/config.toml before launch. Env OPENAI_BASE_URL alone is
+    // Mirror Claude: rewrite Codex config before launch. Env OPENAI_BASE_URL alone is
     // not enough — Codex 0.14x still routes via model_provider / openai_base_url in config.toml,
     // and without that it silently hits api.openai.com (401 with company keys).
+    // Prefer isolated workspace CODEX_HOME when active (avoid project-local deny on ~/.codex).
     let launch = resolve_codex_launch_env();
     // ChatGPT login tokens in auth.json make Codex ignore gateway keys and hit api.openai.com.
     if launch.is_some() {
@@ -184,7 +185,7 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
         apply_codex_slot(url, key, model.as_deref(), Some(slot))
             .ok()
             .filter(|r| r.applied)
-            .map(|_| url.clone())
+            .map(|r| (url.clone(), r.config_path))
     });
 
     // Also pass -c overrides so this process cannot fall back to built-in openai
@@ -193,9 +194,10 @@ fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSessionReport> {
     let argv = codex_launch_argv(launch.as_ref());
     let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
     let mut report = open_in_terminal("codex", &argv_refs, cwd, prompt)?;
-    if let Some(url) = refreshed {
+    if let Some((url, config_path)) = refreshed {
+        let where_written = config_path.unwrap_or_else(|| "~/.codex/config.toml".into());
         report.detail = format!(
-            "Opened Codex after writing model_provider + openai_base_url={url} to ~/.codex/config.toml. {}",
+            "Opened Codex after writing model_provider + openai_base_url={url} to {where_written}. {}",
             report.detail
         );
     }

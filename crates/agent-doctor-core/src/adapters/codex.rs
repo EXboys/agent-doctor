@@ -11,6 +11,18 @@ pub struct CodexAdapter;
 
 impl CodexAdapter {
     fn config_path() -> PathBuf {
+        // Prefer active workspace isolated CODEX_HOME — provider keys live there
+        // once Ask/wiring avoids writing them into ~/.codex (project-local deny).
+        if let Ok(doc) = crate::workspace::load_workspaces() {
+            if let Some(active) = doc.active.as_deref() {
+                if let Some(entry) = doc.workspaces.get(active) {
+                    let ws = entry.codex_home.join("config.toml");
+                    if ws.exists() {
+                        return ws;
+                    }
+                }
+            }
+        }
         home_join(".codex/config.toml")
     }
 

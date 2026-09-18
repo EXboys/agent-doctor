@@ -4697,11 +4697,20 @@ personalListEl.addEventListener("click", (event) => {
 });
 
 windowCloseEl.addEventListener("click", () => {
-  void mainWindow.close();
+  // Hide to tray — destroying main while Ask is alive leaves a tray-only
+  // process that cannot reopen the shell without a rebuild.
+  void mainWindow.hide();
 });
 
 windowMinimizeEl.addEventListener("click", () => {
-  void mainWindow.minimize();
+  // Undecorated WebView2 on Windows often fails to restore from a real
+  // minimize via the taskbar; hide to tray and restore via tray / relaunch.
+  const isWindows = navigator.userAgent.includes("Windows");
+  if (isWindows) {
+    void mainWindow.hide();
+  } else {
+    void mainWindow.minimize();
+  }
 });
 
 windowMaximizeEl.addEventListener("click", () => {

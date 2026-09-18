@@ -265,6 +265,9 @@ mod tests {
         assert!(util::is_runtime_stderr_noise(
             "Reading additional input from stdin..."
         ));
+        assert!(util::is_runtime_stderr_noise(
+            "Ignored unsupported project-local config keys in C:\\Users\\Admin\\.codex\\config.toml: openai_base_url, model_provider, model_providers. If you want these settings to apply, manually set them in your user-level config.toml."
+        ));
         assert!(!util::is_runtime_stderr_noise(
             "ERROR: Missing environment variable"
         ));

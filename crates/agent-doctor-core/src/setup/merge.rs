@@ -675,8 +675,10 @@ pub fn apply_codex(
 /// Additive Codex wiring: upsert `model_providers.{company|personal}`, point
 /// `model_provider` at the active slot, leave the other slot intact.
 ///
-/// Also mirrors into the active workspace `CODEX_HOME` when present so
-/// `workspace use` overlays stay aligned with `~/.codex`.
+/// Prefer the active workspace isolated `CODEX_HOME` when present. Writing
+/// provider keys into `~/.codex/config.toml` while Ask cwd is `$HOME` (default
+/// workspace) makes newer Codex treat that file as project-local and warn on
+/// every turn — keep those keys only in the isolated home in that case.
 pub fn apply_codex_slot(
     gateway_url: &str,
     _api_key: &str,
@@ -693,21 +695,31 @@ pub fn apply_codex_slot(
         .map(str::to_string)
         .unwrap_or_else(|| infer_codex_hermes_slot(gateway_url).to_string());
 
-    let path = home_join(".codex/config.toml");
+    let global_path = home_join(".codex/config.toml");
+    let global_codex_home = home_join(".codex");
+    let isolated_config = crate::workspace::load_workspaces()
+        .ok()
+        .and_then(|doc| {
+            let active = doc.active.as_deref()?;
+            let entry = doc.workspaces.get(active)?;
+            if !entry.codex_home.exists() {
+                return None;
+            }
+            if crate::workspace::path::paths_equal(&entry.codex_home, &global_codex_home) {
+                return None;
+            }
+            Some(entry.codex_home.join("config.toml"))
+        });
+
+    let path = isolated_config.clone().unwrap_or_else(|| global_path.clone());
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
     write_codex_provider_config(&path, gateway_url, model_id, &slot)?;
 
-    // Keep workspace overlay in sync when an active workspace isolates CODEX_HOME.
-    if let Ok(doc) = crate::workspace::load_workspaces() {
-        if let Some(active) = doc.active.as_deref() {
-            if let Some(entry) = doc.workspaces.get(active) {
-                let ws_config = entry.codex_home.join("config.toml");
-                if entry.codex_home.exists() {
-                    let _ = write_codex_provider_config(&ws_config, gateway_url, model_id, &slot);
-                }
-            }
-        }
+    if isolated_config.is_some() {
+        // Drop denylist keys from ~/.codex so home-as-cwd Ask sessions do not
+        // rediscover them as unsupported project-local config.
+        let _ = strip_codex_project_denied_provider_keys(&global_path);
     }
 
     clear_codex_placeholder_auth()?;
@@ -724,6 +736,38 @@ pub fn apply_codex_slot(
         ),
         ..Default::default()
     })
+}
+
+/// Keys Codex refuses in project-local `.codex/config.toml` (credential routing).
+const CODEX_PROJECT_DENIED_PROVIDER_KEYS: &[&str] = &[
+    "openai_base_url",
+    "chatgpt_base_url",
+    "model_provider",
+    "model_providers",
+];
+
+/// Remove provider/auth routing keys from a Codex `config.toml`.
+///
+/// Used when `~/.codex` would be loaded as project-local (cwd under `$HOME`)
+/// while the real user layer is an isolated `CODEX_HOME`.
+pub fn strip_codex_project_denied_provider_keys(path: &std::path::Path) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+    let mut changed = false;
+    for key in CODEX_PROJECT_DENIED_PROVIDER_KEYS {
+        if doc.remove(*key).is_some() {
+            changed = true;
+        }
+    }
+    if changed {
+        fs::write(path, doc.to_string())?;
+    }
+    Ok(changed)
 }
 
 pub(crate) fn codex_slot_display_name(slot: &str) -> &'static str {
@@ -806,6 +850,33 @@ fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
 mod codex_responses_tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn strips_project_denied_provider_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+model = "keep-me"
+model_provider = "company"
+openai_base_url = "https://gateway.example/v1"
+approval_policy = "on-request"
+
+[model_providers.company]
+base_url = "https://gateway.example/v1"
+"#,
+        )
+        .unwrap();
+
+        assert!(strip_codex_project_denied_provider_keys(&path).unwrap());
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("model = \"keep-me\""));
+        assert!(rendered.contains("approval_policy"));
+        assert!(!rendered.contains("model_provider"));
+        assert!(!rendered.contains("openai_base_url"));
+        assert!(!rendered.contains("model_providers"));
+    }
 
     #[test]
     fn personal_slot_is_wired_for_any_openai_compatible_host() {

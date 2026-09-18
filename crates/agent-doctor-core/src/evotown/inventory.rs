@@ -64,7 +64,18 @@ pub fn list_skills_inventory_with_options(
     match load_evotown_config() {
         Ok(config) => list_skills_inventory_with_config(&config, options),
         Err(_) => {
-            // Personal-mode / fresh installs: do not fail the Resources panel.
+            // Personal-mode / fresh installs: still surface skills already on
+            // local agents (Claude/Codex/Hermes/OpenClaw), not only Evotown cache.
+            let workspaces = load_workspaces().unwrap_or_default();
+            let agent_skills = discover_agent_skills(&workspaces);
+            let skills = build_skill_items(
+                agent_skills.keys().cloned().collect::<Vec<_>>(),
+                &serde_json::Map::new(),
+                &agent_skills,
+                &default_skills_dir(),
+                &workspaces,
+                &Ok(std::collections::HashMap::new()),
+            );
             let skills_dir = default_skills_dir();
             Ok(SkillsInventoryReport {
                 skills_dir: skills_dir.display().to_string(),
@@ -72,7 +83,7 @@ pub fn list_skills_inventory_with_options(
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
                 bundle_id: None,
-                skills: Vec::new(),
+                skills,
                 remote_stats_ok: false,
                 remote_stats_error: Some("evotown_not_configured".into()),
             })
@@ -117,12 +128,52 @@ pub fn list_skills_inventory_with_config(
         }
     }
 
+    // Also include skills already present on agent runtimes ("built-in" / previously
+    // mounted). Resources used to only list ~/.evotown/skills, so installed agents
+    // with local skills showed Skills: 0 after a fresh sync miss.
+    let agent_skills = discover_agent_skills(&workspaces);
+    for id in agent_skills.keys() {
+        skill_ids.insert(id.clone());
+    }
+
+    let skills = build_skill_items(
+        skill_ids,
+        &lock_skills,
+        &agent_skills,
+        &config.skills_dir,
+        &workspaces,
+        &remote,
+    );
+
+    Ok(SkillsInventoryReport {
+        skills_dir: config.skills_dir.display().to_string(),
+        lock_path: config.skills_lock_path.display().to_string(),
+        bundle_id,
+        skills,
+        remote_stats_ok: remote.is_ok(),
+        remote_stats_error: remote.err().map(|e| e.to_string()),
+    })
+}
+
+fn build_skill_items(
+    skill_ids: impl IntoIterator<Item = String>,
+    lock_skills: &serde_json::Map<String, Value>,
+    agent_skills: &std::collections::BTreeMap<String, PathBuf>,
+    skills_dir: &Path,
+    workspaces: &WorkspacesDocument,
+    remote: &Result<std::collections::HashMap<String, RemoteSkillStats>, anyhow::Error>,
+) -> Vec<SkillInventoryItem> {
     let mut skills = Vec::new();
     for skill_id in skill_ids {
-        let installed_path = config.skills_dir.join(&skill_id);
-        if !installed_path.is_dir() {
+        let cache_path = skills_dir.join(&skill_id);
+        let installed_path = if cache_path.is_dir() && cache_path.join("SKILL.md").exists() {
+            cache_path.clone()
+        } else if let Some(agent_path) = agent_skills.get(&skill_id) {
+            agent_path.clone()
+        } else {
             continue;
-        }
+        };
+
         let lock_entry = lock_skills.get(&skill_id).cloned().unwrap_or(Value::Null);
         let version = lock_entry
             .get("version")
@@ -162,7 +213,7 @@ pub fn list_skills_inventory_with_config(
             }
         }
 
-        let agents = detect_agents_using(&skill_id, &installed_path, &workspaces);
+        let agents = detect_agents_using(&skill_id, &installed_path, workspaces);
 
         skills.push(SkillInventoryItem {
             skill_id: skill_id.clone(),
@@ -185,15 +236,65 @@ pub fn list_skills_inventory_with_config(
     }
 
     skills.sort_by(|a, b| a.skill_id.cmp(&b.skill_id));
+    skills
+}
 
-    Ok(SkillsInventoryReport {
-        skills_dir: config.skills_dir.display().to_string(),
-        lock_path: config.skills_lock_path.display().to_string(),
-        bundle_id,
-        skills,
-        remote_stats_ok: remote.is_ok(),
-        remote_stats_error: remote.err().map(|e| e.to_string()),
-    })
+/// Walk known agent skill roots and return `skill_id → first path found`.
+fn discover_agent_skills(workspaces: &WorkspacesDocument) -> std::collections::BTreeMap<String, PathBuf> {
+    let mut found = std::collections::BTreeMap::new();
+    collect_skill_dirs(&home_join(".claude/skills"), &mut found);
+    collect_skill_dirs(&home_join(".codex/skills"), &mut found);
+    collect_skill_dirs(&home_join(".hermes/skills"), &mut found);
+    collect_skill_dirs(&home_join(".openclaw/skills"), &mut found);
+    collect_skill_dirs(&home_join(".openclaw/workspace/skills"), &mut found);
+
+    for entry in workspaces.workspaces.values() {
+        collect_skill_dirs(&entry.path.join(".claude/skills"), &mut found);
+        collect_skill_dirs(&entry.codex_home.join("skills"), &mut found);
+        collect_skill_dirs(&entry.openclaw_workspace.join("skills"), &mut found);
+        if !entry.hermes_profile.is_empty() {
+            collect_skill_dirs(
+                &home_join(".hermes")
+                    .join("profiles")
+                    .join(&entry.hermes_profile)
+                    .join("skills"),
+                &mut found,
+            );
+        }
+    }
+    found
+}
+
+fn collect_skill_dirs(root: &Path, out: &mut std::collections::BTreeMap<String, PathBuf>) {
+    if !root.is_dir() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.join("SKILL.md").exists() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                out.entry(name.to_string()).or_insert(path);
+            }
+            continue;
+        }
+        // Hermes stores skills under category folders: skills/<category>/<id>
+        if let Ok(nested) = fs::read_dir(&path) {
+            for child in nested.flatten() {
+                let nested_path = child.path();
+                if nested_path.is_dir() && nested_path.join("SKILL.md").exists() {
+                    if let Some(name) = nested_path.file_name().and_then(|n| n.to_str()) {
+                        out.entry(name.to_string()).or_insert(nested_path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -647,7 +748,8 @@ pub fn mount_synced_skills_with_config(
     options: &SkillMountOptions,
 ) -> Result<SkillMountReport> {
     let workspaces = load_workspaces().unwrap_or_default();
-    let skill_ids = resolve_mount_skill_ids(config, &options.skill_ids)?;
+    let agent_skills = discover_agent_skills(&workspaces);
+    let skill_ids = resolve_mount_skill_ids(config, &options.skill_ids, &agent_skills)?;
     let runtimes = resolve_mount_runtimes(&options.runtimes);
 
     let mut mounted = 0usize;
@@ -656,18 +758,22 @@ pub fn mount_synced_skills_with_config(
     let mut actions = Vec::new();
 
     for skill_id in &skill_ids {
-        let source = config.skills_dir.join(skill_id);
-        if !source.is_dir() || !source.join("SKILL.md").exists() {
+        let cache_source = config.skills_dir.join(skill_id);
+        let source = if cache_source.is_dir() && cache_source.join("SKILL.md").exists() {
+            cache_source
+        } else if let Some(agent_path) = agent_skills.get(skill_id) {
+            agent_path.clone()
+        } else {
             failed += 1;
             actions.push(SkillMountAction {
                 skill_id: skill_id.clone(),
                 runtime: "*".into(),
-                path: source.display().to_string(),
+                path: config.skills_dir.join(skill_id).display().to_string(),
                 outcome: "failed".into(),
                 detail: Some("skill cache missing SKILL.md".into()),
             });
             continue;
-        }
+        };
 
         for runtime in &runtimes {
             let targets = mount_targets_for(
@@ -739,7 +845,8 @@ pub fn unmount_synced_skills_with_config(
     options: &SkillMountOptions,
 ) -> Result<SkillMountReport> {
     let workspaces = load_workspaces().unwrap_or_default();
-    let skill_ids = resolve_mount_skill_ids(config, &options.skill_ids)?;
+    let agent_skills = discover_agent_skills(&workspaces);
+    let skill_ids = resolve_mount_skill_ids(config, &options.skill_ids, &agent_skills)?;
     let runtimes = resolve_mount_runtimes(&options.runtimes);
 
     let mut unmounted = 0usize;
@@ -807,7 +914,11 @@ pub fn unmount_synced_skills_with_config(
     })
 }
 
-fn resolve_mount_skill_ids(config: &EvotownConfig, only: &[String]) -> Result<Vec<String>> {
+fn resolve_mount_skill_ids(
+    config: &EvotownConfig,
+    only: &[String],
+    agent_skills: &std::collections::BTreeMap<String, PathBuf>,
+) -> Result<Vec<String>> {
     if !only.is_empty() {
         return Ok(only
             .iter()
@@ -815,19 +926,21 @@ fn resolve_mount_skill_ids(config: &EvotownConfig, only: &[String]) -> Result<Ve
             .filter(|s| !s.is_empty())
             .collect());
     }
-    let mut ids = Vec::new();
+    let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     if config.skills_dir.is_dir() {
         for entry in fs::read_dir(&config.skills_dir)? {
             let path = entry?.path();
             if path.is_dir() && path.join("SKILL.md").exists() {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    ids.push(name.to_string());
+                    ids.insert(name.to_string());
                 }
             }
         }
     }
-    ids.sort();
-    Ok(ids)
+    for id in agent_skills.keys() {
+        ids.insert(id.clone());
+    }
+    Ok(ids.into_iter().collect())
 }
 
 fn resolve_mount_runtimes(only: &[String]) -> Vec<String> {
@@ -875,6 +988,11 @@ fn mount_targets_for(
 }
 
 fn link_skill_dir(source: &Path, target: &Path) -> Result<String> {
+    if let (Ok(src), Ok(dst)) = (fs::canonicalize(source), fs::canonicalize(target)) {
+        if src == dst {
+            return Ok("skipped".into());
+        }
+    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -949,6 +1067,19 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn discovers_agent_local_skills() {
+        let temp = TempDir::new().unwrap();
+        let claude = temp.path().join(".claude/skills/calculator");
+        fs::create_dir_all(&claude).unwrap();
+        fs::write(claude.join("SKILL.md"), "---\nname: calculator\n---\n").unwrap();
+
+        let mut found = std::collections::BTreeMap::new();
+        collect_skill_dirs(temp.path().join(".claude/skills").as_path(), &mut found);
+        assert_eq!(found.len(), 1);
+        assert!(found.contains_key("calculator"));
+    }
 
     #[test]
     fn reads_frontmatter_and_meta_metrics() {

@@ -87,6 +87,13 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
         return true;
     }
     let lower = t.to_ascii_lowercase();
+    // Newer Codex strips provider keys from project-local `.codex/config.toml` and
+    // logs this on every app-server start. Default workspace cwd is $HOME, so
+    // `~/.codex` is rediscovered as project-local while CODEX_HOME is isolated —
+    // the warning is expected noise; Ask must not surface it as an error toast.
+    if lower.contains("ignored unsupported project-local config") {
+        return true;
+    }
     [
         "openai codex",
         "reading additional input from stdin",

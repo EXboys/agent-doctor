@@ -168,10 +168,64 @@ fn update_tray_tooltip(app: &tauri::AppHandle) {
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
+    let Some(window) = ensure_main_window(app) else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    // WebView2 / undecorated windows on Windows sometimes stay behind after
+    // restore; a brief always-on-top pulse pulls them to the foreground.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_always_on_top(false);
+    }
+}
+
+fn attach_main_window_close_behavior(window: &tauri::WebviewWindow) {
+    let hide = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            // Keep the process alive for tray + Ask; recreate is expensive on WebView2.
+            api.prevent_close();
+            let _ = hide.hide();
+        }
+    });
+}
+
+fn ensure_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        return Some(window);
+    }
+
+    let mut builder =
+        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .title("Agent Doctor")
+            .inner_size(420.0, 720.0)
+            .min_inner_size(360.0, 520.0)
+            .decorations(false)
+            .resizable(true)
+            .visible(false);
+
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.transparent(false).shadow(true);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        builder = builder.transparent(true).shadow(false);
+    }
+
+    match builder.build() {
+        Ok(window) => {
+            attach_main_window_close_behavior(&window);
+            Some(window)
+        }
+        Err(err) => {
+            eprintln!("failed to recreate main window: {err}");
+            None
+        }
     }
 }
 
@@ -1400,6 +1454,7 @@ fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
             // Hide instead of destroy so WebView2 is not rebuilt on the next Ask
             // (rebuild on Windows can hang the UI thread and leave a blank shell).
             api.prevent_close();
+            let _ = hide.set_skip_taskbar(true);
             let _ = hide.hide();
         }
     });
@@ -1426,6 +1481,8 @@ fn create_ask_window(
             .minimizable(true)
             .decorations(true)
             .visible(visible)
+            // Hidden Ask must not steal taskbar restore from the main window.
+            .skip_taskbar(!visible)
             .initialization_script(&init_script)
             .build()
             .map_err(|err| format!("failed to open ask window: {err}"))?;
@@ -1448,6 +1505,7 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
 
     let window = ensure_ask_window(app, runtime)?;
     position_ask_window_right(&window);
+    let _ = window.set_skip_taskbar(false);
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
@@ -1467,6 +1525,7 @@ fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
             .destroy()
             .map_err(|err| format!("failed to close ask window: {err}"))?;
     } else {
+        let _ = window.set_skip_taskbar(true);
         let _ = window.hide();
     }
     Ok(())
@@ -1768,6 +1827,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Second launch (Start Menu / desktop shortcut) while minimized or
+            // tray-hidden: bring the existing main window back instead of
+            // starting a stuck second WebView2 process.
+            show_main_window(app);
+        }))
         .setup(|app| {
             app.manage(Mutex::new(TrayCompactState::default()));
             app.manage(PromptSessionState::default());
@@ -1782,6 +1847,9 @@ pub fn run() {
                         );
                     }
                 }
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                attach_main_window_close_behavior(&window);
             }
             show_main_window(app.handle());
             setup_tray(app);
