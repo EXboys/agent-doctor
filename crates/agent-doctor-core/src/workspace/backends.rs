@@ -826,6 +826,9 @@ mod tests {
         // Idempotent
         ensure_codex_projects_trusted(&codex_home, &[project]).unwrap();
         let raw2 = fs::read_to_string(codex_home.join("config.toml")).unwrap();
-        assert_eq!(raw.matches("trust_level").count(), raw2.matches("trust_level").count());
+        assert_eq!(
+            raw.matches("trust_level").count(),
+            raw2.matches("trust_level").count()
+        );
     }
 }

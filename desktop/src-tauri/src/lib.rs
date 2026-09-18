@@ -199,14 +199,13 @@ fn ensure_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
         return Some(window);
     }
 
-    let mut builder =
-        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-            .title("Agent Doctor")
-            .inner_size(420.0, 720.0)
-            .min_inner_size(360.0, 520.0)
-            .decorations(false)
-            .resizable(true)
-            .visible(false);
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("Agent Doctor")
+        .inner_size(420.0, 720.0)
+        .min_inner_size(360.0, 520.0)
+        .decorations(false)
+        .resizable(true)
+        .visible(false);
 
     #[cfg(target_os = "windows")]
     {
@@ -1471,8 +1470,7 @@ fn create_ask_window(
     );
     // Load chat.html with no query string. WebView2 custom-protocol + `?query`
     // often produces a titled, permanently blank Ask window.
-    let window =
-        WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
+    let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
             .title("Agent Doctor — Ask")
             .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
             .min_inner_size(720.0, 480.0)

@@ -240,7 +240,9 @@ fn build_skill_items(
 }
 
 /// Walk known agent skill roots and return `skill_id → first path found`.
-fn discover_agent_skills(workspaces: &WorkspacesDocument) -> std::collections::BTreeMap<String, PathBuf> {
+fn discover_agent_skills(
+    workspaces: &WorkspacesDocument,
+) -> std::collections::BTreeMap<String, PathBuf> {
     let mut found = std::collections::BTreeMap::new();
     collect_skill_dirs(&home_join(".claude/skills"), &mut found);
     collect_skill_dirs(&home_join(".codex/skills"), &mut found);

@@ -697,21 +697,21 @@ pub fn apply_codex_slot(
 
     let global_path = home_join(".codex/config.toml");
     let global_codex_home = home_join(".codex");
-    let isolated_config = crate::workspace::load_workspaces()
-        .ok()
-        .and_then(|doc| {
-            let active = doc.active.as_deref()?;
-            let entry = doc.workspaces.get(active)?;
-            if !entry.codex_home.exists() {
-                return None;
-            }
-            if crate::workspace::path::paths_equal(&entry.codex_home, &global_codex_home) {
-                return None;
-            }
-            Some(entry.codex_home.join("config.toml"))
-        });
+    let isolated_config = crate::workspace::load_workspaces().ok().and_then(|doc| {
+        let active = doc.active.as_deref()?;
+        let entry = doc.workspaces.get(active)?;
+        if !entry.codex_home.exists() {
+            return None;
+        }
+        if crate::workspace::path::paths_equal(&entry.codex_home, &global_codex_home) {
+            return None;
+        }
+        Some(entry.codex_home.join("config.toml"))
+    });
 
-    let path = isolated_config.clone().unwrap_or_else(|| global_path.clone());
+    let path = isolated_config
+        .clone()
+        .unwrap_or_else(|| global_path.clone());
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
     write_codex_provider_config(&path, gateway_url, model_id, &slot)?;
@@ -760,7 +760,7 @@ pub fn strip_codex_project_denied_provider_keys(path: &std::path::Path) -> Anyho
         .unwrap_or_else(|_| toml_edit::DocumentMut::new());
     let mut changed = false;
     for key in CODEX_PROJECT_DENIED_PROVIDER_KEYS {
-        if doc.remove(*key).is_some() {
+        if doc.remove(key).is_some() {
             changed = true;
         }
     }

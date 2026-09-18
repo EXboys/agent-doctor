@@ -137,9 +137,8 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
         // does not warn on every app-server turn.
         let global = crate::adapters::util::home_join(".codex");
         if !crate::workspace::path::paths_equal(&home, &global) {
-            let _ = crate::setup::strip_codex_project_denied_provider_keys(
-                &global.join("config.toml"),
-            );
+            let _ =
+                crate::setup::strip_codex_project_denied_provider_keys(&global.join("config.toml"));
         }
     }
 }
