@@ -1,0 +1,71 @@
+name: Sync updater latest.json to OSS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub release tag that already has latest.json"
+        required: true
+        default: "v0.1.40"
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Upload latest.json to China OSS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download latest.json from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.release_tag }}"
+          gh release download "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'latest.json' \
+            --dir ./oss-sync
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("oss-sync/latest.json")
+          data = json.loads(path.read_text())
+          prefix = "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/"
+          for meta in data["platforms"].values():
+              url = meta["url"]
+              if "/desktop/" not in url and "aliyuncs.com/" in url:
+                  meta["url"] = url.replace("aliyuncs.com/", "aliyuncs.com/desktop/", 1)
+          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+          print(json.dumps({k: v["url"] for k, v in data["platforms"].items()}, indent=2))
+          PY
+
+      - name: Upload to Aliyun OSS
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          OSS_PREFIX: ${{ secrets.OSS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::error::OSS secrets missing"
+            exit 1
+          fi
+          PREFIX="${OSS_PREFIX:-desktop}"
+          curl -fsSL -o ossutil.zip \
+            "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
+          unzip -qo ossutil.zip -d ossutil-bin
+          OSSUTIL="$(find ossutil-bin -type f -name 'ossutil*' ! -name '*.zip' | head -n 1)"
+          chmod +x "$OSSUTIL"
+          "$OSSUTIL" config \
+            -e "${OSS_ENDPOINT}" \
+            -i "${OSS_ACCESS_KEY_ID}" \
+            -k "${OSS_ACCESS_KEY_SECRET}" \
+            -L CH \
+            --config-file .ossutilconfig
+          "$OSSUTIL" cp oss-sync/latest.json \
+            "oss://${OSS_BUCKET}/${PREFIX}/latest.json" \
+            -f --config-file .ossutilconfig
+          echo "Updated oss://${OSS_BUCKET}/${PREFIX}/latest.json"
