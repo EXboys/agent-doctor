@@ -12,8 +12,52 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Same fmt/clippy gate as CI. Tag pushes do not run ci.yml, so Release must
+  # fail here before any installer is built.
+  lint:
+    name: Format and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (core + CLI)
+        run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+
+  lint-desktop:
+    name: Clippy desktop
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      # custom-protocol (default) requires frontendDist at compile time.
+      - name: Placeholder frontend dist for clippy
+        run: |
+          mkdir -p desktop/dist
+          printf '%s\n' '<!doctype html><title>clippy</title>' > desktop/dist/index.html
+
+      - name: Clippy desktop crate
+        run: cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings
+
   build-cli:
     name: CLI (${{ matrix.name }})
+    needs: [lint, lint-desktop]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -131,6 +175,7 @@ jobs:
   # (do not pass APPLE_ID / APPLE_API_* into tauri build — that triggers built-in notarization).
   build-desktop:
     name: Desktop (${{ matrix.platform }})
+    needs: [lint, lint-desktop]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

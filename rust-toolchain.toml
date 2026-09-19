@@ -1,0 +1,5 @@
+[toolchain]
+# Pin the same rustc/rustfmt/clippy that CI and Release use.
+# Do not pass `toolchain: stable` to dtolnay/rust-toolchain — that overrides this file.
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

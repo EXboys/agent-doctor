@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Channel is rust-toolchain.toml. Do not set toolchain: stable.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
