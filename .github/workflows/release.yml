@@ -458,20 +458,12 @@ jobs:
           name: agent-doctor-desktop-windows-x64
           path: |
             target/release/bundle/msi/*.msi
-            target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-
-      - name: Upload Windows updater signatures
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-doctor-desktop-windows-x64-updater
-          path: |
             target/release/bundle/msi/*.msi.sig
+            target/release/bundle/nsis/*.exe
             target/release/bundle/nsis/*.exe.sig
             target/release/bundle/nsis/*.nsis.zip
             target/release/bundle/nsis/*.nsis.zip.sig
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload Linux artifacts
         if: matrix.os == 'ubuntu-22.04'
@@ -480,18 +472,10 @@ jobs:
           name: agent-doctor-desktop-linux-x64
           path: |
             target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sig
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
           if-no-files-found: error
-
-      - name: Upload Linux updater signatures
-        if: matrix.os == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-doctor-desktop-linux-x64-updater
-          path: |
-            target/release/bundle/appimage/*.AppImage.sig
-          if-no-files-found: warn
 
   upload-desktop-to-release:
     name: Upload desktop assets to Release
