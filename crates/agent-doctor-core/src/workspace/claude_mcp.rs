@@ -125,15 +125,14 @@ fn collect_global_mcp_servers() -> (BTreeMap<String, JsonValue>, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
+    use tempfile::tempdir;
 
     #[test]
     fn migrate_copies_global_servers_to_project() {
-        let temp = env::temp_dir().join(format!("ad-mcp-migrate-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&temp);
-        fs::create_dir_all(&temp).unwrap();
+        let temp = tempdir().unwrap();
+        let home = temp.path();
 
-        let claude_dir = temp.join(".claude");
+        let claude_dir = home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
         fs::write(
             claude_dir.join("settings.json"),
@@ -141,25 +140,14 @@ mod tests {
         )
         .unwrap();
 
-        let project = temp.join("project");
+        let project = home.join("project");
         fs::create_dir_all(&project).unwrap();
 
-        let previous = env::var_os("HOME");
-        // SAFETY: test-only HOME override, restored below.
-        unsafe { env::set_var("HOME", &temp) };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::adapters::util::with_test_home(home, || {
             let report = migrate_claude_global_mcp_to_project(&project, false).unwrap();
             assert!(report.applied);
             assert!(report.added_servers.contains(&"global-demo".to_string()));
             assert!(project.join(".mcp.json").exists());
-        }));
-        match previous {
-            Some(value) => unsafe { env::set_var("HOME", value) },
-            None => unsafe { env::remove_var("HOME") },
-        }
-        let _ = fs::remove_dir_all(&temp);
-        if let Err(payload) = result {
-            std::panic::resume_unwind(payload);
-        }
+        });
     }
 }

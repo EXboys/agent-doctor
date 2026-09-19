@@ -622,25 +622,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::super::WorkspaceEntry;
-    use std::sync::Mutex;
-
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().unwrap();
-        let previous = std::env::var_os("HOME");
-        // SAFETY: test-only HOME override, restored after the closure.
-        unsafe { std::env::set_var("HOME", temp.path()) };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(temp.path())));
-        match previous {
-            Some(value) => unsafe { std::env::set_var("HOME", value) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        match result {
-            Ok(value) => value,
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
+        crate::adapters::util::with_test_home(temp.path(), || f(temp.path()))
     }
 
     #[test]

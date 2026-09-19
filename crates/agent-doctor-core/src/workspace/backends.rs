@@ -772,41 +772,35 @@ mod tests {
     fn upsert_openclaw_agent_creates_agents_list_when_missing() {
         let temp = tempdir().unwrap();
         let home = temp.path();
-        let prev = std::env::var_os("HOME");
-        unsafe { std::env::set_var("HOME", home) };
-
-        let openclaw = home.join(".openclaw");
-        fs::create_dir_all(&openclaw).unwrap();
-        fs::write(
-            openclaw.join("openclaw.json"),
-            r#"{"agents":{"defaults":{"model":{"primary":"personal/x"}}}}"#,
-        )
-        .unwrap();
-        let ws = home.join("ws");
-        fs::create_dir_all(&ws).unwrap();
-
-        upsert_openclaw_agent("agent-doctor", &ws).unwrap();
-
-        let raw = fs::read_to_string(openclaw.join("openclaw.json")).unwrap();
-        let value: JsonValue = serde_json::from_str(&raw).unwrap();
-        let list = value
-            .pointer("/agents/list")
-            .and_then(|v| v.as_array())
+        crate::adapters::util::with_test_home(home, || {
+            let openclaw = home.join(".openclaw");
+            fs::create_dir_all(&openclaw).unwrap();
+            fs::write(
+                openclaw.join("openclaw.json"),
+                r#"{"agents":{"defaults":{"model":{"primary":"personal/x"}}}}"#,
+            )
             .unwrap();
-        assert!(list
-            .iter()
-            .any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
-        assert_eq!(
-            value
-                .pointer("/agents/defaults/workspace")
-                .and_then(|v| v.as_str()),
-            Some(ws.to_str().unwrap())
-        );
+            let ws = home.join("ws");
+            fs::create_dir_all(&ws).unwrap();
 
-        match prev {
-            Some(v) => unsafe { std::env::set_var("HOME", v) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
+            upsert_openclaw_agent("agent-doctor", &ws).unwrap();
+
+            let raw = fs::read_to_string(openclaw.join("openclaw.json")).unwrap();
+            let value: JsonValue = serde_json::from_str(&raw).unwrap();
+            let list = value
+                .pointer("/agents/list")
+                .and_then(|v| v.as_array())
+                .unwrap();
+            assert!(list
+                .iter()
+                .any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
+            assert_eq!(
+                value
+                    .pointer("/agents/defaults/workspace")
+                    .and_then(|v| v.as_str()),
+                Some(ws.to_str().unwrap())
+            );
+        });
     }
 
     #[test]

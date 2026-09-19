@@ -6,8 +6,40 @@ use std::time::Duration;
 use crate::adapter::AdapterDiscovery;
 use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
 
+#[cfg(test)]
+thread_local! {
+    /// Per-test home override so unit tests never mutate the process `HOME`.
+    static TEST_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Resolve the user home directory (tests may override via [`with_test_home`]).
+pub fn home_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_HOME_OVERRIDE.with(|cell| cell.borrow().clone()) {
+            return path;
+        }
+    }
+    dirs::home_dir().expect("home directory")
+}
+
 pub fn home_join(relative: &str) -> PathBuf {
-    dirs::home_dir().expect("home directory").join(relative)
+    home_dir().join(relative)
+}
+
+/// Run `f` with [`home_dir`] / [`home_join`] rooted at `home` for this thread only.
+#[cfg(test)]
+pub(crate) fn with_test_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+    TEST_HOME_OVERRIDE.with(|cell| {
+        let previous = cell.replace(Some(home.to_path_buf()));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        *cell.borrow_mut() = previous;
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    })
 }
 
 /// User-local Node install used when the machine has no npm (no admin / winget).
@@ -452,7 +484,6 @@ mod tests {
     #[test]
     fn common_binary_dirs_includes_home_local_bin() {
         let dirs = common_binary_dirs();
-        // Prefer suffix check: other tests temporarily mutate HOME in parallel.
         assert!(
             dirs.iter()
                 .any(|d| d.ends_with(".local/bin") || d.ends_with(r".local\bin")),

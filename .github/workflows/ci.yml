@@ -30,7 +30,8 @@ jobs:
         run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
 
       - name: Test (core + CLI only)
-        # Some unit tests mutate HOME; serialize to avoid cross-test races.
+        # Some unit tests still mutate process env (e.g. AGENT_DOCTOR_*_BIN);
+        # serialize to avoid cross-test races. HOME is no longer mutated.
         run: cargo test -p agent-doctor-core -p agent-doctor
         env:
           RUST_TEST_THREADS: "1"
