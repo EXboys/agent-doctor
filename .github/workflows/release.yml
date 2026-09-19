@@ -91,6 +91,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # rust-toolchain.toml pins 1.98.0; ensure the matrix target is installed on
+      # that channel (macos-latest is arm64, so x86_64-apple-darwin is cross).
+      - name: Ensure Rust target installed
+        run: rustup target add ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Build CLI
