@@ -1,16 +1,19 @@
+import {
+  AskMentionMenuController,
+  AskResourcesController,
+  buildMentionConstraint,
+  ensureBrowserMention,
+  mergeMentionsForSend,
+  stripMentionTokens,
+  type AskRuntime,
+  type WorkspaceDoc,
+} from "./ask-resources";
 import { getLocale, t, type MessageKey } from "./i18n";
 import { renderMarkdown } from "./markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-
-type AskRuntime =
-  | "claude-code"
-  | "codex"
-  | "hermes"
-  | "openclaw"
-  | "deepseek-harness";
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 type ChatRole = "user" | "assistant" | "meta" | "permission";
 type AttachKind = "file" | "image";
@@ -96,55 +99,11 @@ interface SessionStore {
   sessions: ChatSession[];
 }
 
-interface SkillAgentUsage {
-  runtime: string;
-  scope: string;
-  path: string;
-  mounted: boolean;
-}
-
-interface SkillInventoryItem {
-  skill_id: string;
-  name: string;
-  version: string;
-  description: string | null;
-  agents: SkillAgentUsage[];
-}
-
-interface SkillsInventoryReport {
-  skills: SkillInventoryItem[];
-}
-
-interface McpInventoryItem {
-  name: string;
-  scope: string;
-  healthy: boolean;
-  issue: string | null;
-  is_browser: boolean;
-  runtime_hint: string;
-}
-
-interface McpInventoryReport {
-  workspace_name: string | null;
-  workspace_path: string | null;
-  servers: McpInventoryItem[];
-}
-
-type MentionKind = "skill" | "mcp";
-
-interface MentionRef {
-  kind: MentionKind;
-  id: string;
-  label: string;
-}
-
 const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
 const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 const MAX_SESSIONS = 40;
 const MAX_CONTEXT_MESSAGES = 12;
 const MAX_ATTACHMENTS = 8;
-const MENTION_TOKEN_RE = /@(?:skill|mcp):([^\s@]+)/gi;
-
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "avif"];
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
@@ -197,17 +156,8 @@ let flushRaf = 0;
 let pendingAttachments: ChatAttachment[] = [];
 /** True once any assistant text was rendered this turn (avoids result-fallback duplicates). */
 let turnHadAssistantText = false;
-let mountedSkills: SkillInventoryItem[] = [];
-let enabledMcps: McpInventoryItem[] = [];
 let workspaceCwd: string | null = null;
-let workspaceDoc: {
-  active: string | null;
-  workspaces: Record<string, { path: string }>;
-} | null = null;
-let selectedMentions: MentionRef[] = [];
-let mentionMenuIndex = 0;
-let mentionQuery: { kind: MentionKind | "any"; q: string; start: number; end: number } | null =
-  null;
+let workspaceDoc: WorkspaceDoc | null = null;
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1267,193 +1217,54 @@ function setDisplayedCwd(cwd: string): void {
   cwdEl.dataset.cwd = value;
   cwdEl.textContent = value;
   cwdEl.title = value;
-  updateResourcesSummary();
+  askResources.updateResourcesSummary();
 }
 
-function setResourcesOpen(open: boolean): void {
-  shellEl.classList.toggle("is-resources-open", open);
-  resourcesToggleEl.classList.toggle("is-open", open);
-  resourcesToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
-  resourcesPanelEl.setAttribute("aria-hidden", open ? "false" : "true");
+const askResources = new AskResourcesController(
+  {
+    shellEl,
+    resourcesPanelEl,
+    resourcesToggleEl,
+    resourcesLabelEl,
+    skillsListEl,
+    mcpListEl,
+    skillsEmptyEl,
+    mcpEmptyEl,
+    mentionsEl,
+  },
+  selectedRuntime,
+  displayCwd,
+  shortCwdLabel,
+);
+
+const mentionMenu = new AskMentionMenuController(
+  { promptEl, mentionMenuEl },
+  () => askResources.mentionCandidates(),
+  (mention) => askResources.upsertMention(mention),
+  autoResizePrompt,
+);
+
+function updateResourcesSummary(): void {
+  askResources.updateResourcesSummary();
 }
 
 function toggleResourcesPanel(): void {
-  setResourcesOpen(!shellEl.classList.contains("is-resources-open"));
-}
-
-function updateResourcesSummary(): void {
-  const cwd = displayCwd();
-  resourcesLabelEl.textContent = t("chat.resourcesSummary", {
-    cwd: shortCwdLabel(cwd),
-    skills: String(mountedSkills.length),
-    mcp: String(enabledMcps.length),
-  });
-  resourcesLabelEl.title = cwd;
-}
-
-function mcpMatchesRuntime(server: McpInventoryItem, runtime: AskRuntime): boolean {
-  const hint = server.runtime_hint.trim();
-  return hint === runtime || hint === "shared" || hint === "";
-}
-
-function skillMountedForRuntime(skill: SkillInventoryItem, runtime: AskRuntime): boolean {
-  return skill.agents.some((agent) => agent.runtime === runtime && agent.mounted);
-}
-
-function mentionKey(m: MentionRef): string {
-  return `${m.kind}:${m.id}`;
-}
-
-function hasMention(kind: MentionKind, id: string): boolean {
-  return selectedMentions.some((m) => m.kind === kind && m.id === id);
-}
-
-function upsertMention(mention: MentionRef): void {
-  if (hasMention(mention.kind, mention.id)) return;
-  selectedMentions.push(mention);
-  renderMentions();
-  renderResourceChips();
-}
-
-function removeMention(kind: MentionKind, id: string): void {
-  selectedMentions = selectedMentions.filter((m) => !(m.kind === kind && m.id === id));
-  renderMentions();
-  renderResourceChips();
-}
-
-function toggleMention(mention: MentionRef): void {
-  if (hasMention(mention.kind, mention.id)) removeMention(mention.kind, mention.id);
-  else upsertMention(mention);
-}
-
-function clearMentions(): void {
-  selectedMentions = [];
-  renderMentions();
-  renderResourceChips();
-}
-
-function renderMentions(): void {
-  mentionsEl.replaceChildren();
-  mentionsEl.hidden = selectedMentions.length === 0;
-  for (const mention of selectedMentions) {
-    const chip = document.createElement("span");
-    chip.className = "chat-mention-chip";
-    const label = document.createElement("span");
-    label.textContent =
-      mention.kind === "skill"
-        ? t("chat.mentionSkill", { name: mention.label })
-        : t("chat.mentionMcp", { name: mention.label });
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.setAttribute("aria-label", t("chat.mentionRemove"));
-    remove.textContent = "×";
-    remove.addEventListener("click", () => removeMention(mention.kind, mention.id));
-    chip.append(label, remove);
-    mentionsEl.appendChild(chip);
-  }
-}
-
-function renderResourceChips(): void {
-  skillsListEl.replaceChildren();
-  mcpListEl.replaceChildren();
-  skillsEmptyEl.hidden = mountedSkills.length > 0;
-  mcpEmptyEl.hidden = enabledMcps.length > 0;
-
-  for (const skill of mountedSkills) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chat-res-chip";
-    if (hasMention("skill", skill.skill_id)) btn.classList.add("is-active");
-    btn.textContent = skill.name || skill.skill_id;
-    btn.title = skill.description || skill.skill_id;
-    btn.addEventListener("click", () =>
-      toggleMention({
-        kind: "skill",
-        id: skill.skill_id,
-        label: skill.name || skill.skill_id,
-      }),
-    );
-    skillsListEl.appendChild(btn);
-  }
-
-  for (const server of enabledMcps) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chat-res-chip";
-    if (!server.healthy) btn.classList.add("is-warn");
-    if (hasMention("mcp", server.name)) btn.classList.add("is-active");
-    btn.textContent = server.is_browser ? `${server.name} · browser` : server.name;
-    btn.title = server.issue || `${server.scope} · ${server.runtime_hint}`;
-    btn.addEventListener("click", () =>
-      toggleMention({
-        kind: "mcp",
-        id: server.name,
-        label: server.name,
-      }),
-    );
-    mcpListEl.appendChild(btn);
-  }
-
-  updateResourcesSummary();
+  askResources.toggleResourcesPanel();
 }
 
 async function loadAskResources(): Promise<void> {
-  const runtime = selectedRuntime();
-  try {
-    const [skillsReport, mcpReport] = await Promise.all([
-      invoke<SkillsInventoryReport>("list_skills_inventory_command", { remoteStats: false }),
-      invoke<McpInventoryReport>("list_mcp_inventory_command"),
-    ]);
-    workspaceCwd = mcpReport.workspace_path;
-    try {
-      const doc = await invoke<{
-        active: string | null;
-        workspaces: Record<string, { path: string }>;
-      }>("list_workspaces_command");
-      workspaceDoc = doc;
-      renderWorkspaceSwitcher(doc);
-      if (doc.active && doc.workspaces[doc.active]?.path) {
-        workspaceCwd = doc.workspaces[doc.active].path;
-        cwdEl.dataset.workspace = doc.active;
-        setDisplayedCwd(workspaceCwd);
-        cwdEl.title = `${t("ask.workspaceActive", { name: doc.active })} · ${workspaceCwd}`;
-        workspaceHintEl.textContent = t("ask.workspaceHint");
-      } else {
-        cwdEl.dataset.workspace = "";
-        if (mcpReport.workspace_path) {
-          setDisplayedCwd(mcpReport.workspace_path);
-        } else {
-          setDisplayedCwd("—");
-        }
-        cwdEl.title = t("ask.workspaceNone");
-        workspaceHintEl.textContent = t("ask.workspaceNone");
-      }
-    } catch {
-      workspaceDoc = null;
-      if (mcpReport.workspace_path && (!cwdEl.dataset.cwd || cwdEl.dataset.cwd === "—")) {
-        setDisplayedCwd(mcpReport.workspace_path);
-      }
-    }
-    mountedSkills = (skillsReport.skills ?? []).filter((skill) =>
-      skillMountedForRuntime(skill, runtime),
-    );
-    enabledMcps = (mcpReport.servers ?? []).filter((server) => mcpMatchesRuntime(server, runtime));
-    // Drop mentions that no longer exist for this runtime.
-    selectedMentions = selectedMentions.filter((m) => {
-      if (m.kind === "skill") return mountedSkills.some((s) => s.skill_id === m.id);
-      return enabledMcps.some((s) => s.name === m.id);
-    });
-    renderMentions();
-    renderResourceChips();
-  } catch (error) {
-    setStatus(t("chat.resourcesLoadFailed", { error: String(error) }), "warn");
-  }
+  const result = await askResources.loadAskResources({
+    setStatus,
+    renderWorkspaceSwitcher,
+    cwdEl,
+    workspaceHintEl,
+    setDisplayedCwd,
+  });
+  workspaceCwd = result.workspaceCwd;
+  workspaceDoc = result.workspaceDoc;
 }
 
-function renderWorkspaceSwitcher(doc: {
-  active: string | null;
-  workspaces: Record<string, { path: string }>;
-}): void {
+function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
   const names = Object.keys(doc.workspaces).sort();
   workspaceSelectEl.innerHTML = "";
   if (names.length === 0) {
@@ -1517,191 +1328,6 @@ async function openMainResources(): Promise<void> {
   } catch (error) {
     setStatus(String(error), "error");
   }
-}
-
-function parseMentionsFromText(text: string): MentionRef[] {
-  const found: MentionRef[] = [];
-  const seen = new Set<string>();
-  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
-    const raw = match[0];
-    const id = (match[1] || "").trim();
-    if (!id) continue;
-    const kind: MentionKind = raw.toLowerCase().startsWith("@mcp:") ? "mcp" : "skill";
-    const key = `${kind}:${id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const label =
-      kind === "skill"
-        ? mountedSkills.find((s) => s.skill_id === id || s.name === id)?.name || id
-        : enabledMcps.find((s) => s.name === id)?.name || id;
-    found.push({ kind, id, label });
-  }
-  return found;
-}
-
-function stripMentionTokens(text: string): string {
-  return text
-    .replace(MENTION_TOKEN_RE, " ")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function mergeMentionsForSend(userText: string): MentionRef[] {
-  const fromText = parseMentionsFromText(userText);
-  const map = new Map<string, MentionRef>();
-  for (const m of [...selectedMentions, ...fromText]) {
-    map.set(mentionKey(m), m);
-  }
-  return [...map.values()];
-}
-
-function buildMentionConstraint(mentions: MentionRef[]): string {
-  if (mentions.length === 0) return "";
-  const list = mentions
-    .map((m) => {
-      if (m.kind === "skill") return `- Skill: ${m.label} (id: ${m.id})`;
-      if (m.id.toLowerCase() === "browser" || m.label.toLowerCase().includes("browser")) {
-        return `- MCP server: ${m.label} — use tools browser_navigate / browser_click / browser_screenshot (never shell open/curl)`;
-      }
-      return `- MCP server: ${m.label}`;
-    })
-    .join("\n");
-  return t("chat.mentionHint", { list });
-}
-
-function promptRequestsBrowserMcp(text: string): boolean {
-  const lower = text.toLowerCase();
-  if (
-    text.includes("浏览器") ||
-    lower.includes("browser mcp") ||
-    lower.includes("@mcp:browser") ||
-    lower.includes("browser_navigate") ||
-    lower.includes("open browser") ||
-    lower.includes("launch browser") ||
-    lower.includes("navigate to")
-  ) {
-    return true;
-  }
-  if (
-    (lower.includes("open ") || lower.includes("visit ") || lower.includes("go to ")) &&
-    (lower.includes("http://") ||
-      lower.includes("https://") ||
-      lower.includes(".com") ||
-      lower.includes(".cn") ||
-      lower.includes("baidu") ||
-      lower.includes("google"))
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function ensureBrowserMention(mentions: MentionRef[], userText: string): MentionRef[] {
-  if (!promptRequestsBrowserMcp(userText)) return mentions;
-  if (mentions.some((m) => m.kind === "mcp" && m.id.toLowerCase().includes("browser"))) {
-    return mentions;
-  }
-  const browser = enabledMcps.find(
-    (s) => s.is_browser || s.name.toLowerCase() === "browser" || s.name.toLowerCase().includes("browser"),
-  );
-  if (!browser) return mentions;
-  return [
-    ...mentions,
-    { kind: "mcp", id: browser.name, label: browser.name },
-  ];
-}
-
-function mentionCandidates(): MentionRef[] {
-  const skills = mountedSkills.map((s) => ({
-    kind: "skill" as const,
-    id: s.skill_id,
-    label: s.name || s.skill_id,
-  }));
-  const mcps = enabledMcps.map((s) => ({
-    kind: "mcp" as const,
-    id: s.name,
-    label: s.name,
-  }));
-  return [...skills, ...mcps];
-}
-
-function detectMentionQuery(): typeof mentionQuery {
-  const value = promptEl.value;
-  const caret = promptEl.selectionStart ?? value.length;
-  const before = value.slice(0, caret);
-  const match = before.match(/(?:^|\s)(@(?:skill:|mcp:)?([^\s@]*))$/i);
-  if (!match || match.index == null) return null;
-  const token = match[1];
-  const q = match[2] || "";
-  const start = match.index + (match[0].startsWith("@") ? 0 : 1);
-  const end = caret;
-  let kind: MentionKind | "any" = "any";
-  const lower = token.toLowerCase();
-  if (lower.startsWith("@skill:")) kind = "skill";
-  else if (lower.startsWith("@mcp:")) kind = "mcp";
-  return { kind, q, start, end };
-}
-
-function filteredMentionOptions(): MentionRef[] {
-  if (!mentionQuery) return [];
-  const q = mentionQuery.q.toLowerCase();
-  return mentionCandidates().filter((item) => {
-    if (mentionQuery!.kind !== "any" && item.kind !== mentionQuery!.kind) return false;
-    if (!q) return true;
-    return item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
-  });
-}
-
-function hideMentionMenu(): void {
-  mentionQuery = null;
-  mentionMenuEl.hidden = true;
-  mentionMenuEl.replaceChildren();
-}
-
-function renderMentionMenu(): void {
-  mentionQuery = detectMentionQuery();
-  const options = filteredMentionOptions();
-  if (!mentionQuery || options.length === 0) {
-    hideMentionMenu();
-    return;
-  }
-  mentionMenuIndex = Math.max(0, Math.min(mentionMenuIndex, options.length - 1));
-  mentionMenuEl.replaceChildren();
-  options.forEach((option, index) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chat-mention-option";
-    if (index === mentionMenuIndex) btn.classList.add("is-active");
-    btn.setAttribute("role", "option");
-    const title = document.createElement("strong");
-    title.textContent =
-      option.kind === "skill"
-        ? t("chat.mentionSkill", { name: option.label })
-        : t("chat.mentionMcp", { name: option.label });
-    const sub = document.createElement("span");
-    sub.textContent = `@${option.kind}:${option.id}`;
-    btn.append(title, sub);
-    btn.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      applyMentionOption(option);
-    });
-    mentionMenuEl.appendChild(btn);
-  });
-  mentionMenuEl.hidden = false;
-}
-
-function applyMentionOption(option: MentionRef): void {
-  if (!mentionQuery) return;
-  const value = promptEl.value;
-  const token = `@${option.kind}:${option.id} `;
-  promptEl.value = `${value.slice(0, mentionQuery.start)}${token}${value.slice(mentionQuery.end)}`;
-  const next = mentionQuery.start + token.length;
-  promptEl.setSelectionRange(next, next);
-  upsertMention(option);
-  hideMentionMenu();
-  autoResizePrompt();
-  promptEl.focus();
 }
 
 function buildPromptWithHistory(userText: string, attachments: ChatAttachment[]): string {
@@ -2039,7 +1665,7 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   if (busy) return;
   const text = promptEl.value.trim();
   const attachments = [...pendingAttachments];
-  if (!text && attachments.length === 0 && selectedMentions.length === 0) {
+  if (!text && attachments.length === 0 && askResources.selectedMentions.length === 0) {
     setStatus(t("chat.emptyPrompt"), "warn");
     return;
   }
@@ -2056,7 +1682,16 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
     pushActivity("info", t("chat.verifyMcpWatching"));
   }
 
-  const mentions = ensureBrowserMention(mergeMentionsForSend(text), text);
+  const mentions = ensureBrowserMention(
+    mergeMentionsForSend(
+      text,
+      askResources.selectedMentions,
+      askResources.mountedSkills,
+      askResources.enabledMcps,
+    ),
+    text,
+    askResources.enabledMcps,
+  );
   const cleaned = stripMentionTokens(text);
   const userText = cleaned || text || t("chat.attachOnlyPrompt");
   const constraint = buildMentionConstraint(mentions);
@@ -2067,8 +1702,8 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   persistMessage("user", userText, { attachments });
   appendBubble("user", userText, { persist: false, attachments });
   promptEl.value = "";
-  hideMentionMenu();
-  clearMentions();
+  mentionMenu.hideMentionMenu();
+  askResources.clearMentions();
   autoResizePrompt();
   pendingAttachments = [];
   renderPendingAttachments();
@@ -2201,36 +1836,37 @@ function boot(): void {
   });
   promptEl.addEventListener("input", () => {
     autoResizePrompt();
-    renderMentionMenu();
+    mentionMenu.renderMentionMenu();
   });
   promptEl.addEventListener("keydown", (event) => {
     if (!mentionMenuEl.hidden) {
-      const options = filteredMentionOptions();
+      const options = mentionMenu.filteredMentionOptions();
       if (event.key === "ArrowDown" && options.length > 0) {
         event.preventDefault();
-        mentionMenuIndex = (mentionMenuIndex + 1) % options.length;
-        renderMentionMenu();
+        mentionMenu.mentionMenuIndex = (mentionMenu.mentionMenuIndex + 1) % options.length;
+        mentionMenu.renderMentionMenu();
         return;
       }
       if (event.key === "ArrowUp" && options.length > 0) {
         event.preventDefault();
-        mentionMenuIndex = (mentionMenuIndex - 1 + options.length) % options.length;
-        renderMentionMenu();
+        mentionMenu.mentionMenuIndex =
+          (mentionMenu.mentionMenuIndex - 1 + options.length) % options.length;
+        mentionMenu.renderMentionMenu();
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        hideMentionMenu();
+        mentionMenu.hideMentionMenu();
         return;
       }
-      if (event.key === "Enter" && !event.shiftKey && options[mentionMenuIndex]) {
+      if (event.key === "Enter" && !event.shiftKey && options[mentionMenu.mentionMenuIndex]) {
         event.preventDefault();
-        applyMentionOption(options[mentionMenuIndex]);
+        mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
         return;
       }
-      if (event.key === "Tab" && options[mentionMenuIndex]) {
+      if (event.key === "Tab" && options[mentionMenu.mentionMenuIndex]) {
         event.preventDefault();
-        applyMentionOption(options[mentionMenuIndex]);
+        mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
         return;
       }
     }
@@ -2255,7 +1891,7 @@ function boot(): void {
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Node)) return;
     if (mentionMenuEl.contains(event.target) || promptEl.contains(event.target)) return;
-    hideMentionMenu();
+    mentionMenu.hideMentionMenu();
   });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {
