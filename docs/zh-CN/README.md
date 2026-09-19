@@ -69,6 +69,8 @@ cd desktop && npm install && npm run tauri dev
 
 已交付：五类 runtime 发现与探测、`repair --apply` / 回滚、桌面 Diagnose → Repair → Ask、工作区隔离、Browser MCP、个人/团队模式切换、Evotown 上线、SSH 只读 `remote` doctor。
 
+桌面自动更新（国内 CDN 优先）：见 [desktop-auto-update.md](../desktop-auto-update.md)。
+
 尚未交付：合规报告导出、钥匙串存密钥、远程 SSH 修复、自动填入密钥。详见 [ROADMAP.md](../ROADMAP.md)。
 
 ## 常用命令

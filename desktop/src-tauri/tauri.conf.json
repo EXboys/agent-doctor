@@ -35,6 +35,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
@@ -52,6 +53,18 @@
     ],
     "resources": {
       "resources/": ""
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2RjUyRTYwMTMwREQ0RjQKUldUMDFBMFRZQzcxdGhUQzJhbWFoQlVGQlJ4aUxIZ0JiWW5jZkJUdlo3TjFvS3llNEJTYlJBa04K",
+      "endpoints": [
+        "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/latest.json",
+        "https://github.com/EXboys/agent-doctor/releases/latest/download/latest.github.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

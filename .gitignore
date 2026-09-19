@@ -35,6 +35,10 @@ Thumbs.db
 profile.env
 agent-doctor/profile.env
 !docs/examples/profile.env.example
+desktop/src-tauri/.updater-private.key
+desktop/src-tauri/.updater-private.key.pub
+desktop/src-tauri/.updater-*.key
+desktop/src-tauri/.updater-*.key.pub
 
 # Test / cache
 .coverage

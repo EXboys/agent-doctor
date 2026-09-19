@@ -158,7 +158,7 @@ See [docs/development.md](docs/development.md), [docs/ROADMAP.md](docs/ROADMAP.m
 
 ## Install
 
-Prebuilt CLI and desktop bundles are published to [GitHub Releases](https://github.com/EXboys/agent-doctor/releases).
+Prebuilt CLI and desktop bundles are published to [GitHub Releases](https://github.com/EXboys/agent-doctor/releases). Mainland China auto-update prefers the CDN endpoint — see [docs/desktop-auto-update.md](docs/desktop-auto-update.md).
 
 ```bash
 # Latest CLI (pick the pattern for your OS — see docs/install.md)

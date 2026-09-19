@@ -8,11 +8,12 @@ Typical loop: **scan → diagnose → confirm repair → Ask re-check**.
 
 ## Features
 
-- System tray: **Show**, **Run doctor**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
+- System tray: **Show**, **Run doctor**, **Check for updates**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
 - **Agents** — environment health, runtime inventory, Diagnose → Repair → Ask drawer
 - **Resources** — Skills / MCP inventory; Browser MCP into Codex / Claude / Hermes / OpenClaw
 - **Wiring** — exclusive personal provider vs Evotown team mode (URL templates, verify, apply)
 - **Workspace** — list/switch project isolation, remote VPS read-only doctor, Hermes scene presets
+- Auto-update via Tauri Updater (China CDN first, GitHub fallback) — see [docs/desktop-auto-update.md](../docs/desktop-auto-update.md)
 - Repair apply / rollback for supported runtimes (Hermes, OpenClaw, DeepSeek Harness, plus Claude/Codex gateway + Browser MCP)
 - No separate business logic in the TypeScript UI layer
 

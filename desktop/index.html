@@ -379,7 +379,14 @@
 
       <footer class="widget-footer">
         <p id="status" class="status-footnote" hidden data-i18n="doctor.loading">加载中…</p>
-        <span id="footer-copy" data-i18n="app.footer">本机 Runtime · 诊断修复</span>
+        <div class="footer-meta">
+          <span id="footer-copy" data-i18n="app.footer">本机 Runtime · 诊断修复</span>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <span id="app-version" class="app-version">v—</span>
+          <button id="check-update" type="button" class="btn-link footer-update" data-i18n="update.check">
+            检查更新
+          </button>
+        </div>
       </footer>
     </main>
     <aside id="diagnose-detail" class="diagnose-detail" hidden>

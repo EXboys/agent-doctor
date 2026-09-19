@@ -432,6 +432,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
         None::<&str>,
     )?;
     let doctor = MenuItem::with_id(app, "doctor", "Run doctor", true, None::<&str>)?;
+    let check_update = MenuItem::with_id(app, "check_update", "Check for updates", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     let mut switch_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
@@ -471,7 +472,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
     } else {
         switch_sub.append_items(&switch_refs)?;
     }
-    Menu::with_items(app, &[&show, &switch_sub, &ws_doctor, &doctor, &quit])
+    Menu::with_items(app, &[&show, &switch_sub, &ws_doctor, &doctor, &check_update, &quit])
 }
 
 pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) {
@@ -1112,6 +1113,12 @@ fn setup_tray(app: &tauri::App) {
                 set_tray_busy(app, None);
                 publish_doctor_report(app, &report);
             }
+            "check_update" => {
+                show_main_window(app);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("check-for-updates", ());
+                }
+            }
             "quit" => {
                 app.exit(0);
             }
@@ -1148,15 +1155,23 @@ fn setup_tray(app: &tauri::App) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch (Start Menu / desktop shortcut) while minimized or
             // tray-hidden: bring the existing main window back instead of
             // starting a stuck second WebView2 process.
             show_main_window(app);
-        }))
+        }));
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             app.manage(Mutex::new(TrayCompactState::default()));
             app.manage(PromptSessionState::default());

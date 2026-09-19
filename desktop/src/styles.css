@@ -3070,3 +3070,41 @@ body.is-diagnose-open .diagnose-detail {
   letter-spacing: 0.02em;
   flex-shrink: 0;
 }
+
+.footer-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 6px;
+}
+
+.footer-sep {
+  opacity: 0.45;
+}
+
+.app-version {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+}
+
+.footer-update.btn-link,
+.btn-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent, #2f6fed);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.footer-update {
+  font-size: inherit;
+  padding: 0;
+  min-height: 0;
+}

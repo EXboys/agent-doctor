@@ -9,6 +9,7 @@ import {
   t,
   type Locale,
 } from "./i18n";
+import { initUpdaterUi } from "./updater";
 import { escapeHtml, formatTime, formatRate, formatCount } from "./format";
 import {
   isAskRuntimeId,
@@ -201,6 +202,8 @@ const modeUsePersonalEl = document.querySelector<HTMLButtonElement>("#mode-use-p
 const modeUseTeamEl = document.querySelector<HTMLButtonElement>("#mode-use-team")!;
 const wiringModeFootnoteEl = document.querySelector<HTMLElement>("#wiring-mode-footnote")!;
 const footerCopyEl = document.querySelector<HTMLElement>("#footer-copy")!;
+const appVersionEl = document.querySelector<HTMLElement>("#app-version");
+const checkUpdateEl = document.querySelector<HTMLButtonElement>("#check-update");
 const agentsWsChipEl = document.querySelector<HTMLElement>("#agents-ws-chip")!;
 const agentsWsNameEl = document.querySelector<HTMLElement>("#agents-ws-name")!;
 const agentsWsQuickEl = document.querySelector<HTMLButtonElement>("#agents-ws-quick")!;
@@ -3409,3 +3412,4 @@ void loadModeStatus();
 // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
 // wake Chrome until the user opens Resources or clicks Browser smoke.
 void refresh();
+void initUpdaterUi({ versionEl: appVersionEl, checkBtn: checkUpdateEl });
