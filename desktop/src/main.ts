@@ -2609,15 +2609,26 @@ async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {
   }
 }
 
-async function installRuntimeFromCard(card: HTMLElement) {
+async function installRuntimeFromCard(card: HTMLElement, options: { force?: boolean } = {}) {
   const runtime = card.dataset.runtime;
+  const force = Boolean(options.force);
   const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
   const installButton = card.querySelector<HTMLButtonElement>('[data-action="install-runtime"]');
+  const forceButton = card.querySelector<HTMLButtonElement>(
+    '[data-action="force-reinstall-runtime"]',
+  );
   const diagnoseButton = card.querySelector<HTMLButtonElement>('[data-action="diagnose-runtime"]');
   if (!runtime) {
     return;
   }
+  if (force) {
+    const ok = window.confirm(t("runtime.forceReinstallConfirm", { runtime }));
+    if (!ok) {
+      return;
+    }
+  }
   installButton?.setAttribute("disabled", "true");
+  forceButton?.setAttribute("disabled", "true");
   diagnoseButton?.setAttribute("disabled", "true");
   if (hint) {
     hint.hidden = false;
@@ -2680,7 +2691,10 @@ async function installRuntimeFromCard(card: HTMLElement) {
   });
 
   try {
-    const report = await invoke<InstallRuntimeResponse>("install_runtime_command", { runtime });
+    const report = await invoke<InstallRuntimeResponse>("install_runtime_command", {
+      runtime,
+      force,
+    });
     let nextHintHtml: string | null = null;
     let nextHintText: string | null = null;
     if (!report.install_needed) {
@@ -2702,13 +2716,17 @@ async function installRuntimeFromCard(card: HTMLElement) {
     let stickyText = nextHintText;
     if (
       report.install_needed &&
-      !(report.install_succeeded || report.after_installed) &&
-      report.install_log_path
+      !(report.install_succeeded || report.after_installed)
     ) {
-      stickyText = `${nextHintText ?? t("runtime.installFailed")} ${t("runtime.installLogHint", {
-        path: report.install_log_path,
-      })}`;
-      stickyHtml = null;
+      const logPath = report.install_log_path;
+      if (logPath) {
+        stickyHtml = `<div class="install-progress-done">${escapeHtml(
+          nextHintText ?? t("runtime.installFailed"),
+        )}<p class="footnote">${escapeHtml(t("runtime.installLogHint", { path: logPath }))}</p><button type="button" class="btn-ghost" data-action="open-install-log" data-log-path="${escapeHtml(
+          logPath,
+        )}">${escapeHtml(t("runtime.openInstallLog"))}</button></div>`;
+        stickyText = null;
+      }
     }
     await refresh();
     setStickyInstallHint(runtime, stickyHtml, stickyText);
@@ -2733,9 +2751,13 @@ async function installRuntimeFromCard(card: HTMLElement) {
       ?.querySelector<HTMLButtonElement>('[data-action="install-runtime"]')
       ?.removeAttribute("disabled");
     freshCard
+      ?.querySelector<HTMLButtonElement>('[data-action="force-reinstall-runtime"]')
+      ?.removeAttribute("disabled");
+    freshCard
       ?.querySelector<HTMLButtonElement>('[data-action="diagnose-runtime"]')
       ?.removeAttribute("disabled");
     installButton?.removeAttribute("disabled");
+    forceButton?.removeAttribute("disabled");
     diagnoseButton?.removeAttribute("disabled");
   }
 }
@@ -2947,6 +2969,21 @@ runtimesEl.addEventListener("click", (event) => {
 
   if (action === "install-runtime" && runtimeCard) {
     void installRuntimeFromCard(runtimeCard);
+    return;
+  }
+
+  if (action === "force-reinstall-runtime" && runtimeCard) {
+    void installRuntimeFromCard(runtimeCard, { force: true });
+    return;
+  }
+
+  if (action === "open-install-log") {
+    const path = (event.target as HTMLElement | null)
+      ?.closest<HTMLElement>("[data-action='open-install-log']")
+      ?.dataset.logPath;
+    if (path) {
+      void openRepairGuide(path);
+    }
     return;
   }
 

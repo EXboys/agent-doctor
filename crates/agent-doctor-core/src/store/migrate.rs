@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::db::{
-    PersonalProviderRecord, SettingsStore, SkillsSourceKind, SkillsSourceSettings,
-};
+use super::db::{PersonalProviderRecord, SettingsStore, SkillsSourceKind, SkillsSourceSettings};
 use crate::setup::{
     EVOTOWN_API_KEY_ENV, EVOTOWN_BUNDLE_ID_ENV, EVOTOWN_RUNTIME_ENV, EVOTOWN_SKILLS_DIR_ENV,
     EVOTOWN_URL_ENV,
@@ -336,8 +334,7 @@ mod tests {
         .unwrap();
 
         let db_path = dir.path().join("settings.db");
-        let store =
-            SettingsStore::open_at(&db_path, Arc::new(MemorySecretBackend::new())).unwrap();
+        let store = SettingsStore::open_at(&db_path, Arc::new(MemorySecretBackend::new())).unwrap();
 
         // Inject by reading the file we wrote (simulate candidate path by calling apply directly).
         let map = read_env_map(&env_path).unwrap();

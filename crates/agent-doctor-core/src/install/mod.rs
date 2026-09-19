@@ -29,6 +29,8 @@ pub struct InstallOptions {
     pub explain: bool,
     /// Retry rule-based install up to N extra times on failure.
     pub retry_count: u8,
+    /// Re-run the installer even when the binary already exists on PATH.
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +91,8 @@ where
 
     let has_rule_install = runtime_supports_lifecycle(runtime_id);
     let before_probe = probe_runtime(runtime_id)?;
-    let install_needed = needs_binary_install(&before_probe);
+    let binary_missing = needs_binary_install(&before_probe);
+    let install_needed = binary_missing || options.force;
     let mut skipped_actions = Vec::new();
     let mut install_log_path = None;
     let mut install_attempts = 0u8;
@@ -102,6 +105,13 @@ where
             100,
         ));
     } else if has_rule_install {
+        if options.force && !binary_missing {
+            on_progress(emit(
+                "installing",
+                "Force reinstall requested — re-running installer…",
+                12,
+            ));
+        }
         let max_attempts = 1 + options.retry_count;
         while install_attempts < max_attempts {
             install_attempts += 1;

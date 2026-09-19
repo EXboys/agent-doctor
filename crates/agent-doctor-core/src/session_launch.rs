@@ -37,8 +37,8 @@ use crate::setup::merge::{
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
     clear_codex_placeholder_auth, evotown_agent_env_path, gateway_url_from_evotown_base,
-    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV,
-    EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
+    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::{active_env_path, ensure_default_workspace, load_workspaces};
 

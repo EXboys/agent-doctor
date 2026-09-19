@@ -320,9 +320,7 @@ fn merge_windows_persistent_path_into_env() {
 
 #[cfg(windows)]
 fn windows_env_path_dirs(scope: &str) -> Vec<PathBuf> {
-    let script = format!(
-        "[Environment]::GetEnvironmentVariable('Path','{scope}')"
-    );
+    let script = format!("[Environment]::GetEnvironmentVariable('Path','{scope}')");
     let output = run_output(
         Path::new("powershell"),
         &["-NoProfile", "-NonInteractive", "-Command", &script],
@@ -422,8 +420,7 @@ fn homebrew_node_bin_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-static NPM_PREFIX_CACHE: std::sync::Mutex<Option<Option<PathBuf>>> =
-    std::sync::Mutex::new(None);
+static NPM_PREFIX_CACHE: std::sync::Mutex<Option<Option<PathBuf>>> = std::sync::Mutex::new(None);
 
 fn npm_global_bin_dir() -> Option<PathBuf> {
     let mut guard = NPM_PREFIX_CACHE
@@ -444,8 +441,8 @@ fn invalidate_npm_global_bin_dir_cache() {
 fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
     // Prefer an absolute npm path so GUI shells without Homebrew still work.
     // `#!/usr/bin/env node` still needs node on PATH — callers must seed PATH first.
-    let npm = find_binary_in_dirs("npm", &static_common_binary_dirs())
-        .or_else(|| find_in_path("npm"))?;
+    let npm =
+        find_binary_in_dirs("npm", &static_common_binary_dirs()).or_else(|| find_in_path("npm"))?;
     let output = run_output(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;

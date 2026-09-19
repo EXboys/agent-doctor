@@ -17,6 +17,6 @@ pub use db::{
 pub use secrets::{
     default_secret_backend, personal_api_key_account, platform_secret_store_name,
     CompositeSecretBackend, KeyringBackend, MemorySecretBackend, SecretBackend, KEYRING_SERVICE,
-    SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY, SECRET_TEAMUPS_LICENSE, SECRET_TEAM_API_KEY,
-    SECRET_TEAM_ENGINE_INGEST,
+    SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY, SECRET_TEAMUPS_LICENSE,
+    SECRET_TEAM_API_KEY, SECRET_TEAM_ENGINE_INGEST,
 };

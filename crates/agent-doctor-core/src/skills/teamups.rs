@@ -44,7 +44,10 @@ impl TeamupsClient {
         })
     }
 
-    fn auth_header(&self, req: reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder {
+    fn auth_header(
+        &self,
+        req: reqwest::blocking::RequestBuilder,
+    ) -> reqwest::blocking::RequestBuilder {
         match &self.license {
             Some(token) if !token.trim().is_empty() => {
                 req.header("Authorization", format!("Bearer {}", token.trim()))

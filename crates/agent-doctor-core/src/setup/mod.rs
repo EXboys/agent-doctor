@@ -288,7 +288,11 @@ pub fn write_evotown_agent_env(
             team.bundle_id = Some(DEFAULT_EVOTOWN_BUNDLE_ID.to_string());
         }
         if team.skills_dir.is_none() {
-            team.skills_dir = Some(crate::store::default_skills_cache_dir().display().to_string());
+            team.skills_dir = Some(
+                crate::store::default_skills_cache_dir()
+                    .display()
+                    .to_string(),
+            );
         }
         let _ = store.set_team_settings(&team);
         let _ = store.set_team_api_key(api_key.trim());

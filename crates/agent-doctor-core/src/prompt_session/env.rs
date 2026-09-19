@@ -67,14 +67,16 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            env.insert(EVOTOWN_URL_ENV.to_string(), url.trim_end_matches('/').to_string());
+            env.insert(
+                EVOTOWN_URL_ENV.to_string(),
+                url.trim_end_matches('/').to_string(),
+            );
             let gateway = crate::setup::gateway_url_from_evotown_base(url);
             env.entry(GATEWAY_URL_ENV.to_string())
                 .or_insert_with(|| gateway.clone());
             env.entry("OPENAI_BASE_URL".into()).or_insert(gateway);
             let anthropic = anthropic_gateway_url_from_evotown_base(url);
-            env.entry("ANTHROPIC_BASE_URL".into())
-                .or_insert(anthropic);
+            env.entry("ANTHROPIC_BASE_URL".into()).or_insert(anthropic);
         }
     }
     if let Ok(Some(key)) = store.get_overlay_api_key() {
@@ -82,7 +84,8 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
             let key = key.trim().to_string();
             env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
             env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
-            env.entry("OPENAI_API_KEY".into()).or_insert_with(|| key.clone());
+            env.entry("OPENAI_API_KEY".into())
+                .or_insert_with(|| key.clone());
             env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
         }
     } else if let Ok(Some(key)) = store.get_team_api_key() {
@@ -90,7 +93,8 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
             let key = key.trim().to_string();
             env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
             env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
-            env.entry("OPENAI_API_KEY".into()).or_insert_with(|| key.clone());
+            env.entry("OPENAI_API_KEY".into())
+                .or_insert_with(|| key.clone());
             env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
         }
     }

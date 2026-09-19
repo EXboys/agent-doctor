@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
 #[cfg(windows)]
 use anyhow::bail;
+use anyhow::{Context, Result};
 
 pub const KEYRING_SERVICE: &str = "agent-doctor";
 
@@ -61,39 +61,35 @@ pub struct KeyringBackend;
 impl SecretBackend for KeyringBackend {
     fn set(&self, account: &str, secret: &str) -> Result<()> {
         let store = platform_secret_store_name();
-        let entry = keyring::Entry::new(KEYRING_SERVICE, account).with_context(|| {
-            format!("failed to open {store} entry for `{account}`")
-        })?;
-        entry.set_password(secret).with_context(|| {
-            format!("failed to store secret `{account}` in {store}")
-        })
+        let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+            .with_context(|| format!("failed to open {store} entry for `{account}`"))?;
+        entry
+            .set_password(secret)
+            .with_context(|| format!("failed to store secret `{account}` in {store}"))
     }
 
     fn get(&self, account: &str) -> Result<Option<String>> {
         let store = platform_secret_store_name();
-        let entry = keyring::Entry::new(KEYRING_SERVICE, account).with_context(|| {
-            format!("failed to open {store} entry for `{account}`")
-        })?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+            .with_context(|| format!("failed to open {store} entry for `{account}`"))?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(err) => Err(err).with_context(|| {
-                format!("failed to read secret `{account}` from {store}")
-            }),
+            Err(err) => {
+                Err(err).with_context(|| format!("failed to read secret `{account}` from {store}"))
+            }
         }
     }
 
     fn delete(&self, account: &str) -> Result<()> {
         let store = platform_secret_store_name();
-        let entry = keyring::Entry::new(KEYRING_SERVICE, account).with_context(|| {
-            format!("failed to open {store} entry for `{account}`")
-        })?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+            .with_context(|| format!("failed to open {store} entry for `{account}`"))?;
         match entry.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()),
-            Err(err) => Err(err).with_context(|| {
-                format!("failed to delete secret `{account}` from {store}")
-            }),
+            Err(err) => Err(err)
+                .with_context(|| format!("failed to delete secret `{account}` from {store}")),
         }
     }
 }
@@ -304,7 +300,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN,
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let mut data_in = CRYPT_INTEGER_BLOB {
@@ -331,9 +327,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>> {
     if ok.is_err() {
         bail!("CryptProtectData failed — cannot encrypt secrets for DPAPI fallback");
     }
-    let slice = unsafe {
-        std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize)
-    };
+    let slice = unsafe { std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize) };
     let out = slice.to_vec();
     unsafe {
         let _ = LocalFree(HLOCAL(data_out.pbData as _));
@@ -345,7 +339,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>> {
 fn dpapi_unprotect(protected: &[u8]) -> Result<Vec<u8>> {
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN,
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let mut data_in = CRYPT_INTEGER_BLOB {
@@ -371,9 +365,7 @@ fn dpapi_unprotect(protected: &[u8]) -> Result<Vec<u8>> {
     if ok.is_err() {
         bail!("CryptUnprotectData failed — DPAPI secrets vault unreadable on this Windows user");
     }
-    let slice = unsafe {
-        std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize)
-    };
+    let slice = unsafe { std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize) };
     let out = slice.to_vec();
     unsafe {
         let _ = LocalFree(HLOCAL(data_out.pbData as _));

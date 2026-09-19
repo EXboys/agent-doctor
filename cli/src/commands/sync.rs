@@ -40,7 +40,10 @@ fn print_sync_report(report: &SyncReport, dry_run: bool) {
         if dry_run { " (dry run)" } else { "" }
     );
     println!("Source: {}", report.base_url);
-    println!("Bundle/pack: {} ({})", report.bundle_id, report.runtime_target);
+    println!(
+        "Bundle/pack: {} ({})",
+        report.bundle_id, report.runtime_target
+    );
     println!("Skills dir: {}", report.skills_dir);
     println!("Lock file: {}\n", report.lock_path);
 

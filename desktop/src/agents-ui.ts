@@ -196,7 +196,7 @@ export function renderRuntimeCardActions(
       ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
       <div class="runtime-advanced-actions">
         <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
-        <button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>
+        <button type="button" class="btn-ghost" data-action="force-reinstall-runtime" title="${escapeHtml(t("runtime.forceReinstallHint"))}">${t("runtime.forceReinstall")}</button>
       </div>
     </details>
   `);

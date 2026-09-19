@@ -20,6 +20,7 @@ pub fn run(
             plan_ai_repair: plan_ai,
             repair_after,
             retry_count: retry,
+            force: false,
         },
     )?;
 

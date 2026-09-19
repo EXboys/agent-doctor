@@ -121,9 +121,9 @@ pub use setup::{
     PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 pub use skills::{
-    execute_skills_sync, load_local_skills_layout, resolve_skills_source, save_skills_source_override,
-    LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsClient, TeamupsPackManifest,
-    TeamupsSkillEntry,
+    execute_skills_sync, load_local_skills_layout, resolve_skills_source,
+    save_skills_source_override, LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions,
+    TeamupsClient, TeamupsPackManifest, TeamupsSkillEntry,
 };
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,

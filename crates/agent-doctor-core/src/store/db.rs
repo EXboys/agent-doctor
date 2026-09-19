@@ -500,7 +500,11 @@ pub fn team_configured(store: &SettingsStore) -> Result<bool> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .is_some()
-        && key.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_some())
+        && key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_some())
 }
 
 pub fn require_team_credentials(store: &SettingsStore) -> Result<(String, String)> {

@@ -301,8 +301,10 @@ pub fn run_repair_rollback_command(
 pub async fn install_runtime_command(
     app: AppHandle,
     runtime: String,
+    force: Option<bool>,
 ) -> Result<InstallRuntimeResponse, String> {
     let app_for_emit = app.clone();
+    let force = force.unwrap_or(false);
     let response = tauri::async_runtime::spawn_blocking(move || {
         let report = execute_install_with_progress(
             &runtime,
@@ -311,6 +313,7 @@ pub async fn install_runtime_command(
                 plan_ai_repair: false,
                 repair_after: false,
                 retry_count: 0,
+                force,
             },
             |event: InstallProgressEvent| {
                 let _ = app_for_emit.emit("install-progress", &event);

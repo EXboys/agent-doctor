@@ -57,9 +57,8 @@ pub fn load_doctor_node_config() -> Result<DoctorNodeConfig> {
         }
     }
 
-    let path = evotown_agent_env_path().context(
-        "could not resolve evotown.agent.env — run `agent-doctor setup` first",
-    )?;
+    let path = evotown_agent_env_path()
+        .context("could not resolve evotown.agent.env — run `agent-doctor setup` first")?;
     if !path.exists() {
         bail!(
             "missing team engine credentials — run `agent-doctor setup --url <evotown> --key evk_...` then \
@@ -94,7 +93,7 @@ fn load_doctor_node_config_from_store(
         .context(format!(
             "engine ingest token missing from {} — run agent-doctor register",
             crate::store::platform_secret_store_name()
-       ))?;
+        ))?;
     if !ingest_token.starts_with("evi_") {
         bail!(
             "EVOTOWN_ENGINE_INGEST_TOKEN must start with evi_ (got prefix {:?})",

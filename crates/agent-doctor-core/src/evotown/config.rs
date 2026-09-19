@@ -47,9 +47,8 @@ pub fn default_skills_dir() -> PathBuf {
 }
 
 pub fn default_skills_lock_path() -> Option<PathBuf> {
-    crate::store::default_skills_lock_path().or_else(|| {
-        evotown_config_dir().map(|base| base.join("skills-lock.json"))
-    })
+    crate::store::default_skills_lock_path()
+        .or_else(|| evotown_config_dir().map(|base| base.join("skills-lock.json")))
 }
 
 pub fn default_policy_cache_path() -> Option<PathBuf> {
@@ -98,7 +97,7 @@ fn load_from_store(store: &SettingsStore) -> Result<EvotownConfig> {
         .context(format!(
             "team api_key missing from {} — open Agent Doctor → Provider to reconnect",
             crate::store::platform_secret_store_name()
-       ))?;
+        ))?;
     validate_evotown_api_key(&api_key)?;
 
     let runtime_target = settings

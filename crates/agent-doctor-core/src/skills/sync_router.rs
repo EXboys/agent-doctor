@@ -15,7 +15,9 @@ use super::resolve::{
 };
 use super::teamups::TeamupsClient;
 use super::SkillsSyncSource;
-use crate::evotown::{execute_sync as execute_evotown_sync, EvotownConfig, SyncOptions, SyncReport};
+use crate::evotown::{
+    execute_sync as execute_evotown_sync, EvotownConfig, SyncOptions, SyncReport,
+};
 use crate::setup::{DEFAULT_EVOTOWN_BUNDLE_ID, DEFAULT_EVOTOWN_RUNTIME};
 use crate::store::{open_settings_store, SettingsStore, SkillsSourceKind};
 
@@ -320,8 +322,7 @@ mod tests {
     fn resolve_defaults_to_teamups_when_unset() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("settings.db");
-        let store =
-            SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
         let resolved = resolve_skills_source_from_store(&store, None).unwrap();
         assert_eq!(resolved.kind, SkillsSourceKind::Teamups);
         assert!(resolved.using_default);
@@ -331,8 +332,7 @@ mod tests {
     fn resolve_respects_explicit_evotown() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("settings.db");
-        let store =
-            SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
         store
             .set_skills_source_settings(&crate::store::SkillsSourceSettings {
                 source: Some(SkillsSourceKind::Evotown),
@@ -351,8 +351,7 @@ mod tests {
     fn local_source_refuses_remote_sync() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("settings.db");
-        let store =
-            SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
         store
             .set_skills_source_settings(&crate::store::SkillsSourceSettings {
                 source: Some(SkillsSourceKind::Local),
@@ -360,11 +359,8 @@ mod tests {
                 pack_slug: None,
             })
             .unwrap();
-        let err = execute_skills_sync_with_store(
-            &store,
-            &SkillsSyncOptions::default(),
-        )
-        .unwrap_err();
+        let err =
+            execute_skills_sync_with_store(&store, &SkillsSyncOptions::default()).unwrap_err();
         assert!(err.to_string().contains("local"));
         let _ = crate::skills::local::LocalSkillsSource;
     }

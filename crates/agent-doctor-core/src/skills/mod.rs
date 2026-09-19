@@ -1,8 +1,8 @@
 //! Pluggable skills download sources (TeamUps default, Evotown / custom / local).
 
 mod custom;
-pub(crate) mod local;
 mod evotown_source;
+pub(crate) mod local;
 mod resolve;
 mod sync_router;
 mod teamups;

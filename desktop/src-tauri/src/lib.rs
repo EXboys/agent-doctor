@@ -1,13 +1,13 @@
 use agent_doctor_core::{
     apply_profile_model, ensure_default_workspace, evotown_status, execute_evotown_onboarding,
-    execute_register, execute_skills_sync, load_doctor_node_config, load_mode_status, load_profiles,
-    load_workspaces, open_interactive_session, run_doctor, run_prompt_session_with_cancel,
-    set_runtime_model, use_profile, use_workspace_with_options, workspace_doctor, ApplyReport,
-    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument,
-    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionReport, RegisterOptions, RegisterReport, RuntimeModelPreset, SkillsSyncOptions,
-    SyncReport, UseProfileReport, UseWorkspaceOptions, WorkspaceDoctorReport,
+    execute_register, execute_skills_sync, load_doctor_node_config, load_mode_status,
+    load_profiles, load_workspaces, open_interactive_session, run_doctor,
+    run_prompt_session_with_cancel, set_runtime_model, use_profile, use_workspace_with_options,
+    workspace_doctor, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
+    HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
+    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport, RuntimeModelPreset,
+    SkillsSyncOptions, SyncReport, UseProfileReport, UseWorkspaceOptions, WorkspaceDoctorReport,
 };
 
 use serde::Serialize;

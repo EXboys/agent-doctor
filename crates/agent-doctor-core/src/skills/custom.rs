@@ -48,7 +48,10 @@ impl SkillsSyncSource for CustomSkillsSource {
     }
 
     fn fetch_manifest(&self, pack_or_bundle_id: &str, _runtime_target: &str) -> Result<Value> {
-        let url = format!("{}/api/v1/packs/{pack_or_bundle_id}/manifest", self.base_url);
+        let url = format!(
+            "{}/api/v1/packs/{pack_or_bundle_id}/manifest",
+            self.base_url
+        );
         let resp = self
             .auth(self.http.get(&url))
             .send()
