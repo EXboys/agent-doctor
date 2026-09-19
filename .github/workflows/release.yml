@@ -562,6 +562,13 @@ jobs:
           fi
           VERSION="${GITHUB_REF_NAME}"
           CDN_BASE="${UPDATE_CDN_BASE_URL:-https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop}"
+          CDN_BASE="${CDN_BASE%/}"
+          PREFIX_NAME="${OSS_PREFIX:-desktop}"
+          # Keep package URLs under the same prefix we upload to OSS.
+          case "${CDN_BASE}" in
+            */"${PREFIX_NAME}") ;;
+            *) CDN_BASE="${CDN_BASE}/${PREFIX_NAME}" ;;
+          esac
           GH_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}"
           if ! python3 scripts/build-updater-manifest.py \
             --artifacts ./desktop-artifacts \
