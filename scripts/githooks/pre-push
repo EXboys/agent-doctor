@@ -21,9 +21,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       if [[ "$local_sha" =~ ^0+$ ]]; then
         continue
       fi
+      # Annotated tags: local_sha is the tag object; peel to the commit.
+      commit_sha="$(git rev-parse "${local_sha}^{commit}" 2>/dev/null || true)"
+      if [[ -z "$commit_sha" ]]; then
+        echo "pre-push: could not resolve commit for $remote_ref ($local_sha)" >&2
+        exit 1
+      fi
       need_gate=1
-      tag_commits+=("$local_sha")
-      echo "pre-push: detected tag push $remote_ref -> ${local_sha:0:8}" >&2
+      tag_commits+=("$commit_sha")
+      echo "pre-push: detected tag push $remote_ref -> commit ${commit_sha:0:8}" >&2
       ;;
   esac
 done
