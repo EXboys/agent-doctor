@@ -21,11 +21,15 @@ Commands:
   frontend        Build desktop frontend (npm)
   cli             fmt-check + clippy-cli + test-cli + build-cli
   desktop         clippy-desktop
+  release-preflight
+                  fmt-check + clippy-cli + test-cli (+ desktop clippy when available)
+                  Run this before tagging v*; Release CI re-checks the same gates.
   all             cli + frontend; desktop rust on macOS or AGENT_DOCTOR_CHECK_DESKTOP=1
   help            Show this message
 
 Examples:
   ./scripts/check.sh cli
+  ./scripts/check.sh release-preflight
   AGENT_DOCTOR_CHECK_DESKTOP=1 ./scripts/check.sh all
 EOF
 }
@@ -71,6 +75,20 @@ run_cli_suite() {
   run_build_cli
 }
 
+run_release_preflight() {
+  echo "==> release-preflight: fmt + clippy + tests (must pass before tagging v*)"
+  run_fmt_check
+  run_clippy_cli
+  run_test_cli
+  if should_check_desktop; then
+    run_desktop_rust
+  else
+    echo "Skipping desktop clippy (set AGENT_DOCTOR_CHECK_DESKTOP=1 on Linux with GTK deps)."
+    echo "Release CI still runs desktop clippy on macOS."
+  fi
+  echo "==> release-preflight OK — wait for green CI on main, then tag."
+}
+
 run_desktop_rust() {
   if [[ "$(uname -s)" == "Linux" ]]; then
     echo "Note: desktop Rust checks on Linux require GTK/WebKit dev packages."
@@ -91,6 +109,7 @@ case "$command" in
   frontend) run_frontend ;;
   cli) run_cli_suite ;;
   desktop) run_desktop_rust ;;
+  release-preflight) run_release_preflight ;;
   all)
     run_cli_suite
     run_frontend
