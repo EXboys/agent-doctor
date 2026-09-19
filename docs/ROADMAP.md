@@ -48,7 +48,7 @@
 - [x] Evotown onboarding panel: connect URL/key, one-click doctor + sync + policy pull
 - [x] Tray workspace switch + tooltip (`Agent Doctor · workspace: …`)
 - [x] Tray compact status (small enhancement, not a product skin): tooltip shows health + active workspace + personal/team mode; refresh after doctor/repair/workspace switch; brief “busy” state while a tray action runs. No Dynamic Island chrome, theme pack, or floating HUD.
-- [ ] Keychain storage for API keys (optional)
+- [x] Keychain storage for API keys (`settings.db` + OS keychain; legacy `.env` one-shot migrate)
 
 ## P2 — Project workspaces
 

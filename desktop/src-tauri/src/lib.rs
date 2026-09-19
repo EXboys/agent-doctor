@@ -1,13 +1,13 @@
 use agent_doctor_core::{
     apply_profile_model, ensure_default_workspace, evotown_status, execute_evotown_onboarding,
-    execute_register, execute_sync, load_doctor_node_config, load_evotown_config, load_mode_status,
-    load_profiles, load_workspaces, open_interactive_session, run_doctor,
-    run_prompt_session_with_cancel, set_runtime_model, use_profile, use_workspace_with_options,
-    workspace_doctor, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
-    HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
-    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
-    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport, RuntimeModelPreset,
-    SyncOptions, SyncReport, UseProfileReport, UseWorkspaceOptions, WorkspaceDoctorReport,
+    execute_register, execute_skills_sync, load_doctor_node_config, load_mode_status, load_profiles,
+    load_workspaces, open_interactive_session, run_doctor, run_prompt_session_with_cancel,
+    set_runtime_model, use_profile, use_workspace_with_options, workspace_doctor, ApplyReport,
+    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument,
+    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
+    PromptSessionReport, RegisterOptions, RegisterReport, RuntimeModelPreset, SkillsSyncOptions,
+    SyncReport, UseProfileReport, UseWorkspaceOptions, WorkspaceDoctorReport,
 };
 
 use serde::Serialize;
@@ -551,16 +551,13 @@ fn run_evotown_onboarding_command(
 
 #[tauri::command]
 fn run_sync_command() -> Result<SyncReport, String> {
-    let config = load_evotown_config().map_err(|error| error.to_string())?;
-    execute_sync(
-        &config,
-        &SyncOptions {
-            dry_run: false,
-            only_skills: Vec::new(),
-            runtime_target: None,
-            bundle_id: None,
-        },
-    )
+    execute_skills_sync(&SkillsSyncOptions {
+        dry_run: false,
+        only_skills: Vec::new(),
+        runtime_target: None,
+        pack_or_bundle_id: None,
+        source_override: None,
+    })
     .map_err(|error| error.to_string())
 }
 

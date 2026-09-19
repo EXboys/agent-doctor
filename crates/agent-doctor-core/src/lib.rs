@@ -14,6 +14,8 @@ pub mod repair;
 pub mod runtime;
 pub mod session_launch;
 pub mod setup;
+pub mod skills;
+pub mod store;
 pub mod workspace;
 
 pub use adapter::{
@@ -21,9 +23,10 @@ pub use adapter::{
     RuntimeProfile,
 };
 pub use adapters::{
-    CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, HermesSettings, OpenClawAdapter,
-    DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, DEEPSEEK_HARNESS_CLI,
-    DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID, DEEPSEEK_HARNESS_VERSION,
+    refresh_managed_runtime_path, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter,
+    HermesSettings, OpenClawAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV,
+    DEEPSEEK_HARNESS_CLI, DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID,
+    DEEPSEEK_HARNESS_VERSION,
 };
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use evotown::{
@@ -116,6 +119,15 @@ pub use setup::{
     COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT, MODE_PERSONAL, MODE_TEAM,
     MODE_UNSET, OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
     PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
+};
+pub use skills::{
+    execute_skills_sync, load_local_skills_layout, resolve_skills_source, save_skills_source_override,
+    LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsClient, TeamupsPackManifest,
+    TeamupsSkillEntry,
+};
+pub use store::{
+    default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,
+    PersonalProviderRecord, SettingsStore, SkillsSourceKind, SkillsSourceSettings, TeamSettings,
 };
 pub use workspace::{
     active_env_path, bash_hook_file_path, browser_configured_runtimes,

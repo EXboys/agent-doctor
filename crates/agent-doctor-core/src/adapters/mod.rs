@@ -13,3 +13,4 @@ pub use deepseek_harness::{
 };
 pub use hermes::{HermesAdapter, HermesSettings};
 pub use openclaw::{configured_base_url, OpenClawAdapter};
+pub use util::refresh_managed_runtime_path;

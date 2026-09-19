@@ -1,21 +1,25 @@
 .resources-page {
   margin: 0;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(47, 111, 237, 0.08), transparent 40%),
     linear-gradient(180deg, #eef2f8 0%, #f7f8fb 48%, #f3f5f9 100%);
   color: var(--text, #152033);
+  padding: 0;
 }
 
 .resources-shell {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   max-width: 980px;
   margin: 0 auto;
   padding: 18px 20px 24px;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .resources-top {
@@ -23,6 +27,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .resources-top h1 {
@@ -51,6 +56,7 @@
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.05);
   width: fit-content;
+  flex-shrink: 0;
 }
 
 .resources-section-tab {
@@ -74,6 +80,9 @@
 .resources-body {
   flex: 1;
   min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .resources-panel {
@@ -129,8 +138,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(58vh, 560px);
-  overflow: auto;
 }
 
 .res-catalog-item {

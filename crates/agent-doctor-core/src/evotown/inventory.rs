@@ -9,7 +9,8 @@ use serde_json::Value;
 
 use super::client::EvotownClient;
 use super::config::{
-    default_skills_dir, default_skills_lock_path, load_evotown_config, EvotownConfig,
+    default_policy_cache_path, default_skills_dir, default_skills_lock_path, load_evotown_config,
+    EvotownConfig, DEFAULT_BUNDLE_ID, DEFAULT_RUNTIME_TARGET,
 };
 use crate::adapters::util::home_join;
 use crate::workspace::{load_workspaces, WorkspacesDocument};
@@ -64,29 +65,34 @@ pub fn list_skills_inventory_with_options(
     match load_evotown_config() {
         Ok(config) => list_skills_inventory_with_config(&config, options),
         Err(_) => {
-            // Personal-mode / fresh installs: still surface skills already on
-            // local agents (Claude/Codex/Hermes/OpenClaw), not only Evotown cache.
-            let workspaces = load_workspaces().unwrap_or_default();
-            let agent_skills = discover_agent_skills(&workspaces);
-            let skills = build_skill_items(
-                agent_skills.keys().cloned().collect::<Vec<_>>(),
-                &serde_json::Map::new(),
-                &agent_skills,
-                &default_skills_dir(),
-                &workspaces,
-                &Ok(std::collections::HashMap::new()),
-            );
-            let skills_dir = default_skills_dir();
-            Ok(SkillsInventoryReport {
-                skills_dir: skills_dir.display().to_string(),
-                lock_path: default_skills_lock_path()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-                bundle_id: None,
-                skills,
-                remote_stats_ok: false,
-                remote_stats_error: Some("evotown_not_configured".into()),
-            })
+            // No team credentials: still list/mount from local skills cache.
+            let layout = crate::skills::load_local_skills_layout().unwrap_or_else(|_| {
+                crate::skills::LocalSkillsLayout {
+                    skills_dir: default_skills_dir(),
+                    skills_lock_path: default_skills_lock_path()
+                        .unwrap_or_else(|| default_skills_dir().join("../skills-lock.json")),
+                }
+            });
+            let stub = EvotownConfig {
+                base_url: String::new(),
+                api_key: String::new(),
+                runtime_target: DEFAULT_RUNTIME_TARGET.to_string(),
+                bundle_id: DEFAULT_BUNDLE_ID.to_string(),
+                skills_dir: layout.skills_dir,
+                skills_lock_path: layout.skills_lock_path,
+                policy_cache_path: default_policy_cache_path()
+                    .unwrap_or_else(|| PathBuf::from("policies-cache.json")),
+                config_source: "local-skills-layout".into(),
+            };
+            let mut report = list_skills_inventory_with_config(
+                &stub,
+                &SkillsInventoryOptions {
+                    remote_stats: false,
+                },
+            )?;
+            report.remote_stats_ok = false;
+            report.remote_stats_error = Some("remote_source_not_configured".into());
+            Ok(report)
         }
     }
 }
@@ -739,9 +745,21 @@ pub struct SkillMountReport {
     pub actions: Vec<SkillMountAction>,
 }
 
-/// Symlink Evotown-cached skills into each agent’s native skills directory.
+/// Symlink cached skills into each agent’s native skills directory.
+/// Does **not** require a remote skills source or team credentials.
 pub fn mount_synced_skills(options: &SkillMountOptions) -> Result<SkillMountReport> {
-    let config = load_evotown_config()?;
+    let layout = crate::skills::load_local_skills_layout()?;
+    let config = EvotownConfig {
+        base_url: String::new(),
+        api_key: String::new(),
+        runtime_target: DEFAULT_RUNTIME_TARGET.to_string(),
+        bundle_id: DEFAULT_BUNDLE_ID.to_string(),
+        skills_dir: layout.skills_dir,
+        skills_lock_path: layout.skills_lock_path,
+        policy_cache_path: default_policy_cache_path()
+            .unwrap_or_else(|| PathBuf::from("policies-cache.json")),
+        config_source: "local-skills-layout".into(),
+    };
     mount_synced_skills_with_config(&config, options)
 }
 
@@ -838,7 +856,18 @@ pub fn mount_synced_skills_with_config(
 /// Remove Doctor-managed skill symlinks from agent skills directories.
 /// Only deletes symlinks that resolve to the Evotown cache; never removes real copies.
 pub fn unmount_synced_skills(options: &SkillMountOptions) -> Result<SkillMountReport> {
-    let config = load_evotown_config()?;
+    let layout = crate::skills::load_local_skills_layout()?;
+    let config = EvotownConfig {
+        base_url: String::new(),
+        api_key: String::new(),
+        runtime_target: DEFAULT_RUNTIME_TARGET.to_string(),
+        bundle_id: DEFAULT_BUNDLE_ID.to_string(),
+        skills_dir: layout.skills_dir,
+        skills_lock_path: layout.skills_lock_path,
+        policy_cache_path: default_policy_cache_path()
+            .unwrap_or_else(|| PathBuf::from("policies-cache.json")),
+        config_source: "local-skills-layout".into(),
+    };
     unmount_synced_skills_with_config(&config, options)
 }
 
@@ -1134,5 +1163,36 @@ mod tests {
         assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "unmounted");
         assert!(!target.exists());
         assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "skipped");
+    }
+
+    #[test]
+    fn mount_uses_local_cache_without_remote_credentials() {
+        let temp = TempDir::new().unwrap();
+        let cache = temp.path().join("skills");
+        let skill = cache.join("demo-skill");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: demo-skill\n---\n").unwrap();
+
+        let config = EvotownConfig {
+            base_url: String::new(),
+            api_key: String::new(),
+            runtime_target: "openclaw".into(),
+            bundle_id: "test".into(),
+            skills_dir: cache,
+            skills_lock_path: temp.path().join("lock.json"),
+            policy_cache_path: temp.path().join("policies.json"),
+            config_source: "test".into(),
+        };
+        let report = mount_synced_skills_with_config(
+            &config,
+            &SkillMountOptions {
+                skill_ids: vec!["demo-skill".into()],
+                runtimes: vec![],
+                include_active_workspace: false,
+            },
+        )
+        .unwrap();
+        // No runtimes in sandbox → skipped counts, but never fails for missing Evotown.
+        assert_eq!(report.failed, 0);
     }
 }

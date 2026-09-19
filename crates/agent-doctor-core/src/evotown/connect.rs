@@ -50,17 +50,63 @@ pub struct DoctorNodeConfig {
 }
 
 pub fn load_doctor_node_config() -> Result<DoctorNodeConfig> {
+    // Prefer settings.db + keychain.
+    if let Ok(store) = crate::store::open_settings_store() {
+        if let Ok(config) = load_doctor_node_config_from_store(&store) {
+            return Ok(config);
+        }
+    }
+
     let path = evotown_agent_env_path().context(
-        "could not resolve ~/.config/evotown/evotown.agent.env — run `agent-doctor setup` first",
+        "could not resolve evotown.agent.env — run `agent-doctor setup` first",
     )?;
     if !path.exists() {
         bail!(
-            "missing {} — run `agent-doctor setup --url <evotown> --key evk_...` then \
-             `agent-doctor register --bootstrap-token <IT-token>`",
-            path.display()
+            "missing team engine credentials — run `agent-doctor setup --url <evotown> --key evk_...` then \
+             `agent-doctor register --bootstrap-token <IT-token>`"
         );
     }
     load_doctor_node_config_from_path(&path)
+}
+
+fn load_doctor_node_config_from_store(
+    store: &crate::store::SettingsStore,
+) -> Result<DoctorNodeConfig> {
+    let team = store.get_team_settings()?;
+    let base_url = team
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.trim_end_matches('/').to_string())
+        .context("team base_url missing in settings.db")?;
+    let engine_id = team
+        .engine_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .context("engine_id missing — run agent-doctor register")?;
+    let ingest_token = store
+        .get_team_engine_ingest_token()?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .context(format!(
+            "engine ingest token missing from {} — run agent-doctor register",
+            crate::store::platform_secret_store_name()
+       ))?;
+    if !ingest_token.starts_with("evi_") {
+        bail!(
+            "EVOTOWN_ENGINE_INGEST_TOKEN must start with evi_ (got prefix {:?})",
+            ingest_token.chars().take(4).collect::<String>()
+        );
+    }
+    Ok(DoctorNodeConfig {
+        base_url,
+        engine_id,
+        ingest_token,
+        config_source: format!("settings.db+{}", crate::store::platform_secret_store_name()),
+    })
 }
 
 pub fn load_doctor_node_config_from_path(path: &Path) -> Result<DoctorNodeConfig> {

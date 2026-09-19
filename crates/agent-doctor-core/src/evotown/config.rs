@@ -11,6 +11,7 @@ use crate::setup::{
     DEFAULT_EVOTOWN_BUNDLE_ID, DEFAULT_EVOTOWN_RUNTIME, EVOTOWN_API_KEY_ENV, EVOTOWN_BUNDLE_ID_ENV,
     EVOTOWN_RUNTIME_ENV, EVOTOWN_SKILLS_DIR_ENV, EVOTOWN_URL_ENV,
 };
+use crate::store::{open_settings_store, team_configured, SettingsStore};
 
 pub const DEFAULT_BUNDLE_ID: &str = DEFAULT_EVOTOWN_BUNDLE_ID;
 pub const DEFAULT_RUNTIME_TARGET: &str = DEFAULT_EVOTOWN_RUNTIME;
@@ -32,11 +33,23 @@ pub fn evotown_config_dir() -> Option<PathBuf> {
 }
 
 pub fn default_skills_dir() -> PathBuf {
-    default_evotown_skills_dir()
+    // Prefer Agent Doctor cache; fall back to legacy ~/.evotown/skills.
+    crate::skills::load_local_skills_layout()
+        .map(|layout| layout.skills_dir)
+        .unwrap_or_else(|_| {
+            let modern = crate::store::default_skills_cache_dir();
+            if modern.is_dir() {
+                modern
+            } else {
+                default_evotown_skills_dir()
+            }
+        })
 }
 
 pub fn default_skills_lock_path() -> Option<PathBuf> {
-    evotown_config_dir().map(|base| base.join("skills-lock.json"))
+    crate::store::default_skills_lock_path().or_else(|| {
+        evotown_config_dir().map(|base| base.join("skills-lock.json"))
+    })
 }
 
 pub fn default_policy_cache_path() -> Option<PathBuf> {
@@ -44,7 +57,14 @@ pub fn default_policy_cache_path() -> Option<PathBuf> {
 }
 
 pub fn load_evotown_config() -> Result<EvotownConfig> {
-    // Prefer dedicated Evotown env so a personal provider overlay cannot hijack team connect.
+    // Prefer settings.db + keychain (migrated / newly written).
+    if let Ok(store) = open_settings_store() {
+        if let Ok(config) = load_from_store(&store) {
+            return Ok(config);
+        }
+    }
+
+    // Legacy fallback: dedicated Evotown env so older installs keep working until migrated.
     if let Some(path) = evotown_agent_env_path() {
         if path.exists() {
             return load_from_env_file(&path, path.display().to_string());
@@ -54,9 +74,53 @@ pub fn load_evotown_config() -> Result<EvotownConfig> {
         return Ok(from_profile);
     }
     bail!(
-        "Evotown is not configured — open Agent Doctor → Provider to connect your team, \
+        "Team / Evotown is not configured — open Agent Doctor → Provider to connect your team, \
          or run `agent-doctor setup --url <evotown-url> --key evk_...`"
     )
+}
+
+fn load_from_store(store: &SettingsStore) -> Result<EvotownConfig> {
+    if !team_configured(store)? {
+        bail!("team not configured in settings store");
+    }
+    let settings = store.get_team_settings()?;
+    let base_url = settings
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.trim_end_matches('/').to_string())
+        .context("team base_url missing")?;
+    let api_key = store
+        .get_team_api_key()?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .context(format!(
+            "team api_key missing from {} — open Agent Doctor → Provider to reconnect",
+            crate::store::platform_secret_store_name()
+       ))?;
+    validate_evotown_api_key(&api_key)?;
+
+    let runtime_target = settings
+        .runtime
+        .unwrap_or_else(|| DEFAULT_RUNTIME_TARGET.to_string());
+    let bundle_id = settings
+        .bundle_id
+        .unwrap_or_else(|| DEFAULT_BUNDLE_ID.to_string());
+    let skills_dir = store.resolved_skills_dir()?;
+    let skills_lock_path = default_skills_lock_path().context("could not resolve config dir")?;
+    let policy_cache_path = default_policy_cache_path().context("could not resolve config dir")?;
+
+    Ok(EvotownConfig {
+        base_url,
+        api_key,
+        runtime_target,
+        bundle_id,
+        skills_dir,
+        skills_lock_path,
+        policy_cache_path,
+        config_source: format!("settings.db+{}", crate::store::platform_secret_store_name()),
+    })
 }
 
 fn load_from_company_profile() -> Result<Option<EvotownConfig>> {
@@ -174,27 +238,7 @@ pub fn validate_evotown_api_key(api_key: &str) -> Result<()> {
 }
 
 fn load_env_map(path: &Path) -> Result<std::collections::HashMap<String, String>> {
-    let raw = std::fs::read_to_string(path)?;
-    let mut values = std::collections::HashMap::new();
-    for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let assignment = line.strip_prefix("export ").unwrap_or(line);
-        let Some((key, value)) = assignment.split_once('=') else {
-            continue;
-        };
-        values.insert(
-            key.trim().to_string(),
-            value
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string(),
-        );
-    }
-    Ok(values)
+    crate::store::migrate::read_env_map(path)
 }
 
 fn expand_path(value: &str) -> PathBuf {

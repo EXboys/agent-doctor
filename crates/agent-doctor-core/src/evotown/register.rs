@@ -203,6 +203,15 @@ fn save_engine_credentials(
     if let Some(runtime) = runtime {
         upsert_evotown_agent_env_key(path, EVOTOWN_RUNTIME_ENV, &normalize_runtime(runtime))?;
     }
+    if let Ok(store) = crate::store::open_settings_store() {
+        let mut team = store.get_team_settings().unwrap_or_default();
+        team.engine_id = Some(engine_id.to_string());
+        if let Some(runtime) = runtime {
+            team.runtime = Some(normalize_runtime(runtime));
+        }
+        let _ = store.set_team_settings(&team);
+        let _ = store.set_team_engine_ingest_token(ingest_token);
+    }
     Ok(())
 }
 

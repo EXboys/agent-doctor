@@ -529,7 +529,87 @@ fn document_from_store(store: &PersonalProvidersStore, path: &Path) -> PersonalP
     }
 }
 
+fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // Strip keys from on-disk JSON going forward — keys live in keychain via settings store.
+    let mut redacted = store.clone();
+    for entry in &mut redacted.providers {
+        // Keep keys in memory for this write path's callers, but persist empty on disk
+        // after mirroring to keychain.
+        let _ = entry;
+    }
+    if let Ok(settings) = crate::store::open_settings_store() {
+        for entry in &store.providers {
+            let _ = settings.upsert_personal_provider(&crate::store::PersonalProviderRecord {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                url: entry.url.clone(),
+                model: entry.model.clone(),
+                protocol: normalize_protocol(&entry.protocol),
+                active: store.active_id.as_deref() == Some(entry.id.as_str()),
+            });
+            if !entry.api_key.trim().is_empty() {
+                let _ = settings.set_personal_api_key(&entry.id, entry.api_key.trim());
+            }
+        }
+        // Remove deleted providers from settings store.
+        if let Ok(existing) = settings.list_personal_providers() {
+            for record in existing {
+                if !store.providers.iter().any(|p| p.id == record.id) {
+                    let _ = settings.delete_personal_provider(&record.id);
+                }
+            }
+        }
+        // Persist metadata-only JSON (no api_key) for legacy readers.
+        for entry in &mut redacted.providers {
+            entry.api_key.clear();
+        }
+    }
+    let raw = serde_json::to_string_pretty(&redacted)?;
+    fs::write(path, raw + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
 fn load_store(path: &Path) -> Result<PersonalProvidersStore> {
+    // Prefer settings.db + keychain when populated.
+    if let Ok(settings) = crate::store::open_settings_store() {
+        if let Ok(records) = settings.list_personal_providers() {
+            if !records.is_empty() {
+                let mut providers = Vec::new();
+                let mut active_id = None;
+                for record in records {
+                    let api_key = settings
+                        .get_personal_api_key(&record.id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    if record.active {
+                        active_id = Some(record.id.clone());
+                    }
+                    providers.push(PersonalProviderEntry {
+                        id: record.id,
+                        name: record.name,
+                        url: record.url,
+                        api_key,
+                        model: record.model,
+                        protocol: record.protocol,
+                    });
+                }
+                return Ok(PersonalProvidersStore {
+                    active_id,
+                    providers,
+                });
+            }
+        }
+    }
+
     if !path.exists() {
         return Ok(PersonalProvidersStore::default());
     }
@@ -538,20 +618,6 @@ fn load_store(path: &Path) -> Result<PersonalProvidersStore> {
         return Ok(PersonalProvidersStore::default());
     }
     serde_json::from_str(&raw).context("failed to parse providers.json")
-}
-
-fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let raw = serde_json::to_string_pretty(store)?;
-    fs::write(path, raw + "\n")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
 }
 
 fn migrate_from_profile_if_empty(

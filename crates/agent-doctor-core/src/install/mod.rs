@@ -71,6 +71,9 @@ where
         bail!("unknown runtime '{runtime_id}'");
     }
 
+    // GUI apps inherit a minimal PATH; seed Homebrew/npm dirs before installers run.
+    crate::adapters::util::refresh_managed_runtime_path();
+
     let emit = |phase: &str, message: &str, percent: u8| InstallProgressEvent {
         runtime_id: runtime_id.to_string(),
         phase: phase.to_string(),
@@ -110,6 +113,9 @@ where
             match run_rule_install(runtime_id, &mut on_progress) {
                 Ok(path) => {
                     install_log_path = Some(path.display().to_string());
+                    // Installers update the user PATH in the OS; refresh this process
+                    // so the post-install probe can see the new binary.
+                    crate::adapters::util::refresh_managed_runtime_path();
                     on_progress(emit(
                         "verifying",
                         "Installer finished — verifying binary…",
@@ -146,7 +152,21 @@ where
     }
 
     on_progress(emit("verifying", "Re-probing runtime health…", 90));
+    crate::adapters::util::refresh_managed_runtime_path();
     let mut after_probe = probe_runtime(runtime_id)?;
+    if install_needed && !install_succeeded && !needs_binary_install(&after_probe) {
+        install_succeeded = true;
+    }
+    // npm/brew may finish linking a moment after the installer exits.
+    if install_needed && needs_binary_install(&after_probe) {
+        std::thread::sleep(std::time::Duration::from_millis(750));
+        crate::adapters::util::refresh_managed_runtime_path();
+        after_probe = probe_runtime(runtime_id)?;
+        if !needs_binary_install(&after_probe) {
+            install_succeeded = true;
+            skipped_actions.retain(|item| !is_install_failure_action(&item.id));
+        }
+    }
     if install_needed && !install_succeeded {
         install_succeeded = !needs_binary_install(&after_probe);
     }

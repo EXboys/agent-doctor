@@ -109,7 +109,7 @@ enum Commands {
         #[command(subcommand)]
         action: McpAction,
     },
-    /// Pull private SkillHub bundle from Evotown
+    /// Pull skills from the configured source (default TeamUps; optional Evotown/custom)
     Sync {
         /// Show planned actions without downloading
         #[arg(long)]
@@ -117,12 +117,15 @@ enum Commands {
         /// Only install these skill_ids from the bundle manifest (repeatable)
         #[arg(long = "only")]
         only: Vec<String>,
-        /// Runtime target for manifest (default from evotown.agent.env or openclaw)
+        /// Runtime target for manifest (default from settings or openclaw)
         #[arg(long)]
         runtime: Option<String>,
-        /// Skill bundle id (default: default-agent-skills)
+        /// Pack slug (TeamUps) or skill bundle id (Evotown)
         #[arg(long)]
         bundle: Option<String>,
+        /// One-shot source override: teamups | evotown | custom | local
+        #[arg(long)]
+        source: Option<String>,
         /// Emit JSON
         #[arg(long)]
         json: bool,
@@ -683,8 +686,16 @@ fn main() -> Result<()> {
             only,
             runtime,
             bundle,
+            source,
             json,
-        } => commands::sync::run(dry_run, &only, runtime.as_deref(), bundle.as_deref(), json)?,
+        } => commands::sync::run(
+            dry_run,
+            &only,
+            runtime.as_deref(),
+            bundle.as_deref(),
+            source.as_deref(),
+            json,
+        )?,
         Commands::Connect {
             inventory_interval,
             heartbeat_interval,

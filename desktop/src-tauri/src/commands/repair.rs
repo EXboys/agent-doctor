@@ -321,6 +321,9 @@ pub async fn install_runtime_command(
     })
     .await
     .map_err(|error| error.to_string())??;
+    // Install may have mutated the OS user PATH; keep this process in sync before
+    // the post-install doctor pass updates tray health.
+    agent_doctor_core::refresh_managed_runtime_path();
     let doctor = run_doctor();
     remember_tray_health(&app, &doctor);
     update_tray_tooltip(&app);

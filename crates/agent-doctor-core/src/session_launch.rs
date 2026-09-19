@@ -36,9 +36,9 @@ use crate::setup::merge::{
 };
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
-    clear_codex_placeholder_auth, evotown_agent_env_path, normalize_protocol,
-    write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
-    MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    clear_codex_placeholder_auth, evotown_agent_env_path, gateway_url_from_evotown_base,
+    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV,
+    EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::{active_env_path, ensure_default_workspace, load_workspaces};
 
@@ -276,6 +276,40 @@ fn collect_launch_env_map() -> HashMap<String, String> {
     if let Some(path) = agent_profile_path().filter(|path| path.exists()) {
         if let Ok(map) = read_env_map(&path) {
             env.extend(map);
+        }
+    }
+    // Overlay from settings.db + keychain (authoritative for new installs).
+    if let Ok(store) = crate::store::open_settings_store() {
+        if let Ok(team) = store.get_team_settings() {
+            if let Some(url) = team
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
+                env.insert(
+                    EVOTOWN_URL_ENV.to_string(),
+                    url.trim_end_matches('/').to_string(),
+                );
+                let gateway = gateway_url_from_evotown_base(url);
+                env.insert(GATEWAY_URL_ENV.to_string(), gateway.clone());
+                env.entry("OPENAI_BASE_URL".into()).or_insert(gateway);
+            }
+        }
+        if let Ok(Some(key)) = store.get_team_api_key() {
+            if !key.trim().is_empty() {
+                let key = key.trim().to_string();
+                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+                env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
+                env.entry("OPENAI_API_KEY".into()).or_insert(key);
+            }
+        }
+        if let Ok(Some(key)) = store.get_overlay_api_key() {
+            if !key.trim().is_empty() {
+                let key = key.trim().to_string();
+                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+                env.insert("OPENAI_API_KEY".into(), key);
+            }
         }
     }
     env

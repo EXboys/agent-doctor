@@ -10,6 +10,8 @@ authors.workspace = true
 agent-doctor-mcp = { workspace = true }
 anyhow.workspace = true
 dirs.workspace = true
+keyring.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
@@ -24,6 +26,12 @@ base64 = "0.22"
 tungstenite = { version = "0.26", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 url = "2"
 hostname = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [dev-dependencies]
 tempfile = "3"

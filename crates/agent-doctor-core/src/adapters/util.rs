@@ -237,20 +237,50 @@ fn path_exists_bounded(path: &Path) -> bool {
 
 /// GUI apps (double-clicked `.exe`) inherit Explorer's PATH, which often
 /// omits nvm/npm shims that a developer terminal has. Prepend well-known
-/// Windows install locations so discovery matches `cargo run` from a shell.
+/// install locations so discovery matches `cargo run` from a shell.
 pub(crate) fn ensure_managed_runtime_path() {
     ensure_windows_user_path();
     #[cfg(not(windows))]
     {
         static ONCE: OnceLock<()> = OnceLock::new();
         ONCE.get_or_init(|| {
-            let root = managed_nodejs_root();
-            prepend_user_path(&root.join("bin"));
-            prepend_user_path(&root);
-            if let Some(home) = dirs::home_dir() {
-                prepend_user_path(&home.join(".local/bin"));
-            }
+            merge_managed_dirs_into_path();
         });
+    }
+}
+
+/// Re-merge managed dirs into PATH after an install (installers often mutate the
+/// user PATH in the registry; GUI processes keep a stale copy).
+pub fn refresh_managed_runtime_path() {
+    invalidate_npm_global_bin_dir_cache();
+    #[cfg(windows)]
+    {
+        merge_windows_persistent_path_into_env();
+    }
+    merge_managed_dirs_into_path();
+}
+
+fn merge_managed_dirs_into_path() {
+    // Seed PATH with static known dirs first so `npm`/`node` shebangs resolve
+    // before we query `npm prefix -g` (GUI apps often lack Homebrew on PATH).
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs = static_common_binary_dirs();
+    dirs.extend(std::env::split_paths(&current));
+    let mut seen = BTreeSet::new();
+    dirs.retain(|p| {
+        if p.as_os_str().is_empty() {
+            return false;
+        }
+        seen.insert(normalize_path_for_set(p))
+    });
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        // SAFETY: process-local PATH update for discovery / child installers.
+        std::env::set_var("PATH", joined);
+    }
+
+    invalidate_npm_global_bin_dir_cache();
+    if let Some(npm_bin) = npm_global_bin_dir() {
+        prepend_user_path(&npm_bin);
     }
 }
 
@@ -259,23 +289,77 @@ pub(crate) fn ensure_windows_user_path() {
     {
         static ONCE: OnceLock<()> = OnceLock::new();
         ONCE.get_or_init(|| {
-            let current = std::env::var_os("PATH").unwrap_or_default();
-            let mut dirs = common_binary_dirs();
-            dirs.extend(std::env::split_paths(&current));
-            if let Ok(joined) =
-                std::env::join_paths(dirs.iter().filter(|p| !p.as_os_str().is_empty()))
-            {
-                std::env::set_var("PATH", joined);
-            }
+            merge_windows_persistent_path_into_env();
+            merge_managed_dirs_into_path();
         });
     }
 }
 
+#[cfg(windows)]
+fn merge_windows_persistent_path_into_env() {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for scope in ["User", "Machine"] {
+        dirs.extend(windows_env_path_dirs(scope));
+    }
+    if dirs.is_empty() {
+        return;
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    dirs.extend(std::env::split_paths(&current));
+    let mut seen = BTreeSet::new();
+    dirs.retain(|p| {
+        if p.as_os_str().is_empty() {
+            return false;
+        }
+        seen.insert(normalize_path_for_set(p))
+    });
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
+#[cfg(windows)]
+fn windows_env_path_dirs(scope: &str) -> Vec<PathBuf> {
+    let script = format!(
+        "[Environment]::GetEnvironmentVariable('Path','{scope}')"
+    );
+    let output = run_output(
+        Path::new("powershell"),
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+        Duration::from_secs(8),
+    )
+    .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    raw.split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 fn common_binary_dirs() -> Vec<PathBuf> {
+    let mut dirs = static_common_binary_dirs();
+    if let Some(npm_bin) = npm_global_bin_dir() {
+        dirs.push(npm_bin);
+    }
+    dirs
+}
+
+/// Well-known bin dirs that do not require invoking `npm` (safe while seeding PATH).
+fn static_common_binary_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/opt/homebrew/sbin"),
         PathBuf::from("/usr/local/bin"),
     ];
+
+    dirs.extend(homebrew_node_bin_dirs());
 
     if let Some(home) = dirs::home_dir() {
         dirs.push(home.join(".local/bin"));
@@ -283,11 +367,15 @@ fn common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join("bin"));
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".claude/local"));
+        dirs.push(home.join(".hermes/bin"));
+        dirs.push(home.join("AppData/Local/hermes"));
         #[cfg(windows)]
         {
             dirs.push(home.join(r"AppData\Roaming\npm"));
             dirs.push(home.join(r"AppData\Local\Programs\nodejs"));
+            dirs.push(home.join(r"AppData\Local\hermes"));
             dirs.push(home.join(r"scoop\shims"));
+            dirs.push(home.join(r".local\bin"));
         }
     }
 
@@ -313,20 +401,52 @@ fn common_binary_dirs() -> Vec<PathBuf> {
         }
     }
 
-    if let Some(npm_bin) = npm_global_bin_dir() {
-        dirs.push(npm_bin);
-    }
-
     dirs
 }
 
+/// Homebrew kegs like `node@24` put `node`/`npm` under `opt/node@NN/bin`.
+fn homebrew_node_bin_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for root in ["/opt/homebrew/opt", "/usr/local/opt"] {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "node" || name.starts_with("node@") {
+                dirs.push(entry.path().join("bin"));
+            }
+        }
+    }
+    dirs
+}
+
+static NPM_PREFIX_CACHE: std::sync::Mutex<Option<Option<PathBuf>>> =
+    std::sync::Mutex::new(None);
+
 fn npm_global_bin_dir() -> Option<PathBuf> {
-    static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
-    CACHED.get_or_init(npm_global_bin_dir_uncached).clone()
+    let mut guard = NPM_PREFIX_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_none() {
+        *guard = Some(npm_global_bin_dir_uncached());
+    }
+    guard.clone().flatten()
+}
+
+fn invalidate_npm_global_bin_dir_cache() {
+    *NPM_PREFIX_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
 fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
-    let output = run_output(Path::new("npm"), &["prefix", "-g"], Duration::from_secs(5)).ok()?;
+    // Prefer an absolute npm path so GUI shells without Homebrew still work.
+    // `#!/usr/bin/env node` still needs node on PATH — callers must seed PATH first.
+    let npm = find_binary_in_dirs("npm", &static_common_binary_dirs())
+        .or_else(|| find_in_path("npm"))?;
+    let output = run_output(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;
     }

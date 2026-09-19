@@ -554,6 +554,7 @@ jobs:
         id: manifest
         env:
           UPDATE_CDN_BASE_URL: ${{ secrets.UPDATE_CDN_BASE_URL }}
+          OSS_PREFIX: ${{ secrets.OSS_PREFIX }}
         run: |
           set -euo pipefail
           if [ ! -d ./desktop-artifacts ]; then

@@ -1044,6 +1044,26 @@ async function renderReport(report: DoctorReport) {
   } else {
     void closeDiagnoseDetail({ skipDismiss: true });
   }
+  reapplyStickyInstallHints(report);
+}
+
+/** Survives card re-render after install → refresh(). Cleared once runtime looks installed. */
+const stickyInstallHints = new Map<string, { html: string | null; text: string | null }>();
+
+function reapplyStickyInstallHints(report: DoctorReport) {
+  for (const runtime of report.runtimes) {
+    if (runtime.installed) {
+      stickyInstallHints.delete(runtime.id);
+    }
+  }
+  for (const [runtime, hint] of stickyInstallHints) {
+    applyInstallHint(runtime, hint.html, hint.text);
+  }
+}
+
+function setStickyInstallHint(runtime: string, html: string | null, text: string | null) {
+  stickyInstallHints.set(runtime, { html, text });
+  applyInstallHint(runtime, html, text);
 }
 
 function setPresetTriggerLabel(name: string | null) {
@@ -1224,8 +1244,10 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
   skillsDirEl.textContent = t("skills.dir", { dir: report.skills_dir });
   skillsFootnoteEl.textContent = t("skills.footnote");
   skillsListEl.replaceChildren();
-  const needEvotown = report.remote_stats_error === "evotown_not_configured";
-  skillsEmptyEl.textContent = needEvotown ? t("skills.emptyNeedEvotown") : t("skills.empty");
+  const needRemote =
+    report.remote_stats_error === "evotown_not_configured" ||
+    report.remote_stats_error === "remote_source_not_configured";
+  skillsEmptyEl.textContent = needRemote ? t("skills.emptyNeedEvotown") : t("skills.empty");
 
   const empty = report.skills.length === 0;
   skillsEmptyEl.hidden = !empty;
@@ -2625,12 +2647,11 @@ async function installRuntimeFromCard(card: HTMLElement) {
     const { phase, message, percent } = event.payload;
     const clamped = Math.min(100, Math.max(0, percent));
     if (statusEl) {
+      // Do not treat phase "done" as success — the invoke result decides.
       statusEl.textContent =
-        phase === "done"
-          ? t("runtime.installOk")
-          : phase === "verifying"
-            ? t("runtime.installVerifying")
-            : message.trim() || t("runtime.installing");
+        phase === "verifying"
+          ? t("runtime.installVerifying")
+          : message.trim() || t("runtime.installing");
     }
     if (percentEl) {
       percentEl.textContent = `${clamped}%`;
@@ -2660,32 +2681,82 @@ async function installRuntimeFromCard(card: HTMLElement) {
 
   try {
     const report = await invoke<InstallRuntimeResponse>("install_runtime_command", { runtime });
-    if (hint) {
-      if (!report.install_needed) {
-        hint.textContent = t("runtime.installAlready");
-      } else if (report.install_succeeded || report.after_installed) {
-        const last = logLines.slice(-3).join("\n");
-        hint.innerHTML = `<div class="install-progress-done">${escapeHtml(t("runtime.installOk"))}${
-          last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""
-        }</div>`;
-      } else {
-        const detail =
-          report.skipped.map((item) => item.reason).find(Boolean) ||
-          report.manual_fallback[0] ||
-          t("runtime.installFailed");
-        hint.textContent = `${t("runtime.installFailed")} ${detail}`;
-      }
+    let nextHintHtml: string | null = null;
+    let nextHintText: string | null = null;
+    if (!report.install_needed) {
+      nextHintText = t("runtime.installAlready");
+    } else if (report.install_succeeded || report.after_installed) {
+      const last = logLines.slice(-3).join("\n");
+      nextHintHtml = `<div class="install-progress-done">${escapeHtml(t("runtime.installOk"))}<p class="footnote">${escapeHtml(
+        t("runtime.installWireNext"),
+      )}</p>${last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""}</div>`;
+    } else {
+      const detail =
+        report.skipped.map((item) => item.reason).find(Boolean) ||
+        report.manual_fallback[0] ||
+        t("runtime.installFailed");
+      nextHintText = `${t("runtime.installFailed")} ${detail}`;
+    }
+    // refresh() re-renders cards and would wipe the in-card hint — keep sticky.
+    let stickyHtml = nextHintHtml;
+    let stickyText = nextHintText;
+    if (
+      report.install_needed &&
+      !(report.install_succeeded || report.after_installed) &&
+      report.install_log_path
+    ) {
+      stickyText = `${nextHintText ?? t("runtime.installFailed")} ${t("runtime.installLogHint", {
+        path: report.install_log_path,
+      })}`;
+      stickyHtml = null;
     }
     await refresh();
+    setStickyInstallHint(runtime, stickyHtml, stickyText);
   } catch (error) {
+    const message = String(error);
     if (hint) {
       hint.hidden = false;
-      hint.textContent = String(error);
+      hint.textContent = message;
     }
+    try {
+      await refresh();
+    } catch {
+      // keep the error on the original hint if re-probe fails
+    }
+    setStickyInstallHint(runtime, null, message);
   } finally {
     unlisten();
+    const freshCard = document.querySelector<HTMLElement>(
+      `.runtime[data-runtime="${CSS.escape(runtime)}"]`,
+    );
+    freshCard
+      ?.querySelector<HTMLButtonElement>('[data-action="install-runtime"]')
+      ?.removeAttribute("disabled");
+    freshCard
+      ?.querySelector<HTMLButtonElement>('[data-action="diagnose-runtime"]')
+      ?.removeAttribute("disabled");
     installButton?.removeAttribute("disabled");
     diagnoseButton?.removeAttribute("disabled");
+  }
+}
+
+function applyInstallHint(
+  runtime: string,
+  html: string | null,
+  text: string | null,
+) {
+  const freshCard = document.querySelector<HTMLElement>(
+    `.runtime[data-runtime="${CSS.escape(runtime)}"]`,
+  );
+  const freshHint = freshCard?.querySelector<HTMLElement>("[data-repair-hint]");
+  if (!freshHint) {
+    return;
+  }
+  freshHint.hidden = false;
+  if (html) {
+    freshHint.innerHTML = html;
+  } else if (text) {
+    freshHint.textContent = text;
   }
 }
 

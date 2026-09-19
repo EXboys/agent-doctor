@@ -28,7 +28,7 @@ cargo run -p agent-doctor -- doctor --json
 | `workspace init/list/show/use/status/doctor/fix/matrix/direnv` | Per-project isolation for Hermes, Claude Code, Codex, OpenClaw |
 | `remote host/project/doctor` | Agentless SSH read-only doctor |
 | `setup --url --key` | Evotown/company profile → profile.env + evotown.agent.env + runtime configs |
-| `sync` | Pull SkillHub bundle from Evotown (replaces `evotown-agent-setup.py sync`) |
+| `sync [--source teamups|evotown|custom]` | Pull skills from configured source (default TeamUps if unset) |
 | `policy pull` | Cache Evotown policies to `~/.config/evotown/policies-cache.json` |
 | `register` | Register laptop engine; write `evi_` (replaces `evotown-agent-setup.py register`) |
 | `connect` | WebSocket presence + inventory + job.assign execution |

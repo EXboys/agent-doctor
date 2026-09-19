@@ -1,4 +1,4 @@
-use agent_doctor_core::{execute_sync, load_evotown_config, SyncOptions};
+use agent_doctor_core::{execute_skills_sync, SkillsSourceKind, SkillsSyncOptions, SyncReport};
 use anyhow::Result;
 
 pub fn run(
@@ -6,18 +6,21 @@ pub fn run(
     only: &[String],
     runtime: Option<&str>,
     bundle: Option<&str>,
+    source: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let config = load_evotown_config()?;
-    let report = execute_sync(
-        &config,
-        &SyncOptions {
-            dry_run,
-            only_skills: only.to_vec(),
-            runtime_target: runtime.map(str::to_string),
-            bundle_id: bundle.map(str::to_string),
-        },
-    )?;
+    let source_override = source
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .and_then(SkillsSourceKind::parse);
+
+    let report = execute_skills_sync(&SkillsSyncOptions {
+        dry_run,
+        only_skills: only.to_vec(),
+        runtime_target: runtime.map(str::to_string),
+        pack_or_bundle_id: bundle.map(str::to_string),
+        source_override,
+    })?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -31,13 +34,13 @@ pub fn run(
     Ok(())
 }
 
-fn print_sync_report(report: &agent_doctor_core::SyncReport, dry_run: bool) {
+fn print_sync_report(report: &SyncReport, dry_run: bool) {
     println!(
-        "Agent Doctor — Evotown skill sync{}\n",
+        "Agent Doctor — skill sync{}\n",
         if dry_run { " (dry run)" } else { "" }
     );
-    println!("Evotown: {}", report.base_url);
-    println!("Bundle: {} ({})", report.bundle_id, report.runtime_target);
+    println!("Source: {}", report.base_url);
+    println!("Bundle/pack: {} ({})", report.bundle_id, report.runtime_target);
     println!("Skills dir: {}", report.skills_dir);
     println!("Lock file: {}\n", report.lock_path);
 

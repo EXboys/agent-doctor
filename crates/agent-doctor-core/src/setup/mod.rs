@@ -264,9 +264,14 @@ pub fn remove_evotown_agent_env_key(path: &Path, key: &str) -> Result<()> {
 }
 
 pub fn default_evotown_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|home| home.join(".evotown").join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".evotown/skills"))
+    // Brand-neutral default; keep legacy path as fallback when it already has content.
+    let modern = crate::store::default_skills_cache_dir();
+    let legacy = crate::store::legacy_evotown_skills_dir();
+    if modern.is_dir() || !legacy.is_dir() {
+        modern
+    } else {
+        legacy
+    }
 }
 
 pub fn write_evotown_agent_env(
@@ -274,6 +279,29 @@ pub fn write_evotown_agent_env(
     api_key: &str,
     runtime_target: &str,
 ) -> Result<PathBuf> {
+    // Authoritative: settings.db + keychain
+    if let Ok(store) = crate::store::open_settings_store() {
+        let mut team = store.get_team_settings().unwrap_or_default();
+        team.base_url = Some(base_url.trim().trim_end_matches('/').to_string());
+        team.runtime = Some(runtime_target.to_string());
+        if team.bundle_id.is_none() {
+            team.bundle_id = Some(DEFAULT_EVOTOWN_BUNDLE_ID.to_string());
+        }
+        if team.skills_dir.is_none() {
+            team.skills_dir = Some(crate::store::default_skills_cache_dir().display().to_string());
+        }
+        let _ = store.set_team_settings(&team);
+        let _ = store.set_team_api_key(api_key.trim());
+        let _ = store.set_overlay_api_key(api_key.trim());
+        let _ = store.set_active_mode(crate::setup::MODE_TEAM);
+        // Connecting team explicitly selects Evotown as skills source.
+        let _ = store.set_skills_source_settings(&crate::store::SkillsSourceSettings {
+            source: Some(crate::store::SkillsSourceKind::Evotown),
+            base_url: Some(base_url.trim().trim_end_matches('/').to_string()),
+            pack_slug: team.bundle_id.clone(),
+        });
+    }
+
     let path = evotown_agent_env_path().context("could not resolve config directory")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -307,16 +335,15 @@ pub fn write_evotown_agent_env(
     }
 
     let base = base_url.trim().trim_end_matches('/');
+    let skills_dir = crate::store::default_skills_cache_dir();
     let mut lines = vec![
         "# Evotown employee agent config — written by Agent Doctor setup".to_string(),
+        "# Prefer settings.db + keychain; this file is a legacy/compat projection.".to_string(),
         format!("{EVOTOWN_URL_ENV}={base}"),
         format!("{EVOTOWN_API_KEY_ENV}={api_key}"),
         format!("{EVOTOWN_RUNTIME_ENV}={runtime_target}"),
         format!("{EVOTOWN_BUNDLE_ID_ENV}={DEFAULT_EVOTOWN_BUNDLE_ID}"),
-        format!(
-            "{EVOTOWN_SKILLS_DIR_ENV}={}",
-            default_evotown_skills_dir().display()
-        ),
+        format!("{EVOTOWN_SKILLS_DIR_ENV}={}", skills_dir.display()),
         format!("# Gateway for OpenAI-compatible clients: {base}/api/gateway/v1"),
         format!("# Gateway for Claude Code: {base}/api/gateway/anthropic"),
     ];

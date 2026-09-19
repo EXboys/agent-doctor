@@ -55,10 +55,13 @@ Doctor probes: `mode.overlay_mismatch`, `runtime.env_stale` (OpenClaw keys), `ru
 
 | File | Role |
 |------|------|
-| `~/.config/agent-doctor/profile.env` | **Active** runtime overlay (personal *or* company) |
-| `~/.config/agent-doctor/company-profile.env` | **Durable team baseline** (written by company `setup`; never overwritten by personal activate) |
-| `~/.config/agent-doctor/personal-providers.json` | Named personal providers store |
-| `~/.config/evotown/evotown.agent.env` | Evotown connection (URL / `evk_` / engine id) |
+| `{config_dir}/agent-doctor/settings.db` + OS credential store | **Authoritative** Doctor settings and secrets (Keychain / Windows Credential Manager / Secret Service) |
+| `~/.config/agent-doctor/profile.env` | Legacy active runtime overlay projection |
+| `~/.config/agent-doctor/company-profile.env` | Legacy durable team baseline projection |
+| `~/.config/agent-doctor/providers.json` | Legacy personal providers metadata (keys in keychain) |
+| `~/.config/evotown/evotown.agent.env` | Legacy Evotown connection projection |
+
+Skills source: user/team override when set; otherwise default **TeamUps**. Mount never requires a remote source.
 
 Workspace **company baseline** drift checks against `company-profile.env` only. Activating a personal provider must not make team baseline compare against a personal URL.
 
