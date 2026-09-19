@@ -498,6 +498,8 @@ jobs:
 
     steps:
       - name: Download desktop artifacts
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: ./desktop-artifacts
@@ -505,7 +507,12 @@ jobs:
           merge-multiple: false
 
       - name: List artifacts
-        run: find ./desktop-artifacts -type f
+        run: |
+          if [ ! -d ./desktop-artifacts ]; then
+            echo "::warning::No desktop artifacts directory (build may have failed upstream)."
+            exit 0
+          fi
+          find ./desktop-artifacts -type f || true
 
       - name: Ensure GitHub release exists
         env:
@@ -521,6 +528,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [ ! -d desktop-artifacts ]; then
+            echo "No desktop artifacts to upload."
+            exit 0
+          fi
           # upload-artifact keeps bundle subdirs (msi/, nsis/, deb/, …); only upload files.
           mapfile -d '' files < <(find desktop-artifacts -type f -print0)
           if [ ${#files[@]} -eq 0 ]; then
@@ -543,6 +554,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download desktop artifacts
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: ./desktop-artifacts
@@ -555,6 +567,10 @@ jobs:
           UPDATE_CDN_BASE_URL: ${{ secrets.UPDATE_CDN_BASE_URL }}
         run: |
           set -euo pipefail
+          if [ ! -d ./desktop-artifacts ]; then
+            echo "::warning::No desktop artifacts for updater manifest."
+            exit 0
+          fi
           VERSION="${GITHUB_REF_NAME}"
           CDN_BASE="${UPDATE_CDN_BASE_URL:-https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop}"
           GH_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}"

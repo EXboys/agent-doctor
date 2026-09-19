@@ -180,7 +180,7 @@ fn layout_main_and_ask_side_by_side(app: &AppHandle) {
     let (current_main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
     let main_outer_w = current_main_w.clamp(
         MAIN_WINDOW_MIN_WIDTH,
-        (work_w * 0.38).max(MAIN_WINDOW_MIN_WIDTH).min(480.0),
+        (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
 
     let ask_deco_w = window_decoration_width(&ask, scale);
@@ -208,7 +208,7 @@ fn position_main_window_left(window: &tauri::WebviewWindow) {
     let (current_w, _) = main_window_logical_size(window).unwrap_or((420.0, 720.0));
     let width = current_w.clamp(
         MAIN_WINDOW_MIN_WIDTH,
-        (work_w * 0.38).max(MAIN_WINDOW_MIN_WIDTH).min(480.0),
+        (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
     let height = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
     let x = work_x + MAIN_WINDOW_MARGIN;
@@ -432,7 +432,8 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
         None::<&str>,
     )?;
     let doctor = MenuItem::with_id(app, "doctor", "Run doctor", true, None::<&str>)?;
-    let check_update = MenuItem::with_id(app, "check_update", "Check for updates", true, None::<&str>)?;
+    let check_update =
+        MenuItem::with_id(app, "check_update", "Check for updates", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     let mut switch_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
@@ -472,7 +473,17 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
     } else {
         switch_sub.append_items(&switch_refs)?;
     }
-    Menu::with_items(app, &[&show, &switch_sub, &ws_doctor, &doctor, &check_update, &quit])
+    Menu::with_items(
+        app,
+        &[
+            &show,
+            &switch_sub,
+            &ws_doctor,
+            &doctor,
+            &check_update,
+            &quit,
+        ],
+    )
 }
 
 pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) {
@@ -974,10 +985,7 @@ fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
     });
 }
 
-fn create_resources_window(
-    app: &AppHandle,
-    visible: bool,
-) -> Result<tauri::WebviewWindow, String> {
+fn create_resources_window(app: &AppHandle, visible: bool) -> Result<tauri::WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(
         app,
         RESOURCES_WINDOW_LABEL,

@@ -92,9 +92,7 @@ fn display_name_for(runtime_id: &str, targets: &[BrowserMcpTargetStatus]) -> Str
 }
 
 /// Build desktop/CLI wire options for the active workspace (no runtime filter yet).
-pub fn browser_mcp_wire_options_for_active_workspace(
-    binary: PathBuf,
-) -> WireBrowserMcpOptions {
+pub fn browser_mcp_wire_options_for_active_workspace(binary: PathBuf) -> WireBrowserMcpOptions {
     let workspaces = load_workspaces().unwrap_or_default();
     let active_entry = workspaces
         .active
@@ -121,7 +119,9 @@ pub fn wire_browser_mcp_installed(
 ) -> Result<BrowserMcpWireReport, String> {
     let installed = installed_browser_mcp_runtime_ids();
     if installed.is_empty() {
-        return Ok(BrowserMcpWireReport { results: Vec::new() });
+        return Ok(BrowserMcpWireReport {
+            results: Vec::new(),
+        });
     }
     let discovery = discover_chrome().map_err(|error| error.to_string())?;
     let mut scoped = options.clone();

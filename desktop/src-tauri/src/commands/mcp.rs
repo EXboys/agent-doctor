@@ -236,7 +236,12 @@ pub fn mcp_diagnose_wire_command(
         );
     };
 
-    emit("diagnose", "Diagnosing Chrome, CLI, and installed agents…", false, true);
+    emit(
+        "diagnose",
+        "Diagnosing Chrome, CLI, and installed agents…",
+        false,
+        true,
+    );
 
     let binary = resolve_agent_doctor_binary().unwrap_or_default();
     let mut options = browser_mcp_wire_options_for_active_workspace(binary);

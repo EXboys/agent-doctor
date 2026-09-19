@@ -4,9 +4,8 @@ use agent_doctor_core::{
     load_mode_status, load_personal_provider_status, resolve_agent_doctor_binary,
     switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider,
     verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
-    ModeSwitchReport, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument,
-    UpsertPersonalProviderOptions,
+    ModeSwitchReport, PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
+    PersonalProviderVerifyReport, PersonalProvidersDocument, UpsertPersonalProviderOptions,
 };
 use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::Serialize;
