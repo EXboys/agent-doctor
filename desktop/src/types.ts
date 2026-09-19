@@ -251,10 +251,44 @@ export interface BrowserMcpStatus {
   port: number;
 }
 
+export interface BrowserMcpTargetStatus {
+  runtime_id: string;
+  display_name: string;
+  installed: boolean;
+  configured: boolean;
+}
+
+export interface BrowserMcpDiagnoseIssue {
+  code: string;
+  message: string;
+}
+
+export interface BrowserMcpTargetAction {
+  runtime_id: string;
+  display_name: string;
+  installed: boolean;
+  configured_before: boolean;
+  action: string;
+  ok: boolean;
+  config_path: string | null;
+  message: string;
+}
+
+export interface BrowserMcpDiagnoseWireReport {
+  chrome_ok: boolean;
+  cli_ok: boolean;
+  issues: BrowserMcpDiagnoseIssue[];
+  targets: BrowserMcpTargetAction[];
+  wrote: number;
+  failed: number;
+  skipped: number;
+}
+
 export interface McpModuleStatus {
   browser: BrowserMcpStatus;
   inventory: McpInventoryReport;
   configured_runtimes: string[];
+  targets: BrowserMcpTargetStatus[];
   binary: string;
   config_snippet: unknown;
 }

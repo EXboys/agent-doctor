@@ -11,32 +11,59 @@
       <aside id="chat-resources-panel" class="chat-resources-panel" aria-hidden="true">
         <div class="chat-resources-panel-inner">
           <div class="chat-resources-panel-head">
-            <strong data-i18n="chat.resourcesPanelTitle">Resources</strong>
+            <div class="chat-resources-panel-titles">
+              <strong data-i18n="chat.resourcesPanelTitle">Skills / MCP</strong>
+              <span id="chat-resources-count" class="chat-resources-count">—</span>
+            </div>
             <div class="chat-resources-actions">
               <button id="chat-resources-refresh" type="button" class="btn-link" data-i18n="chat.resourcesRefresh">刷新</button>
               <button id="chat-open-resources" type="button" class="btn-link" data-i18n="chat.openResources">管理</button>
             </div>
           </div>
+
+          <div class="chat-res-tabs" id="chat-resources-tabs" role="tablist">
+            <button type="button" class="chat-res-tab is-active" data-res-tab="all" role="tab" aria-selected="true" data-i18n="chat.resourcesTabAll">全部</button>
+            <button type="button" class="chat-res-tab" data-res-tab="skills" role="tab" aria-selected="false" data-i18n="chat.resourcesTabSkills">Skills</button>
+            <button type="button" class="chat-res-tab" data-res-tab="mcp" role="tab" aria-selected="false" data-i18n="chat.resourcesTabMcp">MCP</button>
+          </div>
+
+          <label class="chat-res-search">
+            <span class="chat-res-search-icon" aria-hidden="true">⌕</span>
+            <input
+              id="chat-resources-search"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              data-i18n-placeholder="chat.resourcesSearch"
+              placeholder="搜索名称或描述…"
+            />
+          </label>
+
           <div class="chat-workspace-block">
             <label class="chat-workspace-label" for="chat-workspace-select" data-i18n="ask.workspaceSwitch">工作区</label>
             <div class="chat-workspace-row">
               <select id="chat-workspace-select" class="chat-workspace-select" aria-label="Workspace"></select>
-              <button id="chat-workspace-activate" type="button" class="btn-secondary btn-compact" data-i18n="ask.workspaceActivate">激活</button>
+              <button id="chat-workspace-activate" type="button" class="chat-workspace-activate" data-i18n="ask.workspaceActivate">激活</button>
             </div>
-            <p id="chat-cwd" class="chat-cwd" title="">—</p>
-            <p id="chat-workspace-hint" class="chat-workspace-hint" data-i18n="ask.workspaceHint"></p>
+            <div class="chat-workspace-meta">
+              <p id="chat-cwd" class="chat-cwd" title="">—</p>
+              <p id="chat-workspace-hint" class="chat-workspace-hint" data-i18n="ask.workspaceHint"></p>
+            </div>
           </div>
-          <section class="chat-resources-section">
-            <h3 data-i18n="chat.skillsTitle">Skills</h3>
-            <div id="chat-skills-list" class="chat-chip-list" role="list"></div>
-            <p id="chat-skills-empty" class="chat-resources-empty" hidden data-i18n="chat.skillsEmpty">当前 runtime 暂无已挂载 skill</p>
-          </section>
-          <section class="chat-resources-section">
-            <h3 data-i18n="chat.mcpTitle">MCP</h3>
-            <div id="chat-mcp-list" class="chat-chip-list" role="list"></div>
-            <p id="chat-mcp-empty" class="chat-resources-empty" hidden data-i18n="chat.mcpEmpty">当前 runtime 暂无 MCP</p>
-          </section>
-          <p class="chat-resources-hint" data-i18n="chat.resourcesHint">点击加入本轮优先；完整 CLI 用「打开终端」。</p>
+
+          <div class="chat-res-scroll">
+            <section class="chat-resources-section" data-res-section="skills">
+              <h3 data-i18n="chat.skillsTitle">Skills</h3>
+              <div id="chat-skills-list" class="chat-res-list" role="list"></div>
+              <p id="chat-skills-empty" class="chat-resources-empty" hidden data-i18n="chat.skillsEmpty">当前 runtime 暂无已挂载 skill</p>
+            </section>
+            <section class="chat-resources-section" data-res-section="mcp">
+              <h3 data-i18n="chat.mcpTitle">MCP</h3>
+              <div id="chat-mcp-list" class="chat-res-list" role="list"></div>
+              <p id="chat-mcp-empty" class="chat-resources-empty" hidden data-i18n="chat.mcpEmpty">当前 runtime 暂无 MCP</p>
+            </section>
+            <p class="chat-resources-hint" data-i18n="chat.resourcesHint">点击加入本轮优先；完整 CLI 用「打开终端」。</p>
+          </div>
         </div>
       </aside>
 
@@ -65,12 +92,6 @@
           <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
           <span id="chat-resources-label" class="chat-resources-label">—</span>
         </button>
-
-        <label class="chat-elevated">
-          <input id="chat-elevated" type="checkbox" />
-          <span id="chat-elevated-label" data-i18n="chat.elevatedClaude">跳过权限确认</span>
-        </label>
-        <p class="chat-permission-hint" data-i18n="chat.permissionHint">未跳过/未全自动时，工具调用会在对话里弹出「允许 / 拒绝」（Claude 与 Codex）。</p>
 
         <div class="chat-side-actions">
           <button id="chat-terminal" type="button" class="btn-side" data-i18n="chat.terminal">打开终端</button>
@@ -104,16 +125,26 @@
               <div id="chat-mention-menu" class="chat-mention-menu" hidden role="listbox"></div>
             </div>
             <div class="chat-composer-bar">
-              <button
-                id="chat-attach"
-                type="button"
-                class="btn-composer-icon"
-                data-i18n-title="chat.attach"
-                aria-label="上传文件或图片"
-                title="上传文件或图片"
-              >
-                <span aria-hidden="true">+</span>
-              </button>
+              <div class="chat-composer-tools">
+                <button
+                  id="chat-attach"
+                  type="button"
+                  class="btn-composer-icon"
+                  data-i18n-title="chat.attach"
+                  aria-label="上传文件或图片"
+                  title="上传文件或图片"
+                >
+                  <span aria-hidden="true">+</span>
+                </button>
+                <label
+                  class="chat-elevated"
+                  title="关闭自动审批时，工具调用会在对话里弹出「允许 / 拒绝」（Claude 与 Codex）。"
+                >
+                  <input id="chat-elevated" type="checkbox" />
+                  <span class="chat-elevated-switch" aria-hidden="true"></span>
+                  <span id="chat-elevated-label" class="chat-elevated-text" data-i18n="chat.elevatedClaude">自动审批</span>
+                </label>
+              </div>
               <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
             </div>
           </div>

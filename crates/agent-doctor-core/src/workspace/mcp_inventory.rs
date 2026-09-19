@@ -172,7 +172,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
                 ProbeStatus::Warn,
                 ProbeSeverity::Warning,
                 format!(
-                    "no browser MCP entry for {runtime_id}; open Diagnose → Repair (or Resources → Browser MCP) to write it automatically"
+                    "no browser MCP entry for {runtime_id}; open Diagnose → Repair, or Resources → Browser MCP → Diagnose & write",
                 ),
                 SensitivityLevel::ConfigShape,
             ));

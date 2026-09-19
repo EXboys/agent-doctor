@@ -41,6 +41,53 @@ export function mcpMatchesRuntime(server: McpInventoryItem, runtime: AskRuntime)
   return hint === runtime || hint === "shared" || hint === "";
 }
 
+/** Prefer workspace/runtime bindings over globals/legacy when collapsing inventory rows. */
+function mcpBindingRank(server: McpInventoryItem): number {
+  switch (server.scope) {
+    case "project":
+    case "openclaw-workspace":
+    case "codex-home":
+    case "hermes-home":
+      return 4;
+    case "openclaw-global":
+    case "claude-user":
+      return 3;
+    case "claude-settings-ignored":
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+/**
+ * Inventory returns one row per config file. Ask chips should show one entry per
+ * server name (same grouping as the Resources tab), preferring the best binding.
+ */
+export function dedupeMcpsByName(servers: McpInventoryItem[]): McpInventoryItem[] {
+  const best = new Map<string, McpInventoryItem>();
+  for (const server of servers) {
+    const key = server.name.trim().toLowerCase() || server.name;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, server);
+      continue;
+    }
+    const score = (s: McpInventoryItem) =>
+      (s.healthy ? 10 : 0) + mcpBindingRank(s);
+    if (score(server) > score(prev)) best.set(key, server);
+  }
+  return [...best.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mcpChipLabel(server: McpInventoryItem): string {
+  // Name is already "browser" for the Browser MCP entry — don't append "· browser".
+  if (server.is_browser && server.name.trim().toLowerCase() === "browser") {
+    return "browser";
+  }
+  if (server.is_browser) return `${server.name} · browser`;
+  return server.name;
+}
+
 export function skillMountedForRuntime(skill: SkillInventoryItem, runtime: AskRuntime): boolean {
   return skill.agents.some((agent) => agent.runtime === runtime && agent.mounted);
 }
@@ -152,11 +199,16 @@ export function ensureBrowserMention(
   return [...mentions, { kind: "mcp", id: browser.name, label: browser.name }];
 }
 
+export type ResourcesTab = "all" | "skills" | "mcp";
+
 export type AskResourcesDom = {
   shellEl: HTMLElement;
   resourcesPanelEl: HTMLElement;
   resourcesToggleEl: HTMLButtonElement;
   resourcesLabelEl: HTMLElement;
+  resourcesCountEl?: HTMLElement | null;
+  resourcesTabsEl?: HTMLElement | null;
+  resourcesSearchEl?: HTMLInputElement | null;
   skillsListEl: HTMLElement;
   mcpListEl: HTMLElement;
   skillsEmptyEl: HTMLElement;
@@ -181,6 +233,8 @@ export class AskResourcesController {
   mountedSkills: SkillInventoryItem[] = [];
   enabledMcps: McpInventoryItem[] = [];
   selectedMentions: MentionRef[] = [];
+  resourcesTab: ResourcesTab = "all";
+  resourcesQuery = "";
 
   constructor(
     private dom: AskResourcesDom,
@@ -200,6 +254,21 @@ export class AskResourcesController {
     this.setResourcesOpen(!this.dom.shellEl.classList.contains("is-resources-open"));
   }
 
+  setResourcesTab(tab: ResourcesTab): void {
+    this.resourcesTab = tab;
+    this.dom.resourcesTabsEl?.querySelectorAll<HTMLButtonElement>("[data-res-tab]").forEach((btn) => {
+      const active = btn.dataset.resTab === tab;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    this.renderResourceChips();
+  }
+
+  setResourcesQuery(query: string): void {
+    this.resourcesQuery = query.trim().toLowerCase();
+    this.renderResourceChips();
+  }
+
   updateResourcesSummary(): void {
     const cwd = this.getCwd();
     this.dom.resourcesLabelEl.textContent = t("chat.resourcesSummary", {
@@ -208,6 +277,12 @@ export class AskResourcesController {
       mcp: String(this.enabledMcps.length),
     });
     this.dom.resourcesLabelEl.title = cwd;
+    if (this.dom.resourcesCountEl) {
+      this.dom.resourcesCountEl.textContent = t("chat.resourcesCount", {
+        skills: String(this.mountedSkills.length),
+        mcp: String(this.enabledMcps.length),
+      });
+    }
   }
 
   hasMention(kind: MentionKind, id: string): boolean {
@@ -262,45 +337,164 @@ export class AskResourcesController {
   renderResourceChips(): void {
     this.dom.skillsListEl.replaceChildren();
     this.dom.mcpListEl.replaceChildren();
-    this.dom.skillsEmptyEl.hidden = this.mountedSkills.length > 0;
-    this.dom.mcpEmptyEl.hidden = this.enabledMcps.length > 0;
 
-    for (const skill of this.mountedSkills) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chat-res-chip";
-      if (this.hasMention("skill", skill.skill_id)) btn.classList.add("is-active");
-      btn.textContent = skill.name || skill.skill_id;
-      btn.title = skill.description || skill.skill_id;
-      btn.addEventListener("click", () =>
-        this.toggleMention({
-          kind: "skill",
-          id: skill.skill_id,
-          label: skill.name || skill.skill_id,
-        }),
-      );
-      this.dom.skillsListEl.appendChild(btn);
+    const q = this.resourcesQuery;
+    const skills = this.mountedSkills.filter((skill) => {
+      if (!q) return true;
+      const hay = `${skill.name} ${skill.skill_id} ${skill.description ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+    const mcps = this.enabledMcps.filter((server) => {
+      if (!q) return true;
+      const hay = `${server.name} ${server.scope} ${server.runtime_hint} ${server.issue ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    const showSkills = this.resourcesTab === "all" || this.resourcesTab === "skills";
+    const showMcp = this.resourcesTab === "all" || this.resourcesTab === "mcp";
+
+    const skillsSection =
+      typeof this.dom.skillsListEl.closest === "function"
+        ? this.dom.skillsListEl.closest<HTMLElement>("[data-res-section]")
+        : null;
+    const mcpSection =
+      typeof this.dom.mcpListEl.closest === "function"
+        ? this.dom.mcpListEl.closest<HTMLElement>("[data-res-section]")
+        : null;
+    if (skillsSection) skillsSection.hidden = !showSkills;
+    if (mcpSection) mcpSection.hidden = !showMcp;
+
+    this.dom.skillsEmptyEl.hidden = !showSkills || skills.length > 0;
+    this.dom.mcpEmptyEl.hidden = !showMcp || mcps.length > 0;
+    if (showSkills && skills.length === 0 && q) {
+      this.dom.skillsEmptyEl.textContent = t("chat.resourcesNoMatch");
+      this.dom.skillsEmptyEl.hidden = false;
+    } else if (showSkills) {
+      this.dom.skillsEmptyEl.textContent = t("chat.skillsEmpty");
+    }
+    if (showMcp && mcps.length === 0 && q) {
+      this.dom.mcpEmptyEl.textContent = t("chat.resourcesNoMatch");
+      this.dom.mcpEmptyEl.hidden = false;
+    } else if (showMcp) {
+      this.dom.mcpEmptyEl.textContent = t("chat.mcpEmpty");
     }
 
-    for (const server of this.enabledMcps) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chat-res-chip";
-      if (!server.healthy) btn.classList.add("is-warn");
-      if (this.hasMention("mcp", server.name)) btn.classList.add("is-active");
-      btn.textContent = server.is_browser ? `${server.name} · browser` : server.name;
-      btn.title = server.issue || `${server.scope} · ${server.runtime_hint}`;
-      btn.addEventListener("click", () =>
-        this.toggleMention({
-          kind: "mcp",
-          id: server.name,
-          label: server.name,
+    for (const skill of skills) {
+      const title = skill.name || skill.skill_id;
+      const calls =
+        skill.call_count != null ? t("chat.resourcesCalls", { count: String(skill.call_count) }) : "";
+      const rate =
+        skill.first_success_rate != null
+          ? t("chat.resourcesRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
+          : "";
+      const meta = [calls, rate].filter(Boolean).join(" · ") || skill.metrics_source || "local";
+      this.dom.skillsListEl.appendChild(
+        this.buildResourceRow({
+          kind: "skill",
+          id: skill.skill_id,
+          title,
+          description: skill.description?.trim() || skill.skill_id,
+          badge: "Skill",
+          meta,
+          tone: "skill",
+          active: this.hasMention("skill", skill.skill_id),
+          onClick: () =>
+            this.toggleMention({
+              kind: "skill",
+              id: skill.skill_id,
+              label: title,
+            }),
         }),
       );
-      this.dom.mcpListEl.appendChild(btn);
+    }
+
+    for (const server of mcps) {
+      const title = mcpChipLabel(server);
+      const badge = server.is_browser ? "Browser" : "MCP";
+      const meta = server.healthy
+        ? `${server.scope}`
+        : server.issue || t("chat.resourcesUnhealthy");
+      this.dom.mcpListEl.appendChild(
+        this.buildResourceRow({
+          kind: "mcp",
+          id: server.name,
+          title,
+          description: server.command
+            ? `${server.command} ${(server.args ?? []).join(" ")}`.trim()
+            : `${server.runtime_hint} · ${server.config_path}`,
+          badge,
+          meta,
+          tone: server.is_browser ? "browser" : "mcp",
+          active: this.hasMention("mcp", server.name),
+          warn: !server.healthy,
+          onClick: () =>
+            this.toggleMention({
+              kind: "mcp",
+              id: server.name,
+              label: server.name,
+            }),
+        }),
+      );
     }
 
     this.updateResourcesSummary();
+  }
+
+  private buildResourceRow(opts: {
+    kind: MentionKind;
+    id: string;
+    title: string;
+    description: string;
+    badge: string;
+    meta: string;
+    tone: "skill" | "mcp" | "browser";
+    active: boolean;
+    warn?: boolean;
+    onClick: () => void;
+  }): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-res-row";
+    btn.setAttribute("role", "listitem");
+    btn.dataset.kind = opts.kind;
+    btn.dataset.id = opts.id;
+    if (opts.active) btn.classList.add("is-active");
+    if (opts.warn) btn.classList.add("is-warn");
+
+    const icon = document.createElement("span");
+    icon.className = "chat-res-icon";
+    icon.dataset.tone = opts.tone;
+    icon.textContent = (opts.title.trim().charAt(0) || "?").toUpperCase();
+    icon.setAttribute("aria-hidden", "true");
+
+    const body = document.createElement("span");
+    body.className = "chat-res-body";
+
+    const titleRow = document.createElement("span");
+    titleRow.className = "chat-res-title-row";
+    const title = document.createElement("span");
+    title.className = "chat-res-title";
+    title.textContent = opts.title;
+    const badge = document.createElement("span");
+    badge.className = "chat-res-badge";
+    badge.dataset.tone = opts.tone;
+    badge.textContent = opts.badge;
+    titleRow.append(title, badge);
+
+    const desc = document.createElement("span");
+    desc.className = "chat-res-desc";
+    desc.textContent = opts.description;
+
+    body.append(titleRow, desc);
+
+    const meta = document.createElement("span");
+    meta.className = "chat-res-meta";
+    meta.textContent = opts.meta;
+
+    btn.title = opts.description;
+    btn.append(icon, body, meta);
+    btn.addEventListener("click", opts.onClick);
+    return btn;
   }
 
   mentionCandidates(): MentionRef[] {
@@ -356,7 +550,9 @@ export class AskResourcesController {
       this.mountedSkills = (skillsReport.skills ?? []).filter((skill) =>
         skillMountedForRuntime(skill, runtime),
       );
-      this.enabledMcps = (mcpReport.servers ?? []).filter((server) => mcpMatchesRuntime(server, runtime));
+      this.enabledMcps = dedupeMcpsByName(
+        (mcpReport.servers ?? []).filter((server) => mcpMatchesRuntime(server, runtime)),
+      );
       this.selectedMentions = this.selectedMentions.filter((m) => {
         if (m.kind === "skill") return this.mountedSkills.some((s) => s.skill_id === m.id);
         return this.enabledMcps.some((s) => s.name === m.id);

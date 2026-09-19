@@ -108,6 +108,7 @@ const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
+const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
 const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
@@ -131,6 +132,9 @@ const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
 const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
 const resourcesToggleEl = document.querySelector<HTMLButtonElement>("#chat-resources-toggle")!;
 const resourcesLabelEl = document.querySelector<HTMLElement>("#chat-resources-label")!;
+const resourcesCountEl = document.querySelector<HTMLElement>("#chat-resources-count");
+const resourcesTabsEl = document.querySelector<HTMLElement>("#chat-resources-tabs");
+const resourcesSearchEl = document.querySelector<HTMLInputElement>("#chat-resources-search");
 const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#chat-resources-refresh")!;
 const openResourcesEl = document.querySelector<HTMLButtonElement>("#chat-open-resources")!;
 const skillsListEl = document.querySelector<HTMLElement>("#chat-skills-list")!;
@@ -307,16 +311,31 @@ function applyI18n(): void {
   promptEl.placeholder = t("chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
+  if (resourcesSearchEl) {
+    resourcesSearchEl.placeholder = t("chat.resourcesSearch");
+  }
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
   updateElevatedLabel();
   syncActionButton();
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
   updateResourcesSummary();
+  askResources.renderResourceChips();
 }
 
 function updateElevatedLabel(): void {
   const runtime = selectedRuntime();
+  const detail =
+    runtime === "codex"
+      ? t("chat.elevatedCodex")
+      : runtime === "hermes"
+        ? t("chat.elevatedHermes")
+        : runtime === "openclaw"
+          ? t("chat.elevatedOpenclaw")
+          : runtime === "deepseek-harness"
+            ? t("chat.elevatedDeepseekHarness")
+            : t("chat.elevatedClaude");
+  elevatedWrapEl.title = `${detail} — ${t("chat.permissionHint")}`;
   if (runtime === "deepseek-harness") {
     elevatedLabelEl.textContent = t("chat.elevatedDeepseekHarness");
     elevatedEl.checked = false;
@@ -324,15 +343,7 @@ function updateElevatedLabel(): void {
     return;
   }
   elevatedEl.disabled = busy;
-  if (runtime === "codex") {
-    elevatedLabelEl.textContent = t("chat.elevatedCodex");
-  } else if (runtime === "hermes") {
-    elevatedLabelEl.textContent = t("chat.elevatedHermes");
-  } else if (runtime === "openclaw") {
-    elevatedLabelEl.textContent = t("chat.elevatedOpenclaw");
-  } else {
-    elevatedLabelEl.textContent = t("chat.elevatedClaude");
-  }
+  elevatedLabelEl.textContent = detail;
 }
 
 function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {
@@ -1226,6 +1237,9 @@ const askResources = new AskResourcesController(
     resourcesPanelEl,
     resourcesToggleEl,
     resourcesLabelEl,
+    resourcesCountEl,
+    resourcesTabsEl,
+    resourcesSearchEl,
     skillsListEl,
     mcpListEl,
     skillsEmptyEl,
@@ -1264,6 +1278,14 @@ async function loadAskResources(): Promise<void> {
   workspaceDoc = result.workspaceDoc;
 }
 
+function syncWorkspaceActivateButton(doc: WorkspaceDoc | null = workspaceDoc): void {
+  const selected = workspaceSelectEl.value.trim();
+  const isCurrent = Boolean(doc?.active && selected && doc.active === selected);
+  workspaceActivateEl.disabled = !selected || isCurrent || !doc || Object.keys(doc.workspaces).length === 0;
+  workspaceActivateEl.classList.toggle("is-current", isCurrent);
+  workspaceActivateEl.textContent = isCurrent ? t("ask.workspaceCurrent") : t("ask.workspaceActivate");
+}
+
 function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
   const names = Object.keys(doc.workspaces).sort();
   workspaceSelectEl.innerHTML = "";
@@ -1273,12 +1295,11 @@ function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
     opt.textContent = t("ask.workspaceEmpty");
     workspaceSelectEl.appendChild(opt);
     workspaceSelectEl.disabled = true;
-    workspaceActivateEl.disabled = true;
+    syncWorkspaceActivateButton(doc);
     return;
   }
 
   workspaceSelectEl.disabled = false;
-  workspaceActivateEl.disabled = false;
   for (const name of names) {
     const opt = document.createElement("option");
     opt.value = name;
@@ -1292,7 +1313,7 @@ function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
   if (!doc.active && names[0]) {
     workspaceSelectEl.value = names[0];
   }
-  workspaceActivateEl.disabled = Boolean(doc.active && workspaceSelectEl.value === doc.active);
+  syncWorkspaceActivateButton(doc);
 }
 
 async function activateSelectedWorkspace(): Promise<void> {
@@ -1309,8 +1330,7 @@ async function activateSelectedWorkspace(): Promise<void> {
     await loadAskResources();
   } catch (error) {
     setStatus(String(error), "error");
-  } finally {
-    workspaceActivateEl.disabled = false;
+    syncWorkspaceActivateButton();
   }
 }
 
@@ -1324,7 +1344,7 @@ async function openMainWorkspace(): Promise<void> {
 
 async function openMainResources(): Promise<void> {
   try {
-    await invoke("focus_main_tab_command", { tab: "resources" });
+    await invoke("open_resources_window_command", { section: "catalog" });
   } catch (error) {
     setStatus(String(error), "error");
   }
@@ -1810,6 +1830,18 @@ function boot(): void {
     event.stopPropagation();
     void loadAskResources();
   });
+  resourcesTabsEl?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    const tab = target?.closest<HTMLButtonElement>("[data-res-tab]");
+    if (!tab?.dataset.resTab) return;
+    const next = tab.dataset.resTab;
+    if (next === "all" || next === "skills" || next === "mcp") {
+      askResources.setResourcesTab(next);
+    }
+  });
+  resourcesSearchEl?.addEventListener("input", () => {
+    askResources.setResourcesQuery(resourcesSearchEl.value);
+  });
   openResourcesEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1819,6 +1851,7 @@ function boot(): void {
   workspaceSelectEl.addEventListener("change", () => {
     const name = workspaceSelectEl.value.trim();
     if (!name || !workspaceDoc) {
+      syncWorkspaceActivateButton();
       return;
     }
     const path = workspaceDoc.workspaces[name]?.path;
@@ -1826,7 +1859,7 @@ function boot(): void {
       cwdEl.textContent = path;
       cwdEl.title = path;
     }
-    workspaceActivateEl.disabled = workspaceDoc.active === name;
+    syncWorkspaceActivateButton();
   });
   workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());
   elevatedEl.addEventListener("change", () => {

@@ -34,7 +34,7 @@ The Tauri companion (tray + window) uses the same Rust core as the CLI. Typical 
 | Tab | What it does |
 | --- | --- |
 | **Agents** | Health score, runtime inventory, Diagnose → Repair → Ask drawer |
-| **Resources** | Skills / MCP inventory, Browser MCP wiring into Codex / Claude / Hermes / OpenClaw |
+| **Resources** | Skills / MCP inventory; Browser MCP Diagnose & write (auto-detect installed Codex / Claude / Hermes / OpenClaw) |
 | **Wiring** | Exclusive personal provider vs Evotown team mode |
 | **Workspace** | Switch project isolation, remote VPS read-only doctor, Hermes scene presets |
 

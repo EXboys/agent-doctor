@@ -28,6 +28,7 @@
             <button type="button" class="lang-btn" data-lang="zh" data-i18n="lang.zh">中</button>
             <button type="button" class="lang-btn" data-lang="en" data-i18n="lang.en">EN</button>
           </div>
+          <button id="toolbar-resources" type="button" class="btn-secondary btn-compact" data-i18n="resources.openWindow" title="Resources">Resources</button>
           <button id="refresh" type="button" class="btn-scan" title="Run doctor">
             <span class="btn-scan-icon" aria-hidden="true">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -109,60 +110,22 @@
         </section>
 
         <section class="main-panel" id="panel-resources" role="tabpanel" data-main-panel="resources" hidden>
-          <section class="widget-section">
+          <section class="widget-section resources-hub">
             <div class="section-label">
-              <h2 data-i18n="mcp.browserTitle">Browser MCP</h2>
-              <span id="mcp-browser-badge" class="badge muted">—</span>
+              <h2 data-i18n="resources.hubTitle">Resources</h2>
+              <span id="hub-mcp-badge" class="badge muted">—</span>
             </div>
-            <div class="meta-grid" id="mcp-browser-meta">
-              <div class="meta-row"><span class="meta-label" data-i18n="mcp.chrome">Chrome</span><span class="meta-value" id="mcp-chrome">—</span></div>
-              <div class="meta-row"><span class="meta-label" data-i18n="mcp.cdp">CDP</span><span class="meta-value" id="mcp-cdp">—</span></div>
-              <div class="meta-row"><span class="meta-label" data-i18n="mcp.configured">已配置</span><span class="meta-value" id="mcp-configured">—</span></div>
-              <div class="meta-row" hidden><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
+            <p class="section-hint" data-i18n="resources.hubHint">Skills / MCP 目录与 Browser MCP 在独立公共窗口管理。</p>
+            <div class="meta-grid resources-hub-stats">
+              <div class="meta-row"><span class="meta-label" data-i18n="resources.hubBrowser">Browser MCP</span><span class="meta-value" id="hub-browser-status">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="resources.hubSkills">Skills</span><span class="meta-value" id="hub-skills-count">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="resources.hubMcp">MCP</span><span class="meta-value" id="hub-mcp-count">—</span></div>
+              <div class="meta-row"><span class="meta-label" data-i18n="resources.hubConfigured">已配置</span><span class="meta-value" id="hub-configured">—</span></div>
             </div>
-            <label class="mcp-option" for="mcp-show-ui">
-              <input id="mcp-show-ui" type="checkbox" checked />
-              <span data-i18n="mcp.showUi">显示浏览器窗口</span>
-            </label>
-            <div class="mcp-profile">
-              <div class="mcp-profile-actions">
-                <button id="mcp-profile-isolated" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileIsolated" data-i18n-title="mcp.profileIsolatedTitle">独立（推荐）</button>
-                <button id="mcp-profile-system" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileSystem" data-i18n-title="mcp.profileSystemTitle">日常登录</button>
-              </div>
-              <details class="mcp-advanced">
-                <summary data-i18n="mcp.advanced">高级</summary>
-                <label class="mcp-profile-label" for="mcp-user-data-dir" data-i18n="mcp.profile">用户目录</label>
-                <input id="mcp-user-data-dir" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" />
-                <label class="mcp-profile-label" for="mcp-profile-directory" data-i18n="mcp.profileDirectory">账号目录</label>
-                <input id="mcp-profile-directory" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" placeholder="Default" />
-              </details>
+            <div class="runtime-actions">
+              <button id="open-resources-window" type="button" class="btn-primary" data-i18n="resources.openWindow">打开 Resources</button>
+              <button id="open-resources-browser" type="button" class="btn-secondary" data-i18n="resources.tabBrowser">Browser MCP</button>
             </div>
-            <div class="runtime-actions mcp-actions">
-              <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
-              <button id="mcp-configure-codex" type="button" class="btn-primary btn-compact" data-i18n="mcp.configureCodex">写入 Codex 配置</button>
-              <button id="mcp-configure-claude" type="button" class="btn-secondary btn-compact" data-i18n="mcp.configureClaude">写入 Claude 配置</button>
-            </div>
-            <details class="mcp-snippet">
-              <summary data-i18n="mcp.snippetTitle">配置片段</summary>
-              <pre id="mcp-snippet" class="mcp-snippet-code"></pre>
-            </details>
-            <p id="mcp-footnote" class="section-footnote"></p>
-          </section>
-
-          <section class="widget-section">
-            <div class="section-label">
-              <h2 data-i18n="resources.title">Skills / MCP</h2>
-              <button id="resources-refresh" type="button" class="btn-secondary btn-compact" data-i18n="resources.refresh">刷新</button>
-            </div>
-            <div class="filters" id="resources-filters" role="group" aria-label="Resource filters">
-              <button type="button" class="filter-chip is-active" data-res-filter="all" data-i18n="resources.filterAll">全部</button>
-              <button type="button" class="filter-chip" data-res-filter="skill" data-i18n="resources.filterSkills">Skills</button>
-              <button type="button" class="filter-chip" data-res-filter="mcp" data-i18n="resources.filterMcp">MCP</button>
-              <button type="button" class="filter-chip" data-res-filter="issue" data-i18n="resources.filterIssue">问题</button>
-            </div>
-            <ul id="resources-list" class="res-list" aria-live="polite"></ul>
-            <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP</p>
-            <p id="resources-footnote" class="section-footnote"></p>
           </section>
         </section>
 

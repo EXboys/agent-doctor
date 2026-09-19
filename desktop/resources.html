@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — Resources</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/resources.css" />
+  </head>
+  <body class="resources-page">
+    <div class="resources-shell">
+      <header class="resources-top">
+        <div>
+          <h1 data-i18n="resources.windowTitle">Skills / MCP</h1>
+          <p id="resources-subtitle" class="resources-subtitle">—</p>
+        </div>
+        <div class="resources-top-actions">
+          <button id="resources-refresh-all" type="button" class="btn-secondary btn-compact" data-i18n="resources.refresh">刷新</button>
+          <button id="resources-close" type="button" class="btn-ghost btn-compact" data-i18n="chat.close">关闭</button>
+        </div>
+      </header>
+
+      <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
+        <button type="button" class="resources-section-tab is-active" data-section="catalog" role="tab" aria-selected="true" data-i18n="resources.tabCatalog">目录</button>
+        <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false" data-i18n="resources.tabBrowser">Browser MCP</button>
+      </nav>
+
+      <main class="resources-body">
+        <section class="resources-panel is-active" id="panel-catalog" data-section-panel="catalog">
+          <div class="resources-toolbar">
+            <div class="filters" id="resources-filters" role="group" aria-label="Resource filters">
+              <button type="button" class="filter-chip is-active" data-res-filter="all" data-i18n="resources.filterAll">全部</button>
+              <button type="button" class="filter-chip" data-res-filter="skill" data-i18n="resources.filterSkills">Skills</button>
+              <button type="button" class="filter-chip" data-res-filter="mcp" data-i18n="resources.filterMcp">MCP</button>
+              <button type="button" class="filter-chip" data-res-filter="issue" data-i18n="resources.filterIssue">问题</button>
+            </div>
+            <label class="resources-search">
+              <span aria-hidden="true">⌕</span>
+              <input id="resources-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="chat.resourcesSearch" placeholder="搜索名称或描述…" />
+            </label>
+          </div>
+          <ul id="resources-list" class="res-catalog-list" aria-live="polite"></ul>
+          <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP</p>
+          <p id="resources-footnote" class="section-footnote"></p>
+        </section>
+
+        <section class="resources-panel" id="panel-browser" data-section-panel="browser" hidden>
+          <div class="section-label">
+            <h2 data-i18n="mcp.browserTitle">Browser MCP</h2>
+            <span id="mcp-browser-badge" class="badge muted">—</span>
+          </div>
+          <div class="meta-grid" id="mcp-browser-meta">
+            <div class="meta-row"><span class="meta-label" data-i18n="mcp.chrome">Chrome</span><span class="meta-value" id="mcp-chrome">—</span></div>
+            <div class="meta-row"><span class="meta-label" data-i18n="mcp.cdp">CDP</span><span class="meta-value" id="mcp-cdp">—</span></div>
+            <div class="meta-row"><span class="meta-label" data-i18n="mcp.configured">已配置</span><span class="meta-value" id="mcp-configured">—</span></div>
+            <div class="meta-row"><span class="meta-label" data-i18n="mcp.binary">CLI</span><span class="meta-value" id="mcp-binary">—</span></div>
+          </div>
+          <label class="mcp-option" for="mcp-show-ui">
+            <input id="mcp-show-ui" type="checkbox" checked />
+            <span data-i18n="mcp.showUi">显示浏览器窗口</span>
+          </label>
+          <div class="mcp-profile">
+            <div class="mcp-profile-actions">
+              <button id="mcp-profile-isolated" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileIsolated" data-i18n-title="mcp.profileIsolatedTitle">独立（推荐）</button>
+              <button id="mcp-profile-system" type="button" class="btn-secondary btn-compact" data-i18n="mcp.profileSystem" data-i18n-title="mcp.profileSystemTitle">日常登录</button>
+            </div>
+            <details class="mcp-advanced">
+              <summary data-i18n="mcp.advanced">高级</summary>
+              <label class="mcp-profile-label" for="mcp-user-data-dir" data-i18n="mcp.profile">用户目录</label>
+              <input id="mcp-user-data-dir" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" />
+              <label class="mcp-profile-label" for="mcp-profile-directory" data-i18n="mcp.profileDirectory">账号目录</label>
+              <input id="mcp-profile-directory" type="text" class="mcp-profile-input" spellcheck="false" autocomplete="off" placeholder="Default" />
+            </details>
+          </div>
+          <div class="runtime-actions mcp-actions">
+            <button id="mcp-refresh" type="button" class="btn-secondary btn-compact" data-i18n="mcp.refresh">刷新</button>
+            <button id="mcp-diagnose-wire" type="button" class="btn-primary btn-compact" data-i18n="mcp.diagnoseWire">诊断并写入</button>
+          </div>
+          <ul id="mcp-targets" class="mcp-targets" aria-live="polite"></ul>
+          <details class="mcp-snippet">
+            <summary data-i18n="mcp.snippetTitle">配置片段</summary>
+            <pre id="mcp-snippet" class="mcp-snippet-code"></pre>
+          </details>
+          <p id="mcp-footnote" class="section-footnote"></p>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/resources.ts"></script>
+  </body>
+</html>

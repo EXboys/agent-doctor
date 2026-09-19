@@ -21,6 +21,7 @@ use self::path::{
 pub mod backends;
 pub mod backup;
 pub mod baseline;
+pub mod browser_mcp;
 pub mod claude_mcp;
 pub mod fix;
 pub mod gateway;
@@ -82,6 +83,12 @@ pub struct UseWorkspaceOptions {
     pub restart_gateways: bool,
 }
 
+pub use browser_mcp::{
+    browser_mcp_wire_options_for_active_workspace, diagnose_and_wire_browser_mcp,
+    installed_browser_mcp_runtime_ids, list_browser_mcp_targets, wire_browser_mcp_installed,
+    BrowserMcpDiagnoseIssue, BrowserMcpDiagnoseWireReport, BrowserMcpTargetAction,
+    BrowserMcpTargetStatus,
+};
 pub use claude_mcp::{migrate_claude_global_mcp_to_project, ClaudeMcpMigrationReport};
 pub use fix::{
     remove_workspace, workspace_fix, WorkspaceFixAction, WorkspaceFixOptions, WorkspaceFixReport,

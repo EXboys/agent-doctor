@@ -46,7 +46,7 @@ Agent Doctor 提供：
 | 页签 | 作用 |
 |------|------|
 | **Agents** | 环境健康度、Runtime 清单、诊断/修复抽屉 |
-| **资源** | Skills / MCP 清单，Browser MCP 写入 Codex / Claude / Hermes / OpenClaw |
+| **资源** | Skills / MCP 清单，Browser MCP「诊断并写入」（自动识别已装的 Codex / Claude / Hermes / OpenClaw） |
 | **接线** | 个人 Provider 与 Evotown 团队模式（互斥） |
 | **工作区** | 项目隔离切换、远程 VPS 只读 doctor、Hermes 场景预设 |
 

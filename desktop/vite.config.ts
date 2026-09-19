@@ -15,6 +15,7 @@ export default defineConfig(async () => ({
       input: {
         main: resolve(__dirname, "index.html"),
         chat: resolve(__dirname, "chat.html"),
+        resources: resolve(__dirname, "resources.html"),
       },
     },
   },

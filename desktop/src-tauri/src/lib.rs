@@ -29,6 +29,9 @@ const ASK_WINDOW_LABEL: &str = "ask";
 const ASK_WINDOW_WIDTH: f64 = 980.0;
 const ASK_WINDOW_HEIGHT: f64 = 640.0;
 const ASK_WINDOW_MARGIN: f64 = 16.0;
+const RESOURCES_WINDOW_LABEL: &str = "resources";
+const RESOURCES_WINDOW_WIDTH: f64 = 920.0;
+const RESOURCES_WINDOW_HEIGHT: f64 = 720.0;
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
@@ -123,10 +126,110 @@ pub(crate) fn update_tray_tooltip(app: &tauri::AppHandle) {
     }
 }
 
+fn monitor_work_area(window: &tauri::WebviewWindow) -> Option<(f64, f64, f64, f64, f64)> {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())?;
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let work_x = work.position.x as f64 / scale;
+    let work_y = work.position.y as f64 / scale;
+    let work_w = work.size.width as f64 / scale;
+    let work_h = work.size.height as f64 / scale;
+    Some((work_x, work_y, work_w, work_h, scale))
+}
+
+fn window_decoration_height(window: &tauri::WebviewWindow, scale: f64) -> f64 {
+    let Ok(outer) = window.outer_size() else {
+        return 0.0;
+    };
+    let Ok(inner) = window.inner_size() else {
+        return 0.0;
+    };
+    ((outer.height as f64 - inner.height as f64) / scale).max(0.0)
+}
+
+fn window_decoration_width(window: &tauri::WebviewWindow, scale: f64) -> f64 {
+    let Ok(outer) = window.outer_size() else {
+        return 0.0;
+    };
+    let Ok(inner) = window.inner_size() else {
+        return 0.0;
+    };
+    ((outer.width as f64 - inner.width as f64) / scale).max(0.0)
+}
+
+/// Dock main (left) + Ask (right) as one aligned pair: same top, same bottom, side by side.
+fn layout_main_and_ask_side_by_side(app: &AppHandle) {
+    let Some(main) = app.get_webview_window("main") else {
+        return;
+    };
+    let Some(ask) = app.get_webview_window(ASK_WINDOW_LABEL) else {
+        return;
+    };
+    let Some((work_x, work_y, work_w, work_h, scale)) = monitor_work_area(&main) else {
+        return;
+    };
+
+    let gap = ASK_WINDOW_MARGIN;
+    let y = work_y + MAIN_WINDOW_MARGIN;
+    let outer_h = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
+
+    let (current_main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
+    let main_outer_w = current_main_w.clamp(
+        MAIN_WINDOW_MIN_WIDTH,
+        (work_w * 0.38).max(MAIN_WINDOW_MIN_WIDTH).min(480.0),
+    );
+
+    let ask_deco_w = window_decoration_width(&ask, scale);
+    let ask_deco_h = window_decoration_height(&ask, scale);
+    let main_deco_h = window_decoration_height(&main, scale);
+
+    let ask_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w).max(720.0_f64);
+    let ask_inner_w = (ask_outer_w - ask_deco_w).max(720.0_f64);
+    let main_inner_h = (outer_h - main_deco_h).max(MAIN_WINDOW_MIN_HEIGHT);
+    let ask_inner_h = (outer_h - ask_deco_h).max(480.0_f64);
+
+    let main_x = work_x + MAIN_WINDOW_MARGIN;
+    let ask_x = main_x + main_outer_w + gap;
+
+    let _ = main.set_size(LogicalSize::new(main_outer_w, main_inner_h));
+    let _ = main.set_position(LogicalPosition::new(main_x, y));
+    let _ = ask.set_size(LogicalSize::new(ask_inner_w, ask_inner_h));
+    let _ = ask.set_position(LogicalPosition::new(ask_x, y));
+}
+
+fn position_main_window_left(window: &tauri::WebviewWindow) {
+    let Some((work_x, work_y, work_w, work_h, _)) = monitor_work_area(window) else {
+        return;
+    };
+    let (current_w, _) = main_window_logical_size(window).unwrap_or((420.0, 720.0));
+    let width = current_w.clamp(
+        MAIN_WINDOW_MIN_WIDTH,
+        (work_w * 0.38).max(MAIN_WINDOW_MIN_WIDTH).min(480.0),
+    );
+    let height = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
+    let x = work_x + MAIN_WINDOW_MARGIN;
+    let y = work_y + MAIN_WINDOW_MARGIN;
+    let _ = window.set_size(LogicalSize::new(width, height));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     let Some(window) = ensure_main_window(app) else {
         return;
     };
+    let ask_visible = app
+        .get_webview_window(ASK_WINDOW_LABEL)
+        .and_then(|ask| ask.is_visible().ok())
+        .unwrap_or(false);
+    if ask_visible {
+        layout_main_and_ask_side_by_side(app);
+    } else {
+        position_main_window_left(&window);
+    }
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
@@ -719,35 +822,6 @@ fn resolve_permission_session_command(
     Ok(true)
 }
 
-fn position_ask_window_right(window: &tauri::WebviewWindow) {
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        return;
-    };
-    let scale = monitor.scale_factor();
-    let work = monitor.work_area();
-    let work_x = work.position.x as f64 / scale;
-    let work_y = work.position.y as f64 / scale;
-    let work_w = work.size.width as f64 / scale;
-    let work_h = work.size.height as f64 / scale;
-
-    let width = ASK_WINDOW_WIDTH
-        .min(work_w - ASK_WINDOW_MARGIN * 2.0)
-        .max(640.0);
-    let height = ASK_WINDOW_HEIGHT
-        .min(work_h - ASK_WINDOW_MARGIN * 2.0)
-        .max(480.0);
-    let x = work_x + work_w - width - ASK_WINDOW_MARGIN;
-    let y = work_y + ASK_WINDOW_MARGIN;
-
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(LogicalPosition::new(x, y));
-}
-
 fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
     let hide = window.clone();
     window.on_window_event(move |event| {
@@ -804,10 +878,17 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
         .unwrap_or("claude-code");
 
     let window = ensure_ask_window(app, runtime)?;
-    position_ask_window_right(&window);
+    // Pair with main: left/right side-by-side, top and bottom aligned.
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+    }
     let _ = window.set_skip_taskbar(false);
     let _ = window.unminimize();
     let _ = window.show();
+    layout_main_and_ask_side_by_side(app);
+    // Second pass after Ask chrome metrics are valid.
+    layout_main_and_ask_side_by_side(app);
     let _ = window.set_focus();
     let _ = window.emit(
         "ask-window-focus",
@@ -831,6 +912,131 @@ fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn position_resources_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let Some((work_x, work_y, work_w, work_h, _)) = monitor_work_area(window) else {
+        return;
+    };
+
+    let width = RESOURCES_WINDOW_WIDTH
+        .min(work_w - ASK_WINDOW_MARGIN * 2.0)
+        .max((work_w - ASK_WINDOW_MARGIN * 2.0).min(720.0_f64));
+    let height = RESOURCES_WINDOW_HEIGHT
+        .min(work_h - ASK_WINDOW_MARGIN * 2.0)
+        .max((work_h - ASK_WINDOW_MARGIN * 2.0).min(520.0_f64));
+
+    // Prefer the free band between main (left) and Ask (right).
+    let main_right = app
+        .get_webview_window("main")
+        .and_then(|main| {
+            if !main.is_visible().unwrap_or(false) {
+                return None;
+            }
+            let scale = main.scale_factor().ok()?;
+            let pos = main.outer_position().ok()?;
+            let size = main.outer_size().ok()?;
+            Some(pos.x as f64 / scale + size.width as f64 / scale)
+        })
+        .unwrap_or(work_x + MAIN_WINDOW_MARGIN);
+    let ask_left = app
+        .get_webview_window(ASK_WINDOW_LABEL)
+        .and_then(|ask| {
+            if !ask.is_visible().unwrap_or(false) {
+                return None;
+            }
+            let scale = ask.scale_factor().ok()?;
+            let pos = ask.outer_position().ok()?;
+            Some(pos.x as f64 / scale)
+        })
+        .unwrap_or(work_x + work_w - ASK_WINDOW_MARGIN);
+
+    let band_left = main_right + ASK_WINDOW_MARGIN;
+    let band_right = ask_left - ASK_WINDOW_MARGIN;
+    let x = if band_right - band_left >= width {
+        band_left + ((band_right - band_left - width) / 2.0).max(0.0)
+    } else {
+        work_x + ((work_w - width) / 2.0).max(ASK_WINDOW_MARGIN)
+    };
+    let y = work_y + ((work_h - height) / 2.0).max(ASK_WINDOW_MARGIN);
+
+    let _ = window.set_size(LogicalSize::new(width, height));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
+    let hide = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hide.set_skip_taskbar(true);
+            let _ = hide.hide();
+        }
+    });
+}
+
+fn create_resources_window(
+    app: &AppHandle,
+    visible: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let window = WebviewWindowBuilder::new(
+        app,
+        RESOURCES_WINDOW_LABEL,
+        WebviewUrl::App("resources.html".into()),
+    )
+    .title("Agent Doctor — Resources")
+    .inner_size(RESOURCES_WINDOW_WIDTH, RESOURCES_WINDOW_HEIGHT)
+    .min_inner_size(720.0, 520.0)
+    .resizable(true)
+    .closable(true)
+    .minimizable(true)
+    .decorations(true)
+    .visible(visible)
+    .skip_taskbar(!visible)
+    .build()
+    .map_err(|err| format!("failed to open resources window: {err}"))?;
+    attach_resources_window_close_behavior(&window);
+    Ok(window)
+}
+
+fn ensure_resources_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    if let Some(existing) = app.get_webview_window(RESOURCES_WINDOW_LABEL) {
+        return Ok(existing);
+    }
+    create_resources_window(app, false)
+}
+
+fn open_or_focus_resources_window(app: &AppHandle, section: Option<&str>) -> Result<(), String> {
+    let window = ensure_resources_window(app)?;
+    position_resources_window(app, &window);
+    let _ = window.set_skip_taskbar(false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let section = section
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("catalog");
+    let _ = window.emit(
+        "resources-window-focus",
+        serde_json::json!({ "section": section }),
+    );
+    Ok(())
+}
+
+fn close_resources_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(RESOURCES_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    if destroy {
+        window
+            .destroy()
+            .map_err(|err| format!("failed to close resources window: {err}"))?;
+    } else {
+        let _ = window.set_skip_taskbar(true);
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
     let app_for_ui = app.clone();
@@ -844,6 +1050,22 @@ fn close_ask_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(),
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         close_ask_window(&app_for_ui, destroy.unwrap_or(false))
+    })
+}
+
+#[tauri::command]
+fn open_resources_window_command(app: AppHandle, section: Option<String>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        open_or_focus_resources_window(&app_for_ui, section.as_deref())
+    })
+}
+
+#[tauri::command]
+fn close_resources_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        close_resources_window(&app_for_ui, destroy.unwrap_or(false))
     })
 }
 
@@ -959,6 +1181,7 @@ pub fn run() {
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
             let _ = ensure_ask_window(app.handle(), "claude-code");
+            let _ = ensure_resources_window(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -974,6 +1197,7 @@ pub fn run() {
             list_mcp_inventory_command,
             mcp_status_command,
             mcp_configure_command,
+            mcp_diagnose_wire_command,
             mount_synced_skills_command,
             unmount_synced_skills_command,
             get_personal_provider_status_command,
@@ -1016,6 +1240,8 @@ pub fn run() {
             open_session_command,
             open_ask_window_command,
             close_ask_window_command,
+            open_resources_window_command,
+            close_resources_window_command,
             focus_main_tab_command,
             resize_main_window_command,
             start_prompt_session_command,

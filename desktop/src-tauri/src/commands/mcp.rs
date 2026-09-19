@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
 use agent_doctor_core::{
-    browser_configured_runtimes, list_mcp_inventory, list_skills_inventory_with_options,
-    load_workspaces, mount_synced_skills, resolve_agent_doctor_binary, unmount_synced_skills,
-    McpInventoryReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport,
+    browser_configured_runtimes, browser_mcp_wire_options_for_active_workspace,
+    diagnose_and_wire_browser_mcp, list_browser_mcp_targets, list_mcp_inventory,
+    list_skills_inventory_with_options, load_workspaces, mount_synced_skills,
+    resolve_agent_doctor_binary, unmount_synced_skills, BrowserMcpDiagnoseWireReport,
+    BrowserMcpTargetStatus, McpInventoryReport, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -27,6 +29,7 @@ pub struct McpModuleStatus {
     pub browser: BrowserMcpStatus,
     pub inventory: McpInventoryReport,
     pub configured_runtimes: Vec<String>,
+    pub targets: Vec<BrowserMcpTargetStatus>,
     pub binary: String,
     pub config_snippet: serde_json::Value,
 }
@@ -62,6 +65,7 @@ pub fn mcp_status_command(
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
+    let targets = list_browser_mcp_targets();
     let binary_result = resolve_agent_doctor_binary();
     let binary = binary_result
         .as_ref()
@@ -93,6 +97,7 @@ pub fn mcp_status_command(
         browser,
         inventory,
         configured_runtimes,
+        targets,
         binary,
         config_snippet,
     })
@@ -206,6 +211,63 @@ pub fn mcp_configure_command(
         config_path: config_path.display().to_string(),
         binary: binary.display().to_string(),
     })
+}
+
+/// Diagnose Chrome / CLI / installed agents, then write Browser MCP into each installed target.
+#[tauri::command]
+pub fn mcp_diagnose_wire_command(
+    app: AppHandle,
+    port: Option<u16>,
+    headless: Option<bool>,
+    user_data_dir: Option<String>,
+    profile_directory: Option<String>,
+) -> Result<BrowserMcpDiagnoseWireReport, String> {
+    let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
+    let headless = headless.unwrap_or(false);
+    let emit = |stage: &str, message: &str, done: bool, ok: bool| {
+        let _ = app.emit(
+            "mcp-progress",
+            &McpProgressEvent {
+                stage: stage.to_string(),
+                message: message.to_string(),
+                done,
+                ok,
+            },
+        );
+    };
+
+    emit("diagnose", "Diagnosing Chrome, CLI, and installed agents…", false, true);
+
+    let binary = resolve_agent_doctor_binary().unwrap_or_default();
+    let mut options = browser_mcp_wire_options_for_active_workspace(binary);
+    options.port = port;
+    options.headless = headless;
+    let explicit_dir = user_data_dir
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    options.user_data_dir = explicit_dir;
+    options.profile_directory = profile_directory
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let report = diagnose_and_wire_browser_mcp(options);
+    let ok = report.failed == 0 && report.chrome_ok && report.cli_ok;
+    let summary = if report.wrote > 0 {
+        format!(
+            "Wrote Browser MCP into {} agent(s); skipped {}; failed {}.",
+            report.wrote, report.skipped, report.failed
+        )
+    } else if !report.issues.is_empty() {
+        report.issues[0].message.clone()
+    } else {
+        "No installed agents to write.".into()
+    };
+    emit("done", &summary, true, ok);
+    Ok(report)
 }
 
 #[tauri::command]

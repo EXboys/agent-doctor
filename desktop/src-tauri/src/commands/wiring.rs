@@ -1,14 +1,14 @@
 use agent_doctor_core::{
-    activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
-    list_personal_providers, load_mode_status, load_personal_provider_status, load_workspaces,
-    resolve_agent_doctor_binary, switch_to_personal_mode, switch_to_team_mode,
-    upsert_personal_provider, verify_personal_provider_with_protocol, ModeStatus, ModeSwitchReport,
-    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, UpsertPersonalProviderOptions,
+    activate_personal_provider, browser_mcp_wire_options_for_active_workspace,
+    delete_personal_provider, execute_personal_provider_setup, list_personal_providers,
+    load_mode_status, load_personal_provider_status, resolve_agent_doctor_binary,
+    switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider,
+    verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
+    ModeSwitchReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument,
+    UpsertPersonalProviderOptions,
 };
-use agent_doctor_mcp::{
-    discover_chrome, wire_browser_mcp, BrowserMcpWireReport, WireBrowserMcpOptions,
-};
+use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::Serialize;
 
 use crate::update_tray_tooltip;
@@ -22,26 +22,9 @@ pub struct ModeSwitchDesktopReport {
 }
 
 fn wire_browser_mcp_for_desktop() -> Result<BrowserMcpWireReport, String> {
-    let discovery = discover_chrome().map_err(|error| error.to_string())?;
     let binary = resolve_agent_doctor_binary().map_err(|error| error.to_string())?;
-    let workspaces = load_workspaces().unwrap_or_default();
-    let active_entry = workspaces
-        .active
-        .as_ref()
-        .and_then(|name| workspaces.workspaces.get(name));
-    let mut options = WireBrowserMcpOptions::with_binary(binary);
-    options.project_path = active_entry.map(|entry| entry.path.clone());
-    options.codex_home = active_entry.map(|entry| entry.codex_home.clone());
-    options.hermes_home = active_entry.map(|entry| {
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
-            .join(".hermes/profiles")
-            .join(&entry.hermes_profile)
-    });
-    options.openclaw_workspace = active_entry.map(|entry| entry.openclaw_workspace.clone());
-    Ok(wire_browser_mcp(&discovery, &options))
+    let options = browser_mcp_wire_options_for_active_workspace(binary);
+    wire_browser_mcp_installed(&options)
 }
 
 #[tauri::command]
