@@ -570,8 +570,8 @@ jobs:
             --github-base "${GH_BASE}" \
             --notes "Agent Doctor ${VERSION}" \
             --out-dir ./updater-manifest; then
-            echo "::warning::Updater manifest not built (missing signed artifacts?). Set TAURI_SIGNING_PRIVATE_KEY. See docs/desktop-auto-update.md"
-            exit 0
+            echo "::error::Updater manifest not built. Check signed desktop artifacts (.sig) and TAURI_SIGNING_PRIVATE_KEY."
+            exit 1
           fi
           echo "cdn_base=${CDN_BASE}" >> "$GITHUB_OUTPUT"
           echo "built=1" >> "$GITHUB_OUTPUT"
@@ -606,14 +606,21 @@ jobs:
             exit 0
           fi
           PREFIX="${OSS_PREFIX:-desktop}"
-          curl -fsSL -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil64
-          chmod +x ossutil
-          ./ossutil config \
+          curl -fsSL -o ossutil.zip \
+            "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
+          unzip -qo ossutil.zip -d ossutil-bin
+          OSSUTIL="$(find ossutil-bin -type f -name 'ossutil*' ! -name '*.zip' | head -n 1)"
+          if [ -z "$OSSUTIL" ]; then
+            echo "::error::ossutil binary not found after download"
+            exit 1
+          fi
+          chmod +x "$OSSUTIL"
+          "$OSSUTIL" config \
             -e "${OSS_ENDPOINT}" \
             -i "${OSS_ACCESS_KEY_ID}" \
             -k "${OSS_ACCESS_KEY_SECRET}" \
             -L CH \
             --config-file .ossutilconfig
-          ./ossutil cp updater-manifest/latest.json "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
-          ./ossutil cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
+          "$OSSUTIL" cp updater-manifest/latest.json "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
+          "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
           echo "Synced updater assets to oss://${OSS_BUCKET}/${PREFIX}/"
