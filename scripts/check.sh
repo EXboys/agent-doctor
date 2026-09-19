@@ -23,13 +23,14 @@ Commands:
   desktop         clippy-desktop
   release-preflight
                   fmt-check + clippy-cli + test-cli (+ desktop clippy when available)
-                  Run this before tagging v*; Release CI re-checks the same gates.
+                  Writes a stamp; required before pushing v* tags (see scripts/release.sh).
   all             cli + frontend; desktop rust on macOS or AGENT_DOCTOR_CHECK_DESKTOP=1
   help            Show this message
 
 Examples:
   ./scripts/check.sh cli
   ./scripts/check.sh release-preflight
+  ./scripts/release.sh
   AGENT_DOCTOR_CHECK_DESKTOP=1 ./scripts/check.sh all
 EOF
 }
@@ -86,7 +87,12 @@ run_release_preflight() {
     echo "Skipping desktop clippy (set AGENT_DOCTOR_CHECK_DESKTOP=1 on Linux with GTK deps)."
     echo "Release CI still runs desktop clippy on macOS."
   fi
-  echo "==> release-preflight OK — wait for green CI on main, then tag."
+  # Stamp current HEAD so git pre-push can skip a duplicate run for the same commit.
+  if [[ -d "$ROOT/.git" ]]; then
+    git rev-parse HEAD >"$ROOT/.git/agent-doctor-preflight.sha"
+    echo "==> wrote preflight stamp for $(git rev-parse --short HEAD)"
+  fi
+  echo "==> release-preflight OK — use ./scripts/release.sh (or push tag; pre-push hook re-checks)."
 }
 
 run_desktop_rust() {

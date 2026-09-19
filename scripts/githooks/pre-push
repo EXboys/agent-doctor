@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Blocks pushing v* tags unless release-preflight has passed for that commit.
+# Install: ./scripts/install-git-hooks.sh
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+if [[ "${AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT:-}" == "1" ]]; then
+  echo "pre-push: AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT=1 — skipping release gate" >&2
+  exit 0
+fi
+
+stamp_path="$ROOT/.git/agent-doctor-preflight.sha"
+need_gate=0
+tag_commits=()
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/v*)
+      if [[ "$local_sha" =~ ^0+$ ]]; then
+        continue
+      fi
+      need_gate=1
+      tag_commits+=("$local_sha")
+      echo "pre-push: detected tag push $remote_ref -> ${local_sha:0:8}" >&2
+      ;;
+  esac
+done
+
+if [[ "$need_gate" -eq 0 ]]; then
+  exit 0
+fi
+
+unique_commits=()
+for sha in "${tag_commits[@]}"; do
+  skip=0
+  for existing in "${unique_commits[@]+"${unique_commits[@]}"}"; do
+    if [[ "$existing" == "$sha" ]]; then
+      skip=1
+      break
+    fi
+  done
+  if [[ "$skip" -eq 0 ]]; then
+    unique_commits+=("$sha")
+  fi
+done
+
+for sha in "${unique_commits[@]}"; do
+  if [[ -f "$stamp_path" ]] && [[ "$(cat "$stamp_path")" == "$sha" ]]; then
+    echo "pre-push: release-preflight stamp OK for ${sha:0:8}" >&2
+    continue
+  fi
+  echo "pre-push: running ./scripts/check.sh release-preflight for ${sha:0:8}…" >&2
+  if [[ "$(git rev-parse HEAD)" != "$sha" ]]; then
+    echo "pre-push: HEAD is not $sha — checkout that commit (or run release-preflight there) before pushing the tag." >&2
+    exit 1
+  fi
+  ./scripts/check.sh release-preflight
+done
+
+exit 0

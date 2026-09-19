@@ -97,13 +97,12 @@ CI runs the same smoke matrix on every PR (see `.github/workflows/ci.yml`).
 
 ## Create a release (maintainers)
 
-See **[docs/release.md](./release.md)** for the full pre-tag checklist (`./scripts/check.sh release-preflight`, wait for green CI on `main`).
-
-Release CI already re-runs `fmt` + `clippy` before any installer build. Push a version tag only after that local/CI gate is green:
+See **[docs/release.md](./release.md)**. Local fmt/clippy/test must pass **before** any tag reaches GitHub:
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+./scripts/install-git-hooks.sh   # once per clone — blocks bare v* tag pushes
+# bump version on main, commit, then:
+./scripts/release.sh             # preflight → tag → push
 ```
 
-This builds CLI archives for all platforms and attaches Tauri desktop installers to the GitHub release.
+Release CI still re-runs `fmt` + `clippy` online as a backstop. Do not push `v*` tags without the local gate.
