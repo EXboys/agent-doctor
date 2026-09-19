@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::adapter::AdapterDiscovery;
-use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
+use crate::exec::{run_output, VERSION_PROBE_TIMEOUT};
 
 #[cfg(test)]
 thread_local! {
@@ -404,20 +404,25 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
 
 /// Homebrew kegs like `node@24` put `node`/`npm` under `opt/node@NN/bin`.
 fn homebrew_node_bin_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    for root in ["/opt/homebrew/opt", "/usr/local/opt"] {
-        let Ok(entries) = std::fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name == "node" || name.starts_with("node@") {
-                dirs.push(entry.path().join("bin"));
+    static CACHE: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let mut dirs = Vec::new();
+            for root in ["/opt/homebrew/opt", "/usr/local/opt"] {
+                let Ok(entries) = std::fs::read_dir(root) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if name == "node" || name.starts_with("node@") {
+                        dirs.push(entry.path().join("bin"));
+                    }
+                }
             }
-        }
-    }
-    dirs
+            dirs
+        })
+        .clone()
 }
 
 static NPM_PREFIX_CACHE: std::sync::Mutex<Option<Option<PathBuf>>> = std::sync::Mutex::new(None);
@@ -488,9 +493,11 @@ fn find_with_where_exe(_name: &str) -> Option<PathBuf> {
 pub fn discover_binary(name: &str) -> AdapterDiscovery {
     let binary_path = find_binary(name);
     let installed = binary_path.is_some();
+    // Doctor sweeps every runtime; prefer the common `--version` flag only so a
+    // hanging CLI cannot burn 3× VERSION_PROBE_TIMEOUT serially.
     let version = binary_path
         .as_ref()
-        .and_then(|path| read_version(path, &["--version", "-V", "version"]));
+        .and_then(|path| read_version(path, &["--version"]));
 
     AdapterDiscovery {
         installed,
@@ -513,7 +520,7 @@ fn read_version_result_with_flags(
 ) -> Result<Option<String>, String> {
     let mut last_error = None;
     for flag in flags {
-        match run_output(binary, &[flag], SHORT_PROBE_TIMEOUT) {
+        match run_output(binary, &[flag], VERSION_PROBE_TIMEOUT) {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);

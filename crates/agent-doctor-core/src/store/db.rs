@@ -88,22 +88,12 @@ pub struct TeamSettings {
     pub engine_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillsSourceSettings {
     /// `None` means "use product default (TeamUps)".
     pub source: Option<SkillsSourceKind>,
     pub base_url: Option<String>,
     pub pack_slug: Option<String>,
-}
-
-impl Default for SkillsSourceSettings {
-    fn default() -> Self {
-        Self {
-            source: None,
-            base_url: None,
-            pack_slug: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -109,10 +109,20 @@ struct RuntimeProbeContext<'a> {
 }
 
 pub fn probe_all_runtimes() -> Vec<RuntimeProbeReport> {
-    all_adapters()
-        .iter()
-        .filter_map(|adapter| probe_adapter(adapter.as_ref()).ok())
-        .collect()
+    use std::thread;
+
+    crate::adapters::util::ensure_managed_runtime_path();
+    let adapters = all_adapters();
+    thread::scope(|scope| {
+        let handles: Vec<_> = adapters
+            .iter()
+            .map(|adapter| scope.spawn(|| probe_adapter(adapter.as_ref()).ok()))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok().flatten())
+            .collect()
+    })
 }
 
 pub fn probe_runtime(runtime_id: &str) -> Result<RuntimeProbeReport> {

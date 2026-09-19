@@ -311,61 +311,6 @@ fn sync_via_generic(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::secrets::MemorySecretBackend;
-    use std::sync::Arc;
-    use tempfile::tempdir;
-
-    #[test]
-    fn resolve_defaults_to_teamups_when_unset() {
-        let dir = tempdir().unwrap();
-        let db = dir.path().join("settings.db");
-        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
-        let resolved = resolve_skills_source_from_store(&store, None).unwrap();
-        assert_eq!(resolved.kind, SkillsSourceKind::Teamups);
-        assert!(resolved.using_default);
-    }
-
-    #[test]
-    fn resolve_respects_explicit_evotown() {
-        let dir = tempdir().unwrap();
-        let db = dir.path().join("settings.db");
-        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
-        store
-            .set_skills_source_settings(&crate::store::SkillsSourceSettings {
-                source: Some(SkillsSourceKind::Evotown),
-                base_url: Some("https://evotown.example".into()),
-                pack_slug: Some("default-agent-skills".into()),
-            })
-            .unwrap();
-        store.set_team_api_key("evk_test").unwrap();
-        let resolved = resolve_skills_source_from_store(&store, None).unwrap();
-        assert_eq!(resolved.kind, SkillsSourceKind::Evotown);
-        assert!(!resolved.using_default);
-        assert_eq!(resolved.base_url, "https://evotown.example");
-    }
-
-    #[test]
-    fn local_source_refuses_remote_sync() {
-        let dir = tempdir().unwrap();
-        let db = dir.path().join("settings.db");
-        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
-        store
-            .set_skills_source_settings(&crate::store::SkillsSourceSettings {
-                source: Some(SkillsSourceKind::Local),
-                base_url: None,
-                pack_slug: None,
-            })
-            .unwrap();
-        let err =
-            execute_skills_sync_with_store(&store, &SkillsSyncOptions::default()).unwrap_err();
-        assert!(err.to_string().contains("local"));
-        let _ = crate::skills::local::LocalSkillsSource;
-    }
-}
-
 fn load_lock_state(path: &Path) -> Result<Value> {
     if !path.exists() {
         return Ok(json!({ "skills": {} }));
@@ -420,4 +365,59 @@ fn utc_now() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     format!("{secs}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::secrets::MemorySecretBackend;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    #[test]
+    fn resolve_defaults_to_teamups_when_unset() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("settings.db");
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        let resolved = resolve_skills_source_from_store(&store, None).unwrap();
+        assert_eq!(resolved.kind, SkillsSourceKind::Teamups);
+        assert!(resolved.using_default);
+    }
+
+    #[test]
+    fn resolve_respects_explicit_evotown() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("settings.db");
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        store
+            .set_skills_source_settings(&crate::store::SkillsSourceSettings {
+                source: Some(SkillsSourceKind::Evotown),
+                base_url: Some("https://evotown.example".into()),
+                pack_slug: Some("default-agent-skills".into()),
+            })
+            .unwrap();
+        store.set_team_api_key("evk_test").unwrap();
+        let resolved = resolve_skills_source_from_store(&store, None).unwrap();
+        assert_eq!(resolved.kind, SkillsSourceKind::Evotown);
+        assert!(!resolved.using_default);
+        assert_eq!(resolved.base_url, "https://evotown.example");
+    }
+
+    #[test]
+    fn local_source_refuses_remote_sync() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("settings.db");
+        let store = SettingsStore::open_at(&db, Arc::new(MemorySecretBackend::new())).unwrap();
+        store
+            .set_skills_source_settings(&crate::store::SkillsSourceSettings {
+                source: Some(SkillsSourceKind::Local),
+                base_url: None,
+                pack_slug: None,
+            })
+            .unwrap();
+        let err =
+            execute_skills_sync_with_store(&store, &SkillsSyncOptions::default()).unwrap_err();
+        assert!(err.to_string().contains("local"));
+        let _ = crate::skills::local::LocalSkillsSource;
+    }
 }

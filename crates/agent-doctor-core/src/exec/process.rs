@@ -11,7 +11,10 @@ use std::thread;
 use std::time::Duration;
 
 /// Default budget for `--version` / `npm prefix` / CLI identity probes.
-pub const SHORT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+pub const SHORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Tighter budget for runtime `--version` during doctor / discovery sweeps.
+pub const VERSION_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
