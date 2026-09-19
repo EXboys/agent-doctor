@@ -10,334 +10,56 @@ import {
   type Locale,
   type MessageKey,
 } from "./i18n";
+import { escapeHtml, formatTime, formatRate, formatCount } from "./format";
+import type {
+  DoctorReport,
+  EngineRegisterStatus,
+  EvotownStatus,
+  HermesSettings,
+  InstallProgressEvent,
+  InstallRuntimeResponse,
+  MainTabId,
+  McpConfigureReport,
+  McpInventoryItem,
+  McpModuleStatus,
+  ModeStatus,
+  ModeSwitchReport,
+  OnboardingReport,
+  OpenSessionReport,
+  PersonalProviderListItem,
+  PersonalProviderSetupReport,
+  PersonalProvidersDocument,
+  PersonalProviderStatus,
+  PersonalProviderVerifyReport,
+  ProfileEntry,
+  ProfilesDocument,
+  ProviderProtocol,
+  ProviderTabId,
+  RegisterReport,
+  RelatedTag,
+  RemoteDoctorReport,
+  RemoteHostsDocument,
+  RemoteProjectRow,
+  RemoteProbeCheck,
+  RepairPreviewResponse,
+  RepairStatusFilter,
+  ResourceFilter,
+  ResourceRow,
+  RestoreSummary,
+  RuntimeDoctorResult,
+  SkillMountReport,
+  SkillsInventoryReport,
+  SyncReport,
+  UseProfileReport,
+  WindowSizeReport,
+  WorkspaceCheck,
+  WorkspaceDoctorReport,
+  WorkspaceFixReport,
+  WorkspacesDocument,
+} from "./types";
 
 if (navigator.userAgent.includes("Windows")) {
   document.documentElement.classList.add("is-opaque-shell");
-}
-
-interface RuntimeDoctorResult {
-  id: string;
-  display_name: string;
-  installed: boolean;
-  version: string | null;
-  binary_path: string | null;
-  config_paths: string[];
-  profile: {
-    gateway_url: string | null;
-    key_source: string | null;
-  };
-}
-
-interface DoctorReport {
-  profile_env_path: string | null;
-  profile_env_exists: boolean;
-  active_preset: string | null;
-  runtimes: RuntimeDoctorResult[];
-}
-
-interface HermesSettings {
-  provider: string;
-  model: string;
-  base_url: string;
-  api_key_env: string | null;
-  api_key_configured: boolean;
-  api_key_hint: string | null;
-}
-
-interface ProfileEntry {
-  hermes?: Pick<HermesSettings, "provider" | "model" | "base_url">;
-  models?: Array<Pick<HermesSettings, "provider" | "model" | "base_url">>;
-}
-
-interface ProfilesDocument {
-  active: string | null;
-  profiles: Record<string, ProfileEntry>;
-}
-
-interface WorkspaceEntry {
-  path: string;
-  hermes_profile: string;
-  codex_home: string;
-  openclaw_agent_id: string;
-  openclaw_workspace: string;
-}
-
-interface WorkspacesDocument {
-  active: string | null;
-  workspaces: Record<string, WorkspaceEntry>;
-}
-
-interface UseProfileReport {
-  profile: string;
-  applied: Array<{
-    runtime_id: string;
-    config_path: string;
-    backup_path: string | null;
-    restart_hint: string;
-  }>;
-  skipped: string[];
-}
-
-interface RepairPreviewResponse {
-  runtime_id: string;
-  display_name: string;
-  summary: {
-    pass: number;
-    warn: number;
-    fail: number;
-    not_applicable: number;
-    not_checked: number;
-  };
-  checks: Array<{
-    title: string;
-    status: "pass" | "warn" | "fail" | "n/a" | "not checked";
-    message: string;
-    details: string[];
-  }>;
-  plan_summary: string;
-  suggested_repairs: Array<{
-    id: string;
-    title: string;
-    description: string;
-    auto_fixable: boolean;
-  }>;
-  can_apply_repair: boolean;
-  backup_ids: string[];
-  last_execute: {
-    backup_id: string;
-    backup_root: string;
-    executed: string[];
-    skipped: Array<{ id: string; reason: string }>;
-    verification_summary: string;
-    rollback_hint: string;
-    guide_path: string | null;
-    browser_smoke?: { ok: boolean; detail: string } | null;
-  } | null;
-}
-
-type RestoreSummary = {
-  backup_id: string;
-  backup_root: string;
-  restored_files: string[];
-};
-
-type InstallRuntimeResponse = {
-  runtime_id: string;
-  install_needed: boolean;
-  install_succeeded: boolean;
-  install_attempts: number;
-  install_log_path: string | null;
-  manual_fallback: string[];
-  skipped: Array<{ id: string; reason: string }>;
-  after_installed: boolean;
-};
-
-type InstallProgressEvent = {
-  runtime_id: string;
-  phase: string;
-  message: string;
-  percent: number;
-};
-
-interface EvotownStatus {
-  configured: boolean;
-  base_url: string | null;
-  api_key_hint: string | null;
-  config_source: string | null;
-  runtime_target: string | null;
-  bundle_id: string | null;
-}
-
-interface EngineRegisterStatus {
-  registered: boolean;
-  engine_id: string | null;
-  env_path: string | null;
-}
-
-interface RegisterReport {
-  base_url: string;
-  engine_id: string;
-  engine_type: string;
-  ingest_token_issued: boolean;
-  ingest_token: string | null;
-  saved_to: string | null;
-  rotated: boolean;
-  detail: string;
-}
-
-interface OnboardingReport {
-  setup: {
-    gateway_url: string;
-    evotown_base_url: string;
-    profile_env_path: string;
-  };
-  sync: {
-    installed: number;
-    skipped: number;
-    failed: number;
-  } | null;
-  policy: {
-    policy_count: number;
-  } | null;
-}
-
-interface OpenSessionReport {
-  runtime: string;
-  method: "deep-link" | "terminal";
-  cwd: string;
-  target: string;
-  detail: string;
-}
-
-interface SyncReport {
-  installed: number;
-  skipped: number;
-  failed: number;
-}
-
-interface SkillAgentUsage {
-  runtime: string;
-  scope: string;
-  path: string;
-  mounted: boolean;
-}
-
-interface SkillInventoryItem {
-  skill_id: string;
-  name: string;
-  version: string;
-  description: string | null;
-  installed_path: string;
-  agents: SkillAgentUsage[];
-  call_count: number | null;
-  success_count: number | null;
-  success_rate: number | null;
-  first_success_rate: number | null;
-  download_count: number | null;
-  metrics_source: string;
-}
-
-interface SkillsInventoryReport {
-  skills_dir: string;
-  lock_path: string;
-  bundle_id: string | null;
-  skills: SkillInventoryItem[];
-  remote_stats_ok: boolean;
-  remote_stats_error: string | null;
-}
-
-interface SkillMountReport {
-  mounted: number;
-  unmounted: number;
-  skipped: number;
-  failed: number;
-}
-
-interface McpInventoryItem {
-  name: string;
-  scope: string;
-  config_path: string;
-  command: string | null;
-  args: string[];
-  healthy: boolean;
-  issue: string | null;
-  is_browser: boolean;
-  runtime_hint: string;
-}
-
-interface McpInventoryReport {
-  workspace_name: string | null;
-  workspace_path: string | null;
-  servers: McpInventoryItem[];
-  total: number;
-  healthy: number;
-  issues: number;
-  browser_configured: boolean;
-}
-
-interface BrowserMcpStatus {
-  chrome_found: boolean;
-  binary: string | null;
-  version: string | null;
-  user_data_dir: string | null;
-  profile_directory: string;
-  system_user_data_dir: string;
-  isolated_user_data_dir: string;
-  cdp_connected: boolean;
-  ws_endpoint: string | null;
-  port: number;
-}
-
-interface McpModuleStatus {
-  browser: BrowserMcpStatus;
-  inventory: McpInventoryReport;
-  configured_runtimes: string[];
-  binary: string;
-  config_snippet: unknown;
-}
-
-interface McpConfigureReport {
-  runtime: string;
-  port: number;
-  config_path: string;
-  binary: string;
-}
-
-type ResourceFilter = "all" | "skill" | "mcp" | "issue";
-type ResourceRow = {
-  kind: "skill" | "mcp";
-  name: string;
-  sub: string;
-  meta: string;
-  tone: "ok" | "warn" | "bad" | "muted";
-  issue: boolean;
-  skillId?: string;
-  needsMount?: boolean;
-};
-
-interface PersonalProviderStatus {
-  configured: boolean;
-  gateway_url: string | null;
-  model: string | null;
-  api_key_hint: string | null;
-  profile_env_path: string | null;
-  active_id: string | null;
-  active_name: string | null;
-  protocol: string | null;
-}
-
-interface PersonalProviderListItem {
-  id: string;
-  name: string;
-  url: string;
-  model: string;
-  protocol: string;
-  api_key_hint: string;
-  active: boolean;
-}
-
-interface PersonalProvidersDocument {
-  active_id: string | null;
-  providers: PersonalProviderListItem[];
-  store_path: string;
-}
-
-interface PersonalProviderVerifyReport {
-  ok: boolean;
-  status_code: number | null;
-  checked_url: string | null;
-  message: string;
-  models_sample: string[];
-}
-
-interface PersonalProviderSetupReport {
-  profile_env_path: string;
-  gateway_url: string;
-  model: string;
-  provider_id: string | null;
-  provider_name: string | null;
-  runtimes: Array<{ runtime_id: string; applied: boolean }>;
-  verify: PersonalProviderVerifyReport | null;
 }
 
 const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
@@ -425,48 +147,6 @@ const personalApplyEl = document.querySelector<HTMLButtonElement>("#personal-app
 const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 
 let personalProvidersDoc: PersonalProvidersDocument | null = null;
-
-type ProviderProtocol = "openai" | "anthropic";
-type ActiveMode = "personal" | "team" | "unset";
-
-type ModeStatus = {
-  mode: ActiveMode | string;
-  personal_ready: boolean;
-  team_ready: boolean;
-  active_label: string | null;
-  active_gateway_url: string | null;
-  active_key_hint: string | null;
-  personal_active_id: string | null;
-  personal_active_name: string | null;
-  team_base_url: string | null;
-};
-
-type ModeSwitchReport = {
-  mode: string;
-  active_label: string | null;
-  active_gateway_url: string | null;
-  message: string;
-  model?: string | null;
-  source_id?: string | null;
-  probe_ok?: boolean | null;
-  probe_detail?: string | null;
-  warnings?: string[];
-  runtimes: Array<{
-    runtime_id: string;
-    applied: boolean;
-    effector?: string | null;
-    effector_ok?: boolean | null;
-    probe_ok?: boolean | null;
-  }>;
-  browser_mcp?: {
-    results: Array<{
-      runtime: string;
-      ok: boolean;
-      config_path?: string | null;
-      message: string;
-    }>;
-  } | null;
-};
 
 const modeWithBrowserMcpEl = document.querySelector<HTMLInputElement>("#mode-with-browser-mcp")!;
 
@@ -753,9 +433,6 @@ function applyProviderPreset(presetId: string, { forceModel = true } = {}) {
 const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
 const providerPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-provider-panel]"));
-
-type MainTabId = "diagnose" | "resources" | "provider" | "workspace";
-type ProviderTabId = "personal" | "evotown";
 
 let lastSkillsInventory: SkillsInventoryReport | null = null;
 let lastMcpStatus: McpModuleStatus | null = null;
@@ -1057,8 +734,6 @@ let lastWorkspaces: WorkspacesDocument | null = null;
 let hermesModel: HermesSettings | null = null;
 let activeRuntimeId: string | null = null;
 
-type RepairStatusFilter = "all" | RepairPreviewResponse["checks"][number]["status"];
-
 const repairPreviewByRuntime = new Map<string, RepairPreviewResponse>();
 const repairFilterByRuntime = new Map<string, RepairStatusFilter>();
 const repairConfirmRuntimeIds = new Set<string>();
@@ -1066,23 +741,6 @@ let selectedPresetName = "";
 let selectedWorkspaceName = "";
 let presetMenuOpen = false;
 let workspaceBusy = false;
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function formatTime(date: Date): string {
-  const locale = getLocale() === "zh" ? "zh-CN" : "en-US";
-  return date.toLocaleTimeString(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 function runtimeClass(id: string): string {
   if (id in RUNTIME_SHORT) {
@@ -1511,8 +1169,6 @@ async function setMainWindowWidth(width: number): Promise<WindowSizeReport> {
   });
 }
 
-type WindowSizeReport = { width: number; height: number };
-
 async function readMainWindowSize(): Promise<WindowSizeReport> {
   return invoke<WindowSizeReport>("resize_main_window_command", {
     width: null,
@@ -1801,8 +1457,6 @@ function renderRuntimeCardActions(
 
   return parts.join("");
 }
-
-type RelatedTag = { kind: "skill" | "mcp"; name: string; broken: boolean };
 
 function extractRelatedTags(report: RepairPreviewResponse | undefined): RelatedTag[] {
   if (!report) {
@@ -2278,16 +1932,6 @@ function renderEvotownStatus(status: EvotownStatus) {
     evotownEngineHintEl.textContent = "";
     skillsInventoryEl.hidden = true;
   }
-}
-
-function formatRate(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return t("skills.na");
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatCount(value: number | null | undefined): string {
-  if (value == null) return t("skills.na");
-  return String(value);
 }
 
 const RUNTIME_LABELS: Record<string, string> = {
@@ -3509,28 +3153,6 @@ async function fixWorkspace() {
   }
 }
 
-interface WorkspaceCheck {
-  id: string;
-  title: string;
-  status: "pass" | "warn" | "fail";
-  detail: string;
-}
-
-interface WorkspaceDoctorReport {
-  active: string | null;
-  checks: WorkspaceCheck[];
-}
-
-interface WorkspaceFixReport {
-  active: string | null;
-  actions: Array<{
-    id: string;
-    title: string;
-    applied: boolean;
-    detail: string;
-  }>;
-}
-
 function workspaceStatusLabel(status: WorkspaceCheck["status"]): string {
   switch (status) {
     case "pass":
@@ -3588,50 +3210,6 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
     warn: String(warn),
     fail: String(fail),
   });
-}
-
-interface RemoteHostsDocument {
-  hosts: Record<
-    string,
-    {
-      ssh_config_host: string;
-      projects: Record<string, { path: string; runtimes: string[] }>;
-    }
-  >;
-}
-
-interface RemoteProjectRow {
-  host_id: string;
-  project_id: string;
-  path: string;
-  runtimes: string[];
-  ssh_config_host: string;
-}
-
-interface RemoteProbeCheck {
-  id: string;
-  title: string;
-  status: "pass" | "warn" | "fail" | "not_applicable" | "not_checked";
-  severity: string;
-  message: string;
-  details: string[];
-}
-
-interface RemoteDoctorReport {
-  host_id: string;
-  ssh_config_host: string;
-  project_id: string;
-  project_path: string;
-  remote_home: string | null;
-  connectivity_ok: boolean;
-  checks: RemoteProbeCheck[];
-  runtimes: Array<{
-    runtime_id: string;
-    display_name: string;
-    binary_name: string;
-    checks: RemoteProbeCheck[];
-  }>;
-  report_path: string | null;
 }
 
 let lastRemoteProjects: RemoteProjectRow[] = [];

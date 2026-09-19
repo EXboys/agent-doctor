@@ -1,31 +1,27 @@
 use agent_doctor_core::{
-    activate_personal_provider, add_host, add_project, apply_profile_model,
-    browser_configured_runtimes, build_repair_preview_from_bundle, delete_personal_provider,
-    ensure_default_workspace, evotown_status, execute_evotown_onboarding,
-    execute_install_with_progress, execute_personal_provider_setup, execute_register,
-    execute_repair, execute_sync, init_workspace, list_mcp_inventory, list_personal_providers,
-    list_runtime_backup_ids, list_skills_inventory_with_options, load_doctor_node_config,
-    load_evotown_config, load_mode_status, load_personal_provider_status, load_profiles,
-    load_remote_hosts, load_workspaces, mount_synced_skills, needs_binary_install,
-    open_interactive_session, probe_runtime, remove_host, remove_project,
+    activate_personal_provider, apply_profile_model, browser_configured_runtimes,
+    build_repair_preview_from_bundle, delete_personal_provider, ensure_default_workspace,
+    evotown_status, execute_evotown_onboarding, execute_install_with_progress,
+    execute_personal_provider_setup, execute_register, execute_repair, execute_sync,
+    list_mcp_inventory, list_personal_providers, list_runtime_backup_ids,
+    list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
+    load_mode_status, load_personal_provider_status, load_profiles, load_workspaces,
+    mount_synced_skills, needs_binary_install, open_interactive_session, probe_runtime,
     resolve_agent_doctor_binary, restore_runtime_backup, run_doctor,
-    run_prompt_session_with_cancel, run_remote_doctor, set_runtime_model, suggest_runtime_repairs,
+    run_prompt_session_with_cancel, set_runtime_model, suggest_runtime_repairs,
     switch_to_personal_mode, switch_to_team_mode, unmount_synced_skills, upsert_personal_provider,
     use_profile, use_workspace_with_options, verify_personal_provider_with_protocol,
-    workspace_doctor, workspace_fix, workspace_status, ApplyReport, DoctorReport, EvotownStatus,
-    HermesAdapter, HermesProfilePreset, HermesSettings, InitWorkspaceReport, InstallOptions,
-    InstallProgressEvent, InstallReport, McpInventoryReport, ModeStatus, ModeSwitchReport,
-    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
-    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus, ProfilesDocument,
-    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionReport, RegisterOptions, RegisterReport, RemoteDoctorOptions, RemoteDoctorReport,
-    RemoteHostsDocument, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
-    RuntimeModelPreset, RuntimeProbeReport, SkillMountOptions, SkillMountReport,
-    SkillsInventoryOptions, SkillsInventoryReport, SyncOptions, SyncReport,
-    UpsertPersonalProviderOptions, UseProfileReport, UseWorkspaceOptions, UseWorkspaceReport,
-    WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport,
-    WorkspacesDocument,
+    workspace_doctor, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
+    HermesSettings, InstallOptions, InstallProgressEvent, InstallReport, McpInventoryReport,
+    ModeStatus, ModeSwitchReport, OnboardingOptions, OnboardingReport, OpenSessionOptions,
+    OpenSessionReport, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument, ProbeStatus,
+    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport,
+    RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeModelPreset,
+    RuntimeProbeReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
+    SkillsInventoryReport, SyncOptions, SyncReport, UpsertPersonalProviderOptions,
+    UseProfileReport, UseWorkspaceOptions, WorkspaceDoctorReport,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -43,6 +39,10 @@ use tauri::{
     WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
+
+mod commands;
+
+use commands::*;
 
 const ASK_WINDOW_LABEL: &str = "ask";
 const ASK_WINDOW_WIDTH: f64 = 980.0;
@@ -152,7 +152,7 @@ fn set_tray_busy(app: &tauri::AppHandle, action: Option<&str>) {
     update_tray_tooltip(app);
 }
 
-fn update_tray_tooltip(app: &tauri::AppHandle) {
+pub(crate) fn update_tray_tooltip(app: &tauri::AppHandle) {
     let doc = load_workspaces().unwrap_or_default();
     let (health, busy) =
         with_tray_state(app, |state| (state.health, state.busy.clone())).unwrap_or((None, None));
@@ -360,149 +360,6 @@ fn publish_doctor_report(app: &tauri::AppHandle, report: &DoctorReport) {
     }
 }
 
-#[tauri::command]
-fn list_workspaces_command() -> WorkspacesDocument {
-    ensure_default_workspace().unwrap_or_else(|_| load_workspaces().unwrap_or_default())
-}
-
-#[tauri::command]
-fn init_workspace_command(
-    path: String,
-    name: Option<String>,
-    git_root: bool,
-    app: tauri::AppHandle,
-) -> Result<InitWorkspaceReport, String> {
-    let report = init_workspace(Some(PathBuf::from(path)), name, git_root)
-        .map_err(|error| error.to_string())?;
-    let _ = use_workspace_with_options(
-        &report.name,
-        &UseWorkspaceOptions {
-            backup: true,
-            restart_gateways: false,
-        },
-    );
-    update_tray_tooltip(&app);
-    rebuild_tray_menu(&app);
-    Ok(report)
-}
-
-#[tauri::command]
-fn use_workspace_command(
-    name: String,
-    app: tauri::AppHandle,
-) -> Result<UseWorkspaceReport, String> {
-    let report = use_workspace_with_options(
-        &name,
-        &UseWorkspaceOptions {
-            backup: true,
-            restart_gateways: false,
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    update_tray_tooltip(&app);
-    rebuild_tray_menu(&app);
-    Ok(report)
-}
-
-#[tauri::command]
-fn workspace_status_command() -> Result<WorkspaceStatusReport, String> {
-    workspace_status(None).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn workspace_doctor_command() -> Result<WorkspaceDoctorReport, String> {
-    workspace_doctor().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn workspace_fix_command(migrate_claude_mcp: bool) -> Result<WorkspaceFixReport, String> {
-    workspace_fix(&WorkspaceFixOptions {
-        dry_run: false,
-        restart_gateways: false,
-        migrate_claude_mcp,
-    })
-    .map_err(|error| error.to_string())
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct RemoteProjectRow {
-    host_id: String,
-    project_id: String,
-    path: String,
-    runtimes: Vec<String>,
-    ssh_config_host: String,
-}
-
-#[tauri::command]
-fn list_remote_hosts_command() -> Result<RemoteHostsDocument, String> {
-    load_remote_hosts().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_remote_projects_command() -> Result<Vec<RemoteProjectRow>, String> {
-    let doc = load_remote_hosts().map_err(|error| error.to_string())?;
-    let mut rows = Vec::new();
-    for (host_id, host) in &doc.hosts {
-        for (project_id, project) in &host.projects {
-            rows.push(RemoteProjectRow {
-                host_id: host_id.clone(),
-                project_id: project_id.clone(),
-                path: project.path.clone(),
-                runtimes: project.runtimes.clone(),
-                ssh_config_host: host.ssh_config_host.clone(),
-            });
-        }
-    }
-    rows.sort_by(|a, b| (&a.host_id, &a.project_id).cmp(&(&b.host_id, &b.project_id)));
-    Ok(rows)
-}
-
-#[tauri::command]
-fn add_remote_host_command(
-    id: String,
-    ssh_config_host: String,
-) -> Result<RemoteHostsDocument, String> {
-    add_host(&id, &ssh_config_host).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn add_remote_project_command(
-    host: String,
-    name: String,
-    path: String,
-    runtimes: Vec<String>,
-) -> Result<RemoteHostsDocument, String> {
-    add_project(&host, &name, &path, runtimes).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn remove_remote_host_command(id: String) -> Result<RemoteHostsDocument, String> {
-    remove_host(&id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn remove_remote_project_command(
-    host: String,
-    name: String,
-) -> Result<RemoteHostsDocument, String> {
-    remove_project(&host, &name).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn run_remote_doctor_command(
-    target: String,
-    runtime: Option<String>,
-) -> Result<RemoteDoctorReport, String> {
-    run_remote_doctor(
-        &target,
-        RemoteDoctorOptions {
-            runtime_filter: runtime,
-            save_report: true,
-        },
-    )
-    .map_err(|error| error.to_string())
-}
-
 fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 
@@ -558,7 +415,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
     Menu::with_items(app, &[&show, &switch_sub, &ws_doctor, &doctor, &quit])
 }
 
-fn rebuild_tray_menu(app: &tauri::AppHandle) {
+pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) {
     if let Ok(menu) = build_tray_menu(app) {
         if let Some(tray) = app.tray_by_id("main") {
             let _ = tray.set_menu(Some(menu));
