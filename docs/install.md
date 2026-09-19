@@ -97,10 +97,12 @@ CI runs the same smoke matrix on every PR (see `.github/workflows/ci.yml`).
 
 ## Create a release (maintainers)
 
-Push a version tag to trigger `.github/workflows/release.yml`:
+See **[docs/release.md](./release.md)** for the full pre-tag checklist (`./scripts/check.sh release-preflight`, wait for green CI on `main`).
+
+Release CI already re-runs `fmt` + `clippy` before any installer build. Push a version tag only after that local/CI gate is green:
 
 ```bash
-git tag v0.1.0
+git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
