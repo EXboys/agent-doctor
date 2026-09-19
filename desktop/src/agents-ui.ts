@@ -1,0 +1,383 @@
+import { t, type MessageKey } from "./i18n";
+import { escapeHtml } from "./format";
+import type {
+  HermesSettings,
+  RepairPreviewResponse,
+  RuntimeDoctorResult,
+} from "./types";
+
+export const RUNTIME_SHORT: Record<string, string> = {
+  openclaw: "OC",
+  hermes: "HE",
+  "claude-code": "CC",
+  codex: "CX",
+  "deepseek-harness": "DSH",
+};
+
+export const ASK_RUNTIME_IDS = new Set([
+  "claude-code",
+  "codex",
+  "hermes",
+  "openclaw",
+  "deepseek-harness",
+]);
+
+export const BROWSER_MCP_RUNTIME_IDS = new Set([
+  "claude-code",
+  "codex",
+  "hermes",
+  "openclaw",
+]);
+
+export function isAskRuntimeId(runtimeId: string): boolean {
+  return ASK_RUNTIME_IDS.has(runtimeId);
+}
+
+export function supportsBrowserMcp(runtimeId: string): boolean {
+  return BROWSER_MCP_RUNTIME_IDS.has(runtimeId);
+}
+
+export function runtimeClass(id: string): string {
+  if (id in RUNTIME_SHORT) {
+    return id;
+  }
+  return "default";
+}
+
+export function metaRow(labelKey: MessageKey, value: string): string {
+  const compact = value.replace(/\s*\n\s*/g, " · ");
+  return `
+    <div class="meta-row">
+      <span class="meta-label">${t(labelKey)}</span>
+      <p class="meta-value" title="${escapeHtml(compact)}">${escapeHtml(compact)}</p>
+    </div>
+  `;
+}
+
+export function renderApiKeyRow(settings: HermesSettings): string {
+  if (!settings.api_key_env) {
+    return metaRow("meta.apiKey", t("meta.apiKeyOptional"));
+  }
+  if (settings.api_key_configured && settings.api_key_hint) {
+    return metaRow(
+      "meta.apiKey",
+      t("meta.apiKeySet", { hint: settings.api_key_hint }),
+    );
+  }
+  return metaRow(
+    "meta.apiKey",
+    t("meta.apiKeyMissing", { env: settings.api_key_env }),
+  );
+}
+
+export function genericRuntimeAdvancedMeta(
+  runtime: RuntimeDoctorResult,
+  includeVersion = true,
+): string {
+  return [
+    runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
+    includeVersion && runtime.version ? metaRow("meta.version", runtime.version) : "",
+    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
+    runtime.config_paths.length
+      ? metaRow("meta.config", runtime.config_paths.join(" · "))
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+export function hermesAdvancedMeta(
+  runtime: RuntimeDoctorResult,
+  hermesModel: HermesSettings | null,
+): string {
+  const model = hermesModel;
+  const keyNeedsAttention = Boolean(
+    model?.api_key_env && !model.api_key_configured,
+  );
+  return [
+    model?.provider ? metaRow("meta.provider", model.provider) : "",
+    model?.base_url ? metaRow("meta.gateway", model.base_url) : "",
+    model && !keyNeedsAttention ? renderApiKeyRow(model) : "",
+    genericRuntimeAdvancedMeta(runtime),
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+export function runtimeAdvancedMeta(
+  runtime: RuntimeDoctorResult,
+  hermesModel: HermesSettings | null,
+): string {
+  return runtime.id === "hermes"
+    ? hermesAdvancedMeta(runtime, hermesModel)
+    : genericRuntimeAdvancedMeta(runtime, Boolean(runtime.profile.gateway_url));
+}
+
+export type RuntimeCardActionContext = {
+  preview?: RepairPreviewResponse;
+  confirmPending: boolean;
+  diagnoseOpenForRuntime: boolean;
+  dismissed: boolean;
+  hasActiveWorkspace: boolean;
+  isAskRuntime: boolean;
+  supportsBrowserMcp: boolean;
+};
+
+export function canOpenSession(runtimeId: string): boolean {
+  return isAskRuntimeId(runtimeId);
+}
+
+function runtimeIsHealthy(preview?: RepairPreviewResponse): boolean {
+  if (!preview) {
+    return false;
+  }
+  return preview.summary.fail === 0 && preview.summary.warn === 0;
+}
+
+export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {
+  if (!preview) {
+    return false;
+  }
+  return preview.summary.fail > 0 || preview.summary.warn > 0;
+}
+
+export function renderRuntimeCardActions(
+  runtime: RuntimeDoctorResult,
+  advancedContent = "",
+  ctx: RuntimeCardActionContext,
+): string {
+  if (!runtime.installed) {
+    return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
+  }
+
+  if (!ctx.isAskRuntime) {
+    return canOpenSession(runtime.id)
+      ? `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`
+      : "";
+  }
+
+  const parts: string[] = [];
+  const preview = ctx.preview;
+  const canRepair = Boolean(preview?.can_apply_repair);
+  const healthy = runtimeIsHealthy(preview);
+  const diagnosed = Boolean(preview);
+  const detailOpenForThis = ctx.diagnoseOpenForRuntime;
+
+  if (!ctx.hasActiveWorkspace) {
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
+    );
+  }
+  if (canRepair && !detailOpenForThis) {
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
+    );
+  } else if (!healthy && !diagnosed) {
+    parts.push(
+      `<button type="button" class="${ctx.hasActiveWorkspace ? "btn-primary" : "btn-secondary"}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+  } else {
+    parts.push(
+      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+  }
+
+  parts.push(
+    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+  );
+
+  parts.push(
+    `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
+  );
+
+  parts.push(`
+    <details class="runtime-advanced">
+      <summary>${escapeHtml(t("runtime.advanced"))}</summary>
+      ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
+      <div class="runtime-advanced-actions">
+        <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
+        <button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>
+      </div>
+    </details>
+  `);
+
+  return parts.join("");
+}
+
+export function renderHermesCard(
+  runtime: RuntimeDoctorResult,
+  hermesModel: HermesSettings | null,
+  actionsHtml: string,
+  relatedResourcesHtml: string,
+): string {
+  const model = hermesModel ?? {
+    provider: "",
+    model: "",
+    base_url: runtime.profile.gateway_url ?? "",
+    api_key_env: null,
+    api_key_configured: false,
+    api_key_hint: null,
+  };
+
+  const keyNeedsAttention = Boolean(model.api_key_env && !model.api_key_configured);
+  const providerLabel =
+    model.provider === "custom"
+      ? model.base_url.toLowerCase().includes("deepseek")
+        ? `DeepSeek · ${t("meta.openaiCompatible")}`
+        : t("meta.openaiCompatible")
+      : model.provider;
+  const modelSummary = [providerLabel, model.model].filter(Boolean).join(" · ");
+  const summaryMeta = [
+    modelSummary ? metaRow("meta.model", modelSummary) : "",
+    keyNeedsAttention ? renderApiKeyRow(model) : "",
+  ]
+    .filter(Boolean)
+    .join("");
+  const badgeClass = keyNeedsAttention ? "warn" : "ok";
+  const badgeText = keyNeedsAttention
+    ? t("runtime.configAttention")
+    : t("runtime.installed");
+
+  return `
+    <article class="runtime hermes" data-runtime="hermes">
+      <div class="section-label runtime-card-label">
+        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
+        <span class="badge ${badgeClass}">${badgeText}</span>
+      </div>
+      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
+      ${actionsHtml ? `<div class="card-actions">${actionsHtml}</div>` : ""}
+      ${relatedResourcesHtml}
+      <div class="card-hint repair-hint" data-repair-hint hidden></div>
+    </article>
+  `;
+}
+
+export function renderRuntimeCard(
+  runtime: RuntimeDoctorResult,
+  hermesModel: HermesSettings | null,
+  actionsHtml: string,
+  relatedResourcesHtml: string,
+): string {
+  if (runtime.id === "hermes" && runtime.installed) {
+    return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml);
+  }
+
+  const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
+  const badgeClass = runtime.installed ? "ok" : "muted";
+  const summaryMeta = runtime.installed
+    ? runtime.id === "deepseek-harness"
+      ? [
+          runtime.version ? metaRow("meta.version", runtime.version) : "",
+          runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
+        ]
+          .filter(Boolean)
+          .join("")
+      : runtime.profile.gateway_url
+        ? metaRow("meta.gateway", runtime.profile.gateway_url)
+        : runtime.version
+          ? metaRow("meta.version", runtime.version)
+          : ""
+    : metaRow("meta.status", t("runtime.notDetected"));
+  const previewBadge =
+    runtime.id === "deepseek-harness"
+      ? `<span class="badge preview">${escapeHtml(t("runtime.developerPreview"))}</span>`
+      : "";
+
+  return `
+    <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
+      <div class="section-label runtime-card-label">
+        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
+        <span class="runtime-badges">
+          ${previewBadge}
+          <span class="badge ${badgeClass}">${state}</span>
+        </span>
+      </div>
+      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
+      ${actionsHtml ? `<div class="card-actions">${actionsHtml}</div>` : ""}
+      ${relatedResourcesHtml}
+      <div class="card-hint repair-hint" data-repair-hint hidden></div>
+      ${
+        !runtime.installed
+          ? `<p class="footnote runtime-install-footnote">${escapeHtml(t("runtime.installHint"))}</p>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+export function resolveActiveRuntimeId(
+  runtimes: RuntimeDoctorResult[],
+  activeRuntimeId: string | null,
+): string | null {
+  if (runtimes.length === 0) {
+    return null;
+  }
+  if (activeRuntimeId && runtimes.some((runtime) => runtime.id === activeRuntimeId)) {
+    return activeRuntimeId;
+  }
+  return runtimes.find((runtime) => runtime.installed)?.id ?? runtimes[0].id;
+}
+
+export function runtimeTabDotClass(
+  runtime: RuntimeDoctorResult,
+  preview?: RepairPreviewResponse,
+): string {
+  if (!runtime.installed) {
+    return "off";
+  }
+  if (runtimeHasProblems(preview)) {
+    return "warn";
+  }
+  return "ok";
+}
+
+export type RepairPreviewLookup =
+  | Map<string, RepairPreviewResponse>
+  | ((id: string) => RepairPreviewResponse | undefined);
+
+function lookupPreview(
+  previews: RepairPreviewLookup,
+  runtimeId: string,
+): RepairPreviewResponse | undefined {
+  return typeof previews === "function" ? previews(runtimeId) : previews.get(runtimeId);
+}
+
+export function renderRuntimeTabs(
+  runtimes: RuntimeDoctorResult[],
+  selectedId: string,
+  previews: RepairPreviewLookup,
+): string {
+  return runtimes
+    .map((runtime) => {
+      const active = runtime.id === selectedId;
+      const preview = lookupPreview(previews, runtime.id);
+      const shortName =
+        runtime.id === "claude-code"
+          ? "Claude"
+          : runtime.display_name.replace(/\s+Code$/i, "");
+      const stateLabel = !runtime.installed
+        ? t("runtime.notInstalled")
+        : runtimeHasProblems(preview)
+          ? t("runtime.configAttention")
+          : t("runtime.installed");
+      const tabMeta = [stateLabel, runtime.version].filter(Boolean).join(" · ");
+      const displayMeta =
+        runtime.id === "deepseek-harness"
+          ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")
+          : tabMeta;
+      return `
+        <button
+          type="button"
+          class="runtime-tab ${runtimeClass(runtime.id)} ${active ? "is-active" : ""}"
+          role="tab"
+          aria-selected="${active}"
+          data-runtime-tab="${runtime.id}"
+        >
+          <span class="runtime-tab-dot ${runtimeTabDotClass(runtime, preview)}" aria-hidden="true"></span>
+          <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
+          <span class="runtime-tab-meta">${escapeHtml(displayMeta)}</span>
+        </button>
+      `;
+    })
+    .join("");
+}

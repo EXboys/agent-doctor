@@ -11,6 +11,16 @@ import {
 } from "./i18n";
 import { escapeHtml, formatTime, formatRate, formatCount } from "./format";
 import {
+  isAskRuntimeId,
+  renderRuntimeCard,
+  renderRuntimeCardActions,
+  renderRuntimeTabs,
+  resolveActiveRuntimeId,
+  runtimeAdvancedMeta,
+  supportsBrowserMcp,
+  type RuntimeCardActionContext,
+} from "./agents-ui";
+import {
   preferredRepairFilter,
   renderDiagnosePendingHtml,
   renderRelatedResourcesHtml,
@@ -707,31 +717,6 @@ const langSwitchEl = document.querySelector<HTMLElement>(".lang-switch")!;
 const healthPillEl = document.querySelector<HTMLElement>("#health-pill")!;
 const healthLabelEl = document.querySelector<HTMLElement>("#health-label")!;
 
-const RUNTIME_SHORT: Record<string, string> = {
-  openclaw: "OC",
-  hermes: "HE",
-  "claude-code": "CC",
-  codex: "CX",
-  "deepseek-harness": "DSH",
-};
-
-const ASK_RUNTIME_IDS = new Set([
-  "claude-code",
-  "codex",
-  "hermes",
-  "openclaw",
-  "deepseek-harness",
-]);
-const BROWSER_MCP_RUNTIME_IDS = new Set(["claude-code", "codex", "hermes", "openclaw"]);
-
-function isAskRuntimeId(runtimeId: string): boolean {
-  return ASK_RUNTIME_IDS.has(runtimeId);
-}
-
-function supportsBrowserMcp(runtimeId: string): boolean {
-  return BROWSER_MCP_RUNTIME_IDS.has(runtimeId);
-}
-
 let lastReport: DoctorReport | null = null;
 let lastProfiles: ProfilesDocument | null = null;
 let lastWorkspaces: WorkspacesDocument | null = null;
@@ -745,13 +730,6 @@ let selectedPresetName = "";
 let selectedWorkspaceName = "";
 let presetMenuOpen = false;
 let workspaceBusy = false;
-
-function runtimeClass(id: string): string {
-  if (id in RUNTIME_SHORT) {
-    return id;
-  }
-  return "default";
-}
 
 function setStatusBanner(
   kind: "ok" | "warn" | "error" | "neutral",
@@ -815,32 +793,6 @@ function updateAgentsSecurityOverview(report: DoctorReport): void {
     count: String(issueCount),
   });
   agentsSecurityIssuesEl.classList.toggle("has-issues", issueCount > 0);
-}
-
-function metaRow(labelKey: Parameters<typeof t>[0], value: string): string {
-  const compact = value.replace(/\s*\n\s*/g, " · ");
-  return `
-    <div class="meta-row">
-      <span class="meta-label">${t(labelKey)}</span>
-      <p class="meta-value" title="${escapeHtml(compact)}">${escapeHtml(compact)}</p>
-    </div>
-  `;
-}
-
-function renderApiKeyRow(settings: HermesSettings): string {
-  if (!settings.api_key_env) {
-    return metaRow("meta.apiKey", t("meta.apiKeyOptional"));
-  }
-  if (settings.api_key_configured && settings.api_key_hint) {
-    return metaRow(
-      "meta.apiKey",
-      t("meta.apiKeySet", { hint: settings.api_key_hint }),
-    );
-  }
-  return metaRow(
-    "meta.apiKey",
-    t("meta.apiKeyMissing", { env: settings.api_key_env }),
-  );
 }
 
 const MAIN_COMPACT_WIDTH = 420;
@@ -983,6 +935,32 @@ function mountRepairPreview(report: RepairPreviewResponse, opts?: { resetFilter?
   void openDiagnoseDetail(report);
 }
 
+function runtimeCardActionContext(runtime: RuntimeDoctorResult): RuntimeCardActionContext {
+  return {
+    preview: repairPreviewByRuntime.get(runtime.id),
+    confirmPending: repairConfirmRuntimeIds.has(runtime.id),
+    diagnoseOpenForRuntime:
+      !diagnoseDetailEl.hidden &&
+      diagnoseDetailEl.dataset.runtime === runtime.id,
+    dismissed: dismissedDiagnoseRuntimes.has(runtime.id),
+    hasActiveWorkspace: hasActiveWorkspace(),
+    isAskRuntime: isAskRuntimeId(runtime.id),
+    supportsBrowserMcp: supportsBrowserMcp(runtime.id),
+  };
+}
+
+function buildRuntimeCardHtml(runtime: RuntimeDoctorResult): string {
+  const preview = repairPreviewByRuntime.get(runtime.id);
+  const advancedMeta = runtimeAdvancedMeta(runtime, hermesModel);
+  const actionsHtml = renderRuntimeCardActions(
+    runtime,
+    advancedMeta,
+    runtimeCardActionContext(runtime),
+  );
+  const relatedResourcesHtml = renderRelatedResourcesHtml(preview);
+  return renderRuntimeCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml);
+}
+
 function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
   const runtime = lastReport?.runtimes.find((item) => item.id === runtimeId);
   if (!runtime) {
@@ -992,7 +970,11 @@ function refreshRuntimeCardActions(card: HTMLElement, runtimeId: string): void {
   if (!actions) {
     return;
   }
-  const html = renderRuntimeCardActions(runtime, runtimeAdvancedMeta(runtime));
+  const html = renderRuntimeCardActions(
+    runtime,
+    runtimeAdvancedMeta(runtime, hermesModel),
+    runtimeCardActionContext(runtime),
+  );
   if (html) {
     actions.innerHTML = html;
   }
@@ -1013,88 +995,8 @@ function applyRepairFilter(runtime: string, filter: RepairStatusFilter): void {
   });
 }
 
-function runtimeHasProblems(runtimeId: string): boolean {
-  const report = repairPreviewByRuntime.get(runtimeId);
-  if (!report) {
-    return false;
-  }
-  return report.summary.fail > 0 || report.summary.warn > 0;
-}
-
-function runtimeIsHealthy(runtimeId: string): boolean {
-  const report = repairPreviewByRuntime.get(runtimeId);
-  if (!report) {
-    return false;
-  }
-  return report.summary.fail === 0 && report.summary.warn === 0;
-}
-
 function hasActiveWorkspace(): boolean {
   return Boolean(lastWorkspaces?.active);
-}
-
-function renderRuntimeCardActions(
-  runtime: RuntimeDoctorResult,
-  advancedContent = "",
-): string {
-  if (!runtime.installed) {
-    return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
-  }
-
-  const isAskRuntime = isAskRuntimeId(runtime.id);
-  if (!isAskRuntime) {
-    return canOpenSession(runtime.id)
-      ? `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`
-      : "";
-  }
-
-  const parts: string[] = [];
-  const preview = repairPreviewByRuntime.get(runtime.id);
-  const canRepair = Boolean(preview?.can_apply_repair);
-  const healthy = runtimeIsHealthy(runtime.id);
-  const diagnosed = Boolean(preview);
-  const detailOpenForThis =
-    !diagnoseDetailEl.hidden && diagnoseDetailEl.dataset.runtime === runtime.id;
-
-  if (!hasActiveWorkspace()) {
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
-    );
-  }
-  if (canRepair && !detailOpenForThis) {
-    parts.push(
-      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
-    );
-  } else if (!healthy && !diagnosed) {
-    parts.push(
-      `<button type="button" class="${hasActiveWorkspace() ? "btn-primary" : "btn-secondary"}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    );
-  } else {
-    parts.push(
-      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    );
-  }
-
-  parts.push(
-    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
-  );
-
-  parts.push(
-    `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
-  );
-
-  parts.push(`
-    <details class="runtime-advanced">
-      <summary>${escapeHtml(t("runtime.advanced"))}</summary>
-      ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
-      <div class="runtime-advanced-actions">
-        <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
-        <button type="button" class="btn-ghost" data-action="install-runtime">${t("runtime.install")}</button>
-      </div>
-    </details>
-  `);
-
-  return parts.join("");
 }
 
 function mountRelatedResources(card: HTMLElement, runtime: string): void {
@@ -1103,197 +1005,6 @@ function mountRelatedResources(card: HTMLElement, runtime: string): void {
     return;
   }
   el.outerHTML = renderRelatedResourcesHtml(repairPreviewByRuntime.get(runtime));
-}
-
-function genericRuntimeAdvancedMeta(
-  runtime: RuntimeDoctorResult,
-  includeVersion = true,
-): string {
-  return [
-    runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
-    includeVersion && runtime.version ? metaRow("meta.version", runtime.version) : "",
-    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
-    runtime.config_paths.length
-      ? metaRow("meta.config", runtime.config_paths.join(" · "))
-      : "",
-  ]
-    .filter(Boolean)
-    .join("");
-}
-
-function hermesAdvancedMeta(runtime: RuntimeDoctorResult): string {
-  const model = hermesModel;
-  const keyNeedsAttention = Boolean(
-    model?.api_key_env && !model.api_key_configured,
-  );
-  return [
-    model?.provider ? metaRow("meta.provider", model.provider) : "",
-    model?.base_url ? metaRow("meta.gateway", model.base_url) : "",
-    model && !keyNeedsAttention ? renderApiKeyRow(model) : "",
-    genericRuntimeAdvancedMeta(runtime),
-  ]
-    .filter(Boolean)
-    .join("");
-}
-
-function runtimeAdvancedMeta(runtime: RuntimeDoctorResult): string {
-  return runtime.id === "hermes"
-    ? hermesAdvancedMeta(runtime)
-    : genericRuntimeAdvancedMeta(runtime, Boolean(runtime.profile.gateway_url));
-}
-
-function renderHermesCard(runtime: RuntimeDoctorResult): string {
-  const model = hermesModel ?? {
-    provider: "",
-    model: "",
-    base_url: runtime.profile.gateway_url ?? "",
-    api_key_env: null,
-    api_key_configured: false,
-    api_key_hint: null,
-  };
-
-  const keyNeedsAttention = Boolean(model.api_key_env && !model.api_key_configured);
-  const providerLabel =
-    model.provider === "custom"
-      ? model.base_url.toLowerCase().includes("deepseek")
-        ? `DeepSeek · ${t("meta.openaiCompatible")}`
-        : t("meta.openaiCompatible")
-      : model.provider;
-  const modelSummary = [providerLabel, model.model].filter(Boolean).join(" · ");
-  const summaryMeta = [
-    modelSummary ? metaRow("meta.model", modelSummary) : "",
-    keyNeedsAttention ? renderApiKeyRow(model) : "",
-  ]
-    .filter(Boolean)
-    .join("");
-  const advancedMeta = hermesAdvancedMeta(runtime);
-  const actionButtons = renderRuntimeCardActions(runtime, advancedMeta);
-  const badgeClass = keyNeedsAttention ? "warn" : "ok";
-  const badgeText = keyNeedsAttention
-    ? t("runtime.configAttention")
-    : t("runtime.installed");
-
-  return `
-    <article class="runtime hermes" data-runtime="hermes">
-      <div class="section-label runtime-card-label">
-        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
-        <span class="badge ${badgeClass}">${badgeText}</span>
-      </div>
-      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
-      ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
-      ${renderRelatedResourcesHtml(repairPreviewByRuntime.get("hermes"))}
-      <div class="card-hint repair-hint" data-repair-hint hidden></div>
-    </article>
-  `;
-}
-
-function renderRuntimeCard(runtime: RuntimeDoctorResult): string {
-  if (runtime.id === "hermes" && runtime.installed) {
-    return renderHermesCard(runtime);
-  }
-
-  const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
-  const badgeClass = runtime.installed ? "ok" : "muted";
-  const advancedMeta = runtimeAdvancedMeta(runtime);
-  const actionButtons = renderRuntimeCardActions(runtime, advancedMeta);
-  const summaryMeta = runtime.installed
-    ? runtime.id === "deepseek-harness"
-      ? [
-          runtime.version ? metaRow("meta.version", runtime.version) : "",
-          runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
-        ]
-          .filter(Boolean)
-          .join("")
-      : runtime.profile.gateway_url
-        ? metaRow("meta.gateway", runtime.profile.gateway_url)
-        : runtime.version
-          ? metaRow("meta.version", runtime.version)
-          : ""
-    : metaRow("meta.status", t("runtime.notDetected"));
-  const previewBadge =
-    runtime.id === "deepseek-harness"
-      ? `<span class="badge preview">${escapeHtml(t("runtime.developerPreview"))}</span>`
-      : "";
-
-  return `
-    <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
-      <div class="section-label runtime-card-label">
-        <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
-        <span class="runtime-badges">
-          ${previewBadge}
-          <span class="badge ${badgeClass}">${state}</span>
-        </span>
-      </div>
-      ${summaryMeta ? `<div class="meta-grid">${summaryMeta}</div>` : ""}
-      ${actionButtons ? `<div class="card-actions">${actionButtons}</div>` : ""}
-      ${renderRelatedResourcesHtml(repairPreviewByRuntime.get(runtime.id))}
-      <div class="card-hint repair-hint" data-repair-hint hidden></div>
-      ${
-        !runtime.installed
-          ? `<p class="footnote runtime-install-footnote">${escapeHtml(t("runtime.installHint"))}</p>`
-          : ""
-      }
-    </article>
-  `;
-}
-
-function canOpenSession(runtimeId: string): boolean {
-  return isAskRuntimeId(runtimeId);
-}
-
-function resolveActiveRuntimeId(runtimes: RuntimeDoctorResult[]): string | null {
-  if (runtimes.length === 0) {
-    return null;
-  }
-  if (activeRuntimeId && runtimes.some((runtime) => runtime.id === activeRuntimeId)) {
-    return activeRuntimeId;
-  }
-  return runtimes.find((runtime) => runtime.installed)?.id ?? runtimes[0].id;
-}
-
-function runtimeTabDotClass(runtime: RuntimeDoctorResult): string {
-  if (!runtime.installed) {
-    return "off";
-  }
-  if (runtimeHasProblems(runtime.id)) {
-    return "warn";
-  }
-  return "ok";
-}
-
-function renderRuntimeTabs(runtimes: RuntimeDoctorResult[], selectedId: string): string {
-  return runtimes
-    .map((runtime) => {
-      const active = runtime.id === selectedId;
-      const shortName =
-        runtime.id === "claude-code"
-          ? "Claude"
-          : runtime.display_name.replace(/\s+Code$/i, "");
-      const stateLabel = !runtime.installed
-        ? t("runtime.notInstalled")
-        : runtimeHasProblems(runtime.id)
-          ? t("runtime.configAttention")
-          : t("runtime.installed");
-      const tabMeta = [stateLabel, runtime.version].filter(Boolean).join(" · ");
-      const displayMeta =
-        runtime.id === "deepseek-harness"
-          ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")
-          : tabMeta;
-      return `
-        <button
-          type="button"
-          class="runtime-tab ${runtimeClass(runtime.id)} ${active ? "is-active" : ""}"
-          role="tab"
-          aria-selected="${active}"
-          data-runtime-tab="${runtime.id}"
-        >
-          <span class="runtime-tab-dot ${runtimeTabDotClass(runtime)}" aria-hidden="true"></span>
-          <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
-          <span class="runtime-tab-meta">${escapeHtml(displayMeta)}</span>
-        </button>
-      `;
-    })
-    .join("");
 }
 
 async function loadHermesModel(): Promise<void> {
@@ -1335,12 +1046,16 @@ async function renderReport(report: DoctorReport) {
     return;
   }
 
-  const selectedId = resolveActiveRuntimeId(report.runtimes)!;
+  const selectedId = resolveActiveRuntimeId(report.runtimes, activeRuntimeId)!;
   activeRuntimeId = selectedId;
-  runtimeTabsEl.innerHTML = renderRuntimeTabs(report.runtimes, selectedId);
+  runtimeTabsEl.innerHTML = renderRuntimeTabs(
+    report.runtimes,
+    selectedId,
+    repairPreviewByRuntime,
+  );
 
   const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
-  runtimesEl.innerHTML = activeRuntime ? renderRuntimeCard(activeRuntime) : "";
+  runtimesEl.innerHTML = activeRuntime ? buildRuntimeCardHtml(activeRuntime) : "";
   const preview = selectedId ? repairPreviewByRuntime.get(selectedId) : undefined;
   if (preview && !dismissedDiagnoseRuntimes.has(selectedId)) {
     mountRepairPreview(preview);
