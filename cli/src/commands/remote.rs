@@ -1,12 +1,59 @@
 use agent_doctor_core::{
-    add_host, add_project, list_hosts, list_projects, remove_host, remove_project,
-    run_remote_doctor, ProbeStatus, RemoteDoctorOptions,
+    add_host, add_project, bootstrap_and_add_host, list_hosts, list_projects, remove_host,
+    remove_project, run_remote_doctor, BootstrapHostOptions, ProbeStatus, RemoteDoctorOptions,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
+
+pub fn host_bootstrap(
+    id: &str,
+    hostname: &str,
+    user: &str,
+    port: u16,
+    password: String,
+    label: Option<String>,
+) -> Result<()> {
+    bootstrap_and_add_host(BootstrapHostOptions {
+        id: id.to_string(),
+        hostname: hostname.to_string(),
+        user: user.to_string(),
+        port,
+        password,
+        label,
+    })?;
+    println!(
+        "Bootstrapped host '{id}' → {user}@{hostname}:{port} (ed25519 key auth; password discarded)"
+    );
+    Ok(())
+}
+
+/// Resolve one-time password from `--password-env` or `--password` (prefer env).
+pub fn resolve_bootstrap_password(
+    password: Option<String>,
+    password_env: Option<String>,
+) -> Result<String> {
+    if let Some(env_name) = password_env {
+        let name = env_name.trim();
+        if name.is_empty() {
+            bail!("--password-env name must not be empty");
+        }
+        match std::env::var(name) {
+            Ok(value) if !value.is_empty() => Ok(value),
+            Ok(_) => bail!("environment variable '{name}' is empty"),
+            Err(_) => bail!("environment variable '{name}' is not set"),
+        }
+    } else if let Some(pw) = password {
+        if pw.is_empty() {
+            bail!("--password must not be empty");
+        }
+        Ok(pw)
+    } else {
+        bail!("provide --password-env <VAR> (preferred) or --password for one-time SSH auth")
+    }
+}
 
 pub fn host_add(id: &str, ssh_config_host: &str) -> Result<()> {
     add_host(id, ssh_config_host)?;
-    println!("Added host '{id}' (ssh {ssh_config_host})");
+    println!("Added host '{id}' (ssh config Host {ssh_config_host}) [advanced]");
     Ok(())
 }
 
@@ -21,14 +68,28 @@ pub fn host_list(json: bool) -> Result<()> {
         return Ok(());
     }
     if hosts.is_empty() {
-        println!("No remote hosts. Add one with:");
+        println!("No remote hosts. Bootstrap one with:");
+        println!(
+            "  agent-doctor remote host bootstrap <id> --host <addr> --user <user> --password-env AD_SSH_PASSWORD"
+        );
+        println!("Or advanced (existing SSH config Host):");
         println!("  agent-doctor remote host add <id> --ssh-config-host <Host>");
         return Ok(());
     }
     for (id, entry) in hosts {
+        let kind = if entry.is_managed() {
+            "managed"
+        } else {
+            "legacy"
+        };
+        let key = entry
+            .identity_file
+            .as_deref()
+            .map(|p| format!("  key={p}"))
+            .unwrap_or_default();
         println!(
-            "{id}  ssh={}  projects={}",
-            entry.ssh_config_host,
+            "{id}  [{kind}]  {}  projects={}{key}",
+            entry.display_target(),
             entry.projects.len()
         );
     }

@@ -300,8 +300,36 @@
             </div>
             <p id="remote-status" class="section-footnote"></p>
 
+            <details class="remote-add" id="remote-bootstrap-host" open>
+              <summary data-i18n="remote.bootstrapHost">开通远程主机</summary>
+              <form id="remote-bootstrap-form" class="remote-form" autocomplete="off">
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.hostId">ID</span>
+                  <input id="remote-bootstrap-id" class="field-input" type="text" placeholder="prod-vps" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.hostname">地址</span>
+                  <input id="remote-bootstrap-hostname" class="field-input" type="text" placeholder="1.2.3.4" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.user">用户</span>
+                  <input id="remote-bootstrap-user" class="field-input" type="text" placeholder="ubuntu" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.port">端口</span>
+                  <input id="remote-bootstrap-port" class="field-input" type="number" min="1" max="65535" value="22" required />
+                </label>
+                <label class="field-row field-row-inline">
+                  <span class="field-label" data-i18n="remote.password">密码</span>
+                  <input id="remote-bootstrap-password" class="field-input" type="password" autocomplete="new-password" required />
+                </label>
+                <p class="section-footnote" data-i18n="remote.passwordHint">仅本次开通使用，不会保存；开通后改用本机 ed25519 密钥。</p>
+                <button type="submit" class="btn-secondary btn-compact" data-i18n="remote.bootstrapSave">开通并保存</button>
+              </form>
+            </details>
+
             <details class="remote-add" id="remote-add-host">
-              <summary data-i18n="remote.addHost">登记 Host</summary>
+              <summary data-i18n="remote.addHost">已有 SSH Host 别名</summary>
               <form id="remote-host-form" class="remote-form" autocomplete="off">
                 <label class="field-row field-row-inline">
                   <span class="field-label" data-i18n="remote.hostId">ID</span>

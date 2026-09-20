@@ -48,7 +48,7 @@
 - [x] Evotown onboarding panel: connect URL/key, one-click doctor + sync + policy pull
 - [x] Tray workspace switch + tooltip (`Agent Doctor · workspace: …`)
 - [x] Tray compact status (small enhancement, not a product skin): tooltip shows health + active workspace + personal/team mode; refresh after doctor/repair/workspace switch; brief “busy” state while a tray action runs. No Dynamic Island chrome, theme pack, or floating HUD.
-- [x] Keychain storage for API keys (`settings.db` + OS keychain; legacy `.env` one-shot migrate)
+- [x] Local secrets file for API keys (`settings.db` + `secrets.json` / Windows DPAPI; optional `AGENT_DOCTOR_SECRETS_BACKEND=keyring`; legacy `.env` one-shot migrate)
 
 ## P2 — Project workspaces
 
@@ -80,7 +80,7 @@
 - [x] Codex CODEX_HOME isolation marker + doctor guard
 - [ ] Team baseline drift — model provider / MCP / Skill full matrix
 - [ ] SkillLite adapter (optional runtime)
-- [x] Agentless remote doctor (SSH) — `remote host|project|doctor` read-only; see [remote.md](remote.md)
+- [x] Agentless remote doctor (SSH) — bootstrap (password→ed25519) + `remote host|project|doctor` read-only; see [remote.md](remote.md)
 - [ ] Remote repair / workspace over SSH
 
 ## Optional integrations

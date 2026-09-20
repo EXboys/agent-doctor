@@ -58,10 +58,11 @@ pub fn run_remote_doctor(target: &str, options: RemoteDoctorOptions) -> Result<R
         .with_context(|| format!("unknown project '{project_id}' on host '{host_id}'"))?
         .clone();
 
-    let backend = SshBackend::new(&host.ssh_config_host);
+    let backend = SshBackend::from_host_entry(host)?;
+    let target_label = host.display_target();
     let mut report = run_remote_doctor_with_backend(
         &host_id,
-        &host.ssh_config_host,
+        &target_label,
         &project_id,
         &project,
         &backend,

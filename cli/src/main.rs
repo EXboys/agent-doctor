@@ -260,7 +260,30 @@ enum RemoteAction {
 
 #[derive(Subcommand)]
 enum RemoteHostAction {
-    /// Register a host (OpenSSH config Host alias)
+    /// Bootstrap a VPS: one-time password → install ed25519 key → save registry
+    Bootstrap {
+        /// Local registry id (e.g. prod-vps)
+        id: String,
+        /// Hostname or IP
+        #[arg(long = "host")]
+        hostname: String,
+        /// SSH user
+        #[arg(long)]
+        user: String,
+        /// SSH port
+        #[arg(long, default_value_t = 22)]
+        port: u16,
+        /// One-time password (prefer --password-env to avoid shell history)
+        #[arg(long)]
+        password: Option<String>,
+        /// Read one-time password from this environment variable (e.g. AD_SSH_PASSWORD)
+        #[arg(long)]
+        password_env: Option<String>,
+        /// Optional display label stored as ssh_config_host
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Advanced: register an existing OpenSSH config Host alias
     Add {
         /// Local registry id (e.g. prod-vps)
         id: String,
@@ -855,6 +878,26 @@ fn main() -> Result<()> {
         },
         Commands::Remote { action } => match action {
             RemoteAction::Host { action } => match action {
+                RemoteHostAction::Bootstrap {
+                    id,
+                    hostname,
+                    user,
+                    port,
+                    password,
+                    password_env,
+                    label,
+                } => {
+                    let password =
+                        commands::remote::resolve_bootstrap_password(password, password_env)?;
+                    commands::remote::host_bootstrap(
+                        &id,
+                        &hostname,
+                        &user,
+                        port,
+                        password,
+                        label,
+                    )?
+                }
                 RemoteHostAction::Add {
                     id,
                     ssh_config_host,

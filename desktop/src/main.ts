@@ -605,8 +605,14 @@ const remoteListEl = document.querySelector<HTMLUListElement>("#remote-list")!;
 const remoteChecksEl = document.querySelector<HTMLUListElement>("#remote-checks")!;
 const remoteHintEl = document.querySelector<HTMLElement>("#remote-hint")!;
 const remoteRefreshEl = document.querySelector<HTMLButtonElement>("#remote-refresh")!;
+const remoteBootstrapFormEl = document.querySelector<HTMLFormElement>("#remote-bootstrap-form")!;
 const remoteHostFormEl = document.querySelector<HTMLFormElement>("#remote-host-form")!;
 const remoteProjectFormEl = document.querySelector<HTMLFormElement>("#remote-project-form")!;
+const remoteBootstrapIdEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-id")!;
+const remoteBootstrapHostnameEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-hostname")!;
+const remoteBootstrapUserEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-user")!;
+const remoteBootstrapPortEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-port")!;
+const remoteBootstrapPasswordEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-password")!;
 const remoteHostIdEl = document.querySelector<HTMLInputElement>("#remote-host-id")!;
 const remoteSshHostEl = document.querySelector<HTMLInputElement>("#remote-ssh-host")!;
 const remoteProjectHostEl = document.querySelector<HTMLSelectElement>("#remote-project-host")!;
@@ -2104,6 +2110,15 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
 
 let lastRemoteProjects: RemoteProjectRow[] = [];
 
+function remoteHostLabel(id: string, host: RemoteHostsDocument["hosts"][string]): string {
+  if (host.hostname) {
+    const user = host.user || "root";
+    const port = host.port ?? 22;
+    return port === 22 ? `${user}@${host.hostname}` : `${user}@${host.hostname}:${port}`;
+  }
+  return host.ssh_config_host || id;
+}
+
 function fillRemoteHostSelect(doc: RemoteHostsDocument): void {
   const ids = Object.keys(doc.hosts).sort();
   const previous = remoteProjectHostEl.value;
@@ -2116,10 +2131,10 @@ function fillRemoteHostSelect(doc: RemoteHostsDocument): void {
   remoteProjectHostEl.innerHTML =
     `<option value="">${escapeHtml(t("remote.selectHost"))}</option>` +
     ids
-      .map(
-        (id) =>
-          `<option value="${escapeHtml(id)}">${escapeHtml(id)} (${escapeHtml(doc.hosts[id]?.ssh_config_host ?? id)})</option>`,
-      )
+      .map((id) => {
+        const label = remoteHostLabel(id, doc.hosts[id]!);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(id)} (${escapeHtml(label)})</option>`;
+      })
       .join("");
   if (previous && ids.includes(previous)) {
     remoteProjectHostEl.value = previous;
@@ -3271,6 +3286,46 @@ remoteListEl.addEventListener("click", (event) => {
       void removeRemoteProjectUi(host, project);
     }
   }
+});
+
+remoteBootstrapFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const id = remoteBootstrapIdEl.value.trim();
+  const hostname = remoteBootstrapHostnameEl.value.trim();
+  const user = remoteBootstrapUserEl.value.trim();
+  const port = Number(remoteBootstrapPortEl.value) || 22;
+  const password = remoteBootstrapPasswordEl.value;
+  if (!id || !hostname || !user || !password || remoteBusy) {
+    return;
+  }
+  remoteBusy = true;
+  remoteHintEl.textContent = t("remote.bootstrapRunning");
+  void (async () => {
+    try {
+      await invoke("bootstrap_remote_host_command", {
+        id,
+        hostname,
+        user,
+        port,
+        password,
+      });
+      remoteBootstrapIdEl.value = "";
+      remoteBootstrapHostnameEl.value = "";
+      remoteBootstrapUserEl.value = "";
+      remoteBootstrapPortEl.value = "22";
+      remoteBootstrapPasswordEl.value = "";
+      remoteHintEl.textContent = t("remote.bootstrapSaved", { id });
+      await loadRemoteProjects();
+      const bootstrap = document.querySelector<HTMLDetailsElement>("#remote-bootstrap-host");
+      if (bootstrap) {
+        bootstrap.open = false;
+      }
+    } catch (error) {
+      remoteHintEl.textContent = t("remote.bootstrapFailed", { error: String(error) });
+    } finally {
+      remoteBusy = false;
+    }
+  })();
 });
 
 remoteHostFormEl.addEventListener("submit", (event) => {

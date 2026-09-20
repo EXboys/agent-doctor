@@ -437,6 +437,10 @@ export interface RemoteHostsDocument {
     string,
     {
       ssh_config_host: string;
+      hostname?: string | null;
+      user?: string | null;
+      port?: number | null;
+      identity_file?: string | null;
       projects: Record<string, { path: string; runtimes: string[] }>;
     }
   >;
@@ -448,6 +452,7 @@ export interface RemoteProjectRow {
   path: string;
   runtimes: string[];
   ssh_config_host: string;
+  managed?: boolean;
 }
 
 export interface RemoteProbeCheck {

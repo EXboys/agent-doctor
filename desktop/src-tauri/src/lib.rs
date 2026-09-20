@@ -1243,6 +1243,7 @@ pub fn run() {
             workspace_fix_command,
             list_remote_hosts_command,
             list_remote_projects_command,
+            bootstrap_remote_host_command,
             add_remote_host_command,
             add_remote_project_command,
             remove_remote_host_command,

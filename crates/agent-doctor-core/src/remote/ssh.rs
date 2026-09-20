@@ -6,10 +6,78 @@ use anyhow::{bail, Context, Result};
 
 use crate::exec::{shell_quote, ExecBackend, ExecOutput, DEFAULT_EXEC_TIMEOUT};
 
+use super::registry::RemoteHostEntry;
+
+/// How to address a remote host over OpenSSH.
+#[derive(Debug, Clone)]
+pub enum SshTarget {
+    /// Legacy / advanced: `Host` alias from ~/.ssh/config.
+    ConfigHost { host: String },
+    /// Managed bootstrap path: user@hostname + identity file.
+    Direct {
+        user: String,
+        hostname: String,
+        port: u16,
+        identity_file: PathBuf,
+    },
+}
+
+impl SshTarget {
+    pub fn from_host_entry(entry: &RemoteHostEntry) -> Result<Self> {
+        if entry.is_managed() {
+            let hostname = entry
+                .hostname
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .context("managed host missing hostname")?
+                .to_string();
+            let identity = entry
+                .identity_file
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .context("managed host missing identity_file")?;
+            Ok(Self::Direct {
+                user: entry.managed_user().to_string(),
+                hostname,
+                port: entry.managed_port(),
+                identity_file: PathBuf::from(identity),
+            })
+        } else {
+            let host = entry.ssh_config_host.trim();
+            if host.is_empty() {
+                bail!("host entry has neither managed identity nor ssh_config_host");
+            }
+            Ok(Self::ConfigHost {
+                host: host.to_string(),
+            })
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::ConfigHost { host } => host.clone(),
+            Self::Direct {
+                user,
+                hostname,
+                port,
+                ..
+            } => {
+                if *port == 22 {
+                    format!("{user}@{hostname}")
+                } else {
+                    format!("{user}@{hostname}:{port}")
+                }
+            }
+        }
+    }
+}
+
 /// OpenSSH-backed execution (BatchMode; no password prompts).
 #[derive(Debug, Clone)]
 pub struct SshBackend {
-    pub ssh_config_host: String,
+    pub target: SshTarget,
     pub connect_timeout_secs: u64,
     pub command_timeout: Duration,
 }
@@ -17,10 +85,43 @@ pub struct SshBackend {
 impl SshBackend {
     pub fn new(ssh_config_host: impl Into<String>) -> Self {
         Self {
-            ssh_config_host: ssh_config_host.into(),
+            target: SshTarget::ConfigHost {
+                host: ssh_config_host.into(),
+            },
             connect_timeout_secs: 10,
             command_timeout: DEFAULT_EXEC_TIMEOUT,
         }
+    }
+
+    pub fn from_host_entry(entry: &RemoteHostEntry) -> Result<Self> {
+        Ok(Self {
+            target: SshTarget::from_host_entry(entry)?,
+            connect_timeout_secs: 10,
+            command_timeout: DEFAULT_EXEC_TIMEOUT,
+        })
+    }
+
+    pub fn direct(
+        user: impl Into<String>,
+        hostname: impl Into<String>,
+        port: u16,
+        identity_file: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            target: SshTarget::Direct {
+                user: user.into(),
+                hostname: hostname.into(),
+                port,
+                identity_file: identity_file.into(),
+            },
+            connect_timeout_secs: 10,
+            command_timeout: DEFAULT_EXEC_TIMEOUT,
+        }
+    }
+
+    /// Back-compat accessor for callers that only know config-host mode.
+    pub fn ssh_config_host(&self) -> String {
+        self.target.label()
     }
 
     fn ssh_base(&self) -> Command {
@@ -30,8 +131,26 @@ impl SshBackend {
             .arg("-o")
             .arg(format!("ConnectTimeout={}", self.connect_timeout_secs))
             .arg("-o")
-            .arg("StrictHostKeyChecking=accept-new")
-            .arg(&self.ssh_config_host);
+            .arg("StrictHostKeyChecking=accept-new");
+        match &self.target {
+            SshTarget::ConfigHost { host } => {
+                cmd.arg(host);
+            }
+            SshTarget::Direct {
+                user,
+                hostname,
+                port,
+                identity_file,
+            } => {
+                cmd.arg("-i")
+                    .arg(identity_file)
+                    .arg("-o")
+                    .arg("IdentitiesOnly=yes")
+                    .arg("-p")
+                    .arg(port.to_string())
+                    .arg(format!("{user}@{hostname}"));
+            }
+        }
         cmd
     }
 
@@ -44,25 +163,14 @@ impl SshBackend {
             .arg(remote_script)
             .stdin(Stdio::null());
 
+        let label = self.target.label();
         let output = cmd.output().with_context(|| {
-            format!(
-                "failed to spawn ssh to '{}'; is OpenSSH client installed?",
-                self.ssh_config_host
-            )
+            format!("failed to spawn ssh to '{label}'; is OpenSSH client installed?")
         })?;
 
         let status = output.status.code().unwrap_or(-1);
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-        if status != 0 {
-            let hint = classify_ssh_error(&stderr);
-            if !hint.is_empty() {
-                // Still return ExecOutput for callers that inspect status; context on hard fails
-                // is added by higher layers when needed.
-                let _ = hint;
-            }
-        }
 
         Ok(ExecOutput {
             status,
@@ -102,7 +210,7 @@ impl ExecBackend for SshBackend {
             bail!(
                 "read {} on '{}': {}",
                 path.display(),
-                self.ssh_config_host,
+                self.target.label(),
                 format_ssh_failure(&output)
             );
         }
@@ -126,13 +234,13 @@ impl ExecBackend for SshBackend {
         if !output.success() {
             bail!(
                 "resolve HOME on '{}': {}",
-                self.ssh_config_host,
+                self.target.label(),
                 format_ssh_failure(&output)
             );
         }
         let home = output.stdout_trim();
         if home.is_empty() {
-            bail!("remote HOME empty on '{}'", self.ssh_config_host);
+            bail!("remote HOME empty on '{}'", self.target.label());
         }
         Ok(PathBuf::from(home))
     }
@@ -157,11 +265,11 @@ fn format_ssh_failure(output: &ExecOutput) -> String {
 fn classify_ssh_error(stderr: &str) -> &'static str {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("permission denied") {
-        "authentication failed — use ssh-agent / key auth (BatchMode; no password)"
+        "authentication failed — use key auth (BatchMode; no password)"
     } else if lower.contains("could not resolve hostname")
         || lower.contains("name or service not known")
     {
-        "host not found — check ~/.ssh/config Host alias"
+        "host not found — check hostname / ~/.ssh/config Host alias"
     } else if lower.contains("connection timed out") || lower.contains("operation timed out") {
         "connection timed out"
     } else if lower.contains("host key verification failed") {
@@ -177,6 +285,8 @@ fn classify_ssh_error(stderr: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::exec::shell_quote;
+    use crate::remote::registry::RemoteHostEntry;
+    use std::collections::BTreeMap;
 
     #[test]
     fn shell_quote_escapes_single_quotes() {
@@ -188,5 +298,49 @@ mod tests {
         assert!(
             classify_ssh_error("Permission denied (publickey).").contains("authentication failed")
         );
+    }
+
+    #[test]
+    fn target_from_managed_entry() {
+        let entry = RemoteHostEntry {
+            ssh_config_host: String::new(),
+            hostname: Some("10.0.0.1".into()),
+            user: Some("ubuntu".into()),
+            port: Some(2222),
+            identity_file: Some("/keys/box".into()),
+            projects: BTreeMap::new(),
+        };
+        let target = SshTarget::from_host_entry(&entry).unwrap();
+        match target {
+            SshTarget::Direct {
+                user,
+                hostname,
+                port,
+                identity_file,
+            } => {
+                assert_eq!(user, "ubuntu");
+                assert_eq!(hostname, "10.0.0.1");
+                assert_eq!(port, 2222);
+                assert_eq!(identity_file, PathBuf::from("/keys/box"));
+            }
+            other => panic!("expected Direct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_from_legacy_entry() {
+        let entry = RemoteHostEntry {
+            ssh_config_host: "prod-vps".into(),
+            hostname: None,
+            user: None,
+            port: None,
+            identity_file: None,
+            projects: BTreeMap::new(),
+        };
+        let target = SshTarget::from_host_entry(&entry).unwrap();
+        match target {
+            SshTarget::ConfigHost { host } => assert_eq!(host, "prod-vps"),
+            other => panic!("expected ConfigHost, got {other:?}"),
+        }
     }
 }
