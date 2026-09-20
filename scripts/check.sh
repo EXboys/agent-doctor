@@ -16,6 +16,7 @@ Commands:
   fmt-check       Check rustfmt (CI)
   clippy-cli      Clippy for core + CLI
   clippy-desktop  Clippy for Tauri crate (needs GTK on Linux)
+  lint            fmt-check + clippy-cli (hard local gate; used by git hooks)
   test-cli        Test core + CLI
   build-cli       Release-build CLI
   frontend        Build desktop frontend (npm)
@@ -28,6 +29,7 @@ Commands:
   help            Show this message
 
 Examples:
+  ./scripts/check.sh lint
   ./scripts/check.sh cli
   ./scripts/check.sh release-preflight
   ./scripts/release.sh
@@ -70,17 +72,22 @@ should_check_desktop() {
   return 1
 }
 
-run_cli_suite() {
+run_lint() {
+  echo "==> lint: fmt-check + clippy (matches CI; enforced by pre-commit / pre-push)"
   run_fmt_check
   run_clippy_cli
+  echo "==> lint OK"
+}
+
+run_cli_suite() {
+  run_lint
   run_test_cli
   run_build_cli
 }
 
 run_release_preflight() {
   echo "==> release-preflight: fmt + clippy + tests (must pass before tagging v*)"
-  run_fmt_check
-  run_clippy_cli
+  run_lint
   run_test_cli
   if should_check_desktop; then
     run_desktop_rust
@@ -111,6 +118,7 @@ case "$command" in
   fmt-check) run_fmt_check ;;
   clippy-cli) run_clippy_cli ;;
   clippy-desktop) run_clippy_desktop ;;
+  lint) run_lint ;;
   test-cli) run_test_cli ;;
   build-cli) run_build_cli ;;
   frontend) run_frontend ;;

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Hard local gate: rustfmt + clippy before every commit that touches Rust.
+# Install: ./scripts/install-git-hooks.sh
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [[ "${AGENT_DOCTOR_SKIP_LINT:-}" == "1" ]]; then
+  echo "pre-commit: AGENT_DOCTOR_SKIP_LINT=1 — skipping fmt/clippy (DO NOT use for real work)" >&2
+  exit 0
+fi
+
+# Only gate commits that touch Rust / Cargo / rustfmt / clippy config.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -Eq '\.rs$|^Cargo\.(toml|lock)$|^rustfmt\.toml$|^clippy\.toml$|^rust-toolchain\.toml$'; then
+  exit 0
+fi
+
+echo "pre-commit: running fmt-check + clippy (./scripts/check.sh lint)…" >&2
+./scripts/check.sh lint
+echo "pre-commit: lint OK" >&2
+exit 0

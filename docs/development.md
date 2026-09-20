@@ -18,6 +18,16 @@ Edit `~/.config/agent-doctor/profiles.yaml` to add your own presets. Example: [p
 ### Quick commands
 
 ```bash
+# Hard local gate (fmt + clippy) — also enforced by git hooks
+make lint
+# or
+./scripts/check.sh lint
+
+# Install / refresh git hooks (once per clone; release.sh also installs)
+./scripts/install-git-hooks.sh
+# or
+make hooks
+
 # Same as CI on any OS (CLI + frontend)
 make check
 # or
@@ -31,6 +41,12 @@ make fmt
 # or
 ./scripts/check.sh fmt
 ```
+
+Git hooks (after `./scripts/install-git-hooks.sh`):
+
+- **pre-commit** — if the commit touches Rust/Cargo, runs `./scripts/check.sh lint`
+- **pre-push** — **every** push runs lint; pushing `v*` tags also requires release-preflight
+- Emergency only: `AGENT_DOCTOR_SKIP_LINT=1` (do not use for real work)
 
 ### Cargo aliases
 

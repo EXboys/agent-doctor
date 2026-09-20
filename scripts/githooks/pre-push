@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
-# Blocks pushing v* tags unless release-preflight has passed for that commit.
+# Hard local gate:
+#   1) Every push → fmt-check + clippy (same as CI)
+#   2) Pushing v* tags → full release-preflight (fmt + clippy + tests [+ desktop])
 # Install: ./scripts/install-git-hooks.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$ROOT" || ! -f "$ROOT/scripts/check.sh" ]]; then
+  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "$ROOT"
 
+# --- Always: fmt + clippy before anything reaches the remote ---------------
+if [[ "${AGENT_DOCTOR_SKIP_LINT:-}" == "1" ]]; then
+  echo "pre-push: AGENT_DOCTOR_SKIP_LINT=1 — skipping fmt/clippy (DO NOT use for real work)" >&2
+else
+  echo "pre-push: running fmt-check + clippy (./scripts/check.sh lint)…" >&2
+  ./scripts/check.sh lint
+  echo "pre-push: lint OK" >&2
+fi
+
+# --- Extra: v* tag pushes need full release-preflight ----------------------
 if [[ "${AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT:-}" == "1" ]]; then
   echo "pre-push: AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT=1 — skipping release gate" >&2
   exit 0

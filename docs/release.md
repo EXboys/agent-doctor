@@ -4,10 +4,10 @@ Installer builds run only on `v*` tags (`.github/workflows/release.yml`).
 
 ## Local gate (required)
 
-Detect fmt/clippy/test failures **on your machine** before anything hits GitHub Releases:
+Detect fmt/clippy failures **on your machine** before anything hits GitHub:
 
 ```bash
-# one-time per clone
+# one-time per clone (installs pre-commit + pre-push)
 ./scripts/install-git-hooks.sh
 
 # preferred: all-in-one (preflight → tag → push)
@@ -17,10 +17,13 @@ Detect fmt/clippy/test failures **on your machine** before anything hits GitHub 
 
 What this enforces:
 
-1. `./scripts/check.sh release-preflight` runs `fmt --check`, clippy (`-D warnings`), and tests (+ desktop clippy on macOS).
-2. A successful preflight writes `.git/agent-doctor-preflight.sha` for the current `HEAD`.
-3. The **pre-push** hook blocks `refs/tags/v*` unless that stamp matches the tagged commit (otherwise it runs preflight again).
-4. Emergency only: `AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT=1 git push origin vX.Y.Z`
+1. **Every commit** that touches Rust runs `./scripts/check.sh lint` (`fmt --check` + clippy `-D warnings`) via **pre-commit**.
+2. **Every push** (branch or tag) runs the same lint via **pre-push**.
+3. `./scripts/check.sh release-preflight` runs lint + tests (+ desktop clippy on macOS) and writes `.git/agent-doctor-preflight.sha`.
+4. Pushing `refs/tags/v*` additionally requires that stamp (or runs preflight again).
+5. Emergency only:
+   - `AGENT_DOCTOR_SKIP_LINT=1 git push …`
+   - `AGENT_DOCTOR_SKIP_RELEASE_PREFLIGHT=1 git push origin vX.Y.Z`
 
 Do **not** `git tag` + `git push --tags` without installing the hook or using `scripts/release.sh`.
 

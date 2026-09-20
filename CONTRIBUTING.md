@@ -11,7 +11,8 @@ Agent Doctor is in early bootstrap. Before opening large PRs, please open an iss
 - `cli/` — `agent-doctor` binary (Rust)
 - `desktop/` — Tauri menubar app (Rust + TypeScript UI)
 - `adapters/` — adapter contract docs; implementations live in `agent-doctor-core`
-- `scripts/check.sh` — local fmt/clippy/test (see [docs/development.md](docs/development.md))
+- `scripts/check.sh` — local fmt/clippy/test; run `./scripts/check.sh lint` (or `make lint`) before push
+- `scripts/install-git-hooks.sh` — installs hard pre-commit / pre-push fmt+clippy gates (required once per clone)
 - `docs/` — user docs; optional enterprise integration in `enterprise.md`
 
 ## Code of conduct

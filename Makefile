@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check clippy-cli clippy-desktop test-cli build-cli frontend cli desktop check all
+.PHONY: fmt fmt-check clippy-cli clippy-desktop lint test-cli build-cli frontend cli desktop check all hooks
 
 fmt:
 	cargo fmt --all
@@ -12,6 +12,13 @@ clippy-cli:
 clippy-desktop:
 	cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings
 
+# Hard local gate (same as git pre-commit / pre-push).
+lint:
+	./scripts/check.sh lint
+
+hooks:
+	./scripts/install-git-hooks.sh
+
 test-cli:
 	cargo test -p agent-doctor-core -p agent-doctor
 
@@ -21,7 +28,7 @@ build-cli:
 frontend:
 	cd desktop && npm ci && npm run build
 
-cli: fmt-check clippy-cli test-cli build-cli
+cli: lint test-cli build-cli
 
 desktop: clippy-desktop
 
