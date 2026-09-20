@@ -1226,6 +1226,88 @@ body.is-diagnose-open .diagnose-detail {
   box-shadow: var(--shadow-soft);
 }
 
+.first-run {
+  margin: 0 0 10px;
+  padding: 16px 14px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--accent) 10%, var(--surface)) 0%,
+      var(--surface) 55%
+    );
+  box-shadow: var(--shadow-soft);
+}
+
+.first-run-eyebrow {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.first-run-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.first-run-desc {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.first-run-target {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 12px;
+  padding: 10px 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-inset, var(--surface));
+}
+
+.first-run-target strong {
+  font-size: 0.8rem;
+}
+
+.first-run-target span {
+  color: var(--text-soft);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.first-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.first-run-actions .btn-scan {
+  min-width: 7.5rem;
+}
+
+.first-run-footnote {
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  font-size: 0.58rem;
+  line-height: 1.35;
+}
+
+#panel-diagnose.is-first-run .agents-main {
+  display: none;
+}
+
+#panel-diagnose.is-first-run-done .first-run {
+  display: none;
+}
+
 .agents-readiness-ring {
   --readiness: 0;
   position: relative;

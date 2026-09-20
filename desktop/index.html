@@ -72,6 +72,25 @@
 
       <div class="main-panels">
         <section class="main-panel is-active" id="panel-diagnose" role="tabpanel" data-main-panel="diagnose">
+            <section class="first-run" id="first-run" hidden>
+              <p class="first-run-eyebrow" data-i18n="firstRun.eyebrow">首次设置</p>
+              <h2 class="first-run-title" id="first-run-title" data-i18n="firstRun.title">先让本机 Agent 跑起来</h2>
+              <p class="first-run-desc" id="first-run-desc" data-i18n="firstRun.desc">扫描本机已装的 Agent，找出最该先修的一个问题。</p>
+              <div class="first-run-target" id="first-run-target" hidden>
+                <strong id="first-run-target-name">—</strong>
+                <span id="first-run-target-meta">—</span>
+              </div>
+              <div class="first-run-actions">
+                <button type="button" class="btn-scan" id="first-run-primary">
+                  <span class="btn-label" id="first-run-primary-label" data-i18n="firstRun.scan">扫描环境</span>
+                  <span class="spinner" id="first-run-spinner" hidden aria-hidden="true"></span>
+                </button>
+                <button type="button" class="btn-ghost btn-compact" id="first-run-secondary" data-i18n="firstRun.skip">稍后再说</button>
+              </div>
+              <p class="first-run-footnote" id="first-run-footnote" data-i18n="firstRun.footnote">修好后可随时用顶部「扫描」复查。</p>
+            </section>
+
+            <div class="agents-main" id="agents-main">
             <div class="ws-chip" id="agents-ws-chip">
               <span class="ws-chip-label">
                 <span data-i18n="agents.wsCurrent">当前工作区</span>
@@ -107,6 +126,7 @@
               <span id="runtime-count" class="sr-only">—</span>
               <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
             </section>
+            </div>
         </section>
 
         <section class="main-panel" id="panel-resources" role="tabpanel" data-main-panel="resources" hidden>

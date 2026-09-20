@@ -49,6 +49,7 @@
 - [x] Tray workspace switch + tooltip (`Agent Doctor · workspace: …`)
 - [x] Tray compact status (small enhancement, not a product skin): tooltip shows health + active workspace + personal/team mode; refresh after doctor/repair/workspace switch; brief “busy” state while a tray action runs. No Dynamic Island chrome, theme pack, or floating HUD.
 - [x] Local secrets file for API keys (`settings.db` + `secrets.json` / Windows DPAPI; optional `AGENT_DOCTOR_SECRETS_BACKEND=keyring`; legacy `.env` one-shot migrate)
+- [x] Personal first-run hero: one-screen scan → pick biggest issue → install / repair / wiring CTA (dismiss persisted in localStorage)
 
 ## P2 — Project workspaces
 

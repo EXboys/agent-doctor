@@ -21,7 +21,20 @@ import {
   mergeMentionsForSend,
   promptRequestsBrowserMcp,
 } from "../src/ask-resources";
-import type { McpInventoryItem, RepairPreviewResponse, RuntimeDoctorResult } from "../src/types";
+import {
+  markFirstRunCompleted,
+  markFirstRunDismissed,
+  pickBiggestFirstRunTarget,
+  readFirstRunStorage,
+  shouldShowPersonalFirstRun,
+  writeFirstRunStorage,
+} from "../src/first-run";
+import type {
+  DoctorReport,
+  McpInventoryItem,
+  RepairPreviewResponse,
+  RuntimeDoctorResult,
+} from "../src/types";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -257,6 +270,97 @@ controller.renderResourceChips();
 controller.renderMentions();
 controller.updateResourcesSummary();
 
+// 5) First-run pure logic (no DOM / Tauri)
+const STORAGE_KEY = "agent-doctor.personal-first-run.v1";
+localStorage.removeItem(STORAGE_KEY);
+assert(shouldShowPersonalFirstRun(true), "personal edition shows first-run");
+assert(!shouldShowPersonalFirstRun(false), "team edition hides first-run");
+writeFirstRunStorage({ dismissed: true });
+assert(!shouldShowPersonalFirstRun(true), "dismissed hides first-run");
+localStorage.removeItem(STORAGE_KEY);
+markFirstRunCompleted();
+assert(readFirstRunStorage().completed === true, "completed persisted");
+assert(!shouldShowPersonalFirstRun(true), "completed hides first-run");
+localStorage.removeItem(STORAGE_KEY);
+markFirstRunDismissed();
+assert(readFirstRunStorage().dismissed === true, "dismissed persisted");
+
+const firstRunCopy = {
+  missingInstall: (name: string) => ({
+    headline: `missing ${name}`,
+    detail: "install",
+  }),
+  needsRepair: (name: string, fail: number, warn: number, top?: string) => ({
+    headline: `repair ${name}`,
+    detail: `${fail}/${warn}${top ? `:${top}` : ""}`,
+  }),
+  needsWiring: (name: string) => ({
+    headline: `wire ${name}`,
+    detail: "wiring",
+  }),
+  allGood: () => ({ headline: "ok", detail: "good" }),
+};
+
+const doctorReport: DoctorReport = {
+  runtimes: [
+    { ...runtime, id: "openclaw", display_name: "OpenClaw", installed: true },
+    { ...runtime, id: "hermes", display_name: "Hermes", installed: true },
+    {
+      ...runtime,
+      id: "codex",
+      display_name: "Codex",
+      installed: false,
+      version: null,
+      binary_path: null,
+    },
+  ],
+  active_preset: null,
+  profile_env_exists: true,
+  profile_env_path: null,
+};
+
+const mildPreview: RepairPreviewResponse = {
+  ...preview,
+  runtime_id: "openclaw",
+  display_name: "OpenClaw",
+  summary: { pass: 3, warn: 1, fail: 0, not_applicable: 0, not_checked: 0 },
+  can_apply_repair: false,
+  suggested_repairs: [
+    {
+      id: "wire-provider",
+      title: "Wire provider",
+      description: "set gateway key",
+      auto_fixable: false,
+    },
+  ],
+};
+const previews = new Map<string, RepairPreviewResponse>([
+  ["hermes", preview],
+  ["openclaw", mildPreview],
+]);
+const biggest = pickBiggestFirstRunTarget(doctorReport, previews, firstRunCopy);
+assert(biggest.runtimeId === "hermes", "prefer higher-issue hermes over openclaw");
+assert(biggest.kind === "repair", "hermes target is repair");
+assert(biggest.canApply === true, "hermes can apply");
+
+const noneInstalled: DoctorReport = {
+  ...doctorReport,
+  runtimes: doctorReport.runtimes.map((r) => ({ ...r, installed: false })),
+};
+const installTarget = pickBiggestFirstRunTarget(noneInstalled, new Map(), firstRunCopy);
+assert(installTarget.kind === "install", "no installs → install target");
+assert(installTarget.runtimeId === "hermes", "prefer hermes in FIRST_RUN_RUNTIME_ORDER");
+
+const allGoodTarget = pickBiggestFirstRunTarget(
+  doctorReport,
+  new Map([
+    ["hermes", { ...preview, summary: { pass: 4, warn: 0, fail: 0, not_applicable: 0, not_checked: 0 }, can_apply_repair: false, suggested_repairs: [], checks: [] }],
+    ["openclaw", { ...mildPreview, summary: { pass: 4, warn: 0, fail: 0, not_applicable: 0, not_checked: 0 }, suggested_repairs: [], checks: [] }],
+  ]),
+  firstRunCopy,
+);
+assert(allGoodTarget.kind === "none", "healthy installed runtimes → none");
+
 console.log("smoke-ui-modules: OK");
 console.log(
   JSON.stringify(
@@ -267,6 +371,8 @@ console.log(
         panel.includes("confirm-repair") || panel.includes("repair-confirm"),
       step4_askResourcesToggle: shellOpen.open,
       step4_askMentions: controller.selectedMentions.length === 1,
+      step5_firstRunPick: biggest.runtimeId === "hermes",
+      step5_firstRunInstall: installTarget.kind === "install",
     },
     null,
     2,
