@@ -36,10 +36,7 @@ pub(crate) fn probe_schema(
     }
 
     let Some(provider) = provider else {
-        checks.push(schema_warn(
-            path,
-            "model_provider is missing".to_string(),
-        ));
+        checks.push(schema_warn(path, "model_provider is missing".to_string()));
         return;
     };
 
@@ -125,7 +122,9 @@ pub(crate) fn probe_schema(
             "Codex wire_api",
             ProbeStatus::Warn,
             ProbeSeverity::Warning,
-            format!("model_providers.{provider}.wire_api is missing; Codex ≥0.84 expects 'responses'"),
+            format!(
+                "model_providers.{provider}.wire_api is missing; Codex ≥0.84 expects 'responses'"
+            ),
             SensitivityLevel::ConfigShape,
         ));
     } else if wire_api != "responses" {
@@ -139,7 +138,10 @@ pub(crate) fn probe_schema(
         ));
     }
 
-    if value.get("openai_base_url").and_then(toml::Value::as_str).is_none()
+    if value
+        .get("openai_base_url")
+        .and_then(toml::Value::as_str)
+        .is_none()
         && provider != "openai"
     {
         checks.push(ProbeCheck::new(
@@ -167,10 +169,10 @@ fn probe_api_key_configured(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<Diagno
 
     let overlay = collect_overlay_env();
     let from_env = env_key.as_ref().is_some_and(|key| {
-        overlay
-            .get(key)
-            .is_some_and(|v| !v.trim().is_empty())
-            || std::env::var(key).ok().is_some_and(|v| !v.trim().is_empty())
+        overlay.get(key).is_some_and(|v| !v.trim().is_empty())
+            || std::env::var(key)
+                .ok()
+                .is_some_and(|v| !v.trim().is_empty())
     });
     let from_auth = auth_has_usable_credentials();
 
@@ -304,7 +306,10 @@ model_provider = "company"
         );
         assert!(checks.iter().any(|c| c.message.contains("no matching")));
         assert_eq!(
-            facts.iter().find(|f| f.key == "model.provider").map(|f| f.value.as_str()),
+            facts
+                .iter()
+                .find(|f| f.key == "model.provider")
+                .map(|f| f.value.as_str()),
             Some("company")
         );
     }

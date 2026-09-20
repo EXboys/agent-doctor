@@ -188,7 +188,9 @@ fn probe_settings_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
                 ProbeSeverity::Info
             },
             if too_open {
-                format!("settings.json permissions are {mode:o}; recommended 600 (contains API key)")
+                format!(
+                    "settings.json permissions are {mode:o}; recommended 600 (contains API key)"
+                )
             } else {
                 format!("settings.json permissions are {mode:o}")
             },
@@ -224,7 +226,9 @@ mod tests {
             &mut checks,
             &mut facts,
         );
-        assert!(checks.iter().any(|c| c.message.contains("ANTHROPIC_BASE_URL")));
+        assert!(checks
+            .iter()
+            .any(|c| c.message.contains("ANTHROPIC_BASE_URL")));
         assert!(facts
             .iter()
             .any(|f| f.key == "claude.api_key.in_settings" && f.value == "false"));

@@ -26,9 +26,7 @@ use agent_doctor_mcp::{wire_browser_mcp, WireBrowserMcpOptions};
 
 use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
-use crate::lifecycle::{
-    run_claude_code_lifecycle, run_codex_lifecycle, NpmCliLifecycleAction,
-};
+use crate::lifecycle::{run_claude_code_lifecycle, run_codex_lifecycle, NpmCliLifecycleAction};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::{SkippedRepairAction, SuggestedRepair};
 use crate::setup::{
@@ -80,7 +78,8 @@ fn suggest_npm_cli_repairs(
                 description: if mode_ready {
                     "Create config by re-applying Personal/Team overlay.".to_string()
                 } else {
-                    "Configure a Personal Provider or connect Evotown, then switch mode.".to_string()
+                    "Configure a Personal Provider or connect Evotown, then switch mode."
+                        .to_string()
                 },
                 auto_fixable: mode_ready,
             });
@@ -417,10 +416,7 @@ fn apply_npm_cli_playbook(
             reason: "skipped on full --apply — select this action alone to keep live gateway"
                 .into(),
         });
-    } else if needs_gateway_rewire(probe)
-        && adopt_selected
-        && only_ids.is_none()
-    {
+    } else if needs_gateway_rewire(probe) && adopt_selected && only_ids.is_none() {
         // unreachable: adopt_selected requires only_ids
     }
 
@@ -441,9 +437,7 @@ fn apply_npm_cli_playbook(
         config_id.as_str(),
     ];
     let should_mode = !skip_align_for_adopt
-        && (mode_action_ids
-            .iter()
-            .any(|id| should_run(id, only_ids))
+        && (mode_action_ids.iter().any(|id| should_run(id, only_ids))
             || (runtime_id == "claude-code"
                 && should_run("fix-claude-code-gateway-from-mode", only_ids)
                 && needs_claude_key_from_mode(probe))
@@ -454,7 +448,9 @@ fn apply_npm_cli_playbook(
     if should_mode && needs_mode_rewire {
         let primary_id = if needs_create_config(probe) && should_run(&create_id, only_ids) {
             create_id
-        } else if needs_gateway_rewire(probe) && should_run(&gateway_id, only_ids) && !adopt_selected
+        } else if needs_gateway_rewire(probe)
+            && should_run(&gateway_id, only_ids)
+            && !adopt_selected
         {
             gateway_id
         } else if needs_model_from_mode(probe) && should_run(&model_id, only_ids) {
@@ -654,18 +650,16 @@ fn needs_browser_mcp_rewire(probe: &RuntimeProbeReport) -> bool {
 
 fn needs_claude_key_from_mode(probe: &RuntimeProbeReport) -> bool {
     mode_is_ready()
-        && probe
-            .checks
-            .iter()
-            .any(|check| check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn)
+        && probe.checks.iter().any(|check| {
+            check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn
+        })
 }
 
 fn needs_claude_api_key_scaffold(probe: &RuntimeProbeReport) -> bool {
     !mode_is_ready()
-        && probe
-            .checks
-            .iter()
-            .any(|check| check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn)
+        && probe.checks.iter().any(|check| {
+            check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn
+        })
 }
 
 fn needs_claude_permissions(probe: &RuntimeProbeReport) -> bool {
@@ -690,18 +684,16 @@ fn needs_codex_placeholder_auth(probe: &RuntimeProbeReport) -> bool {
 
 fn needs_codex_key_from_mode(probe: &RuntimeProbeReport) -> bool {
     mode_is_ready()
-        && probe
-            .checks
-            .iter()
-            .any(|check| check.id == "codex.api_key.configured" && check.status == ProbeStatus::Warn)
+        && probe.checks.iter().any(|check| {
+            check.id == "codex.api_key.configured" && check.status == ProbeStatus::Warn
+        })
 }
 
 fn needs_codex_api_key_scaffold(probe: &RuntimeProbeReport) -> bool {
     !mode_is_ready()
-        && probe
-            .checks
-            .iter()
-            .any(|check| check.id == "codex.api_key.configured" && check.status == ProbeStatus::Warn)
+        && probe.checks.iter().any(|check| {
+            check.id == "codex.api_key.configured" && check.status == ProbeStatus::Warn
+        })
 }
 
 fn mode_is_ready() -> bool {
