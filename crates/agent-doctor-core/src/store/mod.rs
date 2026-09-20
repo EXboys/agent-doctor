@@ -1,7 +1,7 @@
-//! Durable Agent Doctor settings: SQLite (non-secrets) + OS credential store (secrets).
+//! Durable Agent Doctor settings: SQLite (non-secrets) + local secrets file.
 //!
-//! Secrets backends: macOS Keychain, Windows Credential Manager (DPAPI file fallback),
-//! Linux Secret Service — see [`secrets::platform_secret_store_name`].
+//! Default secrets backend: `secrets.json` (Unix) or DPAPI `secrets.dpapi` (Windows).
+//! Opt into OS keyring with `AGENT_DOCTOR_SECRETS_BACKEND=keyring`.
 
 pub mod db;
 pub mod migrate;
@@ -16,7 +16,7 @@ pub use db::{
 };
 pub use secrets::{
     default_secret_backend, personal_api_key_account, platform_secret_store_name,
-    CompositeSecretBackend, KeyringBackend, MemorySecretBackend, SecretBackend, KEYRING_SERVICE,
-    SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY, SECRET_TEAMUPS_LICENSE,
-    SECRET_TEAM_API_KEY, SECRET_TEAM_ENGINE_INGEST,
+    CompositeSecretBackend, KeyringBackend, LocalFileSecretBackend, MemorySecretBackend,
+    SecretBackend, KEYRING_SERVICE, SECRET_CUSTOM_SKILLS_TOKEN, SECRET_OVERLAY_API_KEY,
+    SECRET_TEAMUPS_LICENSE, SECRET_TEAM_API_KEY, SECRET_TEAM_ENGINE_INGEST,
 };

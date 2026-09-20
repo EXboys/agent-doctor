@@ -55,10 +55,10 @@ Doctor probes: `mode.overlay_mismatch`, `runtime.env_stale` (OpenClaw keys), `ru
 
 | File | Role |
 |------|------|
-| `{config_dir}/agent-doctor/settings.db` + OS credential store | **Authoritative** Doctor settings and secrets (Keychain / Windows Credential Manager / Secret Service) |
+| `{config_dir}/agent-doctor/settings.db` + local secrets file | **Authoritative** Doctor settings and secrets (`secrets.json` on Unix, DPAPI `secrets.dpapi` on Windows) |
 | `~/.config/agent-doctor/profile.env` | Legacy active runtime overlay projection |
 | `~/.config/agent-doctor/company-profile.env` | Legacy durable team baseline projection |
-| `~/.config/agent-doctor/providers.json` | Legacy personal providers metadata (keys in keychain) |
+| `~/.config/agent-doctor/providers.json` | Legacy personal providers metadata (keys in local secrets vault) |
 | `~/.config/evotown/evotown.agent.env` | Legacy Evotown connection projection |
 
 Skills source: user/team override when set; otherwise default **TeamUps**. Mount never requires a remote source.

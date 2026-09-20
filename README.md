@@ -68,7 +68,7 @@ See [docs/enterprise.md](docs/enterprise.md) and [docs/product-boundary.md](docs
 
 **Shipped:** discovery and probes for OpenClaw, Hermes, DeepSeek Harness, Claude Code, and Codex; `repair --apply` / `--rollback` with backups; desktop Diagnose → Repair → Ask; workspace isolation; Browser MCP; exclusive personal / team mode; Evotown `setup` / `sync` / `connect`; read-only `remote` doctor over SSH.
 
-**Not yet:** compliance report export, remote repair over SSH, or auto-filling secrets. API keys are stored in the OS credential store (`settings.db` + Keychain / Windows Credential Manager / Secret Service; Windows also has a DPAPI file fallback). Legacy `.env` migrates once. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Not yet:** compliance report export, remote repair over SSH, or auto-filling secrets. API keys are stored in a **local secrets file** next to `settings.db` (`secrets.json` on macOS/Linux with mode `0600`; DPAPI-protected `secrets.dpapi` on Windows — no Keychain / Credential Manager prompts). Legacy `.env` migrates once. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Repair writes stay typed: backup first, no free-form shell, secrets redacted before AI analysis. Missing keys get a `.env` placeholder and a local guide — you paste the secret. — [docs/repair-safety.md](docs/repair-safety.md).
 

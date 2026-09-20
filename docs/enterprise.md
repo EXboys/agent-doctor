@@ -49,15 +49,15 @@ Evotown 负责控制面（账号、SkillHub、policy、网关）；Agent Doctor 
 | 文件 / 存储 | 写入方 | 用途 |
 |------|--------|------|
 | `{config_dir}/agent-doctor/settings.db` | setup / Provider | **权威**非密钥配置（mode、skills 源、团队 URL、个人 Provider 元数据） |
-| OS credential store（macOS Keychain / Windows Credential Manager + DPAPI 回退 / Linux Secret Service） | setup / Provider | **权威**密钥（`evk_`、`evi_`、TeamUps license、个人 key） |
+| 本地 secrets 文件（Unix：`secrets.json` mode 0600；Windows：DPAPI `secrets.dpapi`） | setup / Provider | **权威**密钥（`evk_`、`evi_`、TeamUps license、个人 key）— 不再使用系统 Keychain / Credential Manager |
 | `~/.config/agent-doctor/profile.env` | `setup` / 个人 Provider | Legacy overlay 投影（公司或个人） |
 | `~/.config/agent-doctor/company-profile.env` | `setup` | Legacy 持久团队基线投影 |
-| `~/.config/evotown/evotown.agent.env` | `setup` | Legacy Evotown 投影；优先 settings.db + keychain |
+| `~/.config/evotown/evotown.agent.env` | `setup` | Legacy Evotown 投影；优先 settings.db + 本地 secrets |
 | `~/.config/evotown/skills-lock.json` | `sync` | Legacy lock（新装用 `{config_dir}/agent-doctor/skills-lock.json`） |
 | `~/.agent-doctor/skills/` | `sync` | Skill 安装目录（默认；已有 `~/.evotown/skills` 则继续用） |
 | `~/.config/evotown/policies-cache.json` | `policy pull` | 本地 policy 缓存 |
 
-首次启动会一次性把旧 `.env` / `providers.json` 迁入 settings.db + keychain。Skills 源：对方自配优先，未配置则默认 **TeamUps**；Evotown 仍为可选团队源。
+首次启动会一次性把旧 `.env` / `providers.json` 迁入 settings.db + 本地 secrets。Skills 源：对方自配优先，未配置则默认 **TeamUps**；Evotown 仍为可选团队源。
 
 个人与团队边界见 [product-boundary.md](product-boundary.md) / [zh-CN/product-boundary.md](zh-CN/product-boundary.md)。
 

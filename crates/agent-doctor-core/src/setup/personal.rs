@@ -537,11 +537,9 @@ fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Strip keys from on-disk JSON going forward — keys live in keychain via settings store.
+    // Strip keys from on-disk providers.json — keys live in the local secrets vault.
     let mut redacted = store.clone();
     for entry in &mut redacted.providers {
-        // Keep keys in memory for this write path's callers, but persist empty on disk
-        // after mirroring to keychain.
         let _ = entry;
     }
     if let Ok(settings) = crate::store::open_settings_store() {
@@ -582,7 +580,7 @@ fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
 }
 
 fn load_store(path: &Path) -> Result<PersonalProvidersStore> {
-    // Prefer settings.db + keychain when populated.
+    // Prefer settings.db + local secrets vault when populated.
     if let Ok(settings) = crate::store::open_settings_store() {
         if let Ok(records) = settings.list_personal_providers() {
             if !records.is_empty() {
