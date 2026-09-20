@@ -61,9 +61,9 @@ fn suggest_npm_cli_repairs(
             items.push(SuggestedRepair {
                 id: format!("fix-{runtime_id}-install"),
                 title: format!("Install {display}"),
-                description: format!(
+                description:
                     "Install via `npm install -g` (official package). Requires Node.js/npm and network."
-                ),
+                        .to_string(),
                 auto_fixable: true,
             });
         }
