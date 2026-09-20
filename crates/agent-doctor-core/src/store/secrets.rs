@@ -237,7 +237,11 @@ pub fn default_secret_backend() -> Arc<dyn SecretBackend> {
         .ok()
         .is_some_and(|v| v.eq_ignore_ascii_case("memory"))
     {
-        return Arc::new(MemorySecretBackend::new());
+        use std::sync::OnceLock;
+        static MEMORY: OnceLock<Arc<MemorySecretBackend>> = OnceLock::new();
+        return MEMORY
+            .get_or_init(|| Arc::new(MemorySecretBackend::new()))
+            .clone();
     }
     Arc::new(CompositeSecretBackend::new())
 }

@@ -112,6 +112,7 @@ pub fn apply_personal_provider_command(
 pub fn get_mode_status_command() -> ModeStatus {
     load_mode_status().unwrap_or(ModeStatus {
         mode: "unset".to_string(),
+        edition: agent_doctor_core::product_edition().as_str().to_string(),
         personal_ready: false,
         team_ready: false,
         active_label: None,
@@ -121,6 +122,11 @@ pub fn get_mode_status_command() -> ModeStatus {
         personal_active_name: None,
         team_base_url: None,
     })
+}
+
+#[tauri::command]
+pub fn get_product_edition_command() -> String {
+    agent_doctor_core::product_edition().as_str().to_string()
 }
 
 #[tauri::command]
@@ -181,15 +187,20 @@ pub async fn rewire_current_mode_command(
     app: tauri::AppHandle,
     with_browser_mcp: Option<bool>,
 ) -> Result<ModeSwitchDesktopReport, String> {
+    let edition = agent_doctor_core::product_edition();
     let status = load_mode_status().map_err(|error| error.to_string())?;
-    match status.mode.as_str() {
-        "personal" => {
+    match (edition, status.mode.as_str()) {
+        (agent_doctor_core::ProductEdition::Personal, "personal") => {
             switch_to_personal_mode_command(app, status.personal_active_id, with_browser_mcp).await
         }
-        "team" => switch_to_team_mode_command(app, with_browser_mcp).await,
-        _ => Err(
-            "No active mode yet. Configure a Personal Provider or connect Evotown, then switch mode."
-                .into(),
-        ),
+        (agent_doctor_core::ProductEdition::Team, "team") => {
+            switch_to_team_mode_command(app, with_browser_mcp).await
+        }
+        (agent_doctor_core::ProductEdition::Personal, _) => {
+            Err("Personal edition: configure a personal provider first, then rewire.".into())
+        }
+        (agent_doctor_core::ProductEdition::Team, _) => {
+            Err("Team edition: connect Evotown first, then rewire.".into())
+        }
     }
 }

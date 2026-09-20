@@ -4,41 +4,47 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "GitHub release tag that already has latest.json"
+        description: "GitHub release tag that already has latest.json / latest.team.json"
         required: true
         default: "v0.1.40"
+      edition:
+        description: "personal → desktop/; team → desktop-team/"
+        required: true
+        default: "personal"
+        type: choice
+        options:
+          - personal
+          - team
 
 permissions:
   contents: read
 
 jobs:
   sync:
-    name: Upload latest.json to China OSS
+    name: Upload latest.json to China OSS (${{ inputs.edition }})
     runs-on: ubuntu-latest
     steps:
-      - name: Download latest.json from release
+      - uses: actions/checkout@v4
+
+      - name: Resolve edition
+        id: edition
+        run: |
+          eval "$(bash desktop/scripts/edition-meta.sh "${{ inputs.edition }}")"
+          echo "oss_prefix=$OSS_PREFIX" >> "$GITHUB_OUTPUT"
+          echo "latest_json=$LATEST_JSON" >> "$GITHUB_OUTPUT"
+
+      - name: Download updater JSON from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${{ inputs.release_tag }}"
+          LATEST="${{ steps.edition.outputs.latest_json }}"
           gh release download "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --pattern 'latest.json' \
+            --pattern "${LATEST}" \
             --dir ./oss-sync
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          path = Path("oss-sync/latest.json")
-          data = json.loads(path.read_text())
-          prefix = "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/"
-          for meta in data["platforms"].values():
-              url = meta["url"]
-              if "/desktop/" not in url and "aliyuncs.com/" in url:
-                  meta["url"] = url.replace("aliyuncs.com/", "aliyuncs.com/desktop/", 1)
-          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-          print(json.dumps({k: v["url"] for k, v in data["platforms"].items()}, indent=2))
-          PY
+          test -f "oss-sync/${LATEST}"
 
       - name: Upload to Aliyun OSS
         env:
@@ -46,14 +52,14 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
           OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
           OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          OSS_PREFIX: ${{ secrets.OSS_PREFIX }}
         run: |
           set -euo pipefail
           if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
             echo "::error::OSS secrets missing"
             exit 1
           fi
-          PREFIX="${OSS_PREFIX:-desktop}"
+          PREFIX="${{ steps.edition.outputs.oss_prefix }}"
+          LATEST="${{ steps.edition.outputs.latest_json }}"
           curl -fsSL -o ossutil.zip \
             "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
           unzip -qo ossutil.zip -d ossutil-bin
@@ -65,7 +71,7 @@ jobs:
             -k "${OSS_ACCESS_KEY_SECRET}" \
             -L CH \
             --config-file .ossutilconfig
-          "$OSSUTIL" cp oss-sync/latest.json \
+          "$OSSUTIL" cp "oss-sync/${LATEST}" \
             "oss://${OSS_BUCKET}/${PREFIX}/latest.json" \
             -f --config-file .ossutilconfig
           echo "Updated oss://${OSS_BUCKET}/${PREFIX}/latest.json"

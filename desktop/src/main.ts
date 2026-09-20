@@ -10,6 +10,7 @@ import {
   type Locale,
 } from "./i18n";
 import { initUpdaterUi } from "./updater";
+import { isPersonalEdition, isTeamEdition, productEdition } from "./edition";
 import { escapeHtml, formatTime, formatRate, formatCount } from "./format";
 import {
   isAskRuntimeId,
@@ -48,7 +49,6 @@ import type {
   ProfileEntry,
   ProfilesDocument,
   ProviderProtocol,
-  ProviderTabId,
   RegisterReport,
   RemoteDoctorReport,
   RemoteHostsDocument,
@@ -198,8 +198,6 @@ function formatModeSwitchDetail(report: ModeSwitchReport): string {
 
 const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
 const modeHintEl = document.querySelector<HTMLElement>("#mode-hint")!;
-const modeUsePersonalEl = document.querySelector<HTMLButtonElement>("#mode-use-personal")!;
-const modeUseTeamEl = document.querySelector<HTMLButtonElement>("#mode-use-team")!;
 const wiringModeFootnoteEl = document.querySelector<HTMLElement>("#wiring-mode-footnote")!;
 const footerCopyEl = document.querySelector<HTMLElement>("#footer-copy")!;
 const appVersionEl = document.querySelector<HTMLElement>("#app-version");
@@ -215,15 +213,17 @@ let lastModeStatus: ModeStatus | null = null;
 let agentsWsPickerOpen = false;
 
 function updateFooterCopy(mode?: string): void {
-  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
+  const activeMode = mode ?? lastModeStatus?.mode ?? productEdition();
   footerCopyEl.textContent = activeMode === "team" ? t("app.footerTeam") : t("app.footer");
 }
 
-function updateWiringModeFootnote(mode?: string): void {
-  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
-  wiringModeFootnoteEl.textContent =
-    activeMode === "team" ? t("wiring.modeTeamFootnote") : t("wiring.modePersonalFootnote");
-  wiringModeFootnoteEl.title = t("wiring.modeHint");
+function updateWiringModeFootnote(_mode?: string): void {
+  wiringModeFootnoteEl.textContent = isTeamEdition()
+    ? t("wiring.modeTeamFootnote")
+    : t("wiring.modePersonalFootnote");
+  wiringModeFootnoteEl.title = isTeamEdition()
+    ? t("wiring.modeHintTeam")
+    : t("wiring.modeHintPersonal");
 }
 
 function closeAgentsWsPicker(): void {
@@ -451,10 +451,9 @@ function setMainTab(tab: MainTabId) {
   }
 }
 
-/** Provider panel follows global mode — no nested Personal/Evotown tabs. */
-function syncProviderPanelToMode(mode?: string) {
-  const activeMode = mode ?? lastModeStatus?.mode ?? "personal";
-  const tab: ProviderTabId = activeMode === "team" ? "evotown" : "personal";
+/** Provider panel is locked to the build edition — no Personal/Team switch tabs. */
+function syncProviderPanelToEdition() {
+  const tab = isTeamEdition() ? "evotown" : "personal";
   for (const panel of providerPanels) {
     const active = panel.dataset.providerPanel === tab;
     panel.classList.toggle("is-active", active);
@@ -472,22 +471,6 @@ let modeSwitchInFlight = false;
 
 function renderModeStatus(status: ModeStatus) {
   lastModeStatus = status;
-  modeUsePersonalEl.classList.toggle("is-active", status.mode === "personal");
-  modeUseTeamEl.classList.toggle("is-active", status.mode === "team");
-  // Always visible; disable only when that side has no credentials yet.
-  modeUsePersonalEl.hidden = false;
-  modeUseTeamEl.hidden = false;
-  // Keep clickable so users can jump to the config tab even when not ready.
-  // While a mode switch is in flight, keep both buttons disabled.
-  modeUsePersonalEl.disabled = modeSwitchInFlight;
-  modeUseTeamEl.disabled = modeSwitchInFlight;
-  modeUsePersonalEl.classList.toggle("is-unavailable", !status.personal_ready);
-  modeUseTeamEl.classList.toggle("is-unavailable", !status.team_ready);
-  modeUsePersonalEl.title = status.personal_ready
-    ? modeDisplayName("personal")
-    : t("mode.personalNotReady");
-  modeUseTeamEl.title = status.team_ready ? modeDisplayName("team") : t("mode.teamNotReady");
-
   const meta = status.active_gateway_url
     ? t("mode.meta", {
         label: status.active_label || modeDisplayName(status.mode),
@@ -496,11 +479,9 @@ function renderModeStatus(status: ModeStatus) {
       })
     : t("mode.metaEmpty");
   modeMetaEl.textContent = meta;
-  modeUsePersonalEl.title = status.personal_ready ? meta : t("mode.personalNotReady");
-  modeUseTeamEl.title = status.team_ready ? meta : t("mode.teamNotReady");
-  syncProviderPanelToMode(status.mode);
+  syncProviderPanelToEdition();
   updateWiringModeFootnote(status.mode);
-  updateFooterCopy(status.mode);
+  updateFooterCopy(isTeamEdition() ? "team" : "personal");
 }
 
 async function loadModeStatus() {
@@ -509,16 +490,13 @@ async function loadModeStatus() {
     renderModeStatus(status);
   } catch (error) {
     modeMetaEl.textContent = String(error);
-    modeUsePersonalEl.classList.remove("is-active");
-    modeUseTeamEl.classList.remove("is-active");
-    modeUsePersonalEl.classList.add("is-unavailable");
-    modeUseTeamEl.classList.add("is-unavailable");
+    syncProviderPanelToEdition();
   }
 }
 
 function showModeHint(text: string, detail?: string) {
   // Keep sr-only #mode-hint for a11y, but also surface on the visible footnote —
-  // otherwise mode switch looks "stuck" while buttons are disabled.
+  // otherwise wiring actions look "stuck" while busy.
   modeHintEl.hidden = !text;
   modeHintEl.textContent = text;
   if (text) {
@@ -529,87 +507,28 @@ function showModeHint(text: string, detail?: string) {
 
 function setModeSwitchBusy(busy: boolean) {
   modeSwitchInFlight = busy;
-  modeUsePersonalEl.disabled = busy;
-  modeUseTeamEl.disabled = busy;
-  modeUsePersonalEl.classList.toggle("is-busy", busy);
-  modeUseTeamEl.classList.toggle("is-busy", busy);
-  document.getElementById("mode-banner")?.classList.toggle("is-busy", busy);
-}
-
-async function enablePersonalMode() {
-  if (modeSwitchInFlight) return;
-  if (!lastModeStatus?.personal_ready) {
-    showModeHint(t("mode.personalNotReady"));
-    syncProviderPanelToMode("personal");
-    setMainTab("provider");
-    return;
+  if (isPersonalEdition()) {
+    personalApplyEl.disabled = busy;
+    personalVerifyEl.disabled = busy;
+    personalSaveEl.disabled = busy;
+  } else {
+    evotownConnectEl.disabled = busy;
+    evotownResyncEl.disabled = busy;
   }
-  const wasAlready = lastModeStatus.mode === "personal";
-  setModeSwitchBusy(true);
-  showModeHint(t("mode.switching"));
-  try {
-    const report = await invoke<ModeSwitchReport>("switch_to_personal_mode_command", {
-      providerId: lastModeStatus.personal_active_id,
-      withBrowserMcp: wantsBrowserMcp(),
-    });
-    await loadModeStatus();
-    await loadPersonalProviderStatus();
-    const hint = formatModeSwitchHint(report);
-    showModeHint(
-      t("mode.switchOk", {
-        message: wasAlready ? `${t("mode.alreadyPersonal")} · ${hint}` : hint,
-      }),
-      formatModeSwitchDetail(report),
-    );
-    // Doctor rescan is secondary — don't block the switch UI on it.
-    void refresh();
-  } catch (error) {
-    showModeHint(t("mode.switchFailed", { error: String(error) }));
-    await loadModeStatus();
-  } finally {
-    setModeSwitchBusy(false);
-  }
-}
-
-async function enableTeamMode() {
-  if (modeSwitchInFlight) return;
-  if (!lastModeStatus?.team_ready) {
-    showModeHint(t("mode.teamNotReady"));
-    syncProviderPanelToMode("team");
-    setMainTab("provider");
-    return;
-  }
-  const wasAlready = lastModeStatus.mode === "team";
-  setModeSwitchBusy(true);
-  showModeHint(t("mode.switching"));
-  try {
-    const report = await invoke<ModeSwitchReport>("switch_to_team_mode_command", {
-      withBrowserMcp: wantsBrowserMcp(),
-    });
-    await loadModeStatus();
-    await loadEvotownStatus();
-    const hint = formatModeSwitchHint(report);
-    showModeHint(
-      t("mode.switchOk", {
-        message: wasAlready ? `${t("mode.alreadyTeam")} · ${hint}` : hint,
-      }),
-      formatModeSwitchDetail(report),
-    );
-    void refresh();
-  } catch (error) {
-    showModeHint(t("mode.switchFailed", { error: String(error) }));
-    await loadModeStatus();
-  } finally {
-    setModeSwitchBusy(false);
-  }
+  wiringModeFootnoteEl.classList.toggle("is-busy", busy);
 }
 
 async function rewireCurrentMode(hintEl?: HTMLElement | null) {
   if (modeSwitchInFlight) return;
+  const locked = productEdition();
   const mode = lastModeStatus?.mode;
-  if (mode !== "personal" && mode !== "team") {
+  if (mode !== locked) {
+    // Edition package only rewires its own path; jump to wiring to configure.
     setMainTab("provider");
-    showModeHint(t("mode.pickSide"));
+    syncProviderPanelToEdition();
+    showModeHint(
+      isTeamEdition() ? t("mode.teamNotReady") : t("mode.personalNotReady"),
+    );
     if (hintEl) {
       hintEl.hidden = false;
       hintEl.textContent = t("runtime.installWireNext");
@@ -3494,19 +3413,13 @@ void listen<WorkspaceDoctorReport>("workspace-doctor-report", (event) => {
 
 setLocale(getLocale());
 applyStaticI18n();
-updateFooterCopy();
+syncProviderPanelToEdition();
+updateFooterCopy(isTeamEdition() ? "team" : "personal");
 updateWiringModeFootnote();
 updateLangButtons();
 refreshPresetGroupLabels();
 applyProviderPreset("custom");
 showPersonalListView();
-
-modeUsePersonalEl.addEventListener("click", () => {
-  void enablePersonalMode();
-});
-modeUseTeamEl.addEventListener("click", () => {
-  void enableTeamMode();
-});
 
 // A webview reload can preserve the native width from an open diagnose panel
 // while resetting the frontend's detail state. Always restore compact startup.
@@ -3514,8 +3427,11 @@ void setMainWindowWidth(MAIN_COMPACT_WIDTH);
 void loadProfiles();
 void loadWorkspaces();
 void loadRemoteProjects();
-void loadEvotownStatus();
-void loadPersonalProviderStatus();
+if (isTeamEdition()) {
+  void loadEvotownStatus();
+} else {
+  void loadPersonalProviderStatus();
+}
 void loadModeStatus();
 // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
 // wake Chrome until the user opens Resources or clicks Browser smoke.

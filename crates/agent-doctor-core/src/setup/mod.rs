@@ -111,6 +111,8 @@ pub struct SetupReport {
 }
 
 pub fn execute_setup(options: &SetupOptions) -> Result<SetupReport> {
+    crate::edition::ensure_edition_allows_mode(MODE_TEAM)?;
+
     let gateway_url = normalize_gateway_url(&gateway_url_from_evotown_base(&options.gateway_url))?;
     let evotown_base = evotown_base_from_gateway(&gateway_url);
     let api_key = options.api_key.trim();

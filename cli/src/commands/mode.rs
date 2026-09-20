@@ -67,6 +67,7 @@ pub fn wire_browser_mcp_after_setup() -> Result<BrowserMcpWireReport> {
 
 fn print_mode_status(status: &ModeStatus) {
     println!("Agent Doctor — LLM mode\n");
+    println!("Edition: {}", status.edition);
     println!("Mode: {}", status.mode);
     match status.mode.as_str() {
         MODE_PERSONAL => {
@@ -89,9 +90,17 @@ fn print_mode_status(status: &ModeStatus) {
         "Personal ready: {} · Team ready: {}",
         status.personal_ready, status.team_ready
     );
-    println!("\nSwitch:");
-    println!("  agent-doctor mode personal [--provider-id <id>] [--with-browser-mcp]");
-    println!("  agent-doctor mode team [--with-browser-mcp]");
+    println!("\nThis build:");
+    match status.edition.as_str() {
+        "team" => {
+            println!("  team edition — only Evotown wiring");
+            println!("  agent-doctor mode team [--with-browser-mcp]");
+        }
+        _ => {
+            println!("  personal edition — only personal provider wiring");
+            println!("  agent-doctor mode personal [--provider-id <id>] [--with-browser-mcp]");
+        }
+    }
 }
 
 fn print_mode_switch_report(report: &ModeSwitchReport) {

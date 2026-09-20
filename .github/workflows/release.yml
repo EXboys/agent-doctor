@@ -179,7 +179,7 @@ jobs:
   # Desktop build follows SkillLite: sign during build, notarize separately with notarytool
   # (do not pass APPLE_ID / APPLE_API_* into tauri build — that triggers built-in notarization).
   build-desktop:
-    name: Desktop (${{ matrix.platform }})
+    name: Desktop (${{ matrix.edition }} / ${{ matrix.platform }})
     needs: [lint, lint-desktop]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -188,10 +188,22 @@ jobs:
         include:
           - os: macos-14
             platform: darwin-arm64
+            edition: personal
           - os: windows-latest
             platform: windows-x64
+            edition: personal
           - os: ubuntu-22.04
             platform: linux-x64
+            edition: personal
+          - os: macos-14
+            platform: darwin-arm64
+            edition: team
+          - os: windows-latest
+            platform: windows-x64
+            edition: team
+          - os: ubuntu-22.04
+            platform: linux-x64
+            edition: team
 
     steps:
       - uses: actions/checkout@v4
@@ -300,6 +312,9 @@ jobs:
           if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             echo "::warning::TAURI_SIGNING_PRIVATE_KEY missing — updater signatures will not be produced."
           fi
+          eval "$(bash scripts/edition-meta.sh "${{ matrix.edition }}")"
+          export AGENT_DOCTOR_EDITION="$EDITION"
+          echo "Building edition=$EDITION productName=$PRODUCT_NAME identifier=$BUNDLE_ID"
           if [ "$RUNNER_OS" = "macOS" ]; then
             if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
               security unlock-keychain -p "agent-doctor-ci-keychain" build.keychain
@@ -307,9 +322,10 @@ jobs:
             fi
             # App only; notarize + DMG in later steps (SkillLite pattern).
             # Fail fast if codesign waits on a keychain dialog (common hang symptom).
-            perl -e 'alarm shift; exec @ARGV' 2700 npm run tauri -- build --bundles app
+            perl -e 'alarm shift; exec @ARGV' 2700 \
+              bash scripts/tauri-with-edition.sh "$EDITION" build --bundles app
           else
-            npm run tauri -- build
+            bash scripts/tauri-with-edition.sh "$EDITION" build
           fi
         env:
           CI: true
@@ -322,16 +338,18 @@ jobs:
       - name: Verify .app bundle exists (macOS)
         if: runner.os == 'macOS'
         run: |
+          eval "$(bash desktop/scripts/edition-meta.sh "${{ matrix.edition }}")"
           # Workspace Cargo.toml → artifacts live under repo-root target/, not desktop/src-tauri/target/.
           APP_DIR="target/release/bundle/macos"
+          APP_PATH="$APP_DIR/${PRODUCT_NAME}.app"
           echo "--- Contents of bundle/macos/ ---"
           ls -la "$APP_DIR"
-          test -d "$APP_DIR/Agent Doctor.app/Contents"
-          ls -la "$APP_DIR/Agent Doctor.app/Contents/"
+          test -d "$APP_PATH/Contents"
+          ls -la "$APP_PATH/Contents/"
           # Bundled CLI must ship with the app (MCP configure on clean machines).
-          test -x "$APP_DIR/Agent Doctor.app/Contents/Resources/agent-doctor-cli" \
-            || test -x "$APP_DIR/Agent Doctor.app/Contents/MacOS/agent-doctor-cli"
-          ls -la "$APP_DIR/Agent Doctor.app/Contents/Resources/" || true
+          test -x "$APP_PATH/Contents/Resources/agent-doctor-cli" \
+            || test -x "$APP_PATH/Contents/MacOS/agent-doctor-cli"
+          ls -la "$APP_PATH/Contents/Resources/" || true
 
       # API Key (.p8) or Apple ID + app-specific password + Team ID.
       # Failure does not fail the job (signed-only .app / DMG may still ship).
@@ -349,7 +367,8 @@ jobs:
           set -euo pipefail
           REPO="${{ github.workspace }}"
           KEY_PATH="$REPO/desktop/authkey.p8"
-          APP_PATH="$REPO/target/release/bundle/macos/Agent Doctor.app"
+          eval "$(bash "$REPO/desktop/scripts/edition-meta.sh" "${{ matrix.edition }}")"
+          APP_PATH="$REPO/target/release/bundle/macos/${PRODUCT_NAME}.app"
           ZIP_PATH=""
           cleanup() {
             rm -f "$KEY_PATH"
@@ -401,23 +420,26 @@ jobs:
       - name: Create DMG with create-dmg (macOS)
         if: runner.os == 'macOS'
         run: |
+          eval "$(bash desktop/scripts/edition-meta.sh "${{ matrix.edition }}")"
           APP_VERSION=$(python3 -c "import json; print(json.load(open('desktop/src-tauri/tauri.conf.json'))['version'])")
-          APP_PATH="target/release/bundle/macos/Agent Doctor.app"
+          APP_PATH="target/release/bundle/macos/${PRODUCT_NAME}.app"
           DMG_DIR="target/release/bundle/dmg"
           if [ ! -d "$APP_PATH" ]; then
             echo "::error::.app not found at $APP_PATH"
             exit 1
           fi
           mkdir -p "$DMG_DIR"
+          # Sanitize product name for DMG filename (spaces → dots).
+          DMG_STEM="${PRODUCT_NAME// /.}"
           set +e
           create-dmg \
-            --volname "Agent Doctor" \
+            --volname "$PRODUCT_NAME" \
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "Agent Doctor.app" 175 190 \
+            --icon "${PRODUCT_NAME}.app" 175 190 \
             --app-drop-link 425 190 \
-            "$DMG_DIR/Agent.Doctor_${APP_VERSION}_aarch64.dmg" \
+            "$DMG_DIR/${DMG_STEM}_${APP_VERSION}_aarch64.dmg" \
             "$APP_PATH"
           EXIT_CODE=$?
           set -e
@@ -426,7 +448,7 @@ jobs:
             echo "create-dmg failed with exit code $EXIT_CODE"
             exit 1
           fi
-          test -f "$DMG_DIR/Agent.Doctor_${APP_VERSION}_aarch64.dmg"
+          test -f "$DMG_DIR/${DMG_STEM}_${APP_VERSION}_aarch64.dmg"
 
       - name: Remove Apple API key file (macOS)
         if: runner.os == 'macOS'
@@ -437,7 +459,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: agent-doctor-desktop-darwin-arm64
+          name: agent-doctor-desktop-${{ matrix.edition }}-darwin-arm64
           path: target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
@@ -445,7 +467,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: agent-doctor-desktop-darwin-arm64-updater
+          name: agent-doctor-desktop-${{ matrix.edition }}-darwin-arm64-updater
           path: |
             target/release/bundle/macos/*.app.tar.gz
             target/release/bundle/macos/*.app.tar.gz.sig
@@ -455,7 +477,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: agent-doctor-desktop-windows-x64
+          name: agent-doctor-desktop-${{ matrix.edition }}-windows-x64
           path: |
             target/release/bundle/msi/*.msi
             target/release/bundle/msi/*.msi.sig
@@ -469,7 +491,7 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
-          name: agent-doctor-desktop-linux-x64
+          name: agent-doctor-desktop-${{ matrix.edition }}-linux-x64
           path: |
             target/release/bundle/appimage/*.AppImage
             target/release/bundle/appimage/*.AppImage.sig
@@ -532,53 +554,74 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
 
   publish-updater-manifest:
-    name: Publish updater manifest (CDN + GitHub)
+    name: Publish updater manifest (${{ matrix.edition }})
     needs: upload-desktop-to-release
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/') && !cancelled()
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [personal, team]
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve edition channels
+        id: edition
+        run: |
+          eval "$(bash desktop/scripts/edition-meta.sh "${{ matrix.edition }}")"
+          echo "edition=$EDITION" >> "$GITHUB_OUTPUT"
+          echo "oss_prefix=$OSS_PREFIX" >> "$GITHUB_OUTPUT"
+          echo "latest_json=$LATEST_JSON" >> "$GITHUB_OUTPUT"
+          echo "latest_github_json=$LATEST_GITHUB_JSON" >> "$GITHUB_OUTPUT"
+          echo "product_name=$PRODUCT_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Download desktop artifacts
+        id: download
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: ./desktop-artifacts
-          pattern: agent-doctor-desktop-*
+          pattern: agent-doctor-desktop-${{ matrix.edition }}-*
           merge-multiple: true
 
       - name: Build updater manifests
         id: manifest
         env:
           UPDATE_CDN_BASE_URL: ${{ secrets.UPDATE_CDN_BASE_URL }}
-          OSS_PREFIX: ${{ secrets.OSS_PREFIX }}
         run: |
           set -euo pipefail
           if [ ! -d ./desktop-artifacts ]; then
-            echo "::warning::No desktop artifacts for updater manifest."
+            echo "::warning::No desktop artifacts for updater manifest (${{ matrix.edition }})."
             exit 0
           fi
           VERSION="${GITHUB_REF_NAME}"
-          CDN_BASE="${UPDATE_CDN_BASE_URL:-https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop}"
-          CDN_BASE="${CDN_BASE%/}"
-          PREFIX_NAME="${OSS_PREFIX:-desktop}"
-          # Keep package URLs under the same prefix we upload to OSS.
-          case "${CDN_BASE}" in
-            */"${PREFIX_NAME}") ;;
-            *) CDN_BASE="${CDN_BASE}/${PREFIX_NAME}" ;;
-          esac
+          PREFIX_NAME="${{ steps.edition.outputs.oss_prefix }}"
+          # Prefer edition-specific CDN path; ignore legacy OSS_PREFIX secret for team.
+          CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX_NAME}"
+          if [ -n "${UPDATE_CDN_BASE_URL:-}" ]; then
+            # If secret is a bare host or .../desktop, rewrite to this edition prefix.
+            case "${UPDATE_CDN_BASE_URL%/}" in
+              */desktop|*/desktop-team)
+                CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX_NAME}"
+                ;;
+              *)
+                CDN_BASE="${UPDATE_CDN_BASE_URL%/}/${PREFIX_NAME}"
+                ;;
+            esac
+          fi
           GH_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}"
           if ! python3 scripts/build-updater-manifest.py \
             --artifacts ./desktop-artifacts \
             --version "${VERSION}" \
             --cdn-base "${CDN_BASE}" \
             --github-base "${GH_BASE}" \
-            --notes "Agent Doctor ${VERSION}" \
+            --notes "${{ steps.edition.outputs.product_name }} ${VERSION}" \
+            --edition "${{ matrix.edition }}" \
             --out-dir ./updater-manifest; then
-            echo "::error::Updater manifest not built. Check signed desktop artifacts (.sig) and TAURI_SIGNING_PRIVATE_KEY."
+            echo "::error::Updater manifest not built for ${{ matrix.edition }}. Check signed desktop artifacts (.sig) and TAURI_SIGNING_PRIVATE_KEY."
             exit 1
           fi
           echo "cdn_base=${CDN_BASE}" >> "$GITHUB_OUTPUT"
@@ -590,12 +633,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # latest.json on GitHub mirrors CDN URLs (helpful if CDN JSON is briefly stale).
-          cp updater-manifest/latest.json /tmp/latest.json
-          cp updater-manifest/latest.github.json /tmp/latest.github.json
+          LATEST="${{ steps.edition.outputs.latest_json }}"
+          LATEST_GH="${{ steps.edition.outputs.latest_github_json }}"
+          cp "updater-manifest/${LATEST}" "/tmp/${LATEST}"
+          cp "updater-manifest/${LATEST_GH}" "/tmp/${LATEST_GH}"
           gh release upload "${GITHUB_REF_NAME}" \
-            /tmp/latest.json \
-            /tmp/latest.github.json \
+            "/tmp/${LATEST}" \
+            "/tmp/${LATEST_GH}" \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
 
@@ -606,14 +650,14 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
           OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
           OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          OSS_PREFIX: ${{ secrets.OSS_PREFIX }}
         run: |
           set -euo pipefail
           if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
             echo "::warning::OSS secrets missing — skipped China CDN sync. See docs/desktop-auto-update.md"
             exit 0
           fi
-          PREFIX="${OSS_PREFIX:-desktop}"
+          PREFIX="${{ steps.edition.outputs.oss_prefix }}"
+          LATEST="${{ steps.edition.outputs.latest_json }}"
           curl -fsSL -o ossutil.zip \
             "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
           unzip -qo ossutil.zip -d ossutil-bin
@@ -629,6 +673,7 @@ jobs:
             -k "${OSS_ACCESS_KEY_SECRET}" \
             -L CH \
             --config-file .ossutilconfig
-          "$OSSUTIL" cp updater-manifest/latest.json "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
+          # Clients always fetch <prefix>/latest.json (team package points at desktop-team/).
+          "$OSSUTIL" cp "updater-manifest/${LATEST}" "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
           "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
           echo "Synced updater assets to oss://${OSS_BUCKET}/${PREFIX}/"

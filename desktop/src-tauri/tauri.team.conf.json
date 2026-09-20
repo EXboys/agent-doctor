@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agent Doctor Team",
+  "identifier": "com.agentdoctor.team",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Agent Doctor Team"
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team/latest.json",
+        "https://github.com/EXboys/agent-doctor/releases/latest/download/latest.team.github.json"
+      ]
+    }
+  }
+}

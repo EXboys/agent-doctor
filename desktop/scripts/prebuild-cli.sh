@@ -22,6 +22,9 @@ if [[ "$IS_WINDOWS" -eq 1 ]]; then
   # without asking users to install Visual C++ Redistributable.
   export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
 fi
+# Match desktop edition so the bundled CLI refuses the other wiring path.
+export AGENT_DOCTOR_EDITION="${AGENT_DOCTOR_EDITION:-personal}"
+echo "AGENT_DOCTOR_EDITION=${AGENT_DOCTOR_EDITION}"
 cargo build -p agent-doctor --release
 
 if [[ "$IS_WINDOWS" -eq 1 ]]; then

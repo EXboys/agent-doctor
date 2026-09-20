@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-core"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-doctor-mcp",
  "anyhow",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-desktop"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-mcp"
-version = "0.1.42"
+version = "0.1.43"
 dependencies = [
  "anyhow",
  "serde",

@@ -4,11 +4,14 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { isTeamEdition } from "./edition";
 import { t } from "./i18n";
 
 /** China-first download landing; keep in sync with updater CDN + docs. */
-export const UPDATE_MANUAL_URL =
-  "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/";
+const CDN_ROOT = "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com";
+export const UPDATE_MANUAL_URL = isTeamEdition()
+  ? `${CDN_ROOT}/desktop-team/`
+  : `${CDN_ROOT}/desktop/`;
 export const UPDATE_GITHUB_URL =
   "https://github.com/EXboys/agent-doctor/releases/latest";
 

@@ -1228,6 +1228,7 @@ pub fn run() {
             verify_personal_provider_command,
             apply_personal_provider_command,
             get_mode_status_command,
+            get_product_edition_command,
             switch_to_personal_mode_command,
             switch_to_team_mode_command,
             wire_browser_mcp_command,

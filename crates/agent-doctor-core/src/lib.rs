@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod adapters;
 pub mod doctor;
+pub mod edition;
 pub mod evotown;
 pub mod exec;
 pub mod install;
@@ -29,6 +30,7 @@ pub use adapters::{
     DEEPSEEK_HARNESS_VERSION,
 };
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
+pub use edition::{ensure_edition_allows_mode, product_edition, ProductEdition};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_register, execute_sync,

@@ -362,6 +362,8 @@ export type ActiveMode = "personal" | "team" | "unset";
 
 export type ModeStatus = {
   mode: ActiveMode | string;
+  /** Build edition: personal | team (locked package, not a runtime switch). */
+  edition?: string;
   personal_ready: boolean;
   team_ready: boolean;
   active_label: string | null;

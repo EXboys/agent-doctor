@@ -3,9 +3,9 @@
 //! - **personal**: runtimes use the active personal provider endpoint + key
 //! - **team**: runtimes use Evotown / company gateway only
 //!
-//! Modes are mutually exclusive for gateway URL + API key. Control-plane files
-//! (`evotown.agent.env`, `company-profile.env`, `personal-providers.json`) are kept
-//! so you can switch back without re-entering credentials.
+//! Which path is available is locked by [`crate::edition::ProductEdition`]
+//! (personal vs team install packages). Within an edition, mode wiring still
+//! goes through [`apply_mode_switch`](super::pipeline::apply_mode_switch).
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ pub const MODE_UNSET: &str = "unset";
 pub struct ModeStatus {
     /// `personal` | `team` | `unset`
     pub mode: String,
+    /// Build edition: `personal` | `team` (locked; not a runtime switch).
+    pub edition: String,
     pub personal_ready: bool,
     pub team_ready: bool,
     pub active_label: Option<String>,
@@ -146,6 +148,7 @@ pub fn load_mode_status() -> Result<ModeStatus> {
 
     Ok(ModeStatus {
         mode,
+        edition: crate::edition::product_edition().as_str().to_string(),
         personal_ready,
         team_ready,
         active_label,

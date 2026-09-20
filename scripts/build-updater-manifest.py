@@ -7,7 +7,8 @@ Usage:
     --version 0.1.39 \\
     --cdn-base https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop \\
     --github-base https://github.com/EXboys/agent-doctor/releases/download/v0.1.39 \\
-    --out-dir ./updater-manifest
+    --out-dir ./updater-manifest \\
+    --edition personal
 """
 
 from __future__ import annotations
@@ -27,6 +28,11 @@ CANDIDATES: list[tuple[str, list[str]]] = [
     ("windows-x86_64", [r".*-setup\.exe$", r".*setup\.exe$", r".*\.nsis\.zip$"]),
     ("linux-x86_64", [r".*\.AppImage$"]),
 ]
+
+EDITION_MANIFEST_NAMES = {
+    "personal": ("latest.json", "latest.github.json"),
+    "team": ("latest.team.json", "latest.team.github.json"),
+}
 
 
 def publish_name(path: Path) -> str:
@@ -103,6 +109,12 @@ def main() -> None:
     parser.add_argument("--github-base", required=True)
     parser.add_argument("--notes", default="")
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument(
+        "--edition",
+        default="personal",
+        choices=sorted(EDITION_MANIFEST_NAMES),
+        help="personal → latest.json; team → latest.team.json",
+    )
     args = parser.parse_args()
 
     files = find_files(args.artifacts)
@@ -141,6 +153,7 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     notes = args.notes or f"Agent Doctor {args.version}"
+    cdn_name, gh_name = EDITION_MANIFEST_NAMES[args.edition]
 
     cdn_manifest = build_manifest(
         version=args.version,
@@ -158,11 +171,11 @@ def main() -> None:
         urlencode_names=True,
     )
 
-    (args.out_dir / "latest.json").write_text(
+    (args.out_dir / cdn_name).write_text(
         json.dumps(cdn_manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    (args.out_dir / "latest.github.json").write_text(
+    (args.out_dir / gh_name).write_text(
         json.dumps(gh_manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -175,8 +188,9 @@ def main() -> None:
         out_bundle.write_bytes(bundle.read_bytes())
         out_sig.write_text(sig.read_text(encoding="utf-8"), encoding="utf-8")
 
+    print(f"edition: {args.edition}")
     print(f"platforms: {', '.join(sorted(platforms))}")
-    print(f"wrote manifests to {args.out_dir}")
+    print(f"wrote {cdn_name} + {gh_name} to {args.out_dir}")
 
 
 if __name__ == "__main__":

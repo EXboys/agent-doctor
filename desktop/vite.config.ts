@@ -4,6 +4,22 @@ import { resolve } from "node:path";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// Lock UI to the same edition as the Rust binary (`AGENT_DOCTOR_EDITION`).
+// @ts-expect-error process is a nodejs global
+const editionRaw = (
+  process.env.AGENT_DOCTOR_EDITION ||
+  process.env.VITE_AGENT_DOCTOR_EDITION ||
+  "personal"
+)
+  .trim()
+  .toLowerCase();
+const edition =
+  editionRaw === "team" || editionRaw === "enterprise" || editionRaw === "evotown"
+    ? "team"
+    : "personal";
+// @ts-expect-error process is a nodejs global
+process.env.VITE_AGENT_DOCTOR_EDITION = edition;
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   // Relative asset URLs are required for Tauri's custom protocol (absolute

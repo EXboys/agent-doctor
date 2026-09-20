@@ -131,6 +131,15 @@ pub struct BundleProbeReport {
 
 /// Single entry for personal/team mode switches.
 pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
+    match &target {
+        ModeSwitchTarget::Personal { .. } => {
+            crate::edition::ensure_edition_allows_mode(MODE_PERSONAL)?;
+        }
+        ModeSwitchTarget::Team => {
+            crate::edition::ensure_edition_allows_mode(MODE_TEAM)?;
+        }
+    }
+
     let bundle = match &target {
         ModeSwitchTarget::Personal { provider_id } => {
             resolve_personal_bundle(provider_id.as_deref())?

@@ -11,28 +11,34 @@ Typical loop: **scan → diagnose → confirm repair → Ask re-check**.
 - System tray: **Show**, **Run doctor**, **Check for updates**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
 - **Agents** — environment health, runtime inventory, Diagnose → Repair → Ask drawer
 - **Resources** — Skills / MCP inventory; Browser MCP into Codex / Claude / Hermes / OpenClaw
-- **Wiring** — exclusive personal provider vs Evotown team mode (URL templates, verify, apply)
+- **Wiring** — locked by build edition: personal provider (TeamUps) **or** Evotown (enterprise), not both
 - **Workspace** — list/switch project isolation, remote VPS read-only doctor, Hermes scene presets
 - Auto-update via Tauri Updater (China CDN first, GitHub fallback) — see [docs/desktop-auto-update.md](../docs/desktop-auto-update.md)
 - Repair apply / rollback for supported runtimes (Hermes, OpenClaw, DeepSeek Harness, plus Claude/Codex gateway + Browser MCP)
 - No separate business logic in the TypeScript UI layer
 
-See [docs/product-boundary.md](../docs/product-boundary.md) for personal vs team modes.
+See [docs/product-boundary.md](../docs/product-boundary.md) for personal vs team **editions**.
 
 ## Develop
 
 ```bash
 cd desktop
 npm install
-npm run tauri dev
+# Personal edition (default / TeamUps)
+npm run tauri:dev:personal
+# Team edition (enterprise)
+npm run tauri:dev:team
 ```
 
 ## Build
 
 ```bash
 cd desktop
-npm run tauri build
+npm run tauri:build:personal   # TeamUps — com.agentdoctor.app, updater → desktop/
+npm run tauri:build:team       # enterprise — com.agentdoctor.team, updater → desktop-team/
 ```
+
+See [docs/desktop-auto-update.md](../docs/desktop-auto-update.md) for updater channels.
 
 ## CLI-only workflow
 

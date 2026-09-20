@@ -150,6 +150,8 @@ pub fn list_personal_providers() -> Result<PersonalProvidersDocument> {
 pub fn upsert_personal_provider(
     options: &UpsertPersonalProviderOptions,
 ) -> Result<PersonalProvidersDocument> {
+    crate::edition::ensure_edition_allows_mode(crate::setup::MODE_PERSONAL)?;
+
     let path = personal_providers_path().context("could not resolve config directory")?;
     let mut store = load_store(&path)?;
     migrate_from_profile_if_empty(&mut store, &path)?;
@@ -428,6 +430,8 @@ pub fn verify_personal_provider_with_protocol(
 pub fn execute_personal_provider_setup(
     options: &PersonalProviderOptions,
 ) -> Result<PersonalProviderSetupReport> {
+    crate::edition::ensure_edition_allows_mode(crate::setup::MODE_PERSONAL)?;
+
     let gateway_url = normalize_personal_gateway_url(&options.url)?;
     let api_key = options.api_key.trim();
     if api_key.is_empty() {
