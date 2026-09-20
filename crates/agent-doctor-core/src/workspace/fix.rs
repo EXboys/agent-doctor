@@ -190,7 +190,8 @@ fn plan_fixes(
             detail: if check.id == "workspace.claude.project_mcp"
                 || check.id == "workspace.claude.global_mcp"
             {
-                "Will restore/scaffold .mcp.json and write .agent-doctor/claude-mcp-isolation.md"
+                "Will restore/scaffold .mcp.json and write .agent-doctor/claude-mcp-isolation.md \
+                 (globals kept — pass --migrate-claude-mcp to merge into project .mcp.json)"
                     .into()
             } else if check.id == "workspace.hermes.gateway_mismatch" {
                 "Will attempt Hermes/OpenClaw gateway restart (pass --restart-gateways)".into()

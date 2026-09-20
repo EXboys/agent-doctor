@@ -12,8 +12,9 @@ use crate::lifecycle::{
     HermesLifecycleAction, NpmCliLifecycleAction, OpenClawLifecycleAction,
 };
 use crate::probe::runtimes::{
-    deepseek_harness_probe_deep, openclaw_probe_deep, probe_deep, schema_claude_code, schema_codex,
-    schema_deepseek_harness, schema_hermes, schema_openclaw,
+    claude_code_probe_deep, codex_probe_deep, deepseek_harness_probe_deep, openclaw_probe_deep,
+    probe_deep, schema_claude_code, schema_codex, schema_deepseek_harness, schema_hermes,
+    schema_openclaw,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
@@ -214,7 +215,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         },
         create_adapter: claude_code_adapter,
         schema_probe: Some(schema_claude_code),
-        deep_probe: None,
+        deep_probe: Some(claude_code_probe_deep),
         suggest_repairs: Some(suggest_claude_code_repairs),
         apply_playbook: Some(apply_claude_code_playbook),
         run_lifecycle: Some(run_claude_code_lifecycle_action),
@@ -228,7 +229,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         },
         create_adapter: codex_adapter,
         schema_probe: Some(schema_codex),
-        deep_probe: None,
+        deep_probe: Some(codex_probe_deep),
         suggest_repairs: Some(suggest_codex_repairs),
         apply_playbook: Some(apply_codex_playbook),
         run_lifecycle: Some(run_codex_lifecycle_action),
@@ -423,27 +424,19 @@ mod tests {
     }
 
     #[test]
-    fn claude_and_codex_wire_lifecycle_and_playbook() {
-        assert!(descriptor_by_id("claude-code")
-            .expect("claude-code")
-            .run_lifecycle
-            .is_some());
-        assert!(descriptor_by_id("codex")
-            .expect("codex")
-            .run_lifecycle
-            .is_some());
+    fn claude_and_codex_wire_lifecycle_playbook_and_deep_probe() {
+        let claude = descriptor_by_id("claude-code").expect("claude-code");
+        let codex = descriptor_by_id("codex").expect("codex");
+        assert!(claude.run_lifecycle.is_some());
+        assert!(codex.run_lifecycle.is_some());
+        assert!(claude.deep_probe.is_some());
+        assert!(codex.deep_probe.is_some());
         assert!(runtime_supports_lifecycle("claude-code"));
         assert!(runtime_supports_lifecycle("codex"));
         assert!(runtime_supports_playbook("claude-code"));
         assert!(runtime_supports_playbook("codex"));
-        assert!(descriptor_by_id("claude-code")
-            .expect("claude-code")
-            .suggest_repairs
-            .is_some());
-        assert!(descriptor_by_id("codex")
-            .expect("codex")
-            .apply_playbook
-            .is_some());
+        assert!(claude.suggest_repairs.is_some());
+        assert!(codex.apply_playbook.is_some());
     }
 
     #[test]

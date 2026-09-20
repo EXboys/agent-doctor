@@ -231,6 +231,14 @@ impl SecretBackend for MemorySecretBackend {
 }
 
 pub fn default_secret_backend() -> Arc<dyn SecretBackend> {
+    // Tests / CI: set AGENT_DOCTOR_SECRETS_BACKEND=memory to avoid Keychain /
+    // Credential Manager / Secret Service prompts while reading settings.
+    if std::env::var("AGENT_DOCTOR_SECRETS_BACKEND")
+        .ok()
+        .is_some_and(|v| v.eq_ignore_ascii_case("memory"))
+    {
+        return Arc::new(MemorySecretBackend::new());
+    }
     Arc::new(CompositeSecretBackend::new())
 }
 

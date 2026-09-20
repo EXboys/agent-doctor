@@ -542,44 +542,69 @@ fn probe_gateway(
     match gateway_socket_addr(&url) {
         Some(addr) => match resolve_socket_addrs(&addr, Duration::from_millis(800)) {
             Ok(addrs) => {
-                let deadline = Instant::now() + Duration::from_millis(800);
-                let reachable = addrs.into_iter().any(|addr| {
-                    if Instant::now() >= deadline {
-                        return false;
-                    }
-                    let remain = deadline.saturating_duration_since(Instant::now());
-                    TcpStream::connect_timeout(&addr, remain.min(Duration::from_millis(400)))
-                        .is_ok()
-                });
+                let https = url.starts_with("https://");
+                let outcome = probe_tcp_outcome(&addrs, Duration::from_millis(800));
+                let (status, severity, message) = match outcome {
+                    TcpProbeOutcome::Reachable => (
+                        ProbeStatus::Pass,
+                        ProbeSeverity::Info,
+                        if https {
+                            "gateway host accepted TCP (TLS/HTTP not verified)".to_string()
+                        } else {
+                            "gateway host accepted a TCP connection".to_string()
+                        },
+                    ),
+                    TcpProbeOutcome::Refused => (
+                        ProbeStatus::Warn,
+                        ProbeSeverity::Warning,
+                        "gateway host unreachable (TCP connection refused)".to_string(),
+                    ),
+                    TcpProbeOutcome::TimedOut => (
+                        ProbeStatus::Warn,
+                        ProbeSeverity::Warning,
+                        if https {
+                            "gateway TCP timed out — host may be filtered; TLS/HTTP not checked"
+                                .to_string()
+                        } else {
+                            "gateway TCP timed out — host may be filtered or slow".to_string()
+                        },
+                    ),
+                    TcpProbeOutcome::Failed(detail) => (
+                        ProbeStatus::Warn,
+                        ProbeSeverity::Warning,
+                        format!("gateway TCP connect failed: {detail}"),
+                    ),
+                    TcpProbeOutcome::NoAttempt => (
+                        ProbeStatus::Warn,
+                        ProbeSeverity::Warning,
+                        "gateway TCP check ran out of time before attempting a connection"
+                            .to_string(),
+                    ),
+                };
                 checks.push(ProbeCheck::new(
                     "gateway.connectivity",
                     "Gateway connectivity",
-                    if reachable {
-                        ProbeStatus::Pass
+                    status,
+                    severity,
+                    message,
+                    SensitivityLevel::ConfigShape,
+                ));
+            }
+            Err(error) => {
+                let timed_out = error.kind() == std::io::ErrorKind::TimedOut;
+                checks.push(ProbeCheck::new(
+                    "gateway.connectivity",
+                    "Gateway connectivity",
+                    ProbeStatus::Warn,
+                    ProbeSeverity::Warning,
+                    if timed_out {
+                        format!("gateway DNS timed out: {error}")
                     } else {
-                        ProbeStatus::Warn
-                    },
-                    if reachable {
-                        ProbeSeverity::Info
-                    } else {
-                        ProbeSeverity::Warning
-                    },
-                    if reachable {
-                        "gateway host accepted a TCP connection".to_string()
-                    } else {
-                        "gateway host did not accept a TCP connection within timeout".to_string()
+                        format!("gateway host unreachable (DNS failed): {error}")
                     },
                     SensitivityLevel::ConfigShape,
                 ));
             }
-            Err(error) => checks.push(ProbeCheck::new(
-                "gateway.connectivity",
-                "Gateway connectivity",
-                ProbeStatus::Warn,
-                ProbeSeverity::Warning,
-                format!("failed to resolve gateway host: {error}"),
-                SensitivityLevel::ConfigShape,
-            )),
         },
         None => checks.push(ProbeCheck::new(
             "gateway.connectivity",
@@ -589,6 +614,53 @@ fn probe_gateway(
             "gateway URL could not be parsed for connectivity check",
             SensitivityLevel::ConfigShape,
         )),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TcpProbeOutcome {
+    Reachable,
+    Refused,
+    TimedOut,
+    Failed(String),
+    NoAttempt,
+}
+
+fn probe_tcp_outcome(addrs: &[std::net::SocketAddr], budget: Duration) -> TcpProbeOutcome {
+    let deadline = Instant::now() + budget;
+    let mut saw_timeout = false;
+    let mut last_err: Option<String> = None;
+    let mut attempted = false;
+
+    for addr in addrs {
+        if Instant::now() >= deadline {
+            break;
+        }
+        attempted = true;
+        let remain = deadline.saturating_duration_since(Instant::now());
+        match TcpStream::connect_timeout(addr, remain.min(Duration::from_millis(400))) {
+            Ok(_) => return TcpProbeOutcome::Reachable,
+            Err(error) => match error.kind() {
+                std::io::ErrorKind::ConnectionRefused => return TcpProbeOutcome::Refused,
+                std::io::ErrorKind::TimedOut => {
+                    saw_timeout = true;
+                    last_err = Some(error.to_string());
+                }
+                _ => {
+                    last_err = Some(error.to_string());
+                }
+            },
+        }
+    }
+
+    if !attempted {
+        TcpProbeOutcome::NoAttempt
+    } else if saw_timeout {
+        TcpProbeOutcome::TimedOut
+    } else if let Some(detail) = last_err {
+        TcpProbeOutcome::Failed(detail)
+    } else {
+        TcpProbeOutcome::TimedOut
     }
 }
 

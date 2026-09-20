@@ -52,7 +52,8 @@ run_clippy_desktop() {
 }
 
 run_test_cli() {
-  cargo test "${CLI_PACKAGES[@]}"
+  # Avoid macOS Keychain / OS secret prompts during unit tests.
+  AGENT_DOCTOR_SECRETS_BACKEND=memory cargo test "${CLI_PACKAGES[@]}"
 }
 
 run_build_cli() {

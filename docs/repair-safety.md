@@ -31,6 +31,8 @@ Agent Doctor treats repair as a controlled enterprise workflow, not as a free-fo
    - gateway/base_url TCP reachability
    - obvious MCP/Skills path references and broken links
    - Hermes provider/API key env requirements and `.env` permissions
+  - Claude Code base URL / API key / settings permissions
+  - Codex provider schema (`wire_api`, `openai_base_url`, env_key) and placeholder auth.json
 2. Create a backup snapshot before modifying files.
 3. Redact the diagnostic bundle.
 4. Let AI summarize and rank likely causes from redacted facts.
@@ -81,6 +83,15 @@ Runtime-specific rule playbooks extend step 4. **Hermes v1 (shipped):**
 - tighten `~/.openclaw/.env` permissions to `600`
 - dedupe API key lines in `.env`; scaffold `env.vars` placeholders + local guide (no secret fill)
 
+**Claude Code / Codex v1 (shipped):**
+
+- install via `npm install -g` when binary missing
+- create / rewrite config from active Personal/Team mode (gateway, provider slot, model)
+- Browser MCP wire/repair
+- Claude: empty `ANTHROPIC_API_KEY` scaffold + local guide; tighten `settings.json` to `600` when it holds a key
+- Codex: set `wire_api=responses` (+ align `openai_base_url`); clear placeholder/empty `auth.json`; API key env guide (no secret fill)
+- heal bare/`default` model and provider schema drift via mode rewire
+
 **Never shipped / not planned for v1:** auto-filling or uploading API keys; AI choosing arbitrary shell commands.
 
 **Rollback:** backups live under `~/.config/agent-doctor/backups/<runtime>-<timestamp>/`. Restore with:
@@ -98,8 +109,8 @@ The desktop app shows suggested fixes after diagnosis, runs apply (backup → pl
 
 | Layer | Behavior |
 |-------|----------|
-| Rule install | When lifecycle hooks exist (Hermes, OpenClaw): official script → re-probe; logs under `~/.config/agent-doctor/logs/` |
-| No rules | Skip rule phase (e.g. Claude Code, Codex) → **AI install** via allowlisted bash |
+| Rule install | When lifecycle hooks exist (Hermes, OpenClaw, Claude Code, Codex): official script / `npm install -g` → re-probe; logs under `~/.config/agent-doctor/logs/` |
+| No rules | Skip rule phase → **AI install** via allowlisted bash |
 | Rule failed | **AI repair loop** automatically (read logs, retry allowlisted install, config fixes) |
 | After success | Optional `--plan ai` / `--repair` for remaining config issues |
 

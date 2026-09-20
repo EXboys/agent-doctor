@@ -7,7 +7,7 @@
 //! (`evotown.agent.env`, `company-profile.env`, `personal-providers.json`) are kept
 //! so you can switch back without re-entering credentials.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::personal::{
@@ -19,7 +19,8 @@ use super::{
     RuntimeSetupResult, SetupReport, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
 };
 use crate::profile::{
-    company_baseline_path, read_agent_profile, read_company_baseline, read_env_map, ProviderKind,
+    agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
+    read_env_map, ProviderKind,
 };
 use crate::repair::mask_secret_value;
 
@@ -168,6 +169,89 @@ pub fn switch_to_personal_mode(provider_id: Option<&str>) -> Result<ModeSwitchRe
 /// Switch runtime wiring to Evotown / company gateway (exclusive).
 pub fn switch_to_team_mode() -> Result<ModeSwitchReport> {
     apply_mode_switch(ModeSwitchTarget::Team)
+}
+
+/// Fast overlay readiness check that only reads `profile.env` (no OS keychain).
+pub fn mode_overlay_ready_from_profile() -> bool {
+    matches!(
+        read_agent_profile().ok().flatten().map(|p| p.kind),
+        Some(ProviderKind::Personal | ProviderKind::Company)
+    )
+}
+
+/// Keep the runtime's live gateway; update Agent Doctor **personal** overlay to match.
+///
+/// Does **not** rewrite runtime configs. Refused in team mode so company baseline
+/// stays authoritative.
+pub fn adopt_live_gateway_as_overlay(live_url: &str) -> Result<()> {
+    use super::personal::{
+        write_personal_profile, ACTIVE_PROVIDER_ID_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC,
+        PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
+    };
+
+    let live = live_url.trim().trim_end_matches('/');
+    if live.is_empty() {
+        bail!("live gateway URL is empty");
+    }
+    if !(live.starts_with("http://") || live.starts_with("https://")) {
+        bail!("live gateway URL must start with http:// or https://");
+    }
+
+    let path = agent_profile_path().context("could not resolve profile.env path")?;
+    let active = read_agent_profile()?.context("no active Agent Doctor overlay")?;
+    if active.kind != ProviderKind::Personal {
+        bail!(
+            "keeping live gateway is only supported in personal mode \
+             (team/company baseline must stay authoritative)"
+        );
+    }
+    let api_key = active
+        .api_key
+        .filter(|k| !k.trim().is_empty())
+        .context("personal overlay is missing an API key in profile.env")?;
+
+    let env = read_env_map(&path)?;
+    let model = env
+        .get(MODEL_ENV)
+        .cloned()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| super::COMPANY_DEFAULT_MODEL.to_string());
+    let mut protocol = env
+        .get(PROVIDER_PROTOCOL_ENV)
+        .cloned()
+        .unwrap_or_else(|| PROTOCOL_OPENAI.to_string());
+    // Claude Anthropic-Messages gateways often end with /anthropic.
+    if live.contains("/anthropic") {
+        protocol = PROTOCOL_ANTHROPIC.to_string();
+    }
+    let provider_id = env.get(ACTIVE_PROVIDER_ID_ENV).map(String::as_str);
+    let provider_name = env.get("AGENT_DOCTOR_PROVIDER_NAME").map(String::as_str);
+
+    write_personal_profile(
+        &path,
+        live,
+        &api_key,
+        &model,
+        &protocol,
+        provider_id,
+        provider_name,
+    )?;
+
+    // Best-effort: keep settings.db personal provider URL in sync (SQLite only).
+    if let Ok(store) = crate::store::open_settings_store() {
+        if let Ok(records) = store.list_personal_providers() {
+            for record in records {
+                if record.active || provider_id == Some(record.id.as_str()) {
+                    let mut updated = record;
+                    updated.url = live.to_string();
+                    let _ = store.upsert_personal_provider(&updated);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Team credentials for status checks (overlay readiness).

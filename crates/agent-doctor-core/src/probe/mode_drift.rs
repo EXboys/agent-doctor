@@ -271,7 +271,7 @@ fn probe_codex_model_unroutable(
     checks: &mut Vec<ProbeCheck>,
     facts: &mut Vec<DiagnosticFact>,
 ) {
-    let path = home_join(".codex/config.toml");
+    let path = CodexAdapter::config_path();
     let Ok(raw) = fs::read_to_string(path) else {
         return;
     };

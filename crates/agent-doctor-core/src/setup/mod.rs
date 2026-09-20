@@ -10,8 +10,9 @@ pub use merge::{
     OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
 };
 pub use mode::{
-    load_mode_status, switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport,
-    MODE_PERSONAL, MODE_TEAM, MODE_UNSET,
+    adopt_live_gateway_as_overlay, load_mode_status, mode_overlay_ready_from_profile,
+    switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport, MODE_PERSONAL,
+    MODE_TEAM, MODE_UNSET,
 };
 pub use personal::{
     activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,

@@ -32,9 +32,11 @@ jobs:
       - name: Test (core + CLI only)
         # Some unit tests still mutate process env (e.g. AGENT_DOCTOR_*_BIN);
         # serialize to avoid cross-test races. HOME is no longer mutated.
+        # Memory secrets backend avoids OS keyring prompts in CI.
         run: cargo test -p agent-doctor-core -p agent-doctor
         env:
           RUST_TEST_THREADS: "1"
+          AGENT_DOCTOR_SECRETS_BACKEND: memory
 
       - name: Build CLI
         run: cargo build --release -p agent-doctor

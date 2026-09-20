@@ -10,7 +10,7 @@ use crate::adapters::util::{discover_binary, home_join};
 pub struct CodexAdapter;
 
 impl CodexAdapter {
-    fn config_path() -> PathBuf {
+    pub(crate) fn config_path() -> PathBuf {
         // Prefer active workspace isolated CODEX_HOME — provider keys live there
         // once Ask/wiring avoids writing them into ~/.codex (project-local deny).
         if let Ok(doc) = crate::workspace::load_workspaces() {

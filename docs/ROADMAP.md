@@ -37,8 +37,8 @@
 | Rollback from backup directory | Shipped (CLI + desktop) |
 | AI-generated repair plans / free-form shell | Not planned for v1 |
 | Auto-fill or upload API keys | Not planned |
-| `install` / `update` runtime binaries | Hermes + OpenClaw: `install` command + repair playbook; Claude/Codex planned |
-| OpenClaw / Claude / Codex rule playbooks | OpenClaw: install + config/schema/env/gateway fixes shipped; Claude/Codex planned |
+| `install` / `update` runtime binaries | Hermes + OpenClaw + Claude/Codex: `install` command + repair playbook |
+| OpenClaw / Claude / Codex rule playbooks | OpenClaw: install + config/schema/env/gateway fixes shipped; Claude/Codex: deep probes + install/mode rewire/wire_api/auth/API-key scaffold shipped |
 
 ## P1 — Desktop tray
 
