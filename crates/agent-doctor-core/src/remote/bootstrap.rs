@@ -77,12 +77,8 @@ pub fn bootstrap_and_add_host(opts: BootstrapHostOptions) -> Result<RemoteHostsD
         );
     }
 
-    if let Err(err) = verify_key_login(
-        opts.hostname.trim(),
-        opts.user.trim(),
-        opts.port,
-        &key_path,
-    ) {
+    if let Err(err) = verify_key_login(opts.hostname.trim(), opts.user.trim(), opts.port, &key_path)
+    {
         cleanup_key_pair(&key_path);
         return Err(err).context(
             "public key installed but BatchMode key login failed — check authorized_keys \
@@ -103,8 +99,7 @@ pub fn bootstrap_and_add_host(opts: BootstrapHostOptions) -> Result<RemoteHostsD
 /// `ssh-keygen -t ed25519 -N "" -f <path> -C agent-doctor-<id>`
 pub fn generate_ed25519_key(path: &Path, host_id: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let comment = format!("agent-doctor-{host_id}");
     let status = Command::new("ssh-keygen")

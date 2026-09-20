@@ -889,14 +889,7 @@ fn main() -> Result<()> {
                 } => {
                     let password =
                         commands::remote::resolve_bootstrap_password(password, password_env)?;
-                    commands::remote::host_bootstrap(
-                        &id,
-                        &hostname,
-                        &user,
-                        port,
-                        password,
-                        label,
-                    )?
+                    commands::remote::host_bootstrap(&id, &hostname, &user, port, password, label)?
                 }
                 RemoteHostAction::Add {
                     id,

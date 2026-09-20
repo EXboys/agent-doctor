@@ -65,7 +65,10 @@ impl RemoteHostEntry {
     }
 
     pub fn managed_user(&self) -> &str {
-        self.user.as_deref().filter(|u| !u.is_empty()).unwrap_or("root")
+        self.user
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .unwrap_or("root")
     }
 
     pub fn managed_port(&self) -> u16 {
