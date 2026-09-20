@@ -1262,6 +1262,14 @@ body.is-diagnose-open .diagnose-detail {
   line-height: 1.45;
 }
 
+.first-run.is-error {
+  border-color: color-mix(in srgb, var(--danger, #c44) 35%, var(--border));
+}
+
+.first-run.is-error .first-run-desc {
+  color: color-mix(in srgb, var(--danger, #c44) 75%, var(--text));
+}
+
 .first-run-target {
   display: grid;
   gap: 2px;

@@ -65,6 +65,9 @@ function setMainTab(tab: MainTabId) {
   if (tab === "resources") {
     void refs.resources?.loadResourcesHub();
   }
+  if (tab === "diagnose") {
+    refs.firstRun?.onDiagnoseTabVisible();
+  }
 }
 
 function updateLangButtons() {
@@ -82,7 +85,7 @@ async function switchLocale(next: Locale) {
   }
   setLocale(next);
   applyStaticI18n();
-  if (refs.firstRun && refs.firstRun.getPhase() !== "hidden") {
+  if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && refs.firstRun.getPhase() !== "awaitingWiring") {
     refs.firstRun.renderFirstRunUi();
   }
   updateLangButtons();
