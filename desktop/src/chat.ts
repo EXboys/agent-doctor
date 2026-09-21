@@ -686,6 +686,18 @@ function settleActivity(): void {
   activityEl = null;
 }
 
+type PendingPermission = {
+  sessionId: string;
+  requestId: string;
+  toolName: string;
+  detail: string;
+  messageId: string;
+};
+
+/** Parallel tool asks in one turn — show one batch card instead of N confirm stacks. */
+let pendingPermissionBatch: PendingPermission[] = [];
+let permissionPaintTimer = 0;
+
 function pushPermissionCard(payload: {
   session_id: string;
   request_id: string;
@@ -696,9 +708,12 @@ function pushPermissionCard(payload: {
   sealAssistantBubble();
   settleActivity();
   dismissLifecycleActivity();
-  // Fold the preceding "1 tool used" chip + raw JSON bubble into this one card.
   scrubToolFragmentsBeforePermission(payload.detail);
   setStatus(t("chat.needYourChoice"), "warn");
+
+  if (pendingPermissionBatch.some((item) => item.requestId === payload.request_id)) {
+    return;
+  }
 
   const persisted = persistMessage("permission", payload.detail.trim() || payload.tool_name, {
     permission: {
@@ -710,9 +725,138 @@ function pushPermissionCard(payload: {
     },
   });
 
-  // One module: tool + summary + command + Allow/Deny. No sticky dock duplicate.
+  pendingPermissionBatch.push({
+    sessionId: payload.session_id,
+    requestId: payload.request_id,
+    toolName: payload.tool_name,
+    detail: payload.detail.trim() || payload.tool_name,
+    messageId: persisted.id,
+  });
+
   hideDecisionDock();
-  const card = renderPermissionCard(persisted, true);
+  schedulePaintLivePermissionBatch();
+}
+
+function schedulePaintLivePermissionBatch(): void {
+  // Brief coalesce so parallel Bash asks arrive as one card, not single→batch flash.
+  if (permissionPaintTimer) window.clearTimeout(permissionPaintTimer);
+  permissionPaintTimer = window.setTimeout(() => {
+    permissionPaintTimer = 0;
+    paintLivePermissionBatch();
+  }, 50);
+}
+
+function clearLivePermissionBatchCard(): void {
+  logEl.querySelectorAll<HTMLElement>(".chat-permission.is-batch.is-pending").forEach((el) => {
+    el.remove();
+  });
+  for (const item of pendingPermissionBatch) {
+    logEl
+      .querySelectorAll<HTMLElement>(
+        `.chat-permission.is-pending[data-request-id="${CSS.escape(item.requestId)}"]`,
+      )
+      .forEach((el) => {
+        if (!el.classList.contains("is-batch")) el.remove();
+      });
+  }
+}
+
+function paintLivePermissionBatch(): void {
+  clearLivePermissionBatchCard();
+  if (pendingPermissionBatch.length === 0) {
+    return;
+  }
+
+  // One pending ask: keep the compact single-tool card.
+  if (pendingPermissionBatch.length === 1) {
+    const only = pendingPermissionBatch[0];
+    const message = activeSession().messages.find((m) => m.id === only.messageId);
+    if (message) {
+      const card = renderPermissionCard(message, true);
+      logEl.appendChild(card);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "chat-permission is-pending is-batch";
+  card.dataset.batch = "1";
+
+  const head = document.createElement("div");
+  head.className = "chat-permission-row";
+  const title = document.createElement("span");
+  title.className = "chat-permission-summary chat-permission-batch-title";
+  title.textContent = t("chat.permissionBatchTitle", {
+    count: String(pendingPermissionBatch.length),
+  });
+  const actions = document.createElement("div");
+  actions.className = "chat-permission-actions";
+  const allowBtn = document.createElement("button");
+  allowBtn.type = "button";
+  allowBtn.className = "chat-permission-allow";
+  allowBtn.textContent = t("chat.permissionAllowAll");
+  const denyBtn = document.createElement("button");
+  denyBtn.type = "button";
+  denyBtn.className = "chat-permission-deny";
+  denyBtn.textContent = t("chat.permissionDenyAll");
+  const setBusyLocal = (busyLocal: boolean) => {
+    allowBtn.disabled = busyLocal;
+    denyBtn.disabled = busyLocal;
+  };
+  const resolveAll = async (allow: boolean) => {
+    if (card.dataset.resolved === "1") return;
+    setBusyLocal(true);
+    const items = [...pendingPermissionBatch];
+    try {
+      for (const item of items) {
+        await invoke<boolean>("resolve_permission_session_command", {
+          sessionId: item.sessionId,
+          requestId: item.requestId,
+          allow,
+        });
+      }
+    } catch (error) {
+      setBusyLocal(false);
+      setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
+    }
+  };
+  allowBtn.addEventListener("click", () => void resolveAll(true));
+  denyBtn.addEventListener("click", () => void resolveAll(false));
+  actions.append(allowBtn, denyBtn);
+  head.append(title, actions);
+  card.appendChild(head);
+
+  const list = document.createElement("ul");
+  list.className = "chat-permission-batch-list";
+  for (const item of pendingPermissionBatch) {
+    const formatted = formatPermissionDetail(item.detail);
+    const li = document.createElement("li");
+    li.className = "chat-permission-batch-item";
+    li.dataset.requestId = item.requestId;
+    const tool = document.createElement("span");
+    tool.className = "chat-permission-tool";
+    tool.textContent = item.toolName;
+    const summary = document.createElement("span");
+    summary.className = "chat-permission-summary";
+    summary.textContent = formatted.summary || item.toolName;
+    summary.title = formatted.full || formatted.summary;
+    li.append(tool, summary);
+    if (formatted.full && formatted.full !== formatted.summary) {
+      const more = document.createElement("details");
+      more.className = "chat-permission-more";
+      more.open = true;
+      const moreSummary = document.createElement("summary");
+      moreSummary.textContent = t("chat.permissionExpand");
+      const detail = document.createElement("pre");
+      detail.className = "chat-permission-detail";
+      detail.textContent = formatted.full;
+      more.append(moreSummary, detail);
+      li.appendChild(more);
+    }
+    list.appendChild(li);
+  }
+  card.appendChild(list);
   logEl.appendChild(card);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -761,28 +905,6 @@ function removeAssistantBubbleElement(el: HTMLElement): void {
     assistantBubble = null;
     assistantMessageId = null;
     assistantRaw = "";
-  }
-}
-
-async function resolvePermissionFromDock(
-  sessionId: string,
-  requestId: string,
-  allow: boolean,
-): Promise<void> {
-  decisionActionsEl.querySelectorAll("button").forEach((btn) => {
-    (btn as HTMLButtonElement).disabled = true;
-  });
-  try {
-    await invoke<boolean>("resolve_permission_session_command", {
-      sessionId,
-      requestId,
-      allow,
-    });
-  } catch (error) {
-    decisionActionsEl.querySelectorAll("button").forEach((btn) => {
-      (btn as HTMLButtonElement).disabled = false;
-    });
-    setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
   }
 }
 
@@ -897,8 +1019,11 @@ function markPermissionResolved(requestId: string, allowed: boolean): void {
     saveStore();
   }
 
+  const wasInBatch = pendingPermissionBatch.some((item) => item.requestId === requestId);
+  pendingPermissionBatch = pendingPermissionBatch.filter((item) => item.requestId !== requestId);
+
   const card = logEl.querySelector<HTMLElement>(
-    `.chat-permission[data-request-id="${CSS.escape(requestId)}"]`,
+    `.chat-permission.is-pending[data-request-id="${CSS.escape(requestId)}"]:not(.is-batch)`,
   );
   if (card) {
     card.dataset.resolved = "1";
@@ -913,6 +1038,26 @@ function markPermissionResolved(requestId: string, allowed: boolean): void {
       actions.appendChild(badge);
     }
   }
+
+  const batchCard = logEl.querySelector<HTMLElement>(".chat-permission.is-batch.is-pending");
+  if (batchCard && wasInBatch && pendingPermissionBatch.length === 0) {
+    if (permissionPaintTimer) {
+      window.clearTimeout(permissionPaintTimer);
+      permissionPaintTimer = 0;
+    }
+    batchCard.dataset.resolved = "1";
+    batchCard.classList.remove("is-pending", "is-expired");
+    batchCard.classList.add(allowed ? "is-allowed" : "is-denied");
+    const actions = batchCard.querySelector(".chat-permission-actions");
+    if (actions) {
+      actions.replaceChildren();
+      const badge = document.createElement("span");
+      badge.className = "chat-permission-result";
+      badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
+      actions.appendChild(badge);
+    }
+  }
+
   hideDecisionDock();
   setStatus(allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
 }
@@ -1803,6 +1948,11 @@ async function ensureListener(): Promise<void> {
         const finalAssistantText = assistantRaw;
         sealAssistantBubble();
         // Disable any unanswered permission cards if the session ended.
+        if (permissionPaintTimer) {
+          window.clearTimeout(permissionPaintTimer);
+          permissionPaintTimer = 0;
+        }
+        pendingPermissionBatch = [];
         for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
           card.classList.remove("is-pending");
           card.classList.add("is-expired");
