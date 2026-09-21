@@ -770,6 +770,20 @@ fn is_openclaw_stderr_noise(line: &str) -> bool {
         return true;
     }
     let lower = trimmed.to_ascii_lowercase();
+    // Gateway secret lookup falls back to local files. The reply still arrives;
+    // the multi-line notice is not an Ask failure.
+    if lower.starts_with("[secrets]")
+        || lower.contains("secrets.resolve unavailable")
+        || lower.contains("resolved command secrets locally")
+        || lower.contains("openclaw gateway run")
+        || lower.contains("openclaw gateway status")
+        || lower.starts_with("gateway target:")
+        || lower.starts_with("source: local loopback")
+        || lower.starts_with("bind: loopback")
+        || (lower.starts_with("config:") && lower.contains("openclaw.json"))
+    {
+        return true;
+    }
     lower.starts_with("[agents/")
         || lower.starts_with("[provider-")
         || lower.starts_with("[model-")
@@ -810,6 +824,19 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
+
+    #[test]
+    fn hides_local_secret_fallback_notice() {
+        let notice = "[secrets] agent: gateway secrets.resolve unavailable (Gateway not reachable at ws://127.0.0.1:18789 (ECONNREFUSED).\n\
+Start it with `openclaw gateway run` or check `openclaw gateway status`.\n\
+Gateway target: ws://127.0.0.1:18789\n\
+Source: local loopback\n\
+Config: /Users/airlu/.openclaw/openclaw.json\n\
+Bind: loopback); resolved command secrets locally.";
+        for line in notice.lines() {
+            assert!(is_openclaw_stderr_noise(line), "{line}");
+        }
+    }
 
     #[cfg(unix)]
     fn write_fake_bin(dir: &Path, name: &str, script: &str) -> PathBuf {

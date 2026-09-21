@@ -1,10 +1,13 @@
 pub mod deepseek_harness;
+mod download_route;
 pub mod hermes;
 pub mod nodejs;
 pub mod npm_cli;
 pub mod openclaw;
 mod runner;
 mod uninstall;
+
+pub use download_route::use_china_mirrors;
 
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 

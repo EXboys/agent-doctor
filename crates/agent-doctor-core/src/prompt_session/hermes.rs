@@ -471,6 +471,16 @@ fn is_hermes_stderr_noise(line: &str) -> bool {
     if trimmed.to_ascii_lowercase().starts_with("session_id:") {
         return true;
     }
+    let mut body = trimmed;
+    for prefix in ["↻", "⚠", "⚠️"] {
+        if let Some(rest) = body.strip_prefix(prefix) {
+            body = rest.trim();
+        }
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("resumed session") || lower.starts_with("resume this session") {
+        return true;
+    }
     if trimmed.starts_with("⚠") || trimmed.starts_with("⚠️") {
         // Auxiliary / compression notices are not actionable Ask errors.
         if trimmed.contains("auxiliary") || trimmed.contains("OPENROUTER") {
@@ -498,6 +508,13 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         path
+    }
+
+    #[test]
+    fn hides_resume_banner_from_ask() {
+        assert!(is_hermes_stderr_noise(
+            "↻ Resumed session 20260814_223955_a98b96 'Response style: answer the user directly and...' (4 user messages, 8 total messages)"
+        ));
     }
 
     #[test]

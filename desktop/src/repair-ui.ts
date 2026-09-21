@@ -6,6 +6,13 @@ import type {
   RepairStatusFilter,
 } from "./types";
 
+function isGatewayConnectivityCheck(check: { title: string; message: string }): boolean {
+  return (
+    check.title === "Gateway connectivity" ||
+    /gateway (TCP|DNS|host|URL)/i.test(check.message)
+  );
+}
+
 function renderRepairSummaryChip(
   filter: RepairStatusFilter,
   count: number,
@@ -176,8 +183,18 @@ export function renderRepairPreview(
         ? `<span class="repair-check-detail">${escapeHtml(check.details[0])}${check.details.length > 1 ? ` +${check.details.length - 1}` : ""}</span>`
         : "";
       const legacyAgents = check.message.includes("agents.list is a legacy key");
-      const title = legacyAgents ? t("repair.openclawLegacyAgentsTitle") : check.title;
-      const message = legacyAgents ? t("repair.openclawLegacyAgentsDesc") : check.message;
+      const gatewayDown =
+        (check.status === "warn" || check.status === "fail") && isGatewayConnectivityCheck(check);
+      const title = gatewayDown
+        ? t("repair.gatewayUnreachableTitle")
+        : legacyAgents
+          ? t("repair.openclawLegacyAgentsTitle")
+          : check.title;
+      const message = gatewayDown
+        ? t("repair.gatewayUnreachableDesc")
+        : legacyAgents
+          ? t("repair.openclawLegacyAgentsDesc")
+          : check.message;
       return `
         <li class="repair-check is-${statusClass}">
           <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
@@ -290,6 +307,13 @@ export function renderRepairPreview(
   const canMigrateClaudeMcp = report.suggested_repairs.some(
     (item) => item.id === "review-claude-global-mcp",
   );
+  const blocking = report.checks.filter(
+    (check) => check.status === "warn" || check.status === "fail",
+  );
+  const onlyGateway =
+    blocking.length > 0 && blocking.every((check) => isGatewayConnectivityCheck(check));
+  const showGatewayNext =
+    isAskRuntime && onlyGateway && !report.can_apply_repair && !showRepairConfirm;
   const funnel = isAskRuntime
     ? `<div class="repair-funnel">
         <div class="repair-funnel-bar">
@@ -301,13 +325,17 @@ export function renderRepairPreview(
           ${
             funnelNeedsRepair && !showRepairConfirm
               ? `<button type="button" class="btn-primary" data-action="preview-repair">${escapeHtml(t("repair.oneClick"))}</button>`
-              : ""
+              : showGatewayNext
+                ? `<button type="button" class="btn-primary" data-action="go-wiring">${escapeHtml(t("repair.gatewayUnreachableNext"))}</button>`
+                : ""
           }
         </div>
         ${
-          report.runtime_id === "openclaw"
-            ? `<p class="repair-funnel-hint" title="${escapeHtml(t("repair.openclawMcpNote"))}">${escapeHtml(t("repair.openclawMcpNote"))}</p>`
-            : ""
+          showGatewayNext
+            ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.gatewayUnreachableDesc"))}</p>`
+            : report.runtime_id === "openclaw"
+              ? `<p class="repair-funnel-hint" title="${escapeHtml(t("repair.openclawMcpNote"))}">${escapeHtml(t("repair.openclawMcpNote"))}</p>`
+              : ""
         }
       </div>`
     : "";

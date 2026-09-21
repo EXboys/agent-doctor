@@ -14,6 +14,8 @@ use serde::Deserialize;
 use crate::adapters::util::{find_binary, managed_nodejs_root, prepend_user_path};
 use crate::exec::command_for_path;
 
+use super::download_route::{use_china_mirrors, NODE_MIRROR};
+
 const NODE_DIST_INDEX: &str = "https://nodejs.org/dist/index.json";
 const NODE_DIST_BASE: &str = "https://nodejs.org/dist";
 /// Used when nodejs.org/dist/index.json is unreachable.
@@ -96,10 +98,10 @@ where
     on_progress("Looking up Node.js LTS…", 4);
     let version = resolve_lts_version(&client).unwrap_or_else(|_| NODE_LTS_FALLBACK.to_string());
     let archive = node_archive_name(&version);
-    let url = format!("{NODE_DIST_BASE}/{version}/{archive}");
+    let urls = node_archive_urls(&version, &archive);
     on_progress(&format!("Downloading Node.js {version}…"), 6);
 
-    let bytes = download_bytes(&client, &url, on_progress)?;
+    let bytes = download_first(&client, &urls, on_progress)?;
     on_progress(
         &format!(
             "Downloaded {} — extracting to {}",
@@ -151,19 +153,59 @@ struct DistIndexEntry {
 }
 
 fn resolve_lts_version(client: &reqwest::blocking::Client) -> Result<String> {
+    let mut last_error = None;
+    for url in node_index_urls() {
+        match fetch_lts_version(client, &url) {
+            Ok(version) => return Ok(version),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    match last_error {
+        Some(error) => Err(error),
+        None => bail!("no Node.js index URL"),
+    }
+}
+
+fn node_index_urls() -> Vec<String> {
+    node_index_urls_routed(use_china_mirrors())
+}
+
+fn node_index_urls_routed(china: bool) -> Vec<String> {
+    let mut urls = Vec::new();
+    if china {
+        urls.push(format!("{NODE_MIRROR}/index.json"));
+    }
+    urls.push(NODE_DIST_INDEX.to_string());
+    urls
+}
+
+fn node_archive_urls(version: &str, archive: &str) -> Vec<String> {
+    node_archive_urls_routed(use_china_mirrors(), version, archive)
+}
+
+fn node_archive_urls_routed(china: bool, version: &str, archive: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    if china {
+        urls.push(format!("{NODE_MIRROR}/{version}/{archive}"));
+    }
+    urls.push(format!("{NODE_DIST_BASE}/{version}/{archive}"));
+    urls
+}
+
+fn fetch_lts_version(client: &reqwest::blocking::Client, url: &str) -> Result<String> {
     let entries: Vec<DistIndexEntry> = client
-        .get(NODE_DIST_INDEX)
+        .get(url)
         .send()
-        .context("nodejs.org index")?
+        .with_context(|| format!("node index {url}"))?
         .error_for_status()
-        .context("nodejs.org index HTTP")?
+        .with_context(|| format!("node index {url} HTTP"))?
         .json()
-        .context("nodejs.org index JSON")?;
-    let entry = entries
+        .with_context(|| format!("node index {url} JSON"))?;
+    entries
         .into_iter()
         .find(|entry| entry.lts.is_string())
-        .context("no LTS release in nodejs.org index")?;
-    Ok(entry.version)
+        .map(|entry| entry.version)
+        .context("no LTS release in node index")
 }
 
 fn node_archive_name(version: &str) -> String {
@@ -175,6 +217,27 @@ fn node_archive_name(version: &str) -> String {
         "windows" => format!("node-{version}-win-{arch}.zip"),
         "macos" => format!("node-{version}-darwin-{arch}.tar.gz"),
         _ => format!("node-{version}-linux-{arch}.tar.gz"),
+    }
+}
+
+fn download_first<F>(
+    client: &reqwest::blocking::Client,
+    urls: &[String],
+    on_progress: &mut F,
+) -> Result<Vec<u8>>
+where
+    F: FnMut(&str, u8),
+{
+    let mut last_error = None;
+    for url in urls {
+        match download_bytes(client, url, on_progress) {
+            Ok(bytes) => return Ok(bytes),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    match last_error {
+        Some(error) => Err(error),
+        None => bail!("no Node.js download URL"),
     }
 }
 
@@ -344,6 +407,23 @@ fn copy_dir_all(src: &Path, dest: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn china_node_urls_try_mirror_before_official() {
+        let index = node_index_urls_routed(true);
+        assert_eq!(
+            index[0],
+            "https://cdn.npmmirror.com/binaries/node/index.json"
+        );
+        assert_eq!(index[1], NODE_DIST_INDEX);
+        let archives =
+            node_archive_urls_routed(false, "v22.19.0", "node-v22.19.0-darwin-arm64.tar.gz");
+        assert_eq!(archives.len(), 1);
+        assert!(archives[0].starts_with("https://nodejs.org/dist/"));
+        let china = node_archive_urls_routed(true, "v22.19.0", "node-v22.19.0-darwin-arm64.tar.gz");
+        assert!(china[0].contains("cdn.npmmirror.com"));
+        assert!(china[1].starts_with("https://nodejs.org/dist/"));
+    }
 
     #[test]
     fn archive_name_matches_this_os() {

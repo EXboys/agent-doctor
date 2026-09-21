@@ -485,9 +485,28 @@ function clearEphemeralActivity(): void {
   lifecycleActivityEl = null;
 }
 
+function isQuietStderr(line: string): boolean {
+  const text = line.trim();
+  const lower = text.toLowerCase();
+  return (
+    /^session_id:/i.test(text) ||
+    /^resume this session/i.test(text) ||
+    /resumed session/i.test(text) ||
+    lower.startsWith("[secrets]") ||
+    lower.includes("secrets.resolve unavailable") ||
+    lower.includes("resolved command secrets locally") ||
+    lower.includes("openclaw gateway run") ||
+    lower.includes("openclaw gateway status") ||
+    lower.startsWith("gateway target:") ||
+    lower.startsWith("source: local loopback") ||
+    lower.startsWith("bind: loopback") ||
+    (lower.startsWith("config:") && lower.includes("openclaw.json"))
+  );
+}
+
 function appendStderrLine(line: string): void {
   const text = line.trim();
-  if (!text) return;
+  if (!text || isQuietStderr(text)) return;
   const last = logEl.lastElementChild as HTMLElement | null;
   if (last?.dataset.kind === "error" && last.dataset.stderr === "1") {
     const label = last.querySelector<HTMLElement>(".chat-activity-text");
@@ -810,6 +829,7 @@ function showDecisionDock(opts: {
   kicker: string;
   title: string;
   detail?: string;
+  onDismiss?: () => void;
   actions: Array<{ label: string; kind: "allow" | "deny" | "yes" | "no"; onClick: () => void }>;
 }): void {
   decisionKickerEl.textContent = opts.kicker;
@@ -825,6 +845,17 @@ function showDecisionDock(opts: {
     btn.textContent = action.label;
     btn.addEventListener("click", () => action.onClick());
     decisionActionsEl.appendChild(btn);
+  }
+  if (opts.onDismiss) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "chat-decision-dismiss";
+    close.textContent = "×";
+    close.setAttribute("aria-label", t("chat.dismissChoice"));
+    close.title = t("chat.dismissChoice");
+    const dismiss = opts.onDismiss;
+    close.addEventListener("click", () => dismiss());
+    decisionActionsEl.appendChild(close);
   }
   decisionDockEl.hidden = false;
 }
@@ -850,6 +881,11 @@ function looksLikeChoiceQuestion(text: string): boolean {
   );
 }
 
+function dismissChoice(): void {
+  hideDecisionDock();
+  setStatus("", "muted");
+}
+
 function showQuickReplies(sourceText: string): void {
   clearQuickReplies();
   if (!looksLikeChoiceQuestion(sourceText)) return;
@@ -857,6 +893,7 @@ function showQuickReplies(sourceText: string): void {
   showDecisionDock({
     kicker: t("chat.needYourChoiceShort"),
     title: t("chat.decisionQuestionTitle"),
+    onDismiss: dismissChoice,
     actions: [
       {
         label: t("chat.quickYes"),
@@ -874,10 +911,7 @@ function showQuickReplies(sourceText: string): void {
         kind: "no",
         onClick: () => {
           if (busy) return;
-          hideDecisionDock();
-          promptEl.value = t("chat.quickNoSend");
-          autoResizePrompt();
-          void sendAsk();
+          dismissChoice();
         },
       },
     ],

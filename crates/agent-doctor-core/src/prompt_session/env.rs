@@ -60,64 +60,72 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
     let Ok(store) = crate::store::open_settings_store() else {
         return;
     };
-    if let Ok(team) = store.get_team_settings() {
-        if let Some(url) = team
-            .base_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            env.insert(
-                EVOTOWN_URL_ENV.to_string(),
-                url.trim_end_matches('/').to_string(),
-            );
-            let gateway = crate::setup::gateway_url_from_evotown_base(url);
-            env.entry(GATEWAY_URL_ENV.to_string())
-                .or_insert_with(|| gateway.clone());
-            env.entry("OPENAI_BASE_URL".into()).or_insert(gateway);
-            let anthropic = anthropic_gateway_url_from_evotown_base(url);
-            env.entry("ANTHROPIC_BASE_URL".into()).or_insert(anthropic);
+    let personal_edition =
+        crate::edition::product_edition() == crate::edition::ProductEdition::Personal;
+    // Personal builds must not inherit a team gateway. That URL was answering
+    // Ask while the saved DeepSeek provider sat unused.
+    if !personal_edition {
+        if let Ok(team) = store.get_team_settings() {
+            if let Some(url) = team
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
+                env.insert(
+                    EVOTOWN_URL_ENV.to_string(),
+                    url.trim_end_matches('/').to_string(),
+                );
+                let gateway = crate::setup::gateway_url_from_evotown_base(url);
+                env.entry(GATEWAY_URL_ENV.to_string())
+                    .or_insert_with(|| gateway.clone());
+                env.entry("OPENAI_BASE_URL".into()).or_insert(gateway);
+                let anthropic = anthropic_gateway_url_from_evotown_base(url);
+                env.entry("ANTHROPIC_BASE_URL".into()).or_insert(anthropic);
+            }
+        }
+        if let Ok(Some(key)) = store.get_overlay_api_key() {
+            if !key.trim().is_empty() {
+                let key = key.trim().to_string();
+                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+                env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
+                env.entry("OPENAI_API_KEY".into())
+                    .or_insert_with(|| key.clone());
+                env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
+            }
+        } else if let Ok(Some(key)) = store.get_team_api_key() {
+            if !key.trim().is_empty() {
+                let key = key.trim().to_string();
+                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+                env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
+                env.entry("OPENAI_API_KEY".into())
+                    .or_insert_with(|| key.clone());
+                env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
+            }
         }
     }
-    if let Ok(Some(key)) = store.get_overlay_api_key() {
-        if !key.trim().is_empty() {
-            let key = key.trim().to_string();
-            env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-            env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
-            env.entry("OPENAI_API_KEY".into())
-                .or_insert_with(|| key.clone());
-            env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
-        }
-    } else if let Ok(Some(key)) = store.get_team_api_key() {
-        if !key.trim().is_empty() {
-            let key = key.trim().to_string();
-            env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-            env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
-            env.entry("OPENAI_API_KEY".into())
-                .or_insert_with(|| key.clone());
-            env.entry("ANTHROPIC_API_KEY".into()).or_insert(key);
-        }
-    }
-    // Active personal provider key overrides team when mode is personal.
-    if let Ok(Some(mode)) = store.get_active_mode() {
-        if mode == crate::setup::MODE_PERSONAL {
-            if let Ok(providers) = store.list_personal_providers() {
-                if let Some(active) = providers.into_iter().find(|p| p.active) {
-                    if let Ok(Some(key)) = store.get_personal_api_key(&active.id) {
-                        if !key.trim().is_empty() {
-                            let key = key.trim().to_string();
-                            env.insert("OPENAI_API_KEY".into(), key.clone());
-                            env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-                            env.insert("ANTHROPIC_API_KEY".into(), key);
-                        }
+    let stored_personal = store
+        .get_active_mode()
+        .ok()
+        .flatten()
+        .is_some_and(|mode| mode == crate::setup::MODE_PERSONAL);
+    if personal_edition || stored_personal {
+        if let Ok(providers) = store.list_personal_providers() {
+            if let Some(active) = providers.into_iter().find(|p| p.active) {
+                if let Ok(Some(key)) = store.get_personal_api_key(&active.id) {
+                    if !key.trim().is_empty() {
+                        let key = key.trim().to_string();
+                        env.insert("OPENAI_API_KEY".into(), key.clone());
+                        env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+                        env.insert("ANTHROPIC_API_KEY".into(), key);
                     }
-                    env.insert(GATEWAY_URL_ENV.to_string(), active.url.clone());
-                    env.insert("OPENAI_BASE_URL".into(), active.url.clone());
-                    if !active.model.trim().is_empty() {
-                        env.insert(MODEL_ENV.to_string(), active.model);
-                    }
-                    env.insert(PROVIDER_PROTOCOL_ENV.to_string(), active.protocol);
                 }
+                env.insert(GATEWAY_URL_ENV.to_string(), active.url.clone());
+                env.insert("OPENAI_BASE_URL".into(), active.url.clone());
+                if !active.model.trim().is_empty() {
+                    env.insert(MODEL_ENV.to_string(), active.model);
+                }
+                env.insert(PROVIDER_PROTOCOL_ENV.to_string(), active.protocol);
             }
         }
     }

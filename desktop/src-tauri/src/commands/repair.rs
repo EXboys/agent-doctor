@@ -7,6 +7,8 @@ use agent_doctor_core::{
 };
 use agent_doctor_mcp::{smoke_browser_navigate, SmokeOptions};
 use serde::Serialize;
+use std::collections::HashSet;
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 use crate::{remember_tray_health, update_tray_tooltip};
@@ -317,8 +319,12 @@ pub async fn install_runtime_command(
     runtime: String,
     force: Option<bool>,
 ) -> Result<InstallRuntimeResponse, String> {
+    if !begin_install(&runtime) {
+        return Err("正在安装，请等这一轮结束。".into());
+    }
     let app_for_emit = app.clone();
     let force = force.unwrap_or(false);
+    let runtime_for_end = runtime.clone();
     let response = tauri::async_runtime::spawn_blocking(move || {
         let report = execute_install_with_progress(
             &runtime,
@@ -337,7 +343,9 @@ pub async fn install_runtime_command(
         Ok::<InstallRuntimeResponse, String>(InstallRuntimeResponse::from(&report))
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| error.to_string());
+    end_install(&runtime_for_end);
+    let response = response??;
     // Install may have mutated the OS user PATH; keep this process in sync before
     // the post-install doctor pass updates tray health.
     agent_doctor_core::refresh_managed_runtime_path();
@@ -345,4 +353,23 @@ pub async fn install_runtime_command(
     remember_tray_health(&app, &doctor);
     update_tray_tooltip(&app);
     Ok(response)
+}
+
+fn begin_install(runtime: &str) -> bool {
+    installing_runtimes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(runtime.to_string())
+}
+
+fn end_install(runtime: &str) {
+    let mut guard = installing_runtimes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    guard.remove(runtime);
+}
+
+fn installing_runtimes() -> &'static Mutex<HashSet<String>> {
+    static INSTALLING: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+    INSTALLING.get_or_init(|| Mutex::new(HashSet::new()))
 }

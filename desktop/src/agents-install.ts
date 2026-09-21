@@ -11,6 +11,83 @@ export interface AgentsInstallDeps {
 /** Survives card re-render after install → refresh(). Cleared once runtime looks installed. */
 const stickyInstallHints = new Map<string, { html: string | null; text: string | null }>();
 
+type LiveInstall = {
+  status: string;
+  percent: number;
+  indeterminate: boolean;
+  logLines: string[];
+};
+
+/** In-flight installs. Switching agent tabs rebuilds the card, so progress lives here. */
+const liveInstalls = new Map<string, LiveInstall>();
+
+function installWaitNote(runtime: string): string {
+  if (runtime !== "hermes") {
+    return "";
+  }
+  return `<p class="footnote" data-install-wait>${escapeHtml(t("runtime.hermesInstallWait"))}</p>`;
+}
+
+function installProgressHtml(runtime: string, live: LiveInstall): string {
+  return `
+      <div class="install-progress" data-install-progress>
+        <div class="install-progress-head">
+          <span data-install-status>${escapeHtml(live.status)}</span>
+          <span data-install-percent>${live.percent}%</span>
+        </div>
+        <div class="install-progress-track" aria-hidden="true">
+          <div class="install-progress-fill${live.indeterminate ? " is-indeterminate" : ""}" data-install-fill style="width:${live.percent}%"></div>
+        </div>
+        ${installWaitNote(runtime)}
+        <pre class="install-progress-log" data-install-log>${escapeHtml(live.logLines.join("\n"))}</pre>
+      </div>
+    `;
+}
+
+function paintLiveInstall(runtime: string): void {
+  const live = liveInstalls.get(runtime);
+  if (!live) {
+    return;
+  }
+  const card = document.querySelector<HTMLElement>(`.runtime[data-runtime="${CSS.escape(runtime)}"]`);
+  const hint = card?.querySelector<HTMLElement>("[data-repair-hint]");
+  if (hint) {
+    hint.hidden = false;
+    const progress = hint.querySelector<HTMLElement>("[data-install-progress]");
+    if (!progress) {
+      hint.innerHTML = installProgressHtml(runtime, live);
+    } else {
+      if (runtime === "hermes" && !progress.querySelector("[data-install-wait]")) {
+        const track = progress.querySelector(".install-progress-track");
+        track?.insertAdjacentHTML("afterend", installWaitNote(runtime));
+      }
+      const statusEl = progress.querySelector<HTMLElement>("[data-install-status]");
+      const percentEl = progress.querySelector<HTMLElement>("[data-install-percent]");
+      const fillEl = progress.querySelector<HTMLElement>("[data-install-fill]");
+      const logEl = progress.querySelector<HTMLElement>("[data-install-log]");
+      if (statusEl) {
+        statusEl.textContent = live.status;
+      }
+      if (percentEl) {
+        percentEl.textContent = `${live.percent}%`;
+      }
+      if (fillEl) {
+        fillEl.style.width = `${live.percent}%`;
+        fillEl.classList.toggle("is-indeterminate", live.indeterminate);
+      }
+      if (logEl && logEl.textContent !== live.logLines.join("\n")) {
+        logEl.textContent = live.logLines.join("\n");
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    }
+  }
+  for (const action of ["install-runtime", "force-reinstall-runtime", "diagnose-runtime"]) {
+    card
+      ?.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)
+      ?.setAttribute("disabled", "true");
+  }
+}
+
 export function createAgentsInstall(deps: AgentsInstallDeps) {
   function applyInstallHint(runtime: string, html: string | null, text: string | null) {
     const freshCard = document.querySelector<HTMLElement>(
@@ -40,14 +117,19 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       }
     }
     for (const [runtime, hint] of stickyInstallHints) {
+      if (liveInstalls.has(runtime)) {
+        continue;
+      }
       applyInstallHint(runtime, hint.html, hint.text);
+    }
+    for (const runtime of liveInstalls.keys()) {
+      paintLiveInstall(runtime);
     }
   }
 
   async function installRuntimeFromCard(card: HTMLElement, options: { force?: boolean } = {}) {
     const runtime = card.dataset.runtime;
     const force = Boolean(options.force);
-    const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
     const installButton = card.querySelector<HTMLButtonElement>('[data-action="install-runtime"]');
     const forceButton = card.querySelector<HTMLButtonElement>(
       '[data-action="force-reinstall-runtime"]',
@@ -56,77 +138,59 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
     if (!runtime) {
       return;
     }
+    if (liveInstalls.has(runtime)) {
+      paintLiveInstall(runtime);
+      return;
+    }
     if (force) {
       const ok = window.confirm(t("runtime.forceReinstallConfirm", { runtime }));
       if (!ok) {
         return;
       }
     }
-    installButton?.setAttribute("disabled", "true");
-    forceButton?.setAttribute("disabled", "true");
-    diagnoseButton?.setAttribute("disabled", "true");
-    if (hint) {
-      hint.hidden = false;
-      hint.innerHTML = `
-      <div class="install-progress" data-install-progress>
-        <div class="install-progress-head">
-          <span data-install-status>${escapeHtml(t("runtime.installing"))}</span>
-          <span data-install-percent>0%</span>
-        </div>
-        <div class="install-progress-track" aria-hidden="true">
-          <div class="install-progress-fill is-indeterminate" data-install-fill></div>
-        </div>
-        <pre class="install-progress-log" data-install-log></pre>
-      </div>
-    `;
-    }
-    const statusEl = hint?.querySelector<HTMLElement>("[data-install-status]");
-    const percentEl = hint?.querySelector<HTMLElement>("[data-install-percent]");
-    const fillEl = hint?.querySelector<HTMLElement>("[data-install-fill]");
-    const logEl = hint?.querySelector<HTMLElement>("[data-install-log]");
-    const logLines: string[] = [];
+    liveInstalls.set(runtime, {
+      status: t("runtime.installing"),
+      percent: 0,
+      indeterminate: true,
+      logLines: [],
+    });
+    paintLiveInstall(runtime);
 
     const unlisten = await listen<InstallProgressEvent>("install-progress", (event) => {
       if (event.payload.runtime_id !== runtime) {
         return;
       }
+      const live = liveInstalls.get(runtime);
+      if (!live) {
+        return;
+      }
       const { phase, message, percent } = event.payload;
       const clamped = Math.min(100, Math.max(0, percent));
-      if (statusEl) {
-        // Do not treat phase "done" as success — the invoke result decides.
-        // Shell lines stay in the log; the headline is one short sentence.
-        const text = message.trim();
-        statusEl.textContent =
-          phase === "verifying"
-            ? t("runtime.installVerifying")
-            : text.startsWith("$ ")
-              ? t("runtime.installing")
-              : text || t("runtime.installing");
-      }
-      if (percentEl) {
-        percentEl.textContent = `${clamped}%`;
-      }
-      if (fillEl) {
-        fillEl.style.width = `${clamped}%`;
-        fillEl.classList.toggle("is-indeterminate", clamped < 2 && phase !== "done");
-      }
-      if (logEl && message.trim()) {
-        const isByteProgress = /Downloading Node\.js .+\/|正在下载/.test(message);
+      const text = message.trim();
+      live.status =
+        phase === "verifying"
+          ? t("runtime.installVerifying")
+          : text.startsWith("$ ")
+            ? t("runtime.installing")
+            : text || t("runtime.installing");
+      live.percent = clamped;
+      live.indeterminate = clamped < 2 && phase !== "done";
+      if (text) {
+        const isByteProgress = /Downloading Node\.js .+\/|正在下载|正在确认|正在安装依赖|依赖装好了/.test(text);
         if (
           isByteProgress &&
-          logLines.length > 0 &&
-          /Downloading Node\.js .+\/|正在下载/.test(logLines[logLines.length - 1] ?? "")
+          live.logLines.length > 0 &&
+          /Downloading Node\.js .+\/|正在下载|正在确认|正在安装依赖|依赖装好了/.test(live.logLines[live.logLines.length - 1] ?? "")
         ) {
-          logLines[logLines.length - 1] = message;
+          live.logLines[live.logLines.length - 1] = text;
         } else {
-          logLines.push(message);
+          live.logLines.push(text);
         }
-        while (logLines.length > 40) {
-          logLines.shift();
+        while (live.logLines.length > 40) {
+          live.logLines.shift();
         }
-        logEl.textContent = logLines.join("\n");
-        logEl.scrollTop = logEl.scrollHeight;
       }
+      paintLiveInstall(runtime);
     });
 
     try {
@@ -139,7 +203,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       if (!report.install_needed) {
         nextHintText = t("runtime.installAlready");
       } else if (report.install_succeeded || report.after_installed) {
-        const last = logLines.slice(-3).join("\n");
+        const last = liveInstalls.get(runtime)?.logLines.slice(-3).join("\n") ?? "";
         nextHintHtml = `<div class="install-progress-done">${escapeHtml(t("runtime.installOk"))}<p class="footnote">${escapeHtml(
           t("runtime.installWireNext"),
         )}</p>${last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""}</div>`;
@@ -168,10 +232,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       setStickyInstallHint(runtime, stickyHtml, stickyText);
     } catch (error) {
       const message = String(error);
-      if (hint) {
-        hint.hidden = false;
-        hint.textContent = message;
-      }
+      setStickyInstallHint(runtime, null, message);
       try {
         await deps.refresh();
       } catch {
@@ -179,6 +240,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       }
       setStickyInstallHint(runtime, null, message);
     } finally {
+      liveInstalls.delete(runtime);
       unlisten();
       const freshCard = document.querySelector<HTMLElement>(
         `.runtime[data-runtime="${CSS.escape(runtime)}"]`,

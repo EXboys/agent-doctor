@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -6,6 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+
+use super::download_route::apply_china_download_env;
 
 #[derive(Debug, Clone)]
 pub struct ShellCapture {
@@ -47,28 +49,28 @@ where
     crate::adapters::util::ensure_managed_runtime_path();
 
     #[cfg(unix)]
-    let mut child = Command::new("bash")
-        .arg("-c")
-        .arg(command_line)
+    let mut command = Command::new("bash");
+    #[cfg(unix)]
+    command.arg("-c").arg(command_line);
+
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut command = Command::new("cmd");
+        command
+            .args(["/C", command_line])
+            .creation_flags(CREATE_NO_WINDOW);
+        command
+    };
+
+    apply_china_download_env(&mut command);
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to start install shell")?;
-
-    #[cfg(windows)]
-    let mut child = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new("cmd")
-            .args(["/C", command_line])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .context("failed to start install shell")?
-    };
 
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
@@ -80,29 +82,13 @@ where
     let queue_out = Arc::clone(&queue);
     let acc_out = Arc::clone(&stdout_acc);
     let stdout_handle = thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Ok(mut acc) = acc_out.lock() {
-                acc.push_str(&line);
-                acc.push('\n');
-            }
-            if let Ok(mut q) = queue_out.lock() {
-                q.push(line);
-            }
-        }
+        push_progress_lines(stdout, &queue_out, &acc_out);
     });
 
     let queue_err = Arc::clone(&queue);
     let acc_err = Arc::clone(&stderr_acc);
     let stderr_handle = thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if let Ok(mut acc) = acc_err.lock() {
-                acc.push_str(&line);
-                acc.push('\n');
-            }
-            if let Ok(mut q) = queue_err.lock() {
-                q.push(line);
-            }
-        }
+        push_progress_lines(stderr, &queue_err, &acc_err);
     });
 
     let mut on_line = on_line;
@@ -157,6 +143,55 @@ fn finish_lifecycle_error(capture: &ShellCapture) -> anyhow::Error {
         anyhow::anyhow!("installer exited with status {:?}", capture.exit_code)
     } else {
         anyhow::anyhow!("{detail}")
+    }
+}
+
+fn push_progress_lines<R: Read>(mut reader: R, queue: &Mutex<Vec<String>>, acc: &Mutex<String>) {
+    let mut pending = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        pending.extend_from_slice(&buf[..n]);
+        drain_progress_chunks(&mut pending, queue, acc);
+    }
+    if !pending.is_empty() {
+        emit_progress_chunk(&pending, queue, acc);
+    }
+}
+
+/// Git and uv print progress with carriage returns. Split those into updates
+/// so the install bar does not sit still until the next newline.
+fn drain_progress_chunks(pending: &mut Vec<u8>, queue: &Mutex<Vec<String>>, acc: &Mutex<String>) {
+    while let Some(pos) = pending
+        .iter()
+        .position(|byte| *byte == b'\n' || *byte == b'\r')
+    {
+        let chunk: Vec<u8> = pending.drain(..=pos).collect();
+        let body = chunk
+            .strip_suffix(b"\n")
+            .or_else(|| chunk.strip_suffix(b"\r"))
+            .unwrap_or(&chunk);
+        if !body.is_empty() {
+            emit_progress_chunk(body, queue, acc);
+        }
+    }
+}
+
+fn emit_progress_chunk(body: &[u8], queue: &Mutex<Vec<String>>, acc: &Mutex<String>) {
+    let line = String::from_utf8_lossy(body).trim().to_string();
+    if line.is_empty() {
+        return;
+    }
+    if let Ok(mut acc) = acc.lock() {
+        acc.push_str(&line);
+        acc.push('\n');
+    }
+    if let Ok(mut queue) = queue.lock() {
+        queue.push(line);
     }
 }
 

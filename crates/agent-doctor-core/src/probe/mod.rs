@@ -540,10 +540,11 @@ fn probe_gateway(
     ));
 
     match gateway_socket_addr(&url) {
-        Some(addr) => match resolve_socket_addrs(&addr, Duration::from_millis(800)) {
-            Ok(addrs) => {
+        Some(addr) => match resolve_socket_addrs(&addr, GATEWAY_DNS_TIMEOUT) {
+            Ok(mut addrs) => {
+                prefer_ipv4(&mut addrs);
                 let https = url.starts_with("https://");
-                let outcome = probe_tcp_outcome(&addrs, Duration::from_millis(800));
+                let outcome = probe_tcp_outcome(&addrs, GATEWAY_TCP_BUDGET);
                 let (status, severity, message) = match outcome {
                     TcpProbeOutcome::Reachable => (
                         ProbeStatus::Pass,
@@ -626,6 +627,16 @@ enum TcpProbeOutcome {
     NoAttempt,
 }
 
+const GATEWAY_DNS_TIMEOUT: Duration = Duration::from_secs(3);
+const GATEWAY_TCP_BUDGET: Duration = Duration::from_secs(5);
+const GATEWAY_TCP_PER_ADDR: Duration = Duration::from_secs(3);
+
+/// IPv6 is often listed first and then blackholed. A cold IPv4 connect still
+/// fits in a few seconds once it is tried before that dead address.
+fn prefer_ipv4(addrs: &mut [std::net::SocketAddr]) {
+    addrs.sort_by_key(|addr| u8::from(addr.is_ipv6()));
+}
+
 fn probe_tcp_outcome(addrs: &[std::net::SocketAddr], budget: Duration) -> TcpProbeOutcome {
     let deadline = Instant::now() + budget;
     let mut saw_timeout = false;
@@ -638,7 +649,7 @@ fn probe_tcp_outcome(addrs: &[std::net::SocketAddr], budget: Duration) -> TcpPro
         }
         attempted = true;
         let remain = deadline.saturating_duration_since(Instant::now());
-        match TcpStream::connect_timeout(addr, remain.min(Duration::from_millis(400))) {
+        match TcpStream::connect_timeout(addr, remain.min(GATEWAY_TCP_PER_ADDR)) {
             Ok(_) => return TcpProbeOutcome::Reachable,
             Err(error) => match error.kind() {
                 std::io::ErrorKind::ConnectionRefused => return TcpProbeOutcome::Refused,
@@ -860,6 +871,17 @@ fn expand_home(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tries_ipv4_before_ipv6() {
+        let mut addrs = vec![
+            "[2001:db8::1]:443".parse().unwrap(),
+            "1.2.3.4:443".parse().unwrap(),
+        ];
+        prefer_ipv4(&mut addrs);
+        assert!(addrs[0].is_ipv4());
+        assert!(addrs[1].is_ipv6());
+    }
 
     #[test]
     fn parses_gateway_socket_addr() {

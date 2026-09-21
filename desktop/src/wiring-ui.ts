@@ -749,8 +749,12 @@ const RUNTIME_FOOTNOTE_LABELS: Record<string, string> = {
 
 function updatePersonalAgentsFootnote(): void {
   if (!personalAgentsFootnoteEl) return;
-  const runtimes = appState.lastReport?.runtimes ?? [];
-  const installed = runtimes
+  const report = appState.lastReport;
+  if (!report) {
+    personalAgentsFootnoteEl.textContent = "";
+    return;
+  }
+  const installed = report.runtimes
     .filter((runtime) => runtime.installed)
     .map((runtime) => RUNTIME_FOOTNOTE_LABELS[runtime.id] ?? runtime.display_name)
     .filter(Boolean);
@@ -777,7 +781,8 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     return;
   }
 
-  const personalModeActive = appState.lastModeStatus?.mode === "personal";
+  const personalModeActive =
+    isPersonalEdition() || appState.lastModeStatus?.mode === "personal";
   for (const item of doc.providers) {
     const routingActive = item.active && personalModeActive;
     const presetId = matchPresetId(item.name, item.url, item.protocol);
@@ -812,11 +817,10 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     meta.className = "provider-item-meta";
     meta.textContent = item.model;
 
+    const showUse = !item.active;
     const desc = document.createElement("p");
     desc.className = "provider-item-desc";
-    desc.textContent = routingActive
-      ? t("personal.itemActiveDesc")
-      : t("personal.itemIdleDesc");
+    desc.textContent = showUse ? t("personal.itemIdleDesc") : t("personal.itemActiveDesc");
 
     main.append(kicker, title, meta, desc);
 

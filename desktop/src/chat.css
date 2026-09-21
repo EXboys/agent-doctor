@@ -1511,6 +1511,19 @@ html, body {
   cursor: not-allowed;
 }
 
+.chat-decision-dismiss {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #fff;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .chat-composer-box {
   display: flex;
   flex-direction: column;

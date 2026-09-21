@@ -293,13 +293,17 @@ where
     });
 
     let mut line_count = 0u32;
+    let mut saw_deps = false;
     let capture = run_shell_command_streaming(&command, |line| {
+        if plain_progress_line(line).is_empty() {
+            return;
+        }
         line_count = line_count.saturating_add(1);
-        let percent = (52 + (line_count.min(30) as u8)).min(85);
+        let (message, percent) = install_output_progress(line, line_count, &mut saw_deps);
         on_progress(InstallProgressEvent {
             runtime_id: runtime_id.to_string(),
             phase: "output".to_string(),
-            message: line.to_string(),
+            message,
             percent,
         });
     })
@@ -335,6 +339,158 @@ where
             log_path,
         })
     }
+}
+
+fn install_output_progress(line: &str, line_count: u32, saw_deps: &mut bool) -> (String, u8) {
+    if let Some(pct) = labeled_percent(line, "Receiving objects:") {
+        let percent = 52 + u16::from(pct) * 28 / 100;
+        return (format!("正在下载代码… {pct}%"), percent as u8);
+    }
+    if let Some(pct) = labeled_percent(line, "Resolving deltas:") {
+        let percent = 80 + u16::from(pct) * 8 / 100;
+        return (format!("正在下载代码… {pct}%"), percent as u8);
+    }
+    if let Some(pct) = curl_bar_percent(line) {
+        return (format!("正在下载，已完成 {pct}%。"), pct.clamp(1, 99));
+    }
+    if let Some(progress) = dependency_progress(line) {
+        *saw_deps = true;
+        return progress;
+    }
+    if *saw_deps {
+        return ("正在安装依赖…".to_string(), 92);
+    }
+    let percent = (52 + (line_count.min(30) as u8)).min(85);
+    let shown = plain_progress_line(line);
+    if shown.is_empty() {
+        return ("正在安装…".to_string(), percent);
+    }
+    (shown, percent)
+}
+
+fn dependency_progress(line: &str) -> Option<(String, u8)> {
+    let line = plain_progress_line(line);
+    if line.is_empty() {
+        return None;
+    }
+    if line.contains("node-v") && line.contains("Downloading") {
+        return Some(("正在下载 Node.js…".to_string(), 70));
+    }
+    if let Some(total) = leading_count(&line, "Resolved ", " package") {
+        return Some((format!("正在确认要装哪些依赖，一共 {total} 个。"), 86));
+    }
+    if let Some(total) = leading_count(&line, "Installed ", " package") {
+        return Some((format!("依赖装好了，一共 {total} 个。"), 98));
+    }
+    if let Some((done, total)) = done_of_total(&line) {
+        let percent = 88 + done * 10 / total.max(1);
+        return Some((
+            format!("正在安装依赖，已完成 {done} 个，一共 {total} 个。"),
+            (percent as u8).min(98),
+        ));
+    }
+    if line.contains("Resolving dependencies") {
+        return Some(("正在确认要装哪些依赖。".to_string(), 86));
+    }
+    if line.contains("Installing dependencies")
+        || line.contains("Preparing packages")
+        || line.contains("Installing wheels")
+        || line.contains("Downloading")
+        || line.contains("uv sync")
+    {
+        return Some(("正在安装依赖…".to_string(), 88));
+    }
+    None
+}
+
+fn plain_progress_line(line: &str) -> String {
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if ch == '\u{8}' {
+            out.pop();
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        out.push(ch);
+    }
+    out.trim().to_string()
+}
+
+fn leading_count(line: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let rest = line.trim().strip_prefix(prefix)?;
+    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    if digits.is_empty() || !rest[digits.len()..].starts_with(suffix) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn done_of_total(line: &str) -> Option<(u16, u16)> {
+    let (left, right) = line.split_once('/')?;
+    let done: String = left
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let total: String = right.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    if done.is_empty() || total.is_empty() {
+        return None;
+    }
+    let done: u16 = done.parse().ok()?;
+    let total: u16 = total.parse().ok()?;
+    if total == 0 || done > total {
+        return None;
+    }
+    Some((done, total))
+}
+
+fn curl_bar_percent(line: &str) -> Option<u8> {
+    let line = plain_progress_line(line);
+    if !line.contains('#') || !line.contains('%') {
+        return None;
+    }
+    let before = line.rsplit_once('%')?.0;
+    let number: String = before
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let value: f32 = number.parse().ok()?;
+    if !(0.0..=100.0).contains(&value) {
+        return None;
+    }
+    Some(value.round() as u8)
+}
+
+fn labeled_percent(line: &str, label: &str) -> Option<u8> {
+    let rest = line.split_once(label)?.1;
+    let digits: String = rest
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    let pct: u8 = digits.parse().ok()?;
+    Some(pct.min(100))
 }
 
 fn install_shell_command(runtime_id: &str) -> Option<String> {
@@ -524,6 +680,39 @@ pub fn build_explain_input(
 mod tests {
     use super::*;
     use crate::probe::{ProbeCheck, ProbeSeverity};
+
+    #[test]
+    fn install_progress_follows_git_and_dependency_stages() {
+        let mut saw_deps = false;
+        let (message, percent) = install_output_progress(
+            "Receiving objects:  40% (10/25), 1.00 MiB | 100.00 KiB/s",
+            30,
+            &mut saw_deps,
+        );
+        assert_eq!(message, "正在下载代码… 40%");
+        assert_eq!(percent, 63);
+        let (message, percent) =
+            install_output_progress("Installing dependencies...", 31, &mut saw_deps);
+        assert_eq!(message, "正在安装依赖…");
+        assert!(percent >= 88, "{percent}");
+        let (message, _) =
+            install_output_progress("Downloading cryptography (12/259)", 32, &mut saw_deps);
+        assert_eq!(message, "正在安装依赖，已完成 12 个，一共 259 个。");
+        let (message, percent) =
+            install_output_progress("Installed 259 packages in 3s", 33, &mut saw_deps);
+        assert_eq!(message, "依赖装好了，一共 259 个。");
+        assert_eq!(percent, 98);
+        let bar = format!("##{}3.5%", " ".repeat(70));
+        let (message, percent) = install_output_progress(&bar, 34, &mut saw_deps);
+        assert_eq!(message, "正在下载，已完成 4%。");
+        assert_eq!(percent, 4);
+        let (message, _) = install_output_progress(
+            "Downloading node-v26.9.0-darwin-arm64.tar.xz...",
+            35,
+            &mut saw_deps,
+        );
+        assert_eq!(message, "正在下载 Node.js…");
+    }
 
     #[test]
     fn detects_missing_binary() {
