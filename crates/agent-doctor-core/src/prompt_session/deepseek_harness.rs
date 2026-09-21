@@ -12,7 +12,10 @@ use super::control::PromptSessionControl;
 use super::env::{
     apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env, format_command_display,
 };
-use super::util::{command_from_cli, force_stop_child, join_reader, push_capped, summarize};
+use super::util::{
+    command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child, join_reader,
+    push_capped, summarize,
+};
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
@@ -141,8 +144,12 @@ fn collect_final_output(
     let stderr_acc = Arc::new(Mutex::new(String::new()));
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
+    let stdout_eof = Arc::new(AtomicBool::new(false));
+    let stderr_eof = Arc::new(AtomicBool::new(false));
     let stdout_target = Arc::clone(&stdout_acc);
     let stderr_target = Arc::clone(&stderr_acc);
+    let stdout_eof_flag = Arc::clone(&stdout_eof);
+    let stderr_eof_flag = Arc::clone(&stderr_eof);
     let stdout_reader = thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::BufReader::new(stdout)
@@ -151,6 +158,7 @@ fn collect_final_output(
         {
             push_capped(&stdout_target, &line);
         }
+        stdout_eof_flag.store(true, Ordering::SeqCst);
     });
     let stderr_reader = thread::spawn(move || {
         use std::io::BufRead;
@@ -160,9 +168,11 @@ fn collect_final_output(
         {
             push_capped(&stderr_target, &line);
         }
+        stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut pipes_closed_at: Option<Instant> = None;
     let (status, exit_code) = loop {
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
@@ -171,6 +181,15 @@ fn collect_final_output(
         if Instant::now() >= deadline {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
+        }
+        if let Some(done) = finish_oneshot_after_pipes_closed(
+            child,
+            pid,
+            &stdout_eof,
+            &stderr_eof,
+            &mut pipes_closed_at,
+        ) {
+            break done;
         }
         match child.try_wait() {
             Ok(Some(wait_status)) => {

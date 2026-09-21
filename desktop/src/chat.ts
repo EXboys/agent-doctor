@@ -410,7 +410,7 @@ function activityKind(phase: string): "tool" | "think" | "write" | "info" | "err
 
 /** Lifecycle chatter that belongs in the header live pill, not the transcript. */
 function isQuietPhase(phase: string): boolean {
-  return phase === "writing" || phase === "streaming" || phase === "info";
+  return phase === "writing" || phase === "streaming" || phase === "info" || phase === "done";
 }
 
 /** Remove the transient lifecycle row once a more meaningful event replaces it. */
@@ -432,6 +432,69 @@ function cleanToolLabel(text: string): string {
 
 function toolSignature(text: string): string {
   return cleanToolLabel(text).toLocaleLowerCase();
+}
+
+/** Prefer a short human summary; keep the full command for the expandable row. */
+function formatPermissionDetail(raw: string): { summary: string; full: string } {
+  const full = raw.trim();
+  if (!full) {
+    return { summary: "", full: "" };
+  }
+  const unfenced = full
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (unfenced.startsWith("{") && unfenced.endsWith("}")) {
+    try {
+      const value = JSON.parse(unfenced) as Record<string, unknown>;
+      const description =
+        typeof value.description === "string" ? value.description.trim() : "";
+      const command = typeof value.command === "string" ? value.command.trim() : "";
+      if (description || command) {
+        return {
+          summary:
+            description ||
+            (command.replace(/\s+/g, " ").length > 96
+              ? `${command.replace(/\s+/g, " ").slice(0, 96)}…`
+              : command.replace(/\s+/g, " ")),
+          full: command || unfenced,
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+  const oneLine = full.replace(/\s+/g, " ");
+  return {
+    summary: oneLine.length > 96 ? `${oneLine.slice(0, 96)}…` : oneLine,
+    full,
+  };
+}
+
+function looksLikeToolPayloadJson(text: string): boolean {
+  const trimmed = text.trim();
+  // Strip accidental markdown fences around a tool payload.
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (!unfenced.startsWith("{") || !unfenced.endsWith("}")) {
+    return false;
+  }
+  try {
+    const value = JSON.parse(unfenced) as Record<string, unknown>;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const hasToolShape =
+      typeof value.command === "string" ||
+      typeof value.description === "string" ||
+      typeof value.tool === "string" ||
+      typeof value.name === "string";
+    return hasToolShape && !("role" in value) && !("content" in value);
+  } catch {
+    return false;
+  }
 }
 
 function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
@@ -632,8 +695,9 @@ function pushPermissionCard(payload: {
   flushPendingTextSync();
   sealAssistantBubble();
   settleActivity();
-  finishToolGroup(true);
   dismissLifecycleActivity();
+  // Fold the preceding "1 tool used" chip + raw JSON bubble into this one card.
+  scrubToolFragmentsBeforePermission(payload.detail);
   setStatus(t("chat.needYourChoice"), "warn");
 
   const persisted = persistMessage("permission", payload.detail.trim() || payload.tool_name, {
@@ -646,34 +710,58 @@ function pushPermissionCard(payload: {
     },
   });
 
-  // History card stays in the transcript; actions live in the sticky dock.
-  const card = renderPermissionCard(persisted, false);
-  card.classList.add("is-pending");
+  // One module: tool + summary + command + Allow/Deny. No sticky dock duplicate.
+  hideDecisionDock();
+  const card = renderPermissionCard(persisted, true);
   logEl.appendChild(card);
   logEl.scrollTop = logEl.scrollHeight;
+}
 
-  const detail = payload.detail.trim() || payload.tool_name;
-  showDecisionDock({
-    kicker: t("chat.decisionPermissionKicker"),
-    title: t("chat.permissionTitle", { tool: payload.tool_name }),
-    detail,
-    actions: [
-      {
-        label: t("chat.permissionAllow"),
-        kind: "allow",
-        onClick: () => {
-          void resolvePermissionFromDock(payload.session_id, payload.request_id, true);
-        },
-      },
-      {
-        label: t("chat.permissionDeny"),
-        kind: "deny",
-        onClick: () => {
-          void resolvePermissionFromDock(payload.session_id, payload.request_id, false);
-        },
-      },
-    ],
-  });
+/** Drop the fragmented tool chip / JSON bubble that preceded this permission. */
+function scrubToolFragmentsBeforePermission(detail: string): void {
+  const formatted = formatPermissionDetail(detail.trim());
+  const needles = [formatted.full, formatted.summary, detail.trim()]
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 8);
+
+  // Remove trailing tool groups created from "调用工具 Bash…" status events.
+  while (true) {
+    const last = logEl.lastElementChild as HTMLElement | null;
+    if (!last?.classList.contains("chat-tool-group")) break;
+    last.remove();
+  }
+  toolGroupEl = null;
+  activityEl = null;
+
+  // Remove trailing assistant bubbles that are only the tool JSON / command dump.
+  while (true) {
+    const last = logEl.lastElementChild as HTMLElement | null;
+    if (!last?.classList.contains("assistant")) break;
+    const text = (last.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!text) {
+      removeAssistantBubbleElement(last);
+      continue;
+    }
+    const isToolDump =
+      looksLikeToolPayloadJson(text) ||
+      needles.some((needle) => text === needle || text.includes(needle) || needle.includes(text));
+    if (!isToolDump) break;
+    removeAssistantBubbleElement(last);
+  }
+}
+
+function removeAssistantBubbleElement(el: HTMLElement): void {
+  const messageId = el.dataset.messageId;
+  el.remove();
+  if (!messageId) return;
+  const session = activeSession();
+  session.messages = session.messages.filter((m) => m.id !== messageId);
+  saveStore();
+  if (assistantMessageId === messageId) {
+    assistantBubble = null;
+    assistantMessageId = null;
+    assistantRaw = "";
+  }
 }
 
 async function resolvePermissionFromDock(
@@ -714,13 +802,20 @@ function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLE
   card.dataset.messageId = message.id;
   if (allowed != null) card.dataset.resolved = "1";
 
-  const title = document.createElement("div");
-  title.className = "chat-permission-title";
-  title.textContent = t("chat.permissionTitle", { tool: meta?.toolName ?? "tool" });
+  const toolName = meta?.toolName ?? "tool";
+  const formatted = formatPermissionDetail(meta?.detail || message.content);
 
-  const detail = document.createElement("pre");
-  detail.className = "chat-permission-detail";
-  detail.textContent = meta?.detail || message.content;
+  const row = document.createElement("div");
+  row.className = "chat-permission-row";
+
+  const tool = document.createElement("span");
+  tool.className = "chat-permission-tool";
+  tool.textContent = toolName;
+
+  const summary = document.createElement("span");
+  summary.className = "chat-permission-summary";
+  summary.textContent = formatted.summary || t("chat.permissionTitle", { tool: toolName });
+  summary.title = formatted.full || formatted.summary;
 
   const actions = document.createElement("div");
   actions.className = "chat-permission-actions";
@@ -769,7 +864,25 @@ function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLE
     actions.appendChild(badge);
   }
 
-  card.append(title, detail, actions);
+  row.append(tool, summary, actions);
+  card.appendChild(row);
+
+  if (formatted.full) {
+    const showOpen =
+      allowed == null &&
+      (formatted.full !== formatted.summary || /[\n|&;]/.test(formatted.full));
+    const more = document.createElement("details");
+    more.className = "chat-permission-more";
+    more.open = Boolean(showOpen && interactive);
+    const moreSummary = document.createElement("summary");
+    moreSummary.textContent = t("chat.permissionExpand");
+    const detail = document.createElement("pre");
+    detail.className = "chat-permission-detail";
+    detail.textContent = formatted.full;
+    more.append(moreSummary, detail);
+    card.appendChild(more);
+  }
+
   return card;
 }
 
@@ -870,14 +983,25 @@ function clearQuickReplies(): void {
   }
 }
 
+/** Only yes/no confirmations — not open greetings like「有什么可以帮你的吗？」. */
 function looksLikeChoiceQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  const tail = trimmed.slice(-80);
+  const plain = trimmed.replace(/\s+/g, " ");
+  const lower = plain.toLowerCase();
+  // Open help offers should stay as chat, not a confirm dock.
+  if (
+    /有什么(可以|需要|能)?(帮|帮忙|做)/.test(plain) ||
+    /需要我(做|帮忙|帮你)/.test(plain) ||
+    /随时(找我|叫我|告诉我)/.test(plain) ||
+    /how can i help|anything (i can|you need)|what can i (do|help)/i.test(lower)
+  ) {
+    return false;
+  }
+  const tail = plain.slice(-120);
   return (
-    /[?？]\s*$/.test(trimmed) ||
-    /吗[？?]?\s*$/.test(trimmed) ||
-    /(要不要|要我|是否|可以吗|好吗|行吗|继续吗)/.test(tail)
+    /(要不要|要我|是否|继续吗|可以吗|好吗|行吗|确认一下|选一个|选哪|选哪个)/.test(tail) ||
+    /(shall i|should i|want me to|would you like me to|continue\?|proceed\?)/i.test(tail)
   );
 }
 
@@ -946,6 +1070,11 @@ function sealAssistantBubble(): void {
 
 function appendAssistantChunk(chunk: string): void {
   if (!chunk) return;
+  if (looksLikeToolPayloadJson(chunk)) {
+    const formatted = formatPermissionDetail(chunk.trim());
+    pushActivity("tool", formatted.summary || cleanToolLabel(chunk));
+    return;
+  }
   if (activityEl?.dataset.kind === "tool") settleActivity();
   finishToolGroup(true);
   dismissLifecycleActivity();

@@ -43,6 +43,16 @@ export function renderMarkdown(source: string): string {
     }
   };
 
+  const isTableSep = (line: string): boolean =>
+    /^\s*\|?[\s:|-]+\|[\s:|-]*\|?\s*$/.test(line) && /---/.test(line);
+
+  const splitTableRow = (line: string): string[] => {
+    let row = line.trim();
+    if (row.startsWith("|")) row = row.slice(1);
+    if (row.endsWith("|")) row = row.slice(0, -1);
+    return row.split("|").map((cell) => cell.trim());
+  };
+
   while (i < lines.length) {
     const line = lines[i];
 
@@ -72,6 +82,40 @@ export function renderMarkdown(source: string): string {
     if (/^\s*$/.test(line)) {
       closeList();
       i += 1;
+      continue;
+    }
+
+    // GFM table: header | sep | rows…
+    if (
+      line.includes("|") &&
+      i + 1 < lines.length &&
+      isTableSep(lines[i + 1])
+    ) {
+      closeList();
+      const header = splitTableRow(line);
+      i += 2;
+      const body: string[][] = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+        if (isTableSep(lines[i])) {
+          i += 1;
+          continue;
+        }
+        body.push(splitTableRow(lines[i]));
+        i += 1;
+      }
+      const thead = `<thead><tr>${header
+        .map((cell) => `<th>${inlineMarkdown(cell)}</th>`)
+        .join("")}</tr></thead>`;
+      const tbody =
+        body.length > 0
+          ? `<tbody>${body
+              .map(
+                (row) =>
+                  `<tr>${row.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`,
+              )
+              .join("")}</tbody>`
+          : "";
+      out.push(`<div class="chat-md-table-wrap"><table>${thead}${tbody}</table></div>`);
       continue;
     }
 
@@ -129,7 +173,12 @@ export function renderMarkdown(source: string): string {
     closeList();
     const para: string[] = [line];
     i += 1;
-    while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|[-*+]\s|\d+\.\s|>\s?|```|---+$)/.test(lines[i])) {
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^(#{1,3}\s|[-*+]\s|\d+\.\s|>\s?|```|---+$)/.test(lines[i]) &&
+      !(lines[i].includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1]))
+    ) {
       para.push(lines[i]);
       i += 1;
     }

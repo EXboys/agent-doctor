@@ -18,8 +18,8 @@ use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{apply_overlay_env, collect_overlay_env, format_command_display};
 use super::util::{
-    combine_output, command_from_cli, force_stop_child, is_runtime_stderr_noise, join_reader,
-    push_capped, summarize,
+    combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
+    is_runtime_stderr_noise, join_reader, push_capped, summarize,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -375,6 +375,8 @@ where
 
     let q_out = Arc::clone(&queue);
     let acc_out = Arc::clone(&stdout_acc);
+    let stdout_eof = Arc::new(AtomicBool::new(false));
+    let stdout_eof_flag = Arc::clone(&stdout_eof);
     let stdout_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stdout);
@@ -384,10 +386,13 @@ where
                 guard.push((true, line));
             }
         }
+        stdout_eof_flag.store(true, Ordering::SeqCst);
     });
 
     let q_err = Arc::clone(&queue);
     let acc_err = Arc::clone(&stderr_acc);
+    let stderr_eof = Arc::new(AtomicBool::new(false));
+    let stderr_eof_flag = Arc::clone(&stderr_eof);
     let stderr_handle = thread::spawn(move || {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(stderr);
@@ -397,6 +402,7 @@ where
                 guard.push((false, line));
             }
         }
+        stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
     let drain = |on_event: &mut F| {
@@ -421,6 +427,7 @@ where
 
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
     let mut next_tool_poll = Instant::now();
+    let mut pipes_closed_at: Option<Instant> = None;
     let (status, exit_code) = loop {
         drain(on_event);
         if Instant::now() >= next_tool_poll {
@@ -442,6 +449,15 @@ where
         if Instant::now() >= deadline {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
+        }
+        if let Some(done) = finish_oneshot_after_pipes_closed(
+            child,
+            pid,
+            &stdout_eof,
+            &stderr_eof,
+            &mut pipes_closed_at,
+        ) {
+            break done;
         }
         match child.try_wait() {
             Ok(Some(wait_status)) => {

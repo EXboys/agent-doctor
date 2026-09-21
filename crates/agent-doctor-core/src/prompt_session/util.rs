@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -68,6 +69,37 @@ pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
     kill_process_tree(pid);
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// One-shot CLIs (Hermes / OpenClaw / DeepSeek) use `stdin = null` and should exit
+/// when both pipes close. If a helper process keeps the parent alive, Ask stays on
+/// 「停止」forever — force-stop after a short grace so the UI can accept input again.
+pub(crate) fn finish_oneshot_after_pipes_closed(
+    child: &mut Child,
+    pid: u32,
+    stdout_eof: &AtomicBool,
+    stderr_eof: &AtomicBool,
+    pipes_closed_at: &mut Option<Instant>,
+) -> Option<(PromptSessionStatus, Option<i32>)> {
+    if !(stdout_eof.load(Ordering::SeqCst) && stderr_eof.load(Ordering::SeqCst)) {
+        return None;
+    }
+    let closed_at = pipes_closed_at.get_or_insert_with(Instant::now);
+    match child.try_wait() {
+        Ok(Some(wait_status)) => {
+            let status = if wait_status.success() {
+                PromptSessionStatus::Succeeded
+            } else {
+                PromptSessionStatus::Failed
+            };
+            Some((status, wait_status.code()))
+        }
+        Ok(None) if closed_at.elapsed() >= Duration::from_millis(400) => {
+            force_stop_child(child, pid);
+            Some((PromptSessionStatus::Succeeded, None))
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn join_reader(handle: thread::JoinHandle<()>, budget: Duration) {

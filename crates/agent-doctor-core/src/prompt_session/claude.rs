@@ -338,6 +338,7 @@ where
         }
     });
 
+    let turn_done = Arc::new(AtomicBool::new(false));
     let drain = |on_event: &mut F| {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
@@ -345,7 +346,9 @@ where
         };
         for (is_stdout, line) in drained {
             if is_stdout {
-                for event in parse_claude_stream_line(session_id, &line, control) {
+                for event in
+                    parse_claude_stream_line(session_id, &line, control, Some(turn_done.as_ref()))
+                {
                     on_event(event);
                 }
             } else if !is_runtime_stderr_noise(&line) {
@@ -358,6 +361,7 @@ where
     };
 
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut closed_after_result = false;
     let (status, exit_code) = loop {
         drain(on_event);
         if cancel.load(Ordering::SeqCst) {
@@ -368,17 +372,36 @@ where
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
+        // stream-json keeps Claude alive for another stdin turn after `result`.
+        // Ask is one shot — close stdin so the process can exit and the UI unblocks.
+        if turn_done.load(Ordering::SeqCst) && !closed_after_result {
+            closed_after_result = true;
+            if let Some(control) = control {
+                control.close();
+            }
+        }
         match child.try_wait() {
             Ok(Some(wait_status)) => {
                 let code = wait_status.code();
-                let status = if wait_status.success() {
+                let status = if wait_status.success() || turn_done.load(Ordering::SeqCst) {
                     PromptSessionStatus::Succeeded
                 } else {
                     PromptSessionStatus::Failed
                 };
                 break (status, code);
             }
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
+            Ok(None) => {
+                if closed_after_result {
+                    // Give Claude a moment to exit after stdin EOF, then stop it.
+                    thread::sleep(Duration::from_millis(200));
+                    if child.try_wait().ok().flatten().is_none() {
+                        force_stop_child(child, pid);
+                        break (PromptSessionStatus::Succeeded, None);
+                    }
+                    continue;
+                }
+                thread::sleep(Duration::from_millis(40));
+            }
             Err(error) => return Err(error).context("failed waiting for prompt session"),
         }
     };
@@ -402,10 +425,8 @@ fn permission_detail(
         .or_else(|| request.get("tool_use_description"))
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(desc) = description {
-        return desc.to_string();
-    }
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     let pick_str = |keys: &[&str]| -> Option<String> {
         for key in keys {
@@ -419,21 +440,31 @@ fn permission_detail(
     };
 
     let lower = tool_name.to_ascii_lowercase();
-    if lower.contains("bash") || lower == "shell" {
-        if let Some(cmd) = pick_str(&["command", "cmd"]) {
-            return cmd;
+    let command = if lower.contains("bash") || lower == "shell" {
+        pick_str(&["command", "cmd"])
+    } else {
+        None
+    }
+    .or_else(|| pick_str(&["command", "cmd"]));
+
+    // Keep description + command together so the Ask UI can show one module.
+    if description.is_some() || command.is_some() {
+        let mut map = serde_json::Map::new();
+        if let Some(desc) = description {
+            map.insert("description".into(), serde_json::Value::String(desc));
+        }
+        if let Some(cmd) = command {
+            map.insert("command".into(), serde_json::Value::String(cmd));
+        } else if let Some(path) = pick_str(&["file_path", "path", "filePath", "url", "query"]) {
+            map.insert("command".into(), serde_json::Value::String(path));
+        }
+        if !map.is_empty() {
+            return serde_json::Value::Object(map).to_string();
         }
     }
-    if lower.contains("write") || lower.contains("edit") {
-        if let Some(path) = pick_str(&["file_path", "path", "filePath"]) {
-            return path;
-        }
-    }
+
     if let Some(path) = pick_str(&["file_path", "path", "filePath", "url", "query"]) {
         return path;
-    }
-    if let Some(cmd) = pick_str(&["command", "cmd"]) {
-        return cmd;
     }
 
     let compact = input.to_string();
@@ -448,6 +479,7 @@ fn parse_claude_stream_line(
     session_id: &str,
     line: &str,
     control: Option<&PromptSessionControl>,
+    turn_done: Option<&AtomicBool>,
 ) -> Vec<PromptSessionEvent> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         if line.trim().is_empty() {
@@ -552,18 +584,20 @@ fn parse_claude_stream_line(
                         });
                     }
                     "text" => {
-                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                            if !text.is_empty() {
-                                out.push(PromptSessionEvent::Status {
-                                    session_id: session_id.to_string(),
-                                    phase: "writing".into(),
-                                    message: "正在生成回复…".into(),
-                                });
-                                out.push(PromptSessionEvent::Delta {
-                                    session_id: session_id.to_string(),
-                                    text: text.to_string(),
-                                });
-                            }
+                        // With `--include-partial-messages`, text already arrived via
+                        // `stream_event` deltas. Re-emitting the full assistant text
+                        // here doubles the bubble and looks like the reply is stuck
+                        // mid-stream.
+                        if block
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|text| !text.is_empty())
+                        {
+                            out.push(PromptSessionEvent::Status {
+                                session_id: session_id.to_string(),
+                                phase: "writing".into(),
+                                message: "正在生成回复…".into(),
+                            });
                         }
                     }
                     "tool_use" => {
@@ -581,10 +615,11 @@ fn parse_claude_stream_line(
         }
         "stream_event" => {
             let mut out = Vec::new();
-            // content_block_delta.text / delta.text / event.delta.text
+            // Only stream assistant *text*. `partial_json` is tool-input streaming and
+            // must not land in the chat bubble (it duplicated Bash JSON next to the
+            // permission card).
             let delta = value
                 .pointer("/event/delta/text")
-                .or_else(|| value.pointer("/event/delta/partial_json"))
                 .or_else(|| value.pointer("/delta/text"))
                 .and_then(|v| v.as_str());
             if let Some(delta) = delta.filter(|t| !t.is_empty()) {
@@ -620,6 +655,9 @@ fn parse_claude_stream_line(
         // applied after pump when live deltas were missing (avoids duplicating
         // assistant text that already streamed).
         "result" => {
+            if let Some(flag) = turn_done {
+                flag.store(true, Ordering::SeqCst);
+            }
             let is_error = value
                 .get("is_error")
                 .and_then(|v| v.as_bool())
@@ -644,8 +682,8 @@ fn parse_claude_stream_line(
             } else {
                 vec![PromptSessionEvent::Status {
                     session_id: session_id.to_string(),
-                    phase: "writing".into(),
-                    message: "正在整理回复…".into(),
+                    phase: "done".into(),
+                    message: "回复已完成".into(),
                 }]
             }
         }
@@ -750,6 +788,38 @@ mod tests {
     }
 
     #[test]
+    fn assistant_text_does_not_reemit_streamed_deltas() {
+        let events = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello once"}]}}"#,
+            None,
+            None,
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, PromptSessionEvent::Delta { .. })),
+            "full assistant text must not duplicate stream_event deltas: {events:?}"
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Status { phase, .. } if phase == "writing"
+        )));
+    }
+
+    #[test]
+    fn result_marks_turn_done() {
+        let flag = AtomicBool::new(false);
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"result","is_error":false,"result":"ok"}"#,
+            None,
+            Some(&flag),
+        );
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn extracts_result_text_from_claude_stream() {
         let stdout = r#"
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}
@@ -768,6 +838,7 @@ mod tests {
             "s1",
             r#"{"type":"result","is_error":true,"result":"boom"}"#,
             None,
+            None,
         );
         assert!(events.iter().any(|e| matches!(
             e,
@@ -779,7 +850,7 @@ mod tests {
     fn parse_control_request_emits_permission() {
         let control = PromptSessionControl::new();
         let line = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls -la"}}}"#;
-        let events = parse_claude_stream_line("s1", line, Some(&control));
+        let events = parse_claude_stream_line("s1", line, Some(&control), None);
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {
@@ -787,7 +858,9 @@ mod tests {
                 tool_name,
                 detail,
                 ..
-            } if request_id == "req-1" && tool_name == "Bash" && detail == "ls -la"
+            } if request_id == "req-1"
+                && tool_name == "Bash"
+                && detail.contains("ls -la")
         )));
     }
 
