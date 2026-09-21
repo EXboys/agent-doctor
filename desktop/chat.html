@@ -111,6 +111,14 @@
         <div id="chat-log" class="chat-log" aria-live="polite"></div>
 
         <footer class="chat-composer">
+          <div id="chat-decision-dock" class="chat-decision-dock" hidden role="region" aria-live="assertive">
+            <div class="chat-decision-dock-body">
+              <p id="chat-decision-kicker" class="chat-decision-kicker"></p>
+              <strong id="chat-decision-title" class="chat-decision-title"></strong>
+              <pre id="chat-decision-detail" class="chat-decision-detail" hidden></pre>
+            </div>
+            <div id="chat-decision-actions" class="chat-decision-actions"></div>
+          </div>
           <div id="chat-mentions" class="chat-mentions" hidden></div>
           <div id="chat-attachments" class="chat-attachments" hidden></div>
           <div class="chat-composer-box">
@@ -136,9 +144,15 @@
                 >
                   <span aria-hidden="true">+</span>
                 </button>
+                <span
+                  id="chat-runtime-label"
+                  class="chat-runtime-label"
+                  data-i18n-title="chat.runtimeLockedHint"
+                  title="在主页 Agents 卡片进入时选定"
+                >Claude Code</span>
                 <label
                   class="chat-elevated"
-                  title="关闭自动审批时，工具调用会在对话里弹出「允许 / 拒绝」（Claude 与 Codex）。"
+                  title="关闭自动审批时，需要确认的操作会在输入框上方弹出选择。"
                 >
                   <input id="chat-elevated" type="checkbox" />
                   <span class="chat-elevated-switch" aria-hidden="true"></span>

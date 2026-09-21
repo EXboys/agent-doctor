@@ -5,6 +5,9 @@ import { escapeHtml } from "./format";
 import { appState } from "./app-state";
 import type {
   RemoteDoctorReport,
+  RemoteHostProbeReport,
+  RemoteHostProbeStatus,
+  RemoteHostRow,
   RemoteHostsDocument,
   RemoteProjectRow,
   RemoteProbeCheck,
@@ -26,24 +29,50 @@ const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-c
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
 const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
+const remoteHostListEl = document.querySelector<HTMLUListElement>("#remote-host-list")!;
 const remoteListEl = document.querySelector<HTMLUListElement>("#remote-list")!;
 const remoteChecksEl = document.querySelector<HTMLUListElement>("#remote-checks")!;
 const remoteHintEl = document.querySelector<HTMLElement>("#remote-hint")!;
 const remoteRefreshEl = document.querySelector<HTMLButtonElement>("#remote-refresh")!;
 const remoteBootstrapFormEl = document.querySelector<HTMLFormElement>("#remote-bootstrap-form")!;
-const remoteHostFormEl = document.querySelector<HTMLFormElement>("#remote-host-form")!;
 const remoteProjectFormEl = document.querySelector<HTMLFormElement>("#remote-project-form")!;
 const remoteBootstrapIdEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-id")!;
 const remoteBootstrapHostnameEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-hostname")!;
 const remoteBootstrapUserEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-user")!;
 const remoteBootstrapPortEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-port")!;
 const remoteBootstrapPasswordEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-password")!;
-const remoteHostIdEl = document.querySelector<HTMLInputElement>("#remote-host-id")!;
-const remoteSshHostEl = document.querySelector<HTMLInputElement>("#remote-ssh-host")!;
+const remoteBootstrapPathEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-path");
 const remoteProjectHostEl = document.querySelector<HTMLSelectElement>("#remote-project-host")!;
 const remoteProjectNameEl = document.querySelector<HTMLInputElement>("#remote-project-name")!;
 const remoteProjectPathEl = document.querySelector<HTMLInputElement>("#remote-project-path")!;
 let remoteBusy = false;
+
+function toRemoteId(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  return cleaned || "vps";
+}
+
+function projectNameFromPath(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const base = trimmed.split("/").filter(Boolean).pop() ?? "app";
+  return toRemoteId(base);
+}
+
+function openRemoteAddPath(hostId?: string): void {
+  const addProject = document.querySelector<HTMLDetailsElement>("#remote-add-project");
+  if (!addProject) return;
+  addProject.hidden = false;
+  addProject.open = true;
+  if (hostId) {
+    remoteProjectHostEl.value = hostId;
+  }
+  remoteProjectPathEl.focus();
+  addProject.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
 
 function renderWorkspaceManageList(doc: WorkspacesDocument): void {
   const names = Object.keys(doc.workspaces).sort();
@@ -54,7 +83,6 @@ function renderWorkspaceManageList(doc: WorkspacesDocument): void {
       <li class="ws-manage-item">
         <div class="ws-manage-main">
           <strong>${escapeHtml(t("workspaces.none"))}</strong>
-          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
         </div>
       </li>
     `;
@@ -66,9 +94,6 @@ function renderWorkspaceManageList(doc: WorkspacesDocument): void {
       const entry = doc.workspaces[name];
       const path = entry?.path ?? "";
       const isActive = name === doc.active;
-      const pathLabel = isActive
-        ? `${path}${path ? " · " : ""}${t("agents.wsActiveBadge")}`
-        : path;
       const right = isActive
         ? `
           <div class="ws-manage-right">
@@ -88,7 +113,7 @@ function renderWorkspaceManageList(doc: WorkspacesDocument): void {
         <li class="ws-manage-item ${isActive ? "is-active" : ""}">
           <div class="ws-manage-main">
             <strong>${escapeHtml(name)}</strong>
-            ${pathLabel ? `<span>${escapeHtml(pathLabel)}</span>` : ""}
+            ${path ? `<span>${escapeHtml(path)}</span>` : ""}
           </div>
           ${right}
         </li>
@@ -300,6 +325,9 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
 }
 
 let lastRemoteProjects: RemoteProjectRow[] = [];
+let lastRemoteHosts: RemoteHostRow[] = [];
+const remoteProbeStatus = new Map<string, RemoteHostProbeStatus>();
+const remoteProbeMessage = new Map<string, string>();
 
 function remoteHostLabel(id: string, host: RemoteHostsDocument["hosts"][string]): string {
   if (host.hostname) {
@@ -329,32 +357,85 @@ function fillRemoteHostSelect(doc: RemoteHostsDocument): void {
       .join("");
   if (previous && ids.includes(previous)) {
     remoteProjectHostEl.value = previous;
+  } else if (ids.length === 1) {
+    remoteProjectHostEl.value = ids[0]!;
   }
+}
+
+function probeBadge(status: RemoteHostProbeStatus): { className: string; label: string } {
+  switch (status) {
+    case "ok":
+      return { className: "ok", label: t("remote.statusOk") };
+    case "fail":
+      return { className: "bad", label: t("remote.statusFail") };
+    case "probing":
+      return { className: "warn", label: t("remote.statusProbing") };
+    default:
+      return { className: "muted", label: t("remote.statusUnknown") };
+  }
+}
+
+function renderRemoteHostList(rows: RemoteHostRow[]): void {
+  const bootstrap = document.querySelector<HTMLDetailsElement>("#remote-bootstrap-host");
+  if (bootstrap) {
+    bootstrap.open = rows.length === 0;
+  }
+
+  if (rows.length === 0) {
+    remoteHostListEl.innerHTML = "";
+    return;
+  }
+
+  remoteHostListEl.innerHTML = rows
+    .map((row) => {
+      const status = remoteProbeStatus.get(row.host_id) ?? "unknown";
+      const badge = probeBadge(status);
+      const detail = remoteProbeMessage.get(row.host_id);
+      const projects =
+        row.project_count > 0
+          ? t("remote.projectsCount", { count: String(row.project_count) })
+          : "";
+      const sub = [row.target, projects, detail].filter(Boolean).join(" · ");
+      const firstProject = lastRemoteProjects.find((p) => p.host_id === row.host_id);
+      const doctorBtn = firstProject
+        ? `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="doctor" data-remote-host="${escapeHtml(row.host_id)}" data-remote-target="${escapeHtml(`${firstProject.host_id}/${firstProject.project_id}`)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.doctor"))}</button>`
+        : `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="add-path" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.addPath"))}</button>`;
+      return `
+        <li class="ws-manage-item">
+          <div class="ws-manage-main">
+            <strong>${escapeHtml(row.host_id)}</strong>
+            <span>${escapeHtml(sub)}</span>
+          </div>
+          <div class="ws-manage-right">
+            <span class="badge ${badge.className}">${escapeHtml(badge.label)}</span>
+            <div class="ws-manage-actions">
+              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="probe" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.probe"))}</button>
+              ${doctorBtn}
+              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="remove" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.removeHost"))}</button>
+            </div>
+          </div>
+        </li>
+      `;
+    })
+    .join("");
 }
 
 function renderRemoteList(rows: RemoteProjectRow[]): void {
   if (rows.length === 0) {
-    remoteListEl.innerHTML = `
-      <li class="ws-manage-item">
-        <div class="ws-manage-main">
-          <strong>${escapeHtml(t("remote.none"))}</strong>
-          <span>${escapeHtml(t("remote.noneHint"))}</span>
-        </div>
-      </li>
-    `;
+    remoteListEl.hidden = true;
+    remoteListEl.innerHTML = "";
     return;
   }
 
+  remoteListEl.hidden = false;
   remoteListEl.innerHTML = rows
     .map((row) => {
       const target = `${row.host_id}/${row.project_id}`;
-      const runtimes =
-        row.runtimes.length === 0 ? "all" : row.runtimes.join(", ");
       return `
         <li class="ws-manage-item">
           <div class="ws-manage-main">
             <strong>${escapeHtml(target)}</strong>
-            <span>${escapeHtml(row.path)} · ssh ${escapeHtml(row.ssh_config_host)} · ${escapeHtml(runtimes)}</span>
+            <span>${escapeHtml(row.path)}</span>
           </div>
           <div class="ws-manage-right">
             <div class="ws-manage-actions">
@@ -456,23 +537,83 @@ function renderRemoteChecks(report: RemoteDoctorReport): void {
 
 async function loadRemoteProjects(): Promise<void> {
   try {
-    const [hosts, projects] = await Promise.all([
+    const [hostsDoc, hostRows, projects] = await Promise.all([
       invoke<RemoteHostsDocument>("list_remote_hosts_command"),
+      invoke<RemoteHostRow[]>("list_remote_host_rows_command"),
       invoke<RemoteProjectRow[]>("list_remote_projects_command"),
     ]);
+    const known = new Set(hostRows.map((row) => row.host_id));
+    for (const id of [...remoteProbeStatus.keys()]) {
+      if (!known.has(id)) {
+        remoteProbeStatus.delete(id);
+        remoteProbeMessage.delete(id);
+      }
+    }
+    lastRemoteHosts = hostRows;
     lastRemoteProjects = projects;
-    fillRemoteHostSelect(hosts);
+    fillRemoteHostSelect(hostsDoc);
+    renderRemoteHostList(hostRows);
     renderRemoteList(projects);
     remoteStatusEl.textContent = "";
   } catch (error) {
     remoteStatusEl.textContent = t("remote.doctorFailed", { error: String(error) });
+    remoteHostListEl.innerHTML = "";
     remoteListEl.innerHTML = "";
+  }
+}
+
+async function probeRemoteHostUi(id: string): Promise<void> {
+  if (!id || remoteBusy) return;
+  remoteBusy = true;
+  remoteProbeStatus.set(id, "probing");
+  remoteProbeMessage.delete(id);
+  renderRemoteHostList(lastRemoteHosts);
+  renderRemoteList(lastRemoteProjects);
+  remoteHintEl.textContent = t("remote.probeRunning", { id });
+  // Let the "检测中…" paint before the IPC call.
+  await new Promise<void>((resolve) => {
+    window.setTimeout(() => resolve(), 0);
+  });
+  try {
+    const report = await invoke<RemoteHostProbeReport>("probe_remote_host_command", { id });
+    remoteProbeStatus.set(id, report.ok ? "ok" : "fail");
+    remoteProbeMessage.set(id, report.message);
+    remoteHintEl.textContent = report.ok
+      ? t("remote.probeOk", { id: report.host_id, target: report.target })
+      : t("remote.probeFail", { id: report.host_id, error: report.message });
+  } catch (error) {
+    remoteProbeStatus.set(id, "fail");
+    remoteProbeMessage.set(id, String(error));
+    remoteHintEl.textContent = t("remote.probeFail", { id, error: String(error) });
+  } finally {
+    remoteBusy = false;
+    renderRemoteHostList(lastRemoteHosts);
+    renderRemoteList(lastRemoteProjects);
+  }
+}
+
+async function removeRemoteHostUi(id: string): Promise<void> {
+  if (!id || remoteBusy) return;
+  remoteBusy = true;
+  try {
+    await invoke("remove_remote_host_command", { id });
+    remoteProbeStatus.delete(id);
+    remoteProbeMessage.delete(id);
+    await loadRemoteProjects();
+    remoteHintEl.textContent = "";
+  } catch (error) {
+    remoteHintEl.textContent = t("remote.removeHostFailed", { error: String(error) });
+  } finally {
+    remoteBusy = false;
+    renderRemoteHostList(lastRemoteHosts);
+    renderRemoteList(lastRemoteProjects);
   }
 }
 
 async function runRemoteDoctorUi(target: string): Promise<void> {
   if (!target || remoteBusy) return;
   remoteBusy = true;
+  renderRemoteHostList(lastRemoteHosts);
   renderRemoteList(lastRemoteProjects);
   remoteHintEl.textContent = t("remote.doctorRunning");
   try {
@@ -487,6 +628,7 @@ async function runRemoteDoctorUi(target: string): Promise<void> {
     remoteHintEl.textContent = t("remote.doctorFailed", { error: String(error) });
   } finally {
     remoteBusy = false;
+    renderRemoteHostList(lastRemoteHosts);
     renderRemoteList(lastRemoteProjects);
   }
 }
@@ -502,6 +644,7 @@ async function removeRemoteProjectUi(host: string, project: string): Promise<voi
     remoteHintEl.textContent = t("remote.removeFailed", { error: String(error) });
   } finally {
     remoteBusy = false;
+    renderRemoteHostList(lastRemoteHosts);
     renderRemoteList(lastRemoteProjects);
   }
 }
@@ -550,6 +693,41 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     void loadRemoteProjects();
   });
 
+  remoteHostListEl.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      "[data-remote-host-action]",
+    );
+    if (!button) {
+      return;
+    }
+    const action = button.dataset.remoteHostAction;
+    const host = button.dataset.remoteHost;
+    if (!action || !host) {
+      return;
+    }
+    if (action === "probe") {
+      void probeRemoteHostUi(host);
+      return;
+    }
+    if (action === "add-path") {
+      openRemoteAddPath(host);
+      return;
+    }
+    if (action === "doctor") {
+      const target = button.dataset.remoteTarget;
+      if (target) {
+        void runRemoteDoctorUi(target);
+      } else {
+        remoteHintEl.textContent = t("remote.needPath");
+        openRemoteAddPath(host);
+      }
+      return;
+    }
+    if (action === "remove") {
+      void removeRemoteHostUi(host);
+    }
+  });
+
   remoteListEl.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-remote-action]");
     if (!button) {
@@ -574,31 +752,51 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
 
   remoteBootstrapFormEl.addEventListener("submit", (event) => {
     event.preventDefault();
-    const id = remoteBootstrapIdEl.value.trim();
+    const displayName = remoteBootstrapIdEl.value.trim();
+    const id = toRemoteId(displayName);
     const hostname = remoteBootstrapHostnameEl.value.trim();
     const user = remoteBootstrapUserEl.value.trim();
     const port = Number(remoteBootstrapPortEl.value) || 22;
     const password = remoteBootstrapPasswordEl.value;
-    if (!id || !hostname || !user || !password || remoteBusy) {
+    const projectPath = remoteBootstrapPathEl?.value.trim() ?? "";
+    if (!displayName || !hostname || !user || !password || remoteBusy) {
       return;
     }
     remoteBusy = true;
     remoteHintEl.textContent = t("remote.bootstrapRunning");
     void (async () => {
       try {
-        await invoke("bootstrap_remote_host_command", {
+        const doc = await invoke<RemoteHostsDocument>("bootstrap_remote_host_command", {
           id,
           hostname,
           user,
           port,
           password,
         });
+        if (projectPath.startsWith("/")) {
+          try {
+            await invoke("add_remote_project_command", {
+              host: id,
+              name: projectNameFromPath(projectPath),
+              path: projectPath,
+              runtimes: [],
+            });
+          } catch (pathError) {
+            remoteHintEl.textContent = t("remote.projectFailed", { error: String(pathError) });
+          }
+        }
         remoteBootstrapIdEl.value = "";
         remoteBootstrapHostnameEl.value = "";
-        remoteBootstrapUserEl.value = "";
+        remoteBootstrapUserEl.value = "root";
         remoteBootstrapPortEl.value = "22";
         remoteBootstrapPasswordEl.value = "";
-        remoteHintEl.textContent = t("remote.bootstrapSaved", { id });
+        if (remoteBootstrapPathEl) {
+          remoteBootstrapPathEl.value = "";
+        }
+        const target = doc.hosts[id] ? remoteHostLabel(id, doc.hosts[id]!) : hostname;
+        remoteProbeStatus.set(id, "ok");
+        remoteProbeMessage.set(id, t("remote.statusOk"));
+        remoteHintEl.textContent = t("remote.bootstrapSaved", { id, target });
         await loadRemoteProjects();
         const bootstrap = document.querySelector<HTMLDetailsElement>("#remote-bootstrap-host");
         if (bootstrap) {
@@ -608,33 +806,8 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
         remoteHintEl.textContent = t("remote.bootstrapFailed", { error: String(error) });
       } finally {
         remoteBusy = false;
-      }
-    })();
-  });
-
-  remoteHostFormEl.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const id = remoteHostIdEl.value.trim();
-    const ssh = remoteSshHostEl.value.trim();
-    if (!id || !ssh || remoteBusy) {
-      return;
-    }
-    remoteBusy = true;
-    void (async () => {
-      try {
-        await invoke("add_remote_host_command", { id, sshConfigHost: ssh });
-        remoteHostIdEl.value = "";
-        remoteSshHostEl.value = "";
-        remoteHintEl.textContent = t("remote.hostSaved", { id });
-        await loadRemoteProjects();
-        const addHost = document.querySelector<HTMLDetailsElement>("#remote-add-host");
-        if (addHost) {
-          addHost.open = false;
-        }
-      } catch (error) {
-        remoteHintEl.textContent = t("remote.hostFailed", { error: String(error) });
-      } finally {
-        remoteBusy = false;
+        renderRemoteHostList(lastRemoteHosts);
+        renderRemoteList(lastRemoteProjects);
       }
     })();
   });
@@ -664,11 +837,14 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
         const addProject = document.querySelector<HTMLDetailsElement>("#remote-add-project");
         if (addProject) {
           addProject.open = false;
+          addProject.hidden = true;
         }
       } catch (error) {
         remoteHintEl.textContent = t("remote.projectFailed", { error: String(error) });
       } finally {
         remoteBusy = false;
+        renderRemoteHostList(lastRemoteHosts);
+        renderRemoteList(lastRemoteProjects);
       }
     })();
   });
@@ -683,6 +859,8 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
       if (appState.lastWorkspaces) {
         renderWorkspaces(appState.lastWorkspaces);
       }
+      renderRemoteHostList(lastRemoteHosts);
+      renderRemoteList(lastRemoteProjects);
     },
   };
 }

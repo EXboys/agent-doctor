@@ -17,6 +17,11 @@ export const UPDATE_GITHUB_URL =
 
 let checking = false;
 
+/** True when updater rejects the running binary (tauri:dev / /var symlink path). */
+function isDevUpdaterPathError(raw: string): boolean {
+  return /StartingBinary|symlink on a non-allowed platform|contains a symlink/i.test(raw);
+}
+
 export async function readAppVersion(): Promise<string> {
   try {
     return await getVersion();
@@ -90,13 +95,18 @@ export async function checkForAppUpdates(opts?: {
     }
   } catch (error) {
     const raw = String(error ?? "");
+    const devPath = isDevUpdaterPathError(raw);
     // Dev / unsigned builds have no updater artifacts — keep quiet on boot.
-    if (silent && /not available|unsupported|network|fetch|dns|timed out/i.test(raw)) {
+    if (
+      silent &&
+      (devPath ||
+        /not available|unsupported|network|fetch|dns|timed out/i.test(raw))
+    ) {
       return;
     }
     if (interactive || !silent) {
       const openManual = await ask(
-        t("update.failed", { error: raw.slice(0, 240) }),
+        devPath ? t("update.devUnsupported") : t("update.failed", { error: raw.slice(0, 240) }),
         {
           title: t("update.title"),
           kind: "error",

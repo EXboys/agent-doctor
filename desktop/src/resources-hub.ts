@@ -25,7 +25,6 @@ const hubMcpCountEl = document.querySelector<HTMLElement>("#hub-mcp-count")!;
 const hubConfiguredEl = document.querySelector<HTMLElement>("#hub-configured")!;
 const openResourcesWindowEl = document.querySelector<HTMLButtonElement>("#open-resources-window")!;
 const openResourcesBrowserEl = document.querySelector<HTMLButtonElement>("#open-resources-browser")!;
-const toolbarResourcesEl = document.querySelector<HTMLButtonElement>("#toolbar-resources");
 
 const RUNTIME_LABELS: Record<string, string> = {
   hermes: "Hermes",
@@ -170,13 +169,18 @@ function updateResourcesHubSummary(): void {
   const skillCount = appState.lastSkillsInventory?.skills.length ?? 0;
   const mcpCount = uniqueMcpNames.size;
   mcpCountEl.textContent = appState.lastMcpStatus ? String(mcpCount) : "—";
-  hubSkillsCountEl.textContent = appState.lastSkillsInventory ? String(skillCount) : "—";
+  hubSkillsCountEl.textContent = appState.lastSkillsInventory
+    ? t("resources.hubSkillsCount", { count: String(skillCount) })
+    : "—";
   hubMcpCountEl.textContent = appState.lastMcpStatus ? String(mcpCount) : "—";
 
   const chrome = appState.lastMcpStatus?.browser;
   const configured = appState.lastMcpStatus?.configured_runtimes ?? [];
+  const agentLabels = configured.map((id) => RUNTIME_LABELS[id] ?? id);
   hubConfiguredEl.textContent =
-    configured.length > 0 ? configured.join(", ") : t("mcp.configuredNone");
+    agentLabels.length > 0
+      ? t("resources.hubAgentsOk", { list: agentLabels.join("、") })
+      : t("resources.hubAgentsNone");
 
   hubMcpBadgeEl.classList.remove("ok", "warn", "muted", "bad");
   if (!appState.lastMcpStatus || !chrome) {
@@ -188,19 +192,15 @@ function updateResourcesHubSummary(): void {
   if (!chrome.chrome_found) {
     hubMcpBadgeEl.textContent = t("mcp.badgeMissing");
     hubMcpBadgeEl.classList.add("bad");
-    hubBrowserStatusEl.textContent = t("mcp.chromeMissing");
+    hubBrowserStatusEl.textContent = t("resources.hubBrowserMissing");
   } else if (configured.length > 0) {
     hubMcpBadgeEl.textContent = t("mcp.badgeReady");
     hubMcpBadgeEl.classList.add("ok");
-    hubBrowserStatusEl.textContent = t("mcp.chromeOk", {
-      version: chrome.version || chrome.binary || "OK",
-    });
+    hubBrowserStatusEl.textContent = t("resources.hubBrowserReady");
   } else {
     hubMcpBadgeEl.textContent = t("mcp.badgePartial");
     hubMcpBadgeEl.classList.add("warn");
-    hubBrowserStatusEl.textContent = t("mcp.chromeOk", {
-      version: chrome.version || chrome.binary || "OK",
-    });
+    hubBrowserStatusEl.textContent = t("resources.hubBrowserReady");
   }
 }
 
@@ -321,9 +321,6 @@ export function initResourcesHub(_deps?: Record<string, never>): ResourcesHubApi
   });
   openResourcesBrowserEl.addEventListener("click", () => {
     void openResourcesWindow("browser");
-  });
-  toolbarResourcesEl?.addEventListener("click", () => {
-    void openResourcesWindow("catalog");
   });
   skillsRefreshEl.addEventListener("click", () => {
     void loadSkillsInventory();

@@ -73,11 +73,11 @@ pub use prompt_session::{
 };
 pub use remote::{
     add_host, add_project, bootstrap_and_add_host, list_hosts, list_projects, load_remote_hosts,
-    remote_hosts_path, remote_key_path_for, remote_keys_dir, remote_root_dir, remove_host,
-    remove_project, run_remote_doctor, run_remote_doctor_with_backend, save_remote_hosts,
-    upsert_managed_host, write_remote_doctor_report, BootstrapHostOptions, RemoteDoctorOptions,
-    RemoteDoctorReport, RemoteHostEntry, RemoteHostsDocument, RemoteProjectEntry,
-    RemoteRuntimeDoctorResult, SshBackend, SshTarget,
+    probe_remote_host, remote_hosts_path, remote_key_path_for, remote_keys_dir, remote_root_dir,
+    remove_host, remove_project, run_remote_doctor, run_remote_doctor_with_backend,
+    save_remote_hosts, upsert_managed_host, write_remote_doctor_report, BootstrapHostOptions,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostEntry, RemoteHostProbeReport,
+    RemoteHostsDocument, RemoteProjectEntry, RemoteRuntimeDoctorResult, SshBackend, SshTarget,
 };
 pub use repair::{
     allowed_paths_for_runtime, apply_deepseek_harness_playbook,

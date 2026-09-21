@@ -32,7 +32,6 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
       <li class="ws-quick-item">
         <span class="ws-quick-item-main">
           <strong>${escapeHtml(t("workspaces.none"))}</strong>
-          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
         </span>
       </li>
     `;

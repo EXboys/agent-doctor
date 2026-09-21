@@ -547,11 +547,22 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
 
     set_active_personal_provider_id(&entry.id)?;
 
-    let anthropic_gateway_url = if protocol == PROTOCOL_ANTHROPIC {
+    let mut anthropic_gateway_url = if protocol == PROTOCOL_ANTHROPIC {
         Some(gateway_url.clone())
     } else {
         None
     };
+    let mut gateway_url = gateway_url;
+    let mut protocol = protocol;
+
+    // Known dual-protocol hosts (same key): auto-route OpenAI agents + Claude Code.
+    if let Some(dual) = dual_protocol_endpoints(&gateway_url) {
+        gateway_url = dual.openai_url;
+        anthropic_gateway_url = Some(dual.anthropic_url);
+        // Primary path stays OpenAI so Codex / Hermes / OpenClaw all write;
+        // Claude Code reads anthropic_gateway_url.
+        protocol = PROTOCOL_OPENAI.to_string();
+    }
 
     Ok(EndpointBundle {
         mode: MODE_PERSONAL.to_string(),
@@ -566,6 +577,103 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
         personal_provider_id: Some(entry.id.clone()),
         personal_provider_name: Some(entry.name.clone()),
     })
+}
+
+/// Providers that expose both OpenAI-compatible and Anthropic Messages APIs with one key.
+struct DualProtocolEndpoints {
+    openai_url: String,
+    anthropic_url: String,
+}
+
+fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
+    let lower = url.trim().to_ascii_lowercase();
+    // DeepSeek: /v1 (OpenAI) + /anthropic (Claude Code)
+    if lower.contains("api.deepseek.com") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.deepseek.com/v1".into(),
+            anthropic_url: "https://api.deepseek.com/anthropic".into(),
+        });
+    }
+    // MiniMax (China + intl): same key, OpenAI + Anthropic gateways
+    if lower.contains("api.minimaxi.com") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.minimaxi.com/v1".into(),
+            anthropic_url: "https://api.minimaxi.com/anthropic".into(),
+        });
+    }
+    if lower.contains("api.minimax.io") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.minimax.io/v1".into(),
+            anthropic_url: "https://api.minimax.io/anthropic".into(),
+        });
+    }
+    // Zhipu GLM / Z.ai: OpenAI paas + Anthropic Messages
+    if lower.contains("open.bigmodel.cn") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://open.bigmodel.cn/api/paas/v4".into(),
+            anthropic_url: "https://open.bigmodel.cn/api/anthropic".into(),
+        });
+    }
+    if lower.contains("api.z.ai") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.z.ai/api/paas/v4".into(),
+            anthropic_url: "https://api.z.ai/api/anthropic".into(),
+        });
+    }
+    // Qwen / DashScope Model Studio: compatible-mode + apps/anthropic
+    if lower.contains("dashscope.aliyuncs.com")
+        || lower.contains("dashscope-intl.aliyuncs.com")
+        || lower.contains("dashscope-us.aliyuncs.com")
+        || lower.contains("cn-hongkong.dashscope.aliyuncs.com")
+    {
+        let host = if lower.contains("dashscope-intl") {
+            "https://dashscope-intl.aliyuncs.com"
+        } else if lower.contains("dashscope-us") {
+            "https://dashscope-us.aliyuncs.com"
+        } else if lower.contains("cn-hongkong.dashscope") {
+            "https://cn-hongkong.dashscope.aliyuncs.com"
+        } else {
+            "https://dashscope.aliyuncs.com"
+        };
+        return Some(DualProtocolEndpoints {
+            openai_url: format!("{host}/compatible-mode/v1"),
+            anthropic_url: format!("{host}/apps/anthropic"),
+        });
+    }
+    // Moonshot / Kimi (CN + intl)
+    if lower.contains("api.moonshot.cn") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.moonshot.cn/v1".into(),
+            anthropic_url: "https://api.moonshot.cn/anthropic".into(),
+        });
+    }
+    if lower.contains("api.moonshot.ai") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.moonshot.ai/v1".into(),
+            anthropic_url: "https://api.moonshot.ai/anthropic".into(),
+        });
+    }
+    // SiliconFlow: OpenAI /v1 + Anthropic Messages on same host root
+    if lower.contains("api.siliconflow.cn") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.siliconflow.cn/v1".into(),
+            anthropic_url: "https://api.siliconflow.cn".into(),
+        });
+    }
+    if lower.contains("api.siliconflow.com") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.siliconflow.com/v1".into(),
+            anthropic_url: "https://api.siliconflow.com".into(),
+        });
+    }
+    // OpenRouter: /api/v1 (OpenAI) + /api (Claude Code → /api/v1/messages)
+    if lower.contains("openrouter.ai") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://openrouter.ai/api/v1".into(),
+            anthropic_url: "https://openrouter.ai/api".into(),
+        });
+    }
+    None
 }
 
 fn resolve_team_bundle() -> Result<EndpointBundle> {
@@ -741,8 +849,76 @@ mod tests {
     fn personal_openai_without_anthropic_gateway_skips_claude() {
         let mut bundle = sample_bundle(PROTOCOL_OPENAI, None);
         bundle.mode = MODE_PERSONAL.to_string();
-        bundle.gateway_url = "https://api.deepseek.com/v1".into();
+        bundle.gateway_url = "https://api.openai.com/v1".into();
         assert!(claude_code_target_url(&bundle).is_none());
+    }
+
+    #[test]
+    fn deepseek_dual_endpoints_cover_openai_and_anthropic() {
+        let dual = dual_protocol_endpoints("https://api.deepseek.com/v1").expect("deepseek");
+        assert_eq!(dual.openai_url, "https://api.deepseek.com/v1");
+        assert_eq!(dual.anthropic_url, "https://api.deepseek.com/anthropic");
+
+        let dual2 = dual_protocol_endpoints("https://api.deepseek.com/anthropic")
+            .expect("deepseek anthropic");
+        assert_eq!(dual2.openai_url, "https://api.deepseek.com/v1");
+        assert_eq!(dual2.anthropic_url, "https://api.deepseek.com/anthropic");
+
+        let or = dual_protocol_endpoints("https://openrouter.ai/api/v1").expect("openrouter");
+        assert_eq!(or.openai_url, "https://openrouter.ai/api/v1");
+        assert_eq!(or.anthropic_url, "https://openrouter.ai/api");
+    }
+
+    #[test]
+    fn glm_and_minimax_dual_endpoints() {
+        let glm = dual_protocol_endpoints("https://open.bigmodel.cn/api/paas/v4").expect("glm");
+        assert_eq!(glm.openai_url, "https://open.bigmodel.cn/api/paas/v4");
+        assert_eq!(glm.anthropic_url, "https://open.bigmodel.cn/api/anthropic");
+
+        let mm = dual_protocol_endpoints("https://api.minimaxi.com/v1").expect("minimax cn");
+        assert_eq!(mm.openai_url, "https://api.minimaxi.com/v1");
+        assert_eq!(mm.anthropic_url, "https://api.minimaxi.com/anthropic");
+
+        let mm_io = dual_protocol_endpoints("https://api.minimax.io/v1").expect("minimax intl");
+        assert_eq!(mm_io.openai_url, "https://api.minimax.io/v1");
+        assert_eq!(mm_io.anthropic_url, "https://api.minimax.io/anthropic");
+    }
+
+    #[test]
+    fn qwen_moonshot_siliconflow_dual_endpoints() {
+        let qwen = dual_protocol_endpoints("https://dashscope.aliyuncs.com/compatible-mode/v1")
+            .expect("qwen");
+        assert_eq!(
+            qwen.openai_url,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        );
+        assert_eq!(
+            qwen.anthropic_url,
+            "https://dashscope.aliyuncs.com/apps/anthropic"
+        );
+
+        let kimi = dual_protocol_endpoints("https://api.moonshot.cn/v1").expect("moonshot");
+        assert_eq!(kimi.openai_url, "https://api.moonshot.cn/v1");
+        assert_eq!(kimi.anthropic_url, "https://api.moonshot.cn/anthropic");
+
+        let sf = dual_protocol_endpoints("https://api.siliconflow.cn/v1").expect("siliconflow");
+        assert_eq!(sf.openai_url, "https://api.siliconflow.cn/v1");
+        assert_eq!(sf.anthropic_url, "https://api.siliconflow.cn");
+    }
+
+    #[test]
+    fn personal_deepseek_openai_also_targets_claude() {
+        let mut bundle = sample_bundle(PROTOCOL_OPENAI, None);
+        bundle.mode = MODE_PERSONAL.to_string();
+        bundle.gateway_url = "https://api.deepseek.com/v1".into();
+        if let Some(dual) = dual_protocol_endpoints(&bundle.gateway_url) {
+            bundle.gateway_url = dual.openai_url;
+            bundle.anthropic_gateway_url = Some(dual.anthropic_url);
+        }
+        assert_eq!(
+            claude_code_target_url(&bundle),
+            Some("https://api.deepseek.com/anthropic")
+        );
     }
 
     #[test]

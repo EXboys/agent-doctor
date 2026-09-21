@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { t } from "./i18n";
+import { t, type MessageKey } from "./i18n";
+import { escapeHtml } from "./format";
 import { isPersonalEdition, isTeamEdition, productEdition } from "./edition";
 import { appState } from "./app-state";
 import type {
@@ -53,23 +54,28 @@ const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-v
 const personalFormViewEl = document.querySelector<HTMLElement>("#personal-form-view")!;
 const personalStatusEl = document.querySelector<HTMLElement>("#personal-status")!;
 const personalConnectedEl = document.querySelector<HTMLElement>("#personal-connected")!;
-const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-connected-url")!;
-const personalConnectedMetaEl = document.querySelector<HTMLElement>("#personal-connected-meta")!;
+const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-connected-url");
+const personalConnectedMetaEl = document.querySelector<HTMLElement>("#personal-connected-meta");
+const personalAgentsFootnoteEl = document.querySelector<HTMLElement>("#personal-agents-footnote");
 const personalListEl = document.querySelector<HTMLUListElement>("#personal-list")!;
 const personalListHintEl = document.querySelector<HTMLElement>("#personal-list-hint")!;
 const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
 const personalFormTitleEl = document.querySelector<HTMLElement>("#personal-form-title")!;
 const personalIdEl = document.querySelector<HTMLInputElement>("#personal-id")!;
 const personalPresetEl = document.querySelector<HTMLSelectElement>("#personal-preset")!;
+const personalPresetPickerEl = document.querySelector<HTMLElement>("#personal-preset-picker");
 const personalProtocolEl = document.querySelector<HTMLSelectElement>("#personal-protocol")!;
 const personalNameRowEl = document.querySelector<HTMLElement>("#personal-name-row")!;
 const personalNameEl = document.querySelector<HTMLInputElement>("#personal-name")!;
 const personalUrlEl = document.querySelector<HTMLInputElement>("#personal-url")!;
 const personalKeyEl = document.querySelector<HTMLInputElement>("#personal-key")!;
 const personalModelEl = document.querySelector<HTMLInputElement>("#personal-model")!;
+const personalModelSelectEl = document.querySelector<HTMLSelectElement>("#personal-model-select");
 const personalModelSuggestionsEl = document.querySelector<HTMLDataListElement>(
   "#personal-model-suggestions",
 )!;
+const personalPresetUrlEl = document.querySelector<HTMLElement>("#personal-preset-url");
+const personalAdvancedEl = document.querySelector<HTMLDetailsElement>("#personal-advanced");
 const personalAddEl = document.querySelector<HTMLButtonElement>("#personal-add")!;
 const personalBackEl = document.querySelector<HTMLButtonElement>("#personal-back")!;
 const personalVerifyEl = document.querySelector<HTMLButtonElement>("#personal-verify")!;
@@ -77,10 +83,9 @@ const personalSaveEl = document.querySelector<HTMLButtonElement>("#personal-save
 const personalApplyEl = document.querySelector<HTMLButtonElement>("#personal-apply")!;
 const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 
-
-const modeWithBrowserMcpEl = document.querySelector<HTMLInputElement>("#mode-with-browser-mcp")!;
+/** Always write Browser MCP when applying provider — no separate toggle. */
 function wantsBrowserMcp(): boolean {
-  return Boolean(modeWithBrowserMcpEl?.checked);
+  return true;
 }
 
 function formatBrowserMcpHint(report: ModeSwitchReport): string | null {
@@ -138,89 +143,197 @@ function updateFooterCopy(mode?: string): void {
 }
 
 function updateWiringModeFootnote(_mode?: string): void {
-  wiringModeFootnoteEl.textContent = isTeamEdition()
-    ? t("wiring.modeTeamFootnote")
-    : t("wiring.modePersonalFootnote");
-  wiringModeFootnoteEl.title = isTeamEdition()
-    ? t("wiring.modeHintTeam")
-    : t("wiring.modeHintPersonal");
+  // Pathway toggle removed — Browser MCP always writes with provider apply.
+  if (!wiringModeFootnoteEl.classList.contains("is-busy")) {
+    wiringModeFootnoteEl.textContent = "";
+    wiringModeFootnoteEl.removeAttribute("title");
+  }
 }
 const PROVIDER_PRESETS: Record<
   string,
-  { name: string; url: string; protocol: ProviderProtocol; models: string[] }
+  { name: string; url: string; protocol: ProviderProtocol; models: string[]; chip?: string }
 > = {
-  openai: {
-    name: "OpenAI",
-    url: "https://api.openai.com/v1",
-    protocol: "openai",
-    models: ["gpt-4.1-mini", "gpt-4.1", "o4-mini"],
-  },
   deepseek: {
     name: "DeepSeek",
     url: "https://api.deepseek.com/v1",
     protocol: "openai",
     models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    chip: "DeepSeek",
+  },
+  qwen: {
+    name: "Qwen",
+    url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    protocol: "openai",
+    models: ["qwen-plus", "qwen-max", "qwen-flash"],
+    chip: "Qwen",
+  },
+  glm: {
+    name: "GLM",
+    url: "https://open.bigmodel.cn/api/paas/v4",
+    protocol: "openai",
+    models: ["glm-5.3", "glm-5.3-flash", "glm-4.6"],
+    chip: "GLM",
+  },
+  minimax: {
+    name: "MiniMax",
+    url: "https://api.minimaxi.com/v1",
+    protocol: "openai",
+    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"],
+    chip: "MiniMax",
   },
   moonshot: {
-    name: "Moonshot",
+    name: "Moonshot / Kimi",
     url: "https://api.moonshot.cn/v1",
     protocol: "openai",
-    models: ["kimi-k3", "kimi-k2.5"],
+    models: ["kimi-k2.5", "kimi-latest", "moonshot-v1-auto"],
+    chip: "Kimi",
+  },
+  openai: {
+    name: "ChatGPT / OpenAI",
+    url: "https://api.openai.com/v1",
+    protocol: "openai",
+    models: ["gpt-4.1-mini", "gpt-4.1", "o4-mini"],
+    chip: "ChatGPT",
+  },
+  anthropic: {
+    name: "Claude",
+    url: "https://api.anthropic.com",
+    protocol: "anthropic",
+    models: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
+    chip: "Claude",
+  },
+  gemini: {
+    name: "Gemini",
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    protocol: "openai",
+    models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview"],
+    chip: "Gemini",
   },
   siliconflow: {
     name: "SiliconFlow",
     url: "https://api.siliconflow.cn/v1",
     protocol: "openai",
     models: ["deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3-235B-A22B"],
+    chip: "SiliconFlow",
   },
   openrouter: {
     name: "OpenRouter",
     url: "https://openrouter.ai/api/v1",
     protocol: "openai",
-    models: ["openai/gpt-4.1-mini", "deepseek/deepseek-v4-flash"],
+    models: ["openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-sonnet-4.5"],
+    chip: "OpenRouter",
   },
   groq: {
     name: "Groq",
     url: "https://api.groq.com/openai/v1",
     protocol: "openai",
     models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
-  },
-  anthropic: {
-    name: "Anthropic",
-    url: "https://api.anthropic.com",
-    protocol: "anthropic",
-    models: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
-  },
-  "deepseek-anthropic": {
-    name: "DeepSeek Claude",
-    url: "https://api.deepseek.com/anthropic",
-    protocol: "anthropic",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    chip: "Groq",
   },
 };
 
-function protocolLabel(protocol: string): string {
-  return protocol === "anthropic"
-    ? t("personal.protocolBadgeClaude")
-    : t("personal.protocolBadgeOpenAI");
+const PRESET_PICKER_GROUPS: Array<{ labelKey: MessageKey; ids: string[] }> = [
+  {
+    labelKey: "personal.groupPopular",
+    ids: ["deepseek", "qwen", "glm", "minimax", "moonshot"],
+  },
+  {
+    labelKey: "personal.groupGlobal",
+    ids: ["openai", "anthropic", "gemini"],
+  },
+  {
+    labelKey: "personal.groupHub",
+    ids: ["siliconflow", "openrouter", "groq"],
+  },
+];
+
+function chipLabel(presetId: string): string {
+  if (presetId === "custom") {
+    return t("personal.presetCustom");
+  }
+  return PROVIDER_PRESETS[presetId]?.chip ?? PROVIDER_PRESETS[presetId]?.name ?? presetId;
+}
+
+function syncPresetPicker(activeId: string) {
+  if (!personalPresetPickerEl) return;
+  personalPresetPickerEl.querySelectorAll<HTMLButtonElement>(".provider-chip").forEach((chip) => {
+    const selected = chip.dataset.presetId === activeId;
+    chip.classList.toggle("is-active", selected);
+    chip.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+}
+
+function renderPresetPicker() {
+  if (!personalPresetPickerEl) return;
+  personalPresetPickerEl.innerHTML = "";
+
+  for (const group of PRESET_PICKER_GROUPS) {
+    const groupEl = document.createElement("div");
+    groupEl.className = "provider-picker-group";
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "provider-picker-label";
+    labelEl.dataset.i18nLabel = group.labelKey;
+    labelEl.textContent = t(group.labelKey);
+    groupEl.appendChild(labelEl);
+
+    const chipsEl = document.createElement("div");
+    chipsEl.className = "provider-picker-chips";
+    for (const id of group.ids) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "provider-chip";
+      chip.dataset.presetId = id;
+      chip.setAttribute("role", "option");
+      chip.textContent = chipLabel(id);
+      chipsEl.appendChild(chip);
+    }
+    groupEl.appendChild(chipsEl);
+    personalPresetPickerEl.appendChild(groupEl);
+  }
+
+  const customGroup = document.createElement("div");
+  customGroup.className = "provider-picker-group";
+  const customChips = document.createElement("div");
+  customChips.className = "provider-picker-chips";
+  const customChip = document.createElement("button");
+  customChip.type = "button";
+  customChip.className = "provider-chip is-custom";
+  customChip.dataset.presetId = "custom";
+  customChip.setAttribute("role", "option");
+  customChip.textContent = chipLabel("custom");
+  customChips.appendChild(customChip);
+  customGroup.appendChild(customChips);
+  personalPresetPickerEl.appendChild(customGroup);
+
+  syncPresetPicker(personalPresetEl.value || "deepseek");
 }
 
 function refreshPresetGroupLabels() {
+  if (personalPresetPickerEl) {
+    personalPresetPickerEl.querySelectorAll<HTMLElement>("[data-i18n-label]").forEach((el) => {
+      const key = el.dataset.i18nLabel;
+      if (
+        key === "personal.groupPopular" ||
+        key === "personal.groupGlobal" ||
+        key === "personal.groupHub"
+      ) {
+        el.textContent = t(key);
+      }
+    });
+    const custom = personalPresetPickerEl.querySelector<HTMLElement>(
+      '.provider-chip[data-preset-id="custom"]',
+    );
+    if (custom) {
+      custom.textContent = t("personal.presetCustom");
+    }
+  }
   personalPresetEl.querySelectorAll("optgroup").forEach((group) => {
     const key = group.getAttribute("data-i18n-label");
     if (key === "personal.groupOpenAI" || key === "personal.groupClaude") {
       group.label = t(key);
     }
   });
-}
-
-function setModelSuggestions(models: string[]) {
-  personalModelSuggestionsEl.innerHTML = "";
-  for (const model of models) {
-    const option = document.createElement("option");
-    option.value = model;
-    personalModelSuggestionsEl.appendChild(option);
-  }
 }
 
 function matchPresetId(name: string, url: string, protocol?: string): string {
@@ -240,9 +353,66 @@ function matchPresetId(name: string, url: string, protocol?: string): string {
   return "custom";
 }
 
+function setModelSuggestions(models: string[]) {
+  personalModelSuggestionsEl.innerHTML = "";
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model;
+    personalModelSuggestionsEl.appendChild(option);
+  }
+  if (personalModelSelectEl) {
+    const current = personalModelEl.value.trim();
+    personalModelSelectEl.innerHTML = "";
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      if (model === current) {
+        option.selected = true;
+      }
+      personalModelSelectEl.appendChild(option);
+    }
+    if (models.length && !models.includes(current)) {
+      personalModelSelectEl.value = models[0]!;
+      personalModelEl.value = models[0]!;
+    } else if (current && models.includes(current)) {
+      personalModelSelectEl.value = current;
+    }
+  }
+}
+
+function syncModelFromSelect() {
+  if (personalModelSelectEl && !personalModelSelectEl.hidden) {
+    personalModelEl.value = personalModelSelectEl.value;
+  }
+}
+
+function setPresetFormMode(isCustom: boolean, presetUrl?: string) {
+  if (personalAdvancedEl) {
+    // Presets: hide entirely — URL/protocol auto-routed in background.
+    // Custom: keep for power users, but collapse by default.
+    personalAdvancedEl.hidden = !isCustom;
+    personalAdvancedEl.open = false;
+  }
+  if (personalModelSelectEl && personalModelEl) {
+    personalModelSelectEl.hidden = isCustom;
+    personalModelEl.hidden = !isCustom;
+  }
+  if (personalPresetUrlEl) {
+    // Don't surface raw endpoint to beginners; presets already wire it.
+    personalPresetUrlEl.hidden = true;
+    personalPresetUrlEl.textContent = "";
+    void presetUrl;
+  }
+  if (personalSaveEl) {
+    personalSaveEl.hidden = !isCustom;
+  }
+}
+
 function applyProviderPreset(presetId: string, { forceModel = true } = {}) {
   if (presetId === "custom" || !PROVIDER_PRESETS[presetId]) {
     personalPresetEl.value = "custom";
+    syncPresetPicker("custom");
     personalNameRowEl.classList.remove("is-preset-locked");
     personalNameEl.readOnly = false;
     setModelSuggestions(
@@ -250,19 +420,25 @@ function applyProviderPreset(presetId: string, { forceModel = true } = {}) {
         ? ["claude-sonnet-4-5", "claude-opus-4-5", "deepseek-v4-flash"]
         : ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4.1-mini"],
     );
+    setPresetFormMode(true);
     return;
   }
   const preset = PROVIDER_PRESETS[presetId];
   personalPresetEl.value = presetId;
+  syncPresetPicker(presetId);
   personalProtocolEl.value = preset.protocol;
   personalNameEl.value = preset.name;
   personalUrlEl.value = preset.url;
   setModelSuggestions(preset.models);
   if (forceModel || !personalModelEl.value.trim()) {
     personalModelEl.value = preset.models[0] ?? "";
+    if (personalModelSelectEl) {
+      personalModelSelectEl.value = preset.models[0] ?? "";
+    }
   }
   personalNameRowEl.classList.add("is-preset-locked");
   personalNameEl.readOnly = true;
+  setPresetFormMode(false, preset.url);
 }
 const providerPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-provider-panel]"));
 /** Provider panel is locked to the build edition — no Personal/Team switch tabs. */
@@ -549,29 +725,49 @@ async function loadPersonalProviderStatus() {
 
 function renderPersonalProviderStatus(status: PersonalProviderStatus) {
   personalSectionEl.classList.toggle("is-configured", status.configured);
-  personalConnectedEl.hidden = !status.configured;
+  // Status is shown on the active list row — keep this block hidden.
+  personalConnectedEl.hidden = true;
+  personalStatusEl.textContent = status.configured
+    ? t("personal.configured")
+    : t("personal.notConfigured");
+  if (personalConnectedUrlEl) personalConnectedUrlEl.textContent = "";
+  if (personalConnectedMetaEl) personalConnectedMetaEl.textContent = "";
+}
 
-  if (status.configured && status.gateway_url) {
-    personalStatusEl.textContent = t("personal.configured");
-    personalConnectedUrlEl.textContent = status.active_name || status.gateway_url;
-    personalConnectedMetaEl.textContent = t("personal.meta", {
-      name: status.active_name ?? "—",
-      protocol: protocolLabel(status.protocol ?? "openai"),
-      model: status.model ?? "—",
-      key: status.api_key_hint ?? "…",
-    });
-  } else {
-    personalStatusEl.textContent = t("personal.notConfigured");
-    personalConnectedMetaEl.textContent = "";
-  }
+const RUNTIME_FOOTNOTE_LABELS: Record<string, string> = {
+  hermes: "Hermes",
+  openclaw: "OpenClaw",
+  "claude-code": "Claude",
+  codex: "Codex",
+  "deepseek-harness": "DeepSeek",
+};
+
+function updatePersonalAgentsFootnote(): void {
+  if (!personalAgentsFootnoteEl) return;
+  const runtimes = appState.lastReport?.runtimes ?? [];
+  const installed = runtimes
+    .filter((runtime) => runtime.installed)
+    .map((runtime) => RUNTIME_FOOTNOTE_LABELS[runtime.id] ?? runtime.display_name)
+    .filter(Boolean);
+  personalAgentsFootnoteEl.textContent =
+    installed.length > 0
+      ? t("personal.agentsOk", { list: installed.join("、") })
+      : t("personal.agentsNone");
 }
 
 function renderPersonalProviderList(doc: PersonalProvidersDocument) {
   personalListEl.innerHTML = "";
+  updatePersonalAgentsFootnote();
   if (doc.providers.length === 0) {
     const empty = document.createElement("li");
-    empty.className = "section-hint";
-    empty.textContent = t("personal.emptyList");
+    empty.className = "provider-item provider-item-empty";
+    empty.innerHTML = `
+      <div class="provider-item-main">
+        <p class="provider-item-kicker">${escapeHtml(t("personal.preset"))}</p>
+        <p class="provider-item-title">${escapeHtml(t("personal.emptyTitle"))}</p>
+        <p class="provider-item-desc">${escapeHtml(t("personal.emptyList"))}</p>
+      </div>
+    `;
     personalListEl.appendChild(empty);
     return;
   }
@@ -579,29 +775,45 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
   const personalModeActive = appState.lastModeStatus?.mode === "personal";
   for (const item of doc.providers) {
     const routingActive = item.active && personalModeActive;
+    const presetId = matchPresetId(item.name, item.url, item.protocol);
+    const brand =
+      presetId !== "custom"
+        ? PROVIDER_PRESETS[presetId]?.chip ?? PROVIDER_PRESETS[presetId]?.name ?? item.name
+        : item.name.trim() || t("personal.presetCustom");
+    const titleText = item.name.trim() || brand;
+
     const li = document.createElement("li");
     li.className = `provider-item${routingActive ? " is-active" : ""}`;
     li.dataset.providerId = item.id;
 
     const main = document.createElement("div");
     main.className = "provider-item-main";
+
+    const kicker = document.createElement("p");
+    kicker.className = "provider-item-kicker";
+    kicker.textContent = brand;
+
     const title = document.createElement("p");
     title.className = "provider-item-title";
-    title.textContent = item.name;
+    title.textContent = titleText;
     if (routingActive) {
       const badge = document.createElement("span");
       badge.className = "provider-badge";
       badge.textContent = t("personal.activeBadge");
       title.appendChild(badge);
     }
+
     const meta = document.createElement("p");
     meta.className = "provider-item-meta";
-    meta.textContent = t("personal.itemMeta", {
-      protocol: protocolLabel(item.protocol),
-      model: item.model,
-      url: item.url,
-    });
-    main.append(title, meta);
+    meta.textContent = item.model;
+
+    const desc = document.createElement("p");
+    desc.className = "provider-item-desc";
+    desc.textContent = routingActive
+      ? t("personal.itemActiveDesc")
+      : t("personal.itemIdleDesc");
+
+    main.append(kicker, title, meta, desc);
 
     const actions = document.createElement("div");
     actions.className = "provider-item-actions";
@@ -609,7 +821,7 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     if (!item.active) {
       const activateBtn = document.createElement("button");
       activateBtn.type = "button";
-      activateBtn.className = "btn-primary";
+      activateBtn.className = "btn-primary btn-compact";
       activateBtn.dataset.action = "activate-provider";
       activateBtn.dataset.providerId = item.id;
       activateBtn.textContent = t("personal.activate");
@@ -618,7 +830,7 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
-    editBtn.className = "btn-secondary";
+    editBtn.className = "btn-secondary btn-compact";
     editBtn.dataset.action = "edit-provider";
     editBtn.dataset.providerId = item.id;
     editBtn.textContent = t("personal.edit");
@@ -626,7 +838,7 @@ function renderPersonalProviderList(doc: PersonalProvidersDocument) {
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
-    deleteBtn.className = "btn-ghost";
+    deleteBtn.className = "btn-ghost btn-compact";
     deleteBtn.dataset.action = "delete-provider";
     deleteBtn.dataset.providerId = item.id;
     deleteBtn.textContent = t("personal.delete");
@@ -658,8 +870,7 @@ function resetPersonalForm() {
   personalModelEl.value = "";
   personalProtocolEl.value = "openai";
   personalKeyEl.placeholder = "sk-…";
-  applyProviderPreset("custom");
-  personalPresetEl.value = "custom";
+  applyProviderPreset("deepseek");
 }
 
 function fillPersonalForm(item: PersonalProviderListItem) {
@@ -676,11 +887,21 @@ function fillPersonalForm(item: PersonalProviderListItem) {
     personalNameEl.value = item.name;
     personalUrlEl.value = item.url;
     personalProtocolEl.value = item.protocol === "anthropic" ? "anthropic" : "openai";
+    personalModelEl.value = item.model;
   } else {
     applyProviderPreset(presetId, { forceModel: false });
     personalNameEl.value = item.name;
     personalUrlEl.value = item.url;
     personalModelEl.value = item.model;
+    if (personalModelSelectEl) {
+      if (![...personalModelSelectEl.options].some((o) => o.value === item.model)) {
+        const option = document.createElement("option");
+        option.value = item.model;
+        option.textContent = item.model;
+        personalModelSelectEl.appendChild(option);
+      }
+      personalModelSelectEl.value = item.model;
+    }
   }
 }
 
@@ -692,6 +913,7 @@ function personalFormValues(requireKey: boolean): {
   model: string;
   protocol: ProviderProtocol;
 } | null {
+  syncModelFromSelect();
   const id = personalIdEl.value.trim() || null;
   const name = personalNameEl.value.trim();
   const url = personalUrlEl.value.trim();
@@ -779,10 +1001,8 @@ async function upsertPersonalProvider(activate: boolean) {
       await loadPersonalProviderStatus();
       await loadModeStatus();
       await deps.refresh();
-      const applied = report.runtimes.filter((item) => item.applied).length;
       personalListHintEl.textContent = t("personal.applyOk", {
         name: report.provider_name ?? values.name,
-        count: String(applied),
       });
       resetPersonalForm();
       showPersonalListView();
@@ -820,10 +1040,8 @@ async function activateProviderById(id: string) {
     await loadPersonalProviderStatus();
     await loadModeStatus();
     await deps.refresh();
-    const applied = report.runtimes.filter((item) => item.applied).length;
     personalListHintEl.textContent = t("personal.applyOk", {
       name: report.provider_name ?? id,
-      count: String(applied),
     });
   } catch (error) {
     personalListHintEl.textContent = t("personal.applyFailed", { error: String(error) });
@@ -866,6 +1084,8 @@ export interface WiringUiApi {
 export function initWiringUi(d: WiringUiDeps): WiringUiApi {
   deps = d;
 
+  renderPresetPicker();
+
   evotownFormEl.addEventListener("submit", (event) => {
     event.preventDefault();
     void runEvotownOnboarding();
@@ -890,6 +1110,10 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     showPersonalListView();
   });
 
+  personalModelSelectEl?.addEventListener("change", () => {
+    syncModelFromSelect();
+  });
+
   personalFormEl.addEventListener("submit", (event) => {
     event.preventDefault();
     void upsertPersonalProvider(true);
@@ -906,6 +1130,19 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
   personalPresetEl.addEventListener("change", () => {
     applyProviderPreset(personalPresetEl.value, { forceModel: true });
     if (personalPresetEl.value === "custom") {
+      personalNameEl.focus();
+    } else {
+      personalKeyEl.focus();
+    }
+  });
+
+  personalPresetPickerEl?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    const chip = target?.closest<HTMLButtonElement>(".provider-chip");
+    if (!chip?.dataset.presetId) return;
+    const presetId = chip.dataset.presetId;
+    applyProviderPreset(presetId, { forceModel: true });
+    if (presetId === "custom") {
       personalNameEl.focus();
     } else {
       personalKeyEl.focus();

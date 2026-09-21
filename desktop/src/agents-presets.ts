@@ -8,34 +8,77 @@ export interface AgentsPresetsDeps {
   refresh: () => Promise<void>;
 }
 
+/**
+ * Hermes scene presets (work / local). Optional UI — workspace no longer hosts this.
+ * When DOM is absent, returns no-op stubs so Agents panel still boots.
+ */
 export function createAgentsPresets(deps: AgentsPresetsDeps) {
-  const presetStatusEl = document.querySelector<HTMLElement>("#preset-status")!;
-  const presetApplyEl = document.querySelector<HTMLButtonElement>("#preset-apply")!;
-  const presetHintEl = document.querySelector<HTMLElement>("#preset-hint")!;
-  const presetPickerEl = document.querySelector<HTMLElement>("#preset-picker")!;
-  const presetTriggerEl = document.querySelector<HTMLButtonElement>("#preset-trigger")!;
-  const presetTriggerLabelEl = document.querySelector<HTMLElement>("#preset-trigger-label")!;
-  const presetMenuEl = document.querySelector<HTMLElement>("#preset-menu")!;
+  const presetStatusEl = document.querySelector<HTMLElement>("#preset-status");
+  const presetApplyEl = document.querySelector<HTMLButtonElement>("#preset-apply");
+  const presetHintEl = document.querySelector<HTMLElement>("#preset-hint");
+  const presetPickerEl = document.querySelector<HTMLElement>("#preset-picker");
+  const presetTriggerEl = document.querySelector<HTMLButtonElement>("#preset-trigger");
+  const presetTriggerLabelEl = document.querySelector<HTMLElement>("#preset-trigger-label");
+  const presetMenuEl = document.querySelector<HTMLElement>("#preset-menu");
+
+  const enabled = Boolean(
+    presetStatusEl &&
+      presetApplyEl &&
+      presetHintEl &&
+      presetPickerEl &&
+      presetTriggerEl &&
+      presetTriggerLabelEl &&
+      presetMenuEl,
+  );
+
+  if (!enabled) {
+    return {
+      closePresetMenu: () => {
+        appState.presetMenuOpen = false;
+      },
+      loadProfiles: async () => {
+        try {
+          appState.lastProfiles = await invoke<ProfilesDocument>("list_profiles_command");
+        } catch {
+          appState.lastProfiles = null;
+        }
+      },
+      renderProfiles: (doc: ProfilesDocument) => {
+        appState.lastProfiles = doc;
+      },
+      applyPreset: async () => {},
+      setLoadingStatus: (_message: string) => {},
+      presetPickerEl: document.createElement("div"),
+    };
+  }
+
+  const statusEl = presetStatusEl!;
+  const applyEl = presetApplyEl!;
+  const hintEl = presetHintEl!;
+  const pickerEl = presetPickerEl!;
+  const triggerEl = presetTriggerEl!;
+  const triggerLabelEl = presetTriggerLabelEl!;
+  const menuEl = presetMenuEl!;
 
   function setPresetTriggerLabel(name: string | null) {
-    presetTriggerLabelEl.textContent = name ?? t("presets.noActive");
+    triggerLabelEl.textContent = name ?? t("presets.noActive");
   }
 
   function closePresetMenu() {
     appState.presetMenuOpen = false;
-    presetMenuEl.hidden = true;
-    presetTriggerEl.setAttribute("aria-expanded", "false");
-    presetPickerEl.classList.remove("is-open");
+    menuEl.hidden = true;
+    triggerEl.setAttribute("aria-expanded", "false");
+    pickerEl.classList.remove("is-open");
   }
 
   function openPresetMenu() {
-    if (presetTriggerEl.disabled) {
+    if (triggerEl.disabled) {
       return;
     }
     appState.presetMenuOpen = true;
-    presetMenuEl.hidden = false;
-    presetTriggerEl.setAttribute("aria-expanded", "true");
-    presetPickerEl.classList.add("is-open");
+    menuEl.hidden = false;
+    triggerEl.setAttribute("aria-expanded", "true");
+    pickerEl.classList.add("is-open");
   }
 
   function togglePresetMenu() {
@@ -75,10 +118,10 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
     profiles: Record<string, ProfileEntry>,
   ) {
     if (names.length === 0) {
-      presetMenuEl.innerHTML = "";
+      menuEl.innerHTML = "";
       appState.selectedPresetName = "";
       setPresetTriggerLabel(null);
-      presetTriggerEl.disabled = true;
+      triggerEl.disabled = true;
       closePresetMenu();
       return;
     }
@@ -88,9 +131,9 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
         ? appState.selectedPresetName
         : (active ?? names[0]);
     setPresetTriggerLabel(appState.selectedPresetName);
-    presetTriggerEl.disabled = false;
+    triggerEl.disabled = false;
 
-    presetMenuEl.innerHTML = names
+    menuEl.innerHTML = names
       .map((name) => {
         const activeOption = name === appState.selectedPresetName;
         const meta = presetMeta(profiles[name]);
@@ -116,18 +159,18 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
   function renderProfiles(doc: ProfilesDocument) {
     appState.lastProfiles = doc;
     const names = sortPresetNames(Object.keys(doc.profiles));
-    presetStatusEl.textContent = "";
+    statusEl.textContent = "";
 
     if (names.length === 0) {
-      presetApplyEl.disabled = true;
-      presetHintEl.textContent = t("presets.noneHint");
+      applyEl.disabled = true;
+      hintEl.textContent = t("presets.noneHint");
       renderPresetOptions([], null, doc.profiles);
       return;
     }
 
     renderPresetOptions(names, doc.active, doc.profiles);
-    presetApplyEl.disabled = false;
-    presetHintEl.textContent = doc.active
+    applyEl.disabled = false;
+    hintEl.textContent = doc.active
       ? t("presets.active", { name: doc.active })
       : t("presets.noActive");
   }
@@ -137,9 +180,9 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
       const doc = await invoke<ProfilesDocument>("list_profiles_command");
       renderProfiles(doc);
     } catch (error) {
-      presetStatusEl.textContent = t("presets.failed");
-      presetHintEl.textContent = String(error);
-      presetApplyEl.disabled = true;
+      statusEl.textContent = t("presets.failed");
+      hintEl.textContent = String(error);
+      applyEl.disabled = true;
     }
   }
 
@@ -151,36 +194,36 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
 
     closePresetMenu();
 
-    presetApplyEl.disabled = true;
-    presetHintEl.textContent = t("presets.applying", { name });
+    applyEl.disabled = true;
+    hintEl.textContent = t("presets.applying", { name });
     try {
       const report = await invoke<UseProfileReport>("use_profile_command", { name });
       const applied = report.applied.map((item) => item.runtime_id).join(", ");
-      presetHintEl.textContent = applied
+      hintEl.textContent = applied
         ? t("presets.updated", { list: applied })
         : report.skipped.join("; ");
       await loadProfiles();
       await deps.refresh();
     } catch (error) {
-      presetHintEl.textContent = String(error);
+      hintEl.textContent = String(error);
     } finally {
-      presetApplyEl.disabled = false;
+      applyEl.disabled = false;
     }
   }
 
   function setLoadingStatus(message: string) {
-    presetStatusEl.textContent = message;
+    statusEl.textContent = message;
   }
 
-  presetApplyEl.addEventListener("click", () => {
+  applyEl.addEventListener("click", () => {
     void applyPreset();
   });
 
-  presetTriggerEl.addEventListener("click", () => {
+  triggerEl.addEventListener("click", () => {
     togglePresetMenu();
   });
 
-  presetMenuEl.addEventListener("click", (event) => {
+  menuEl.addEventListener("click", (event) => {
     const option = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-preset]");
     const name = option?.dataset.preset;
     if (!name || !appState.lastProfiles) {
@@ -201,7 +244,7 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
     renderProfiles,
     applyPreset,
     setLoadingStatus,
-    presetPickerEl,
+    presetPickerEl: pickerEl,
   };
 }
 

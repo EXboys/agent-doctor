@@ -131,6 +131,14 @@ impl SshBackend {
             .arg("-o")
             .arg(format!("ConnectTimeout={}", self.connect_timeout_secs))
             .arg("-o")
+            .arg("ConnectionAttempts=1")
+            .arg("-o")
+            .arg("GSSAPIAuthentication=no")
+            .arg("-o")
+            .arg("PreferredAuthentications=publickey")
+            .arg("-o")
+            .arg("NumberOfPasswordPrompts=0")
+            .arg("-o")
             .arg("StrictHostKeyChecking=accept-new");
         match &self.target {
             SshTarget::ConfigHost { host } => {

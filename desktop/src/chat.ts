@@ -109,6 +109,7 @@ const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
 const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
+const runtimeLabelEl = document.querySelector<HTMLElement>("#chat-runtime-label")!;
 const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
@@ -122,6 +123,11 @@ const terminalEl = document.querySelector<HTMLButtonElement>("#chat-terminal")!;
 const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
 const logEl = document.querySelector<HTMLElement>("#chat-log")!;
 const statusEl = document.querySelector<HTMLElement>("#chat-status")!;
+const decisionDockEl = document.querySelector<HTMLElement>("#chat-decision-dock")!;
+const decisionKickerEl = document.querySelector<HTMLElement>("#chat-decision-kicker")!;
+const decisionTitleEl = document.querySelector<HTMLElement>("#chat-decision-title")!;
+const decisionDetailEl = document.querySelector<HTMLElement>("#chat-decision-detail")!;
+const decisionActionsEl = document.querySelector<HTMLElement>("#chat-decision-actions")!;
 const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
 const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-workspace-select")!;
 const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
@@ -199,9 +205,16 @@ function isAskRuntime(value: string | null | undefined): value is AskRuntime {
   );
 }
 
+function updateRuntimeLabel(): void {
+  const name = runtimeDisplayName(currentRuntime);
+  runtimeLabelEl.textContent = name;
+  runtimeLabelEl.title = `${name} — ${t("chat.runtimeLockedHint")}`;
+}
+
 function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
   currentRuntime = runtime;
   updateElevatedLabel();
+  updateRuntimeLabel();
   if (opts?.syncSession) {
     const session = activeSession();
     if (session.messages.length === 0) {
@@ -316,6 +329,7 @@ function applyI18n(): void {
   }
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
   updateElevatedLabel();
+  updateRuntimeLabel();
   syncActionButton();
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
@@ -581,6 +595,7 @@ function pushPermissionCard(payload: {
   settleActivity();
   finishToolGroup(true);
   dismissLifecycleActivity();
+  setStatus(t("chat.needYourChoice"), "warn");
 
   const persisted = persistMessage("permission", payload.detail.trim() || payload.tool_name, {
     permission: {
@@ -592,9 +607,56 @@ function pushPermissionCard(payload: {
     },
   });
 
-  const card = renderPermissionCard(persisted, true);
+  // History card stays in the transcript; actions live in the sticky dock.
+  const card = renderPermissionCard(persisted, false);
+  card.classList.add("is-pending");
   logEl.appendChild(card);
   logEl.scrollTop = logEl.scrollHeight;
+
+  const detail = payload.detail.trim() || payload.tool_name;
+  showDecisionDock({
+    kicker: t("chat.decisionPermissionKicker"),
+    title: t("chat.permissionTitle", { tool: payload.tool_name }),
+    detail,
+    actions: [
+      {
+        label: t("chat.permissionAllow"),
+        kind: "allow",
+        onClick: () => {
+          void resolvePermissionFromDock(payload.session_id, payload.request_id, true);
+        },
+      },
+      {
+        label: t("chat.permissionDeny"),
+        kind: "deny",
+        onClick: () => {
+          void resolvePermissionFromDock(payload.session_id, payload.request_id, false);
+        },
+      },
+    ],
+  });
+}
+
+async function resolvePermissionFromDock(
+  sessionId: string,
+  requestId: string,
+  allow: boolean,
+): Promise<void> {
+  decisionActionsEl.querySelectorAll("button").forEach((btn) => {
+    (btn as HTMLButtonElement).disabled = true;
+  });
+  try {
+    await invoke<boolean>("resolve_permission_session_command", {
+      sessionId,
+      requestId,
+      allow,
+    });
+  } catch (error) {
+    decisionActionsEl.querySelectorAll("button").forEach((btn) => {
+      (btn as HTMLButtonElement).disabled = false;
+    });
+    setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
+  }
 }
 
 function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLElement {
@@ -662,7 +724,9 @@ function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLE
         ? t("chat.permissionAllowed")
         : allowed === false
           ? t("chat.permissionDenied")
-          : t("chat.permissionExpired");
+          : interactive
+            ? t("chat.permissionExpired")
+            : t("chat.permissionWaiting");
     actions.appendChild(badge);
   }
 
@@ -684,18 +748,21 @@ function markPermissionResolved(requestId: string, allowed: boolean): void {
   const card = logEl.querySelector<HTMLElement>(
     `.chat-permission[data-request-id="${CSS.escape(requestId)}"]`,
   );
-  if (!card) return;
-  card.dataset.resolved = "1";
-  card.classList.remove("is-pending", "is-expired");
-  card.classList.add(allowed ? "is-allowed" : "is-denied");
-  const actions = card.querySelector(".chat-permission-actions");
-  if (actions) {
-    actions.replaceChildren();
-    const badge = document.createElement("span");
-    badge.className = "chat-permission-result";
-    badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
-    actions.appendChild(badge);
+  if (card) {
+    card.dataset.resolved = "1";
+    card.classList.remove("is-pending", "is-expired");
+    card.classList.add(allowed ? "is-allowed" : "is-denied");
+    const actions = card.querySelector(".chat-permission-actions");
+    if (actions) {
+      actions.replaceChildren();
+      const badge = document.createElement("span");
+      badge.className = "chat-permission-result";
+      badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
+      actions.appendChild(badge);
+    }
   }
+  hideDecisionDock();
+  setStatus(allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
 }
 
 /** Apply queued assistant text immediately (before inserting later events). */
@@ -708,6 +775,94 @@ function flushPendingTextSync(): void {
   const chunk = pendingText;
   pendingText = "";
   appendAssistantChunk(chunk);
+}
+
+function hideDecisionDock(): void {
+  decisionDockEl.hidden = true;
+  decisionKickerEl.textContent = "";
+  decisionTitleEl.textContent = "";
+  decisionDetailEl.textContent = "";
+  decisionDetailEl.hidden = true;
+  decisionActionsEl.replaceChildren();
+}
+
+function showDecisionDock(opts: {
+  kicker: string;
+  title: string;
+  detail?: string;
+  actions: Array<{ label: string; kind: "allow" | "deny" | "yes" | "no"; onClick: () => void }>;
+}): void {
+  decisionKickerEl.textContent = opts.kicker;
+  decisionTitleEl.textContent = opts.title;
+  const detail = opts.detail?.trim() ?? "";
+  decisionDetailEl.textContent = detail;
+  decisionDetailEl.hidden = !detail;
+  decisionActionsEl.replaceChildren();
+  for (const action of opts.actions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `chat-decision-btn is-${action.kind}`;
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => action.onClick());
+    decisionActionsEl.appendChild(btn);
+  }
+  decisionDockEl.hidden = false;
+}
+
+function clearQuickReplies(): void {
+  logEl.querySelectorAll(".chat-quick-replies").forEach((el) => el.remove());
+  if (!decisionDockEl.querySelector(".chat-decision-btn.is-allow, .chat-decision-btn.is-deny")) {
+    // Only clear dock when it is showing quick replies, not a permission prompt.
+    if (decisionDockEl.querySelector(".chat-decision-btn.is-yes, .chat-decision-btn.is-no")) {
+      hideDecisionDock();
+    }
+  }
+}
+
+function looksLikeChoiceQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const tail = trimmed.slice(-80);
+  return (
+    /[?？]\s*$/.test(trimmed) ||
+    /吗[？?]?\s*$/.test(trimmed) ||
+    /(要不要|要我|是否|可以吗|好吗|行吗|继续吗)/.test(tail)
+  );
+}
+
+function showQuickReplies(sourceText: string): void {
+  clearQuickReplies();
+  if (!looksLikeChoiceQuestion(sourceText)) return;
+
+  showDecisionDock({
+    kicker: t("chat.needYourChoiceShort"),
+    title: t("chat.decisionQuestionTitle"),
+    actions: [
+      {
+        label: t("chat.quickYes"),
+        kind: "yes",
+        onClick: () => {
+          if (busy) return;
+          hideDecisionDock();
+          promptEl.value = t("chat.quickYesSend");
+          autoResizePrompt();
+          void sendAsk();
+        },
+      },
+      {
+        label: t("chat.quickNo"),
+        kind: "no",
+        onClick: () => {
+          if (busy) return;
+          hideDecisionDock();
+          promptEl.value = t("chat.quickNoSend");
+          autoResizePrompt();
+          void sendAsk();
+        },
+      },
+    ],
+  });
+  setStatus(t("chat.needYourChoiceShort"), "warn");
 }
 
 /** Close the current streaming assistant bubble so later events render after it. */
@@ -855,9 +1010,28 @@ function ensureRuntimeSession(runtime: AskRuntime): void {
     renderSessionList();
     return;
   }
-  const existing = store.sessions.find((s) => s.runtime === runtime);
+  // Prefer the most recently updated session for this agent.
+  const existing = store.sessions
+    .filter((s) => s.runtime === runtime)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0];
   if (existing) {
+    if (busy) {
+      void cancelAsk().finally(() => {
+        if (selectedRuntime() !== runtime) return;
+        if (!busy) switchSession(existing.id);
+      });
+      return;
+    }
     switchSession(existing.id);
+    return;
+  }
+  if (busy) {
+    // Finish/cancel the in-flight turn before creating a session for the new agent.
+    void cancelAsk().finally(() => {
+      if (selectedRuntime() !== runtime) return;
+      if (activeSession().runtime === runtime) return;
+      if (!busy) startNewSession();
+    });
     return;
   }
   startNewSession();
@@ -1444,6 +1618,7 @@ async function ensureListener(): Promise<void> {
         }
         noteVerifyBrowserSignal(assistantRaw, "assistant");
         clearEphemeralActivity();
+        const finalAssistantText = assistantRaw;
         sealAssistantBubble();
         // Disable any unanswered permission cards if the session ended.
         for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
@@ -1459,14 +1634,16 @@ async function ensureListener(): Promise<void> {
             actions.appendChild(badge);
           }
         }
+        hideDecisionDock();
         if (!turnHadAssistantText) {
           appendBubble("meta", t("chat.emptyReply"), { persist: false });
         }
         reportVerifyMcpIfNeeded();
         applyVerifyMcpFooter();
         setBusy(false);
-        // Success stays silent in the transcript; failures get one short note.
-        if (payload.status !== "succeeded") {
+        if (payload.status === "cancelled") {
+          setStatus(t("chat.forceStopped"), "warn");
+        } else if (payload.status !== "succeeded") {
           appendBubble(
             "meta",
             t("chat.completed", {
@@ -1475,6 +1652,8 @@ async function ensureListener(): Promise<void> {
             }),
             { persist: false },
           );
+        } else if (finalAssistantText.trim()) {
+          showQuickReplies(finalAssistantText);
         }
         renderSessionList();
         break;
@@ -1660,6 +1839,7 @@ async function openTerminal(): Promise<void> {
 
 async function cancelAsk(): Promise<void> {
   const gen = busyGen;
+  clearQuickReplies();
   try {
     const stopped = await invoke<boolean>("cancel_prompt_session_command");
     setStatus(t("chat.cancelling"), "warn");
@@ -1719,6 +1899,7 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   const selectedMcps = mentions.filter((m) => m.kind === "mcp").map((m) => m.id);
 
   await ensureListener();
+  clearQuickReplies();
   persistMessage("user", userText, { attachments });
   appendBubble("user", userText, { persist: false, attachments });
   promptEl.value = "";
@@ -1802,7 +1983,14 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
 }
 
 function boot(): void {
+  (window as Window & { __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void }).__AD_ASK_APPLY_RUNTIME__ =
+    (runtime) => {
+      if (isAskRuntime(runtime)) {
+        ensureRuntimeSession(runtime);
+      }
+    };
   readInitialRuntime();
+  updateRuntimeLabel();
   applyI18n();
   renderActiveMessages();
   void setupFileDrop();

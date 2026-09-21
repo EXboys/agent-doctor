@@ -208,7 +208,7 @@ refs.wiring.updateFooterCopy(isTeamEdition() ? "team" : "personal");
 refs.wiring.updateWiringModeFootnote();
 updateLangButtons();
 refs.wiring.refreshPresetGroupLabels();
-refs.wiring.applyProviderPreset("custom");
+refs.wiring.applyProviderPreset("deepseek");
 refs.wiring.showPersonalListView();
 
 // A webview reload can preserve the native width from an open diagnose panel

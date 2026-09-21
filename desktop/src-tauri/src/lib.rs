@@ -880,6 +880,23 @@ fn ensure_ask_window(app: &AppHandle, runtime: &str) -> Result<tauri::WebviewWin
     create_ask_window(app, runtime, false)
 }
 
+fn apply_ask_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
+    // Ask is pre-created at startup (often as claude-code) and then reused.
+    // Events alone can be missed; eval updates the injected runtime and calls
+    // the chat page apply hook so the active session matches the Agents entry.
+    let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+    let script = format!(
+        "(function(){{\
+            window.__AD_ASK_RUNTIME__ = {runtime};\
+            if (typeof window.__AD_ASK_APPLY_RUNTIME__ === 'function') {{\
+                window.__AD_ASK_APPLY_RUNTIME__({runtime});\
+            }}\
+        }})();",
+        runtime = runtime_json
+    );
+    let _ = window.eval(&script);
+}
+
 fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<(), String> {
     let runtime = runtime
         .map(str::trim)
@@ -887,6 +904,7 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
         .unwrap_or("claude-code");
 
     let window = ensure_ask_window(app, runtime)?;
+    apply_ask_runtime_in_webview(&window, runtime);
     // Pair with main: left/right side-by-side, top and bottom aligned.
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
@@ -899,10 +917,11 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
     // Second pass after Ask chrome metrics are valid.
     layout_main_and_ask_side_by_side(app);
     let _ = window.set_focus();
-    let _ = window.emit(
-        "ask-window-focus",
-        serde_json::json!({ "runtime": runtime }),
-    );
+    // Re-apply after show/focus in case the webview was still booting on first eval.
+    apply_ask_runtime_in_webview(&window, runtime);
+    let payload = serde_json::json!({ "runtime": runtime });
+    let _ = window.emit("ask-window-focus", &payload);
+    let _ = app.emit("ask-window-focus", &payload);
     Ok(())
 }
 
@@ -1242,12 +1261,14 @@ pub fn run() {
             workspace_doctor_command,
             workspace_fix_command,
             list_remote_hosts_command,
+            list_remote_host_rows_command,
             list_remote_projects_command,
             bootstrap_remote_host_command,
             add_remote_host_command,
             add_remote_project_command,
             remove_remote_host_command,
             remove_remote_project_command,
+            probe_remote_host_command,
             run_remote_doctor_command,
             use_profile_command,
             get_hermes_model_command,

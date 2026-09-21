@@ -1,9 +1,17 @@
 use agent_doctor_core::{
-    add_host, add_project, bootstrap_and_add_host, load_remote_hosts, remove_host, remove_project,
-    run_remote_doctor, BootstrapHostOptions, RemoteDoctorOptions, RemoteDoctorReport,
-    RemoteHostsDocument,
+    add_host, add_project, bootstrap_and_add_host, load_remote_hosts, probe_remote_host,
+    remove_host, remove_project, run_remote_doctor, BootstrapHostOptions, RemoteDoctorOptions,
+    RemoteDoctorReport, RemoteHostProbeReport, RemoteHostsDocument,
 };
 use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteHostRow {
+    pub host_id: String,
+    pub target: String,
+    pub managed: bool,
+    pub project_count: usize,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteProjectRow {
@@ -19,6 +27,23 @@ pub struct RemoteProjectRow {
 #[tauri::command]
 pub fn list_remote_hosts_command() -> Result<RemoteHostsDocument, String> {
     load_remote_hosts().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_remote_host_rows_command() -> Result<Vec<RemoteHostRow>, String> {
+    let doc = load_remote_hosts().map_err(|error| error.to_string())?;
+    let mut rows: Vec<RemoteHostRow> = doc
+        .hosts
+        .iter()
+        .map(|(host_id, host)| RemoteHostRow {
+            host_id: host_id.clone(),
+            target: host.display_target(),
+            managed: host.is_managed(),
+            project_count: host.projects.len(),
+        })
+        .collect();
+    rows.sort_by(|a, b| a.host_id.cmp(&b.host_id));
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -42,22 +67,26 @@ pub fn list_remote_projects_command() -> Result<Vec<RemoteProjectRow>, String> {
 }
 
 #[tauri::command]
-pub fn bootstrap_remote_host_command(
+pub async fn bootstrap_remote_host_command(
     id: String,
     hostname: String,
     user: String,
     port: u16,
     password: String,
 ) -> Result<RemoteHostsDocument, String> {
-    bootstrap_and_add_host(BootstrapHostOptions {
-        id,
-        hostname,
-        user,
-        port,
-        password,
-        label: None,
+    tauri::async_runtime::spawn_blocking(move || {
+        bootstrap_and_add_host(BootstrapHostOptions {
+            id,
+            hostname,
+            user,
+            port,
+            password,
+            label: None,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -92,16 +121,30 @@ pub fn remove_remote_project_command(
 }
 
 #[tauri::command]
-pub fn run_remote_doctor_command(
+pub async fn probe_remote_host_command(id: String) -> Result<RemoteHostProbeReport, String> {
+    // SSH must not run on the UI / IPC thread — same pattern as repair commands.
+    tauri::async_runtime::spawn_blocking(move || {
+        probe_remote_host(&id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn run_remote_doctor_command(
     target: String,
     runtime: Option<String>,
 ) -> Result<RemoteDoctorReport, String> {
-    run_remote_doctor(
-        &target,
-        RemoteDoctorOptions {
-            runtime_filter: runtime,
-            save_report: true,
-        },
-    )
-    .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        run_remote_doctor(
+            &target,
+            RemoteDoctorOptions {
+                runtime_filter: runtime,
+                save_report: true,
+            },
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

@@ -44,6 +44,52 @@ pub struct RemoteRuntimeDoctorResult {
     pub checks: Vec<ProbeCheck>,
 }
 
+/// Lightweight SSH connectivity probe for a registered host (no project required).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteHostProbeReport {
+    pub host_id: String,
+    pub target: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Probe BatchMode SSH to `host_id` with `true` (does not require a project).
+pub fn probe_remote_host(host_id: &str) -> Result<RemoteHostProbeReport> {
+    let doc = load_remote_hosts()?;
+    let host = doc
+        .hosts
+        .get(host_id)
+        .with_context(|| format!("unknown host '{host_id}'"))?;
+    let mut backend = SshBackend::from_host_entry(host)?;
+    // Keep probe snappy so the desktop UI does not feel frozen on unreachable hosts.
+    backend.connect_timeout_secs = 5;
+    let target = host.display_target();
+    match backend.run(&["true"], None) {
+        Ok(out) if out.success() => Ok(RemoteHostProbeReport {
+            host_id: host_id.to_string(),
+            target: target.clone(),
+            ok: true,
+            message: format!("connected to '{target}'"),
+        }),
+        Ok(out) => Ok(RemoteHostProbeReport {
+            host_id: host_id.to_string(),
+            target: target.clone(),
+            ok: false,
+            message: format!(
+                "ssh to '{target}' failed (exit {}): {}",
+                out.status,
+                out.stderr.trim()
+            ),
+        }),
+        Err(err) => Ok(RemoteHostProbeReport {
+            host_id: host_id.to_string(),
+            target,
+            ok: false,
+            message: format!("ssh failed: {err}"),
+        }),
+    }
+}
+
 /// Run agentless remote doctor for `host/project` (e.g. `prod-vps/api`).
 pub fn run_remote_doctor(target: &str, options: RemoteDoctorOptions) -> Result<RemoteDoctorReport> {
     let (host_id, project_id) = parse_target(target)?;

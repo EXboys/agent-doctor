@@ -172,22 +172,31 @@ export function renderRuntimeCardActions(
     parts.push(
       `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
     );
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    );
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+    );
   } else if (!healthy && !diagnosed) {
     parts.push(
       `<button type="button" class="${ctx.hasActiveWorkspace ? "btn-primary" : "btn-secondary"}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
     );
-  } else {
     parts.push(
-      `<button type="button" class="btn-ghost" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+    );
+  } else {
+    // Healthy: chat is the main action; diagnose / terminal stay equal secondary.
+    parts.push(
+      `<button type="button" class="btn-primary" data-action="ask-session">${t("runtime.ask")}</button>`,
+    );
+    parts.push(
+      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
     );
   }
 
   parts.push(
-    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
-  );
-
-  parts.push(
-    `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
+    `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
   );
 
   parts.push(`

@@ -446,6 +446,22 @@ export interface RemoteHostsDocument {
   >;
 }
 
+export interface RemoteHostRow {
+  host_id: string;
+  target: string;
+  managed: boolean;
+  project_count: number;
+}
+
+export type RemoteHostProbeStatus = "unknown" | "probing" | "ok" | "fail";
+
+export interface RemoteHostProbeReport {
+  host_id: string;
+  target: string;
+  ok: boolean;
+  message: string;
+}
+
 export interface RemoteProjectRow {
   host_id: string;
   project_id: string;
