@@ -52,7 +52,8 @@ pub use lifecycle::{
     deepseek_harness_install_shell_command, deepseek_harness_shell_command,
     deepseek_harness_update_shell_command, hermes_shell_command, openclaw_shell_command,
     run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
-    DeepSeekHarnessLifecycleAction, HermesLifecycleAction, OpenClawLifecycleAction,
+    uninstall_runtime, DeepSeekHarnessLifecycleAction, HermesLifecycleAction,
+    OpenClawLifecycleAction,
 };
 pub use presets::{
     apply_profile_model, default_local_hermes_preset, default_work_models, effective_models,

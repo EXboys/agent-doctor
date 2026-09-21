@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::adapters::util::home_join;
-use crate::lifecycle::{run_openclaw_lifecycle, OpenClawLifecycleAction};
+use crate::lifecycle::{run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClawLifecycleAction};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::profile::read_company_profile;
 use crate::repair::playbooks::hermes::dedupe_env_key_lines;
@@ -71,6 +71,16 @@ pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepa
                 title: "Migrate OpenClaw LLM URL to models.providers".to_string(),
                 description: "Remove invalid gateway.url / evotown.url and write \
                     models.providers.evotown|personal.baseUrl."
+                    .to_string(),
+                auto_fixable: true,
+            });
+        }
+
+        if check.id == "openclaw.schema.legacy_agents_list" && check.status == ProbeStatus::Warn {
+            items.push(SuggestedRepair {
+                id: "fix-openclaw-legacy-agents-list".to_string(),
+                title: "Update OpenClaw config format".to_string(),
+                description: "agents.list is no longer accepted. Run openclaw doctor --fix."
                     .to_string(),
                 auto_fixable: true,
             });
@@ -232,6 +242,24 @@ pub fn apply_openclaw_playbook_filtered(
                     reason: error.to_string(),
                 }),
             }
+        }
+    }
+
+    if should_run("fix-openclaw-legacy-agents-list", only_ids)
+        && probe_has_check(
+            probe,
+            "openclaw.schema.legacy_agents_list",
+            ProbeStatus::Warn,
+        )
+    {
+        match run_openclaw_doctor_fix() {
+            Ok(()) => result
+                .executed
+                .push("fix-openclaw-legacy-agents-list".to_string()),
+            Err(error) => result.skipped.push(SkippedRepairAction {
+                id: "fix-openclaw-legacy-agents-list".to_string(),
+                reason: error.to_string(),
+            }),
         }
     }
 
@@ -632,6 +660,14 @@ mod tests {
                 "bad profile",
                 SensitivityLevel::Public,
             ),
+            ProbeCheck::new(
+                "openclaw.schema.legacy_agents_list",
+                "agents.list",
+                ProbeStatus::Warn,
+                ProbeSeverity::Warning,
+                "legacy",
+                SensitivityLevel::Public,
+            ),
         ]);
         let items = suggest_openclaw_repairs(&probe);
         assert!(items
@@ -640,6 +676,9 @@ mod tests {
         assert!(items
             .iter()
             .any(|item| item.id == "fix-openclaw-tools-profile"));
+        assert!(items
+            .iter()
+            .any(|item| item.id == "fix-openclaw-legacy-agents-list" && item.auto_fixable));
     }
 
     #[test]

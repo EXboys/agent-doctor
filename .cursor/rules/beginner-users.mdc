@@ -1,0 +1,15 @@
+---
+description: Desktop users are beginners; design and copy must stay plain
+alwaysApply: true
+---
+
+# Beginner users
+
+Desktop users are beginners. They do not use a terminal and do not know MCP, paths, protocols, or CLI commands.
+
+This is locked in `docs/zh-CN/product-boundary.md` and `docs/product-boundary.md`. Follow it for every feature and every user-visible string.
+
+- Say the problem in one sentence with words they already have: project, tool, cannot connect, needs a key.
+- Button labels name the change they will see. Do not say “Fix” when the click cannot clear the problem.
+- After a click, show the result where they clicked. If the warning stays, say why in one plain sentence and what to tap next.
+- Commands, file paths, and raw English errors are never the only explanation.

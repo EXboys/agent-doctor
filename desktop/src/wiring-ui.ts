@@ -30,6 +30,7 @@ let deps!: WiringUiDeps;
 
 const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
 const evotownStatusEl = document.querySelector<HTMLElement>("#evotown-status")!;
+const evotownBadgeEl = document.querySelector<HTMLElement>("#evotown-badge");
 const evotownConnectedEl = document.querySelector<HTMLElement>("#evotown-connected")!;
 const evotownConnectedUrlEl = document.querySelector<HTMLElement>("#evotown-connected-url")!;
 const evotownConnectedMetaEl = document.querySelector<HTMLElement>("#evotown-connected-meta")!;
@@ -554,7 +555,8 @@ async function rewireCurrentMode(hintEl?: HTMLElement | null) {
     setModeSwitchBusy(false);
   }
 }
-const evotownBadgeEl = document.querySelector<HTMLElement>("#evotown-badge");
+let lastEvotownStatus: EvotownStatus | null = null;
+
 async function loadEvotownStatus() {
   try {
     const status = await invoke<EvotownStatus>("get_evotown_status_command");
@@ -564,7 +566,8 @@ async function loadEvotownStatus() {
   }
 }
 
-function renderEvotownStatus(status: EvotownStatus) {
+function renderEvotownStatus(status: EvotownStatus, opts?: { refreshSkills?: boolean }) {
+  lastEvotownStatus = status;
   const connected = status.configured && Boolean(status.base_url);
   evotownSectionEl.classList.toggle("is-connected", connected);
   evotownConnectedEl.hidden = !connected;
@@ -592,8 +595,10 @@ function renderEvotownStatus(status: EvotownStatus) {
     evotownUrlEl.value = status.base_url;
     evotownResyncEl.hidden = false;
     evotownEngineEl.hidden = false;
-    void loadEngineRegisterStatus();
-    void deps.loadSkillsInventory();
+    if (opts?.refreshSkills !== false) {
+      void loadEngineRegisterStatus();
+      void deps.loadSkillsInventory();
+    }
   } else {
     evotownStatusEl.textContent = t("evotown.notConfigured");
     evotownConnectedMetaEl.textContent = "";
@@ -1224,11 +1229,17 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     showPersonalListView,
     reloadWiringLocale: async () => {
       refreshPresetGroupLabels();
-      updateFooterCopy();
-      updateWiringModeFootnote();
-      await loadEvotownStatus();
-      await loadPersonalProviderStatus();
-      await loadModeStatus();
+      updateFooterCopy(isTeamEdition() ? "team" : "personal");
+      updateWiringModeFootnote(appState.lastModeStatus?.mode);
+      if (appState.lastModeStatus) {
+        renderModeStatus(appState.lastModeStatus);
+      }
+      if (lastEvotownStatus) {
+        renderEvotownStatus(lastEvotownStatus, { refreshSkills: false });
+      }
+      if (appState.personalProvidersDoc) {
+        renderPersonalProviderList(appState.personalProvidersDoc);
+      }
     },
   };
 }

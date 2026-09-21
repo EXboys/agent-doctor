@@ -140,6 +140,14 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
   }
 }
 
+/** Full skill rows only when the inventory list is actually on screen. */
+function paintSkillsInventory(report: SkillsInventoryReport): void {
+  if (skillsInventoryEl.hidden) {
+    return;
+  }
+  renderSkillsInventory(report);
+}
+
 async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
   try {
     const report = await invoke<SkillsInventoryReport>("list_skills_inventory_command", {
@@ -147,7 +155,7 @@ async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
     });
     appState.lastSkillsInventory = report;
     skillsCountEl.textContent = String(report.skills.length);
-    renderSkillsInventory(report);
+    paintSkillsInventory(report);
     updateResourcesHubSummary();
   } catch (error) {
     appState.lastSkillsInventory = null;
@@ -219,8 +227,26 @@ async function loadMcpStatus() {
   }
 }
 
+let hubRefresh: Promise<void> | null = null;
+let hubRefreshedAt = 0;
+
 async function loadResourcesHub() {
-  await Promise.all([loadMcpStatus(), loadSkillsInventory({ remoteStats: false })]);
+  updateResourcesHubSummary();
+  const fresh =
+    Date.now() - hubRefreshedAt < 20_000 &&
+    appState.lastSkillsInventory != null &&
+    appState.lastMcpStatus != null;
+  if (fresh || hubRefresh) {
+    return hubRefresh ?? undefined;
+  }
+  hubRefresh = Promise.all([loadMcpStatus(), loadSkillsInventory({ remoteStats: false })])
+    .then(() => {
+      hubRefreshedAt = Date.now();
+    })
+    .finally(() => {
+      hubRefresh = null;
+    });
+  return hubRefresh;
 }
 
 async function openResourcesWindow(section?: "catalog" | "browser"): Promise<void> {
@@ -344,7 +370,7 @@ export function initResourcesHub(_deps?: Record<string, never>): ResourcesHubApi
     },
     reloadLocale: () => {
       if (appState.lastSkillsInventory) {
-        renderSkillsInventory(appState.lastSkillsInventory);
+        paintSkillsInventory(appState.lastSkillsInventory);
       }
       updateResourcesHubSummary();
     },

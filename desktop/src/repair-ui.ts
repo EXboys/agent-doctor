@@ -92,6 +92,7 @@ export function formatVerificationSummary(summary: string): string {
 export function renderRepairExecuteResult(
   execute: NonNullable<RepairPreviewResponse["last_execute"]>,
   supportsBrowserMcp: boolean,
+  offerVerify = false,
 ): string {
   const playbookExecuted = execute.executed.filter((id) => id.startsWith("fix-"));
   const hasBackup = execute.executed.includes("backup-runtime-configs");
@@ -141,8 +142,14 @@ export function renderRepairExecuteResult(
       ${guideBlock}
       <p class="repair-verify"><strong>${escapeHtml(t("repair.verifyTitle"))}:</strong> ${escapeHtml(verify)}</p>
       ${smoke}
-      ${canVerifyBrowserMcp ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.funnelAskVerifyHint"))}</p>` : ""}
-      <button type="button" class="btn-primary" data-action="${canVerifyBrowserMcp ? "ask-verify" : "ask-session"}">${escapeHtml(canVerifyBrowserMcp ? t("repair.funnelAskVerifyCta") : t("runtime.ask"))}</button>
+      ${
+        offerVerify && canVerifyBrowserMcp
+          ? `<p class="repair-funnel-hint">${escapeHtml(t("repair.funnelAskVerifyHint"))}</p>
+      <button type="button" class="btn-primary" data-action="ask-verify">${escapeHtml(t("repair.funnelAskVerifyCta"))}</button>`
+          : offerVerify
+            ? `<button type="button" class="btn-primary" data-action="ask-session">${escapeHtml(t("runtime.ask"))}</button>`
+            : ""
+      }
     </div>
   `;
 }
@@ -168,12 +175,15 @@ export function renderRepairPreview(
       const details = check.details.length
         ? `<span class="repair-check-detail">${escapeHtml(check.details[0])}${check.details.length > 1 ? ` +${check.details.length - 1}` : ""}</span>`
         : "";
+      const legacyAgents = check.message.includes("agents.list is a legacy key");
+      const title = legacyAgents ? t("repair.openclawLegacyAgentsTitle") : check.title;
+      const message = legacyAgents ? t("repair.openclawLegacyAgentsDesc") : check.message;
       return `
         <li class="repair-check is-${statusClass}">
           <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
           <span class="repair-check-body">
-            <strong>${escapeHtml(check.title)}</strong>
-            <span>${escapeHtml(check.message)}</span>
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(message)}</span>
             ${details}
           </span>
         </li>
@@ -217,19 +227,39 @@ export function renderRepairPreview(
         <ul class="repair-suggested-list">
           ${report.suggested_repairs
             .map((item) => {
+              const plain =
+                item.id === "review-claude-global-mcp"
+                  ? {
+                      badge: t("repair.claudeGlobalMcpBadge"),
+                      title: t("repair.claudeGlobalMcpTitle"),
+                      description: t("repair.claudeGlobalMcpDesc"),
+                    }
+                  : item.id === "fix-openclaw-legacy-agents-list"
+                    ? {
+                        badge: t("repair.autoFixable"),
+                        title: t("repair.openclawLegacyAgentsTitle"),
+                        description: t("repair.openclawLegacyAgentsDesc"),
+                      }
+                    : null;
               const manualAction =
                 item.id === "configure-openclaw-api-key" ||
                 item.id === "configure-deepseek-harness-credentials"
                   ? `<button type="button" class="btn-ghost repair-suggested-action" data-action="go-wiring">${escapeHtml(t("repair.goWiring"))}</button>`
-                  : "";
+                  : item.id === "review-claude-global-mcp"
+                    ? `<button type="button" class="btn-primary btn-compact repair-suggested-action" data-action="migrate-claude-mcp">${escapeHtml(t("repair.migrateClaudeMcp"))}</button>`
+                    : "";
               return `
                 <li class="repair-suggested-item">
                   <span class="repair-suggested-badge ${item.auto_fixable ? "ok" : "muted"}">${
-                    item.auto_fixable ? t("repair.autoFixable") : t("repair.manualOnly")
+                    plain
+                      ? escapeHtml(plain.badge)
+                      : item.auto_fixable
+                        ? t("repair.autoFixable")
+                        : t("repair.manualOnly")
                   }</span>
                   <span class="repair-suggested-body">
-                    <strong>${escapeHtml(item.title)}</strong>
-                    <span>${escapeHtml(item.description)}</span>
+                    <strong>${escapeHtml(plain?.title ?? item.title)}</strong>
+                    <span>${escapeHtml(plain?.description ?? item.description)}</span>
                   </span>
                   ${manualAction}
                 </li>
@@ -246,31 +276,33 @@ export function renderRepairPreview(
       ? `<button type="button" class="btn-ghost repair-rollback-btn" data-action="rollback-repair">${t("repair.rollback")}</button>`
       : "";
 
+  const healthy = summary.fail === 0 && summary.warn === 0;
   const supportsBrowserMcp = Boolean(opts?.supportsBrowserMcp);
   const executeResult = report.last_execute
-    ? renderRepairExecuteResult(report.last_execute, supportsBrowserMcp)
+    ? renderRepairExecuteResult(report.last_execute, supportsBrowserMcp, healthy)
     : "";
 
-  const healthy = summary.fail === 0 && summary.warn === 0;
   const isAskRuntime = Boolean(opts?.isAskRuntime);
   const canVerifyBrowserMcp = supportsBrowserMcp;
-  const funnelNeedsRepair = isAskRuntime && report.can_apply_repair && !healthy && !report.last_execute;
+  // Warn/fail plus an auto-fix still needs a repair action, even after a previous execute.
+  const funnelNeedsRepair = isAskRuntime && report.can_apply_repair && !healthy;
   const showRepairConfirm = funnelNeedsRepair && Boolean(opts?.confirmPending);
-  const funnelCta =
-    healthy || report.last_execute
-      ? `<button type="button" class="btn-primary btn-compact" data-action="${canVerifyBrowserMcp ? "ask-verify" : "ask-session"}">${escapeHtml(canVerifyBrowserMcp ? t("repair.funnelAskVerifyCta") : t("runtime.ask"))}</button>`
-      : funnelNeedsRepair
-        ? `<button type="button" class="btn-primary btn-compact" data-action="preview-repair">${escapeHtml(t("repair.previewFixes"))}</button>`
-        : "";
+  const canMigrateClaudeMcp = report.suggested_repairs.some(
+    (item) => item.id === "review-claude-global-mcp",
+  );
   const funnel = isAskRuntime
     ? `<div class="repair-funnel">
         <div class="repair-funnel-bar">
           <ol class="repair-funnel-steps">
             <li class="repair-funnel-step done">${escapeHtml(t("repair.funnelStepDiagnose"))}</li>
-            <li class="repair-funnel-step ${report.last_execute || healthy ? "done" : report.can_apply_repair ? "active" : ""}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
-            <li class="repair-funnel-step ${healthy || report.last_execute ? "active" : ""}">${escapeHtml(t("repair.funnelStepAsk"))}</li>
+            <li class="repair-funnel-step ${report.last_execute && healthy ? "done" : (report.can_apply_repair || canMigrateClaudeMcp) && !healthy ? "active" : healthy ? "done" : ""}">${escapeHtml(t("repair.funnelStepRepair"))}</li>
+            <li class="repair-funnel-step ${healthy ? "active" : ""}">${escapeHtml(t("repair.funnelStepAsk"))}</li>
           </ol>
-          ${funnelCta}
+          ${
+            funnelNeedsRepair && !showRepairConfirm
+              ? `<button type="button" class="btn-primary" data-action="preview-repair">${escapeHtml(t("repair.oneClick"))}</button>`
+              : ""
+          }
         </div>
         ${
           report.runtime_id === "openclaw"

@@ -4,6 +4,17 @@ Agent Doctor is one codebase with a shared ops core. **Personal** and **team** s
 
 Set `AGENT_DOCTOR_EDITION=personal|team` at build time (default: `personal`).
 
+## Beginners are the default user (locked)
+
+People using the desktop app are beginners. They do not read a terminal, and they do not know MCP, file paths, protocols, or CLI commands.
+
+Design and copy are for that person.
+
+1. Say what is wrong in one sentence, using words they already have: project, tool, cannot connect, needs a key.
+2. Button labels name the change they will see, for example “Put in this project”. Do not label a control “Fix” when it cannot clear the problem.
+3. After the click, show the result in the same place they clicked. If the warning is still there, say why in one plain sentence and what to tap next.
+4. Commands, paths, and raw English errors are never the only explanation. Those can sit behind a details control.
+
 ## Shared core
 
 | Capability | Meaning |

@@ -94,10 +94,14 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       const clamped = Math.min(100, Math.max(0, percent));
       if (statusEl) {
         // Do not treat phase "done" as success — the invoke result decides.
+        // Shell lines stay in the log; the headline is one short sentence.
+        const text = message.trim();
         statusEl.textContent =
           phase === "verifying"
             ? t("runtime.installVerifying")
-            : message.trim() || t("runtime.installing");
+            : text.startsWith("$ ")
+              ? t("runtime.installing")
+              : text || t("runtime.installing");
       }
       if (percentEl) {
         percentEl.textContent = `${clamped}%`;
@@ -194,11 +198,37 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
     }
   }
 
+  async function uninstallRuntime(runtime: string, name: string): Promise<void> {
+    if (!window.confirm(t("runtime.uninstallConfirm", { name }))) {
+      return;
+    }
+    const card = document.querySelector<HTMLElement>(`.runtime[data-runtime="${CSS.escape(runtime)}"]`);
+    const hint = card?.querySelector<HTMLElement>("[data-repair-hint]");
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = t("runtime.uninstalling");
+    }
+    try {
+      await invoke("uninstall_runtime_command", { runtime });
+      if (hint) {
+        hint.textContent = t("runtime.uninstallOk");
+      }
+      await deps.refresh();
+    } catch (error) {
+      const message = String(error);
+      if (hint) {
+        hint.hidden = false;
+        hint.textContent = message;
+      }
+    }
+  }
+
   return {
     reapplyStickyInstallHints,
     setStickyInstallHint,
     applyInstallHint,
     installRuntimeFromCard,
+    uninstallRuntime,
   };
 }
 

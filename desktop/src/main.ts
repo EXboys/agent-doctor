@@ -84,15 +84,18 @@ async function switchLocale(next: Locale) {
     return;
   }
   setLocale(next);
+  updateLangButtons();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
   applyStaticI18n();
   if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && refs.firstRun.getPhase() !== "awaitingWiring") {
     refs.firstRun.renderFirstRunUi();
   }
-  updateLangButtons();
-  await refs.agents?.reloadLocale();
   refs.workspace?.reloadLocale();
   refs.resources?.reloadLocale();
-  await refs.wiring?.reloadWiringLocale();
+  void refs.agents?.reloadLocale();
+  void refs.wiring?.reloadWiringLocale();
 }
 
 refs.agents = initAgentsPanel({

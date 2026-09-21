@@ -72,6 +72,13 @@ fn run_openclaw(
         .unwrap_or_else(fresh_openclaw_session_id);
 
     let overlay = collect_overlay_env();
+    if let Some(note) = ensure_openclaw_config_current() {
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: "workspace".into(),
+            message: note,
+        });
+    }
     if let Some(note) = ensure_openclaw_agent_ready(&overlay) {
         on_event(PromptSessionEvent::Status {
             session_id: session_id.clone(),
@@ -264,6 +271,19 @@ fn resolve_openclaw_agent(overlay: &std::collections::HashMap<String, String>) -
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "main".into())
+}
+
+/// Drop legacy `agents.list` before Ask. OpenClaw rejects the file and exits
+/// before it can answer.
+fn ensure_openclaw_config_current() -> Option<String> {
+    let path = crate::adapters::util::home_join(".openclaw/openclaw.json");
+    let raw = fs::read_to_string(&path).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    value.pointer("/agents/list")?;
+    match crate::lifecycle::run_openclaw_doctor_fix() {
+        Ok(()) => Some("Updated the old config so chat can start.".into()),
+        Err(err) => Some(format!("Could not update the old config ({err}).")),
+    }
 }
 
 /// Bind/create workspace OpenClaw agent before Ask spawn (fixes missing agents.list).

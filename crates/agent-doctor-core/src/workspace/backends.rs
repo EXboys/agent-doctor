@@ -383,23 +383,35 @@ pub fn codex_home_from_env() -> PathBuf {
         .unwrap_or_else(|_| home_join(".codex"))
 }
 
-pub fn openclaw_agent_workspace(agent_id: &str) -> Option<PathBuf> {
+fn read_openclaw_config() -> Option<JsonValue> {
     let config_path = home_join(".openclaw/openclaw.json");
     if !config_path.exists() {
         return None;
     }
     let raw = fs::read_to_string(&config_path).ok()?;
-    let value: JsonValue = serde_json::from_str(&raw).ok()?;
-    let agents = value.pointer("/agents/list")?.as_array()?;
-    for agent in agents {
-        if agent.get("id").and_then(JsonValue::as_str) == Some(agent_id) {
-            return agent
-                .get("workspace")
-                .and_then(JsonValue::as_str)
-                .map(PathBuf::from);
-        }
+    serde_json::from_str(&raw).ok()
+}
+
+fn agent_record<'a>(value: &'a JsonValue, agent_id: &str) -> Option<&'a JsonValue> {
+    if let Some(entry) = value.pointer(&format!("/agents/entries/{agent_id}")) {
+        return Some(entry);
     }
-    None
+    value
+        .pointer("/agents/list")
+        .and_then(JsonValue::as_array)
+        .and_then(|agents| {
+            agents
+                .iter()
+                .find(|agent| agent.get("id").and_then(JsonValue::as_str) == Some(agent_id))
+        })
+}
+
+pub fn openclaw_agent_workspace(agent_id: &str) -> Option<PathBuf> {
+    let value = read_openclaw_config()?;
+    agent_record(&value, agent_id)
+        .and_then(|agent| agent.get("workspace"))
+        .and_then(JsonValue::as_str)
+        .map(PathBuf::from)
 }
 
 fn activate_hermes_profile(profile: &str) -> Result<()> {
@@ -526,26 +538,39 @@ fn seed_openclaw_workspace_files(workspace_path: &Path) -> Result<()> {
 }
 
 pub fn openclaw_default_agent_id() -> Option<String> {
-    let config_path = home_join(".openclaw/openclaw.json");
-    if !config_path.exists() {
-        return None;
-    }
-    let raw = fs::read_to_string(&config_path).ok()?;
-    let value: JsonValue = serde_json::from_str(&raw).ok()?;
-    let agents = value.pointer("/agents/list")?.as_array()?;
-    for agent in agents {
-        if agent.get("default").and_then(JsonValue::as_bool) == Some(true) {
-            return agent
-                .get("id")
-                .and_then(JsonValue::as_str)
-                .map(str::to_string);
+    let value = read_openclaw_config()?;
+    if let Some(agents) = value.pointer("/agents/list").and_then(JsonValue::as_array) {
+        if let Some(id) = agents.iter().find_map(|agent| {
+            (agent.get("default").and_then(JsonValue::as_bool) == Some(true))
+                .then(|| {
+                    agent
+                        .get("id")
+                        .and_then(JsonValue::as_str)
+                        .map(str::to_string)
+                })
+                .flatten()
+        }) {
+            return Some(id);
+        }
+        if let Some(id) = agents
+            .first()
+            .and_then(|agent| agent.get("id"))
+            .and_then(JsonValue::as_str)
+        {
+            return Some(id.to_string());
         }
     }
-    agents
-        .first()
-        .and_then(|agent| agent.get("id"))
-        .and_then(JsonValue::as_str)
-        .map(str::to_string)
+    let entries = value.pointer("/agents/entries")?.as_object()?;
+    entries
+        .iter()
+        .find(|(_, agent)| {
+            agent
+                .get("workspace")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|workspace| !workspace.trim().is_empty())
+        })
+        .map(|(id, _)| id.clone())
+        .or_else(|| entries.keys().next().cloned())
 }
 
 pub fn openclaw_defaults_workspace() -> Option<PathBuf> {
@@ -596,7 +621,7 @@ fn upsert_openclaw_agent(agent_id: &str, workspace_path: &Path) -> Result<()> {
     let mut value: JsonValue =
         serde_json::from_str(&raw).with_context(|| format!("parse {}", config_path.display()))?;
 
-    // Older OpenClaw configs may only have `agents.defaults` — create `list` if missing.
+    let workspace_str = workspace_path.display().to_string();
     {
         let agents_obj = value
             .as_object_mut()
@@ -606,44 +631,22 @@ fn upsert_openclaw_agent(agent_id: &str, workspace_path: &Path) -> Result<()> {
         let agents_map = agents_obj
             .as_object_mut()
             .context("openclaw.json agents must be an object")?;
-        if !agents_map.contains_key("list") {
-            agents_map.insert("list".to_string(), json!([]));
-        }
-    }
+        // `agents.list` is rejected by current OpenClaw. Workspace lives on `agents.entries`.
+        agents_map.remove("list");
+        let entries = agents_map.entry("entries").or_insert_with(|| json!({}));
+        let entries_map = entries
+            .as_object_mut()
+            .context("openclaw.json agents.entries must be an object")?;
+        let entry = entries_map
+            .entry(agent_id.to_string())
+            .or_insert_with(|| json!({}));
+        let entry_obj = entry
+            .as_object_mut()
+            .context("openclaw.json agents.entries item must be an object")?;
+        entry_obj.entry("name").or_insert_with(|| json!(agent_id));
+        entry_obj.insert("workspace".to_string(), json!(workspace_str.clone()));
 
-    let agents = value
-        .pointer_mut("/agents/list")
-        .and_then(JsonValue::as_array_mut)
-        .context("openclaw.json agents.list must be an array")?;
-
-    let workspace_str = workspace_path.display().to_string();
-    for agent in agents.iter_mut() {
-        let Some(obj) = agent.as_object_mut() else {
-            continue;
-        };
-        let is_target = obj.get("id").and_then(JsonValue::as_str) == Some(agent_id);
-        if is_target {
-            obj.insert("workspace".to_string(), json!(workspace_str));
-            obj.insert("default".to_string(), json!(true));
-        } else {
-            obj.remove("default");
-        }
-    }
-
-    if !agents
-        .iter()
-        .any(|agent| agent.get("id").and_then(JsonValue::as_str) == Some(agent_id))
-    {
-        agents.push(json!({
-            "id": agent_id,
-            "name": agent_id,
-            "workspace": workspace_str,
-            "default": true,
-        }));
-    }
-
-    if let Some(agents_obj) = value.get_mut("agents").and_then(JsonValue::as_object_mut) {
-        let defaults = agents_obj.entry("defaults").or_insert_with(|| json!({}));
+        let defaults = agents_map.entry("defaults").or_insert_with(|| json!({}));
         if let Some(defaults_obj) = defaults.as_object_mut() {
             defaults_obj.insert("workspace".to_string(), json!(workspace_str));
         }
@@ -769,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_openclaw_agent_creates_agents_list_when_missing() {
+    fn upsert_openclaw_agent_writes_entries_not_list() {
         let temp = tempdir().unwrap();
         let home = temp.path();
         crate::adapters::util::with_test_home(home, || {
@@ -787,13 +790,13 @@ mod tests {
 
             let raw = fs::read_to_string(openclaw.join("openclaw.json")).unwrap();
             let value: JsonValue = serde_json::from_str(&raw).unwrap();
-            let list = value
-                .pointer("/agents/list")
-                .and_then(|v| v.as_array())
-                .unwrap();
-            assert!(list
-                .iter()
-                .any(|a| a.get("id").and_then(|v| v.as_str()) == Some("agent-doctor")));
+            assert!(value.pointer("/agents/list").is_none());
+            assert_eq!(
+                value
+                    .pointer("/agents/entries/agent-doctor/workspace")
+                    .and_then(|v| v.as_str()),
+                Some(ws.to_str().unwrap())
+            );
             assert_eq!(
                 value
                     .pointer("/agents/defaults/workspace")

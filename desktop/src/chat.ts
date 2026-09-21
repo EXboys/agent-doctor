@@ -485,6 +485,26 @@ function clearEphemeralActivity(): void {
   lifecycleActivityEl = null;
 }
 
+function appendStderrLine(line: string): void {
+  const text = line.trim();
+  if (!text) return;
+  const last = logEl.lastElementChild as HTMLElement | null;
+  if (last?.dataset.kind === "error" && last.dataset.stderr === "1") {
+    const label = last.querySelector<HTMLElement>(".chat-activity-text");
+    if (label) {
+      label.textContent = `${label.textContent}\n${text}`;
+      logEl.scrollTop = logEl.scrollHeight;
+      return;
+    }
+  }
+  pushActivity("error", text);
+  settleActivity();
+  const row = logEl.lastElementChild as HTMLElement | null;
+  if (row?.dataset.kind === "error") {
+    row.dataset.stderr = "1";
+  }
+}
+
 /** Render progress / tool calls inline in the chat stream (not a side panel). */
 function pushActivity(phase: string, message: string): void {
   const text = message.trim() || phase;
@@ -1599,8 +1619,7 @@ async function ensureListener(): Promise<void> {
         noteVerifyBrowserSignal(payload.line, "assistant");
         break;
       case "stderr_line":
-        pushActivity("error", payload.line);
-        settleActivity();
+        appendStderrLine(payload.line);
         break;
       case "permission_request":
         pushPermissionCard(payload);

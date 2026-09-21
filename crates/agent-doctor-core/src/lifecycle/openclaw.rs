@@ -64,6 +64,14 @@ pub fn openclaw_update_shell_command() -> String {
     }
 }
 
+pub fn openclaw_doctor_fix_shell_command() -> &'static str {
+    "openclaw doctor --fix --yes --non-interactive"
+}
+
+pub fn run_openclaw_doctor_fix() -> Result<()> {
+    run_shell_command(openclaw_doctor_fix_shell_command()).context("OpenClaw config repair failed")
+}
+
 pub fn run_openclaw_lifecycle(action: OpenClawLifecycleAction) -> Result<()> {
     let command_line = openclaw_shell_command(action);
     run_shell_command(&command_line).with_context(|| {

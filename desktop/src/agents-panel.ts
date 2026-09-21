@@ -174,6 +174,8 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   const sessions = createAgentsSessions({ setStatusBanner });
 
+  const install = createAgentsInstall({ refresh });
+
   const diagnose = createAgentsDiagnose({
     setStatusBanner,
     updateAgentsSecurityOverview,
@@ -183,6 +185,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     openAskWindow: sessions.openAskWindow,
     openAskWindowForVerify: sessions.openAskWindowForVerify,
     setMainTab: (tab) => deps.setMainTab(tab),
+    uninstallRuntime: (runtime, name) => install.uninstallRuntime(runtime, name),
   });
 
   async function refresh() {
@@ -205,7 +208,6 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     }
   }
 
-  const install = createAgentsInstall({ refresh });
   const presets = createAgentsPresets({ refresh });
   const workspaceChip = createAgentsWorkspaceChip({
     setMainTab: (tab) => deps.setMainTab(tab),
@@ -227,14 +229,19 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     return renderRuntimeCard(runtime, appState.hermesModel, actionsHtml, relatedResourcesHtml);
   }
 
-  async function renderReport(report: DoctorReport) {
+  async function renderReport(
+    report: DoctorReport,
+    opts?: { relocalize?: boolean },
+  ) {
     appState.lastReport = report;
     const installed = report.runtimes.filter((runtime) => runtime.installed).length;
     const total = report.runtimes.length;
 
     installedCountEl.textContent = `${installed}/${total}`;
     profileStatusEl.textContent = report.active_preset ?? t("status.none");
-    lastScanEl.textContent = formatTime(new Date());
+    if (!opts?.relocalize) {
+      lastScanEl.textContent = formatTime(new Date());
+    }
     runtimeCountEl.textContent = `${installed}/${total}`;
     updateHealthStrip(installed, total);
     updateAgentsSecurityOverview(report);
@@ -244,9 +251,12 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       report.profile_env_exists ? t("doctor.companyOk") : t("doctor.companyMissing"),
     );
 
-    if (report.runtimes.some((runtime) => runtime.id === "hermes" && runtime.installed)) {
+    const hermesInstalled = report.runtimes.some(
+      (runtime) => runtime.id === "hermes" && runtime.installed,
+    );
+    if (hermesInstalled && !(opts?.relocalize && appState.hermesModel)) {
       await loadHermesModel();
-    } else {
+    } else if (!hermesInstalled) {
       appState.hermesModel = null;
     }
 
@@ -254,7 +264,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       appState.activeRuntimeId = null;
       runtimeTabsEl.innerHTML = "";
       runtimesEl.innerHTML = `<div class="empty-state">${t("runtimes.empty")}</div>`;
-      void diagnose.closeDiagnoseDetail({ skipDismiss: true });
+      if (!opts?.relocalize) {
+        void diagnose.closeDiagnoseDetail({ skipDismiss: true });
+      }
       return;
     }
 
@@ -268,6 +280,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
     runtimesEl.innerHTML = activeRuntime ? buildRuntimeCardHtml(activeRuntime) : "";
+    if (opts?.relocalize) {
+      diagnose.refreshDiagnoseLocale();
+      return;
+    }
     const preview = selectedId ? repairPreviewByRuntime.get(selectedId) : undefined;
     if (preview && !diagnose.hasDismissed(selectedId)) {
       diagnose.mountRepairPreview(preview);
@@ -325,7 +341,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     if (action === "ask-session" && runtimeCard) {
       const runtime = runtimeCard.dataset.runtime;
       if (runtime && isAskRuntimeId(runtime)) {
-        void sessions.openAskWindow(runtime);
+        void (async () => {
+          await diagnose.closeDiagnoseDetail({ skipDismiss: true });
+          await sessions.openAskWindow(runtime);
+        })();
       }
       return;
     }
@@ -333,7 +352,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     if (action === "ask-verify" && runtimeCard) {
       const runtime = runtimeCard.dataset.runtime;
       if (runtime && supportsBrowserMcp(runtime)) {
-        void sessions.openAskWindowForVerify(runtime);
+        void (async () => {
+          await diagnose.closeDiagnoseDetail({ skipDismiss: true });
+          await sessions.openAskWindowForVerify(runtime);
+        })();
       }
       return;
     }
@@ -350,6 +372,16 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     if (action === "force-reinstall-runtime" && runtimeCard) {
       void install.installRuntimeFromCard(runtimeCard, { force: true });
+      return;
+    }
+
+    if (action === "uninstall-runtime" && runtimeCard) {
+      const runtime = runtimeCard.dataset.runtime;
+      const name =
+        runtimeCard.querySelector(".runtime-tab-title")?.textContent?.trim() || runtime || "";
+      if (runtime) {
+        void install.uninstallRuntime(runtime, name);
+      }
       return;
     }
 
@@ -450,7 +482,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         presets.renderProfiles(appState.lastProfiles);
       }
       if (appState.lastReport) {
-        await renderReport(appState.lastReport);
+        await renderReport(appState.lastReport, { relocalize: true });
       } else {
         setStatusBanner("neutral", t("doctor.loading"));
         presets.setLoadingStatus(t("presets.loading"));

@@ -1,8 +1,9 @@
 use agent_doctor_core::{
     build_repair_preview_from_bundle, execute_install_with_progress, execute_repair,
     list_runtime_backup_ids, needs_binary_install, probe_runtime, restore_runtime_backup,
-    run_doctor, suggest_runtime_repairs, InstallOptions, InstallProgressEvent, InstallReport,
-    ProbeStatus, RepairExecuteOptions, RepairExecuteReport, RestoreReport, RuntimeProbeReport,
+    run_doctor, suggest_runtime_repairs, uninstall_runtime, InstallOptions, InstallProgressEvent,
+    InstallReport, ProbeStatus, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
+    RuntimeProbeReport,
 };
 use agent_doctor_mcp::{smoke_browser_navigate, SmokeOptions};
 use serde::Serialize;
@@ -295,6 +296,19 @@ pub fn run_repair_rollback_command(
     remember_tray_health(&app, &doctor);
     update_tray_tooltip(&app);
     Ok(RestoreSummary::from(&report))
+}
+
+#[tauri::command]
+pub async fn uninstall_runtime_command(app: AppHandle, runtime: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || uninstall_runtime(&runtime))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    agent_doctor_core::refresh_managed_runtime_path();
+    let doctor = run_doctor();
+    remember_tray_health(&app, &doctor);
+    update_tray_tooltip(&app);
+    Ok(())
 }
 
 #[tauri::command]

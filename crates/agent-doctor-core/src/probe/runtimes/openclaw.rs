@@ -65,6 +65,17 @@ pub(crate) fn probe_schema(
         }
     }
 
+    if value.pointer("/agents/list").is_some() {
+        checks.push(ProbeCheck::new(
+            "openclaw.schema.legacy_agents_list",
+            "OpenClaw agents.list",
+            ProbeStatus::Warn,
+            ProbeSeverity::Warning,
+            "agents.list is a legacy key; expected agents.entries".to_string(),
+            SensitivityLevel::ConfigShape,
+        ));
+    }
+
     if value.pointer("/agents/defaults/timeout").is_some() {
         checks.push(ProbeCheck::new(
             "openclaw.schema.legacy_timeout",
@@ -364,7 +375,7 @@ mod tests {
     fn detects_openclaw_schema_warnings() {
         let value = serde_json::json!({
             "tools": { "profile": "bad" },
-            "agents": { "defaults": { "timeout": 10 } },
+            "agents": { "defaults": { "timeout": 10 }, "list": [] },
             "env": { "vars": "{\"OPENAI_API_KEY\":\"x\"}" }
         });
         let mut checks = Vec::new();
@@ -381,6 +392,9 @@ mod tests {
         assert!(checks
             .iter()
             .any(|c| c.id == "openclaw.schema.legacy_timeout"));
+        assert!(checks
+            .iter()
+            .any(|c| c.id == "openclaw.schema.legacy_agents_list"));
         assert!(checks
             .iter()
             .any(|c| c.id.starts_with("openclaw.schema.env_string:")));

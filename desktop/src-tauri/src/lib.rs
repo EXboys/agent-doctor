@@ -1279,6 +1279,7 @@ pub fn run() {
             run_browser_smoke_command,
             run_repair_rollback_command,
             install_runtime_command,
+            uninstall_runtime_command,
             open_path_command,
             open_session_command,
             open_ask_window_command,

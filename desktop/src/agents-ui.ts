@@ -141,6 +141,15 @@ export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {
   return preview.summary.fail > 0 || preview.summary.warn > 0;
 }
 
+export function renderStandardRuntimeActions(_runtimeId: string): string {
+  return [
+    `<button type="button" class="btn-primary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
+    `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
+    `<button type="button" class="btn-secondary" data-action="uninstall-runtime">${t("runtime.uninstall")}</button>`,
+  ].join("");
+}
+
 export function renderRuntimeCardActions(
   runtime: RuntimeDoctorResult,
   advancedContent = "",
@@ -156,11 +165,8 @@ export function renderRuntimeCardActions(
       : "";
   }
 
-  const parts: string[] = [];
-  const preview = ctx.preview;
-  const canRepair = Boolean(preview?.can_apply_repair);
-  const healthy = runtimeIsHealthy(preview);
-  const diagnosed = Boolean(preview);
+  const parts: string[] = [renderStandardRuntimeActions(runtime.id)];
+  const canRepair = Boolean(ctx.preview?.can_apply_repair);
   const detailOpenForThis = ctx.diagnoseOpenForRuntime;
 
   if (!ctx.hasActiveWorkspace) {
@@ -170,34 +176,9 @@ export function renderRuntimeCardActions(
   }
   if (canRepair && !detailOpenForThis) {
     parts.push(
-      `<button type="button" class="btn-primary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
-    );
-  } else if (!healthy && !diagnosed) {
-    parts.push(
-      `<button type="button" class="${ctx.hasActiveWorkspace ? "btn-primary" : "btn-secondary"}" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
-    );
-  } else {
-    // Healthy: chat is the main action; diagnose / terminal stay equal secondary.
-    parts.push(
-      `<button type="button" class="btn-primary" data-action="ask-session">${t("runtime.ask")}</button>`,
-    );
-    parts.push(
-      `<button type="button" class="btn-secondary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
+      `<button type="button" class="btn-secondary" data-action="apply-repair">${t("repair.oneClick")}</button>`,
     );
   }
-
-  parts.push(
-    `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
-  );
 
   parts.push(`
     <details class="runtime-advanced">

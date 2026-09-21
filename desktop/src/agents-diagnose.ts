@@ -27,10 +27,12 @@ import type {
   RestoreSummary,
   RuntimeDoctorResult,
   WindowSizeReport,
+  WorkspaceFixReport,
 } from "./types";
 
 export const MAIN_COMPACT_WIDTH = 420;
-export const MAIN_DETAIL_EXTRA = 380;
+/** Room for diagnose aside beside the compact agents column. */
+export const MAIN_DETAIL_EXTRA = 420;
 
 export interface AgentsDiagnoseDeps {
   setStatusBanner: (kind: "ok" | "warn" | "error" | "neutral", message: string) => void;
@@ -41,6 +43,7 @@ export interface AgentsDiagnoseDeps {
   openAskWindow: (runtime: string) => Promise<void>;
   openAskWindowForVerify: (runtime: string) => Promise<void>;
   setMainTab: (tab: "provider") => void;
+  uninstallRuntime: (runtime: string, name: string) => Promise<void>;
 }
 
 export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
@@ -86,20 +89,32 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   async function expandDiagnoseWindowIfNeeded(): Promise<void> {
     diagnoseDetailEl.hidden = false;
     document.body.classList.add("is-diagnose-layout");
-    if (!diagnoseDetailOpen) {
+    // Ask side-by-side layout clamps main width (~480); close it so diagnose can expand.
+    try {
+      await invoke("close_ask_window_command", { destroy: false });
+    } catch {
+      /* ask may already be closed */
+    }
+    if (compactWidthBeforeDetail == null) {
       try {
-        compactWidthBeforeDetail = (await readMainWindowSize()).width;
+        const size = await readMainWindowSize();
+        compactWidthBeforeDetail =
+          size.width > MAIN_COMPACT_WIDTH + 80 ? MAIN_COMPACT_WIDTH : size.width;
       } catch {
         compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
       }
-      const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
-      document.body.style.setProperty("--compact-window-width", `${compact}px`);
-      diagnoseDetailOpen = true;
-      try {
+    }
+    const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+    document.body.style.setProperty("--compact-window-width", `${compact}px`);
+    diagnoseDetailOpen = true;
+    try {
+      const report = await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
+      // Keep expanding if something (Ask layout / clamp) shrank us again.
+      if (report.width < compact + MAIN_DETAIL_EXTRA - 40) {
         await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
-      } catch (error) {
-        deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
       }
+    } catch (error) {
+      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
     }
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     document.body.classList.add("is-diagnose-open");
@@ -177,6 +192,10 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     if (!opts?.keepContent && !opts?.skipDismiss && runtime) {
       dismissedDiagnoseRuntimes.add(runtime);
     }
+    const wasOpen =
+      diagnoseDetailOpen ||
+      !diagnoseDetailEl.hidden ||
+      document.body.classList.contains("is-diagnose-layout");
     document.body.classList.remove("is-diagnose-open");
     if (diagnoseDetailOpen) {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
@@ -193,11 +212,30 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         refreshRuntimeCardActions(card, runtime);
       }
     }
-    const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
-    compactWidthBeforeDetail = null;
-    await setMainWindowWidth(compact);
-    document.body.classList.remove("is-diagnose-layout");
-    document.body.style.removeProperty("--compact-window-width");
+    if (wasOpen) {
+      const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
+      compactWidthBeforeDetail = null;
+      await setMainWindowWidth(compact);
+      document.body.classList.remove("is-diagnose-layout");
+      document.body.style.removeProperty("--compact-window-width");
+    }
+  }
+
+  function refreshDiagnoseLocale(): void {
+    const runtime = diagnoseDetailEl.dataset.runtime;
+    if (!runtime || diagnoseDetailEl.hidden) {
+      return;
+    }
+    const report = repairPreviewByRuntime.get(runtime);
+    if (!report) {
+      return;
+    }
+    const filter = repairFilterByRuntime.get(runtime) ?? "all";
+    diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, filter, {
+      confirmPending: repairConfirmRuntimeIds.has(report.runtime_id),
+      isAskRuntime: isAskRuntimeId(report.runtime_id),
+      supportsBrowserMcp: supportsBrowserMcp(report.runtime_id),
+    });
   }
 
   function mountRelatedResources(card: HTMLElement, runtime: string): void {
@@ -397,6 +435,42 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     }
   }
 
+  async function migrateClaudeGlobalMcp(runtime: string): Promise<void> {
+    showDiagnosePending(runtime, t("workspaces.fixRunning"), "repair");
+    try {
+      const report = await invoke<WorkspaceFixReport>("workspace_fix_command", {
+        migrateClaudeMcp: true,
+      });
+      const migration = report.actions.find((action) => action.id === "workspace.claude.mcp_migration");
+      const detail = migration?.detail ?? "";
+      const message = !report.active
+        ? t("repair.migrateNoWorkspace")
+        : detail.startsWith("applied:")
+          ? t("repair.migrateWrote")
+          : t("repair.migrateKeptGlobal");
+      const preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+        runtime,
+      });
+      mountRepairPreview(preview, { resetFilter: true });
+      const note = document.createElement("p");
+      note.className = "repair-migrate-note";
+      note.textContent = message;
+      diagnoseDetailBodyEl.querySelector(".repair-panel")?.prepend(note);
+      deps.setStatusBanner(report.active && detail.startsWith("applied:") ? "ok" : "warn", message);
+    } catch (error) {
+      const message = String(error);
+      deps.setStatusBanner("error", message);
+      const preview = repairPreviewByRuntime.get(runtime);
+      if (preview) {
+        await openDiagnoseDetail(preview);
+        const note = document.createElement("p");
+        note.className = "repair-migrate-note is-error";
+        note.textContent = message;
+        diagnoseDetailBodyEl.querySelector(".repair-panel")?.prepend(note);
+      }
+    }
+  }
+
   function bindEvents(): void {
     diagnoseDetailEl.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
@@ -427,16 +501,51 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         diagnoseDetailEl.dataset.runtime;
       const card = runtime ? runtimeCardEl(runtime) : null;
 
+      if (action === "diagnose-runtime" && runtime) {
+        if (card) {
+          void diagnoseRuntimeCard(card);
+        }
+        return;
+      }
+
+      if (action === "open-session" && runtime) {
+        const terminal =
+          target.closest<HTMLElement>("[data-action='open-session']")?.dataset.openTerminal === "1";
+        void invoke("open_session_command", {
+          runtime,
+          cwd: null,
+          prompt: null,
+          terminal,
+        }).catch((error) => {
+          deps.setStatusBanner("error", String(error));
+        });
+        return;
+      }
+
+      if (action === "uninstall-runtime" && runtime) {
+        const name =
+          diagnoseDetailEl.querySelector(".repair-panel-head strong")?.textContent?.trim() ||
+          runtime;
+        void deps.uninstallRuntime(runtime, name);
+        return;
+      }
+
       if (action === "ask-session" && runtime) {
         if (isAskRuntimeId(runtime)) {
-          void deps.openAskWindow(runtime);
+          void (async () => {
+            await closeDiagnoseDetail({ skipDismiss: true });
+            await deps.openAskWindow(runtime);
+          })();
         }
         return;
       }
 
       if (action === "ask-verify" && runtime) {
         if (supportsBrowserMcp(runtime)) {
-          void deps.openAskWindowForVerify(runtime);
+          void (async () => {
+            await closeDiagnoseDetail({ skipDismiss: true });
+            await deps.openAskWindowForVerify(runtime);
+          })();
         }
         return;
       }
@@ -449,6 +558,11 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       if (action === "go-wiring") {
         void closeDiagnoseDetail();
         deps.setMainTab("provider");
+        return;
+      }
+
+      if (action === "migrate-claude-mcp" && runtime) {
+        void migrateClaudeGlobalMcp(runtime);
         return;
       }
 
@@ -510,6 +624,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     applyRepairFilter,
     openDiagnoseDetail,
     closeDiagnoseDetail,
+    refreshDiagnoseLocale,
     showDiagnosePending,
     expandDiagnoseWindowIfNeeded,
     diagnoseRuntimeCard,
