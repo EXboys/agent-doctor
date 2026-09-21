@@ -127,13 +127,6 @@ export function canOpenSession(runtimeId: string): boolean {
   return isAskRuntimeId(runtimeId);
 }
 
-function runtimeIsHealthy(preview?: RepairPreviewResponse): boolean {
-  if (!preview) {
-    return false;
-  }
-  return preview.summary.fail === 0 && preview.summary.warn === 0;
-}
-
 export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {
   if (!preview) {
     return false;

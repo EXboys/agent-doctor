@@ -590,14 +590,29 @@ fn open_url(url: &str) -> Result<()> {
 fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        // Terminal.app's AppleScript `do script` truncates long command strings
-        // (commonly at 1024 bytes). Codex provider overrides can exceed that, so
-        // put the full command in a private temporary script and only send its
-        // short path through AppleScript. The script removes itself immediately.
+        // Prefer `open … .command` over AppleScript:
+        // 1) Launch Services brings Terminal.app to the front (Ask window stays on top
+        //    otherwise, so users think "打开终端" did nothing).
+        // 2) No Automation permission is required to control Terminal.
+        // Terminal.app's AppleScript `do script` also truncates long strings (~1024
+        // bytes); the self-deleting script keeps Codex overrides intact.
         let launch_script = write_macos_terminal_launch_script(cwd, command_line)?;
+        if Command::new("open")
+            .arg(&launch_script)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+        {
+            // Nudge Terminal forward in case Ask / another always-focused window
+            // kept covering the new tab.
+            let _ = Command::new("open").args(["-a", "Terminal"]).status();
+            return Ok(());
+        }
+
+        // Fallback: AppleScript + activate (needs Automation permission).
         let invoke_script = shell_single_quote(&launch_script.to_string_lossy());
         let script = format!(
-            "tell application \"Terminal\" to do script \"{cmd}\"",
+            "tell application \"Terminal\"\nactivate\ndo script \"{cmd}\"\nend tell",
             cmd = escape_applescript(&invoke_script),
         );
         let status = match Command::new("osascript").args(["-e", &script]).status() {
@@ -611,6 +626,7 @@ fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {
             let _ = fs::remove_file(&launch_script);
             bail!("osascript exited with {status}");
         }
+        let _ = Command::new("open").args(["-a", "Terminal"]).status();
         Ok(())
     }
     #[cfg(target_os = "linux")]
@@ -656,8 +672,10 @@ fn write_macos_terminal_launch_script(cwd: &Path, command_line: &str) -> Result<
     let dir = std::env::temp_dir();
 
     for attempt in 0..16 {
+        // `.command` is opened by Terminal.app via Launch Services (`open`), which
+        // focuses the terminal — unlike a bare `.sh` handed only to AppleScript.
         let path = dir.join(format!(
-            "agent-doctor-terminal-{}-{nonce}-{attempt}.sh",
+            "agent-doctor-terminal-{}-{nonce}-{attempt}.command",
             std::process::id()
         ));
         let file = OpenOptions::new()
