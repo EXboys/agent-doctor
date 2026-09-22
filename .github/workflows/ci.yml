@@ -88,9 +88,23 @@ jobs:
       - name: Install Microsoft Edge
         if: matrix.browser == 'edge'
         id: setup-edge
-        uses: browser-actions/setup-edge@v1
-        with:
-          edge-version: stable
+        run: |
+          # browser-actions/setup-edge often fails on Linux: Edge Updates API
+          # may omit a Stable+x64+Linux download URL. Install from Microsoft's apt repo.
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget gpg
+          wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/trusted.gpg.d/microsoft-edge.gpg >/dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/microsoft-edge.gpg] https://packages.microsoft.com/repos/edge stable main" \
+            | sudo tee /etc/apt/sources.list.d/microsoft-edge.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y microsoft-edge-stable
+          EDGE_PATH="$(command -v microsoft-edge-stable || command -v microsoft-edge)"
+          test -x "$EDGE_PATH"
+          echo "edge-path=$EDGE_PATH" >> "$GITHUB_OUTPUT"
+          "$EDGE_PATH" --version
 
       - name: Build CLI
         run: cargo build --release -p agent-doctor
@@ -103,6 +117,8 @@ jobs:
             export AGENT_DOCTOR_BROWSER_BINARY="${{ steps.setup-edge.outputs.edge-path }}"
           fi
           echo "Using browser binary: $AGENT_DOCTOR_BROWSER_BINARY"
+          test -n "$AGENT_DOCTOR_BROWSER_BINARY"
+          test -x "$AGENT_DOCTOR_BROWSER_BINARY"
           "$AGENT_DOCTOR_BROWSER_BINARY" --version || true
           ./target/release/agent-doctor mcp smoke \
             --browser "${{ matrix.browser }}" \
