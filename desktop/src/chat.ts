@@ -2561,6 +2561,10 @@ const mentionMenu = new AskMentionMenuController(
   () => askResources.mentionCandidates(),
   (mention) => askResources.upsertMention(mention),
   autoResizePrompt,
+  (open) => {
+    composerBoxEl.classList.toggle("is-mention-open", open);
+    composerEl.classList.toggle("is-mention-open", open);
+  },
 );
 
 function updateResourcesSummary(): void {
@@ -3325,6 +3329,18 @@ function boot(): void {
   promptEl.addEventListener("keydown", (event) => {
     if (!mentionMenuEl.hidden) {
       const options = mentionMenu.filteredMentionOptions();
+      const slashOpen = mentionMenu.isSlashMenuOpen();
+
+      if (slashOpen && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        event.preventDefault();
+        mentionMenu.cycleSlashTab(event.key === "ArrowRight" ? 1 : -1);
+        return;
+      }
+      if (slashOpen && event.key === "Tab") {
+        event.preventDefault();
+        mentionMenu.cycleSlashTab(event.shiftKey ? -1 : 1);
+        return;
+      }
       if (event.key === "ArrowDown" && options.length > 0) {
         event.preventDefault();
         mentionMenu.mentionMenuIndex = (mentionMenu.mentionMenuIndex + 1) % options.length;
@@ -3348,7 +3364,7 @@ function boot(): void {
         mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
         return;
       }
-      if (event.key === "Tab" && options[mentionMenu.mentionMenuIndex]) {
+      if (!slashOpen && event.key === "Tab" && options[mentionMenu.mentionMenuIndex]) {
         event.preventDefault();
         mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
         return;

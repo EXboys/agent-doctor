@@ -32,7 +32,11 @@ export type MentionQuery = {
   q: string;
   start: number;
   end: number;
+  /** `@skill:` style token vs Cursor-like `/` slash picker. */
+  trigger: "at" | "slash";
 };
+
+export type SlashTab = MentionKind;
 
 const MENTION_TOKEN_RE = /@(?:skill|mcp):([^\s@]+)/gi;
 
@@ -574,18 +578,29 @@ export type AskMentionMenuDom = {
 export class AskMentionMenuController {
   mentionMenuIndex = 0;
   mentionQuery: MentionQuery | null = null;
+  /** Active tab while the `/` slash picker is open. */
+  slashTab: SlashTab = "skill";
 
   constructor(
     private dom: AskMentionMenuDom,
     private getCandidates: () => MentionRef[],
     private upsertMention: (mention: MentionRef) => void,
     private autoResizePrompt: () => void,
+    private onVisibilityChange?: (open: boolean) => void,
   ) {}
 
   detectMentionQuery(): MentionQuery | null {
     const value = this.dom.promptEl.value;
     const caret = this.dom.promptEl.selectionStart ?? value.length;
     const before = value.slice(0, caret);
+
+    const slash = before.match(/(?:^|\s)(\/([^\s/@]*))$/);
+    if (slash && slash.index != null) {
+      const q = slash[2] || "";
+      const start = slash.index + (slash[0].startsWith("/") ? 0 : 1);
+      return { kind: this.slashTab, q, start, end: caret, trigger: "slash" };
+    }
+
     const match = before.match(/(?:^|\s)(@(?:skill:|mcp:)?([^\s@]*))$/i);
     if (!match || match.index == null) return null;
     const token = match[1];
@@ -596,64 +611,158 @@ export class AskMentionMenuController {
     const lower = token.toLowerCase();
     if (lower.startsWith("@skill:")) kind = "skill";
     else if (lower.startsWith("@mcp:")) kind = "mcp";
-    return { kind, q, start, end };
+    return { kind, q, start, end, trigger: "at" };
   }
 
   filteredMentionOptions(): MentionRef[] {
     if (!this.mentionQuery) return [];
     const q = this.mentionQuery.q.toLowerCase();
+    const kindFilter =
+      this.mentionQuery.trigger === "slash" ? this.slashTab : this.mentionQuery.kind;
     return this.getCandidates().filter((item) => {
-      if (this.mentionQuery!.kind !== "any" && item.kind !== this.mentionQuery!.kind) return false;
+      if (kindFilter !== "any" && item.kind !== kindFilter) return false;
       if (!q) return true;
       return item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
     });
+  }
+
+  setSlashTab(tab: SlashTab): void {
+    if (this.slashTab === tab) return;
+    this.slashTab = tab;
+    this.mentionMenuIndex = 0;
+    this.renderMentionMenu();
+  }
+
+  cycleSlashTab(dir: 1 | -1): void {
+    const tabs: SlashTab[] = ["skill", "mcp"];
+    const idx = tabs.indexOf(this.slashTab);
+    const next = tabs[(idx + dir + tabs.length) % tabs.length]!;
+    this.setSlashTab(next);
   }
 
   hideMentionMenu(): void {
     this.mentionQuery = null;
     this.dom.mentionMenuEl.hidden = true;
     this.dom.mentionMenuEl.replaceChildren();
+    this.dom.mentionMenuEl.classList.remove("is-slash");
+    this.onVisibilityChange?.(false);
+  }
+
+  isSlashMenuOpen(): boolean {
+    return Boolean(this.mentionQuery?.trigger === "slash" && !this.dom.mentionMenuEl.hidden);
   }
 
   renderMentionMenu(): void {
     this.mentionQuery = this.detectMentionQuery();
-    const options = this.filteredMentionOptions();
-    if (!this.mentionQuery || options.length === 0) {
+    if (!this.mentionQuery) {
       this.hideMentionMenu();
       return;
     }
-    this.mentionMenuIndex = Math.max(0, Math.min(this.mentionMenuIndex, options.length - 1));
+
+    const isSlash = this.mentionQuery.trigger === "slash";
+    const options = this.filteredMentionOptions();
+
+    // Keep `/` menu open even when empty so tabs/empty hint stay visible.
+    if (!isSlash && options.length === 0) {
+      this.hideMentionMenu();
+      return;
+    }
+
+    this.mentionMenuIndex = Math.max(
+      0,
+      Math.min(this.mentionMenuIndex, Math.max(options.length - 1, 0)),
+    );
     this.dom.mentionMenuEl.replaceChildren();
-    options.forEach((option, index) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chat-mention-option";
-      if (index === this.mentionMenuIndex) btn.classList.add("is-active");
-      btn.setAttribute("role", "option");
-      const title = document.createElement("strong");
-      title.textContent =
-        option.kind === "skill"
-          ? t("chat.mentionSkill", { name: option.label })
-          : t("chat.mentionMcp", { name: option.label });
-      const sub = document.createElement("span");
-      sub.textContent = `@${option.kind}:${option.id}`;
-      btn.append(title, sub);
-      btn.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        this.applyMentionOption(option);
+    this.dom.mentionMenuEl.classList.toggle("is-slash", isSlash);
+
+    if (isSlash) {
+      const head = document.createElement("div");
+      head.className = "chat-slash-head";
+
+      const tabs = document.createElement("div");
+      tabs.className = "chat-slash-tabs";
+      tabs.setAttribute("role", "tablist");
+
+      for (const tab of [
+        { id: "skill" as const, label: t("chat.slashTabSkills") },
+        { id: "mcp" as const, label: t("chat.slashTabTools") },
+      ]) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `chat-slash-tab${this.slashTab === tab.id ? " is-active" : ""}`;
+        btn.setAttribute("role", "tab");
+        btn.setAttribute("aria-selected", this.slashTab === tab.id ? "true" : "false");
+        btn.textContent = tab.label;
+        btn.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          this.setSlashTab(tab.id);
+        });
+        tabs.appendChild(btn);
+      }
+
+      const hint = document.createElement("span");
+      hint.className = "chat-slash-hint";
+      hint.textContent = t("chat.slashHint");
+
+      head.append(tabs, hint);
+      this.dom.mentionMenuEl.appendChild(head);
+    }
+
+    const list = document.createElement("div");
+    list.className = "chat-slash-list";
+    list.setAttribute("role", "listbox");
+
+    if (options.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "chat-slash-empty";
+      empty.textContent =
+        this.slashTab === "skill" ? t("chat.slashEmptySkills") : t("chat.slashEmptyTools");
+      list.appendChild(empty);
+    } else {
+      options.forEach((option, index) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `chat-mention-option${index === this.mentionMenuIndex ? " is-active" : ""}`;
+        btn.setAttribute("role", "option");
+        const title = document.createElement("strong");
+        title.textContent = option.label;
+        const sub = document.createElement("span");
+        sub.textContent =
+          option.kind === "skill" ? t("chat.slashKindSkill") : t("chat.slashKindTool");
+        btn.append(title, sub);
+        btn.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          this.applyMentionOption(option);
+        });
+        list.appendChild(btn);
       });
-      this.dom.mentionMenuEl.appendChild(btn);
-    });
+    }
+
+    this.dom.mentionMenuEl.appendChild(list);
     this.dom.mentionMenuEl.hidden = false;
+    this.onVisibilityChange?.(true);
+
+    const active = list.querySelector<HTMLElement>(".chat-mention-option.is-active");
+    active?.scrollIntoView({ block: "nearest" });
   }
 
   applyMentionOption(option: MentionRef): void {
     if (!this.mentionQuery) return;
     const value = this.dom.promptEl.value;
-    const token = `@${option.kind}:${option.id} `;
-    this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${token}${value.slice(this.mentionQuery.end)}`;
-    const next = this.mentionQuery.start + token.length;
-    this.dom.promptEl.setSelectionRange(next, next);
+    const trigger = this.mentionQuery.trigger;
+
+    if (trigger === "slash") {
+      // Remove `/query` — selection lives in chips (beginner-friendly, no raw tokens).
+      this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${value.slice(this.mentionQuery.end)}`;
+      const next = this.mentionQuery.start;
+      this.dom.promptEl.setSelectionRange(next, next);
+    } else {
+      const token = `@${option.kind}:${option.id} `;
+      this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${token}${value.slice(this.mentionQuery.end)}`;
+      const next = this.mentionQuery.start + token.length;
+      this.dom.promptEl.setSelectionRange(next, next);
+    }
+
     this.upsertMention(option);
     this.hideMentionMenu();
     this.autoResizePrompt();
