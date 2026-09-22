@@ -1201,6 +1201,7 @@ body.is-diagnose-open .diagnose-detail {
   box-shadow: var(--shadow-soft);
 }
 
+.health-card,
 .agents-security-overview {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
@@ -1212,6 +1213,251 @@ body.is-diagnose-open .diagnose-detail {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+}
+
+.health-card.is-ok,
+.agents-security-overview.is-ok {
+  border-color: rgba(22, 163, 74, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--success) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-warn {
+  border-color: rgba(217, 119, 6, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--warn) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-fail {
+  border-color: rgba(220, 38, 38, 0.2);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--danger) 10%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card.is-busy {
+  border-color: rgba(59, 130, 246, 0.22);
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--primary) 12%, var(--surface)) 0%,
+      var(--surface) 58%
+    );
+}
+
+.health-card-ring,
+.agents-readiness-ring {
+  --readiness: 0;
+  --ring-color: var(--success);
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-color) calc(var(--readiness) * 1%),
+    var(--surface-inset) 0
+  );
+  text-align: center;
+}
+
+.health-card-ring::before,
+.agents-readiness-ring::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.health-card-ring strong,
+.health-card-ring span,
+.agents-readiness-ring strong,
+.agents-readiness-ring span {
+  position: relative;
+  z-index: 1;
+}
+
+.health-card-ring strong,
+.agents-readiness-ring strong {
+  font-size: 0.88rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-card-ring span,
+.agents-readiness-ring span {
+  max-width: 44px;
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.48rem;
+  line-height: 1.1;
+}
+
+.health-card-ring.is-warn,
+.agents-readiness-ring.is-warn {
+  --ring-color: var(--warn);
+}
+
+.health-card-ring.is-fail,
+.agents-readiness-ring.is-fail {
+  --ring-color: var(--danger);
+}
+
+.health-card-ring.is-busy {
+  --ring-color: var(--primary);
+}
+
+.health-card-ring.is-scanning {
+  animation: health-card-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes health-card-pulse {
+  0%,
+  100% {
+    filter: saturate(0.85);
+  }
+  50% {
+    filter: saturate(1.15);
+  }
+}
+
+.health-card-copy,
+.agents-security-copy {
+  min-width: 0;
+}
+
+.health-card-kicker {
+  margin: 0 0 2px;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--success);
+}
+
+.health-card.is-warn .health-card-kicker {
+  color: var(--warn);
+}
+
+.health-card.is-fail .health-card-kicker {
+  color: var(--danger);
+}
+
+.health-card.is-busy .health-card-kicker {
+  color: var(--primary-deep);
+}
+
+.health-card-copy h2,
+.agents-security-copy h2 {
+  margin: 0 0 3px;
+  font-size: 0.82rem;
+}
+
+.health-card-copy > p,
+.agents-security-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.health-card-stats,
+.agents-security-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.health-card-stat,
+.agents-security-stats span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-soft);
+  font-size: 0.56rem;
+  line-height: 1.2;
+  border: 1px solid transparent;
+}
+
+.health-card-stat strong {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+
+.health-card-stat.is-pass,
+.agents-security-stats span:not(.has-issues) {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.agents-security-stats span.has-issues {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.health-card-stat.is-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.health-card-stat.is-fail {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+button.health-card-stat {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+button.health-card-stat:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+button.health-card-stat:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+button.health-card-stat.is-active {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+button.health-card-stat.is-pass.is-active {
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3);
+}
+
+button.health-card-stat.is-warn.is-active {
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.3);
+}
+
+button.health-card-stat.is-fail.is-active {
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.3);
+}
+
+.agents-security-overview {
+  /* kept for existing selectors; layout comes from shared block above */
 }
 
 .first-run {
@@ -1302,83 +1548,6 @@ body.is-diagnose-open .diagnose-detail {
 
 #panel-diagnose.is-first-run-done .first-run {
   display: none;
-}
-
-.agents-readiness-ring {
-  --readiness: 0;
-  position: relative;
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  border-radius: 50%;
-  background: conic-gradient(
-    var(--success) calc(var(--readiness) * 1%),
-    var(--surface-inset) 0
-  );
-  text-align: center;
-}
-
-.agents-readiness-ring::before {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  border-radius: 50%;
-  background: var(--surface);
-}
-
-.agents-readiness-ring strong,
-.agents-readiness-ring span {
-  position: relative;
-  z-index: 1;
-}
-
-.agents-readiness-ring strong {
-  font-size: 0.88rem;
-  line-height: 1;
-}
-
-.agents-readiness-ring span {
-  max-width: 44px;
-  margin-top: 3px;
-  color: var(--text-soft);
-  font-size: 0.48rem;
-  line-height: 1.1;
-}
-
-.agents-security-copy {
-  min-width: 0;
-}
-
-.agents-security-copy h2 {
-  margin: 0 0 3px;
-  font-size: 0.82rem;
-}
-
-.agents-security-copy p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.64rem;
-}
-
-.agents-security-stats {
-  display: flex;
-  gap: 5px;
-  margin-top: 7px;
-}
-
-.agents-security-stats span {
-  padding: 3px 6px;
-  border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-size: 0.56rem;
-}
-
-.agents-security-stats span.has-issues {
-  background: var(--warn-bg);
-  color: var(--warn);
 }
 
 .runtime-section {

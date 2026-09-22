@@ -140,6 +140,13 @@ function updateAgentsSecurityOverview(report: DoctorReport): void {
     count: String(issueCount),
   });
   agentsSecurityIssuesEl.classList.toggle("has-issues", issueCount > 0);
+  const overview = document.querySelector<HTMLElement>("#agents-security-overview");
+  overview?.classList.toggle("is-ok", installed === total && total > 0 && issueCount === 0);
+  agentsReadinessRingEl.classList.toggle("is-warn", issueCount > 0 && installed > 0);
+  agentsReadinessRingEl.classList.toggle(
+    "is-fail",
+    installed === 0 || (issueCount > 0 && installed < total),
+  );
 }
 
 function hasActiveWorkspace(): boolean {

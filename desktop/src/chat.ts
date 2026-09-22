@@ -147,7 +147,7 @@ const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-works
 const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#chat-workspace-hint")!;
 const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
-const closeEl = document.querySelector<HTMLButtonElement>("#chat-close")!;
+const themeEl = ensureChatThemeButton();
 const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
 const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
 const resourcesToggleEl = document.querySelector<HTMLButtonElement>("#chat-resources-toggle")!;
@@ -168,6 +168,71 @@ let wiredProvider: PersonalProviderListItem | null = null;
 let modelMenuOpen = false;
 
 const CHAT_STORE_MAX_BYTES = 2_500_000;
+const CHAT_THEME_KEY = "ad.ask.theme";
+type ChatTheme = "light" | "dark";
+
+function ensureChatThemeButton(): HTMLButtonElement {
+  const existing = document.querySelector<HTMLButtonElement>("#chat-theme");
+  if (existing) {
+    return existing;
+  }
+  const top = document.querySelector<HTMLElement>(".chat-top");
+  let actions = document.querySelector<HTMLElement>(".chat-top-actions");
+  if (!actions) {
+    actions = document.createElement("div");
+    actions.className = "chat-top-actions";
+    top?.appendChild(actions);
+  }
+  const btn = document.createElement("button");
+  btn.id = "chat-theme";
+  btn.type = "button";
+  btn.className = "chat-theme";
+  btn.innerHTML = `
+    <svg class="chat-theme-icon chat-theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M21 14.3A8.4 8.4 0 0 1 9.7 3 7.2 7.2 0 1 0 21 14.3Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg class="chat-theme-icon chat-theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.05 5.05l1.56 1.56M17.39 17.39l1.56 1.56M5.05 18.95l1.56-1.56M17.39 6.61l1.56-1.56" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  `;
+  actions.appendChild(btn);
+  return btn;
+}
+
+function readStoredChatTheme(): ChatTheme | null {
+  try {
+    const saved = window.localStorage.getItem(CHAT_THEME_KEY);
+    if (saved === "light" || saved === "dark") {
+      return saved;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function systemChatTheme(): ChatTheme {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function currentChatTheme(): ChatTheme {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function applyChatTheme(theme: ChatTheme, persist = true): void {
+  document.documentElement.dataset.theme = theme;
+  const nextLabel = theme === "dark" ? t("chat.themeLight") : t("chat.themeDark");
+  themeEl.setAttribute("aria-label", nextLabel);
+  themeEl.title = nextLabel;
+  if (persist) {
+    try {
+      window.localStorage.setItem(CHAT_THEME_KEY, theme);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function normalizeChatMessage(message: ChatMessage): ChatMessage {
   return {
@@ -323,6 +388,7 @@ function closeModelMenu(): void {
   modelMenuEl.style.width = "";
   modelMenuEl.style.minWidth = "";
   modelMenuEl.style.position = "";
+  modelMenuEl.style.zIndex = "";
 }
 
 function positionModelMenu(): void {
@@ -335,6 +401,7 @@ function positionModelMenu(): void {
   if (left + width > window.innerWidth - 12) {
     left = Math.max(12, window.innerWidth - 12 - width);
   }
+  // Anchor just above the model button (original interaction).
   modelMenuEl.style.position = "fixed";
   modelMenuEl.style.left = `${Math.round(left)}px`;
   modelMenuEl.style.right = "auto";
@@ -342,6 +409,7 @@ function positionModelMenu(): void {
   modelMenuEl.style.minWidth = `${Math.round(width)}px`;
   modelMenuEl.style.bottom = `${Math.round(window.innerHeight - rect.top + gap)}px`;
   modelMenuEl.style.top = "auto";
+  modelMenuEl.style.zIndex = "120";
 }
 
 function renderModelPickerLabel(): void {
@@ -456,7 +524,11 @@ async function switchWiredModel(model: string): Promise<void> {
     return;
   }
   closeModelMenu();
-  modelBtnEl.disabled = true;
+  // Ask reads the active provider model from store at send time — skip full
+  // activate/mode-switch so the picker stays snappy.
+  const previous = wiredProvider.model;
+  wiredProvider = { ...wiredProvider, model: next };
+  renderModelPickerLabel();
   setStatus(t("chat.modelSwitching"), "muted");
   try {
     await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
@@ -466,14 +538,15 @@ async function switchWiredModel(model: string): Promise<void> {
       key: "",
       model: next,
       protocol: wiredProvider.protocol || "openai",
-      activate: true,
+      activate: false,
     });
-    wiredProvider = { ...wiredProvider, model: next };
     setStatus(t("chat.modelSwitched", { model: next }), "ok");
   } catch (error) {
+    wiredProvider = { ...wiredProvider, model: previous };
+    renderModelPickerLabel();
     setStatus(t("chat.modelSwitchFailed", { error: String(error) }), "error");
   } finally {
-    renderModelPickerLabel();
+    modelBtnEl.disabled = isComposerLocked() || !wiredProvider;
   }
 }
 
@@ -705,7 +778,7 @@ function sessionTitle(session: ChatSession): string {
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
-    if (el === actionEl) return;
+    if (el === actionEl || el === themeEl) return;
     const key = el.dataset.i18n as MessageKey | undefined;
     if (key) el.textContent = t(key);
   });
@@ -716,6 +789,7 @@ function applyI18n(): void {
     resourcesSearchEl.placeholder = t("chat.resourcesSearch");
   }
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
+  applyChatTheme(currentChatTheme(), false);
   updateElevatedLabel();
   updateRuntimeLabel();
   syncActionButton();
@@ -3594,6 +3668,7 @@ function boot(): void {
     __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
     __AD_ASK_BOOTED__?: boolean;
   };
+  applyChatTheme(readStoredChatTheme() ?? systemChatTheme(), false);
   win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
     if (isAskRuntime(runtime)) {
       ensureRuntimeSession(runtime);
@@ -3641,8 +3716,8 @@ function boot(): void {
   });
   newSessionEl.addEventListener("click", startNewSession);
   terminalEl.addEventListener("click", () => void openTerminal());
-  closeEl.addEventListener("click", () => {
-    void invoke("close_ask_window_command", { destroy: false });
+  themeEl.addEventListener("click", () => {
+    applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
   });
   resourcesToggleEl.addEventListener("click", () => {
     toggleResourcesPanel();

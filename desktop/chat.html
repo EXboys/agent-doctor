@@ -109,7 +109,34 @@
       <main class="chat-main">
         <header class="chat-top">
           <h1 id="chat-title" class="chat-title">对话</h1>
-          <button id="chat-close" type="button" class="chat-close" data-i18n="chat.close" title="关闭">关闭</button>
+          <div class="chat-top-actions">
+            <button
+              id="chat-theme"
+              type="button"
+              class="chat-theme"
+              aria-label="深色"
+              title="深色"
+            >
+              <svg class="chat-theme-icon chat-theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M21 14.3A8.4 8.4 0 0 1 9.7 3 7.2 7.2 0 1 0 21 14.3Z"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg class="chat-theme-icon chat-theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.05 5.05l1.56 1.56M17.39 17.39l1.56 1.56M5.05 18.95l1.56-1.56M17.39 6.61l1.56-1.56"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <div id="chat-log" class="chat-log" aria-live="polite">

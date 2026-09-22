@@ -33,6 +33,7 @@ const ASK_WINDOW_MARGIN: f64 = 16.0;
 const ASK_WINDOW_MIN_WIDTH: f64 = 720.0;
 const ASK_WINDOW_MIN_HEIGHT: f64 = 480.0;
 const RESOURCES_WINDOW_LABEL: &str = "resources";
+const DIAGNOSE_WINDOW_LABEL: &str = "diagnose";
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
@@ -162,7 +163,7 @@ fn window_decoration_width(window: &tauri::WebviewWindow, scale: f64) -> f64 {
     ((outer.width as f64 - inner.width as f64) / scale).max(0.0)
 }
 
-/// Dock main (left) + secondary (right: Ask or Resources): same top/bottom, side by side.
+/// Dock main (left) + secondary (right: Ask / Resources / Diagnose): same top/bottom, side by side.
 fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -211,6 +212,10 @@ fn layout_main_and_resources_side_by_side(app: &AppHandle) {
     layout_main_and_secondary_side_by_side(app, RESOURCES_WINDOW_LABEL);
 }
 
+fn layout_main_and_diagnose_side_by_side(app: &AppHandle) {
+    layout_main_and_secondary_side_by_side(app, DIAGNOSE_WINDOW_LABEL);
+}
+
 fn hide_secondary_window(app: &AppHandle, label: &str) {
     let Some(window) = app.get_webview_window(label) else {
         return;
@@ -250,10 +255,16 @@ fn show_main_window(app: &tauri::AppHandle) {
         .get_webview_window(RESOURCES_WINDOW_LABEL)
         .and_then(|win| win.is_visible().ok())
         .unwrap_or(false);
+    let diagnose_visible = app
+        .get_webview_window(DIAGNOSE_WINDOW_LABEL)
+        .and_then(|win| win.is_visible().ok())
+        .unwrap_or(false);
     if ask_visible {
         layout_main_and_ask_side_by_side(app);
     } else if resources_visible {
         layout_main_and_resources_side_by_side(app);
+    } else if diagnose_visible {
+        layout_main_and_diagnose_side_by_side(app);
     } else {
         position_main_window_left(&window);
     }
@@ -928,6 +939,7 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
     apply_ask_runtime_in_webview(&window, runtime);
     // Right-dock slot is shared with Resources — only one secondary on the right.
     hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
+    hide_secondary_window(app, DIAGNOSE_WINDOW_LABEL);
     // Pair with main: left/right side-by-side, top and bottom aligned.
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
@@ -1015,10 +1027,129 @@ fn ensure_resources_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Stri
     create_resources_window(app, false)
 }
 
+fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
+    let hide = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hide.set_skip_taskbar(true);
+            let _ = hide.hide();
+        }
+    });
+}
+
+fn create_diagnose_window(
+    app: &AppHandle,
+    runtime: &str,
+    visible: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let init_script = format!(
+        "window.__AD_DIAGNOSE_RUNTIME__ = {};",
+        serde_json::Value::String(runtime.to_string())
+    );
+    // Same soft defaults as Ask / Resources; live size follows right-dock layout.
+    let window = WebviewWindowBuilder::new(
+        app,
+        DIAGNOSE_WINDOW_LABEL,
+        WebviewUrl::App("diagnose.html".into()),
+    )
+    .title("Agent Doctor — Diagnose")
+    .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+    .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
+    .resizable(true)
+    .closable(true)
+    .minimizable(true)
+    .decorations(true)
+    .visible(visible)
+    .skip_taskbar(!visible)
+    .initialization_script(&init_script)
+    .build()
+    .map_err(|err| format!("failed to open diagnose window: {err}"))?;
+    attach_diagnose_window_close_behavior(&window);
+    Ok(window)
+}
+
+fn ensure_diagnose_window(app: &AppHandle, runtime: &str) -> Result<tauri::WebviewWindow, String> {
+    if let Some(existing) = app.get_webview_window(DIAGNOSE_WINDOW_LABEL) {
+        return Ok(existing);
+    }
+    create_diagnose_window(app, runtime, false)
+}
+
+fn apply_diagnose_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
+    let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+    let script = format!(
+        "(function(){{\
+            window.__AD_DIAGNOSE_RUNTIME__ = {runtime};\
+            if (typeof window.__AD_DIAGNOSE_APPLY_RUNTIME__ === 'function') {{\
+                window.__AD_DIAGNOSE_APPLY_RUNTIME__({runtime});\
+            }}\
+        }})();",
+        runtime = runtime_json
+    );
+    let _ = window.eval(&script);
+}
+
+fn open_or_focus_diagnose_window(app: &AppHandle, runtime: Option<&str>) -> Result<(), String> {
+    let runtime = runtime
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("openclaw");
+
+    let already_exists = app.get_webview_window(DIAGNOSE_WINDOW_LABEL).is_some();
+    let window = ensure_diagnose_window(app, runtime)?;
+    apply_diagnose_runtime_in_webview(&window, runtime);
+    // Same right-dock slot as Ask / Resources.
+    hide_secondary_window(app, ASK_WINDOW_LABEL);
+    hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+    }
+    let _ = window.set_skip_taskbar(false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    layout_main_and_diagnose_side_by_side(app);
+    layout_main_and_diagnose_side_by_side(app);
+    let _ = window.set_focus();
+
+    if already_exists {
+        let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+        let reload = format!(
+            "window.__AD_DIAGNOSE_RUNTIME__ = {runtime}; location.reload();",
+            runtime = runtime_json
+        );
+        let _ = window.eval(&reload);
+    } else {
+        apply_diagnose_runtime_in_webview(&window, runtime);
+        let payload = serde_json::json!({ "runtime": runtime });
+        let _ = window.emit("diagnose-window-focus", &payload);
+        let _ = app.emit("diagnose-window-focus", &payload);
+    }
+
+    Ok(())
+}
+
+fn close_diagnose_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(DIAGNOSE_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    if destroy {
+        window
+            .destroy()
+            .map_err(|err| format!("failed to close diagnose window: {err}"))?;
+    } else {
+        let _ = window.set_skip_taskbar(true);
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 fn open_or_focus_resources_window(app: &AppHandle, section: Option<&str>) -> Result<(), String> {
     let window = ensure_resources_window(app)?;
     // Same right-dock as Ask — hide Ask so Resources does not stack over main.
     hide_secondary_window(app, ASK_WINDOW_LABEL);
+    hide_secondary_window(app, DIAGNOSE_WINDOW_LABEL);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
         let _ = main.show();
@@ -1084,6 +1215,22 @@ fn close_resources_window_command(app: AppHandle, destroy: Option<bool>) -> Resu
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         close_resources_window(&app_for_ui, destroy.unwrap_or(false))
+    })
+}
+
+#[tauri::command]
+fn open_diagnose_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        open_or_focus_diagnose_window(&app_for_ui, runtime.as_deref())
+    })
+}
+
+#[tauri::command]
+fn close_diagnose_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        close_diagnose_window(&app_for_ui, destroy.unwrap_or(false))
     })
 }
 
@@ -1214,6 +1361,7 @@ pub fn run() {
             // and Task Manager "End task" appear to do nothing).
             let _ = ensure_ask_window(app.handle(), "claude-code");
             let _ = ensure_resources_window(app.handle());
+            let _ = ensure_diagnose_window(app.handle(), "openclaw");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -1279,6 +1427,8 @@ pub fn run() {
             close_ask_window_command,
             open_resources_window_command,
             close_resources_window_command,
+            open_diagnose_window_command,
+            close_diagnose_window_command,
             focus_main_tab_command,
             resize_main_window_command,
             start_prompt_session_command,

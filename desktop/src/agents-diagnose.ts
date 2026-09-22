@@ -89,11 +89,16 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   async function expandDiagnoseWindowIfNeeded(): Promise<void> {
     diagnoseDetailEl.hidden = false;
     document.body.classList.add("is-diagnose-layout");
-    // Ask side-by-side layout clamps main width (~480); close it so diagnose can expand.
+    // Ask / Diagnose big windows clamp or cover main — close them so aside can expand.
     try {
       await invoke("close_ask_window_command", { destroy: false });
     } catch {
       /* ask may already be closed */
+    }
+    try {
+      await invoke("close_diagnose_window_command", { destroy: false });
+    } catch {
+      /* diagnose may already be closed */
     }
     if (compactWidthBeforeDetail == null) {
       try {
@@ -424,12 +429,20 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     button?.setAttribute("disabled", "true");
     hint.hidden = false;
     hint.textContent = t("runtime.diagnosing");
-    showDiagnosePending(runtime, t("runtime.diagnosing"));
+    // Prefer big setup window over the narrow right aside.
     try {
-      const report = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
-      mountRepairPreview(report, { resetFilter: true });
+      await closeDiagnoseDetail({ skipDismiss: true, keepContent: true });
+    } catch {
+      /* aside may already be closed */
+    }
+    try {
+      await invoke("open_diagnose_window_command", { runtime });
+      hint.hidden = true;
+      hint.replaceChildren();
+      deps.setStatusBanner("ok", t("runtime.diagnosisReady"));
     } catch (error) {
       hint.textContent = String(error);
+      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
     } finally {
       button?.removeAttribute("disabled");
     }

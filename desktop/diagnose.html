@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Doctor — Diagnose</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/diagnose.css" />
+  </head>
+  <body class="diagnose-page">
+    <div class="diagnose-shell">
+      <header class="diagnose-top">
+        <div>
+          <p class="diagnose-eyebrow" data-i18n="diagnose.flow.eyebrow">准备 Agent</p>
+          <h1 id="diagnose-title">—</h1>
+          <p id="diagnose-subtitle" class="diagnose-subtitle" data-i18n="diagnose.flow.subtitle">
+            按安装 → 配置 → 测试走完，就可以用了
+          </p>
+        </div>
+        <div class="diagnose-top-actions">
+          <button id="diagnose-close" type="button" class="btn-ghost btn-compact" data-i18n="chat.close">关闭</button>
+        </div>
+      </header>
+
+      <ol class="diagnose-steps" id="diagnose-steps" aria-label="Setup steps">
+        <li class="diagnose-step" data-step="install">
+          <span class="diagnose-step-index">1</span>
+          <span class="diagnose-step-label" data-i18n="diagnose.flow.stepInstall">安装</span>
+        </li>
+        <li class="diagnose-step" data-step="config">
+          <span class="diagnose-step-index">2</span>
+          <span class="diagnose-step-label" data-i18n="diagnose.flow.stepConfig">配置</span>
+        </li>
+        <li class="diagnose-step" data-step="test">
+          <span class="diagnose-step-index">3</span>
+          <span class="diagnose-step-label" data-i18n="diagnose.flow.stepTest">测试</span>
+        </li>
+      </ol>
+
+      <main class="diagnose-body">
+        <section class="diagnose-hero" id="diagnose-hero" aria-live="polite">
+          <div class="health-card diagnose-hero-main" id="diagnose-health-card">
+            <div class="health-card-ring" id="diagnose-score-ring">
+              <strong id="diagnose-score-value">—</strong>
+              <span id="diagnose-score-label" data-i18n="diagnose.flow.scoreLabel">就绪分</span>
+            </div>
+            <div class="health-card-copy diagnose-hero-copy">
+              <p class="health-card-kicker" id="diagnose-hero-kicker" hidden data-i18n="diagnose.flow.scoreReveal">就绪分</p>
+              <h2 id="diagnose-headline">—</h2>
+              <p id="diagnose-detail">—</p>
+              <div class="health-card-stats diagnose-stat-row" id="diagnose-stat-row" role="tablist" aria-label="Filter checks">
+                <button type="button" class="health-card-stat is-pass" data-check-filter="pass" role="tab" aria-selected="false">
+                  <strong id="diagnose-stat-pass">0</strong>
+                  <span data-i18n="repair.pass">通过</span>
+                </button>
+                <button type="button" class="health-card-stat is-warn" data-check-filter="warn" role="tab" aria-selected="false">
+                  <strong id="diagnose-stat-warn">0</strong>
+                  <span data-i18n="repair.warn">警告</span>
+                </button>
+                <button type="button" class="health-card-stat is-fail" data-check-filter="fail" role="tab" aria-selected="false">
+                  <strong id="diagnose-stat-fail">0</strong>
+                  <span data-i18n="repair.fail">失败</span>
+                </button>
+              </div>
+              <p id="diagnose-result" class="diagnose-result is-slot" hidden></p>
+            </div>
+          </div>
+
+          <div class="diagnose-hero-foot" id="diagnose-hero-foot">
+            <div class="diagnose-scan-meter is-idle" id="diagnose-scan-meter">
+              <div class="diagnose-scan-meter-head">
+                <span id="diagnose-scan-meter-label">—</span>
+                <span id="diagnose-scan-meter-count">0/0</span>
+              </div>
+              <div class="diagnose-scan-meter-track" aria-hidden="true">
+                <div class="diagnose-scan-meter-fill" id="diagnose-scan-meter-fill" style="width: 0%"></div>
+              </div>
+            </div>
+            <p class="diagnose-test-hint is-slot" id="diagnose-test-hint" hidden data-i18n="diagnose.flow.testHint">
+              系统会自动打分检查，不会替你打开问答。想亲自试一句，可点下面的按钮。
+            </p>
+            <div class="diagnose-actions" id="diagnose-actions">
+              <button id="diagnose-primary" type="button" class="btn-primary">—</button>
+              <button id="diagnose-secondary" type="button" class="btn-secondary">—</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="diagnose-panel" id="diagnose-panel-install" hidden>
+          <div class="diagnose-install-progress" id="diagnose-install-progress" hidden>
+            <div class="install-progress-head">
+              <span id="diagnose-install-status">—</span>
+              <span id="diagnose-install-percent">0%</span>
+            </div>
+            <div class="install-progress-track" aria-hidden="true">
+              <div class="install-progress-fill" id="diagnose-install-fill" style="width: 0%"></div>
+            </div>
+            <pre class="install-progress-log" id="diagnose-install-log"></pre>
+          </div>
+        </section>
+
+        <section class="diagnose-panel" id="diagnose-panel-config" hidden>
+          <div id="diagnose-config-personal">
+            <div class="diagnose-preset-chips" id="diagnose-preset-chips" role="listbox"></div>
+            <div class="diagnose-form-grid">
+              <label>
+                <span data-i18n="diagnose.flow.fieldUrl">地址</span>
+                <input id="diagnose-url" type="url" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                <span data-i18n="diagnose.flow.fieldKey">密钥</span>
+                <input id="diagnose-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…" />
+              </label>
+              <label>
+                <span data-i18n="diagnose.flow.fieldModel">模型</span>
+                <select id="diagnose-model"></select>
+              </label>
+              <input id="diagnose-protocol" type="hidden" value="openai" />
+              <input id="diagnose-provider-name" type="hidden" value="DeepSeek" />
+            </div>
+          </div>
+          <div id="diagnose-config-team" hidden>
+            <p id="diagnose-team-status" class="diagnose-team-status">—</p>
+          </div>
+        </section>
+
+        <section class="diagnose-panel" id="diagnose-panel-test" hidden></section>
+
+        <section class="diagnose-details" id="diagnose-details" aria-label="Check list">
+          <div class="diagnose-details-head" data-i18n="diagnose.flow.details">检查明细</div>
+          <div class="diagnose-check-scroll" id="diagnose-check-scroll">
+            <ul id="diagnose-check-list" class="diagnose-check-list">
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+              <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>
+            </ul>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/diagnose-window.ts"></script>
+  </body>
+</html>

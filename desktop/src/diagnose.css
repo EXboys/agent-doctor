@@ -1,0 +1,479 @@
+/* Diagnose — match main Agents tokens & health-card. Keep layout stable. */
+
+.diagnose-page {
+  margin: 0;
+  height: 100%;
+  max-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+html:has(.diagnose-page),
+html:has(.diagnose-page) body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.diagnose-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px 12px;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.diagnose-top,
+.diagnose-steps,
+.diagnose-hero,
+.diagnose-panel {
+  flex-shrink: 0;
+}
+
+.diagnose-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.diagnose-eyebrow {
+  margin: 0 0 2px;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.diagnose-top h1 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.diagnose-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.diagnose-top-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Steps: three small cards (original) */
+.diagnose-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.diagnose-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.diagnose-step-index {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.diagnose-step-label {
+  font-weight: 650;
+  font-size: 0.7rem;
+}
+
+.diagnose-step.is-active {
+  color: var(--text);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.1);
+}
+
+.diagnose-step.is-active .diagnose-step-index {
+  background: var(--primary);
+  color: #fff;
+}
+
+.diagnose-step.is-done {
+  color: var(--success);
+  border-color: rgba(22, 163, 74, 0.28);
+}
+
+.diagnose-step.is-done .diagnose-step-index {
+  background: var(--success);
+  color: #fff;
+}
+
+.diagnose-step.is-error {
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.28);
+}
+
+.diagnose-step.is-error .diagnose-step-index {
+  background: var(--danger);
+  color: #fff;
+}
+
+.diagnose-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Hero: shared health-card + foot (do not override ring hole) */
+.diagnose-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.diagnose-hero .health-card {
+  margin-bottom: 0;
+}
+
+.diagnose-result {
+  margin: 6px 0 0 !important;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  min-height: 2.1em;
+  box-sizing: border-box;
+}
+
+.diagnose-result.is-slot[hidden],
+.diagnose-test-hint.is-slot[hidden] {
+  display: block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.diagnose-result.is-ok {
+  background: var(--success-bg);
+  color: #166534;
+}
+
+.diagnose-result.is-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.diagnose-result.is-busy {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary-deep);
+}
+
+.diagnose-hero-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.diagnose-test-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.diagnose-scan-meter {
+  margin: 0;
+  min-height: 28px;
+}
+
+.diagnose-scan-meter.is-idle {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.diagnose-scan-meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
+.diagnose-scan-meter-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnose-scan-meter-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.diagnose-scan-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), var(--success));
+  transition: width 0.2s ease;
+}
+
+.diagnose-actions {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 8px;
+}
+
+.diagnose-actions .btn-primary,
+.diagnose-actions .btn-secondary {
+  min-width: 0;
+  width: 100%;
+  padding: 8px 12px;
+  min-height: 34px;
+  font-size: 0.74rem;
+  border-radius: 10px;
+}
+
+.diagnose-actions .btn-secondary[hidden],
+.diagnose-actions .btn-primary[hidden] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.diagnose-actions:has(.btn-secondary[hidden]):not(:has(.btn-primary[hidden])) {
+  grid-template-columns: 1.2fr 1fr;
+}
+
+.diagnose-panel {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.diagnose-panel.is-guide {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08);
+}
+
+.diagnose-preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.diagnose-preset-chips .provider-chip {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.66rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.diagnose-preset-chips .provider-chip.is-active {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--primary-deep);
+}
+
+.diagnose-form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.diagnose-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
+.diagnose-form-grid input,
+.diagnose-form-grid select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  font-size: 0.72rem;
+  color: inherit;
+  background: var(--surface);
+}
+
+.diagnose-form-grid input:focus,
+.diagnose-form-grid select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.diagnose-team-status {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.diagnose-details {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 10px 10px;
+  flex: 1 1 0;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.diagnose-details-head {
+  flex-shrink: 0;
+  font-weight: 650;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.diagnose-check-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+.diagnose-check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.diagnose-check-list li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--surface-muted);
+}
+
+.diagnose-check-list li.is-pending {
+  opacity: 0.45;
+}
+
+.diagnose-check-list li.is-skeleton {
+  min-height: 2.4em;
+  color: transparent;
+  user-select: none;
+}
+
+.diagnose-check-list li.is-skeleton .diagnose-check-badge {
+  color: transparent;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.diagnose-check-list li.is-checking {
+  opacity: 1;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.diagnose-check-list li.is-just-revealed {
+  border-color: rgba(22, 163, 74, 0.28);
+  background: var(--success-bg);
+}
+
+.diagnose-check-list li.is-revealed {
+  opacity: 1;
+}
+
+.diagnose-check-badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.56rem;
+  font-weight: 650;
+}
+
+.diagnose-check-badge.pass {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.diagnose-check-badge.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.diagnose-check-badge.fail {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.diagnose-check-badge.muted {
+  background: var(--surface-inset);
+  color: var(--text-soft);
+}
+
+.diagnose-install-progress .install-progress-head {
+  font-size: 0.66rem;
+}
+
+.diagnose-install-progress .install-progress-log {
+  max-height: 120px;
+  overflow: auto;
+  margin: 8px 0 0;
+  font-size: 0.58rem;
+}
+
+@media (max-width: 720px) {
+  .diagnose-steps {
+    grid-template-columns: 1fr;
+  }
+}

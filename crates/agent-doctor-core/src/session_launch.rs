@@ -903,11 +903,23 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_launch_skips_personal_openai_without_evotown() {
+    fn anthropic_launch_maps_deepseek_openai_to_anthropic() {
         let env = HashMap::from([
             (PROVIDER_PROTOCOL_ENV.into(), "openai".into()),
             (GATEWAY_URL_ENV.into(), "https://api.deepseek.com/v1".into()),
             (COMPANY_API_KEY_ENV.into(), "sk-ds".into()),
+        ]);
+        let (url, key) = anthropic_launch_from_env(&env).unwrap();
+        assert_eq!(url, "https://api.deepseek.com/anthropic");
+        assert_eq!(key, "sk-ds");
+    }
+
+    #[test]
+    fn anthropic_launch_skips_openai_without_dual_or_evotown() {
+        let env = HashMap::from([
+            (PROVIDER_PROTOCOL_ENV.into(), "openai".into()),
+            (GATEWAY_URL_ENV.into(), "https://api.openai.com/v1".into()),
+            (COMPANY_API_KEY_ENV.into(), "sk-oai".into()),
         ]);
         assert!(anthropic_launch_from_env(&env).is_none());
     }
