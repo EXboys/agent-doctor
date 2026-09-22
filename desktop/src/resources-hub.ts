@@ -231,15 +231,27 @@ let hubRefresh: Promise<void> | null = null;
 let hubRefreshedAt = 0;
 
 async function loadResourcesHub() {
+  // Paint whatever we already have so the tab switch feels instant.
   updateResourcesHubSummary();
-  const fresh =
-    Date.now() - hubRefreshedAt < 20_000 &&
-    appState.lastSkillsInventory != null &&
-    appState.lastMcpStatus != null;
-  if (fresh || hubRefresh) {
-    return hubRefresh ?? undefined;
+  if (hubRefresh) {
+    return hubRefresh;
   }
-  hubRefresh = Promise.all([loadMcpStatus(), loadSkillsInventory({ remoteStats: false })])
+
+  const now = Date.now();
+  // Hub cards only need a skill count + browser badge. Full inventory (118 skills ×
+  // mount probes) belongs in the library window — do not rescan on every tab click.
+  const skillsReady = appState.lastSkillsInventory != null;
+  const mcpFresh = appState.lastMcpStatus != null && now - hubRefreshedAt < 30_000;
+  if (skillsReady && mcpFresh) {
+    return;
+  }
+
+  hubRefresh = Promise.all([
+    mcpFresh ? Promise.resolve() : loadMcpStatus(),
+    skillsReady
+      ? Promise.resolve()
+      : loadSkillsInventory({ remoteStats: false }),
+  ])
     .then(() => {
       hubRefreshedAt = Date.now();
     })
@@ -249,8 +261,11 @@ async function loadResourcesHub() {
   return hubRefresh;
 }
 
-async function openResourcesWindow(section?: "catalog" | "browser"): Promise<void> {
-  await invoke("open_resources_window_command", { section: section ?? null });
+async function openResourcesWindow(
+  section?: "skills" | "tools" | "browser" | "catalog",
+): Promise<void> {
+  const normalized = !section || section === "catalog" ? "skills" : section;
+  await invoke("open_resources_window_command", { section: normalized });
 }
 
 function setSkillsBusy(busy: boolean) {
@@ -328,7 +343,7 @@ export interface ResourcesHubApi {
   updateResourcesHubSummary: () => void;
   loadMcpStatus: () => Promise<void>;
   loadResourcesHub: () => Promise<void>;
-  openResourcesWindow: (section?: "catalog" | "browser") => Promise<void>;
+  openResourcesWindow: (section?: "skills" | "tools" | "browser" | "catalog") => Promise<void>;
   toggleSkillRuntimeMount: (
     chip: HTMLButtonElement,
     skillId: string,
@@ -343,7 +358,7 @@ export interface ResourcesHubApi {
 
 export function initResourcesHub(_deps?: Record<string, never>): ResourcesHubApi {
   openResourcesWindowEl.addEventListener("click", () => {
-    void openResourcesWindow("catalog");
+    void openResourcesWindow("skills");
   });
   openResourcesBrowserEl.addEventListener("click", () => {
     void openResourcesWindow("browser");

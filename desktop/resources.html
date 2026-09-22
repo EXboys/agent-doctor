@@ -20,33 +20,42 @@
         </div>
       </header>
 
-      <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
-        <button type="button" class="resources-section-tab is-active" data-section="catalog" role="tab" aria-selected="true" data-i18n="resources.tabCatalog">目录</button>
-        <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false" data-i18n="resources.tabBrowser">Browser MCP</button>
-      </nav>
+      <div class="resources-nav-row">
+        <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
+          <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true" data-i18n="resources.tabSkills">技能</button>
+          <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false" data-i18n="resources.tabTools">工具</button>
+          <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false" data-i18n="resources.tabBrowser">浏览器</button>
+        </nav>
+        <label class="resources-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="resources-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="resources.searchGlobal" placeholder="搜索技能或工具…" />
+        </label>
+      </div>
 
       <main class="resources-body">
-        <section class="resources-panel is-active" id="panel-catalog" data-section-panel="catalog">
+        <section class="resources-panel is-active" id="panel-skills" data-section-panel="skills">
           <div class="resources-toolbar">
-            <div class="filters" id="resources-filters" role="group" aria-label="Resource filters">
-              <button type="button" class="filter-chip is-active" data-res-filter="all" data-i18n="resources.filterAll">全部</button>
-              <button type="button" class="filter-chip" data-res-filter="skill" data-i18n="resources.filterSkills">Skills</button>
-              <button type="button" class="filter-chip" data-res-filter="mcp" data-i18n="resources.filterMcp">MCP</button>
-              <button type="button" class="filter-chip" data-res-filter="issue" data-i18n="resources.filterIssue">问题</button>
-            </div>
-            <label class="resources-search">
-              <span aria-hidden="true">⌕</span>
-              <input id="resources-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="chat.resourcesSearch" placeholder="搜索名称或描述…" />
-            </label>
+            <div class="filters" id="resources-skill-filters" role="group" aria-label="Skill categories"></div>
           </div>
-          <ul id="resources-list" class="res-catalog-list" aria-live="polite"></ul>
-          <p id="resources-empty" class="section-hint" hidden data-i18n="resources.empty">暂无 Skills / MCP</p>
+          <div id="resources-list" class="res-catalog-list" aria-live="polite"></div>
+          <p id="resources-empty" class="section-hint" hidden data-i18n="resources.emptySkills">还没有技能</p>
           <p id="resources-footnote" class="section-footnote"></p>
+        </section>
+
+        <section class="resources-panel" id="panel-tools" data-section-panel="tools" hidden>
+          <div class="resources-toolbar">
+            <div class="filters" id="resources-tool-filters" role="group" aria-label="Tool filters">
+              <button type="button" class="filter-chip is-active" data-tool-filter="all" data-i18n="resources.filterAll">全部</button>
+              <button type="button" class="filter-chip" data-tool-filter="issue" data-i18n="resources.filterIssue">问题</button>
+            </div>
+          </div>
+          <ul id="resources-tools-list" class="res-catalog-list" aria-live="polite"></ul>
+          <p id="resources-tools-empty" class="section-hint" hidden data-i18n="resources.emptyTools">还没有工具</p>
         </section>
 
         <section class="resources-panel" id="panel-browser" data-section-panel="browser" hidden>
           <div class="section-label">
-            <h2 data-i18n="mcp.browserTitle">Browser MCP</h2>
+            <h2 data-i18n="mcp.browserTitle">浏览器</h2>
             <span id="mcp-browser-badge" class="badge muted">—</span>
           </div>
           <div class="meta-grid" id="mcp-browser-meta">

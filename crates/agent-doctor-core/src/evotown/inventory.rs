@@ -169,6 +169,7 @@ fn build_skill_items(
     workspaces: &WorkspacesDocument,
     remote: &Result<std::collections::HashMap<String, RemoteSkillStats>, anyhow::Error>,
 ) -> Vec<SkillInventoryItem> {
+    let presence = detect_runtime_presence();
     let mut skills = Vec::new();
     for skill_id in skill_ids {
         let cache_path = skills_dir.join(&skill_id);
@@ -219,7 +220,7 @@ fn build_skill_items(
             }
         }
 
-        let agents = detect_agents_using(&skill_id, &installed_path, workspaces);
+        let agents = detect_agents_using(&skill_id, &installed_path, workspaces, &presence);
 
         skills.push(SkillInventoryItem {
             skill_id: skill_id.clone(),
@@ -423,19 +424,20 @@ fn detect_agents_using(
     skill_id: &str,
     cache_path: &Path,
     workspaces: &WorkspacesDocument,
+    presence: &RuntimePresence,
 ) -> Vec<SkillAgentUsage> {
     let mut agents = Vec::new();
 
-    if runtime_present("hermes") {
+    if presence.hermes {
         agents.push(probe_hermes(skill_id, cache_path, workspaces));
     }
-    if runtime_present("openclaw") {
+    if presence.openclaw {
         agents.push(probe_openclaw(skill_id, cache_path, workspaces));
     }
-    if runtime_present("claude-code") {
+    if presence.claude_code {
         agents.push(probe_claude_code(skill_id, cache_path, workspaces));
     }
-    if runtime_present("codex") {
+    if presence.codex {
         agents.push(probe_codex(skill_id, cache_path, workspaces));
     }
 
@@ -443,6 +445,23 @@ fn detect_agents_using(
     let order = ["hermes", "openclaw", "claude-code", "codex"];
     agents.sort_by_key(|a| order.iter().position(|id| *id == a.runtime).unwrap_or(99));
     agents
+}
+
+#[derive(Clone, Copy)]
+struct RuntimePresence {
+    hermes: bool,
+    openclaw: bool,
+    claude_code: bool,
+    codex: bool,
+}
+
+fn detect_runtime_presence() -> RuntimePresence {
+    RuntimePresence {
+        hermes: runtime_present("hermes"),
+        openclaw: runtime_present("openclaw"),
+        claude_code: runtime_present("claude-code"),
+        codex: runtime_present("codex"),
+    }
 }
 
 fn runtime_present(runtime_id: &str) -> bool {

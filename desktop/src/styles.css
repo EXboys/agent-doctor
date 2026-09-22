@@ -72,6 +72,9 @@ html.is-opaque-shell body::before {
 
 html.is-opaque-shell .widget {
   border-radius: 0;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 body::before {
@@ -118,68 +121,6 @@ body::before {
   flex-shrink: 0;
   user-select: none;
   cursor: default;
-}
-
-.window-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-}
-
-.window-control {
-  position: relative;
-  width: 12px;
-  height: 12px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 0.5px rgba(15, 23, 42, 0.16);
-  cursor: default;
-}
-
-.window-control.close {
-  background: #ff5f57;
-}
-
-.window-control.minimize {
-  background: #febc2e;
-}
-
-.window-control.maximize {
-  background: #28c840;
-}
-
-.window-control::after {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: rgba(15, 23, 42, 0.68);
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 12px;
-  opacity: 0;
-}
-
-.window-controls:hover .window-control::after,
-.window-control:focus-visible::after {
-  opacity: 1;
-}
-
-.window-control.close::after {
-  content: "×";
-}
-
-.window-control.minimize::after {
-  content: "−";
-  transform: translateY(-1px);
-}
-
-.window-control.maximize::after {
-  content: "+";
-  font-size: 8px;
 }
 
 .brand {

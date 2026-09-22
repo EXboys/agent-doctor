@@ -20,17 +20,13 @@ import { initResourcesHub } from "./resources-hub";
 import { initFirstRunUi } from "./first-run-ui";
 import type { DoctorReport, MainTabId, WorkspaceDoctorReport } from "./types";
 
-if (navigator.userAgent.includes("Windows")) {
-  document.documentElement.classList.add("is-opaque-shell");
-}
+// Native OS title bar — fill the window edge-to-edge (no frameless traffic lights).
+document.documentElement.classList.add("is-opaque-shell");
 
 const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
 const langSwitchEl = document.querySelector<HTMLElement>(".lang-switch")!;
 const widgetToolbarEl = document.querySelector<HTMLElement>(".widget-toolbar")!;
-const windowCloseEl = document.querySelector<HTMLButtonElement>("#window-close")!;
-const windowMinimizeEl = document.querySelector<HTMLButtonElement>("#window-minimize")!;
-const windowMaximizeEl = document.querySelector<HTMLButtonElement>("#window-maximize")!;
 const mainWindow = getCurrentWindow();
 const appVersionEl = document.querySelector<HTMLElement>("#app-version");
 const checkUpdateEl = document.querySelector<HTMLButtonElement>("#check-update");
@@ -150,27 +146,6 @@ mainTabsEl.addEventListener("click", (event) => {
   if (tab === "diagnose" || tab === "resources" || tab === "provider" || tab === "workspace") {
     setMainTab(tab);
   }
-});
-
-windowCloseEl.addEventListener("click", () => {
-  // Hide to tray — destroying main while Ask is alive leaves a tray-only
-  // process that cannot reopen the shell without a rebuild.
-  void mainWindow.hide();
-});
-
-windowMinimizeEl.addEventListener("click", () => {
-  // Undecorated WebView2 on Windows often fails to restore from a real
-  // minimize via the taskbar; hide to tray and restore via tray / relaunch.
-  const isWindows = navigator.userAgent.includes("Windows");
-  if (isWindows) {
-    void mainWindow.hide();
-  } else {
-    void mainWindow.minimize();
-  }
-});
-
-windowMaximizeEl.addEventListener("click", () => {
-  void mainWindow.toggleMaximize();
 });
 
 widgetToolbarEl.addEventListener("dblclick", (event) => {

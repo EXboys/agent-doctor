@@ -2,17 +2,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatCount, formatRate } from "./format";
 import { getLocale, t, type MessageKey } from "./i18n";
+import {
+  classifySkillCategory,
+  skillCategoryLabelKey,
+  SKILL_CATEGORY_ORDER,
+  type SkillCategoryId,
+} from "./skill-categories";
 import type {
   BrowserMcpDiagnoseWireReport,
   BrowserMcpTargetAction,
   BrowserMcpTargetStatus,
   McpInventoryItem,
   McpModuleStatus,
-  ResourceFilter,
   ResourceRow,
   SkillMountReport,
   SkillsInventoryReport,
 } from "./types";
+
+type ResourcesSection = "skills" | "tools" | "browser";
+type SkillFilter = "all" | "issue" | SkillCategoryId;
+type ToolFilter = "all" | "issue";
 
 const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
 const MCP_USER_DATA_DIR_KEY = "agent-doctor.mcp.userDataDir";
@@ -22,11 +31,14 @@ const subtitleEl = document.querySelector<HTMLElement>("#resources-subtitle")!;
 const refreshAllEl = document.querySelector<HTMLButtonElement>("#resources-refresh-all")!;
 const closeEl = document.querySelector<HTMLButtonElement>("#resources-close")!;
 const sectionTabsEl = document.querySelector<HTMLElement>("#resources-section-tabs")!;
-const filtersEl = document.querySelector<HTMLElement>("#resources-filters")!;
+const skillFiltersEl = document.querySelector<HTMLElement>("#resources-skill-filters")!;
+const toolFiltersEl = document.querySelector<HTMLElement>("#resources-tool-filters")!;
 const searchEl = document.querySelector<HTMLInputElement>("#resources-search")!;
-const listEl = document.querySelector<HTMLUListElement>("#resources-list")!;
+const listEl = document.querySelector<HTMLElement>("#resources-list")!;
 const emptyEl = document.querySelector<HTMLElement>("#resources-empty")!;
 const footnoteEl = document.querySelector<HTMLElement>("#resources-footnote")!;
+const toolsListEl = document.querySelector<HTMLUListElement>("#resources-tools-list")!;
+const toolsEmptyEl = document.querySelector<HTMLElement>("#resources-tools-empty")!;
 
 const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
 const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
@@ -47,8 +59,10 @@ const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 let lastSkillsInventory: SkillsInventoryReport | null = null;
 let lastMcpStatus: McpModuleStatus | null = null;
 let lastWireActions: BrowserMcpTargetAction[] | null = null;
-let resourceFilter: ResourceFilter = "all";
+let skillFilter: SkillFilter = "all";
+let toolFilter: ToolFilter = "all";
 let resourceQuery = "";
+let activeSection: ResourcesSection = "skills";
 let mcpConfigureInFlight = false;
 
 function applyI18n(): void {
@@ -60,12 +74,13 @@ function applyI18n(): void {
     const key = el.dataset.i18nTitle as MessageKey | undefined;
     if (key) el.title = t(key);
   });
-  searchEl.placeholder = t("chat.resourcesSearch");
+  searchEl.placeholder = t("resources.searchGlobal");
   mcpDiagnoseWireEl.title = t("mcp.diagnoseWireHint");
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
 }
 
-function setSection(section: "catalog" | "browser"): void {
+function setSection(section: ResourcesSection): void {
+  activeSection = section;
   sectionTabsEl.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((btn) => {
     const active = btn.dataset.section === section;
     btn.classList.toggle("is-active", active);
@@ -76,6 +91,37 @@ function setSection(section: "catalog" | "browser"): void {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+}
+
+function rowMatchesQuery(row: ResourceRow, extra = ""): boolean {
+  if (!resourceQuery) return true;
+  return `${row.name} ${row.sub} ${row.meta} ${extra}`.toLowerCase().includes(resourceQuery);
+}
+
+function countSkillMatches(): number {
+  return buildSkillRows().filter((row) => rowMatchesQuery(row, skillDescription(row.skillId))).length;
+}
+
+function countToolMatches(): number {
+  return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
+}
+
+/** When searching, leave Browser (no list) and jump to the tab that has hits. */
+function maybeJumpToSearchHits(): void {
+  if (!resourceQuery) return;
+  const skillHits = countSkillMatches();
+  const toolHits = countToolMatches();
+  if (activeSection === "browser") {
+    if (skillHits > 0) setSection("skills");
+    else if (toolHits > 0) setSection("tools");
+    else setSection("skills");
+    return;
+  }
+  if (activeSection === "skills" && skillHits === 0 && toolHits > 0) {
+    setSection("tools");
+  } else if (activeSection === "tools" && toolHits === 0 && skillHits > 0) {
+    setSection("skills");
+  }
 }
 
 function persistShowBrowserUi(show: boolean): void {
@@ -302,10 +348,11 @@ function renderMcpBrowserStatus(status: McpModuleStatus): void {
   mcpDiagnoseWireEl.disabled = !canWire;
 }
 
-function buildResourceRows(): ResourceRow[] {
+function buildMcpRows(): ResourceRow[] {
   const rows: ResourceRow[] = [];
   const mcpGroups = new Map<string, McpInventoryItem[]>();
   for (const server of lastMcpStatus?.inventory.servers ?? []) {
+    if (server.is_browser) continue; // Browser has its own tab.
     const key = server.name.trim().toLowerCase();
     const group = mcpGroups.get(key) ?? [];
     group.push(server);
@@ -313,14 +360,14 @@ function buildResourceRows(): ResourceRow[] {
   }
 
   for (const servers of mcpGroups.values()) {
-    const primary = servers[0];
+    const primary = servers[0]!;
     const runtimes = [...new Set(servers.map((server) => server.runtime_hint))].map((runtime) => {
       if (runtime === "claude-code") return "Claude";
       if (runtime === "codex") return "Codex";
       if (runtime === "openclaw") return "OpenClaw";
       if (runtime === "hermes") return "Hermes";
-      if (runtime === "deepseek-harness") return "DeepSeek Harness";
-      if (runtime === "shared") return "Shared";
+      if (runtime === "deepseek-harness") return "DeepSeek";
+      if (runtime === "shared") return t("resources.shared");
       return runtime;
     });
     const issues = servers.filter((server) => !server.healthy);
@@ -335,17 +382,27 @@ function buildResourceRows(): ResourceRow[] {
               issues: String(issues.length),
               count: String(servers.length),
             })
-          : primary.is_browser
-            ? `${t("resources.mcpBrowser")} · ${bindingLabel}`
-            : `${t("resources.mcpHealthy")} · ${bindingLabel}`,
+          : `${t("resources.mcpHealthy")} · ${bindingLabel}`,
       tone: issues.length > 0 ? "bad" : "ok",
       issue: issues.length > 0,
     });
   }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
 
+type SkillRow = ResourceRow & { category: SkillCategoryId };
+
+function buildSkillRows(): SkillRow[] {
+  const rows: SkillRow[] = [];
   for (const skill of lastSkillsInventory?.skills ?? []) {
     const mounted = skill.agents.filter((a) => a.mounted).length;
-    const needsMount = skill.agents.some((a) => !a.mounted);
+    // Only "needs attention" when no Agent has it — missing on some Agents is normal.
+    const needsMount = skill.agents.length > 0 && mounted === 0;
+    const category = classifySkillCategory({
+      id: skill.skill_id,
+      name: skill.name,
+      description: skill.description,
+    });
     rows.push({
       kind: "skill",
       name: skill.name || skill.skill_id,
@@ -358,10 +415,10 @@ function buildResourceRows(): ResourceRow[] {
       issue: needsMount,
       skillId: skill.skill_id,
       needsMount,
+      category,
     });
   }
-
-  return rows;
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function skillDescription(skillId: string | undefined): string {
@@ -369,91 +426,174 @@ function skillDescription(skillId: string | undefined): string {
   return lastSkillsInventory?.skills.find((s) => s.skill_id === skillId)?.description?.trim() || "";
 }
 
-function mcpPrimary(name: string): McpInventoryItem | undefined {
-  return lastMcpStatus?.inventory.servers.find((s) => s.name === name);
+function appendResourceRow(parent: HTMLElement, row: ResourceRow, tagLabel: string): void {
+  const li = document.createElement("li");
+  li.className = "res-catalog-item";
+
+  const icon = document.createElement("span");
+  icon.className = "res-catalog-icon";
+  icon.classList.add(row.kind === "skill" ? "is-skill" : "is-mcp");
+  icon.textContent = (row.name.trim().charAt(0) || "?").toUpperCase();
+
+  const body = document.createElement("div");
+  body.className = "res-catalog-body";
+  const titleRow = document.createElement("div");
+  titleRow.className = "res-catalog-title-row";
+  const strong = document.createElement("strong");
+  strong.textContent = row.name;
+  const badge = document.createElement("span");
+  badge.className = "res-catalog-badge";
+  badge.textContent = tagLabel;
+  titleRow.append(strong, badge);
+  const desc = document.createElement("div");
+  desc.className = "res-catalog-desc";
+  desc.textContent = row.kind === "skill" ? skillDescription(row.skillId) || row.sub : row.sub;
+  body.append(titleRow, desc);
+
+  const metaWrap = document.createElement("div");
+  metaWrap.className = "res-catalog-meta";
+  const meta = document.createElement("span");
+  meta.className = `tone-${row.tone}`;
+  meta.textContent = row.meta;
+  metaWrap.appendChild(meta);
+
+  if (row.kind === "skill" && row.needsMount && row.skillId) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary btn-compact";
+    btn.textContent = t("resources.mount");
+    const skillId = row.skillId;
+    btn.addEventListener("click", () => {
+      void mountSkill(skillId);
+    });
+    metaWrap.appendChild(btn);
+  }
+
+  li.append(icon, body, metaWrap);
+  parent.appendChild(li);
 }
 
-function renderResourcesList(): void {
-  const rows = buildResourceRows().filter((row) => {
-    if (resourceFilter === "all") {
-      // keep
-    } else if (resourceFilter === "issue") {
+function renderSkillFilters(rows: SkillRow[]): void {
+  const counts = new Map<SkillFilter, number>();
+  counts.set("all", rows.length);
+  counts.set("issue", rows.filter((row) => row.issue).length);
+  for (const id of SKILL_CATEGORY_ORDER) {
+    counts.set(id, rows.filter((row) => row.category === id).length);
+  }
+
+  const chips: Array<{ id: SkillFilter; label: string; count: number }> = [
+    { id: "all", label: t("resources.filterAll"), count: counts.get("all") ?? 0 },
+    { id: "issue", label: t("resources.filterIssue"), count: counts.get("issue") ?? 0 },
+  ];
+  for (const id of SKILL_CATEGORY_ORDER) {
+    const count = counts.get(id) ?? 0;
+    if (id !== "other" && count === 0) continue;
+    chips.push({
+      id,
+      label: t(skillCategoryLabelKey(id) as MessageKey),
+      count,
+    });
+  }
+
+  if (!chips.some((chip) => chip.id === skillFilter)) {
+    skillFilter = "all";
+  }
+
+  skillFiltersEl.replaceChildren();
+  for (const chip of chips) {
+    if (chip.id === "issue" && chip.count === 0) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `filter-chip${skillFilter === chip.id ? " is-active" : ""}`;
+    btn.dataset.skillFilter = chip.id;
+    btn.textContent = `${chip.label} ${chip.count}`;
+    btn.addEventListener("click", () => {
+      skillFilter = chip.id;
+      renderResourcesList();
+    });
+    skillFiltersEl.appendChild(btn);
+  }
+}
+
+function renderSkillsList(): void {
+  const allRows = buildSkillRows();
+  renderSkillFilters(allRows);
+
+  const rows = allRows.filter((row) => {
+    if (skillFilter === "issue") {
       if (!row.issue) return false;
-    } else if (row.kind !== resourceFilter) {
+    } else if (skillFilter !== "all" && row.category !== skillFilter) {
       return false;
     }
-    if (!resourceQuery) return true;
-    const desc =
-      row.kind === "skill"
-        ? skillDescription(row.skillId)
-        : mcpPrimary(row.name)?.config_path || "";
-    return `${row.name} ${row.sub} ${row.meta} ${desc}`.toLowerCase().includes(resourceQuery);
+    return rowMatchesQuery(row, skillDescription(row.skillId));
   });
 
   listEl.replaceChildren();
   emptyEl.hidden = rows.length > 0;
-  emptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.empty");
+  emptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptySkills");
+
+  if (skillFilter === "all" && !resourceQuery) {
+    for (const category of SKILL_CATEGORY_ORDER) {
+      const group = rows.filter((row) => row.category === category);
+      if (group.length === 0) continue;
+      const heading = document.createElement("h3");
+      heading.className = "res-catalog-group";
+      heading.textContent = `${t(skillCategoryLabelKey(category) as MessageKey)} · ${group.length}`;
+      listEl.appendChild(heading);
+      const ul = document.createElement("ul");
+      ul.className = "res-catalog-list";
+      for (const row of group) {
+        appendResourceRow(ul, row, t(skillCategoryLabelKey(row.category) as MessageKey));
+      }
+      listEl.appendChild(ul);
+    }
+  } else {
+    const ul = document.createElement("ul");
+    ul.className = "res-catalog-list";
+    for (const row of rows) {
+      appendResourceRow(ul, row, t(skillCategoryLabelKey(row.category) as MessageKey));
+    }
+    listEl.appendChild(ul);
+  }
+}
+
+function renderToolsList(): void {
+  const allRows = buildMcpRows();
+  const rows = allRows.filter((row) => {
+    if (toolFilter === "issue" && !row.issue) return false;
+    return rowMatchesQuery(row);
+  });
+
+  toolFiltersEl.querySelectorAll<HTMLButtonElement>("[data-tool-filter]").forEach((chip) => {
+    chip.classList.toggle("is-active", chip.dataset.toolFilter === toolFilter);
+  });
+
+  toolsListEl.replaceChildren();
+  toolsEmptyEl.hidden = rows.length > 0;
+  toolsEmptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptyTools");
+  for (const row of rows) {
+    appendResourceRow(toolsListEl, row, t("resources.toolBadge"));
+  }
+}
+
+function renderResourcesList(): void {
+  const uniqueMcp = new Set(
+    (lastMcpStatus?.inventory.servers ?? [])
+      .filter((s) => !s.is_browser)
+      .map((s) => s.name.trim().toLowerCase()),
+  );
+  subtitleEl.textContent = t("resources.windowSubtitle", {
+    skills: String(lastSkillsInventory?.skills.length ?? 0),
+    mcp: String(uniqueMcp.size),
+  });
   footnoteEl.textContent = lastMcpStatus?.inventory.workspace_name
     ? `${lastMcpStatus.inventory.workspace_name}${
         lastMcpStatus.inventory.workspace_path ? ` · ${lastMcpStatus.inventory.workspace_path}` : ""
       }`
     : "";
 
-  const uniqueMcp = new Set(
-    (lastMcpStatus?.inventory.servers ?? []).map((s) => s.name.trim().toLowerCase()),
-  );
-  subtitleEl.textContent = t("resources.windowSubtitle", {
-    skills: String(lastSkillsInventory?.skills.length ?? 0),
-    mcp: String(uniqueMcp.size),
-  });
-
-  for (const row of rows) {
-    const li = document.createElement("li");
-    li.className = "res-catalog-item";
-
-    const icon = document.createElement("span");
-    icon.className = "res-catalog-icon";
-    const browser = row.kind === "mcp" && Boolean(mcpPrimary(row.name)?.is_browser);
-    icon.classList.add(row.kind === "skill" ? "is-skill" : browser ? "is-browser" : "is-mcp");
-    icon.textContent = (row.name.trim().charAt(0) || "?").toUpperCase();
-
-    const body = document.createElement("div");
-    body.className = "res-catalog-body";
-    const titleRow = document.createElement("div");
-    titleRow.className = "res-catalog-title-row";
-    const strong = document.createElement("strong");
-    strong.textContent = row.name;
-    const badge = document.createElement("span");
-    badge.className = "res-catalog-badge";
-    badge.textContent = row.kind === "skill" ? "Skill" : browser ? "Browser" : "MCP";
-    titleRow.append(strong, badge);
-    const desc = document.createElement("div");
-    desc.className = "res-catalog-desc";
-    desc.textContent = row.kind === "skill" ? skillDescription(row.skillId) || row.sub : row.sub;
-    body.append(titleRow, desc);
-
-    const metaWrap = document.createElement("div");
-    metaWrap.className = "res-catalog-meta";
-    const meta = document.createElement("span");
-    meta.className = `tone-${row.tone}`;
-    meta.textContent = row.meta;
-    metaWrap.appendChild(meta);
-
-    if (row.kind === "skill" && row.needsMount && row.skillId) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn-secondary btn-compact";
-      btn.textContent = t("resources.mount");
-      const skillId = row.skillId;
-      btn.addEventListener("click", () => {
-        void mountSkill(skillId);
-      });
-      metaWrap.appendChild(btn);
-    }
-
-    li.append(icon, body, metaWrap);
-    listEl.appendChild(li);
-  }
+  renderSkillsList();
+  renderToolsList();
 }
 
 async function mountSkill(skillId: string): Promise<void> {
@@ -554,25 +694,28 @@ async function diagnoseAndWireBrowserMcp(): Promise<void> {
 sectionTabsEl.addEventListener("click", (event) => {
   const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-section]");
   if (!btn?.dataset.section) return;
-  if (btn.dataset.section === "catalog" || btn.dataset.section === "browser") {
+  if (
+    btn.dataset.section === "skills" ||
+    btn.dataset.section === "tools" ||
+    btn.dataset.section === "browser"
+  ) {
     setSection(btn.dataset.section);
   }
 });
 
-filtersEl.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-res-filter]");
-  const filter = button?.dataset.resFilter as ResourceFilter | undefined;
+toolFiltersEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-tool-filter]");
+  const filter = button?.dataset.toolFilter as ToolFilter | undefined;
   if (!filter) return;
-  resourceFilter = filter;
-  filtersEl.querySelectorAll<HTMLButtonElement>("[data-res-filter]").forEach((chip) => {
-    chip.classList.toggle("is-active", chip.dataset.resFilter === filter);
-  });
-  renderResourcesList();
+  toolFilter = filter;
+  renderToolsList();
 });
 
 searchEl.addEventListener("input", () => {
   resourceQuery = searchEl.value.trim().toLowerCase();
-  renderResourcesList();
+  maybeJumpToSearchHits();
+  renderSkillsList();
+  renderToolsList();
 });
 
 refreshAllEl.addEventListener("click", () => {
@@ -633,6 +776,8 @@ applyI18n();
 void refreshAll();
 void listen<{ section?: string }>("resources-window-focus", (event) => {
   const section = event.payload?.section;
-  if (section === "browser" || section === "catalog") setSection(section);
+  if (section === "browser") setSection("browser");
+  else if (section === "tools" || section === "mcp") setSection("tools");
+  else if (section === "skills" || section === "catalog") setSection("skills");
   void refreshAll();
 });

@@ -43,13 +43,16 @@ pub struct McpConfigureReport {
 }
 
 #[tauri::command]
-pub fn list_skills_inventory_command(
+pub async fn list_skills_inventory_command(
     remote_stats: Option<bool>,
 ) -> Result<SkillsInventoryReport, String> {
-    list_skills_inventory_with_options(&SkillsInventoryOptions {
-        remote_stats: remote_stats.unwrap_or(true),
+    let remote_stats = remote_stats.unwrap_or(true);
+    tauri::async_runtime::spawn_blocking(move || {
+        list_skills_inventory_with_options(&SkillsInventoryOptions { remote_stats })
+            .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

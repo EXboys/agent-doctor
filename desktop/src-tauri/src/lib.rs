@@ -26,12 +26,13 @@ mod commands;
 use commands::*;
 
 const ASK_WINDOW_LABEL: &str = "ask";
+/// Soft defaults for first create only; live size follows the monitor work area.
 const ASK_WINDOW_WIDTH: f64 = 980.0;
 const ASK_WINDOW_HEIGHT: f64 = 640.0;
 const ASK_WINDOW_MARGIN: f64 = 16.0;
+const ASK_WINDOW_MIN_WIDTH: f64 = 720.0;
+const ASK_WINDOW_MIN_HEIGHT: f64 = 480.0;
 const RESOURCES_WINDOW_LABEL: &str = "resources";
-const RESOURCES_WINDOW_WIDTH: f64 = 920.0;
-const RESOURCES_WINDOW_HEIGHT: f64 = 720.0;
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
@@ -161,12 +162,12 @@ fn window_decoration_width(window: &tauri::WebviewWindow, scale: f64) -> f64 {
     ((outer.width as f64 - inner.width as f64) / scale).max(0.0)
 }
 
-/// Dock main (left) + Ask (right) as one aligned pair: same top, same bottom, side by side.
-fn layout_main_and_ask_side_by_side(app: &AppHandle) {
+/// Dock main (left) + secondary (right: Ask or Resources): same top/bottom, side by side.
+fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str) {
     let Some(main) = app.get_webview_window("main") else {
         return;
     };
-    let Some(ask) = app.get_webview_window(ASK_WINDOW_LABEL) else {
+    let Some(secondary) = app.get_webview_window(secondary_label) else {
         return;
     };
     let Some((work_x, work_y, work_w, work_h, scale)) = monitor_work_area(&main) else {
@@ -183,22 +184,42 @@ fn layout_main_and_ask_side_by_side(app: &AppHandle) {
         (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
 
-    let ask_deco_w = window_decoration_width(&ask, scale);
-    let ask_deco_h = window_decoration_height(&ask, scale);
+    let secondary_deco_w = window_decoration_width(&secondary, scale);
+    let secondary_deco_h = window_decoration_height(&secondary, scale);
     let main_deco_h = window_decoration_height(&main, scale);
 
-    let ask_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w).max(720.0_f64);
-    let ask_inner_w = (ask_outer_w - ask_deco_w).max(720.0_f64);
+    let secondary_outer_w =
+        (work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w).max(ASK_WINDOW_MIN_WIDTH);
+    let secondary_inner_w = (secondary_outer_w - secondary_deco_w).max(ASK_WINDOW_MIN_WIDTH);
     let main_inner_h = (outer_h - main_deco_h).max(MAIN_WINDOW_MIN_HEIGHT);
-    let ask_inner_h = (outer_h - ask_deco_h).max(480.0_f64);
+    let secondary_inner_h = (outer_h - secondary_deco_h).max(ASK_WINDOW_MIN_HEIGHT);
 
     let main_x = work_x + MAIN_WINDOW_MARGIN;
-    let ask_x = main_x + main_outer_w + gap;
+    let secondary_x = main_x + main_outer_w + gap;
 
     let _ = main.set_size(LogicalSize::new(main_outer_w, main_inner_h));
     let _ = main.set_position(LogicalPosition::new(main_x, y));
-    let _ = ask.set_size(LogicalSize::new(ask_inner_w, ask_inner_h));
-    let _ = ask.set_position(LogicalPosition::new(ask_x, y));
+    let _ = secondary.set_size(LogicalSize::new(secondary_inner_w, secondary_inner_h));
+    let _ = secondary.set_position(LogicalPosition::new(secondary_x, y));
+}
+
+fn layout_main_and_ask_side_by_side(app: &AppHandle) {
+    layout_main_and_secondary_side_by_side(app, ASK_WINDOW_LABEL);
+}
+
+fn layout_main_and_resources_side_by_side(app: &AppHandle) {
+    layout_main_and_secondary_side_by_side(app, RESOURCES_WINDOW_LABEL);
+}
+
+fn hide_secondary_window(app: &AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    if !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.hide();
 }
 
 fn position_main_window_left(window: &tauri::WebviewWindow) {
@@ -225,8 +246,14 @@ fn show_main_window(app: &tauri::AppHandle) {
         .get_webview_window(ASK_WINDOW_LABEL)
         .and_then(|ask| ask.is_visible().ok())
         .unwrap_or(false);
+    let resources_visible = app
+        .get_webview_window(RESOURCES_WINDOW_LABEL)
+        .and_then(|win| win.is_visible().ok())
+        .unwrap_or(false);
     if ask_visible {
         layout_main_and_ask_side_by_side(app);
+    } else if resources_visible {
+        layout_main_and_resources_side_by_side(app);
     } else {
         position_main_window_left(&window);
     }
@@ -258,22 +285,15 @@ fn ensure_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
         return Some(window);
     }
 
-    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Agent Doctor")
         .inner_size(420.0, 720.0)
         .min_inner_size(360.0, 520.0)
-        .decorations(false)
+        .decorations(true)
+        .transparent(false)
+        .shadow(true)
         .resizable(true)
         .visible(false);
-
-    #[cfg(target_os = "windows")]
-    {
-        builder = builder.transparent(false).shadow(true);
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        builder = builder.transparent(true).shadow(false);
-    }
 
     match builder.build() {
         Ok(window) => {
@@ -858,7 +878,7 @@ fn create_ask_window(
     let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
             .title("Agent Doctor — Ask")
             .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
-            .min_inner_size(720.0, 480.0)
+            .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
             .resizable(true)
             .closable(true)
             .minimizable(true)
@@ -906,6 +926,8 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
     let already_exists = app.get_webview_window(ASK_WINDOW_LABEL).is_some();
     let window = ensure_ask_window(app, runtime)?;
     apply_ask_runtime_in_webview(&window, runtime);
+    // Right-dock slot is shared with Resources — only one secondary on the right.
+    hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
     // Pair with main: left/right side-by-side, top and bottom aligned.
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
@@ -954,56 +976,6 @@ fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn position_resources_window(app: &AppHandle, window: &tauri::WebviewWindow) {
-    let Some((work_x, work_y, work_w, work_h, _)) = monitor_work_area(window) else {
-        return;
-    };
-
-    let width = RESOURCES_WINDOW_WIDTH
-        .min(work_w - ASK_WINDOW_MARGIN * 2.0)
-        .max((work_w - ASK_WINDOW_MARGIN * 2.0).min(720.0_f64));
-    let height = RESOURCES_WINDOW_HEIGHT
-        .min(work_h - ASK_WINDOW_MARGIN * 2.0)
-        .max((work_h - ASK_WINDOW_MARGIN * 2.0).min(520.0_f64));
-
-    // Prefer the free band between main (left) and Ask (right).
-    let main_right = app
-        .get_webview_window("main")
-        .and_then(|main| {
-            if !main.is_visible().unwrap_or(false) {
-                return None;
-            }
-            let scale = main.scale_factor().ok()?;
-            let pos = main.outer_position().ok()?;
-            let size = main.outer_size().ok()?;
-            Some(pos.x as f64 / scale + size.width as f64 / scale)
-        })
-        .unwrap_or(work_x + MAIN_WINDOW_MARGIN);
-    let ask_left = app
-        .get_webview_window(ASK_WINDOW_LABEL)
-        .and_then(|ask| {
-            if !ask.is_visible().unwrap_or(false) {
-                return None;
-            }
-            let scale = ask.scale_factor().ok()?;
-            let pos = ask.outer_position().ok()?;
-            Some(pos.x as f64 / scale)
-        })
-        .unwrap_or(work_x + work_w - ASK_WINDOW_MARGIN);
-
-    let band_left = main_right + ASK_WINDOW_MARGIN;
-    let band_right = ask_left - ASK_WINDOW_MARGIN;
-    let x = if band_right - band_left >= width {
-        band_left + ((band_right - band_left - width) / 2.0).max(0.0)
-    } else {
-        work_x + ((work_w - width) / 2.0).max(ASK_WINDOW_MARGIN)
-    };
-    let y = work_y + ((work_h - height) / 2.0).max(ASK_WINDOW_MARGIN);
-
-    let _ = window.set_size(LogicalSize::new(width, height));
-    let _ = window.set_position(LogicalPosition::new(x, y));
-}
-
 fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
     let hide = window.clone();
     window.on_window_event(move |event| {
@@ -1022,8 +994,8 @@ fn create_resources_window(app: &AppHandle, visible: bool) -> Result<tauri::Webv
         WebviewUrl::App("resources.html".into()),
     )
     .title("Agent Doctor — Resources")
-    .inner_size(RESOURCES_WINDOW_WIDTH, RESOURCES_WINDOW_HEIGHT)
-    .min_inner_size(720.0, 520.0)
+    .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+    .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
     .resizable(true)
     .closable(true)
     .minimizable(true)
@@ -1045,10 +1017,17 @@ fn ensure_resources_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Stri
 
 fn open_or_focus_resources_window(app: &AppHandle, section: Option<&str>) -> Result<(), String> {
     let window = ensure_resources_window(app)?;
-    position_resources_window(app, &window);
+    // Same right-dock as Ask — hide Ask so Resources does not stack over main.
+    hide_secondary_window(app, ASK_WINDOW_LABEL);
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+    }
     let _ = window.set_skip_taskbar(false);
     let _ = window.unminimize();
     let _ = window.show();
+    layout_main_and_resources_side_by_side(app);
+    layout_main_and_resources_side_by_side(app);
     let _ = window.set_focus();
     let section = section
         .map(str::trim)
