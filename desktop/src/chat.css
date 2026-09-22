@@ -2456,9 +2456,9 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-prompt {
   width: 100%;
+  /* min-height = one line + padding; grow via autoResizePrompt / resources-open. */
   min-height: calc(1.45em + 14px);
   max-height: calc(1.45em * 3 + 14px);
-  height: calc(1.45em + 14px);
   overflow-y: auto;
   resize: none;
   border: 0;
@@ -2472,6 +2472,11 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   box-shadow: none;
 }
 
+/* When Skills/MCP steals width, keep the empty placeholder readable (2 lines). */
+.chat-shell.is-resources-open .chat-prompt:placeholder-shown {
+  min-height: calc(1.45em * 2 + 14px);
+}
+
 .chat-prompt:focus {
   outline: none;
   border-color: transparent;
@@ -2481,16 +2486,18 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   padding: 4px 8px 8px;
 }
 
 .chat-composer-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
 }
 
 .btn-composer-icon {

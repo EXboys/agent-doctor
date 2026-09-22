@@ -533,38 +533,44 @@ fn document_from_store(store: &PersonalProvidersStore, path: &Path) -> PersonalP
     }
 }
 
+fn is_canonical_providers_path(path: &Path) -> bool {
+    personal_providers_path()
+        .map(|canonical| canonical == path)
+        .unwrap_or(false)
+}
+
 fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     // Strip keys from on-disk providers.json — keys live in the local secrets vault.
     let mut redacted = store.clone();
-    for entry in &mut redacted.providers {
-        let _ = entry;
-    }
-    if let Ok(settings) = crate::store::open_settings_store() {
-        for entry in &store.providers {
-            let _ = settings.upsert_personal_provider(&crate::store::PersonalProviderRecord {
-                id: entry.id.clone(),
-                name: entry.name.clone(),
-                url: entry.url.clone(),
-                model: entry.model.clone(),
-                protocol: normalize_protocol(&entry.protocol),
-                active: store.active_id.as_deref() == Some(entry.id.as_str()),
-            });
-            if !entry.api_key.trim().is_empty() {
-                let _ = settings.set_personal_api_key(&entry.id, entry.api_key.trim());
+    // Only mirror into the real settings.db when writing the real providers.json.
+    // Unit tests write to temp paths and must never touch the developer's machine.
+    if is_canonical_providers_path(path) {
+        if let Ok(settings) = crate::store::open_settings_store() {
+            for entry in &store.providers {
+                let _ = settings.upsert_personal_provider(&crate::store::PersonalProviderRecord {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                    url: entry.url.clone(),
+                    model: entry.model.clone(),
+                    protocol: normalize_protocol(&entry.protocol),
+                    active: store.active_id.as_deref() == Some(entry.id.as_str()),
+                });
+                if !entry.api_key.trim().is_empty() {
+                    let _ = settings.set_personal_api_key(&entry.id, entry.api_key.trim());
+                }
             }
-        }
-        // Remove deleted providers from settings store.
-        if let Ok(existing) = settings.list_personal_providers() {
-            for record in existing {
-                if !store.providers.iter().any(|p| p.id == record.id) {
-                    let _ = settings.delete_personal_provider(&record.id);
+            // Remove deleted providers from settings store.
+            if let Ok(existing) = settings.list_personal_providers() {
+                for record in existing {
+                    if !store.providers.iter().any(|p| p.id == record.id) {
+                        let _ = settings.delete_personal_provider(&record.id);
+                    }
                 }
             }
         }
-        // Persist metadata-only JSON (no api_key) for legacy readers.
         for entry in &mut redacted.providers {
             entry.api_key.clear();
         }
@@ -580,34 +586,36 @@ fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
 }
 
 fn load_store(path: &Path) -> Result<PersonalProvidersStore> {
-    // Prefer settings.db + local secrets vault when populated.
-    if let Ok(settings) = crate::store::open_settings_store() {
-        if let Ok(records) = settings.list_personal_providers() {
-            if !records.is_empty() {
-                let mut providers = Vec::new();
-                let mut active_id = None;
-                for record in records {
-                    let api_key = settings
-                        .get_personal_api_key(&record.id)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default();
-                    if record.active {
-                        active_id = Some(record.id.clone());
+    // Prefer settings.db + local secrets vault when reading the real providers path.
+    if is_canonical_providers_path(path) {
+        if let Ok(settings) = crate::store::open_settings_store() {
+            if let Ok(records) = settings.list_personal_providers() {
+                if !records.is_empty() {
+                    let mut providers = Vec::new();
+                    let mut active_id = None;
+                    for record in records {
+                        let api_key = settings
+                            .get_personal_api_key(&record.id)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        if record.active {
+                            active_id = Some(record.id.clone());
+                        }
+                        providers.push(PersonalProviderEntry {
+                            id: record.id,
+                            name: record.name,
+                            url: record.url,
+                            api_key,
+                            model: record.model,
+                            protocol: record.protocol,
+                        });
                     }
-                    providers.push(PersonalProviderEntry {
-                        id: record.id,
-                        name: record.name,
-                        url: record.url,
-                        api_key,
-                        model: record.model,
-                        protocol: record.protocol,
+                    return Ok(PersonalProvidersStore {
+                        active_id,
+                        providers,
                     });
                 }
-                return Ok(PersonalProvidersStore {
-                    active_id,
-                    providers,
-                });
             }
         }
     }

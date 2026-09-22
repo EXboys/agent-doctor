@@ -14,6 +14,7 @@ import { modelsForProviderUrl, providerChipForUrl } from "./provider-models";
 import { renderMarkdown } from "./markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
@@ -341,9 +342,10 @@ function autoResizePrompt(): void {
   promptEl.style.height = "auto";
   const styles = window.getComputedStyle(promptEl);
   const maxHeight = Number.parseFloat(styles.maxHeight);
-  const next = Number.isFinite(maxHeight)
-    ? Math.min(promptEl.scrollHeight, maxHeight)
-    : promptEl.scrollHeight;
+  const minHeight = Number.parseFloat(styles.minHeight);
+  let next = promptEl.scrollHeight;
+  if (Number.isFinite(minHeight)) next = Math.max(next, minHeight);
+  if (Number.isFinite(maxHeight)) next = Math.min(next, maxHeight);
   promptEl.style.height = `${next}px`;
 }
 
@@ -2973,8 +2975,48 @@ function updateResourcesSummary(): void {
   askResources.updateResourcesSummary();
 }
 
+/** Matches `.chat-shell.is-resources-open` grid first column. */
+const RESOURCES_PANEL_WIDTH_PX = 320;
+const ASK_WINDOW_MIN_WIDTH_PX = 720;
+/** Remember width before opening Skills/MCP so close restores, not blindly -320. */
+let askWidthBeforeResources: number | null = null;
+
+async function adaptAskWindowForResources(open: boolean): Promise<void> {
+  try {
+    const win = getCurrentWindow();
+    const size = await win.innerSize();
+    const factor = await win.scaleFactor();
+    const logicalW = size.width / factor;
+    const logicalH = size.height / factor;
+
+    let nextW: number;
+    if (open) {
+      askWidthBeforeResources = logicalW;
+      nextW = logicalW + RESOURCES_PANEL_WIDTH_PX;
+      const monitor = await win.currentMonitor();
+      if (monitor) {
+        const maxW = monitor.size.width / monitor.scaleFactor - 24;
+        nextW = Math.min(nextW, maxW);
+      }
+    } else {
+      nextW = askWidthBeforeResources ?? logicalW - RESOURCES_PANEL_WIDTH_PX;
+      askWidthBeforeResources = null;
+    }
+    nextW = Math.max(ASK_WINDOW_MIN_WIDTH_PX, nextW);
+    if (Math.abs(nextW - logicalW) < 1) return;
+    await win.setSize(new LogicalSize(nextW, logicalH));
+  } catch {
+    // Browser / non-Tauri preview — CSS adaptation still applies.
+  }
+}
+
 function toggleResourcesPanel(): void {
+  const willOpen = !shellEl.classList.contains("is-resources-open");
   askResources.toggleResourcesPanel();
+  void adaptAskWindowForResources(willOpen).finally(() => {
+    // After layout width settles, re-measure the prompt (placeholder may wrap).
+    requestAnimationFrame(() => autoResizePrompt());
+  });
 }
 
 async function loadAskResources(): Promise<void> {
