@@ -365,6 +365,121 @@ html, body {
   font-size: 0.82rem;
 }
 
+.chat-model-wrap {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  z-index: 1;
+}
+
+.chat-model-wrap.is-open {
+  z-index: 40;
+}
+
+.chat-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  max-width: min(220px, 48vw);
+  margin: 0;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-model-btn:hover:not(:disabled) {
+  border-color: rgba(47, 111, 237, 0.28);
+  background: var(--accent-soft);
+}
+
+.chat-model-btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.chat-model-btn.is-open {
+  border-color: rgba(47, 111, 237, 0.45);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.1);
+}
+
+.chat-model-btn span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-model-chevron {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  margin: 0 2px 1px 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.55;
+}
+
+.chat-model-btn:disabled .chat-model-chevron {
+  display: none;
+}
+
+.chat-model-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 80;
+  min-width: max(100%, 200px);
+  max-width: min(280px, 70vw);
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.chat-model-menu-hint {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.chat-model-option {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-model-option:hover,
+.chat-model-option.is-active {
+  background: var(--accent-soft);
+}
+
+.chat-model-option.is-active {
+  font-weight: 700;
+}
+
 .chat-runtime-label {
   display: inline-flex;
   align-items: center;
@@ -760,16 +875,69 @@ html, body {
   background: linear-gradient(180deg, rgba(47, 111, 237, 0.04), #fff);
 }
 
-.chat-permission.is-allowed {
-  border-color: rgba(20, 154, 90, 0.22);
-  background: rgba(236, 253, 245, 0.55);
-}
-
+/* Resolved tools: quiet secondary chrome so assistant prose stays primary. */
+.chat-permission.is-allowed,
 .chat-permission.is-denied,
 .chat-permission.is-expired {
-  border-color: rgba(15, 23, 42, 0.08);
-  background: rgba(247, 248, 251, 0.9);
-  opacity: 0.88;
+  gap: 2px;
+  margin: 1px 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 8px;
+  background: rgba(247, 248, 251, 0.72);
+  box-shadow: none;
+}
+
+.chat-permission.is-allowed .chat-permission-tool,
+.chat-permission.is-denied .chat-permission-tool,
+.chat-permission.is-expired .chat-permission-tool {
+  height: 18px;
+  padding: 0 6px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 600;
+}
+
+.chat-permission.is-allowed .chat-permission-summary,
+.chat-permission.is-denied .chat-permission-summary,
+.chat-permission.is-expired .chat-permission-summary {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.chat-permission.is-allowed .chat-permission-result,
+.chat-permission.is-denied .chat-permission-result,
+.chat-permission.is-expired .chat-permission-result {
+  color: var(--faint);
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+
+.chat-permission.is-allowed .chat-permission-more > summary,
+.chat-permission.is-denied .chat-permission-more > summary,
+.chat-permission.is-expired .chat-permission-more > summary {
+  color: var(--faint);
+  font-size: 0.64rem;
+  font-weight: 550;
+}
+
+.chat-permission.is-allowed .chat-permission-more > summary::before,
+.chat-permission.is-denied .chat-permission-more > summary::before,
+.chat-permission.is-expired .chat-permission-more > summary::before {
+  color: var(--faint);
+}
+
+.chat-permission.is-allowed .chat-permission-detail,
+.chat-permission.is-denied .chat-permission-detail,
+.chat-permission.is-expired .chat-permission-detail {
+  margin-top: 2px;
+  padding: 6px 8px;
+  max-height: 96px;
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(15, 23, 42, 0.05);
+  color: var(--muted);
 }
 
 .chat-permission-row {
@@ -1447,110 +1615,411 @@ html, body {
   box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
 }
 
+.chat-msg-assistant,
+.chat-msg-user {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(760px, 92%);
+}
+
+.chat-msg-assistant {
+  align-self: flex-start;
+  /* Slightly tighter around tool cards between short steps. */
+  margin-block: -1px;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-msg-assistant.is-compact,
+.chat-msg-user.is-compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-msg-user.is-compact {
+  flex-direction: row-reverse;
+}
+
+.chat-msg-assistant .chat-bubble.assistant,
+.chat-msg-user .chat-bubble.user {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-msg-assistant.is-compact .chat-bubble.assistant,
+.chat-msg-user.is-compact .chat-bubble.user {
+  max-width: calc(100% - 32px);
+}
+
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: var(--panel);
+  /* Flat prose — steps interleaved with tools shouldn't look like separate chat cards. */
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 6px;
-  box-shadow: 0 8px 24px rgba(21, 32, 51, 0.055);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 2px 4px 2px 2px;
+  max-width: min(760px, 100%);
+}
+
+.chat-msg-assistant.is-compact .chat-bubble.assistant {
+  align-self: center;
+}
+
+.chat-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding-left: 2px;
+}
+
+.chat-msg-actions[hidden] {
+  display: none;
+}
+
+.chat-msg-assistant.is-compact .chat-msg-actions,
+.chat-msg-user.is-compact .chat-msg-actions {
+  min-height: 0;
+  padding: 0;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.chat-msg-user .chat-msg-actions {
+  padding-left: 0;
+  padding-right: 2px;
+  justify-content: flex-start;
+}
+
+.chat-msg-user:not(.is-compact) .chat-msg-actions {
+  align-self: flex-start;
+}
+
+.chat-msg-copy {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0.72;
+}
+
+.chat-msg-copy:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--muted);
+  opacity: 1;
+}
+
+.chat-msg-copy:active {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+.chat-msg-copy.is-copied {
+  color: #16a34a;
+  opacity: 1;
+}
+
+.chat-msg-copy[hidden] {
+  display: none;
+}
+
+.chat-msg-copy svg {
+  display: block;
+}
+
+/* Pointer devices: hide message copy until hover (less clutter). Touch keeps it visible. */
+@media (hover: hover) and (pointer: fine) {
+  .chat-msg-assistant:not(:hover):not(:focus-within) .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)),
+  .chat-msg-user:not(:hover):not(:focus-within) .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)) {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .chat-msg-assistant:not(.is-compact):not(:hover):not(:focus-within)
+    .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)),
+  .chat-msg-user:not(.is-compact):not(:hover):not(:focus-within)
+    .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)) {
+    min-height: 0;
+    height: 0;
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+  }
+
+  .chat-msg-assistant.is-compact:not(:hover):not(:focus-within):not(:has(.chat-msg-copy.is-copied)),
+  .chat-msg-user.is-compact:not(:hover):not(:focus-within):not(:has(.chat-msg-copy.is-copied)) {
+    gap: 0;
+  }
+
+  .chat-msg-assistant.is-compact:not(:hover):not(:focus-within)
+    .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)),
+  .chat-msg-user.is-compact:not(:hover):not(:focus-within)
+    .chat-msg-actions:not(:has(.chat-msg-copy.is-copied)) {
+    width: 0;
+    overflow: hidden;
+  }
+
+  .chat-msg-assistant.is-compact:not(:hover):not(:focus-within)
+    .chat-bubble.assistant,
+  .chat-msg-user.is-compact:not(:hover):not(:focus-within)
+    .chat-bubble.user {
+    max-width: 100%;
+  }
+
+  .chat-msg-assistant:hover .chat-msg-actions,
+  .chat-msg-user:hover .chat-msg-actions,
+  .chat-msg-assistant:focus-within .chat-msg-actions,
+  .chat-msg-user:focus-within .chat-msg-actions,
+  .chat-msg-actions:has(.chat-msg-copy.is-copied) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .chat-code-copy {
+    opacity: 0;
+  }
+
+  .chat-code-block:hover .chat-code-copy,
+  .chat-code-copy:focus-visible,
+  .chat-code-copy.is-copied {
+    opacity: 1;
+  }
+}
+
+.chat-code-block {
+  position: relative;
+  margin: 0.7em 0;
+}
+
+.chat-code-block pre {
+  margin: 0;
+  padding: 36px 12px 10px;
+}
+
+.chat-code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.chat-code-copy:hover {
+  background: rgba(148, 163, 184, 0.22);
+  color: #f8fafc;
+}
+
+.chat-code-copy.is-copied {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.chat-code-copy svg {
+  display: block;
+}
+
+.chat-bubble.assistant.chat-md,
+.chat-md {
+  font-size: 0.925rem;
+  line-height: 1.72;
+  letter-spacing: 0.012em;
+  color: #1f2a37;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .chat-md > :first-child { margin-top: 0; }
 .chat-md > :last-child { margin-bottom: 0; }
-.chat-md p { margin: 0.45em 0; }
+
+.chat-md p {
+  margin: 0.55em 0;
+}
+
+.chat-md strong {
+  font-weight: 650;
+  color: #111827;
+}
+
 .chat-md h1,
 .chat-md h2,
 .chat-md h3 {
-  margin: 0.9em 0 0.4em;
-  line-height: 1.3;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  margin: 1.15em 0 0.45em;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #111827;
 }
-.chat-md h1 { font-size: 1.15rem; }
+
+.chat-md h1 { font-size: 1.12rem; }
 .chat-md h2 {
   font-size: 1.02rem;
-  padding-bottom: 0.28em;
-  border-bottom: 1px solid var(--line);
+  padding-bottom: 0;
+  border-bottom: none;
 }
-.chat-md h3 { font-size: 0.94rem; color: #344054; }
+.chat-md h3 {
+  font-size: 0.95rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.chat-md h1 + p,
+.chat-md h2 + p,
+.chat-md h3 + p,
+.chat-md h1 + ul,
+.chat-md h2 + ul,
+.chat-md h3 + ul,
+.chat-md h1 + ol,
+.chat-md h2 + ol,
+.chat-md h3 + ol,
+.chat-md h1 + .chat-md-table-wrap,
+.chat-md h2 + .chat-md-table-wrap,
+.chat-md h3 + .chat-md-table-wrap {
+  margin-top: 0.35em;
+}
+
 .chat-md ul,
 .chat-md ol {
-  margin: 0.4em 0;
-  padding-left: 1.25em;
+  margin: 0.45em 0 0.65em;
+  padding-left: 1.15em;
 }
-.chat-md li { margin: 0.15em 0; }
+
+.chat-md li {
+  margin: 0.28em 0;
+  padding-left: 0.15em;
+}
+
+.chat-md li::marker {
+  color: #94a3b8;
+}
+
+.chat-md li > ul,
+.chat-md li > ol {
+  margin: 0.2em 0 0.35em;
+}
+
 .chat-md blockquote {
-  margin: 0.5em 0;
-  padding: 0.15em 0 0.15em 0.8em;
-  border-left: 3px solid rgba(47, 111, 237, 0.35);
+  margin: 0.65em 0;
+  padding: 0.2em 0 0.2em 0.85em;
+  border-left: 2px solid rgba(15, 23, 42, 0.12);
   color: var(--muted);
 }
+
 .chat-md hr {
   border: none;
-  border-top: 1px solid var(--line);
-  margin: 0.8em 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  margin: 1em 0;
 }
+
 .chat-md a {
   color: var(--accent);
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
+
+/* Inline code: monospace cue without noisy gray pills. */
 .chat-md code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.84em;
-  padding: 0.12em 0.35em;
-  border-radius: 5px;
-  background: rgba(15, 23, 42, 0.06);
+  font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  font-weight: 500;
+  padding: 0.08em 0.22em;
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.035);
+  color: #334155;
+  letter-spacing: 0;
 }
+
 .chat-md pre {
-  margin: 0.55em 0;
+  margin: 0.7em 0;
   padding: 10px 12px;
   overflow: auto;
   border-radius: 10px;
   background: #0f172a;
   color: #e2e8f0;
 }
+
 .chat-md pre code {
   padding: 0;
   background: transparent;
   color: inherit;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  font-weight: 400;
 }
 
 .chat-md-table-wrap {
-  margin: 0.55em 0;
+  margin: 0.7em 0 0.85em;
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .chat-md table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .chat-md th,
 .chat-md td {
-  padding: 7px 10px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  padding: 8px 11px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
   text-align: left;
   vertical-align: top;
 }
 
 .chat-md th {
-  background: rgba(247, 248, 251, 0.95);
-  font-weight: 700;
-  color: #344054;
+  background: rgba(15, 23, 42, 0.03);
+  font-weight: 600;
+  color: #475569;
   white-space: nowrap;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+.chat-md td {
+  color: #334155;
+}
+
+.chat-md td code {
+  background: transparent;
+  padding: 0;
+  color: #475569;
 }
 
 .chat-md tr:last-child td {
   border-bottom: 0;
+}
+
+.chat-md tr:hover td {
+  background: rgba(15, 23, 42, 0.015);
 }
 
 .chat-bubble.assistant.is-streaming::after {
@@ -1712,6 +2181,15 @@ html, body {
   background: #fff;
   overflow: hidden;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Model menu opens upward; keep it unclipped while open. */
+.chat-composer-box.is-model-open {
+  overflow: visible;
+}
+
+.chat-composer.is-model-open {
+  overflow: visible;
 }
 
 .chat-composer-box:focus-within {

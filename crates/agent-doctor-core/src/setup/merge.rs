@@ -625,6 +625,14 @@ fn upsert_hermes_slot(slot: &str, gateway_url: &str, model: &str) -> AnyhowResul
 }
 
 pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<RuntimeSetupResult> {
+    apply_claude_code_with_model(gateway_url, api_key, None)
+}
+
+pub fn apply_claude_code_with_model(
+    gateway_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
     let path = home_join(".claude/settings.json");
     let backup_path = backup_file(&path)?;
     ensure_parent(&path)?;
@@ -644,6 +652,16 @@ pub fn apply_claude_code(gateway_url: &str, api_key: &str) -> AnyhowResult<Runti
     if let Some(env_obj) = env.as_object_mut() {
         env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(gateway_url));
         env_obj.insert("ANTHROPIC_API_KEY".to_string(), json!(api_key));
+        if let Some(model_id) = model.map(str::trim).filter(|m| !m.is_empty()) {
+            env_obj.insert("ANTHROPIC_MODEL".to_string(), json!(model_id));
+            env_obj.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                json!(model_id),
+            );
+            env_obj.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), json!(model_id));
+            env_obj.insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), json!(model_id));
+            env_obj.insert("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), json!(model_id));
+        }
     }
     root.as_object_mut()
         .expect("object")

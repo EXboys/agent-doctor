@@ -9,11 +9,18 @@ import {
   type WorkspaceDoc,
 } from "./ask-resources";
 import { getLocale, t, type MessageKey } from "./i18n";
+import { isPersonalEdition } from "./edition";
+import { modelsForProviderUrl, providerChipForUrl } from "./provider-models";
 import { renderMarkdown } from "./markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  PersonalProviderListItem,
+  PersonalProviderStatus,
+  PersonalProvidersDocument,
+} from "./types";
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 type ChatRole = "user" | "assistant" | "meta" | "permission";
 type AttachKind = "file" | "image";
@@ -111,12 +118,16 @@ const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
 const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
-const runtimeLabelEl = document.querySelector<HTMLElement>("#chat-runtime-label")!;
+const modelBtnEl = document.querySelector<HTMLButtonElement>("#chat-model-btn")!;
+const modelLabelEl = document.querySelector<HTMLElement>("#chat-model-label")!;
+const modelMenuEl = document.querySelector<HTMLElement>("#chat-model-menu")!;
+const modelWrapEl = modelBtnEl.closest(".chat-model-wrap") as HTMLElement;
 const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
 const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
 const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
+const composerEl = document.querySelector<HTMLElement>(".chat-composer")!;
 const mentionsEl = document.querySelector<HTMLElement>("#chat-mentions")!;
 const mentionMenuEl = document.querySelector<HTMLElement>("#chat-mention-menu")!;
 const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!;
@@ -153,6 +164,8 @@ const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
 
 /** Locked by main-page Ask entry (`#runtime=` / ask-window-focus). Not switched in-chat. */
 let currentRuntime: AskRuntime = "claude-code";
+let wiredProvider: PersonalProviderListItem | null = null;
+let modelMenuOpen = false;
 
 const CHAT_STORE_MAX_BYTES = 2_500_000;
 
@@ -227,9 +240,176 @@ function isAskRuntime(value: string | null | undefined): value is AskRuntime {
 }
 
 function updateRuntimeLabel(): void {
-  const name = runtimeDisplayName(currentRuntime);
-  runtimeLabelEl.textContent = name;
-  runtimeLabelEl.title = `${name} — ${t("chat.runtimeLockedHint")}`;
+  renderModelPickerLabel();
+}
+
+function closeModelMenu(): void {
+  modelMenuOpen = false;
+  modelMenuEl.hidden = true;
+  modelBtnEl.classList.remove("is-open");
+  modelBtnEl.setAttribute("aria-expanded", "false");
+  modelWrapEl?.classList.remove("is-open");
+  composerBoxEl.classList.remove("is-model-open");
+  composerEl.classList.remove("is-model-open");
+  modelMenuEl.style.left = "";
+  modelMenuEl.style.right = "";
+  modelMenuEl.style.top = "";
+  modelMenuEl.style.bottom = "";
+  modelMenuEl.style.width = "";
+  modelMenuEl.style.minWidth = "";
+  modelMenuEl.style.position = "";
+}
+
+function positionModelMenu(): void {
+  const rect = modelBtnEl.getBoundingClientRect();
+  const gap = 8;
+  const minWidth = Math.max(rect.width, 200);
+  const maxWidth = Math.min(280, window.innerWidth - 24);
+  const width = Math.min(Math.max(minWidth, rect.width), maxWidth);
+  let left = rect.left;
+  if (left + width > window.innerWidth - 12) {
+    left = Math.max(12, window.innerWidth - 12 - width);
+  }
+  modelMenuEl.style.position = "fixed";
+  modelMenuEl.style.left = `${Math.round(left)}px`;
+  modelMenuEl.style.right = "auto";
+  modelMenuEl.style.width = `${Math.round(width)}px`;
+  modelMenuEl.style.minWidth = `${Math.round(width)}px`;
+  modelMenuEl.style.bottom = `${Math.round(window.innerHeight - rect.top + gap)}px`;
+  modelMenuEl.style.top = "auto";
+}
+
+function renderModelPickerLabel(): void {
+  const runtimeName = runtimeDisplayName(currentRuntime);
+  if (wiredProvider) {
+    const chip = providerChipForUrl(wiredProvider.url, wiredProvider.name);
+    const model = wiredProvider.model.trim() || "—";
+    modelLabelEl.textContent = `${chip} · ${model}`;
+    modelBtnEl.disabled = busy;
+    modelBtnEl.title = t("chat.modelPickHint");
+    modelBtnEl.setAttribute("aria-label", modelLabelEl.textContent);
+    return;
+  }
+  modelLabelEl.textContent = runtimeName;
+  modelBtnEl.disabled = true;
+  modelBtnEl.title = isPersonalEdition()
+    ? t("chat.modelNeedProvider")
+    : `${runtimeName} — ${t("chat.runtimeLockedHint")}`;
+  modelBtnEl.setAttribute("aria-label", modelLabelEl.textContent);
+}
+
+function renderModelMenu(): void {
+  modelMenuEl.replaceChildren();
+  if (!wiredProvider) {
+    const hint = document.createElement("div");
+    hint.className = "chat-model-menu-hint";
+    hint.textContent = t("chat.modelNeedProvider");
+    modelMenuEl.appendChild(hint);
+    return;
+  }
+  const models = modelsForProviderUrl(wiredProvider.url, wiredProvider.model);
+  if (models.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "chat-model-menu-hint";
+    hint.textContent = wiredProvider.model || t("chat.modelNeedProvider");
+    modelMenuEl.appendChild(hint);
+    return;
+  }
+  for (const model of models) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `chat-model-option${model === wiredProvider.model ? " is-active" : ""}`;
+    btn.role = "option";
+    btn.textContent = model;
+    btn.addEventListener("click", () => {
+      void switchWiredModel(model);
+    });
+    modelMenuEl.appendChild(btn);
+  }
+}
+
+function openModelMenu(): void {
+  if (modelBtnEl.disabled || busy || !wiredProvider) return;
+  renderModelMenu();
+  modelMenuOpen = true;
+  modelMenuEl.hidden = false;
+  modelBtnEl.classList.add("is-open");
+  modelBtnEl.setAttribute("aria-expanded", "true");
+  modelWrapEl?.classList.add("is-open");
+  composerBoxEl.classList.add("is-model-open");
+  composerEl.classList.add("is-model-open");
+  positionModelMenu();
+}
+
+async function refreshWiredProvider(): Promise<void> {
+  if (!isPersonalEdition()) {
+    wiredProvider = null;
+    renderModelPickerLabel();
+    return;
+  }
+  try {
+    const [status, doc] = await Promise.all([
+      invoke<PersonalProviderStatus>("get_personal_provider_status_command"),
+      invoke<PersonalProvidersDocument>("list_personal_providers_command"),
+    ]);
+    const active =
+      doc.providers.find((p) => p.active) ||
+      (status.active_id
+        ? doc.providers.find((p) => p.id === status.active_id)
+        : undefined) ||
+      null;
+    wiredProvider = active
+      ? {
+          ...active,
+          model: active.model || status.model || "",
+          name: active.name || status.active_name || active.name,
+        }
+      : status.configured && status.active_id
+        ? {
+            id: status.active_id,
+            name: status.active_name || "Provider",
+            url: status.gateway_url || "",
+            model: status.model || "",
+            protocol: status.protocol || "openai",
+            api_key_hint: status.api_key_hint || "",
+            active: true,
+          }
+        : null;
+  } catch (error) {
+    console.warn("Ask: failed to load personal provider", error);
+    wiredProvider = null;
+  }
+  renderModelPickerLabel();
+  if (modelMenuOpen) renderModelMenu();
+}
+
+async function switchWiredModel(model: string): Promise<void> {
+  if (!wiredProvider || busy) return;
+  const next = model.trim();
+  if (!next || next === wiredProvider.model) {
+    closeModelMenu();
+    return;
+  }
+  closeModelMenu();
+  modelBtnEl.disabled = true;
+  setStatus(t("chat.modelSwitching"), "muted");
+  try {
+    await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
+      id: wiredProvider.id,
+      name: wiredProvider.name,
+      url: wiredProvider.url,
+      key: "",
+      model: next,
+      protocol: wiredProvider.protocol || "openai",
+      activate: true,
+    });
+    wiredProvider = { ...wiredProvider, model: next };
+    setStatus(t("chat.modelSwitched", { model: next }), "ok");
+  } catch (error) {
+    setStatus(t("chat.modelSwitchFailed", { error: String(error) }), "error");
+  } finally {
+    renderModelPickerLabel();
+  }
 }
 
 function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
@@ -544,6 +724,8 @@ function setBusy(next: boolean): void {
   busy = next;
   promptEl.disabled = next;
   elevatedEl.disabled = next || selectedRuntime() === "deepseek-harness";
+  modelBtnEl.disabled = next || !wiredProvider;
+  if (next) closeModelMenu();
   newSessionEl.disabled = next;
   attachEl.disabled = next;
   sessionListEl.classList.toggle("is-busy", next);
@@ -551,7 +733,10 @@ function setBusy(next: boolean): void {
   if (!next) {
     settleActivity();
     finishToolGroup(true);
-    if (assistantBubble) assistantBubble.classList.remove("is-streaming");
+    if (assistantBubble) {
+      assistantBubble.classList.remove("is-streaming");
+      syncAssistantCopyButton(assistantBubble);
+    }
     flushStorePersist();
     flushSessionListRender();
   }
@@ -1054,23 +1239,32 @@ function scrubToolFragmentsBeforePermission(detail: string): void {
   // Remove trailing assistant bubbles that are only the tool JSON / command dump.
   while (true) {
     const last = logEl.lastElementChild as HTMLElement | null;
-    if (!last?.classList.contains("assistant")) break;
-    const text = (last.textContent ?? "").replace(/\s+/g, " ").trim();
+    const bubble =
+      last?.classList.contains("chat-msg-assistant")
+        ? last.querySelector<HTMLElement>(":scope > .chat-bubble.assistant")
+        : last?.classList.contains("assistant")
+          ? last
+          : null;
+    if (!bubble) break;
+    const text = bubblePlainText(bubble).replace(/\s+/g, " ").trim();
     if (!text) {
-      removeAssistantBubbleElement(last);
+      removeAssistantBubbleElement(bubble);
       continue;
     }
     const isToolDump =
       looksLikeToolPayloadJson(text) ||
       needles.some((needle) => text === needle || text.includes(needle) || needle.includes(text));
     if (!isToolDump) break;
-    removeAssistantBubbleElement(last);
+    removeAssistantBubbleElement(bubble);
   }
 }
 
 function removeAssistantBubbleElement(el: HTMLElement): void {
-  const messageId = el.dataset.messageId;
-  el.remove();
+  const bubble = el.classList.contains("chat-bubble")
+    ? el
+    : el.querySelector<HTMLElement>(":scope > .chat-bubble.assistant") ?? el;
+  const messageId = bubble.dataset.messageId;
+  assistantMsgWrap(bubble).remove();
   if (!messageId) return;
   const session = activeSession();
   session.messages = session.messages.filter((m) => m.id !== messageId);
@@ -1294,7 +1488,8 @@ function wrapTurnToolsInGroup(nodes: HTMLElement[]): HTMLDetailsElement {
 /** Fold consecutive tool chips + Bash permission cards into one Cursor-style row. */
 function collapseResolvedPermissionsBeforeAssistant(anchor: HTMLElement): void {
   finishToolGroup(true);
-  const prev = anchor.previousElementSibling as HTMLElement | null;
+  const block = assistantMsgWrap(anchor);
+  const prev = block.previousElementSibling as HTMLElement | null;
   if (prev?.classList.contains("chat-turn-tools")) {
     const existing = prev as HTMLDetailsElement;
     existing.open = false;
@@ -1514,15 +1709,18 @@ function sealAssistantBubble(): void {
   if (!assistantRaw.trim()) {
     // Drop empty placeholder bubbles so tools aren't preceded by a blank card.
     const emptyId = assistantMessageId;
-    assistantBubble.remove();
+    assistantMsgWrap(assistantBubble).remove();
     if (emptyId) {
       const session = activeSession();
       session.messages = session.messages.filter((m) => m.id !== emptyId);
       saveStore();
     }
-  } else if (assistantMessageId) {
-    updateAssistantMessage(assistantMessageId, assistantRaw);
-    flushStorePersist();
+  } else {
+    if (assistantMessageId) {
+      updateAssistantMessage(assistantMessageId, assistantRaw);
+      flushStorePersist();
+    }
+    syncAssistantCopyButton(assistantBubble);
   }
   assistantBubble = null;
   assistantMessageId = null;
@@ -1543,7 +1741,7 @@ function appendAssistantChunk(chunk: string): void {
   const bubble = ensureAssistantBubble();
   collapseResolvedPermissionsBeforeAssistant(bubble);
   assistantRaw += chunk;
-  bubble.innerHTML = renderMarkdown(assistantRaw);
+  setAssistantMarkdown(bubble, assistantRaw);
   if (assistantMessageId) {
     updateAssistantMessage(assistantMessageId, assistantRaw, { persist: false });
   }
@@ -1927,22 +2125,259 @@ function updateAssistantMessage(id: string, content: string, opts?: { persist?: 
   }
 }
 
+function msgWrap(el: HTMLElement, role: "assistant" | "user"): HTMLElement {
+  return el.closest(`.chat-msg-${role}`) ?? el;
+}
+
+function assistantMsgWrap(bubble: HTMLElement): HTMLElement {
+  return msgWrap(bubble, "assistant");
+}
+
+function bubblePlainText(bubble: HTMLElement): string {
+  return (bubble.innerText ?? "").trim();
+}
+
+function assistantMarkdownSource(bubble: HTMLElement): string {
+  const id = bubble.dataset.messageId;
+  if (id) {
+    const message = activeSession().messages.find((m) => m.id === id);
+    if (message?.content?.trim()) return message.content;
+  }
+  if (bubble === assistantBubble && assistantRaw.trim()) return assistantRaw;
+  return bubblePlainText(bubble);
+}
+
+const SHORT_MSG_COPY_CHARS = 140;
+const SHORT_MSG_COPY_LINES = 2;
+
+function isShortCopyLayout(bubble: HTMLElement, source: string): boolean {
+  if (bubble.querySelector("pre, .chat-code-block, table, .chat-bubble-attachments")) return false;
+  const text = source.trim();
+  if (!text) return false;
+  const lines = text.split(/\n/).filter((line) => line.trim().length > 0);
+  return text.length <= SHORT_MSG_COPY_CHARS && lines.length <= SHORT_MSG_COPY_LINES;
+}
+
+function copyIconSvg(kind: "copy" | "check"): string {
+  if (kind === "check") {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+type CopyIdleKind = "text" | "code";
+
+function copyIdleLabel(kind: CopyIdleKind): string {
+  return kind === "code" ? t("chat.copyCode") : t("chat.copy");
+}
+
+function setCopyButtonState(
+  btn: HTMLButtonElement,
+  state: "idle" | "copied" | "failed",
+  idleKind: CopyIdleKind = "text",
+): void {
+  if (state === "copied") {
+    btn.innerHTML = copyIconSvg("check");
+    btn.classList.add("is-copied");
+    btn.title = t("chat.copied");
+    btn.setAttribute("aria-label", t("chat.copied"));
+    return;
+  }
+  btn.innerHTML = copyIconSvg("copy");
+  btn.classList.remove("is-copied");
+  const label = state === "failed" ? t("chat.copyFailed") : copyIdleLabel(idleKind);
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
+
+async function runCopyButton(
+  btn: HTMLButtonElement,
+  getText: () => string,
+  idleKind: CopyIdleKind,
+): Promise<void> {
+  const text = getText().trim();
+  if (!text) return;
+  try {
+    await copyTextToClipboard(text);
+    setCopyButtonState(btn, "copied", idleKind);
+    window.setTimeout(() => {
+      if (!btn.isConnected) return;
+      setCopyButtonState(btn, "idle", idleKind);
+    }, 1600);
+  } catch {
+    setCopyButtonState(btn, "failed", idleKind);
+    window.setTimeout(() => {
+      if (!btn.isConnected) return;
+      setCopyButtonState(btn, "idle", idleKind);
+    }, 1600);
+  }
+}
+
+function createCopyActionButton(
+  idleKind: CopyIdleKind,
+  getText: () => string,
+): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "chat-msg-copy";
+  btn.dataset.copyKind = idleKind;
+  btn.hidden = true;
+  setCopyButtonState(btn, "idle", idleKind);
+  btn.addEventListener("click", () => {
+    void runCopyButton(btn, getText, idleKind);
+  });
+  return btn;
+}
+
+function syncMessageCopyActions(
+  wrap: HTMLElement,
+  bubble: HTMLElement,
+  streaming: boolean,
+  layoutSource: string,
+): void {
+  const hasText = layoutSource.trim().length > 0;
+  const show = hasText && !streaming;
+  const actions = wrap.querySelector<HTMLElement>(":scope > .chat-msg-actions");
+  const btn = actions?.querySelector<HTMLButtonElement>(".chat-msg-copy");
+  if (btn) {
+    const kind: CopyIdleKind = btn.dataset.copyKind === "code" ? "code" : "text";
+    btn.hidden = !show;
+    if (show) setCopyButtonState(btn, "idle", kind);
+  }
+  if (actions) actions.hidden = !show;
+  wrap.classList.toggle("is-compact", show && isShortCopyLayout(bubble, layoutSource));
+}
+
+function syncAssistantCopyButton(bubble: HTMLElement): void {
+  const source = assistantMarkdownSource(bubble);
+  syncMessageCopyActions(
+    assistantMsgWrap(bubble),
+    bubble,
+    bubble.classList.contains("is-streaming"),
+    source,
+  );
+}
+
+function enhanceCodeBlocks(root: HTMLElement): void {
+  for (const pre of Array.from(root.querySelectorAll("pre"))) {
+    if (pre.parentElement?.classList.contains("chat-code-block")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "chat-code-block";
+    pre.replaceWith(wrap);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-code-copy";
+    setCopyButtonState(btn, "idle", "code");
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const code = pre.querySelector("code");
+      const text = (code?.textContent ?? pre.textContent ?? "").replace(/\n$/, "");
+      void runCopyButton(btn, () => text, "code");
+    });
+
+    wrap.append(btn, pre);
+  }
+}
+
+function createAssistantBubbleEl(opts?: { id?: string }): { wrap: HTMLElement; bubble: HTMLElement } {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-msg chat-msg-assistant";
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble assistant chat-md";
+  if (opts?.id) bubble.dataset.messageId = opts.id;
+
+  const actions = document.createElement("div");
+  actions.className = "chat-msg-actions";
+  actions.hidden = true;
+  // Default copy = markdown source (better for paste/edit).
+  actions.appendChild(createCopyActionButton("text", () => assistantMarkdownSource(bubble)));
+  wrap.append(bubble, actions);
+  return { wrap, bubble };
+}
+
+function createUserBubbleEl(opts?: {
+  id?: string;
+  text?: string;
+  attachments?: ChatAttachment[];
+}): { wrap: HTMLElement; bubble: HTMLElement } {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-msg chat-msg-user";
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble user";
+  if (opts?.id) bubble.dataset.messageId = opts.id;
+  bubble.textContent = opts?.text ?? "";
+  const strip = renderAttachmentStrip(opts?.attachments);
+  if (strip) bubble.appendChild(strip);
+
+  const actions = document.createElement("div");
+  actions.className = "chat-msg-actions";
+  const getText = () => {
+    const id = bubble.dataset.messageId;
+    if (id) {
+      const message = activeSession().messages.find((m) => m.id === id);
+      if (message) return message.content;
+    }
+    return opts?.text ?? bubblePlainText(bubble);
+  };
+  actions.appendChild(createCopyActionButton("text", getText));
+  wrap.append(bubble, actions);
+  syncMessageCopyActions(wrap, bubble, false, getText());
+  return { wrap, bubble };
+}
+
+function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
+  bubble.innerHTML = markdown.trim() ? renderMarkdown(markdown) : "";
+  if (markdown.trim()) enhanceCodeBlocks(bubble);
+  syncAssistantCopyButton(bubble);
+}
+
 function appendBubble(
   kind: ChatRole,
   text: string,
   opts?: { id?: string; persist?: boolean; attachments?: ChatAttachment[] },
 ): HTMLElement {
+  if (kind === "assistant") {
+    const { wrap, bubble } = createAssistantBubbleEl({ id: opts?.id });
+    setAssistantMarkdown(bubble, text);
+    logEl.appendChild(wrap);
+    logEl.scrollTop = logEl.scrollHeight;
+    return bubble;
+  }
+  if (kind === "user") {
+    const { wrap, bubble } = createUserBubbleEl({
+      id: opts?.id,
+      text,
+      attachments: opts?.attachments,
+    });
+    logEl.appendChild(wrap);
+    logEl.scrollTop = logEl.scrollHeight;
+    return bubble;
+  }
   const bubble = document.createElement("div");
   bubble.className = `chat-bubble ${kind}`;
   if (opts?.id) bubble.dataset.messageId = opts.id;
-  if (kind === "assistant") {
-    bubble.classList.add("chat-md");
-    bubble.innerHTML = text.trim() ? renderMarkdown(text) : "";
-  } else {
-    bubble.textContent = text;
-    const strip = renderAttachmentStrip(opts?.attachments);
-    if (strip) bubble.appendChild(strip);
-  }
+  bubble.textContent = text;
+  const strip = renderAttachmentStrip(opts?.attachments);
+  if (strip) bubble.appendChild(strip);
   logEl.appendChild(bubble);
   logEl.scrollTop = logEl.scrollHeight;
   return bubble;
@@ -1985,11 +2420,16 @@ function renderActiveMessages(): void {
       continue;
     }
     if (message.role === "assistant") {
-      const bubble = document.createElement("div");
-      bubble.className = "chat-bubble assistant chat-md";
-      bubble.dataset.messageId = message.id;
-      bubble.innerHTML = renderMarkdown(message.content);
-      logEl.appendChild(bubble);
+      const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
+      setAssistantMarkdown(bubble, message.content);
+      logEl.appendChild(wrap);
+    } else if (message.role === "user") {
+      const { wrap } = createUserBubbleEl({
+        id: message.id,
+        text: message.content,
+        attachments: message.attachments,
+      });
+      logEl.appendChild(wrap);
     } else {
       const bubble = document.createElement("div");
       bubble.className = `chat-bubble ${message.role}`;
@@ -2596,8 +3036,8 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
 
   await ensureListener();
   clearQuickReplies();
-  persistMessage("user", userText, { attachments });
-  appendBubble("user", userText, { persist: false, attachments });
+  const userMessage = persistMessage("user", userText, { attachments });
+  appendBubble("user", userText, { id: userMessage.id, persist: false, attachments });
   promptEl.value = "";
   mentionMenu.hideMentionMenu();
   askResources.clearMentions();
@@ -2936,6 +3376,22 @@ function boot(): void {
     if (!(event.target instanceof Node)) return;
     if (mentionMenuEl.contains(event.target) || promptEl.contains(event.target)) return;
     mentionMenu.hideMentionMenu();
+    if (!modelBtnEl.contains(event.target) && !modelMenuEl.contains(event.target)) {
+      closeModelMenu();
+    }
+  });
+
+  modelBtnEl.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (modelMenuOpen) {
+      closeModelMenu();
+      return;
+    }
+    openModelMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if (modelMenuOpen) positionModelMenu();
   });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {
@@ -2944,6 +3400,7 @@ function boot(): void {
       ensureRuntimeSession(runtime);
     }
     void (async () => {
+      await refreshWiredProvider();
       await loadAskResources();
       applyVerifyDraftIfAny();
     })();
@@ -2951,6 +3408,7 @@ function boot(): void {
   });
 
   void ensureListener();
+  void refreshWiredProvider();
   autoResizePrompt();
   promptEl.focus();
 }

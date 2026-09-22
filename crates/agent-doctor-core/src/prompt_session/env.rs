@@ -4,9 +4,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::profile::{agent_profile_path, read_env_map, COMPANY_API_KEY_ENV, GATEWAY_URL_ENV};
+use crate::profile::{
+    agent_profile_path, read_env_map, COMPANY_API_KEY_ENV, GATEWAY_URL_ENV, PROVIDER_KIND_ENV,
+    PROVIDER_KIND_PERSONAL,
+};
 use crate::setup::{
-    anthropic_gateway_url_from_evotown_base, apply_codex_slot,
+    anthropic_gateway_for_provider_url, anthropic_gateway_url_from_evotown_base, apply_codex_slot,
     clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth, evotown_agent_env_path,
     normalize_protocol, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC,
     PROVIDER_PROTOCOL_ENV,
@@ -15,6 +18,8 @@ use crate::workspace::active_env_path;
 
 pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
     let mut env = HashMap::new();
+    let personal_edition =
+        crate::edition::product_edition() == crate::edition::ProductEdition::Personal;
     let mut merge = |path: Option<PathBuf>| {
         let Some(path) = path.filter(|p| p.exists()) else {
             return;
@@ -25,8 +30,11 @@ pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
     };
     merge(active_env_path().ok());
     merge(agent_profile_path());
-    merge(evotown_agent_env_path());
-    merge_settings_store_overlay(&mut env);
+    // Personal builds must not inherit a leftover team/Evotown agent.env — that
+    // skilllite gateway was answering Ask while the saved personal provider sat unused.
+    if !personal_edition {
+        merge(evotown_agent_env_path());
+    }
     for key in [
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
@@ -53,7 +61,25 @@ pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
             }
         }
     }
+    // Apply saved personal/team settings last so they win over shell leftovers.
+    merge_settings_store_overlay(&mut env);
     env
+}
+
+fn strip_team_gateway_leftovers(env: &mut HashMap<String, String>) {
+    env.remove(EVOTOWN_URL_ENV);
+    env.remove("AGENT_DOCTOR_EVOTOWN_URL");
+    if let Some(url) = env
+        .get("ANTHROPIC_BASE_URL")
+        .map(|v| v.to_ascii_lowercase())
+    {
+        if url.contains("skilllite.ai")
+            || url.contains("evotown")
+            || url.contains("/api/gateway/anthropic")
+        {
+            env.remove("ANTHROPIC_BASE_URL");
+        }
+    }
 }
 
 fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
@@ -112,6 +138,11 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
     if personal_edition || stored_personal {
         if let Ok(providers) = store.list_personal_providers() {
             if let Some(active) = providers.into_iter().find(|p| p.active) {
+                strip_team_gateway_leftovers(env);
+                env.insert(
+                    PROVIDER_KIND_ENV.to_string(),
+                    PROVIDER_KIND_PERSONAL.to_string(),
+                );
                 if let Ok(Some(key)) = store.get_personal_api_key(&active.id) {
                     if !key.trim().is_empty() {
                         let key = key.trim().to_string();
@@ -122,10 +153,18 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
                 }
                 env.insert(GATEWAY_URL_ENV.to_string(), active.url.clone());
                 env.insert("OPENAI_BASE_URL".into(), active.url.clone());
+                let protocol = normalize_protocol(&active.protocol);
+                env.insert(PROVIDER_PROTOCOL_ENV.to_string(), protocol.clone());
+                if protocol == PROTOCOL_ANTHROPIC {
+                    env.insert("ANTHROPIC_BASE_URL".into(), active.url.clone());
+                } else {
+                    // OpenAI-compatible personal providers must not keep a leftover
+                    // Anthropic/Evotown base URL — Claude Ask would call skilllite.
+                    env.remove("ANTHROPIC_BASE_URL");
+                }
                 if !active.model.trim().is_empty() {
                     env.insert(MODEL_ENV.to_string(), active.model);
                 }
-                env.insert(PROVIDER_PROTOCOL_ENV.to_string(), active.protocol);
             }
         }
     }
@@ -139,10 +178,24 @@ pub(crate) fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, Str
 
 pub(crate) fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     if let Some((url, key)) = resolve_claude_overlay(overlay) {
-        cmd.env("ANTHROPIC_BASE_URL", url);
+        cmd.env("ANTHROPIC_BASE_URL", &url);
         cmd.env("ANTHROPIC_API_KEY", &key);
         cmd.env(COMPANY_API_KEY_ENV, &key);
         cmd.env(EVOTOWN_API_KEY_ENV, &key);
+        let model = overlay
+            .get(MODEL_ENV)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        if let Some(model_id) = model {
+            cmd.env("ANTHROPIC_MODEL", model_id);
+            cmd.env("ANTHROPIC_DEFAULT_SONNET_MODEL", model_id);
+            cmd.env("ANTHROPIC_DEFAULT_OPUS_MODEL", model_id);
+            cmd.env("ANTHROPIC_DEFAULT_HAIKU_MODEL", model_id);
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", model_id);
+            cmd.env(MODEL_ENV, model_id);
+        }
+        // Keep ~/.claude/settings.json aligned — Claude CLI still reads it when env is sparse.
+        let _ = crate::setup::apply_claude_code_with_model(&url, &key, model);
     }
 }
 
@@ -371,6 +424,39 @@ pub(crate) fn resolve_claude_overlay(env: &HashMap<String, String>) -> Option<(S
             .map(str::to_string)
     })?;
 
+    let protocol = env
+        .get(PROVIDER_PROTOCOL_ENV)
+        .map(|value| normalize_protocol(value));
+    let personal = env
+        .get(PROVIDER_KIND_ENV)
+        .map(|value| value.trim())
+        .is_some_and(|value| value.eq_ignore_ascii_case(PROVIDER_KIND_PERSONAL));
+
+    let gateway = env
+        .get(GATEWAY_URL_ENV)
+        .or_else(|| env.get("OPENAI_BASE_URL"))
+        .or_else(|| env.get("ANTHROPIC_BASE_URL"))
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    // Personal providers: never fall back to Evotown/skilllite leftovers.
+    if personal {
+        if protocol.as_deref() == Some(PROTOCOL_ANTHROPIC) {
+            if let Some(url) = gateway {
+                return Some((url, api_key));
+            }
+            return None;
+        }
+        if let Some(url) = gateway
+            .as_deref()
+            .and_then(anthropic_gateway_for_provider_url)
+        {
+            return Some((url, api_key));
+        }
+        return None;
+    }
+
     if let Some(url) = env
         .get("ANTHROPIC_BASE_URL")
         .map(|value| value.trim())
@@ -379,17 +465,17 @@ pub(crate) fn resolve_claude_overlay(env: &HashMap<String, String>) -> Option<(S
         return Some((url.to_string(), api_key));
     }
 
-    let protocol = env
-        .get(PROVIDER_PROTOCOL_ENV)
-        .map(|value| normalize_protocol(value));
     if protocol.as_deref() == Some(PROTOCOL_ANTHROPIC) {
-        if let Some(url) = env
-            .get(GATEWAY_URL_ENV)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-        {
-            return Some((url.to_string(), api_key));
+        if let Some(url) = gateway {
+            return Some((url, api_key));
         }
+    }
+
+    if let Some(url) = gateway
+        .as_deref()
+        .and_then(anthropic_gateway_for_provider_url)
+    {
+        return Some((url, api_key));
     }
 
     let evotown = env
@@ -504,5 +590,72 @@ pub(crate) fn format_command_display(cmd: &Command) -> String {
         program.into_owned()
     } else {
         format!("{program} {}", args.join(" "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn resolve_claude_personal_deepseek_openai_maps_to_anthropic() {
+        let mut env = HashMap::new();
+        env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+        env.insert(PROVIDER_PROTOCOL_ENV.into(), "openai".into());
+        env.insert(GATEWAY_URL_ENV.into(), "https://api.deepseek.com/v1".into());
+        env.insert(
+            "ANTHROPIC_BASE_URL".into(),
+            "https://www.skilllite.ai/api/gateway/anthropic".into(),
+        );
+        env.insert("OPENAI_API_KEY".into(), "sk-test".into());
+
+        let (url, key) = resolve_claude_overlay(&env).expect("overlay");
+        assert_eq!(url, "https://api.deepseek.com/anthropic");
+        assert_eq!(key, "sk-test");
+    }
+
+    #[test]
+    fn resolve_claude_prefers_personal_gateway_over_skilllite_leftover() {
+        let mut env = HashMap::new();
+        env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+        env.insert(PROVIDER_PROTOCOL_ENV.into(), PROTOCOL_ANTHROPIC.into());
+        env.insert(
+            GATEWAY_URL_ENV.into(),
+            "https://api.deepseek.com/anthropic".into(),
+        );
+        env.insert(
+            "ANTHROPIC_BASE_URL".into(),
+            "https://www.skilllite.ai/api/gateway/anthropic".into(),
+        );
+        env.insert("ANTHROPIC_API_KEY".into(), "sk-test".into());
+
+        let (url, key) = resolve_claude_overlay(&env).expect("overlay");
+        assert_eq!(url, "https://api.deepseek.com/anthropic");
+        assert_eq!(key, "sk-test");
+    }
+
+    #[test]
+    fn resolve_claude_personal_does_not_fall_back_to_evotown() {
+        let mut env = HashMap::new();
+        env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+        env.insert(PROVIDER_PROTOCOL_ENV.into(), "openai".into());
+        env.insert(EVOTOWN_URL_ENV.into(), "https://www.skilllite.ai".into());
+        env.insert("OPENAI_API_KEY".into(), "sk-test".into());
+
+        assert!(resolve_claude_overlay(&env).is_none());
+    }
+
+    #[test]
+    fn strip_team_gateway_removes_skilllite_anthropic_base() {
+        let mut env = HashMap::new();
+        env.insert(
+            "ANTHROPIC_BASE_URL".into(),
+            "https://www.skilllite.ai/api/gateway/anthropic".into(),
+        );
+        env.insert(EVOTOWN_URL_ENV.into(), "https://www.skilllite.ai".into());
+        strip_team_gateway_leftovers(&mut env);
+        assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
+        assert!(!env.contains_key(EVOTOWN_URL_ENV));
     }
 }

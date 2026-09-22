@@ -27,19 +27,21 @@ use crate::evotown::{load_evotown_config, normalize_runtime};
 #[cfg(windows)]
 use crate::profile::read_company_profile;
 use crate::profile::{
-    agent_profile_path, read_env_map, GATEWAY_URL_ENV, PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV,
+    agent_profile_path, GATEWAY_URL_ENV, PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV,
     PROVIDER_KIND_PERSONAL,
 };
+#[cfg(windows)]
+use crate::setup::anthropic_gateway_url_from_evotown_base;
 use crate::setup::merge::{
     apply_claude_code, apply_codex_slot, codex_slot_display_name, codex_slot_env_key,
     CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
 };
 use crate::setup::{
-    anthropic_gateway_url_from_evotown_base, clear_codex_chatgpt_auth_for_gateway,
-    clear_codex_placeholder_auth, evotown_agent_env_path, gateway_url_from_evotown_base,
-    normalize_protocol, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
-    EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
+    clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth, evotown_agent_env_path,
+    write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV, MODEL_ENV,
 };
+#[cfg(test)]
+use crate::setup::{PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV};
 use crate::workspace::{active_env_path, ensure_default_workspace, load_workspaces};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,59 +262,8 @@ fn resolve_codex_launch_env() -> Option<(String, String, Option<String>, String)
 }
 
 fn collect_launch_env_map() -> HashMap<String, String> {
-    let mut env = HashMap::new();
-    if let Some(path) = evotown_agent_env_path().filter(|path| path.exists()) {
-        if let Ok(map) = read_env_map(&path) {
-            env.extend(map);
-        }
-    }
-    if let Ok(path) = active_env_path() {
-        if path.exists() {
-            if let Ok(map) = read_env_map(&path) {
-                env.extend(map);
-            }
-        }
-    }
-    if let Some(path) = agent_profile_path().filter(|path| path.exists()) {
-        if let Ok(map) = read_env_map(&path) {
-            env.extend(map);
-        }
-    }
-    // Overlay from settings.db + keychain (authoritative for new installs).
-    if let Ok(store) = crate::store::open_settings_store() {
-        if let Ok(team) = store.get_team_settings() {
-            if let Some(url) = team
-                .base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-            {
-                env.insert(
-                    EVOTOWN_URL_ENV.to_string(),
-                    url.trim_end_matches('/').to_string(),
-                );
-                let gateway = gateway_url_from_evotown_base(url);
-                env.insert(GATEWAY_URL_ENV.to_string(), gateway.clone());
-                env.entry("OPENAI_BASE_URL".into()).or_insert(gateway);
-            }
-        }
-        if let Ok(Some(key)) = store.get_team_api_key() {
-            if !key.trim().is_empty() {
-                let key = key.trim().to_string();
-                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-                env.insert(EVOTOWN_API_KEY_ENV.to_string(), key.clone());
-                env.entry("OPENAI_API_KEY".into()).or_insert(key);
-            }
-        }
-        if let Ok(Some(key)) = store.get_overlay_api_key() {
-            if !key.trim().is_empty() {
-                let key = key.trim().to_string();
-                env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-                env.insert("OPENAI_API_KEY".into(), key);
-            }
-        }
-    }
-    env
+    // Same overlay rules as Ask — personal edition must not inherit Evotown leftovers.
+    crate::prompt_session::env::collect_overlay_env()
 }
 
 fn codex_launch_from_env(
@@ -364,47 +315,9 @@ fn resolve_claude_launch_env() -> Option<(String, String)> {
 }
 
 fn anthropic_launch_from_env(env: &HashMap<String, String>) -> Option<(String, String)> {
-    let api_key = [
-        "ANTHROPIC_API_KEY",
-        COMPANY_API_KEY_ENV,
-        EVOTOWN_API_KEY_ENV,
-        "OPENAI_API_KEY",
-    ]
-    .into_iter()
-    .find_map(|key| {
-        env.get(key)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })?;
-
-    if let Some(url) = env
-        .get("ANTHROPIC_BASE_URL")
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        return Some((url.to_string(), api_key));
-    }
-
-    let protocol = env
-        .get(PROVIDER_PROTOCOL_ENV)
-        .map(|value| normalize_protocol(value));
-    if protocol.as_deref() == Some(PROTOCOL_ANTHROPIC) {
-        if let Some(url) = env
-            .get(GATEWAY_URL_ENV)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-        {
-            return Some((url.to_string(), api_key));
-        }
-    }
-
-    let evotown = env
-        .get("AGENT_DOCTOR_EVOTOWN_URL")
-        .or_else(|| env.get(EVOTOWN_URL_ENV))
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())?;
-    Some((anthropic_gateway_url_from_evotown_base(evotown), api_key))
+    // Reuse Ask overlay resolution so opening Claude Code cannot rewrite
+    // ~/.claude/settings.json back to a leftover Evotown/skilllite gateway.
+    crate::prompt_session::env::resolve_claude_overlay(env)
 }
 
 fn open_in_terminal(

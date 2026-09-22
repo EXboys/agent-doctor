@@ -377,7 +377,7 @@ fn project_claude_code(bundle: &EndpointBundle, display_name: &str) -> Result<Ru
             ..Default::default()
         });
     };
-    merge::apply_claude_code(url, &bundle.api_key)
+    merge::apply_claude_code_with_model(url, &bundle.api_key, Some(&bundle.model))
 }
 
 fn annotate_runtimes_with_strategy_and_probe(
@@ -583,6 +583,19 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
 struct DualProtocolEndpoints {
     openai_url: String,
     anthropic_url: String,
+}
+
+/// Providers that expose both OpenAI-compatible and Anthropic Messages APIs with one key.
+pub fn anthropic_gateway_for_provider_url(url: &str) -> Option<String> {
+    if let Some(dual) = dual_protocol_endpoints(url) {
+        return Some(dual.anthropic_url);
+    }
+    let trimmed = url.trim().trim_end_matches('/');
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("/anthropic") || lower.contains("api.anthropic.com") {
+        return Some(trimmed.to_string());
+    }
+    None
 }
 
 fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {

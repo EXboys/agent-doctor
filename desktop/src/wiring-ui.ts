@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { t, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
 import { isPersonalEdition, isTeamEdition, productEdition } from "./edition";
+import { modelsForPresetId } from "./provider-models";
 import { appState } from "./app-state";
 import type {
   EngineRegisterStatus,
@@ -158,77 +159,77 @@ const PROVIDER_PRESETS: Record<
     name: "DeepSeek",
     url: "https://api.deepseek.com/v1",
     protocol: "openai",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    models: modelsForPresetId("deepseek"),
     chip: "DeepSeek",
   },
   qwen: {
     name: "Qwen",
     url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     protocol: "openai",
-    models: ["qwen-plus", "qwen-max", "qwen-flash"],
+    models: modelsForPresetId("qwen"),
     chip: "Qwen",
   },
   glm: {
     name: "GLM",
     url: "https://open.bigmodel.cn/api/paas/v4",
     protocol: "openai",
-    models: ["glm-5.3", "glm-5.3-flash", "glm-4.6"],
+    models: modelsForPresetId("glm"),
     chip: "GLM",
   },
   minimax: {
     name: "MiniMax",
     url: "https://api.minimaxi.com/v1",
     protocol: "openai",
-    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"],
+    models: modelsForPresetId("minimax"),
     chip: "MiniMax",
   },
   moonshot: {
     name: "Moonshot / Kimi",
     url: "https://api.moonshot.cn/v1",
     protocol: "openai",
-    models: ["kimi-k2.5", "kimi-latest", "moonshot-v1-auto"],
+    models: modelsForPresetId("moonshot"),
     chip: "Kimi",
   },
   openai: {
     name: "ChatGPT / OpenAI",
     url: "https://api.openai.com/v1",
     protocol: "openai",
-    models: ["gpt-4.1-mini", "gpt-4.1", "o4-mini"],
+    models: modelsForPresetId("openai"),
     chip: "ChatGPT",
   },
   anthropic: {
     name: "Claude",
     url: "https://api.anthropic.com",
     protocol: "anthropic",
-    models: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
+    models: modelsForPresetId("anthropic"),
     chip: "Claude",
   },
   gemini: {
     name: "Gemini",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/",
     protocol: "openai",
-    models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview"],
+    models: modelsForPresetId("gemini"),
     chip: "Gemini",
   },
   siliconflow: {
     name: "SiliconFlow",
     url: "https://api.siliconflow.cn/v1",
     protocol: "openai",
-    models: ["deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3-235B-A22B"],
+    models: modelsForPresetId("siliconflow"),
     chip: "SiliconFlow",
   },
   openrouter: {
     name: "OpenRouter",
     url: "https://openrouter.ai/api/v1",
     protocol: "openai",
-    models: ["openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-sonnet-4.5"],
+    models: modelsForPresetId("openrouter"),
     chip: "OpenRouter",
   },
   groq: {
     name: "Groq",
     url: "https://api.groq.com/openai/v1",
     protocol: "openai",
-    models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
+    models: modelsForPresetId("groq"),
     chip: "Groq",
   },
 };

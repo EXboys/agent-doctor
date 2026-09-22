@@ -799,6 +799,10 @@ pub(crate) fn write_personal_profile(
     if normalize_protocol(protocol) == PROTOCOL_ANTHROPIC {
         writeln!(file, "ANTHROPIC_BASE_URL={gateway_url}")?;
         writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
+    } else if let Some(anthropic) = crate::setup::anthropic_gateway_for_provider_url(gateway_url) {
+        // Dual-protocol hosts (DeepSeek etc.): Claude Code needs the Anthropic path.
+        writeln!(file, "ANTHROPIC_BASE_URL={anthropic}")?;
+        writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
     }
 
     #[cfg(unix)]

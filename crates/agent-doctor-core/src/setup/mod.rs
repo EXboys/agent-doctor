@@ -4,10 +4,11 @@ mod personal;
 mod pipeline;
 
 pub use merge::{
-    apply_codex_slot, apply_hermes_slot, apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway,
-    clear_codex_placeholder_auth, strip_codex_project_denied_provider_keys, CODEX_PERSONAL_SLOT,
-    CODEX_TEAM_SLOT, COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT,
-    OPENCLAW_PERSONAL_SLOT, OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
+    apply_claude_code, apply_claude_code_with_model, apply_codex_slot, apply_hermes_slot,
+    apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth,
+    strip_codex_project_denied_provider_keys, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
+    COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT, OPENCLAW_PERSONAL_SLOT,
+    OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,
 };
 pub use mode::{
     adopt_live_gateway_as_overlay, load_mode_status, mode_overlay_ready_from_profile,
@@ -24,9 +25,9 @@ pub use personal::{
     PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
 };
 pub use pipeline::{
-    apply_mode_switch, effector_label, probe_endpoint_bundle, project_bundle, runtime_strategies,
-    strategy_for, BundleProbeReport, EffectorKind, EndpointBundle, ModeSwitchTarget,
-    RuntimeStrategy, WriteSemantics,
+    anthropic_gateway_for_provider_url, apply_mode_switch, effector_label, probe_endpoint_bundle,
+    project_bundle, runtime_strategies, strategy_for, BundleProbeReport, EffectorKind,
+    EndpointBundle, ModeSwitchTarget, RuntimeStrategy, WriteSemantics,
 };
 
 use std::fs;

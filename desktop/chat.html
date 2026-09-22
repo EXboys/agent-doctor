@@ -150,12 +150,21 @@
                 >
                   <span aria-hidden="true">+</span>
                 </button>
-                <span
-                  id="chat-runtime-label"
-                  class="chat-runtime-label"
-                  data-i18n-title="chat.runtimeLockedHint"
-                  title="在主页 Agents 卡片进入时选定"
-                >Claude Code</span>
+                <div class="chat-model-wrap">
+                  <button
+                    id="chat-model-btn"
+                    type="button"
+                    class="chat-model-btn"
+                    data-i18n-title="chat.modelPickHint"
+                    title="按主页已接服务商切换模型"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span id="chat-model-label">Claude Code</span>
+                    <span class="chat-model-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div id="chat-model-menu" class="chat-model-menu" hidden role="listbox"></div>
+                </div>
                 <label
                   class="chat-elevated"
                   title="关闭自动审批时，需要确认的操作会在输入框上方弹出选择。"
