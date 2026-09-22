@@ -98,7 +98,7 @@ pub(crate) fn browser_mcp_tool_instructions() -> &'static str {
 role|label|text|placeholder|testid (optional action=click|fill).\n\
      - Wait with `browser_wait` load=networkidle when SPAs are still settling.\n\
      - Persist logins via `browser_state_save` / `browser_state_load` (path or session name).\n\
-     - Also available: `browser_type`, `browser_screenshot`, `browser_get_text`, \
+     - Also available: `browser_type`, `browser_screenshot` (returns PNG path by default; set inline=true only if you need base64), `browser_get_text`, \
 `browser_list_tabs`.\n\
      - To open a website, call `browser_navigate` with the target URL \
 (e.g. https://www.baidu.com), then `browser_snapshot`.\n\

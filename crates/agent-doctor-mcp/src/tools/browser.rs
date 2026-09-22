@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use base64::Engine;
 use serde_json::{json, Value};
 use tungstenite::{client::IntoClientRequest, Message};
 
@@ -42,10 +44,37 @@ fn js_bind_el(target: &str) -> String {
 }
 
 fn unix_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+fn screenshot_stamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn resolve_screenshot_path(path: Option<&str>) -> PathBuf {
+    if let Some(p) = path.map(str::trim).filter(|s| !s.is_empty()) {
+        return PathBuf::from(p);
+    }
+    std::env::temp_dir().join(format!(
+        "agent-doctor-screenshot-{}-{}.png",
+        std::process::id(),
+        screenshot_stamp_ms()
+    ))
+}
+
+fn write_screenshot_png(data_b64: &str, path: &Path) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_b64)
+        .context("decode screenshot base64")?;
+    std::fs::write(path, &bytes).with_context(|| format!("write screenshot {}", path.display()))?;
+    Ok(())
 }
 
 /// A CDP connection to a Chrome DevTools Protocol endpoint.
@@ -686,6 +715,24 @@ impl BrowserContext {
             .and_then(Value::as_str)
             .map(str::to_string)
             .context("Screenshot response missing 'data' field")
+    }
+
+    /// Screenshot result for MCP: default writes PNG and returns `{ path }`.
+    ///
+    /// Set `inline` to return `{ data }` base64 (can blow past context limits).
+    pub fn screenshot_result(&mut self, path: Option<&str>, inline: bool) -> Result<Value> {
+        let data = self.screenshot()?;
+        if inline {
+            return Ok(json!({ "data": data }));
+        }
+        let out = resolve_screenshot_path(path);
+        write_screenshot_png(&data, &out)?;
+        let bytes = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        Ok(json!({
+            "path": out,
+            "bytes": bytes,
+            "format": "png",
+        }))
     }
 
     /// Get the visible text content of the page.
@@ -1419,5 +1466,31 @@ mod ref_tests {
         ));
         assert!(url_matches("https://example.com/login", "login"));
         assert!(!url_matches("https://example.com", "https://other.com"));
+    }
+
+    #[test]
+    fn screenshot_path_defaults_to_temp_png() {
+        let path = resolve_screenshot_path(None);
+        assert!(path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("agent-doctor-screenshot-") && n.ends_with(".png")));
+    }
+
+    #[test]
+    fn screenshot_path_honors_explicit() {
+        let path = resolve_screenshot_path(Some("/tmp/shot.png"));
+        assert_eq!(path, PathBuf::from("/tmp/shot.png"));
+    }
+
+    #[test]
+    fn write_screenshot_png_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("page.png");
+        // 1x1 PNG
+        let b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        write_screenshot_png(b64, &out).unwrap();
+        assert!(out.is_file());
+        assert!(std::fs::metadata(&out).unwrap().len() > 0);
     }
 }

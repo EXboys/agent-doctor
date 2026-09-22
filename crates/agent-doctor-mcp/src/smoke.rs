@@ -4,7 +4,7 @@
 //! (PUT/GET `/json/new` fallback), navigates once, then tears down.
 
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -152,6 +152,38 @@ fn run_navigate(
         }
     }
 
+    // Screenshot default: write PNG + return path (not huge base64).
+    let shot = ctx
+        .screenshot_result(None, false)
+        .context("browser_screenshot save-to-path")?;
+    let shot_path = shot
+        .get("path")
+        .and_then(|v| v.as_str())
+        .context("browser_screenshot missing path")?;
+    if !Path::new(shot_path).is_file() {
+        bail!("browser_screenshot path does not exist: {shot_path}");
+    }
+    let shot_bytes = shot.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+    if shot_bytes < 100 {
+        bail!("browser_screenshot PNG too small ({shot_bytes} bytes)");
+    }
+    if shot.get("data").is_some() {
+        bail!("browser_screenshot default must not return base64 data");
+    }
+    let _ = std::fs::remove_file(shot_path);
+
+    let inline = ctx
+        .screenshot_result(None, true)
+        .context("browser_screenshot inline")?;
+    let data_len = inline
+        .get("data")
+        .and_then(|v| v.as_str())
+        .map(|s| s.len())
+        .unwrap_or(0);
+    if data_len < 50 {
+        bail!("browser_screenshot inline missing base64 data");
+    }
+
     Ok(SmokeReport {
         ok: true,
         browser: options.family.as_str().into(),
@@ -161,7 +193,9 @@ fn run_navigate(
         url: options.url.clone(),
         title,
         final_url,
-        detail: format!("navigate ok; snapshot refs={count}; find+networkidle ok"),
+        detail: format!(
+            "navigate ok; snapshot refs={count}; find+networkidle ok; screenshot path={shot_bytes}B inline={data_len}chars"
+        ),
     })
 }
 

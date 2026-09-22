@@ -242,10 +242,19 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "browser_screenshot".into(),
-            description: "Take a screenshot of the current page (returns base64 PNG)".into(),
+            description: "Take a screenshot of the current page. By default writes a PNG and returns { path } (avoids huge base64 in context). Set inline=true only if you need base64 data.".into(),
             input_schema: json!({
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Optional file path for the PNG. If omitted, writes under the system temp dir."
+                    },
+                    "inline": {
+                        "type": "boolean",
+                        "description": "When true, return { data } base64 PNG instead of writing a file. Default false."
+                    }
+                }
             }),
         },
         ToolDefinition {
@@ -646,8 +655,9 @@ fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Val
             ctx.state_load(path, session)
         }
         "browser_screenshot" => {
-            let data = ctx.screenshot()?;
-            Ok(json!({ "data": data }))
+            let path = args.get("path").and_then(Value::as_str);
+            let inline = args.get("inline").and_then(Value::as_bool).unwrap_or(false);
+            ctx.screenshot_result(path, inline)
         }
         "browser_get_text" => {
             let text = ctx.get_text()?;
