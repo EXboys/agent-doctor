@@ -201,6 +201,54 @@
                   <span class="chat-elevated-switch" aria-hidden="true"></span>
                   <span id="chat-elevated-label" class="chat-elevated-text" data-i18n="chat.elevatedClaude">自动审批</span>
                 </label>
+                <div class="chat-context-wrap">
+                  <button
+                    id="chat-context-meter"
+                    type="button"
+                    class="chat-context-ring-btn"
+                    hidden
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                    aria-controls="chat-context-popover"
+                    title="对话占用的上下文比例（估算）"
+                  >
+                    <svg class="chat-context-ring" viewBox="0 0 32 32" aria-hidden="true">
+                      <circle class="chat-context-ring-bg" cx="16" cy="16" r="12"></circle>
+                      <circle
+                        id="chat-context-ring-fill"
+                        class="chat-context-ring-fg"
+                        cx="16"
+                        cy="16"
+                        r="12"
+                      ></circle>
+                    </svg>
+                    <span id="chat-context-label" class="chat-context-sr">0%</span>
+                  </button>
+                  <div
+                    id="chat-context-popover"
+                    class="chat-context-popover"
+                    hidden
+                    role="dialog"
+                    aria-labelledby="chat-context-popover-title"
+                  >
+                    <strong id="chat-context-popover-title" class="chat-context-popover-title">
+                      对话占用
+                    </strong>
+                    <p id="chat-context-popover-body" class="chat-context-popover-body">
+                      当前大约用了 0%。快满时建议精简，继续聊会更稳。
+                    </p>
+                    <button
+                      id="chat-context-compact"
+                      type="button"
+                      class="chat-context-compact"
+                      data-i18n="chat.contextCompact"
+                      data-i18n-title="chat.contextCompactHint"
+                      title="丢掉较早细节，保留最近几轮"
+                    >
+                      精简对话
+                    </button>
+                  </div>
+                </div>
               </div>
               <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
             </div>

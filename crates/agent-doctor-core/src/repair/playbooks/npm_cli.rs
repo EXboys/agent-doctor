@@ -748,7 +748,8 @@ fn rewire_gateway_from_active_mode() -> Result<()> {
 
 fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
     let discovery = agent_doctor_mcp::discover_chrome().context("discover Chrome")?;
-    let binary = resolve_agent_doctor_binary().context("resolve agent-doctor binary")?;
+    let resolved = resolve_agent_doctor_binary().context("resolve agent-doctor binary")?;
+    let binary = crate::workspace::ensure_stable_agent_doctor_cli(&resolved)?;
     let mut options = WireBrowserMcpOptions::with_binary(binary);
     options.runtimes = vec![runtime_id.to_string()];
     if let Ok(doc) = crate::workspace::load_workspaces() {

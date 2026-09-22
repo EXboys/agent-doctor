@@ -96,9 +96,10 @@ pub fn run_configure(
     json: bool,
 ) -> Result<()> {
     let discovery = discover_chrome()?;
-    let binary = agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_else(|_| {
+    let resolved = agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_else(|_| {
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("agent-doctor-cli"))
     });
+    let binary = agent_doctor_core::ensure_stable_agent_doctor_cli(&resolved).unwrap_or(resolved);
     let user_data_dir = Some(resolve_user_data_dir(
         user_data_dir.as_ref(),
         Some(&discovery.binary_path),

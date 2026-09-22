@@ -2,7 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { t, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
 import { isPersonalEdition, isTeamEdition, productEdition } from "./edition";
-import { modelsForPresetId } from "./provider-models";
+import {
+  modelsForPresetId,
+  mergeLiveModels,
+  modelsForCustomProtocol,
+} from "./provider-models";
+import { PROVIDER_PRESETS } from "./provider-presets";
 import { appState } from "./app-state";
 import type {
   EngineRegisterStatus,
@@ -151,89 +156,6 @@ function updateWiringModeFootnote(_mode?: string): void {
     wiringModeFootnoteEl.removeAttribute("title");
   }
 }
-const PROVIDER_PRESETS: Record<
-  string,
-  { name: string; url: string; protocol: ProviderProtocol; models: string[]; chip?: string }
-> = {
-  deepseek: {
-    name: "DeepSeek",
-    url: "https://api.deepseek.com/v1",
-    protocol: "openai",
-    models: modelsForPresetId("deepseek"),
-    chip: "DeepSeek",
-  },
-  qwen: {
-    name: "Qwen",
-    url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    protocol: "openai",
-    models: modelsForPresetId("qwen"),
-    chip: "Qwen",
-  },
-  glm: {
-    name: "GLM",
-    url: "https://open.bigmodel.cn/api/paas/v4",
-    protocol: "openai",
-    models: modelsForPresetId("glm"),
-    chip: "GLM",
-  },
-  minimax: {
-    name: "MiniMax",
-    url: "https://api.minimaxi.com/v1",
-    protocol: "openai",
-    models: modelsForPresetId("minimax"),
-    chip: "MiniMax",
-  },
-  moonshot: {
-    name: "Moonshot / Kimi",
-    url: "https://api.moonshot.cn/v1",
-    protocol: "openai",
-    models: modelsForPresetId("moonshot"),
-    chip: "Kimi",
-  },
-  openai: {
-    name: "ChatGPT / OpenAI",
-    url: "https://api.openai.com/v1",
-    protocol: "openai",
-    models: modelsForPresetId("openai"),
-    chip: "ChatGPT",
-  },
-  anthropic: {
-    name: "Claude",
-    url: "https://api.anthropic.com",
-    protocol: "anthropic",
-    models: modelsForPresetId("anthropic"),
-    chip: "Claude",
-  },
-  gemini: {
-    name: "Gemini",
-    url: "https://generativelanguage.googleapis.com/v1beta/openai/",
-    protocol: "openai",
-    models: modelsForPresetId("gemini"),
-    chip: "Gemini",
-  },
-  siliconflow: {
-    name: "SiliconFlow",
-    url: "https://api.siliconflow.cn/v1",
-    protocol: "openai",
-    models: modelsForPresetId("siliconflow"),
-    chip: "SiliconFlow",
-  },
-  openrouter: {
-    name: "OpenRouter",
-    url: "https://openrouter.ai/api/v1",
-    protocol: "openai",
-    models: modelsForPresetId("openrouter"),
-    chip: "OpenRouter",
-  },
-  groq: {
-    name: "Groq",
-    url: "https://api.groq.com/openai/v1",
-    protocol: "openai",
-    models: modelsForPresetId("groq"),
-    chip: "Groq",
-  },
-};
-
 const PRESET_PICKER_GROUPS: Array<{ labelKey: MessageKey; ids: string[] }> = [
   {
     labelKey: "personal.groupPopular",
@@ -417,11 +339,7 @@ function applyProviderPreset(presetId: string, { forceModel = true } = {}) {
     syncPresetPicker("custom");
     personalNameRowEl.classList.remove("is-preset-locked");
     personalNameEl.readOnly = false;
-    setModelSuggestions(
-      personalProtocolEl.value === "anthropic"
-        ? ["claude-sonnet-4-5", "claude-opus-4-5", "deepseek-v4-flash"]
-        : ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4.1-mini"],
-    );
+    setModelSuggestions(modelsForCustomProtocol(personalProtocolEl.value));
     setPresetFormMode(true);
     return;
   }
@@ -964,6 +882,16 @@ async function verifyPersonalProvider() {
       protocol: values.protocol,
     });
     if (report.ok) {
+      const presetId = personalPresetEl.value;
+      const base =
+        presetId !== "custom" && PROVIDER_PRESETS[presetId]
+          ? modelsForPresetId(presetId)
+          : modelsForCustomProtocol(personalProtocolEl.value);
+      if (report.models_sample.length > 0) {
+        setModelSuggestions(
+          mergeLiveModels(base, report.models_sample, personalModelEl.value),
+        );
+      }
       const sample =
         report.models_sample.length > 0 ? ` (${report.models_sample.slice(0, 3).join(", ")})` : "";
       personalHintEl.textContent = t("personal.verifyOk", { message: `${report.message}${sample}` });
@@ -1172,11 +1100,7 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
         personalModelEl.value = keptModel;
       }
     } else {
-      setModelSuggestions(
-        personalProtocolEl.value === "anthropic"
-          ? ["claude-sonnet-4-5", "claude-opus-4-5", "deepseek-v4-flash"]
-          : ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4.1-mini"],
-      );
+      setModelSuggestions(modelsForCustomProtocol(personalProtocolEl.value));
     }
   });
 

@@ -113,6 +113,8 @@ const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS = 40;
 const MAX_CONTEXT_MESSAGES = 12;
+/** Keep this many user/assistant turns after one-click compact. */
+const COMPACT_KEEP_TURNS = 4;
 const MAX_ATTACHMENTS = 8;
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "avif"];
 
@@ -129,6 +131,14 @@ const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
 const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
 const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
 const composerEl = document.querySelector<HTMLElement>(".chat-composer")!;
+const contextMeterEl = document.querySelector<HTMLButtonElement>("#chat-context-meter");
+const contextRingFillEl = document.querySelector<SVGCircleElement>("#chat-context-ring-fill");
+const contextLabelEl = document.querySelector<HTMLElement>("#chat-context-label");
+const contextPopoverEl = document.querySelector<HTMLElement>("#chat-context-popover");
+const contextPopoverTitleEl = document.querySelector<HTMLElement>("#chat-context-popover-title");
+const contextPopoverBodyEl = document.querySelector<HTMLElement>("#chat-context-popover-body");
+const contextCompactEl = document.querySelector<HTMLButtonElement>("#chat-context-compact");
+const CONTEXT_RING_LENGTH = 2 * Math.PI * 12;
 const mentionsEl = document.querySelector<HTMLElement>("#chat-mentions")!;
 const mentionMenuEl = document.querySelector<HTMLElement>("#chat-mention-menu")!;
 const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!;
@@ -373,6 +383,7 @@ function isAskRuntime(value: string | null | undefined): value is AskRuntime {
 
 function updateRuntimeLabel(): void {
   renderModelPickerLabel();
+  updateContextMeter();
 }
 
 function closeModelMenu(): void {
@@ -425,11 +436,17 @@ function renderModelPickerLabel(): void {
     modelBtnEl.setAttribute("aria-label", modelLabelEl.textContent);
     return;
   }
-  modelLabelEl.textContent = runtimeName;
-  modelBtnEl.disabled = true;
-  modelBtnEl.title = isPersonalEdition()
-    ? t("chat.modelNeedProvider")
-    : `${runtimeName} — ${t("chat.runtimeLockedHint")}`;
+  // Personal: keep clickable so the menu can say “go wire a provider”.
+  // Team / locked: show runtime name only — model is chosen on the Agents page.
+  if (isPersonalEdition()) {
+    modelLabelEl.textContent = t("chat.modelPickLabel");
+    modelBtnEl.disabled = isComposerLocked();
+    modelBtnEl.title = t("chat.modelNeedProvider");
+  } else {
+    modelLabelEl.textContent = runtimeName;
+    modelBtnEl.disabled = true;
+    modelBtnEl.title = `${runtimeName} — ${t("chat.runtimeLockedHint")}`;
+  }
   modelBtnEl.setAttribute("aria-label", modelLabelEl.textContent);
 }
 
@@ -464,7 +481,7 @@ function renderModelMenu(): void {
 }
 
 function openModelMenu(): void {
-  if (modelBtnEl.disabled || isComposerLocked() || !wiredProvider) return;
+  if (modelBtnEl.disabled || isComposerLocked()) return;
   renderModelMenu();
   modelMenuOpen = true;
   modelMenuEl.hidden = false;
@@ -795,6 +812,13 @@ function applyI18n(): void {
   updateElevatedLabel();
   updateRuntimeLabel();
   syncActionButton();
+  if (contextCompactEl) {
+    contextCompactEl.textContent = t("chat.contextCompact");
+    contextCompactEl.title = t("chat.contextCompactHint");
+  }
+  if (contextMeterEl) {
+    contextMeterEl.title = t("chat.contextMeterTitle");
+  }
   // Paint history list before optional resource chips — chips must not block sessions.
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
@@ -805,6 +829,7 @@ function applyI18n(): void {
     console.warn("Ask: resources UI update failed", error);
   }
   syncRestoreBackupButton();
+  updateContextMeter();
 }
 
 function syncRestoreBackupButton(): void {
@@ -865,13 +890,17 @@ function syncComposerUi(): void {
   promptEl.disabled = locked;
   elevatedEl.disabled = locked || selectedRuntime() === "deepseek-harness";
   modelBtnEl.disabled = locked || !wiredProvider;
-  if (locked) closeModelMenu();
+  if (locked) {
+    closeModelMenu();
+    closeContextPopover();
+  }
   newSessionEl.disabled = false;
   attachEl.disabled = locked;
   sessionListEl.classList.remove("is-busy");
   syncActionButton();
   updateElevatedLabel();
   renderModelPickerLabel();
+  updateContextMeter();
 }
 
 function setBusy(next: boolean, chatSessionId?: string | null): void {
@@ -1080,6 +1109,8 @@ function isQuietStderr(line: string): boolean {
     /^session_id:/i.test(text) ||
     /^resume this session/i.test(text) ||
     /resumed session/i.test(text) ||
+    lower.includes("unrecognized_model") ||
+    lower.includes("unrecognized model") ||
     lower.startsWith("[secrets]") ||
     lower.includes("secrets.resolve unavailable") ||
     lower.includes("resolved command secrets locally") ||
@@ -2160,7 +2191,7 @@ function switchSession(id: string): void {
   if (unseenCompletedSessionIds.delete(id)) {
     // Opened after finishing elsewhere — clear 【完成】 badge.
   }
-  safeRenderActiveMessages();
+  renderActiveMessages();
   if (enteringRunning) {
     reattachLiveUi();
   } else if (busy && runningChatSessionId) {
@@ -2171,6 +2202,7 @@ function switchSession(id: string): void {
   syncComposerUi();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
+  updateContextMeter();
   promptEl.focus();
 }
 
@@ -2208,7 +2240,7 @@ function deleteSession(id: string): void {
   lifecycleActivityEl = null;
   toolGroupEl = null;
   renderPendingAttachments();
-  safeRenderActiveMessages();
+  renderActiveMessages();
   if (isViewingRunningSession()) {
     reattachLiveUi();
   }
@@ -2259,7 +2291,7 @@ function startNewSession(): void {
   lifecycleActivityEl = null;
   toolGroupEl = null;
   renderPendingAttachments();
-  safeRenderActiveMessages();
+  renderActiveMessages();
   syncComposerUi();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
@@ -2268,6 +2300,7 @@ function startNewSession(): void {
   } else {
     setStatus(t("chat.newSessionReady"), "ok");
   }
+  updateContextMeter();
   promptEl.focus();
 }
 
@@ -2294,7 +2327,7 @@ function clearActiveSession(): void {
   activityEl = null;
   pendingAttachments = [];
   renderPendingAttachments();
-  safeRenderActiveMessages();
+  renderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
   setStatus("");
@@ -2484,6 +2517,7 @@ function persistMessage(
   }
   if (session.id === store.activeId) {
     titleEl.textContent = sessionTitle(session);
+    updateContextMeter();
   }
   return message;
 }
@@ -2766,102 +2800,99 @@ function appendBubble(
 }
 
 function renderActiveMessages(): void {
-  logEl.replaceChildren();
-  assistantBubble = null;
-  activityEl = null;
-  toolGroupEl = null;
-  lifecycleActivityEl = null;
-  // Keep in-flight run memory so background events and switch-back still work.
-  if (!busy) {
-    assistantMessageId = null;
-    assistantRaw = "";
-    turnHadAssistantText = false;
-  }
-  const session = activeSession();
-  if (session.messages.length === 0) {
-    appendBubble("meta", t("chat.welcome"), { persist: false });
-    return;
-  }
-  for (let i = 0; i < session.messages.length; ) {
-    const message = session.messages[i];
-    if (message.role === "permission") {
-      const pendingLive =
-        isViewingRunningSession() &&
-        message.permission?.allowed == null &&
-        pendingPermissionBatch.some((p) => p.requestId === message.permission?.requestId);
-      if (pendingLive) {
-        i += 1;
-        continue;
-      }
-      // Unanswered asks stay as standalone cards — never fold into "$ N tools".
-      if (message.permission?.allowed == null) {
-        logEl.appendChild(renderPermissionCard(message, false));
-        i += 1;
-        continue;
-      }
-      const run: ChatMessage[] = [message];
-      while (
-        i + run.length < session.messages.length &&
-        session.messages[i + run.length].role === "permission"
-      ) {
-        const next = session.messages[i + run.length];
-        if (next.permission?.allowed == null) break;
-        const nextPending =
-          isViewingRunningSession() &&
-          pendingPermissionBatch.some((p) => p.requestId === next.permission?.requestId);
-        if (nextPending) break;
-        run.push(next);
-      }
-      if (run.length >= 2) {
-        try {
-          logEl.appendChild(renderPermissionGroup(run, false));
-        } catch {
-          for (const item of run) {
-            logEl.appendChild(renderPermissionCard(item, false));
-          }
-        }
-      } else {
-        logEl.appendChild(renderPermissionCard(message, false));
-      }
-      i += run.length;
-      continue;
-    }
-    if (message.role === "assistant") {
-      const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
-      const liveContent =
-        busy && message.id === assistantMessageId && assistantRaw
-          ? assistantRaw
-          : message.content;
-      setAssistantMarkdown(bubble, liveContent);
-      if (busy && message.id === assistantMessageId) {
-        bubble.classList.add("is-streaming");
-        assistantBubble = bubble;
-      }
-      logEl.appendChild(wrap);
-    } else if (message.role === "user") {
-      const { wrap } = createUserBubbleEl({
-        id: message.id,
-        text: message.content,
-        attachments: message.attachments,
-      });
-      logEl.appendChild(wrap);
-    } else {
-      const bubble = document.createElement("div");
-      bubble.className = `chat-bubble ${message.role}`;
-      bubble.dataset.messageId = message.id;
-      bubble.textContent = message.content;
-      const strip = renderAttachmentStrip(message.attachments);
-      if (strip) bubble.appendChild(strip);
-      logEl.appendChild(bubble);
-    }
-    i += 1;
-  }
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-function safeRenderActiveMessages(): void {
   try {
-    renderActiveMessages();
+    logEl.replaceChildren();
+    assistantBubble = null;
+    activityEl = null;
+    toolGroupEl = null;
+    lifecycleActivityEl = null;
+    // Keep in-flight run memory so background events and switch-back still work.
+    if (!busy) {
+      assistantMessageId = null;
+      assistantRaw = "";
+      turnHadAssistantText = false;
+    }
+    const session = activeSession();
+    if (session.messages.length === 0) {
+      appendBubble("meta", t("chat.welcome"), { persist: false });
+      return;
+    }
+    for (let i = 0; i < session.messages.length; ) {
+      const message = session.messages[i];
+      if (message.role === "permission") {
+        const pendingLive =
+          isViewingRunningSession() &&
+          message.permission?.allowed == null &&
+          pendingPermissionBatch.some((p) => p.requestId === message.permission?.requestId);
+        if (pendingLive) {
+          i += 1;
+          continue;
+        }
+        // Unanswered asks stay as standalone cards — never fold into "$ N tools".
+        if (message.permission?.allowed == null) {
+          logEl.appendChild(renderPermissionCard(message, false));
+          i += 1;
+          continue;
+        }
+        const run: ChatMessage[] = [message];
+        while (
+          i + run.length < session.messages.length &&
+          session.messages[i + run.length].role === "permission"
+        ) {
+          const next = session.messages[i + run.length];
+          if (next.permission?.allowed == null) break;
+          const nextPending =
+            isViewingRunningSession() &&
+            pendingPermissionBatch.some((p) => p.requestId === next.permission?.requestId);
+          if (nextPending) break;
+          run.push(next);
+        }
+        if (run.length >= 2) {
+          try {
+            logEl.appendChild(renderPermissionGroup(run, false));
+          } catch {
+            for (const item of run) {
+              logEl.appendChild(renderPermissionCard(item, false));
+            }
+          }
+        } else {
+          logEl.appendChild(renderPermissionCard(message, false));
+        }
+        i += run.length;
+        continue;
+      }
+      if (message.role === "assistant") {
+        const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
+        const liveContent =
+          busy && message.id === assistantMessageId && assistantRaw
+            ? assistantRaw
+            : message.content;
+        setAssistantMarkdown(bubble, liveContent);
+        if (busy && message.id === assistantMessageId) {
+          bubble.classList.add("is-streaming");
+          assistantBubble = bubble;
+        }
+        logEl.appendChild(wrap);
+      } else if (message.role === "user") {
+        const { wrap } = createUserBubbleEl({
+          id: message.id,
+          text: message.content,
+          attachments: message.attachments,
+        });
+        logEl.appendChild(wrap);
+      } else {
+        const bubble = document.createElement("div");
+        bubble.className = `chat-bubble ${message.role}`;
+        bubble.dataset.messageId = message.id;
+        bubble.textContent = message.content;
+        const strip = renderAttachmentStrip(message.attachments);
+        if (strip) bubble.appendChild(strip);
+        logEl.appendChild(bubble);
+      }
+      i += 1;
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+    updateContextMeter();
   } catch (error) {
     console.error("Ask: failed to render messages", error);
     logEl.replaceChildren();
@@ -3153,6 +3184,198 @@ function buildPromptWithHistory(
 
   parts.push(`User: ${userText}\n\nAssistant:`);
   return parts.join("\n\n");
+}
+
+/** Rough token estimate — CJK denser than ASCII. */
+function estimateTokens(text: string): number {
+  let cjk = 0;
+  let other = 0;
+  for (const ch of text) {
+    if ((ch.codePointAt(0) ?? 0) > 0xff) cjk += 1;
+    else other += 1;
+  }
+  return Math.max(1, Math.ceil(cjk / 1.5 + other / 4));
+}
+
+function contextLimitForModel(model: string | null | undefined): number {
+  const m = (model ?? "").toLowerCase();
+  if (!m) return 128_000;
+  if (m.includes("haiku")) return 200_000;
+  if (
+    m.includes("gpt-5.6") ||
+    m.includes("gpt-5.4") ||
+    m.includes("gpt-4.1") ||
+    m.includes("o3") ||
+    m.includes("o4-mini")
+  ) {
+    return 128_000;
+  }
+  if (
+    m.includes("deepseek") ||
+    m.includes("qwen") ||
+    m.includes("claude") ||
+    m.includes("gemini") ||
+    m.includes("kimi") ||
+    m.includes("moonshot") ||
+    m.includes("glm") ||
+    m.includes("minimax")
+  ) {
+    return 1_000_000;
+  }
+  return 128_000;
+}
+
+function sessionContextText(session: ChatSession, draft = ""): string {
+  const chunks: string[] = [];
+  for (const message of session.messages) {
+    if (message.role !== "user" && message.role !== "assistant" && message.role !== "meta") {
+      continue;
+    }
+    if (message.content.trim()) chunks.push(message.content);
+    if (message.attachments?.length) {
+      chunks.push(message.attachments.map((a) => a.name).join("\n"));
+    }
+  }
+  const trimmedDraft = draft.trim();
+  if (trimmedDraft) chunks.push(trimmedDraft);
+  return chunks.join("\n");
+}
+
+function contextUsagePercent(session: ChatSession, draft = ""): number {
+  const used = estimateTokens(sessionContextText(session, draft));
+  const limit = contextLimitForModel(wiredProvider?.model);
+  return Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+}
+
+function closeContextPopover(): void {
+  if (!contextPopoverEl || !contextMeterEl) return;
+  contextPopoverEl.hidden = true;
+  contextMeterEl.classList.remove("is-open");
+  contextMeterEl.setAttribute("aria-expanded", "false");
+  contextMeterEl.closest(".chat-context-wrap")?.classList.remove("is-open");
+  composerBoxEl.classList.remove("is-context-open");
+  composerEl.classList.remove("is-context-open");
+  contextPopoverEl.style.left = "";
+  contextPopoverEl.style.right = "";
+  contextPopoverEl.style.top = "";
+  contextPopoverEl.style.bottom = "";
+  contextPopoverEl.style.width = "";
+}
+
+function positionContextPopover(): void {
+  if (!contextPopoverEl || !contextMeterEl || contextPopoverEl.hidden) return;
+  const rect = contextMeterEl.getBoundingClientRect();
+  const gap = 8;
+  const width = Math.min(248, window.innerWidth - 24);
+  let left = rect.right - width;
+  if (left < 12) left = 12;
+  if (left + width > window.innerWidth - 12) {
+    left = Math.max(12, window.innerWidth - 12 - width);
+  }
+  contextPopoverEl.style.position = "fixed";
+  contextPopoverEl.style.left = `${Math.round(left)}px`;
+  contextPopoverEl.style.right = "auto";
+  contextPopoverEl.style.width = `${Math.round(width)}px`;
+  contextPopoverEl.style.bottom = `${Math.round(window.innerHeight - rect.top + gap)}px`;
+  contextPopoverEl.style.top = "auto";
+  contextPopoverEl.style.zIndex = "120";
+}
+
+function openContextPopover(): void {
+  if (!contextPopoverEl || !contextMeterEl) return;
+  closeModelMenu();
+  contextPopoverEl.hidden = false;
+  contextMeterEl.classList.add("is-open");
+  contextMeterEl.setAttribute("aria-expanded", "true");
+  contextMeterEl.closest(".chat-context-wrap")?.classList.add("is-open");
+  composerBoxEl.classList.add("is-context-open");
+  composerEl.classList.add("is-context-open");
+  positionContextPopover();
+}
+
+function toggleContextPopover(): void {
+  if (!contextPopoverEl || contextMeterEl?.hidden) return;
+  if (contextPopoverEl.hidden) openContextPopover();
+  else closeContextPopover();
+}
+
+function updateContextMeter(): void {
+  if (!contextMeterEl || !contextRingFillEl || !contextLabelEl) return;
+  const session = activeSession();
+  const turns = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
+  if (turns.length === 0 && !promptEl.value.trim()) {
+    closeContextPopover();
+    contextMeterEl.hidden = true;
+    return;
+  }
+  contextMeterEl.hidden = false;
+  const pct = contextUsagePercent(session, promptEl.value);
+  const offset = CONTEXT_RING_LENGTH * (1 - pct / 100);
+  contextRingFillEl.style.strokeDasharray = String(CONTEXT_RING_LENGTH);
+  contextRingFillEl.style.strokeDashoffset = String(offset);
+  contextLabelEl.textContent = t("chat.contextUsed", { pct: String(pct) });
+  contextMeterEl.classList.toggle("is-warn", pct >= 70 && pct < 90);
+  contextMeterEl.classList.toggle("is-full", pct >= 90);
+  contextMeterEl.title = pct >= 70 ? t("chat.contextNearFull") : t("chat.contextMeterTitle");
+  if (contextPopoverTitleEl) {
+    contextPopoverTitleEl.textContent = t("chat.contextPopoverTitle", { pct: String(pct) });
+  }
+  if (contextPopoverBodyEl) {
+    contextPopoverBodyEl.textContent =
+      pct >= 70
+        ? t("chat.contextNearFull")
+        : t("chat.contextPopoverBody", { pct: String(pct) });
+  }
+  if (contextCompactEl) {
+    const canCompact = turns.length > COMPACT_KEEP_TURNS && !isComposerLocked();
+    contextCompactEl.disabled = !canCompact;
+    contextCompactEl.hidden = false;
+  }
+}
+
+function compactActiveSession(): void {
+  if (isComposerLocked()) return;
+  const session = activeSession();
+  const turns = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
+  if (turns.length <= COMPACT_KEEP_TURNS) {
+    setStatus(t("chat.contextCompactNeedMore"), "muted");
+    return;
+  }
+  const keep = turns.slice(-COMPACT_KEEP_TURNS);
+  const dropped = turns.slice(0, -COMPACT_KEEP_TURNS);
+  const summaryLines = dropped
+    .map((m) => {
+      const role =
+        m.role === "user"
+          ? getLocale() === "zh"
+            ? "用户"
+            : "User"
+          : getLocale() === "zh"
+            ? "助手"
+            : "Assistant";
+      const text = m.content.trim().replace(/\s+/g, " ");
+      const short = text.length > 72 ? `${text.slice(0, 72)}…` : text || "(…)";
+      return `- ${role}: ${short}`;
+    })
+    .slice(0, 16);
+  const summary: ChatMessage = {
+    id: uid(),
+    role: "meta",
+    content: `${t("chat.contextCompactSummary", { n: String(dropped.length) })}\n${summaryLines.join("\n")}`,
+    at: Date.now(),
+  };
+  const pendingPermissions = session.messages.filter(
+    (m) => m.role === "permission" && m.permission?.allowed == null,
+  );
+  session.messages = [...pendingPermissions, summary, ...keep];
+  session.runtimeThreadId = null;
+  touchSession(session);
+  saveStore();
+  closeContextPopover();
+  renderActiveMessages();
+  renderSessionList();
+  updateContextMeter();
+  setStatus(t("chat.contextCompactDone"), "ok");
 }
 
 async function ensureListener(): Promise<void> {
@@ -3622,7 +3845,7 @@ function restoreChatFromBackup(): boolean {
   }
   store = loaded;
   flushStorePersist();
-  safeRenderActiveMessages();
+  renderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
   setStatus(t("chat.restoreBackupOk"), "ok");
@@ -3719,7 +3942,7 @@ function boot(): void {
   // Paint sessions + transcript first so a hung secondary init never looks like “no history”.
   try {
     renderSessionList();
-    safeRenderActiveMessages();
+    renderActiveMessages();
   } catch (error) {
     console.error("Ask: early paint failed", error);
   }
@@ -3730,7 +3953,7 @@ function boot(): void {
     console.error("Ask: runtime session setup failed", error);
   }
   applyI18n();
-  safeRenderActiveMessages();
+  renderActiveMessages();
   offerBackupRestoreIfNeeded();
   win.__AD_ASK_BOOTED__ = true;
   try {
@@ -3809,6 +4032,15 @@ function boot(): void {
   promptEl.addEventListener("input", () => {
     autoResizePrompt();
     mentionMenu.renderMentionMenu();
+    updateContextMeter();
+  });
+  contextMeterEl?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleContextPopover();
+  });
+  contextCompactEl?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    compactActiveSession();
   });
   promptEl.addEventListener("keydown", (event) => {
     if (!mentionMenuEl.hidden) {
@@ -3879,10 +4111,15 @@ function boot(): void {
     if (!modelBtnEl.contains(event.target) && !modelMenuEl.contains(event.target)) {
       closeModelMenu();
     }
+    const wrap = contextMeterEl?.closest(".chat-context-wrap");
+    if (wrap && !wrap.contains(event.target)) {
+      closeContextPopover();
+    }
   });
 
   modelBtnEl.addEventListener("click", (event) => {
     event.stopPropagation();
+    closeContextPopover();
     if (modelMenuOpen) {
       closeModelMenu();
       return;
@@ -3892,6 +4129,7 @@ function boot(): void {
 
   window.addEventListener("resize", () => {
     if (modelMenuOpen) positionModelMenu();
+    if (contextPopoverEl && !contextPopoverEl.hidden) positionContextPopover();
   });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {

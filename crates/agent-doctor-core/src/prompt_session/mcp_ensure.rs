@@ -237,7 +237,8 @@ fn resolve_mcp_binary() -> anyhow::Result<PathBuf> {
         }
     }
     // Prefer app-bundled / real CLI over a stale PATH shim (common C-end trap).
-    resolve_agent_doctor_binary().context("resolve agent-doctor MCP binary")
+    let resolved = resolve_agent_doctor_binary().context("resolve agent-doctor MCP binary")?;
+    crate::workspace::ensure_stable_agent_doctor_cli(&resolved)
 }
 
 #[cfg(test)]

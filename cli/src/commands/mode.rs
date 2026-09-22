@@ -59,9 +59,10 @@ fn finish_switch(report: ModeSwitchReport, with_browser_mcp: bool, json: bool) -
 }
 
 pub fn wire_browser_mcp_after_setup() -> Result<BrowserMcpWireReport> {
-    let binary = agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_else(|_| {
+    let resolved = agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_else(|_| {
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("agent-doctor"))
     });
+    let binary = agent_doctor_core::ensure_stable_agent_doctor_cli(&resolved).unwrap_or(resolved);
     wire_browser_mcp_defaults(&binary)
 }
 

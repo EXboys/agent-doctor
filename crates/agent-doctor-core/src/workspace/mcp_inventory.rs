@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -470,28 +470,45 @@ fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
 ///
 /// Skips the common Hermes workspace shim at `~/.local/bin/agent-doctor`
 /// (`exec hermes -p agent-doctor …`), which is not the Agent Doctor CLI.
+///
+/// Prefers a stable, non-ephemeral path (and the current `agent-doctor` binary
+/// name) over leftover `agent-doctor-cli` copies under Cursor sandbox caches —
+/// those can be months old and break tools like `browser_screenshot`.
 pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     let mut candidates = Vec::new();
 
-    // Bundled CLI first. PATH scan can spawn a GUI stub / npm shim and hang on Windows.
+    // Dev / Cursor sandbox: honor CARGO_TARGET_DIR before PATH or stale siblings.
+    if let Ok(target) = std::env::var("CARGO_TARGET_DIR") {
+        let root = PathBuf::from(target);
+        for rel in [
+            "release/agent-doctor",
+            "debug/agent-doctor",
+            "release/agent-doctor-cli",
+            "debug/agent-doctor-cli",
+        ] {
+            candidates.push(root.join(rel));
+        }
+    }
+
+    // Bundled CLI next to the running exe. Prefer `agent-doctor` (current package
+    // bin name) ahead of legacy `agent-doctor-cli` so an old sibling cannot win.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             #[cfg(windows)]
             {
+                candidates.push(dir.join("resources/agent-doctor.exe"));
+                candidates.push(dir.join("agent-doctor.exe"));
+                candidates.push(dir.join("../Resources/agent-doctor.exe"));
                 candidates.push(dir.join("resources/agent-doctor-cli.exe"));
                 candidates.push(dir.join("agent-doctor-cli.exe"));
                 candidates.push(dir.join("../Resources/agent-doctor-cli.exe"));
             }
-            candidates.push(dir.join("agent-doctor-cli"));
-            candidates.push(dir.join("../Resources/agent-doctor-cli"));
-            candidates.push(dir.join("resources/agent-doctor-cli"));
             candidates.push(dir.join("resources/agent-doctor"));
             candidates.push(dir.join("../Resources/agent-doctor"));
             candidates.push(dir.join("agent-doctor"));
-            #[cfg(windows)]
-            {
-                candidates.push(dir.join("agent-doctor.exe"));
-            }
+            candidates.push(dir.join("resources/agent-doctor-cli"));
+            candidates.push(dir.join("../Resources/agent-doctor-cli"));
+            candidates.push(dir.join("agent-doctor-cli"));
         }
     }
 
@@ -505,18 +522,28 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
             "../../target/debug/agent-doctor",
             "target/release/agent-doctor",
             "target/debug/agent-doctor",
+            "../target/release/agent-doctor-cli",
+            "../target/debug/agent-doctor-cli",
+            "../../target/release/agent-doctor-cli",
+            "../../target/debug/agent-doctor-cli",
         ] {
             candidates.push(root.join(rel));
         }
     }
 
-    candidates.extend(find_all_binaries("agent-doctor-cli"));
     candidates.extend(find_all_binaries("agent-doctor"));
+    candidates.extend(find_all_binaries("agent-doctor-cli"));
 
+    let mut real = Vec::new();
     let mut saw_unrunnable: Option<PathBuf> = None;
     for path in candidates {
         match classify_agent_doctor_cli(&path) {
-            CliProbe::Real => return Ok(path.canonicalize().unwrap_or(path)),
+            CliProbe::Real => {
+                let canonical = path.canonicalize().unwrap_or(path);
+                if !real.iter().any(|p: &PathBuf| p == &canonical) {
+                    real.push(canonical);
+                }
+            }
             CliProbe::Unrunnable => {
                 if saw_unrunnable.is_none() {
                     saw_unrunnable = Some(path);
@@ -524,6 +551,10 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
             }
             CliProbe::Skip => {}
         }
+    }
+
+    if let Some(best) = pick_best_agent_doctor_cli(&real) {
+        return Ok(best);
     }
 
     if let Some(path) = saw_unrunnable {
@@ -550,6 +581,62 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
         "Could not find the Agent Doctor CLI. Install with `cargo install --path cli`, \
          or place `agent-doctor-cli` on PATH (note: ~/.local/bin/agent-doctor may be a Hermes shim)."
     )
+}
+
+fn is_ephemeral_cli_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    s.contains("cursor-sandbox-cache")
+        || s.contains("/T/cargo-target")
+        || s.contains("/var/folders/")
+        || s.contains("\\AppData\\Local\\Temp\\")
+}
+
+fn pick_best_agent_doctor_cli(candidates: &[PathBuf]) -> Option<PathBuf> {
+    if candidates.is_empty() {
+        return None;
+    }
+    // Newest mtime wins so a just-built `agent-doctor` beats a months-old
+    // `agent-doctor-cli` left on PATH or beside a desktop debug binary.
+    candidates
+        .iter()
+        .max_by_key(|p| {
+            fs::metadata(p)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+        .cloned()
+}
+
+/// When the resolved CLI lives in a Cursor/cargo temp dir, copy it into the
+/// user config bin so `.mcp.json` does not keep pointing at a cache that
+/// disappears or stays stuck on an August build.
+pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
+    if !is_ephemeral_cli_path(resolved) {
+        return Ok(resolved.to_path_buf());
+    }
+    let Some(config) = dirs::config_dir() else {
+        return Ok(resolved.to_path_buf());
+    };
+    let bin_dir = config.join("agent-doctor").join("bin");
+    fs::create_dir_all(&bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
+    #[cfg(windows)]
+    let dest = bin_dir.join("agent-doctor.exe");
+    #[cfg(not(windows))]
+    let dest = bin_dir.join("agent-doctor");
+
+    fs::copy(resolved, &dest).with_context(|| {
+        format!(
+            "copy {} → {} for stable MCP command",
+            resolved.display(),
+            dest.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(dest)
 }
 
 fn looks_like_desktop_gui(path: &Path) -> bool {

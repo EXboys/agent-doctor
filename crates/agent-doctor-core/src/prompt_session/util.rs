@@ -119,6 +119,12 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
         return true;
     }
     let lower = t.to_ascii_lowercase();
+    // Claude Code SDK warns when ANTHROPIC_MODEL is a gateway id (e.g. DeepSeek)
+    // that is not in Claude's built-in list. The request still works; Ask must
+    // not show the raw `[claude-code:unrecognized_model] {…}` blob as an error.
+    if lower.contains("unrecognized_model") || lower.contains("unrecognized model") {
+        return true;
+    }
     // Newer Codex strips provider keys from project-local `.codex/config.toml` and
     // logs this on every app-server start. Default workspace cwd is $HOME, so
     // `~/.codex` is rediscovered as project-local while CODEX_HOME is isolated —

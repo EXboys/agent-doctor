@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::doctor::run_doctor;
 use crate::workspace::{
-    browser_configured_runtimes, list_mcp_inventory, load_workspaces, resolve_agent_doctor_binary,
+    browser_configured_runtimes, ensure_stable_agent_doctor_cli, list_mcp_inventory,
+    load_workspaces, resolve_agent_doctor_binary,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,9 +147,13 @@ pub fn diagnose_and_wire_browser_mcp(
     }
 
     let binary = if options.binary.as_os_str().is_empty() {
-        resolve_agent_doctor_binary().ok()
+        resolve_agent_doctor_binary()
+            .ok()
+            .and_then(|p| ensure_stable_agent_doctor_cli(&p).ok())
     } else {
-        Some(options.binary.clone())
+        ensure_stable_agent_doctor_cli(&options.binary)
+            .ok()
+            .or_else(|| Some(options.binary.clone()))
     };
     let cli_ok = binary.is_some();
     if !cli_ok {
