@@ -248,6 +248,10 @@ mod tests {
         .unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("AGENT_DOCTOR_DSH_BIN", &binary);
+        // Prefer DEEPSEEK_* so a leftover personal provider in settings.db cannot
+        // override OPENAI_BASE_URL via collect_overlay_env().
+        std::env::set_var("DEEPSEEK_API_KEY", "test-secret");
+        std::env::set_var("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1");
         std::env::set_var("OPENAI_API_KEY", "test-secret");
         std::env::set_var("OPENAI_BASE_URL", "https://api.deepseek.com/v1");
         let report = DeepSeekHarnessAskBackend
@@ -268,6 +272,8 @@ mod tests {
             )
             .unwrap();
         std::env::remove_var("AGENT_DOCTOR_DSH_BIN");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("DEEPSEEK_BASE_URL");
         std::env::remove_var("OPENAI_API_KEY");
         std::env::remove_var("OPENAI_BASE_URL");
         assert_eq!(report.status, PromptSessionStatus::Succeeded);
