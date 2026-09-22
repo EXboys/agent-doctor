@@ -188,6 +188,12 @@ let store: SessionStore = (() => {
 })();
 let busy = false;
 let busyGen = 0;
+/** Frontend chat session id for the in-flight ask (null when idle). */
+let runningChatSessionId: string | null = null;
+/** Backend prompt-session id for the in-flight ask. */
+let runningBackendSessionId: string | null = null;
+/** Sessions that finished while the user was looking elsewhere — show 【完成】 until opened. */
+const unseenCompletedSessionIds = new Set<string>();
 let unlisten: UnlistenFn | null = null;
 let assistantBubble: HTMLElement | null = null;
 let assistantMessageId: string | null = null;
@@ -202,6 +208,65 @@ let pendingAttachments: ChatAttachment[] = [];
 let turnHadAssistantText = false;
 let workspaceCwd: string | null = null;
 let workspaceDoc: WorkspaceDoc | null = null;
+
+/** True when the open chat owns the in-flight (or just-finishing) run. */
+function isViewingRunningSession(): boolean {
+  return Boolean(runningChatSessionId && store.activeId === runningChatSessionId);
+}
+
+/** Composer/send locks only while a run is busy and that chat is open. */
+function isComposerLocked(): boolean {
+  return Boolean(busy && isViewingRunningSession());
+}
+
+function sessionById(id: string | null | undefined): ChatSession | undefined {
+  if (!id) return undefined;
+  return store.sessions.find((s) => s.id === id);
+}
+
+/** Session that owns the in-flight run (falls back to the open chat). */
+function runTargetSession(): ChatSession {
+  const running = sessionById(runningChatSessionId);
+  if (running) return running;
+  return activeSession();
+}
+
+/** Ignore stale events from a previous backend session. */
+function isEventForCurrentRun(sessionId: string | undefined): boolean {
+  // Prefer backend session id so late events still apply after invoke()>finally
+  // clears `busy` a tick before the matching `completed`/delta is handled.
+  if (runningBackendSessionId) {
+    return !sessionId || sessionId === runningBackendSessionId;
+  }
+  return busy;
+}
+
+function settleRunRouting(): void {
+  runningChatSessionId = null;
+  runningBackendSessionId = null;
+}
+
+/** Expire leftover Allow/Deny cards when the ask ends (in place — do not reshuffle the log). */
+function expireLivePermissionCards(): void {
+  if (permissionPaintTimer) {
+    window.clearTimeout(permissionPaintTimer);
+    permissionPaintTimer = 0;
+  }
+  pendingPermissionBatch = [];
+  for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
+    card.classList.remove("is-pending");
+    card.classList.add("is-expired");
+    card.dataset.resolved = "1";
+    const actions = card.querySelector(".chat-permission-actions");
+    if (actions) {
+      actions.replaceChildren();
+      const badge = document.createElement("span");
+      badge.className = "chat-permission-result";
+      badge.textContent = t("chat.permissionExpired");
+      actions.appendChild(badge);
+    }
+  }
+}
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -285,7 +350,7 @@ function renderModelPickerLabel(): void {
     const chip = providerChipForUrl(wiredProvider.url, wiredProvider.name);
     const model = wiredProvider.model.trim() || "—";
     modelLabelEl.textContent = `${chip} · ${model}`;
-    modelBtnEl.disabled = busy;
+    modelBtnEl.disabled = isComposerLocked();
     modelBtnEl.title = t("chat.modelPickHint");
     modelBtnEl.setAttribute("aria-label", modelLabelEl.textContent);
     return;
@@ -329,7 +394,7 @@ function renderModelMenu(): void {
 }
 
 function openModelMenu(): void {
-  if (modelBtnEl.disabled || busy || !wiredProvider) return;
+  if (modelBtnEl.disabled || isComposerLocked() || !wiredProvider) return;
   renderModelMenu();
   modelMenuOpen = true;
   modelMenuEl.hidden = false;
@@ -384,7 +449,7 @@ async function refreshWiredProvider(): Promise<void> {
 }
 
 async function switchWiredModel(model: string): Promise<void> {
-  if (!wiredProvider || busy) return;
+  if (!wiredProvider || isComposerLocked()) return;
   const next = model.trim();
   if (!next || next === wiredProvider.model) {
     closeModelMenu();
@@ -691,7 +756,7 @@ function updateElevatedLabel(): void {
     elevatedEl.disabled = true;
     return;
   }
-  elevatedEl.disabled = busy;
+  elevatedEl.disabled = isComposerLocked();
   elevatedLabelEl.textContent = detail;
 }
 
@@ -704,7 +769,7 @@ function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "mute
 }
 
 function syncActionButton(): void {
-  if (busy) {
+  if (isViewingRunningSession()) {
     actionEl.textContent = t("chat.stop");
     actionEl.classList.remove("btn-primary");
     actionEl.classList.add("btn-danger");
@@ -719,27 +784,52 @@ function syncActionButton(): void {
   }
 }
 
-function setBusy(next: boolean): void {
-  if (next) busyGen += 1;
-  busy = next;
-  promptEl.disabled = next;
-  elevatedEl.disabled = next || selectedRuntime() === "deepseek-harness";
-  modelBtnEl.disabled = next || !wiredProvider;
-  if (next) closeModelMenu();
-  newSessionEl.disabled = next;
-  attachEl.disabled = next;
-  sessionListEl.classList.toggle("is-busy", next);
+function syncComposerUi(): void {
+  const locked = isComposerLocked();
+  promptEl.disabled = locked;
+  elevatedEl.disabled = locked || selectedRuntime() === "deepseek-harness";
+  modelBtnEl.disabled = locked || !wiredProvider;
+  if (locked) closeModelMenu();
+  newSessionEl.disabled = false;
+  attachEl.disabled = locked;
+  sessionListEl.classList.remove("is-busy");
   syncActionButton();
-  if (!next) {
+  updateElevatedLabel();
+  renderModelPickerLabel();
+}
+
+function setBusy(next: boolean, chatSessionId?: string | null): void {
+  if (next) {
+    busyGen += 1;
+    busy = true;
+    runningChatSessionId = chatSessionId ?? store.activeId;
+    syncComposerUi();
+    flushSessionListRender();
+    return;
+  }
+  const wasViewing = isViewingRunningSession();
+  busy = false;
+  // Do not clear runningBackendSessionId here — late prompt-session-event
+  // handlers (completed / trailing deltas) must still match the run.
+  syncComposerUi();
+  if (wasViewing) {
     settleActivity();
     finishToolGroup(true);
-    if (assistantBubble) {
+    if (assistantBubble?.isConnected) {
       assistantBubble.classList.remove("is-streaming");
       syncAssistantCopyButton(assistantBubble);
     }
-    flushStorePersist();
-    flushSessionListRender();
   }
+  assistantBubble = null;
+  assistantMessageId = null;
+  assistantRaw = "";
+  pendingText = "";
+  turnHadAssistantText = false;
+  activityEl = null;
+  lifecycleActivityEl = null;
+  toolGroupEl = null;
+  flushStorePersist();
+  flushSessionListRender();
 }
 
 function activityKind(phase: string): "tool" | "think" | "write" | "info" | "error" {
@@ -927,6 +1017,7 @@ function isQuietStderr(line: string): boolean {
 }
 
 function appendStderrLine(line: string): void {
+  if (!isViewingRunningSession()) return;
   const text = line.trim();
   if (!text || isQuietStderr(text)) return;
   const last = logEl.lastElementChild as HTMLElement | null;
@@ -948,6 +1039,7 @@ function appendStderrLine(line: string): void {
 
 /** Render progress / tool calls inline in the chat stream (not a side panel). */
 function pushActivity(phase: string, message: string): void {
+  if (!isViewingRunningSession()) return;
   const text = message.trim() || phase;
   if (!text) return;
 
@@ -1065,10 +1157,16 @@ function pushPermissionCard(payload: {
 }): void {
   flushPendingTextSync();
   sealAssistantBubble();
-  settleActivity();
-  dismissLifecycleActivity();
-  scrubToolFragmentsBeforePermission(payload.detail);
-  setStatus(t("chat.needYourChoice"), "warn");
+  if (isViewingRunningSession()) {
+    settleActivity();
+    dismissLifecycleActivity();
+    scrubToolFragmentsBeforePermission(payload.detail);
+  }
+  if (isViewingRunningSession()) {
+    setStatus(t("chat.needYourChoice"), "warn");
+  } else {
+    setStatus(t("chat.waitingPermissionElsewhere"), "warn");
+  }
 
   if (pendingPermissionBatch.some((item) => item.requestId === payload.request_id)) {
     return;
@@ -1092,8 +1190,11 @@ function pushPermissionCard(payload: {
     messageId: persisted.id,
   });
 
-  hideDecisionDock();
-  schedulePaintLivePermissionBatch();
+  if (isViewingRunningSession()) {
+    hideDecisionDock();
+    schedulePaintLivePermissionBatch();
+  }
+  flushSessionListRender();
 }
 
 function schedulePaintLivePermissionBatch(): void {
@@ -1129,7 +1230,7 @@ function paintLivePermissionBatch(): void {
   // One pending ask: keep the compact single-tool card.
   if (pendingPermissionBatch.length === 1) {
     const only = pendingPermissionBatch[0];
-    const message = activeSession().messages.find((m) => m.id === only.messageId);
+    const message = runTargetSession().messages.find((m) => m.id === only.messageId);
     if (message) {
       const card = renderPermissionCard(message, true);
       logEl.appendChild(card);
@@ -1177,7 +1278,13 @@ function paintLivePermissionBatch(): void {
       }
     } catch (error) {
       setBusyLocal(false);
-      setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
+      const raw = String(error);
+      if (/no active ask session/i.test(raw)) {
+        setStatus(t("chat.permissionSessionGone"), "warn");
+        expireLivePermissionCards();
+      } else {
+        setStatus(t("chat.permissionFailed", { error: raw }), "error");
+      }
     }
   };
   allowBtn.addEventListener("click", () => void resolveAll(true));
@@ -1227,10 +1334,19 @@ function scrubToolFragmentsBeforePermission(detail: string): void {
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter((s) => s.length > 8);
 
-  // Remove trailing tool groups created from "调用工具 Bash…" status events.
+  // Only strip ephemeral live tool chips — never the resolved permission history
+  // group (`chat-turn-tools` / `chat-permission-group`), or a pending ask vanishes
+  // when the next permission arrives.
   while (true) {
     const last = logEl.lastElementChild as HTMLElement | null;
     if (!last?.classList.contains("chat-tool-group")) break;
+    if (
+      last.classList.contains("chat-turn-tools") ||
+      last.classList.contains("chat-permission-group") ||
+      !last.classList.contains("is-live")
+    ) {
+      break;
+    }
     last.remove();
   }
   toolGroupEl = null;
@@ -1266,7 +1382,7 @@ function removeAssistantBubbleElement(el: HTMLElement): void {
   const messageId = bubble.dataset.messageId;
   assistantMsgWrap(bubble).remove();
   if (!messageId) return;
-  const session = activeSession();
+  const session = runTargetSession();
   session.messages = session.messages.filter((m) => m.id !== messageId);
   saveStore();
   if (assistantMessageId === messageId) {
@@ -1334,7 +1450,13 @@ function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLE
         });
       } catch (error) {
         setLocalBusy(false);
-        setStatus(t("chat.permissionFailed", { error: String(error) }), "error");
+        const raw = String(error);
+        if (/no active ask session/i.test(raw)) {
+          setStatus(t("chat.permissionSessionGone"), "warn");
+          expireLivePermissionCards();
+        } else {
+          setStatus(t("chat.permissionFailed", { error: raw }), "error");
+        }
       }
     };
     allowBtn.addEventListener("click", () => void resolve(true));
@@ -1386,9 +1508,13 @@ function permissionGroupSummaryLabel(count: number, toolNames: string[]): string
 
 function isCollapsiblePermissionEl(el: HTMLElement): boolean {
   if (!el.classList.contains("chat-permission")) return false;
+  // Live asks and unanswered/expired cards must stay visible — folding them into
+  // "$ N tools" makes the Allow/Deny UI look like it flashed away.
   if (el.classList.contains("is-pending")) return false;
+  if (el.classList.contains("is-expired")) return false;
+  if (el.classList.contains("is-batch")) return false;
   if (el.closest(".chat-permission-group, .chat-turn-tools")) return false;
-  return true;
+  return el.classList.contains("is-allowed") || el.classList.contains("is-denied");
 }
 
 function isTurnToolEphemeral(el: HTMLElement): boolean {
@@ -1519,7 +1645,7 @@ function renderPermissionGroup(messages: ChatMessage[], interactive: boolean): H
 }
 
 function markPermissionResolved(requestId: string, allowed: boolean): void {
-  const session = activeSession();
+  const session = runTargetSession();
   const message = session.messages.find(
     (m) => m.role === "permission" && m.permission?.requestId === requestId,
   );
@@ -1531,7 +1657,9 @@ function markPermissionResolved(requestId: string, allowed: boolean): void {
 
   const wasInBatch = pendingPermissionBatch.some((item) => item.requestId === requestId);
   pendingPermissionBatch = pendingPermissionBatch.filter((item) => item.requestId !== requestId);
+  const stillPending = pendingPermissionBatch.length > 0;
 
+  // Always update the card in the open log if present (even if busy just cleared).
   const card = logEl.querySelector<HTMLElement>(
     `.chat-permission.is-pending[data-request-id="${CSS.escape(requestId)}"]:not(.is-batch)`,
   );
@@ -1550,26 +1678,36 @@ function markPermissionResolved(requestId: string, allowed: boolean): void {
   }
 
   const batchCard = logEl.querySelector<HTMLElement>(".chat-permission.is-batch.is-pending");
-  if (batchCard && wasInBatch && pendingPermissionBatch.length === 0) {
-    if (permissionPaintTimer) {
-      window.clearTimeout(permissionPaintTimer);
-      permissionPaintTimer = 0;
-    }
-    batchCard.dataset.resolved = "1";
-    batchCard.classList.remove("is-pending", "is-expired");
-    batchCard.classList.add(allowed ? "is-allowed" : "is-denied");
-    const actions = batchCard.querySelector(".chat-permission-actions");
-    if (actions) {
-      actions.replaceChildren();
-      const badge = document.createElement("span");
-      badge.className = "chat-permission-result";
-      badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
-      actions.appendChild(badge);
+  if (batchCard && wasInBatch) {
+    if (stillPending) {
+      // Batch shrank — repaint remaining asks without tearing down resolved cards.
+      schedulePaintLivePermissionBatch();
+    } else {
+      if (permissionPaintTimer) {
+        window.clearTimeout(permissionPaintTimer);
+        permissionPaintTimer = 0;
+      }
+      batchCard.dataset.resolved = "1";
+      batchCard.classList.remove("is-pending", "is-expired");
+      batchCard.classList.add(allowed ? "is-allowed" : "is-denied");
+      const actions = batchCard.querySelector(".chat-permission-actions");
+      if (actions) {
+        actions.replaceChildren();
+        const badge = document.createElement("span");
+        badge.className = "chat-permission-result";
+        badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
+        actions.appendChild(badge);
+      }
     }
   }
 
   hideDecisionDock();
-  setStatus(allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
+  if (stillPending) {
+    setStatus(t("chat.needYourChoice"), "warn");
+  } else {
+    setStatus(allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
+  }
+  flushSessionListRender();
 }
 
 /** Apply queued assistant text immediately (before inserting later events). */
@@ -1700,18 +1838,21 @@ function showQuickReplies(sourceText: string): void {
 
 /** Close the current streaming assistant bubble so later events render after it. */
 function sealAssistantBubble(): void {
-  if (!assistantBubble) {
-    assistantMessageId = null;
+  if (!assistantMessageId && !assistantBubble) {
     assistantRaw = "";
     return;
   }
-  assistantBubble.classList.remove("is-streaming");
+  if (assistantBubble?.isConnected) {
+    assistantBubble.classList.remove("is-streaming");
+  }
   if (!assistantRaw.trim()) {
     // Drop empty placeholder bubbles so tools aren't preceded by a blank card.
     const emptyId = assistantMessageId;
-    assistantMsgWrap(assistantBubble).remove();
+    if (assistantBubble?.isConnected) {
+      assistantMsgWrap(assistantBubble).remove();
+    }
     if (emptyId) {
-      const session = activeSession();
+      const session = runTargetSession();
       session.messages = session.messages.filter((m) => m.id !== emptyId);
       saveStore();
     }
@@ -1720,39 +1861,84 @@ function sealAssistantBubble(): void {
       updateAssistantMessage(assistantMessageId, assistantRaw);
       flushStorePersist();
     }
-    syncAssistantCopyButton(assistantBubble);
+    if (assistantBubble?.isConnected) {
+      syncAssistantCopyButton(assistantBubble);
+    }
   }
   assistantBubble = null;
   assistantMessageId = null;
   assistantRaw = "";
 }
 
+function ensureAssistantMessage(): string {
+  if (assistantMessageId) return assistantMessageId;
+  const message = persistMessage("assistant", "");
+  assistantMessageId = message.id;
+  assistantRaw = "";
+  return assistantMessageId;
+}
+
+function ensureAssistantBubble(): HTMLElement {
+  ensureAssistantMessage();
+  if (assistantBubble?.isConnected) {
+    assistantBubble.classList.add("is-streaming");
+    return assistantBubble;
+  }
+  const existing = assistantMessageId
+    ? logEl.querySelector<HTMLElement>(
+        `.chat-bubble.assistant[data-message-id="${CSS.escape(assistantMessageId)}"]`,
+      )
+    : null;
+  if (existing) {
+    assistantBubble = existing;
+    assistantBubble.classList.add("is-streaming");
+    return assistantBubble;
+  }
+  assistantBubble = appendBubble("assistant", assistantRaw, {
+    id: assistantMessageId ?? undefined,
+    persist: false,
+  });
+  assistantBubble.classList.add("is-streaming");
+  return assistantBubble;
+}
+
 function appendAssistantChunk(chunk: string): void {
   if (!chunk) return;
   if (looksLikeToolPayloadJson(chunk)) {
-    const formatted = formatPermissionDetail(chunk.trim());
-    pushActivity("tool", formatted.summary || cleanToolLabel(chunk));
+    if (isViewingRunningSession()) {
+      const formatted = formatPermissionDetail(chunk.trim());
+      pushActivity("tool", formatted.summary || cleanToolLabel(chunk));
+    }
     return;
   }
-  if (activityEl?.dataset.kind === "tool") settleActivity();
-  finishToolGroup(true);
-  dismissLifecycleActivity();
   turnHadAssistantText = true;
-  const bubble = ensureAssistantBubble();
-  collapseResolvedPermissionsBeforeAssistant(bubble);
+  ensureAssistantMessage();
   assistantRaw += chunk;
-  setAssistantMarkdown(bubble, assistantRaw);
   if (assistantMessageId) {
     updateAssistantMessage(assistantMessageId, assistantRaw, { persist: false });
   }
+  scheduleStorePersist();
+  if (!isViewingRunningSession()) return;
+  if (activityEl?.dataset.kind === "tool") settleActivity();
+  finishToolGroup(true);
+  dismissLifecycleActivity();
+  const bubble = ensureAssistantBubble();
+  if (!bubble.isConnected) return;
+  collapseResolvedPermissionsBeforeAssistant(bubble);
+  setAssistantMarkdown(bubble, assistantRaw);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 function renderSessionList(): void {
   sessionListEl.replaceChildren();
   for (const session of store.sessions) {
+    const isRunning = busy && session.id === runningChatSessionId;
+    const awaitingConfirm = isRunning && pendingPermissionBatch.length > 0;
+    const doneUnseen = !isRunning && unseenCompletedSessionIds.has(session.id);
     const row = document.createElement("div");
-    row.className = `chat-session${session.id === store.activeId ? " is-active" : ""}`;
+    row.className = `chat-session${session.id === store.activeId ? " is-active" : ""}${
+      awaitingConfirm ? " is-awaiting-confirm" : isRunning ? " is-running" : ""
+    }${doneUnseen ? " is-done-unseen" : ""}`;
     row.dataset.sessionId = session.id;
 
     const main = document.createElement("button");
@@ -1765,11 +1951,18 @@ function renderSessionList(): void {
 
     const meta = document.createElement("span");
     meta.className = "chat-session-meta";
-    meta.textContent = `${runtimeDisplayName(session.runtime)} · ${formatTime(session.updatedAt)}`;
+    if (awaitingConfirm) {
+      meta.textContent = `${t("chat.sessionAwaitingConfirm")} · ${runtimeDisplayName(session.runtime)}`;
+    } else if (isRunning) {
+      meta.textContent = `${t("chat.sessionRunning")} · ${runtimeDisplayName(session.runtime)}`;
+    } else if (doneUnseen) {
+      meta.textContent = `${t("chat.sessionDoneUnseen")} · ${runtimeDisplayName(session.runtime)}`;
+    } else {
+      meta.textContent = `${runtimeDisplayName(session.runtime)} · ${formatTime(session.updatedAt)}`;
+    }
 
     main.append(title, meta);
     main.addEventListener("click", () => {
-      if (busy) return;
       switchSession(session.id);
     });
 
@@ -1781,7 +1974,6 @@ function renderSessionList(): void {
     del.textContent = "×";
     del.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (busy) return;
       deleteSession(session.id);
     });
 
@@ -1803,23 +1995,116 @@ function formatTime(ts: number): string {
   }
 }
 
+/** Flush live DOM pointers when leaving a running chat; keep run memory for background events. */
+function detachLiveDom(): void {
+  flushPendingTextSync();
+  if (assistantMessageId && assistantRaw) {
+    updateAssistantMessage(assistantMessageId, assistantRaw, { persist: false });
+    scheduleStorePersist();
+  }
+  assistantBubble = null;
+  activityEl = null;
+  lifecycleActivityEl = null;
+  toolGroupEl = null;
+  hideDecisionDock();
+}
+
+/** Re-bind streaming bubble / pending permissions after switching back to a running chat. */
+function reattachLiveUi(): void {
+  if (!isViewingRunningSession()) return;
+  if (assistantMessageId) {
+    const bubble = logEl.querySelector<HTMLElement>(
+      `.chat-bubble.assistant[data-message-id="${CSS.escape(assistantMessageId)}"]`,
+    );
+    if (bubble) {
+      assistantBubble = bubble;
+      bubble.classList.add("is-streaming");
+      if (assistantRaw.trim()) {
+        setAssistantMarkdown(bubble, assistantRaw);
+      }
+      syncAssistantCopyButton(bubble);
+    } else if (assistantRaw.trim() || turnHadAssistantText) {
+      assistantBubble = appendBubble("assistant", assistantRaw, {
+        id: assistantMessageId,
+        persist: false,
+      });
+      assistantBubble.classList.add("is-streaming");
+    }
+  }
+  for (const item of pendingPermissionBatch) {
+    logEl
+      .querySelectorAll<HTMLElement>(
+        `.chat-permission[data-request-id="${CSS.escape(item.requestId)}"]`,
+      )
+      .forEach((el) => el.remove());
+  }
+  if (pendingPermissionBatch.length > 0) {
+    setStatus(t("chat.needYourChoice"), "warn");
+    schedulePaintLivePermissionBatch();
+  } else {
+    setStatus(
+      t("chat.running", { runtime: runtimeDisplayName(activeSession().runtime) }),
+      "muted",
+    );
+    pushActivity("think", t("chat.typing"));
+  }
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 function switchSession(id: string): void {
   if (id === store.activeId) return;
   const session = store.sessions.find((s) => s.id === id);
   if (!session) return;
+
+  const leavingRunning = Boolean(busy && store.activeId === runningChatSessionId);
+  const enteringRunning = Boolean(busy && id === runningChatSessionId);
+
+  if (leavingRunning) {
+    detachLiveDom();
+  } else if (!busy) {
+    assistantBubble = null;
+    assistantMessageId = null;
+    assistantRaw = "";
+    pendingText = "";
+    turnHadAssistantText = false;
+    activityEl = null;
+    lifecycleActivityEl = null;
+    toolGroupEl = null;
+  } else {
+    // Leaving a non-running chat while another run continues — clear local view only.
+    assistantBubble = null;
+    activityEl = null;
+    lifecycleActivityEl = null;
+    toolGroupEl = null;
+  }
+
   store.activeId = id;
   saveStore();
   setCurrentRuntime(session.runtime);
+  if (unseenCompletedSessionIds.delete(id)) {
+    // Opened after finishing elsewhere — clear 【完成】 badge.
+  }
   safeRenderActiveMessages();
+  if (enteringRunning) {
+    reattachLiveUi();
+  } else if (busy && runningChatSessionId) {
+    setStatus(t("chat.otherSessionRunningHint"), "muted");
+  } else {
+    setStatus("");
+  }
+  syncComposerUi();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
-  setStatus("");
   promptEl.focus();
 }
 
 function deleteSession(id: string): void {
-  if (busy) return;
+  if (busy && id === runningChatSessionId) {
+    setStatus(t("chat.cannotDeleteRunning"), "warn");
+    return;
+  }
   if (!window.confirm(t("chat.deleteSessionConfirm"))) return;
+  unseenCompletedSessionIds.delete(id);
   const remaining = store.sessions.filter((s) => s.id !== id);
   if (remaining.length === 0) {
     const session = createEmptySession(currentRuntime);
@@ -1833,15 +2118,25 @@ function deleteSession(id: string): void {
   saveStore();
   const active = activeSession();
   setCurrentRuntime(active.runtime);
-  assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
-  pendingText = "";
-  turnHadAssistantText = false;
+  if (!busy) {
+    assistantBubble = null;
+    assistantMessageId = null;
+    assistantRaw = "";
+    pendingText = "";
+    turnHadAssistantText = false;
+  } else {
+    assistantBubble = null;
+  }
   pendingAttachments = [];
   activityEl = null;
+  lifecycleActivityEl = null;
+  toolGroupEl = null;
   renderPendingAttachments();
   safeRenderActiveMessages();
+  if (isViewingRunningSession()) {
+    reattachLiveUi();
+  }
+  syncComposerUi();
   renderSessionList();
   titleEl.textContent = sessionTitle(active);
   setStatus("");
@@ -1860,63 +2155,67 @@ function ensureRuntimeSession(runtime: AskRuntime): void {
     .filter((s) => s.runtime === runtime)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0];
   if (existing) {
-    if (busy) {
-      void cancelAsk().finally(() => {
-        if (selectedRuntime() !== runtime) return;
-        if (!busy) switchSession(existing.id);
-      });
-      return;
-    }
     switchSession(existing.id);
-    return;
-  }
-  if (busy) {
-    // Finish/cancel the in-flight turn before creating a session for the new agent.
-    void cancelAsk().finally(() => {
-      if (selectedRuntime() !== runtime) return;
-      if (activeSession().runtime === runtime) return;
-      if (!busy) startNewSession();
-    });
     return;
   }
   startNewSession();
 }
 
 function startNewSession(): void {
-  if (busy) return;
+  if (busy && store.activeId === runningChatSessionId) {
+    detachLiveDom();
+  } else if (!busy) {
+    assistantBubble = null;
+    assistantMessageId = null;
+    assistantRaw = "";
+    pendingText = "";
+    turnHadAssistantText = false;
+  } else {
+    assistantBubble = null;
+  }
   const session = createEmptySession(selectedRuntime());
   store.sessions.unshift(session);
   store.activeId = session.id;
   store.sessions = store.sessions.slice(0, MAX_SESSIONS);
   saveStore();
-  assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
-  pendingText = "";
-  turnHadAssistantText = false;
   pendingAttachments = [];
   activityEl = null;
+  lifecycleActivityEl = null;
+  toolGroupEl = null;
   renderPendingAttachments();
   safeRenderActiveMessages();
+  syncComposerUi();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
-  setStatus(t("chat.newSessionReady"), "ok");
+  if (busy && runningChatSessionId) {
+    setStatus(t("chat.otherSessionRunningHint"), "muted");
+  } else {
+    setStatus(t("chat.newSessionReady"), "ok");
+  }
   promptEl.focus();
 }
 
 function clearActiveSession(): void {
-  if (busy) return;
+  if (isViewingRunningSession()) {
+    setStatus(t("chat.cannotClearRunning"), "warn");
+    return;
+  }
+  if (busy && store.activeId === runningChatSessionId) return;
   const session = activeSession();
   session.messages = [];
   session.title = "";
   session.runtimeThreadId = null;
   session.updatedAt = Date.now();
   saveStore();
-  assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
+  if (!busy) {
+    assistantBubble = null;
+    assistantMessageId = null;
+    assistantRaw = "";
+    turnHadAssistantText = false;
+  } else {
+    assistantBubble = null;
+  }
   activityEl = null;
-  turnHadAssistantText = false;
   pendingAttachments = [];
   renderPendingAttachments();
   safeRenderActiveMessages();
@@ -1983,7 +2282,7 @@ function renderPendingAttachments(): void {
 }
 
 function addAttachmentPaths(paths: string[]): void {
-  if (busy || paths.length === 0) return;
+  if (isComposerLocked() || paths.length === 0) return;
   let added = 0;
   for (const path of paths) {
     const trimmed = path.trim();
@@ -2006,7 +2305,7 @@ function addAttachmentPaths(paths: string[]): void {
 }
 
 async function pickAttachments(): Promise<void> {
-  if (busy) return;
+  if (isComposerLocked()) return;
   try {
     const selected = await open({
       multiple: true,
@@ -2021,7 +2320,7 @@ async function pickAttachments(): Promise<void> {
 }
 
 function setComposerDropTarget(active: boolean): void {
-  composerBoxEl.classList.toggle("is-drop-target", active && !busy);
+  composerBoxEl.classList.toggle("is-drop-target", active && !isComposerLocked());
 }
 
 async function setupFileDrop(): Promise<void> {
@@ -2082,7 +2381,7 @@ function persistMessage(
   content: string,
   opts?: { id?: string; attachments?: ChatAttachment[]; permission?: PermissionMeta },
 ): ChatMessage {
-  const session = activeSession();
+  const session = busy ? runTargetSession() : activeSession();
   const message: ChatMessage = {
     id: opts?.id ?? uid(),
     role,
@@ -2096,7 +2395,9 @@ function persistMessage(
     const seed = content.trim() || opts?.attachments?.[0]?.name || "";
     session.title = seed.split(/\n/)[0].slice(0, 48);
   }
-  session.runtime = selectedRuntime();
+  if (!busy || session.id === store.activeId) {
+    session.runtime = selectedRuntime();
+  }
   touchSession(session);
   if (busy) {
     scheduleStorePersist();
@@ -2105,12 +2406,14 @@ function persistMessage(
     saveStore();
     renderSessionList();
   }
-  titleEl.textContent = sessionTitle(session);
+  if (session.id === store.activeId) {
+    titleEl.textContent = sessionTitle(session);
+  }
   return message;
 }
 
 function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
-  const session = activeSession();
+  const session = busy ? runTargetSession() : activeSession();
   const message = session.messages.find((m) => m.id === id);
   if (!message) return;
   message.content = content;
@@ -2140,7 +2443,8 @@ function bubblePlainText(bubble: HTMLElement): string {
 function assistantMarkdownSource(bubble: HTMLElement): string {
   const id = bubble.dataset.messageId;
   if (id) {
-    const message = activeSession().messages.find((m) => m.id === id);
+    const session = busy ? runTargetSession() : activeSession();
+    const message = session.messages.find((m) => m.id === id);
     if (message?.content?.trim()) return message.content;
   }
   if (bubble === assistantBubble && assistantRaw.trim()) return assistantRaw;
@@ -2211,7 +2515,9 @@ async function runCopyButton(
   getText: () => string,
   idleKind: CopyIdleKind,
 ): Promise<void> {
-  const text = getText().trim();
+  // Code blocks keep their leading indentation; only trailing newlines go.
+  const raw = getText();
+  const text = idleKind === "code" ? raw.replace(/\n+$/, "") : raw.trim();
   if (!text) return;
   try {
     await copyTextToClipboard(text);
@@ -2288,7 +2594,7 @@ function enhanceCodeBlocks(root: HTMLElement): void {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       const code = pre.querySelector("code");
-      const text = (code?.textContent ?? pre.textContent ?? "").replace(/\n$/, "");
+      const text = code?.textContent ?? pre.textContent ?? "";
       void runCopyButton(btn, () => text, "code");
     });
 
@@ -2386,10 +2692,15 @@ function appendBubble(
 function renderActiveMessages(): void {
   logEl.replaceChildren();
   assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
   activityEl = null;
   toolGroupEl = null;
+  lifecycleActivityEl = null;
+  // Keep in-flight run memory so background events and switch-back still work.
+  if (!busy) {
+    assistantMessageId = null;
+    assistantRaw = "";
+    turnHadAssistantText = false;
+  }
   const session = activeSession();
   if (session.messages.length === 0) {
     appendBubble("meta", t("chat.welcome"), { persist: false });
@@ -2398,12 +2709,32 @@ function renderActiveMessages(): void {
   for (let i = 0; i < session.messages.length; ) {
     const message = session.messages[i];
     if (message.role === "permission") {
+      const pendingLive =
+        isViewingRunningSession() &&
+        message.permission?.allowed == null &&
+        pendingPermissionBatch.some((p) => p.requestId === message.permission?.requestId);
+      if (pendingLive) {
+        i += 1;
+        continue;
+      }
+      // Unanswered asks stay as standalone cards — never fold into "$ N tools".
+      if (message.permission?.allowed == null) {
+        logEl.appendChild(renderPermissionCard(message, false));
+        i += 1;
+        continue;
+      }
       const run: ChatMessage[] = [message];
       while (
         i + run.length < session.messages.length &&
         session.messages[i + run.length].role === "permission"
       ) {
-        run.push(session.messages[i + run.length]);
+        const next = session.messages[i + run.length];
+        if (next.permission?.allowed == null) break;
+        const nextPending =
+          isViewingRunningSession() &&
+          pendingPermissionBatch.some((p) => p.requestId === next.permission?.requestId);
+        if (nextPending) break;
+        run.push(next);
       }
       if (run.length >= 2) {
         try {
@@ -2421,7 +2752,15 @@ function renderActiveMessages(): void {
     }
     if (message.role === "assistant") {
       const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
-      setAssistantMarkdown(bubble, message.content);
+      const liveContent =
+        busy && message.id === assistantMessageId && assistantRaw
+          ? assistantRaw
+          : message.content;
+      setAssistantMarkdown(bubble, liveContent);
+      if (busy && message.id === assistantMessageId) {
+        bubble.classList.add("is-streaming");
+        assistantBubble = bubble;
+      }
       logEl.appendChild(wrap);
     } else if (message.role === "user") {
       const { wrap } = createUserBubbleEl({
@@ -2452,17 +2791,6 @@ function safeRenderActiveMessages(): void {
     logEl.replaceChildren();
     appendBubble("meta", t("chat.welcome"), { persist: false });
   }
-}
-
-function ensureAssistantBubble(): HTMLElement {
-  if (!assistantBubble) {
-    const message = persistMessage("assistant", "");
-    assistantMessageId = message.id;
-    assistantRaw = "";
-    assistantBubble = appendBubble("assistant", "", { id: message.id, persist: false });
-    assistantBubble.classList.add("is-streaming");
-  }
-  return assistantBubble;
 }
 
 function queueAssistantText(text: string): void {
@@ -2659,8 +2987,12 @@ async function openMainResources(): Promise<void> {
   }
 }
 
-function buildPromptWithHistory(userText: string, attachments: ChatAttachment[]): string {
-  const session = activeSession();
+function buildPromptWithHistory(
+  userText: string,
+  attachments: ChatAttachment[],
+  sessionId?: string,
+): string {
+  const session = sessionById(sessionId) ?? (busy ? runTargetSession() : activeSession());
   const responseStyle =
     "Response style: answer the user directly and concisely. Lead with the result. " +
     "Use short sections or bullets only when they improve clarity. Do not narrate hidden reasoning, " +
@@ -2711,8 +3043,13 @@ async function ensureListener(): Promise<void> {
   if (unlisten) return;
   unlisten = await listen<PromptSessionEvent>("prompt-session-event", (event) => {
     const payload = event.payload;
+    const eventSessionId = "session_id" in payload ? payload.session_id : undefined;
+    if (payload.type !== "started" && !isEventForCurrentRun(eventSessionId)) {
+      return;
+    }
     switch (payload.type) {
       case "started":
+        runningBackendSessionId = payload.session_id;
         setDisplayedCwd(payload.cwd);
         assistantBubble = null;
         assistantMessageId = null;
@@ -2720,6 +3057,7 @@ async function ensureListener(): Promise<void> {
         pendingText = "";
         turnHadAssistantText = false;
         pushActivity("think", t("chat.waitingModel"));
+        flushSessionListRender();
         break;
       case "status":
         pushActivity(payload.phase, payload.message);
@@ -2743,7 +3081,9 @@ async function ensureListener(): Promise<void> {
       case "permission_resolved":
         markPermissionResolved(payload.request_id, payload.allowed);
         break;
-      case "completed":
+      case "completed": {
+        const completedSessionId = runningChatSessionId;
+        const viewing = isViewingRunningSession() || store.activeId === completedSessionId;
         flushPendingTextSync();
         // Fallback only when this turn never streamed assistant text.
         if (!turnHadAssistantText && !assistantRaw.trim() && payload.summary?.trim()) {
@@ -2751,52 +3091,55 @@ async function ensureListener(): Promise<void> {
           if (fallback) appendAssistantChunk(fallback);
         }
         noteVerifyBrowserSignal(assistantRaw, "assistant");
-        clearEphemeralActivity();
+        const hadAssistantText = turnHadAssistantText;
         const finalAssistantText = assistantRaw;
+        if (viewing) {
+          clearEphemeralActivity();
+        }
         sealAssistantBubble();
-        // Disable any unanswered permission cards if the session ended.
-        if (permissionPaintTimer) {
-          window.clearTimeout(permissionPaintTimer);
-          permissionPaintTimer = 0;
-        }
-        pendingPermissionBatch = [];
-        for (const card of logEl.querySelectorAll<HTMLElement>(".chat-permission.is-pending")) {
-          card.classList.remove("is-pending");
-          card.classList.add("is-expired");
-          card.dataset.resolved = "1";
-          const actions = card.querySelector(".chat-permission-actions");
-          if (actions) {
-            actions.replaceChildren();
-            const badge = document.createElement("span");
-            badge.className = "chat-permission-result";
-            badge.textContent = t("chat.permissionExpired");
-            actions.appendChild(badge);
+        expireLivePermissionCards();
+        if (viewing) {
+          hideDecisionDock();
+          if (!hadAssistantText) {
+            appendBubble("meta", t("chat.emptyReply"), { persist: false });
           }
-        }
-        hideDecisionDock();
-        if (!turnHadAssistantText) {
-          appendBubble("meta", t("chat.emptyReply"), { persist: false });
         }
         reportVerifyMcpIfNeeded();
         applyVerifyMcpFooter();
         flushStorePersist();
         setBusy(false);
+        settleRunRouting();
+        if (!viewing && completedSessionId) {
+          unseenCompletedSessionIds.add(completedSessionId);
+        }
         if (payload.status === "cancelled") {
           setStatus(t("chat.forceStopped"), "warn");
         } else if (payload.status !== "succeeded") {
-          appendBubble(
-            "meta",
+          if (viewing) {
+            appendBubble(
+              "meta",
+              t("chat.completed", {
+                status: payload.status,
+                code: payload.exit_code == null ? "—" : String(payload.exit_code),
+              }),
+              { persist: false },
+            );
+          }
+          setStatus(
             t("chat.completed", {
               status: payload.status,
               code: payload.exit_code == null ? "—" : String(payload.exit_code),
             }),
-            { persist: false },
+            "error",
           );
-        } else if (finalAssistantText.trim()) {
+        } else if (finalAssistantText.trim() && viewing) {
           showQuickReplies(finalAssistantText);
+        } else if (!viewing) {
+          setStatus(t("chat.doneElsewhere"), "ok");
         }
         renderSessionList();
         break;
+      }
     }
   });
 }
@@ -2986,23 +3329,34 @@ async function cancelAsk(): Promise<void> {
     pushActivity("think", t("chat.cancelling"));
     if (!stopped && busy && busyGen === gen) {
       setBusy(false);
+      expireLivePermissionCards();
+      settleRunRouting();
       setStatus(t("chat.forceStopped"), "warn");
       return;
     }
     window.setTimeout(() => {
       if (busy && busyGen === gen) {
         setBusy(false);
+        expireLivePermissionCards();
+        settleRunRouting();
         setStatus(t("chat.forceStopped"), "warn");
       }
     }, 2500);
   } catch (error) {
     setBusy(false);
+    expireLivePermissionCards();
+    settleRunRouting();
     setStatus(t("chat.cancelFailed", { error: String(error) }), "error");
   }
 }
 
 async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
-  if (busy) return;
+  if (busy) {
+    if (runningChatSessionId && runningChatSessionId !== store.activeId) {
+      setStatus(t("chat.otherSessionRunning"), "warn");
+    }
+    return;
+  }
   const text = promptEl.value.trim();
   const attachments = [...pendingAttachments];
   if (!text && attachments.length === 0 && askResources.selectedMentions.length === 0) {
@@ -3014,13 +3368,13 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   const elevated = selectedRuntime() !== "deepseek-harness" && elevatedEl.checked;
   if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
 
+  const chatSessionId = store.activeId;
+  const resumeThreadId = activeSession().runtimeThreadId?.trim() || null;
+
   verifyMcpTurn = Boolean(opts?.verifyMcp);
   verifySawBrowserNavigate = false;
   verifyMcpReported = false;
   verifyTurnText = "";
-  if (verifyMcpTurn) {
-    pushActivity("info", t("chat.verifyMcpWatching"));
-  }
 
   const mentions = ensureBrowserMention(
     mergeMentionsForSend(
@@ -3040,25 +3394,29 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
 
   await ensureListener();
   clearQuickReplies();
+  assistantBubble = null;
+  assistantMessageId = null;
+  assistantRaw = "";
+  pendingText = "";
+  turnHadAssistantText = false;
+  setBusy(true, chatSessionId);
+  if (verifyMcpTurn) {
+    pushActivity("info", t("chat.verifyMcpWatching"));
+  }
   const userMessage = persistMessage("user", userText, { attachments });
-  appendBubble("user", userText, { id: userMessage.id, persist: false, attachments });
+  if (store.activeId === chatSessionId) {
+    appendBubble("user", userText, { id: userMessage.id, persist: false, attachments });
+  }
   promptEl.value = "";
   mentionMenu.hideMentionMenu();
   askResources.clearMentions();
   autoResizePrompt();
   pendingAttachments = [];
   renderPendingAttachments();
-  assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
-  pendingText = "";
-  turnHadAssistantText = false;
-  setBusy(true);
   setStatus(t("chat.running", { runtime }), "muted");
   pushActivity("think", t("chat.waitingModel"));
 
-  const prompt = buildPromptWithHistory(promptUserText, attachments);
-  const resumeThreadId = activeSession().runtimeThreadId?.trim() || null;
+  const prompt = buildPromptWithHistory(promptUserText, attachments, chatSessionId);
 
   try {
     const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
@@ -3074,7 +3432,7 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
     });
     setDisplayedCwd(report.cwd);
     if (report.runtime_thread_id?.trim()) {
-      const session = activeSession();
+      const session = sessionById(chatSessionId) ?? runTargetSession();
       session.runtimeThreadId = report.runtime_thread_id.trim();
       touchSession(session);
       saveStore();
@@ -3095,10 +3453,14 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
         /* ignore */
       }
       setStatus(t("chat.forceStopped"), "warn");
-      appendBubble("meta", t("chat.forceStopped"), { persist: false });
+      if (store.activeId === chatSessionId) {
+        appendBubble("meta", t("chat.forceStopped"), { persist: false });
+      }
     } else {
       setStatus(t("chat.failed", { error: message }), "error");
-      appendBubble("meta", message, { persist: false });
+      if (store.activeId === chatSessionId) {
+        appendBubble("meta", message, { persist: false });
+      }
     }
   } finally {
     applyVerifyEvidenceFromAssistant();
@@ -3106,7 +3468,12 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
       reportVerifyMcpIfNeeded();
       applyVerifyMcpFooter();
     }
+    // Yield so any trailing `completed` / delta events from this invoke are
+    // handled before we tear down busy UI (avoids dropping the rest of the turn).
+    await Promise.resolve();
     setBusy(false);
+    expireLivePermissionCards();
+    settleRunRouting();
     renderSessionList();
     const wasVerify = verifyMcpTurn;
     if (wasVerify && !verifyMcpReported) {
@@ -3264,7 +3631,7 @@ function boot(): void {
   })();
 
   actionEl.addEventListener("click", () => {
-    if (busy) void cancelAsk();
+    if (isViewingRunningSession()) void cancelAsk();
     else void sendAsk();
   });
   attachEl.addEventListener("click", () => void pickAttachments());
@@ -3376,7 +3743,7 @@ function boot(): void {
     // IME candidate confirm (Chinese etc.): Enter commits the composition, not send.
     if (event.isComposing || event.keyCode === 229 || promptEl.dataset.composing === "1") return;
     event.preventDefault();
-    if (busy) return;
+    if (isComposerLocked()) return;
     void sendAsk();
   });
   promptEl.addEventListener("compositionstart", () => {

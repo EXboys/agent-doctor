@@ -263,8 +263,24 @@ html, body {
 }
 
 .chat-sessions.is-busy {
-  pointer-events: none;
-  opacity: 0.55;
+  /* Kept for compatibility; session switches stay enabled while a run is in flight. */
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-session.is-running .chat-session-meta {
+  color: var(--accent, #2f6fed);
+  font-weight: 600;
+}
+
+.chat-session.is-awaiting-confirm .chat-session-meta {
+  color: var(--warn, #c47a12);
+  font-weight: 600;
+}
+
+.chat-session.is-done-unseen .chat-session-meta {
+  color: var(--ok, #1a7f4b);
+  font-weight: 600;
 }
 
 .chat-session {
