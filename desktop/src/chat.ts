@@ -100,7 +100,9 @@ interface SessionStore {
 }
 
 const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
+const STORAGE_BACKUP_KEY = "agent-doctor.chat.sessions.v2.backup";
 const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
+const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS = 40;
 const MAX_CONTEXT_MESSAGES = 12;
 const MAX_ATTACHMENTS = 8;
@@ -118,6 +120,7 @@ const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!
 const mentionsEl = document.querySelector<HTMLElement>("#chat-mentions")!;
 const mentionMenuEl = document.querySelector<HTMLElement>("#chat-mention-menu")!;
 const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!;
+const restoreBackupEl = document.querySelector<HTMLButtonElement>("#chat-restore-backup");
 const newSessionEl = document.querySelector<HTMLButtonElement>("#chat-new")!;
 const terminalEl = document.querySelector<HTMLButtonElement>("#chat-terminal")!;
 const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
@@ -151,7 +154,25 @@ const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
 /** Locked by main-page Ask entry (`#runtime=` / ask-window-focus). Not switched in-chat. */
 let currentRuntime: AskRuntime = "claude-code";
 
-let store: SessionStore = loadStore();
+const CHAT_STORE_MAX_BYTES = 2_500_000;
+
+function normalizeChatMessage(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    content: typeof message.content === "string" ? message.content : String(message.content ?? ""),
+    at: typeof message.at === "number" && Number.isFinite(message.at) ? message.at : Date.now(),
+  };
+}
+
+let store: SessionStore = (() => {
+  try {
+    return loadStore();
+  } catch (error) {
+    console.error("Ask: failed to load chat store", error);
+    const session = createEmptySession(currentRuntime);
+    return { activeId: session.id, sessions: [session] };
+  }
+})();
 let busy = false;
 let busyGen = 0;
 let unlisten: UnlistenFn | null = null;
@@ -225,22 +246,92 @@ function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }
   void loadAskResources();
 }
 
-function loadStore(): SessionStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as SessionStore;
-      if (parsed?.sessions?.length && parsed.activeId) {
-        parsed.sessions = parsed.sessions.map((session) => ({
-          ...session,
-          messages: coalesceAssistantFragments(session.messages ?? []),
-        }));
-        return parsed;
+function normalizeSessionMessages(messages: ChatMessage[]): ChatMessage[] {
+  return coalesceAssistantFragments(
+    messages.map((message) => {
+      const normalized = normalizeChatMessage(message);
+      if (normalized.permission?.detail && normalized.permission.detail.length > 12_000) {
+        return {
+          ...normalized,
+          permission: {
+            ...normalized.permission,
+            detail: `${normalized.permission.detail.slice(0, 12_000)}\n…`,
+          },
+        };
       }
-    }
+      return normalized;
+    }),
+  );
+}
+
+function finalizeSessionStore(parsed: SessionStore): SessionStore {
+  const sessions = parsed.sessions.map((session) => ({
+    ...session,
+    messages: normalizeSessionMessages((session.messages ?? []) as ChatMessage[]),
+  }));
+  const activeId =
+    parsed.activeId && sessions.some((s) => s.id === parsed.activeId)
+      ? parsed.activeId
+      : sessions[0]!.id;
+  return { activeId, sessions };
+}
+
+function trimStoreForSize(data: SessionStore): SessionStore {
+  const sessions = data.sessions.slice(0, MAX_SESSIONS).map((session) => ({
+    ...session,
+    messages: session.messages.slice(-MAX_MESSAGES_PER_SESSION),
+  }));
+  const activeId = sessions.some((s) => s.id === data.activeId)
+    ? data.activeId
+    : (sessions[0]?.id ?? data.activeId);
+  return { activeId, sessions };
+}
+
+function backupStoreRaw(raw: string): void {
+  const trimmed = raw.trim();
+  if (!trimmed) return;
+  try {
+    localStorage.setItem(STORAGE_BACKUP_KEY, trimmed);
   } catch {
-    /* ignore corrupt store */
+    /* quota — keep trying on next save */
   }
+}
+
+function parseStoreRaw(raw: string): SessionStore | null {
+  try {
+    const parsed = JSON.parse(raw) as SessionStore;
+    if (!parsed?.sessions?.length) return null;
+    return finalizeSessionStore(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function loadStoreFromLocalKeys(): SessionStore | null {
+  const keys = [STORAGE_KEY, STORAGE_BACKUP_KEY, LEGACY_STORAGE_KEY];
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    backupStoreRaw(raw);
+    let loaded = parseStoreRaw(raw);
+    if (!loaded) continue;
+    let json = JSON.stringify(loaded);
+    while (json.length > CHAT_STORE_MAX_BYTES && loaded.sessions.some((s) => s.messages.length > 8)) {
+      loaded = trimStoreForSize(loaded);
+      loaded = finalizeSessionStore(loaded);
+      json = JSON.stringify(loaded);
+    }
+    if (key !== STORAGE_KEY) {
+      console.warn(`Ask: restored chat store from ${key}`);
+    }
+    return loaded;
+  }
+  return null;
+}
+
+function loadStore(): SessionStore {
+  const loaded = loadStoreFromLocalKeys();
+  if (loaded) return loaded;
   const session = createEmptySession(currentRuntime);
   return { activeId: session.id, sessions: [session] };
 }
@@ -251,6 +342,7 @@ function coalesceAssistantFragments(messages: ChatMessage[]): ChatMessage[] {
   for (const message of messages) {
     const prev = out[out.length - 1];
     const gap = prev ? message.at - prev.at : Number.POSITIVE_INFINITY;
+    const content = typeof message.content === "string" ? message.content : "";
     const canMerge =
       message.role === "assistant" &&
       prev?.role === "assistant" &&
@@ -258,7 +350,7 @@ function coalesceAssistantFragments(messages: ChatMessage[]): ChatMessage[] {
       !prev.permission &&
       gap >= 0 &&
       gap < 250 &&
-      message.content.length <= 16;
+      content.length <= 16;
     if (canMerge && prev) {
       prev.content += message.content;
       prev.at = message.at;
@@ -270,7 +362,58 @@ function coalesceAssistantFragments(messages: ChatMessage[]): ChatMessage[] {
 }
 
 function saveStore(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  const previous = localStorage.getItem(STORAGE_KEY);
+  if (previous) backupStoreRaw(previous);
+  let payload = JSON.stringify(store);
+  if (payload.length > CHAT_STORE_MAX_BYTES) {
+    store = trimStoreForSize(store);
+    store = finalizeSessionStore(store);
+    payload = JSON.stringify(store);
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, payload);
+  } catch (error) {
+    console.warn("Ask: saveStore failed, trimming history", error);
+    store = trimStoreForSize(store);
+    store = finalizeSessionStore(store);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  }
+}
+
+let storePersistTimer = 0;
+let sessionListRenderTimer = 0;
+
+function flushStorePersist(): void {
+  if (storePersistTimer) {
+    window.clearTimeout(storePersistTimer);
+    storePersistTimer = 0;
+  }
+  saveStore();
+}
+
+/** Avoid syncing the full transcript to disk on every streaming token or tool step. */
+function scheduleStorePersist(delayMs = 500): void {
+  if (storePersistTimer) window.clearTimeout(storePersistTimer);
+  storePersistTimer = window.setTimeout(() => {
+    storePersistTimer = 0;
+    saveStore();
+  }, delayMs);
+}
+
+function flushSessionListRender(): void {
+  if (sessionListRenderTimer) {
+    window.clearTimeout(sessionListRenderTimer);
+    sessionListRenderTimer = 0;
+  }
+  renderSessionList();
+}
+
+function scheduleSessionListRender(delayMs = 400): void {
+  if (sessionListRenderTimer) window.clearTimeout(sessionListRenderTimer);
+  sessionListRenderTimer = window.setTimeout(() => {
+    sessionListRenderTimer = 0;
+    renderSessionList();
+  }, delayMs);
 }
 
 function createEmptySession(runtime: AskRuntime): ChatSession {
@@ -331,10 +474,22 @@ function applyI18n(): void {
   updateElevatedLabel();
   updateRuntimeLabel();
   syncActionButton();
+  // Paint history list before optional resource chips — chips must not block sessions.
   renderSessionList();
   titleEl.textContent = sessionTitle(activeSession());
-  updateResourcesSummary();
-  askResources.renderResourceChips();
+  try {
+    updateResourcesSummary();
+    askResources.renderResourceChips();
+  } catch (error) {
+    console.warn("Ask: resources UI update failed", error);
+  }
+  syncRestoreBackupButton();
+}
+
+function syncRestoreBackupButton(): void {
+  if (!restoreBackupEl) return;
+  // Always show the control; empty backup just no-ops with a status message.
+  restoreBackupEl.hidden = false;
 }
 
 function updateElevatedLabel(): void {
@@ -397,6 +552,8 @@ function setBusy(next: boolean): void {
     settleActivity();
     finishToolGroup(true);
     if (assistantBubble) assistantBubble.classList.remove("is-streaming");
+    flushStorePersist();
+    flushSessionListRender();
   }
 }
 
@@ -511,6 +668,20 @@ function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void 
 
 function ensureToolGroup(): HTMLDetailsElement {
   if (toolGroupEl?.isConnected) return toolGroupEl;
+  // Reuse a trailing unfinished tool chip instead of stacking "正在调用工具 · 1" rows.
+  const last = logEl.lastElementChild as HTMLElement | null;
+  if (
+    last instanceof HTMLDetailsElement &&
+    last.classList.contains("chat-tool-group") &&
+    !last.classList.contains("chat-permission-group") &&
+    !last.classList.contains("chat-turn-tools")
+  ) {
+    toolGroupEl = last;
+    toolGroupEl.open = true;
+    toolGroupEl.classList.add("is-live");
+    updateToolGroupSummary(toolGroupEl, true);
+    return toolGroupEl;
+  }
   const group = document.createElement("details");
   group.className = "chat-tool-group is-live";
   group.open = true;
@@ -546,6 +717,9 @@ function clearEphemeralActivity(): void {
     row.remove();
   }
   lifecycleActivityEl = null;
+  const assistants = logEl.querySelectorAll<HTMLElement>(".chat-bubble.assistant");
+  const lastAssistant = assistants[assistants.length - 1];
+  if (lastAssistant) collapseResolvedPermissionsBeforeAssistant(lastAssistant);
 }
 
 function isQuietStderr(line: string): boolean {
@@ -1008,6 +1182,147 @@ function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLE
   return card;
 }
 
+function permissionGroupSummaryLabel(count: number, toolNames: string[]): string {
+  const allBash = toolNames.length > 0 && toolNames.every((name) => /^bash$/i.test(name));
+  if (allBash) {
+    return t("chat.permissionGroupBash", { count: String(count) });
+  }
+  return t("chat.permissionGroupTools", { count: String(count) });
+}
+
+function isCollapsiblePermissionEl(el: HTMLElement): boolean {
+  if (!el.classList.contains("chat-permission")) return false;
+  if (el.classList.contains("is-pending")) return false;
+  if (el.closest(".chat-permission-group, .chat-turn-tools")) return false;
+  return true;
+}
+
+function isTurnToolEphemeral(el: HTMLElement): boolean {
+  if (el.classList.contains("is-pending")) return false;
+  if (el.classList.contains("chat-turn-tools")) return true;
+  if (el.classList.contains("chat-permission-group")) return true;
+  if (el.classList.contains("chat-tool-group")) return true;
+  if (el.classList.contains("chat-permission")) return isCollapsiblePermissionEl(el);
+  if (el.classList.contains("chat-activity") && el.dataset.kind === "tool") return true;
+  return false;
+}
+
+function collectToolNamesFromNode(node: HTMLElement): string[] {
+  const names: string[] = [];
+  node.querySelectorAll<HTMLElement>(".chat-permission-tool").forEach((el) => {
+    const name = el.textContent?.trim();
+    if (name) names.push(name);
+  });
+  if (names.length > 0) return names;
+  node.querySelectorAll<HTMLElement>(".chat-tool-cmd, .chat-activity-text").forEach((el) => {
+    const label = cleanToolLabel(el.textContent ?? "");
+    if (label) names.push(label.split(/\s+/)[0] || label);
+  });
+  return names;
+}
+
+function flattenTurnToolNode(node: HTMLElement, stack: HTMLElement): void {
+  if (node.classList.contains("chat-turn-tools") || node.classList.contains("chat-permission-group")) {
+    const inner =
+      node.querySelector<HTMLElement>(".chat-permission-stack, .chat-tool-list") ?? null;
+    if (inner) {
+      while (inner.firstElementChild) {
+        stack.appendChild(inner.firstElementChild);
+      }
+    }
+    node.remove();
+    return;
+  }
+  if (node.classList.contains("chat-tool-group")) {
+    const list = node.querySelector<HTMLElement>(".chat-tool-list");
+    if (list) {
+      while (list.firstElementChild) {
+        const row = list.firstElementChild as HTMLElement;
+        row.classList.remove("is-live");
+        row.classList.add("is-done");
+        stack.appendChild(row);
+      }
+    }
+    node.remove();
+    return;
+  }
+  stack.appendChild(node);
+}
+
+function wrapTurnToolsInGroup(nodes: HTMLElement[]): HTMLDetailsElement {
+  const toolNames = nodes.flatMap((node) => collectToolNamesFromNode(node));
+  const count = Math.max(
+    toolNames.length,
+    nodes.reduce((sum, node) => {
+      if (node.classList.contains("chat-permission")) return sum + 1;
+      const nested =
+        node.querySelectorAll(".chat-permission, .chat-activity.kind-tool").length ||
+        (node.classList.contains("chat-activity") ? 1 : 0);
+      return sum + nested;
+    }, 0),
+  );
+  const group = document.createElement("details");
+  group.className = "chat-tool-group chat-turn-tools chat-permission-group";
+  group.open = false;
+
+  const summary = document.createElement("summary");
+  summary.className = "chat-tool-group-summary";
+  const icon = document.createElement("span");
+  icon.className = "chat-tool-group-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "$";
+  const label = document.createElement("span");
+  label.className = "chat-tool-group-label";
+  label.textContent = permissionGroupSummaryLabel(Math.max(count, 1), toolNames);
+  const chevron = document.createElement("span");
+  chevron.className = "chat-tool-group-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  summary.append(icon, label, chevron);
+
+  const stack = document.createElement("div");
+  stack.className = "chat-permission-stack";
+  const anchor = nodes[0];
+  const parent = anchor.parentElement;
+  if (parent) parent.insertBefore(group, anchor);
+  for (const node of nodes) {
+    flattenTurnToolNode(node, stack);
+  }
+  group.append(summary, stack);
+  return group;
+}
+
+/** Fold consecutive tool chips + Bash permission cards into one Cursor-style row. */
+function collapseResolvedPermissionsBeforeAssistant(anchor: HTMLElement): void {
+  finishToolGroup(true);
+  const prev = anchor.previousElementSibling as HTMLElement | null;
+  if (prev?.classList.contains("chat-turn-tools")) {
+    const existing = prev as HTMLDetailsElement;
+    existing.open = false;
+    existing.classList.remove("is-live");
+    return;
+  }
+  const nodes: HTMLElement[] = [];
+  let sibling = prev;
+  while (sibling && isTurnToolEphemeral(sibling)) {
+    nodes.unshift(sibling);
+    sibling = sibling.previousElementSibling as HTMLElement | null;
+  }
+  if (nodes.length === 0) return;
+  if (nodes.length === 1 && nodes[0].classList.contains("chat-turn-tools")) {
+    const only = nodes[0] as HTMLDetailsElement;
+    only.open = false;
+    only.classList.remove("is-live");
+    return;
+  }
+  // One leftover live chip is still worth collapsing so it doesn't stay blue forever.
+  wrapTurnToolsInGroup(nodes);
+}
+
+function renderPermissionGroup(messages: ChatMessage[], interactive: boolean): HTMLDetailsElement {
+  const cards = messages.map((message) => renderPermissionCard(message, interactive));
+  return wrapTurnToolsInGroup(cards);
+}
+
 function markPermissionResolved(requestId: string, allowed: boolean): void {
   const session = activeSession();
   const message = session.messages.find(
@@ -1207,6 +1522,7 @@ function sealAssistantBubble(): void {
     }
   } else if (assistantMessageId) {
     updateAssistantMessage(assistantMessageId, assistantRaw);
+    flushStorePersist();
   }
   assistantBubble = null;
   assistantMessageId = null;
@@ -1225,9 +1541,12 @@ function appendAssistantChunk(chunk: string): void {
   dismissLifecycleActivity();
   turnHadAssistantText = true;
   const bubble = ensureAssistantBubble();
+  collapseResolvedPermissionsBeforeAssistant(bubble);
   assistantRaw += chunk;
   bubble.innerHTML = renderMarkdown(assistantRaw);
-  if (assistantMessageId) updateAssistantMessage(assistantMessageId, assistantRaw);
+  if (assistantMessageId) {
+    updateAssistantMessage(assistantMessageId, assistantRaw, { persist: false });
+  }
   logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -1293,7 +1612,7 @@ function switchSession(id: string): void {
   store.activeId = id;
   saveStore();
   setCurrentRuntime(session.runtime);
-  renderActiveMessages();
+  safeRenderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
   setStatus("");
@@ -1324,7 +1643,7 @@ function deleteSession(id: string): void {
   pendingAttachments = [];
   activityEl = null;
   renderPendingAttachments();
-  renderActiveMessages();
+  safeRenderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(active);
   setStatus("");
@@ -1380,7 +1699,7 @@ function startNewSession(): void {
   pendingAttachments = [];
   activityEl = null;
   renderPendingAttachments();
-  renderActiveMessages();
+  safeRenderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
   setStatus(t("chat.newSessionReady"), "ok");
@@ -1402,7 +1721,7 @@ function clearActiveSession(): void {
   turnHadAssistantText = false;
   pendingAttachments = [];
   renderPendingAttachments();
-  renderActiveMessages();
+  safeRenderActiveMessages();
   renderSessionList();
   titleEl.textContent = sessionTitle(session);
   setStatus("");
@@ -1581,20 +1900,31 @@ function persistMessage(
   }
   session.runtime = selectedRuntime();
   touchSession(session);
-  saveStore();
-  renderSessionList();
+  if (busy) {
+    scheduleStorePersist();
+    scheduleSessionListRender();
+  } else {
+    saveStore();
+    renderSessionList();
+  }
   titleEl.textContent = sessionTitle(session);
   return message;
 }
 
-function updateAssistantMessage(id: string, content: string): void {
+function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
   const session = activeSession();
   const message = session.messages.find((m) => m.id === id);
   if (!message) return;
   message.content = content;
+  if (opts?.persist === false) return;
   message.at = Date.now();
   touchSession(session);
-  saveStore();
+  if (busy) {
+    scheduleStorePersist();
+    scheduleSessionListRender();
+  } else {
+    saveStore();
+  }
 }
 
 function appendBubble(
@@ -1624,20 +1954,42 @@ function renderActiveMessages(): void {
   assistantMessageId = null;
   assistantRaw = "";
   activityEl = null;
+  toolGroupEl = null;
   const session = activeSession();
   if (session.messages.length === 0) {
     appendBubble("meta", t("chat.welcome"), { persist: false });
     return;
   }
-  for (const message of session.messages) {
+  for (let i = 0; i < session.messages.length; ) {
+    const message = session.messages[i];
+    if (message.role === "permission") {
+      const run: ChatMessage[] = [message];
+      while (
+        i + run.length < session.messages.length &&
+        session.messages[i + run.length].role === "permission"
+      ) {
+        run.push(session.messages[i + run.length]);
+      }
+      if (run.length >= 2) {
+        try {
+          logEl.appendChild(renderPermissionGroup(run, false));
+        } catch {
+          for (const item of run) {
+            logEl.appendChild(renderPermissionCard(item, false));
+          }
+        }
+      } else {
+        logEl.appendChild(renderPermissionCard(message, false));
+      }
+      i += run.length;
+      continue;
+    }
     if (message.role === "assistant") {
       const bubble = document.createElement("div");
       bubble.className = "chat-bubble assistant chat-md";
       bubble.dataset.messageId = message.id;
       bubble.innerHTML = renderMarkdown(message.content);
       logEl.appendChild(bubble);
-    } else if (message.role === "permission") {
-      logEl.appendChild(renderPermissionCard(message, false));
     } else {
       const bubble = document.createElement("div");
       bubble.className = `chat-bubble ${message.role}`;
@@ -1647,8 +1999,19 @@ function renderActiveMessages(): void {
       if (strip) bubble.appendChild(strip);
       logEl.appendChild(bubble);
     }
+    i += 1;
   }
   logEl.scrollTop = logEl.scrollHeight;
+}
+
+function safeRenderActiveMessages(): void {
+  try {
+    renderActiveMessages();
+  } catch (error) {
+    console.error("Ask: failed to render messages", error);
+    logEl.replaceChildren();
+    appendBubble("meta", t("chat.welcome"), { persist: false });
+  }
 }
 
 function ensureAssistantBubble(): HTMLElement {
@@ -1972,6 +2335,7 @@ async function ensureListener(): Promise<void> {
         }
         reportVerifyMcpIfNeeded();
         applyVerifyMcpFooter();
+        flushStorePersist();
         setBusy(false);
         if (payload.status === "cancelled") {
           setStatus(t("chat.forceStopped"), "warn");
@@ -2314,17 +2678,141 @@ async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
   }
 }
 
-function boot(): void {
-  (window as Window & { __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void }).__AD_ASK_APPLY_RUNTIME__ =
-    (runtime) => {
-      if (isAskRuntime(runtime)) {
-        ensureRuntimeSession(runtime);
+function hasRestorableChatBackup(): boolean {
+  return Boolean(localStorage.getItem(STORAGE_BACKUP_KEY)?.trim());
+}
+
+function restoreChatFromBackup(): boolean {
+  const raw = localStorage.getItem(STORAGE_BACKUP_KEY);
+  if (!raw) {
+    setStatus(t("chat.restoreBackupNone"), "warn");
+    return false;
+  }
+  const loaded = parseStoreRaw(raw);
+  if (!loaded) {
+    setStatus(t("chat.restoreBackupNone"), "warn");
+    return false;
+  }
+  store = loaded;
+  flushStorePersist();
+  safeRenderActiveMessages();
+  renderSessionList();
+  titleEl.textContent = sessionTitle(activeSession());
+  setStatus(t("chat.restoreBackupOk"), "ok");
+  syncRestoreBackupButton();
+  return true;
+}
+
+function offerBackupRestoreIfNeeded(): void {
+  if (!hasRestorableChatBackup()) return;
+  const session = activeSession();
+  const looksEmpty =
+    session.messages.length === 0 &&
+    store.sessions.length <= 1 &&
+    !session.title.trim();
+  if (!looksEmpty) return;
+  appendBubble("meta", t("chat.restoreBackupHint"), { persist: false });
+  const row = document.createElement("div");
+  row.className = "chat-restore-backup-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-secondary btn-compact";
+  btn.textContent = t("chat.restoreBackup");
+  btn.addEventListener("click", () => {
+    restoreChatFromBackup();
+    row.remove();
+  });
+  row.appendChild(btn);
+  logEl.appendChild(row);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function showBootFailure(error: unknown): void {
+  console.error("Ask: boot failed", error);
+  const shell = document.querySelector<HTMLElement>("#chat-shell");
+  if (shell) shell.style.display = "grid";
+  const log = document.querySelector<HTMLElement>("#chat-log");
+  if (log) {
+    log.replaceChildren();
+    const box = document.createElement("div");
+    box.className = "chat-bubble meta";
+    box.style.margin = "12px";
+    box.style.lineHeight = "1.5";
+    box.textContent =
+      "对话页加载失败。多半是本地聊天记录损坏或过大。你可以点下方按钮清空缓存后重试；若仍白屏，请完全退出 Agent Doctor 再打开。";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.style.marginTop = "10px";
+    btn.textContent = "清空对话缓存并重试";
+    btn.addEventListener("click", () => {
+      const current = localStorage.getItem(STORAGE_KEY);
+      if (current) backupStoreRaw(current);
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      window.location.reload();
+    });
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "btn-secondary";
+    restore.style.marginTop = "8px";
+    restore.style.marginLeft = "8px";
+    restore.textContent = t("chat.restoreBackup");
+    restore.addEventListener("click", () => {
+      if (restoreChatFromBackup()) {
+        box.textContent = t("chat.restoreBackupOk");
+        btn.remove();
+        restore.remove();
       }
-    };
-  readInitialRuntime();
-  updateRuntimeLabel();
+    });
+    log.append(box, btn, restore);
+  }
+  const list = document.querySelector<HTMLElement>("#chat-sessions");
+  if (list && list.childElementCount === 0) {
+    const hint = document.createElement("p");
+    hint.style.margin = "8px 10px";
+    hint.style.fontSize = "0.72rem";
+    hint.style.color = "var(--muted)";
+    hint.textContent = "会话列表暂不可用";
+    list.appendChild(hint);
+  }
+}
+
+function boot(): void {
+  const win = window as Window & {
+    __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
+    __AD_ASK_BOOTED__?: boolean;
+  };
+  win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
+    if (isAskRuntime(runtime)) {
+      ensureRuntimeSession(runtime);
+    }
+  };
+  // Paint sessions + transcript first so a hung secondary init never looks like “no history”.
+  try {
+    renderSessionList();
+    safeRenderActiveMessages();
+  } catch (error) {
+    console.error("Ask: early paint failed", error);
+  }
   applyI18n();
-  renderActiveMessages();
+  try {
+    readInitialRuntime();
+  } catch (error) {
+    console.error("Ask: runtime session setup failed", error);
+  }
+  applyI18n();
+  safeRenderActiveMessages();
+  offerBackupRestoreIfNeeded();
+  win.__AD_ASK_BOOTED__ = true;
+  try {
+    sessionStorage.removeItem("ad-ask-reload");
+  } catch {
+    /* ignore */
+  }
+  window.addEventListener("beforeunload", () => {
+    flushStorePersist();
+  });
   void setupFileDrop();
   void (async () => {
     await loadAskResources();
@@ -2337,6 +2825,9 @@ function boot(): void {
   });
   attachEl.addEventListener("click", () => void pickAttachments());
   clearEl.addEventListener("click", clearActiveSession);
+  restoreBackupEl?.addEventListener("click", () => {
+    restoreChatFromBackup();
+  });
   newSessionEl.addEventListener("click", startNewSession);
   terminalEl.addEventListener("click", () => void openTerminal());
   closeEl.addEventListener("click", () => {
@@ -2464,4 +2955,8 @@ function boot(): void {
   promptEl.focus();
 }
 
-boot();
+try {
+  boot();
+} catch (error) {
+  showBootFailure(error);
+}

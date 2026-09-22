@@ -1703,7 +1703,18 @@ body.is-diagnose-open .diagnose-detail {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.evotown-actions > button {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding-block: 7px;
+  padding-inline: 12px;
+  font-size: 0.78rem;
+  box-sizing: border-box;
 }
 
 .evotown-connected-line {

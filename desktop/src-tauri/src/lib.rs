@@ -903,6 +903,7 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
         .filter(|value| !value.is_empty())
         .unwrap_or("claude-code");
 
+    let already_exists = app.get_webview_window(ASK_WINDOW_LABEL).is_some();
     let window = ensure_ask_window(app, runtime)?;
     apply_ask_runtime_in_webview(&window, runtime);
     // Pair with main: left/right side-by-side, top and bottom aligned.
@@ -917,11 +918,24 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
     // Second pass after Ask chrome metrics are valid.
     layout_main_and_ask_side_by_side(app);
     let _ = window.set_focus();
-    // Re-apply after show/focus in case the webview was still booting on first eval.
-    apply_ask_runtime_in_webview(&window, runtime);
-    let payload = serde_json::json!({ "runtime": runtime });
-    let _ = window.emit("ask-window-focus", &payload);
-    let _ = app.emit("ask-window-focus", &payload);
+
+    // A previously crashed Ask webview can stay titled+blank forever while we only
+    // hide/show it. Always soft-reload existing Ask windows so history paints again.
+    if already_exists {
+        let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+        let reload = format!(
+            "window.__AD_ASK_RUNTIME__ = {runtime}; location.reload();",
+            runtime = runtime_json
+        );
+        let _ = window.eval(&reload);
+    } else {
+        // Fresh window: still push runtime + focus event after show.
+        apply_ask_runtime_in_webview(&window, runtime);
+        let payload = serde_json::json!({ "runtime": runtime });
+        let _ = window.emit("ask-window-focus", &payload);
+        let _ = app.emit("ask-window-focus", &payload);
+    }
+
     Ok(())
 }
 

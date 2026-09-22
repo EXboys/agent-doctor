@@ -7,6 +7,9 @@
     <link rel="stylesheet" href="/src/chat.css" />
   </head>
   <body>
+    <noscript>
+      <p style="margin: 16px; font-family: system-ui, sans-serif">需要启用 JavaScript 才能使用 Ask 对话。</p>
+    </noscript>
     <div class="chat-shell" id="chat-shell">
       <aside id="chat-resources-panel" class="chat-resources-panel" aria-hidden="true">
         <div class="chat-resources-panel-inner">
@@ -96,6 +99,7 @@
         <div class="chat-side-actions">
           <button id="chat-terminal" type="button" class="btn-side" data-i18n="chat.terminal">打开终端</button>
           <button id="chat-clear" type="button" class="btn-side btn-side-muted" data-i18n="chat.clear">清空当前</button>
+          <button id="chat-restore-backup" type="button" class="btn-side btn-side-muted" data-i18n="chat.restoreBackup">恢复备份</button>
         </div>
 
         <p id="chat-status" class="chat-status" aria-live="polite"></p>
@@ -108,7 +112,9 @@
           <button id="chat-close" type="button" class="chat-close" data-i18n="chat.close" title="关闭">关闭</button>
         </header>
 
-        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+        <div id="chat-log" class="chat-log" aria-live="polite">
+          <div id="chat-boot-placeholder" class="chat-bubble meta" style="margin:0">正在加载会话…</div>
+        </div>
 
         <footer class="chat-composer">
           <div id="chat-decision-dock" class="chat-decision-dock" hidden role="region" aria-live="assertive">
@@ -166,5 +172,42 @@
       </main>
     </div>
     <script type="module" src="/src/chat.ts"></script>
+    <script>
+      window.addEventListener("error", function () {
+        var log = document.getElementById("chat-log");
+        if (!log || log.querySelector(".chat-session, .chat-bubble.assistant, .chat-bubble.user")) return;
+        if (document.getElementById("chat-boot-error")) return;
+        var box = document.createElement("div");
+        box.id = "chat-boot-error";
+        box.className = "chat-bubble meta";
+        box.style.margin = "12px";
+        box.textContent =
+          "对话页脚本出错。请关掉 Ask，从主页重新点进问答；或完全退出 Agent Doctor 再开。";
+        log.appendChild(box);
+      });
+      // Stuck Ask webviews keep the shell but never boot chat.ts — force a reload once.
+      window.setTimeout(function () {
+        if (window.__AD_ASK_BOOTED__) return;
+        var sessions = document.getElementById("chat-sessions");
+        var emptyList = sessions && sessions.childElementCount === 0;
+        var placeholder = document.getElementById("chat-boot-placeholder");
+        if (!emptyList && !placeholder) return;
+        if (sessionStorage.getItem("ad-ask-reload") === "1") {
+          var log = document.getElementById("chat-log");
+          if (log && !document.getElementById("chat-boot-error")) {
+            var box = document.createElement("div");
+            box.id = "chat-boot-error";
+            box.className = "chat-bubble meta";
+            box.style.margin = "12px";
+            box.textContent =
+              "会话列表加载失败。请完全退出 Agent Doctor，确认开发服务还在跑，再重新打开。";
+            log.appendChild(box);
+          }
+          return;
+        }
+        sessionStorage.setItem("ad-ask-reload", "1");
+        location.reload();
+      }, 2500);
+    </script>
   </body>
 </html>
