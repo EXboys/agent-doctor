@@ -678,27 +678,13 @@ jobs:
           "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
           # TeamUps /download 用人装包（.dmg / setup.exe）；updater 仍用 .app.tar.gz
           EDITION="${{ matrix.edition }}"
-          mapfile -d '' installers < <(
-            if [ "$EDITION" = team ]; then
-              find desktop-artifacts -type f \( -name 'Agent.Doctor.Team_*.dmg' -o -name 'Agent.Doctor.Team_*-setup.exe' \) -print0
-            else
-              find desktop-artifacts -type f \( -name 'Agent.Doctor_*.dmg' -o -name 'Agent.Doctor_*-setup.exe' \) ! -name 'Agent.Doctor.Team_*' -print0
-            fi
-          )
-          for f in "${installers[@]+"${installers[@]}"}"; do
-            [ -n "$f" ] || continue
-            base="$(basename "$f" | tr ' ' '.')"
-            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
-            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
-            echo "Uploaded installer ${base}"
-          done
-          # TeamUps 下载页读 download.json（人装包）；latest.json 仍给 Tauri updater
           mkdir -p ./download-manifest-src
           if [ "$EDITION" = team ]; then
             find desktop-artifacts -type f \( -name 'Agent.Doctor.Team_*.dmg' -o -name 'Agent.Doctor.Team_*-setup.exe' \) -exec cp {} ./download-manifest-src/ \;
           else
             find desktop-artifacts -type f \( -name 'Agent.Doctor_*.dmg' -o -name 'Agent.Doctor_*-setup.exe' \) ! -name 'Agent.Doctor.Team_*' -exec cp {} ./download-manifest-src/ \;
           fi
+          # 先写 download.json，再传大包
           if [ "$(find ./download-manifest-src -type f | wc -l)" -gt 0 ]; then
             CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX}"
             python3 scripts/build-download-manifest.py \
@@ -710,6 +696,13 @@ jobs:
             "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${PREFIX}/download.json" -f --config-file .ossutilconfig
             "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/download.json" public-read -f --config-file .ossutilconfig || true
             echo "Uploaded download.json"
+            for f in ./download-manifest-src/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f" | tr ' ' '.')"
+              "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
+              "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
+              echo "Uploaded installer ${base}"
+            done
           else
             echo "::warning::No .dmg/.exe installers — skipped download.json"
           fi
