@@ -40,4 +40,9 @@ fi
 
 echo "AGENT_DOCTOR_EDITION=$AGENT_DOCTOR_EDITION"
 echo "tauri --config src-tauri/tauri.${EDITION}.conf.json ${RUNNER_ARGS[*]:-} $*"
-exec npx tauri "$@" "${RUNNER_ARGS[@]}" --config "src-tauri/tauri.${EDITION}.conf.json"
+# Under `set -u`, empty "${array[@]}" is an unbound variable on some bash builds
+# (e.g. CI Linux). Only expand when the runner is actually set.
+if ((${#RUNNER_ARGS[@]} > 0)); then
+  exec npx tauri "$@" "${RUNNER_ARGS[@]}" --config "src-tauri/tauri.${EDITION}.conf.json"
+fi
+exec npx tauri "$@" --config "src-tauri/tauri.${EDITION}.conf.json"
