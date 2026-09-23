@@ -14,7 +14,7 @@ import { modelsForProviderUrl, providerChipForUrl } from "./provider-models";
 import { renderMarkdown } from "./markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { currentMonitor, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
@@ -3024,7 +3024,7 @@ async function adaptAskWindowForResources(open: boolean): Promise<void> {
     if (open) {
       askWidthBeforeResources = logicalW;
       nextW = logicalW + RESOURCES_PANEL_WIDTH_PX;
-      const monitor = await win.currentMonitor();
+      const monitor = await currentMonitor();
       if (monitor) {
         const maxW = monitor.size.width / monitor.scaleFactor - 24;
         nextW = Math.min(nextW, maxW);
