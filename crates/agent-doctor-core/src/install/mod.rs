@@ -373,6 +373,12 @@ fn dependency_progress(line: &str) -> Option<(String, u8)> {
     if line.is_empty() {
         return None;
     }
+    if line.contains("npm http fetch") || line.contains("http fetch GET") {
+        return Some(("正在下载依赖包…".to_string(), 70));
+    }
+    if line.contains("仍在下载安装") {
+        return Some((line.to_string(), 68));
+    }
     if line.contains("node-v") && line.contains("Downloading") {
         return Some(("正在下载 Node.js…".to_string(), 70));
     }

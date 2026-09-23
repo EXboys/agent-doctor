@@ -3,11 +3,12 @@ mod download_route;
 pub mod hermes;
 pub mod nodejs;
 pub mod npm_cli;
+mod npm_target;
 pub mod openclaw;
 mod runner;
 mod uninstall;
 
-pub use download_route::use_china_mirrors;
+pub use download_route::{use_china_mirrors, NPM_MIRROR};
 
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 

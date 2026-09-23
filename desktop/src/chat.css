@@ -2517,53 +2517,60 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-context-ring-btn {
   appearance: none;
-  width: 32px;
+  min-width: 44px;
   height: 32px;
-  padding: 0;
-  border: 1px solid var(--line);
+  padding: 0 8px 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line-strong, var(--line)) 80%, rgba(15, 23, 42, 0.18));
   border-radius: 10px;
   background: var(--panel);
-  color: var(--muted);
+  color: #334155;
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
 .chat-context-ring-btn:hover {
-  border-color: rgba(47, 111, 237, 0.35);
+  border-color: rgba(47, 111, 237, 0.4);
   background: var(--accent-soft);
   color: var(--accent);
 }
 
 .chat-context-ring-btn.is-open {
-  border-color: rgba(47, 111, 237, 0.45);
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.1);
+  border-color: rgba(47, 111, 237, 0.5);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
+  color: var(--accent);
 }
 
 .chat-context-ring-btn.is-warn {
   color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
 }
 
 .chat-context-ring-btn.is-full {
   color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
 }
 
 .chat-context-ring {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
   transform: rotate(-90deg);
 }
 
 .chat-context-ring-bg,
 .chat-context-ring-fg {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 3.5;
   stroke-linecap: round;
 }
 
 .chat-context-ring-bg {
-  stroke: var(--fill);
+  /* Full track must stay visible even when usage is near 0. */
+  stroke: rgba(15, 23, 42, 0.22);
 }
 
 .chat-context-ring-fg {
@@ -2571,6 +2578,14 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   stroke-dasharray: 75.4;
   stroke-dashoffset: 75.4;
   transition: stroke-dashoffset 0.2s ease;
+}
+
+.chat-context-pct {
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: inherit;
 }
 
 .chat-context-sr {
@@ -2587,15 +2602,20 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-context-popover {
   position: fixed;
-  z-index: 120;
-  width: min(248px, calc(100vw - 24px));
+  z-index: 10000;
+  width: min(260px, calc(100vw - 24px));
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   background: var(--panel);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
-  display: grid;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  display: none;
   gap: 10px;
+}
+
+.chat-context-popover.is-open,
+.chat-context-popover:not([hidden]) {
+  display: grid;
 }
 
 .chat-context-popover[hidden] {
@@ -2787,20 +2807,20 @@ html[data-theme="dark"] .chat-theme:hover {
 }
 
 html[data-theme="dark"] .chat-context-ring-btn {
-  color: rgba(255, 255, 255, 0.72);
-  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.28);
   background: transparent;
 }
 
 html[data-theme="dark"] .chat-context-ring-btn:hover,
 html[data-theme="dark"] .chat-context-ring-btn.is-open {
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.5);
   background: rgba(255, 255, 255, 0.08);
 }
 
 html[data-theme="dark"] .chat-context-ring-bg {
-  stroke: rgba(255, 255, 255, 0.12);
+  stroke: rgba(255, 255, 255, 0.28);
 }
 
 html[data-theme="dark"] .chat-context-popover {

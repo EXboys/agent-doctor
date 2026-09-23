@@ -1,9 +1,11 @@
 import { t, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
+import { appState } from "./app-state";
 import type {
   HermesSettings,
   RepairPreviewResponse,
   RuntimeDoctorResult,
+  RuntimeVersionStatus,
 } from "./types";
 
 export const RUNTIME_SHORT: Record<string, string> = {
@@ -55,6 +57,50 @@ export function metaRow(labelKey: MessageKey, value: string, detailTitle?: strin
   `;
 }
 
+export function renderVersionCompareRow(
+  runtime: RuntimeDoctorResult,
+  status: RuntimeVersionStatus | undefined,
+): string {
+  if (!runtime.installed) {
+    return "";
+  }
+  const localRaw = status?.installed || runtime.version;
+  if (!localRaw && !status) {
+    return metaRow("meta.version", t("meta.versionChecking"));
+  }
+  if (!localRaw) {
+    return "";
+  }
+
+  if (!status || status.status === "unknown" || !status.latest) {
+    return metaRow("meta.version", t("meta.versionUnknown", { local: localRaw }));
+  }
+
+  if (status.status === "up_to_date") {
+    return metaRow(
+      "meta.version",
+      t("meta.versionUpToDate", { local: localRaw }),
+    );
+  }
+
+  const latest = status.latest;
+  const value = t("meta.versionLocalLatest", { local: localRaw, latest });
+  const hintParts = [t("meta.versionUpdateHint")];
+  if (status.recommended && status.recommended !== latest) {
+    hintParts.push(t("meta.versionRecommend", { recommended: status.recommended }));
+  }
+  const hint = hintParts.join(" ");
+  return `
+    <div class="meta-row meta-row-version is-update">
+      <span class="meta-label">${t("meta.version")}</span>
+      <div class="meta-version-block">
+        <p class="meta-value" title="${escapeHtml(value)}">${escapeHtml(value)}</p>
+        <p class="meta-version-hint">${escapeHtml(hint)}</p>
+      </div>
+    </div>
+  `;
+}
+
 export function renderApiKeyRow(settings: HermesSettings): string {
   if (!settings.api_key_env) {
     return metaRow("meta.apiKey", t("meta.apiKeyOptional"));
@@ -72,13 +118,9 @@ export function renderApiKeyRow(settings: HermesSettings): string {
   );
 }
 
-export function genericRuntimeAdvancedMeta(
-  runtime: RuntimeDoctorResult,
-  includeVersion = true,
-): string {
+export function genericRuntimeAdvancedMeta(runtime: RuntimeDoctorResult): string {
   return [
     runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
-    includeVersion && runtime.version ? metaRow("meta.version", runtime.version) : "",
     runtime.binary_path
       ? metaRow("meta.binary", t("meta.binaryFound"), runtime.binary_path)
       : "",
@@ -118,7 +160,7 @@ export function runtimeAdvancedMeta(
 ): string {
   return runtime.id === "hermes"
     ? hermesAdvancedMeta(runtime, hermesModel)
-    : genericRuntimeAdvancedMeta(runtime, Boolean(runtime.profile.gateway_url));
+    : genericRuntimeAdvancedMeta(runtime);
 }
 
 export type RuntimeCardActionContext = {
@@ -218,7 +260,9 @@ export function renderHermesCard(
         : t("meta.openaiCompatible")
       : model.provider;
   const modelSummary = [providerLabel, model.model].filter(Boolean).join(" · ");
+  const versionStatus = appState.runtimeVersions.get(runtime.id);
   const summaryMeta = [
+    renderVersionCompareRow(runtime, versionStatus),
     modelSummary ? metaRow("meta.model", modelSummary) : "",
     keyNeedsAttention ? renderApiKeyRow(model) : "",
   ]
@@ -255,19 +299,15 @@ export function renderRuntimeCard(
 
   const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
   const badgeClass = runtime.installed ? "ok" : "muted";
+  const versionStatus = appState.runtimeVersions.get(runtime.id);
+  const versionRow = renderVersionCompareRow(runtime, versionStatus);
   const summaryMeta = runtime.installed
-    ? runtime.id === "deepseek-harness"
-      ? [
-          runtime.version ? metaRow("meta.version", runtime.version) : "",
-          runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
-        ]
-          .filter(Boolean)
-          .join("")
-      : runtime.profile.gateway_url
-        ? metaRow("meta.gateway", runtime.profile.gateway_url)
-        : runtime.version
-          ? metaRow("meta.version", runtime.version)
-          : ""
+    ? [
+        versionRow,
+        runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
+      ]
+        .filter(Boolean)
+        .join("")
     : metaRow("meta.status", t("runtime.notDetected"));
   const previewBadge =
     runtime.id === "deepseek-harness"
@@ -351,7 +391,15 @@ export function renderRuntimeTabs(
         : runtimeHasProblems(preview)
           ? t("runtime.configAttention")
           : t("runtime.installed");
-      const tabMeta = [stateLabel, runtime.version].filter(Boolean).join(" · ");
+      const versionStatus = appState.runtimeVersions.get(runtime.id);
+      const versionMeta =
+        versionStatus?.status === "update_available" && versionStatus.latest
+          ? t("meta.versionLocalLatest", {
+              local: versionStatus.installed || runtime.version || "—",
+              latest: versionStatus.latest,
+            })
+          : runtime.version;
+      const tabMeta = [stateLabel, versionMeta].filter(Boolean).join(" · ");
       const displayMeta =
         runtime.id === "deepseek-harness"
           ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")

@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 
 use crate::adapters::{DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_VERSION};
 
+use super::npm_target::{npm_install_global_command, resolve_active_npm_prefix};
 use super::runner::run_shell_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +26,10 @@ pub fn deepseek_harness_shell_command(_action: DeepSeekHarnessLifecycleAction) -
 pub fn run_deepseek_harness_lifecycle(action: DeepSeekHarnessLifecycleAction) -> Result<()> {
     crate::lifecycle::nodejs::ensure_npm()
         .context("Node.js / npm is required to install DeepSeek Harness")?;
-    run_shell_command(&deepseek_harness_shell_command(action)).with_context(|| {
+    let active = resolve_active_npm_prefix("dsh")?;
+    let package = format!("{DEEPSEEK_HARNESS_NPM_PACKAGE}@{DEEPSEEK_HARNESS_VERSION}");
+    let command = npm_install_global_command(&package, &active.prefix);
+    run_shell_command(&command).with_context(|| {
         format!(
             "DeepSeek Harness {} failed",
             match action {

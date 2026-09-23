@@ -13,6 +13,49 @@ function isGatewayConnectivityCheck(check: { title: string; message: string }): 
   );
 }
 
+function isUpstreamVersionCheck(check: { title?: string; message: string }): boolean {
+  return (
+    check.title === "Upstream version" ||
+    /matches the latest known release|Upgrading may break settings/i.test(check.message)
+  );
+}
+
+function parseUpstreamDetail(
+  details: string[],
+  key: "local" | "latest" | "recommended",
+): string | undefined {
+  const prefix = `${key}=`;
+  return details.find((item) => item.startsWith(prefix))?.slice(prefix.length);
+}
+
+export function plainUpstreamVersionCopy(check: {
+  status: string;
+  message: string;
+  details?: string[];
+}): { title: string; message: string } | null {
+  if (!isUpstreamVersionCheck(check)) {
+    return null;
+  }
+  const details = check.details ?? [];
+  const local = parseUpstreamDetail(details, "local") || "—";
+  const latest = parseUpstreamDetail(details, "latest") || "—";
+  const recommended = parseUpstreamDetail(details, "recommended");
+  if (check.status === "pass") {
+    return {
+      title: t("repair.upstreamVersionOkTitle"),
+      message: t("repair.upstreamVersionOkDesc", { local }),
+    };
+  }
+  let message = t("repair.upstreamVersionDesc", { local, latest });
+  if (recommended && recommended !== latest) {
+    message = `${message} ${t("repair.upstreamVersionRecommend", { recommended })}`;
+  }
+  return {
+    title: t("repair.upstreamVersionTitle"),
+    message,
+  };
+}
+
 function renderRepairSummaryChip(
   filter: RepairStatusFilter,
   count: number,
@@ -192,16 +235,21 @@ export function renderRepairPreview(
       const legacyAgents = check.message.includes("agents.list is a legacy key");
       const gatewayDown =
         (check.status === "warn" || check.status === "fail") && isGatewayConnectivityCheck(check);
+      const upstream = plainUpstreamVersionCopy(check);
       const title = gatewayDown
         ? t("repair.gatewayUnreachableTitle")
         : legacyAgents
           ? t("repair.openclawLegacyAgentsTitle")
-          : check.title;
+          : upstream
+            ? upstream.title
+            : check.title;
       const message = gatewayDown
         ? t("repair.gatewayUnreachableDesc")
         : legacyAgents
           ? t("repair.openclawLegacyAgentsDesc")
-          : check.message;
+          : upstream
+            ? upstream.message
+            : check.message;
       return `
         <li class="repair-check is-${statusClass}">
           <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>

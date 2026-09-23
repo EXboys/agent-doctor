@@ -48,19 +48,19 @@
               <p class="health-card-kicker" id="diagnose-hero-kicker" hidden data-i18n="diagnose.flow.scoreReveal">就绪分</p>
               <h2 id="diagnose-headline">—</h2>
               <p id="diagnose-detail">—</p>
-              <div class="health-card-stats diagnose-stat-row" id="diagnose-stat-row" role="tablist" aria-label="Filter checks">
-                <button type="button" class="health-card-stat is-pass" data-check-filter="pass" role="tab" aria-selected="false">
+              <div class="health-card-stats diagnose-stat-row" id="diagnose-stat-row">
+                <span class="health-card-stat is-pass">
                   <strong id="diagnose-stat-pass">0</strong>
                   <span data-i18n="repair.pass">通过</span>
-                </button>
-                <button type="button" class="health-card-stat is-warn" data-check-filter="warn" role="tab" aria-selected="false">
+                </span>
+                <span class="health-card-stat is-warn">
                   <strong id="diagnose-stat-warn">0</strong>
                   <span data-i18n="repair.warn">警告</span>
-                </button>
-                <button type="button" class="health-card-stat is-fail" data-check-filter="fail" role="tab" aria-selected="false">
+                </span>
+                <span class="health-card-stat is-fail">
                   <strong id="diagnose-stat-fail">0</strong>
                   <span data-i18n="repair.fail">失败</span>
-                </button>
+                </span>
               </div>
               <p id="diagnose-result" class="diagnose-result is-slot" hidden></p>
             </div>
@@ -127,7 +127,26 @@
         <section class="diagnose-panel" id="diagnose-panel-test" hidden></section>
 
         <section class="diagnose-details" id="diagnose-details" aria-label="Check list">
-          <div class="diagnose-details-head" data-i18n="diagnose.flow.details">检查明细</div>
+          <div class="diagnose-details-head">
+            <span data-i18n="diagnose.flow.details">检查明细</span>
+            <div class="diagnose-check-tabs" id="diagnose-check-tabs" role="tablist" aria-label="Filter checks">
+              <button type="button" class="diagnose-check-tab is-all is-active" data-check-filter="all" role="tab" aria-selected="true">
+                <span data-i18n="repair.all">全部</span>
+              </button>
+              <button type="button" class="diagnose-check-tab is-pass" data-check-filter="pass" role="tab" aria-selected="false">
+                <strong id="diagnose-tab-pass">0</strong>
+                <span data-i18n="repair.pass">通过</span>
+              </button>
+              <button type="button" class="diagnose-check-tab is-warn" data-check-filter="warn" role="tab" aria-selected="false">
+                <strong id="diagnose-tab-warn">0</strong>
+                <span data-i18n="repair.warn">警告</span>
+              </button>
+              <button type="button" class="diagnose-check-tab is-fail" data-check-filter="fail" role="tab" aria-selected="false">
+                <strong id="diagnose-tab-fail">0</strong>
+                <span data-i18n="repair.fail">失败</span>
+              </button>
+            </div>
+          </div>
           <div class="diagnose-check-scroll" id="diagnose-check-scroll">
             <ul id="diagnose-check-list" class="diagnose-check-list">
               <li class="is-pending is-skeleton" aria-hidden="true"><span class="diagnose-check-badge muted">—</span><span>—</span></li>

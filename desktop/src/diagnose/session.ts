@@ -32,7 +32,31 @@ export type DiagnoseSession = {
   guideFillConfig: boolean;
 };
 
+const RUNTIME_STORAGE_KEY = "ad-diagnose-runtime";
+
+/** Persist so reload does not fall back to the window's first-create init script. */
+export function rememberDiagnoseRuntime(runtime: string): void {
+  const trimmed = runtime.trim();
+  if (!trimmed) {
+    return;
+  }
+  try {
+    sessionStorage.setItem(RUNTIME_STORAGE_KEY, trimmed);
+  } catch {
+    /* private / blocked storage */
+  }
+  window.__AD_DIAGNOSE_RUNTIME__ = trimmed;
+}
+
 export function resolveInitialRuntime(): string {
+  try {
+    const stored = sessionStorage.getItem(RUNTIME_STORAGE_KEY)?.trim();
+    if (stored) {
+      return stored;
+    }
+  } catch {
+    /* private / blocked storage */
+  }
   const injected = window.__AD_DIAGNOSE_RUNTIME__?.trim();
   if (injected) {
     return injected;

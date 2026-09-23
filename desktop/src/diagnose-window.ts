@@ -24,6 +24,7 @@ import { createDiagnosePaint } from "./diagnose/paint";
 import { renderPresetChips } from "./diagnose/presets";
 import {
   createDiagnoseSession,
+  rememberDiagnoseRuntime,
   resolveInitialRuntime,
   type CheckFilter,
 } from "./diagnose/session";
@@ -36,6 +37,7 @@ declare global {
 }
 
 const session = createDiagnoseSession(resolveInitialRuntime());
+rememberDiagnoseRuntime(session.runtimeId);
 const paint = createDiagnosePaint(session);
 
 function runtimeFromDoctor(report: DoctorReport): RuntimeDoctorResult | undefined {
@@ -146,7 +148,11 @@ const actions = createDiagnoseActions({
 
 function applyRuntime(next: string): void {
   const trimmed = next.trim();
-  if (!trimmed || trimmed === session.runtimeId) {
+  if (!trimmed) {
+    return;
+  }
+  rememberDiagnoseRuntime(trimmed);
+  if (trimmed === session.runtimeId) {
     return;
   }
   session.runtimeId = trimmed;
@@ -155,16 +161,16 @@ function applyRuntime(next: string): void {
 
 window.__AD_DIAGNOSE_APPLY_RUNTIME__ = applyRuntime;
 
-dom.statRowEl.addEventListener("click", (event) => {
+dom.checkTabsEl.addEventListener("click", (event) => {
   const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-check-filter]");
   if (!btn || btn.disabled || session.busy) {
     return;
   }
   const next = btn.dataset.checkFilter as CheckFilter | undefined;
-  if (!next || (next !== "pass" && next !== "warn" && next !== "fail")) {
+  if (!next || (next !== "all" && next !== "pass" && next !== "warn" && next !== "fail")) {
     return;
   }
-  session.checkFilter = session.checkFilter === next ? "all" : next;
+  session.checkFilter = next;
   paint.syncStatFilterUi(session.lastScore);
   paint.paintChecks(session.preview);
   paint.ensureDetailsOpen();

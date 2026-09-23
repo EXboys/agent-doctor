@@ -1,5 +1,6 @@
 import {
   computeDiagnoseScore,
+  scoreLooksGood,
   type DiagnoseScore,
   stepStatesFor,
 } from "../diagnose-flow";
@@ -7,7 +8,7 @@ import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { t } from "../i18n";
 import { supportsBrowserMcp } from "../agents-ui";
-import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
+import { repairCheckStatusLabel, repairStatusClass, plainUpstreamVersionCopy } from "../repair-ui";
 import type { RepairPreviewResponse } from "../types";
 import * as dom from "./dom";
 import {
@@ -63,16 +64,28 @@ export function createDiagnosePaint(session: DiagnoseSession) {
       warn: score?.warn ?? 0,
       fail: score?.fail ?? 0,
     };
-    dom.statRowEl.querySelectorAll<HTMLButtonElement>("[data-check-filter]").forEach((btn) => {
-      const filter = btn.dataset.checkFilter as "pass" | "warn" | "fail" | undefined;
+    if (dom.tabPassEl) {
+      dom.tabPassEl.textContent = score ? String(counts.pass) : "—";
+    }
+    if (dom.tabWarnEl) {
+      dom.tabWarnEl.textContent = score ? String(counts.warn) : "—";
+    }
+    if (dom.tabFailEl) {
+      dom.tabFailEl.textContent = score ? String(counts.fail) : "—";
+    }
+    dom.checkTabsEl?.querySelectorAll<HTMLButtonElement>("[data-check-filter]").forEach((btn) => {
+      const filter = btn.dataset.checkFilter as "all" | "pass" | "warn" | "fail" | undefined;
       if (!filter) {
         return;
       }
       const active = session.checkFilter === filter;
       btn.classList.toggle("is-active", active);
       btn.setAttribute("aria-selected", active ? "true" : "false");
+      if (filter === "all") {
+        btn.disabled = !score;
+        return;
+      }
       btn.disabled = !score || counts[filter] === 0;
-      btn.title = t("diagnose.flow.filterHint");
     });
   }
 
@@ -91,7 +104,9 @@ export function createDiagnosePaint(session: DiagnoseSession) {
       syncStatFilterUi(null);
       return;
     }
-    dom.scoreRingEl.classList.toggle("is-warn", score.fail === 0 && score.warn > 0);
+    // Green when usable (≥80, no fail). Yellow only below that bar; red if any fail.
+    const good = scoreLooksGood(score);
+    dom.scoreRingEl.classList.toggle("is-warn", !good && score.fail === 0);
     dom.scoreRingEl.classList.toggle("is-fail", score.fail > 0);
     dom.scoreRingEl.classList.toggle("is-busy", Boolean(opts?.animateFromZero));
     dom.scoreRingEl.classList.toggle("is-scanning", Boolean(opts?.animateFromZero));
@@ -226,7 +241,10 @@ export function createDiagnosePaint(session: DiagnoseSession) {
 
     dom.checkListEl.innerHTML = checks
       .map((check, index) => {
-        const body = `<span><strong>${escapeHtml(check.title)}</strong> — ${escapeHtml(check.message)}</span>`;
+        const upstream = plainUpstreamVersionCopy(check);
+        const title = upstream?.title ?? check.title;
+        const message = upstream?.message ?? check.message;
+        const body = `<span><strong>${escapeHtml(title)}</strong> — ${escapeHtml(message)}</span>`;
         if (mode === "pending") {
           return `<li class="is-pending" data-check-index="${index}">
           <span class="diagnose-check-badge muted">${escapeHtml(t("diagnose.flow.waitingConfirm"))}</span>
@@ -245,7 +263,8 @@ export function createDiagnosePaint(session: DiagnoseSession) {
   async function animateScoreCount(target: DiagnoseScore): Promise<void> {
     dom.scoreRingEl.hidden = false;
     dom.scoreRingEl.classList.remove("is-scanning", "is-busy");
-    dom.scoreRingEl.classList.toggle("is-warn", target.fail === 0 && target.warn > 0);
+    const good = scoreLooksGood(target);
+    dom.scoreRingEl.classList.toggle("is-warn", !good && target.fail === 0);
     dom.scoreRingEl.classList.toggle("is-fail", target.fail > 0);
     const frames = 18;
     for (let i = 1; i <= frames; i += 1) {
@@ -456,11 +475,11 @@ export function createDiagnosePaint(session: DiagnoseSession) {
     } else {
       if (session.busy && !session.testedOk) {
         paintHeroTone("busy");
-      } else if (session.testedOk) {
+      } else if (session.testedOk || (session.lastScore && scoreLooksGood(session.lastScore))) {
         paintHeroTone("ok");
       } else if (session.lastScore && session.lastScore.fail > 0) {
         paintHeroTone("fail");
-      } else if (session.lastScore && session.lastScore.warn > 0) {
+      } else if (session.lastScore) {
         paintHeroTone("warn");
       } else {
         paintHeroTone("busy");

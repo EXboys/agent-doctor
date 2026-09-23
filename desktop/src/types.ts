@@ -11,6 +11,16 @@ export interface RuntimeDoctorResult {
   };
 }
 
+export type VersionCompareStatus = "up_to_date" | "update_available" | "unknown";
+
+export interface RuntimeVersionStatus {
+  runtime_id: string;
+  installed: string | null;
+  latest: string | null;
+  recommended: string | null;
+  status: VersionCompareStatus;
+}
+
 export interface DoctorReport {
   profile_env_path: string | null;
   profile_env_exists: boolean;

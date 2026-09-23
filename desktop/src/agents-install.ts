@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
@@ -7,6 +8,7 @@ import type { DoctorReport, InstallProgressEvent, InstallRuntimeResponse } from 
 
 export interface AgentsInstallDeps {
   refresh: () => Promise<void>;
+  setStatusBanner: (tone: "ok" | "warn" | "error" | "neutral", message: string) => void;
 }
 
 /** Survives card re-render after install → refresh(). Cleared once runtime looks installed. */
@@ -144,7 +146,12 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       return;
     }
     if (force) {
-      const ok = window.confirm(t("runtime.forceReinstallConfirm", { runtime }));
+      const ok = await ask(t("runtime.forceReinstallConfirm", { runtime }), {
+        title: t("runtime.forceReinstall"),
+        kind: "warning",
+        okLabel: t("runtime.forceReinstall"),
+        cancelLabel: t("runtime.cancel"),
+      });
       if (!ok) {
         return;
       }
@@ -262,26 +269,49 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
   }
 
   async function uninstallRuntime(runtime: string, name: string): Promise<void> {
-    if (!window.confirm(t("runtime.uninstallConfirm", { name }))) {
+    let ok = false;
+    try {
+      ok = await ask(t("runtime.uninstallConfirm", { name }), {
+        title: t("runtime.uninstall"),
+        kind: "warning",
+        okLabel: t("runtime.uninstall"),
+        cancelLabel: t("runtime.cancel"),
+      });
+    } catch (error) {
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.uninstallFailed"), error));
       return;
     }
-    const card = document.querySelector<HTMLElement>(`.runtime[data-runtime="${CSS.escape(runtime)}"]`);
+    if (!ok) {
+      return;
+    }
+
+    const card = document.querySelector<HTMLElement>(
+      `.runtime[data-runtime="${CSS.escape(runtime)}"]`,
+    );
     const hint = card?.querySelector<HTMLElement>("[data-repair-hint]");
+    const uninstallButton = card?.querySelector<HTMLButtonElement>(
+      '[data-action="uninstall-runtime"]',
+    );
+    uninstallButton?.setAttribute("disabled", "true");
     if (hint) {
       hint.hidden = false;
       hint.textContent = t("runtime.uninstalling");
     }
+    deps.setStatusBanner("neutral", t("runtime.uninstalling"));
     try {
       await invoke("uninstall_runtime_command", { runtime });
       if (hint) {
         hint.textContent = t("runtime.uninstallOk");
       }
+      deps.setStatusBanner("ok", t("runtime.uninstallOk"));
       await deps.refresh();
     } catch (error) {
+      uninstallButton?.removeAttribute("disabled");
       if (hint) {
         hint.hidden = false;
         hint.textContent = withErrorDetail(t("runtime.uninstallFailed"), error);
       }
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.uninstallFailed"), error));
     }
   }
 

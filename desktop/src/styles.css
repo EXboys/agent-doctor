@@ -1424,38 +1424,6 @@ body.is-diagnose-open .diagnose-detail {
   background: var(--danger-bg);
 }
 
-button.health-card-stat {
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
-}
-
-button.health-card-stat:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-button.health-card-stat:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-button.health-card-stat.is-active {
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
-}
-
-button.health-card-stat.is-pass.is-active {
-  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3);
-}
-
-button.health-card-stat.is-warn.is-active {
-  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.3);
-}
-
-button.health-card-stat.is-fail.is-active {
-  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.3);
-}
-
 .agents-security-overview {
   /* kept for existing selectors; layout comes from shared block above */
 }
@@ -2777,6 +2745,33 @@ button.health-card-stat.is-fail.is-active {
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
   border: 1px solid var(--border);
+}
+
+.meta-row-version.is-update {
+  align-items: start;
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--border));
+  background: var(--warn-bg);
+}
+
+.meta-row-version.is-update .meta-value {
+  color: #b45309;
+  font-weight: 600;
+  white-space: normal;
+}
+
+.meta-version-block {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.meta-version-hint {
+  margin: 0;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: normal;
 }
 
 .meta-row-edit {

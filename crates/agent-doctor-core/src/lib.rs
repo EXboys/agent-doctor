@@ -17,6 +17,7 @@ pub mod session_launch;
 pub mod setup;
 pub mod skills;
 pub mod store;
+pub mod version_check;
 pub mod workspace;
 
 pub use adapter::{
@@ -132,6 +133,10 @@ pub use skills::{
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,
     PersonalProviderRecord, SettingsStore, SkillsSourceKind, SkillsSourceSettings, TeamSettings,
+};
+pub use version_check::{
+    check_runtime_versions, check_runtime_versions_cached, RuntimeVersionStatus,
+    VersionCompareStatus,
 };
 pub use workspace::{
     active_env_path, bash_hook_file_path, browser_configured_runtimes,

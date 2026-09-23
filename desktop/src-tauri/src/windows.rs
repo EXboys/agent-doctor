@@ -525,15 +525,33 @@ fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
     });
 }
 
+fn diagnose_runtime_bootstrap_script(runtime: &str) -> String {
+    let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+    // Do not overwrite sessionStorage: the window is pre-created at startup with a
+    // default runtime, and location.reload() re-runs this script. A later open
+    // writes the real runtime into sessionStorage before reload.
+    format!(
+        "(function(){{\
+            var fallback = {runtime};\
+            var stored = null;\
+            try {{ stored = sessionStorage.getItem('ad-diagnose-runtime'); }} catch (e) {{}}\
+            if (stored && stored.trim()) {{\
+                window.__AD_DIAGNOSE_RUNTIME__ = stored.trim();\
+            }} else {{\
+                window.__AD_DIAGNOSE_RUNTIME__ = fallback;\
+                try {{ sessionStorage.setItem('ad-diagnose-runtime', fallback); }} catch (e) {{}}\
+            }}\
+        }})();",
+        runtime = runtime_json
+    )
+}
+
 fn create_diagnose_window(
     app: &AppHandle,
     runtime: &str,
     visible: bool,
 ) -> Result<tauri::WebviewWindow, String> {
-    let init_script = format!(
-        "window.__AD_DIAGNOSE_RUNTIME__ = {};",
-        serde_json::Value::String(runtime.to_string())
-    );
+    let init_script = diagnose_runtime_bootstrap_script(runtime);
     // Same soft defaults as Ask / Resources; live size follows right-dock layout.
     let window = WebviewWindowBuilder::new(
         app,
@@ -570,6 +588,7 @@ fn apply_diagnose_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &st
     let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
     let script = format!(
         "(function(){{\
+            try {{ sessionStorage.setItem('ad-diagnose-runtime', {runtime}); }} catch (e) {{}}\
             window.__AD_DIAGNOSE_RUNTIME__ = {runtime};\
             if (typeof window.__AD_DIAGNOSE_APPLY_RUNTIME__ === 'function') {{\
                 window.__AD_DIAGNOSE_APPLY_RUNTIME__({runtime});\
@@ -591,7 +610,6 @@ pub(crate) fn open_or_focus_diagnose_window(
 
     let already_exists = app.get_webview_window(DIAGNOSE_WINDOW_LABEL).is_some();
     let window = ensure_diagnose_window(app, runtime)?;
-    apply_diagnose_runtime_in_webview(&window, runtime);
     // Same right-dock slot as Ask / Resources.
     hide_secondary_window(app, ASK_WINDOW_LABEL);
     hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
@@ -607,12 +625,23 @@ pub(crate) fn open_or_focus_diagnose_window(
     let _ = window.set_focus();
 
     if already_exists {
+        // Prefer soft switch; reload only if the page has not registered yet.
+        // Persist to sessionStorage first so a reload cannot fall back to the
+        // startup init script (always baked as the first create runtime).
         let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
-        let reload = format!(
-            "window.__AD_DIAGNOSE_RUNTIME__ = {runtime}; location.reload();",
+        let script = format!(
+            "(function(){{\
+                try {{ sessionStorage.setItem('ad-diagnose-runtime', {runtime}); }} catch (e) {{}}\
+                window.__AD_DIAGNOSE_RUNTIME__ = {runtime};\
+                if (typeof window.__AD_DIAGNOSE_APPLY_RUNTIME__ === 'function') {{\
+                    window.__AD_DIAGNOSE_APPLY_RUNTIME__({runtime});\
+                }} else {{\
+                    location.reload();\
+                }}\
+            }})();",
             runtime = runtime_json
         );
-        let _ = window.eval(&reload);
+        let _ = window.eval(&script);
     } else {
         apply_diagnose_runtime_in_webview(&window, runtime);
         let payload = serde_json::json!({ "runtime": runtime });

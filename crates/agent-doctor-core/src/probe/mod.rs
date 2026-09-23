@@ -151,6 +151,14 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
     probe_gateway(adapter, &mut checks, &mut facts);
     mode_drift::probe_mode_drift(adapter.id(), &mut checks, &mut facts);
     crate::workspace::probe_browser_mcp_for_runtime(adapter.id(), &mut checks);
+    let binary_ok = checks
+        .iter()
+        .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Pass);
+    let raw_version = checks
+        .iter()
+        .find(|check| check.id == "binary.version" && check.status == ProbeStatus::Pass)
+        .map(|check| check.message.clone());
+    probe_upstream_version(adapter.id(), binary_ok, raw_version, &mut checks);
 
     Ok(RuntimeProbeReport {
         runtime_id: adapter.id().to_string(),
@@ -159,6 +167,64 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
         checks,
         facts,
     })
+}
+
+/// Read-only upstream compare from cache. Warn only — never suggests auto-upgrade.
+fn probe_upstream_version(
+    runtime_id: &str,
+    binary_ok: bool,
+    raw_version: Option<String>,
+    checks: &mut Vec<ProbeCheck>,
+) {
+    if !binary_ok {
+        return;
+    }
+    let status = crate::version_check::check_runtime_versions_cached(&[(
+        runtime_id.to_string(),
+        raw_version,
+    )])
+    .into_iter()
+    .next();
+    let Some(status) = status else {
+        return;
+    };
+    match status.status {
+        crate::version_check::VersionCompareStatus::UpdateAvailable => {
+            let local = status.installed.unwrap_or_else(|| "unknown".into());
+            let latest = status.latest.unwrap_or_else(|| "unknown".into());
+            let mut details = vec![format!("local={local}"), format!("latest={latest}")];
+            if let Some(recommended) = status.recommended {
+                details.push(format!("recommended={recommended}"));
+            }
+            checks.push(
+                ProbeCheck::new(
+                    "binary.upstream_version",
+                    "Upstream version",
+                    ProbeStatus::Warn,
+                    ProbeSeverity::Warning,
+                    format!(
+                        "Installed {local}; latest is {latest}. Upgrading may break settings — diagnose again after any upgrade. Agent Doctor will not upgrade for you."
+                    ),
+                    SensitivityLevel::Public,
+                )
+                .with_details(details),
+            );
+        }
+        crate::version_check::VersionCompareStatus::UpToDate => {
+            let local = status.installed.unwrap_or_else(|| "unknown".into());
+            checks.push(ProbeCheck::new(
+                "binary.upstream_version",
+                "Upstream version",
+                ProbeStatus::Pass,
+                ProbeSeverity::Info,
+                format!("Installed {local} matches the latest known release"),
+                SensitivityLevel::Public,
+            ));
+        }
+        crate::version_check::VersionCompareStatus::Unknown => {
+            // Cache empty / offline — stay quiet so diagnose is not noisy.
+        }
+    }
 }
 
 fn probe_binary(

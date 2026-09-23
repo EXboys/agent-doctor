@@ -365,10 +365,85 @@ html:has(.diagnose-page) body {
 
 .diagnose-details-head {
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
   font-weight: 650;
   font-size: 0.66rem;
   color: var(--text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.diagnose-check-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+}
+
+.diagnose-check-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  margin: 0;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 0.58rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.diagnose-check-tab strong {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.diagnose-check-tab:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.diagnose-check-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.diagnose-check-tab:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.diagnose-check-tab.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.diagnose-check-tab.is-pass.is-active {
+  color: var(--success);
+}
+
+.diagnose-check-tab.is-warn.is-active {
+  color: var(--warn);
+}
+
+.diagnose-check-tab.is-fail.is-active {
+  color: var(--danger);
 }
 
 .diagnose-check-scroll {

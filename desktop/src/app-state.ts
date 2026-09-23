@@ -7,6 +7,7 @@ import type {
   ProfilesDocument,
   RepairPreviewResponse,
   RepairStatusFilter,
+  RuntimeVersionStatus,
   SkillsInventoryReport,
   WorkspacesDocument,
 } from "./types";
@@ -24,6 +25,7 @@ export const appState = {
   lastSkillsInventory: null as SkillsInventoryReport | null,
   lastMcpStatus: null as McpModuleStatus | null,
   personalProvidersDoc: null as PersonalProvidersDocument | null,
+  runtimeVersions: new Map<string, RuntimeVersionStatus>(),
   workspaceBusy: false,
   presetMenuOpen: false,
   agentsWsPickerOpen: false,

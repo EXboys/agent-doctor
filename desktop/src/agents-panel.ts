@@ -27,8 +27,10 @@ import type {
   HermesSettings,
   MainTabId,
   ProfilesDocument,
+  RepairPreviewResponse,
   RepairStatusFilter,
   RuntimeDoctorResult,
+  RuntimeVersionStatus,
   WindowSizeReport,
   WorkspacesDocument,
 } from "./types";
@@ -183,7 +185,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   const sessions = createAgentsSessions({ setStatusBanner });
 
-  const install = createAgentsInstall({ refresh });
+  const install = createAgentsInstall({ refresh, setStatusBanner });
 
   const diagnose = createAgentsDiagnose({
     setStatusBanner,
@@ -300,6 +302,73 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       void diagnose.closeDiagnoseDetail({ skipDismiss: true });
     }
     install.reapplyStickyInstallHints(report);
+    if (!opts?.relocalize) {
+      void refreshRuntimeVersions(report);
+    }
+  }
+
+  async function refreshRuntimeVersions(report: DoctorReport): Promise<void> {
+    const installed = report.runtimes
+      .filter((runtime) => runtime.installed)
+      .map((runtime) => ({
+        runtimeId: runtime.id,
+        version: runtime.version,
+      }));
+    if (installed.length === 0) {
+      appState.runtimeVersions.clear();
+      return;
+    }
+    try {
+      const rows = await invoke<RuntimeVersionStatus[]>("check_runtime_versions_command", {
+        installed,
+      });
+      appState.runtimeVersions.clear();
+      for (const row of rows) {
+        appState.runtimeVersions.set(row.runtime_id, row);
+      }
+      if (appState.lastReport !== report) {
+        return;
+      }
+      const selectedId = resolveActiveRuntimeId(report.runtimes, appState.activeRuntimeId);
+      if (!selectedId) {
+        return;
+      }
+      appState.activeRuntimeId = selectedId;
+      runtimeTabsEl.innerHTML = renderRuntimeTabs(
+        report.runtimes,
+        selectedId,
+        repairPreviewByRuntime,
+      );
+      const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
+      if (activeRuntime) {
+        const preview = repairPreviewByRuntime.get(selectedId);
+        const hint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
+        const hintHtml = hint && !hint.hidden ? hint.innerHTML : "";
+        const hintText = hint && !hint.hidden ? hint.textContent : "";
+        runtimesEl.innerHTML = buildRuntimeCardHtml(activeRuntime);
+        const nextHint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
+        if (nextHint && (hintHtml || hintText)) {
+          nextHint.hidden = false;
+          if (hintHtml) {
+            nextHint.innerHTML = hintHtml;
+          } else if (hintText) {
+            nextHint.textContent = hintText;
+          }
+        }
+        if (preview && !diagnose.hasDismissed(selectedId)) {
+          try {
+            const next = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+              runtime: selectedId,
+            });
+            diagnose.mountRepairPreview(next);
+          } catch {
+            diagnose.mountRepairPreview(preview);
+          }
+        }
+      }
+    } catch {
+      // Network/cache failures stay silent — local version still shows.
+    }
   }
 
   diagnose.bindEvents();

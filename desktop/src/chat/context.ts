@@ -71,7 +71,9 @@ export function estimateTokens(text: string): number {
 export function contextLimitForModel(model: string | null | undefined): number {
   const m = (model ?? "").toLowerCase();
   if (!m) return 128_000;
-  if (m.includes("haiku")) return 200_000;
+  // Long-context families first.
+  if (m.includes("gemini")) return 1_000_000;
+  if (m.includes("haiku") || m.includes("claude")) return 200_000;
   if (
     m.includes("gpt-5.6") ||
     m.includes("gpt-5.4") ||
@@ -81,17 +83,16 @@ export function contextLimitForModel(model: string | null | undefined): number {
   ) {
     return 128_000;
   }
+  // DeepSeek / Qwen / domestic OpenAI-compatible chat models are typically ~128K.
   if (
     m.includes("deepseek") ||
     m.includes("qwen") ||
-    m.includes("claude") ||
-    m.includes("gemini") ||
     m.includes("kimi") ||
     m.includes("moonshot") ||
     m.includes("glm") ||
     m.includes("minimax")
   ) {
-    return 1_000_000;
+    return 128_000;
   }
   return 128_000;
 }
@@ -118,6 +119,9 @@ export function contextUsagePercent(
   model: string | null | undefined,
 ): number {
   const used = estimateTokens(sessionContextText(session, draft));
+  if (used <= 0) return 0;
   const limit = contextLimitForModel(model);
-  return Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const pct = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  // Keep a visible sliver once there is real chat content (short threads vs large windows).
+  return Math.max(1, pct);
 }

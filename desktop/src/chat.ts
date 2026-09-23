@@ -1371,10 +1371,12 @@ function boot(): void {
     updateContextMeter();
   });
   contextMeterEl?.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     toggleContextPopover();
   });
   contextCompactEl?.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     compactActiveSession();
   });
@@ -1448,7 +1450,9 @@ function boot(): void {
       closeModelMenu();
     }
     const wrap = contextMeterEl?.closest(".chat-context-wrap");
-    if (wrap && !wrap.contains(event.target)) {
+    const inMeter = Boolean(wrap?.contains(event.target));
+    const inPopover = Boolean(contextPopoverEl?.contains(event.target));
+    if (!inMeter && !inPopover) {
       closeContextPopover();
     }
   });

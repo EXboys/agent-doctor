@@ -1,8 +1,23 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 
+use crate::adapters::util::ensure_managed_runtime_path;
 use crate::adapters::DEEPSEEK_HARNESS_NPM_PACKAGE;
 
+use super::npm_target::{
+    leftover_npm_cli_binaries, npm_uninstall_global_command, resolve_active_npm_prefix,
+};
 use super::runner::run_shell_command;
+
+/// Human-facing CLI name used when probing leftover installs.
+fn npm_cli_binary_name(runtime_id: &str) -> Option<&'static str> {
+    match runtime_id {
+        "claude-code" => Some("claude"),
+        "codex" => Some("codex"),
+        "deepseek-harness" => Some("dsh"),
+        "openclaw" => Some("openclaw"),
+        _ => None,
+    }
+}
 
 pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
     let package = match runtime_id {
@@ -69,17 +84,68 @@ PY"#
     .to_string()
 }
 
-pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
-    let command = uninstall_shell_command(runtime_id)?;
-    if runtime_id != "hermes" {
-        crate::lifecycle::nodejs::ensure_npm().map_err(|_| anyhow!("卸掉需要本机已安装 npm。"))?;
+fn uninstall_npm_package(package: &str, binary_name: &str) -> Result<()> {
+    crate::lifecycle::nodejs::ensure_npm().map_err(|_| anyhow!("卸掉需要本机已安装 npm。"))?;
+
+    let active = resolve_active_npm_prefix(binary_name)?;
+    let removed_path = active.detected_binary.clone();
+    run_shell_command(&npm_uninstall_global_command(package, &active.prefix))?;
+
+    ensure_managed_runtime_path();
+    let leftovers = leftover_npm_cli_binaries(binary_name);
+    if leftovers.is_empty() {
+        return Ok(());
     }
-    run_shell_command(&command)
+
+    if let Some(removed) = removed_path.as_ref() {
+        let removed_key = normalize_bin_key(removed);
+        let still_same = leftovers
+            .iter()
+            .any(|path| normalize_bin_key(path) == removed_key);
+        if still_same {
+            bail!("卸不掉。本机这份可能不是用本应用能卸的方式装的，请先关掉正在运行的窗口后再试。");
+        }
+    }
+
+    // Active copy is gone; another install is still on PATH.
+    bail!("这一份已经卸掉了，但本机还有别处的一份。再点一次卸载，继续卸掉剩下的。");
+}
+
+fn normalize_bin_key(path: &std::path::Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
+    match runtime_id {
+        "hermes" => {
+            let command = hermes_uninstall_shell_command();
+            run_shell_command(&command)
+        }
+        "openclaw" => {
+            // Best-effort service teardown; package removal is the source of truth.
+            let _ = run_shell_command("openclaw uninstall --service --yes --non-interactive");
+            uninstall_npm_package("openclaw", "openclaw")
+        }
+        other => {
+            let package = match other {
+                "claude-code" => "@anthropic-ai/claude-code",
+                "codex" => "@openai/codex",
+                "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
+                unknown => return Err(anyhow!("unknown runtime: {unknown}")),
+            };
+            let binary =
+                npm_cli_binary_name(other).ok_or_else(|| anyhow!("unknown runtime: {other}"))?;
+            uninstall_npm_package(package, binary)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::uninstall_shell_command;
+    use super::*;
 
     #[test]
     fn npm_clis_use_global_uninstall() {
@@ -112,5 +178,12 @@ mod tests {
         assert!(cmd.contains("b\"1\\n\""));
         assert!(cmd.contains("b\"yes\\n\""));
         assert!(!cmd.contains("--full"));
+    }
+
+    #[test]
+    fn leftover_message_is_beginner_friendly() {
+        // Keep the copy stable — desktop surfaces this string to beginners.
+        let msg = "这一份已经卸掉了，但本机还有别处的一份。再点一次卸载，继续卸掉剩下的。";
+        assert!(msg.contains("还有别处的一份"));
     }
 }

@@ -65,6 +65,7 @@ where
     };
 
     apply_china_download_env(&mut command);
+    prepare_npm_install_env(command_line, &mut command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -92,13 +93,28 @@ where
     });
 
     let mut on_line = on_line;
+    let started = std::time::Instant::now();
+    let mut last_output_at = started;
+    let mut last_heartbeat_at = started;
     let status = loop {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|error| error.into_inner());
             guard.drain(..).collect::<Vec<_>>()
         };
-        for line in drained {
-            on_line(&line);
+        if !drained.is_empty() {
+            last_output_at = std::time::Instant::now();
+            for line in drained {
+                on_line(&line);
+            }
+        } else if looks_like_npm_install(command_line)
+            && last_output_at.elapsed() >= Duration::from_secs(8)
+            && last_heartbeat_at.elapsed() >= Duration::from_secs(8)
+        {
+            let waited = started.elapsed().as_secs();
+            on_line(&format!(
+                "仍在下载安装，请稍候…（依赖比较多，已等待 {waited} 秒）"
+            ));
+            last_heartbeat_at = std::time::Instant::now();
         }
 
         match child.try_wait() {
@@ -134,6 +150,25 @@ where
         stderr,
         exit_code: status.code(),
     })
+}
+
+fn looks_like_npm_install(command_line: &str) -> bool {
+    let lower = command_line.to_ascii_lowercase();
+    lower.contains("npm install") || lower.contains("npm uninstall")
+}
+
+/// Make long npm installs visible and ignore host-injected npm knobs (e.g. Cursor `devdir`).
+fn prepare_npm_install_env(command_line: &str, command: &mut Command) {
+    if !looks_like_npm_install(command_line) {
+        return;
+    }
+    command.env_remove("npm_config_devdir");
+    command.env_remove("NPM_CONFIG_DEVDIR");
+    // Default npm loglevel hides hundreds of DeepSeek dependency fetches.
+    command.env("npm_config_loglevel", "info");
+    command.env("npm_config_progress", "true");
+    command.env("npm_config_fetch_retries", "2");
+    command.env("npm_config_fetch_timeout", "120000");
 }
 
 fn finish_lifecycle_error(capture: &ShellCapture) -> anyhow::Error {

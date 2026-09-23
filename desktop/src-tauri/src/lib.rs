@@ -416,6 +416,7 @@ pub fn run() {
             wire_browser_mcp_command,
             rewire_current_mode_command,
             run_doctor_command,
+            check_runtime_versions_command,
             list_profiles_command,
             list_workspaces_command,
             init_workspace_command,
