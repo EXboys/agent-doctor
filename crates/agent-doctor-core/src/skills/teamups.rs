@@ -135,6 +135,25 @@ impl TeamupsClient {
         serde_json::from_str(&body).context("invalid TeamUps owned packs JSON")
     }
 
+    /// Account summary (`/api/v1/doctor/me`) — `packs` is a string slug list.
+    pub fn doctor_me(&self) -> Result<Value> {
+        if !self.has_license() {
+            bail!("TeamUps license required");
+        }
+        let url = format!("{}/api/v1/doctor/me", self.base_url);
+        let req = self.auth_header(self.http.get(&url).header("Accept", "application/json"));
+        let resp = req.send().with_context(|| format!("GET {url}"))?;
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            bail!("TeamUps license rejected ({status}): {body}");
+        }
+        if !status.is_success() {
+            bail!("TeamUps account check failed ({status}): {body}");
+        }
+        serde_json::from_str(&body).context("invalid TeamUps doctor/me JSON")
+    }
+
     /// Optional skills index; missing endpoint is treated as empty.
     pub fn list_skills_index(&self) -> Result<Value> {
         let url = format!("{}/api/v1/skills", self.base_url);
@@ -173,40 +192,7 @@ impl TeamupsClient {
             bail!("TeamUps manifest failed ({status}): {body}");
         }
         let value: Value = serde_json::from_str(&body).context("invalid TeamUps manifest JSON")?;
-        // Prefer skill list when present; otherwise treat the whole pack artifact as one unit.
-        if let Ok(manifest) = serde_json::from_value::<TeamupsPackManifest>(value.clone()) {
-            if !manifest.skills.is_empty() || manifest.version.is_some() {
-                return Ok(manifest);
-            }
-        }
-        let version = value
-            .get("version")
-            .and_then(Value::as_str)
-            .or_else(|| {
-                value
-                    .get("artifact")
-                    .and_then(|a| a.get("version"))
-                    .and_then(Value::as_str)
-            })
-            .map(str::to_string);
-        let skill_version = version.clone().unwrap_or_else(|| "0.0.0".into());
-        Ok(TeamupsPackManifest {
-            slug: value
-                .get("slug")
-                .and_then(Value::as_str)
-                .unwrap_or(slug)
-                .to_string(),
-            version,
-            skills: vec![TeamupsSkillEntry {
-                id: slug.to_string(),
-                version: skill_version,
-                sha256: value
-                    .get("artifact")
-                    .and_then(|a| a.get("sha256"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-            }],
-        })
+        Ok(manifest_from_doctor_json(value, slug))
     }
 
     pub fn download_skill(&self, slug: &str, _skill_id: &str) -> Result<Vec<u8>> {
@@ -276,18 +262,14 @@ impl TeamupsClient {
         }
 
         if self.has_license() {
-            if let Ok(owned_json) = self.list_owned_packs() {
-                let owned_ids: std::collections::HashSet<String> =
-                    parse_catalog_entries(&owned_json, "pack", &self.base_url)
-                        .into_iter()
-                        .map(|item| item.id)
-                        .collect();
-                for item in &mut items {
-                    if owned_ids.contains(&item.id) {
-                        item.owned = true;
-                    }
-                }
-            }
+            let owned_json = self.list_owned_packs().ok();
+            let me_json = self.doctor_me().ok();
+            merge_owned_into_catalog(
+                &mut items,
+                owned_json.as_ref(),
+                me_json.as_ref(),
+                &self.base_url,
+            );
         }
 
         Ok(items)
@@ -327,6 +309,129 @@ impl SkillsSyncSource for TeamupsClient {
 
     fn download_skill_zip(&self, pack_or_bundle_id: &str, skill_id: &str) -> Result<Vec<u8>> {
         self.download_skill(pack_or_bundle_id, skill_id)
+    }
+}
+
+/// Doctor `/packs/{slug}/manifest` — skill-only rows often have `version` + `artifact` but no `skills[]`.
+fn manifest_from_doctor_json(value: Value, slug: &str) -> TeamupsPackManifest {
+    if let Ok(manifest) = serde_json::from_value::<TeamupsPackManifest>(value.clone()) {
+        if !manifest.skills.is_empty() {
+            return manifest;
+        }
+    }
+    let version = value
+        .get("version")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("artifact")
+                .and_then(|a| a.get("version"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let skill_version = version.clone().unwrap_or_else(|| "0.0.0".into());
+    TeamupsPackManifest {
+        slug: value
+            .get("slug")
+            .and_then(Value::as_str)
+            .unwrap_or(slug)
+            .to_string(),
+        version,
+        skills: vec![TeamupsSkillEntry {
+            id: slug.to_string(),
+            version: skill_version,
+            sha256: value
+                .get("artifact")
+                .and_then(|a| a.get("sha256"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }],
+    }
+}
+
+fn collect_pack_ids(value: &Value) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Some(entries) = json_array(value) else {
+        return ids;
+    };
+    for entry in entries {
+        if let Some(text) = entry.as_str() {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                ids.insert(trimmed.to_string());
+            }
+            continue;
+        }
+        if let Some(id) = string_field(entry, &["slug", "id", "pack_slug", "pack_id", "bundle_id"])
+        {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// Mark public catalog rows the account owns, and append owned packs that
+/// the public storefront did not list.
+pub(crate) fn merge_owned_into_catalog(
+    items: &mut Vec<TeamupsCatalogItem>,
+    owned_json: Option<&Value>,
+    me_json: Option<&Value>,
+    base_url: &str,
+) {
+    let mut owned_ids = std::collections::HashSet::new();
+    let mut owned_rows = Vec::new();
+    if let Some(owned_json) = owned_json {
+        owned_ids.extend(collect_pack_ids(owned_json));
+        owned_rows = parse_catalog_entries(owned_json, "pack", base_url);
+        for row in &mut owned_rows {
+            row.owned = true;
+            // doctor/packs has no priceCents; do not treat those rows as free.
+            row.free = false;
+        }
+    }
+    if let Some(me_json) = me_json {
+        owned_ids.extend(collect_pack_ids(me_json));
+    }
+    if owned_ids.is_empty() && owned_rows.is_empty() {
+        return;
+    }
+
+    for item in items.iter_mut() {
+        if owned_ids.contains(&item.id)
+            || item
+                .pack_slug
+                .as_deref()
+                .is_some_and(|slug| owned_ids.contains(slug))
+        {
+            item.owned = true;
+        }
+    }
+
+    for mut row in owned_rows {
+        if items.iter().any(|item| item.id == row.id) {
+            continue;
+        }
+        row.owned = true;
+        items.push(row);
+    }
+    for id in owned_ids {
+        if items.iter().any(|item| item.id == id) {
+            continue;
+        }
+        items.push(TeamupsCatalogItem {
+            id: id.clone(),
+            kind: "pack".to_string(),
+            name: id.clone(),
+            description: String::new(),
+            free: false,
+            price_label: None,
+            owned: true,
+            installed: false,
+            skill_count: None,
+            pack_slug: Some(id),
+            purchase_url: None,
+            version: None,
+        });
     }
 }
 
@@ -464,7 +569,7 @@ fn price_label(entry: &Value, free: bool) -> Option<String> {
 
 fn default_purchase_url(base_url: &str, kind: &str, id: &str) -> String {
     if kind == "skill" {
-        format!("{base_url}/packs?kind=skill#{id}")
+        format!("{base_url}/skills/{id}")
     } else {
         format!("{base_url}/packs/{id}")
     }
@@ -531,7 +636,10 @@ pub(crate) fn parse_catalog_entries(
                     .and_then(Value::as_array)
                     .map(|arr| arr.len() as u32)
             });
-        let pack_slug = string_field(entry, &["pack_slug", "pack", "bundle_id", "parent_slug"]);
+        let mut pack_slug = string_field(entry, &["pack_slug", "pack", "bundle_id", "parent_slug"]);
+        if kind == "skill" && pack_slug.is_none() {
+            pack_slug = Some(id.clone());
+        }
         let purchase_url = string_field(
             entry,
             &[
@@ -627,5 +735,107 @@ mod tests {
             Some("https://teamups.vip/packs/ecommerce-cs")
         );
         assert_eq!(items[1].price_label.as_deref(), Some("¥99"));
+    }
+
+    #[test]
+    fn marks_owned_public_pack_and_appends_missing() {
+        let mut items = parse_catalog_entries(
+            &json!({
+                "packs": [
+                    { "slug": "ecommerce-cs", "title": "电商客服话术", "priceCents": 12900 },
+                    { "slug": "weekly-report", "title": "团队周报 / 日报", "priceCents": 9900 }
+                ]
+            }),
+            "pack",
+            "https://teamups.vip",
+        );
+        merge_owned_into_catalog(
+            &mut items,
+            Some(&json!({
+                "ok": true,
+                "packs": [
+                    { "slug": "internal-ops", "title": "内部运营包", "status": "published" }
+                ]
+            })),
+            Some(&json!({ "ok": true, "packs": ["weekly-report", "internal-ops"] })),
+            "https://teamups.vip",
+        );
+        let weekly = items.iter().find(|i| i.id == "weekly-report").unwrap();
+        assert!(weekly.owned);
+        assert!(!weekly.free);
+        let shop = items.iter().find(|i| i.id == "ecommerce-cs").unwrap();
+        assert!(!shop.owned);
+        let extra = items.iter().find(|i| i.id == "internal-ops").unwrap();
+        assert!(extra.owned);
+        assert_eq!(extra.name, "内部运营包");
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn expands_title_polish_manifest_without_skills_array() {
+        let manifest = manifest_from_doctor_json(
+            json!({
+                "ok": true,
+                "slug": "title-polish",
+                "title": "标题润色",
+                "version": "0.1.0",
+                "artifact": {
+                    "url": "https://teamups.vip/api/v1/artifacts/skill/title-polish",
+                    "sha256": "84a52f5adfe4370a828503300fb91fdc04aca1866c420e9ec7d570fe998b975d",
+                    "version": "0.1.0"
+                }
+            }),
+            "title-polish",
+        );
+        assert_eq!(manifest.skills.len(), 1);
+        assert_eq!(manifest.skills[0].id, "title-polish");
+        assert_eq!(
+            manifest.skills[0].sha256.as_deref(),
+            Some("84a52f5adfe4370a828503300fb91fdc04aca1866c420e9ec7d570fe998b975d")
+        );
+    }
+
+    #[test]
+    fn parses_published_skill_in_packs_list() {
+        let items = parse_catalog_entries(
+            &json!({
+                "packs": [
+                    { "slug": "weekly-report", "title": "周报", "priceCents": 9900 },
+                    {
+                        "slug": "title-polish",
+                        "title": "标题润色",
+                        "kind": "skill",
+                        "tagline": "给草稿标题换几种更抓人的说法",
+                        "priceCents": 1900
+                    }
+                ]
+            }),
+            "pack",
+            "https://teamups.vip",
+        );
+        assert_eq!(items.len(), 2);
+        let skill = items.iter().find(|i| i.id == "title-polish").unwrap();
+        assert_eq!(skill.kind, "skill");
+        assert_eq!(skill.name, "标题润色");
+        assert!(!skill.free);
+        assert_eq!(skill.pack_slug.as_deref(), Some("title-polish"));
+    }
+
+    #[test]
+    fn owned_from_me_strings_only() {
+        let mut items = parse_catalog_entries(
+            &json!({
+                "packs": [{ "slug": "weekly-report", "title": "周报", "priceCents": 9900 }]
+            }),
+            "pack",
+            "https://teamups.vip",
+        );
+        merge_owned_into_catalog(
+            &mut items,
+            None,
+            Some(&json!({ "packs": ["weekly-report"] })),
+            "https://teamups.vip",
+        );
+        assert!(items[0].owned);
     }
 }

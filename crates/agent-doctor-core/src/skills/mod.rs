@@ -11,8 +11,8 @@ mod teamups_auth;
 
 pub use mall::{install_teamups_mall_item, list_teamups_mall_catalog};
 pub use resolve::{
-    load_local_skills_layout, resolve_skills_source, save_skills_source_override,
-    LocalSkillsLayout, ResolvedSkillsSource,
+    load_local_skills_layout, resolve_cached_skill_dir, resolve_skills_source,
+    save_skills_source_override, LocalSkillsLayout, ResolvedSkillsSource,
 };
 pub use sync_router::{execute_skills_sync, SkillsSyncOptions};
 pub use teamups::{

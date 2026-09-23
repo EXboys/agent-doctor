@@ -3,7 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatCount, formatRate } from "./format";
 import { getLocale, t, type MessageKey } from "./i18n";
-import { withErrorDetail } from "./friendly-error";
+import {
+  teamupsLoginFailure,
+  teamupsMallInstallFailure,
+  withErrorDetail,
+} from "./friendly-error";
 import {
   classifySkillCategory,
   skillCategoryLabelKey,
@@ -135,17 +139,53 @@ function countMallMatches(): number {
   return filteredMallItems().length;
 }
 
+function applyAccountOwnership(): void {
+  if (!lastMallCatalog || !lastTeamupsAccount?.signed_in) return;
+  const account = lastTeamupsAccount as TeamupsAccountStatus & {
+    packCount?: number;
+  };
+  const owned = new Set(
+    (account.packs ?? []).map((slug) => slug.trim()).filter(Boolean),
+  );
+  if (owned.size === 0) return;
+  for (const item of lastMallCatalog.items) {
+    if (owned.has(item.id) || (item.pack_slug && owned.has(item.pack_slug))) {
+      item.owned = true;
+    }
+  }
+  const base = lastMallCatalog.base_url.replace(/\/$/, "");
+  for (const slug of owned) {
+    if (lastMallCatalog.items.some((item) => item.id === slug)) continue;
+    lastMallCatalog.items.push({
+      id: slug,
+      kind: "pack",
+      name: slug,
+      description: "",
+      free: false,
+      price_label: null,
+      owned: true,
+      installed: false,
+      skill_count: null,
+      pack_slug: slug,
+      purchase_url: base ? `${base}/packs/${slug}` : null,
+      version: null,
+    });
+  }
+}
+
 function filteredMallItems(): TeamupsCatalogItem[] {
   const items = lastMallCatalog?.items ?? [];
-  return items.filter((item) => {
-    if (mallFilter === "free" && !item.free) return false;
-    if (mallFilter === "paid" && item.free) return false;
-    if (mallFilter === "pack" && item.kind !== "pack") return false;
-    if (mallFilter === "skill" && item.kind !== "skill") return false;
-    if (!resourceQuery) return true;
-    const blob = `${item.name} ${item.description} ${item.id} ${item.kind}`.toLowerCase();
-    return blob.includes(resourceQuery);
-  });
+  return items
+    .filter((item) => {
+      if (mallFilter === "free" && !item.free) return false;
+      if (mallFilter === "paid" && item.free) return false;
+      if (mallFilter === "pack" && item.kind !== "pack") return false;
+      if (mallFilter === "skill" && item.kind !== "skill") return false;
+      if (!resourceQuery) return true;
+      const blob = `${item.name} ${item.description} ${item.id} ${item.kind}`.toLowerCase();
+      return blob.includes(resourceQuery);
+    })
+    .sort((a, b) => Number(b.owned) - Number(a.owned));
 }
 
 /** When searching, leave Browser (no list) and jump to the tab that has hits. */
@@ -809,6 +849,7 @@ async function loadMall(): Promise<void> {
     ]);
     lastMallCatalog = catalog;
     lastTeamupsAccount = account;
+    applyAccountOwnership();
     renderMallList();
   } catch (error) {
     lastMallCatalog = null;
@@ -856,7 +897,7 @@ async function scheduleMallLoginPoll(
       }
     } catch (error) {
       mallLoginInFlight = false;
-      mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoginFailed"), error);
+      mallFootnoteEl.textContent = teamupsLoginFailure(error);
       renderMallAccount();
     }
   };
@@ -875,7 +916,7 @@ async function startMallLogin(): Promise<void> {
     await scheduleMallLoginPoll(started.device_code, started.interval_sec, expiresAt);
   } catch (error) {
     mallLoginInFlight = false;
-    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoginFailed"), error);
+    mallFootnoteEl.textContent = teamupsLoginFailure(error);
     renderMallAccount();
   }
 }
@@ -920,14 +961,17 @@ async function installMallItem(
     const report = await invoke<SyncReport>("install_teamups_mall_item_command", {
       kind: item.kind,
       id: item.id,
-      packSlug: item.pack_slug,
+      packSlug:
+        item.kind === "skill"
+          ? (item.pack_slug?.trim() || item.id)
+          : item.pack_slug,
     });
     mallFootnoteEl.textContent = t("resources.mallInstallOk", {
       installed: String(report.installed),
     });
     await Promise.all([loadMall(), loadSkills()]);
   } catch (error) {
-    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallInstallFailed"), error);
+    mallFootnoteEl.textContent = teamupsMallInstallFailure(error);
     button.disabled = false;
     button.textContent = previous;
   } finally {

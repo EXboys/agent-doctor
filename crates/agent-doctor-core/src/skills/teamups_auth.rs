@@ -59,6 +59,15 @@ fn mall_base_url() -> Result<String> {
     Ok(default_teamups_base_url())
 }
 
+/// Error bodies from the site's HTML 404 page are useless to show; keep JSON/text short.
+fn error_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.starts_with('<') {
+        return "(html page)".to_string();
+    }
+    trimmed.chars().take(300).collect()
+}
+
 fn http_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -78,7 +87,10 @@ pub fn start_teamups_login() -> Result<TeamupsLoginStart> {
     let status = resp.status();
     let body_text = resp.text().unwrap_or_default();
     if !status.is_success() {
-        bail!("TeamUps login start failed ({status}): {body_text}");
+        bail!(
+            "TeamUps login start failed ({status}): {}",
+            error_body(&body_text)
+        );
     }
     let body: Value =
         serde_json::from_str(&body_text).context("invalid TeamUps device start JSON")?;
@@ -134,7 +146,10 @@ pub fn poll_teamups_login(device_code: &str) -> Result<TeamupsLoginPoll> {
     let status = resp.status();
     let body_text = resp.text().unwrap_or_default();
     if !status.is_success() {
-        bail!("TeamUps login poll failed ({status}): {body_text}");
+        bail!(
+            "TeamUps login poll failed ({status}): {}",
+            error_body(&body_text)
+        );
     }
     let body: Value =
         serde_json::from_str(&body_text).context("invalid TeamUps device poll JSON")?;
@@ -217,7 +232,10 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         });
     }
     if !status.is_success() {
-        bail!("TeamUps account check failed ({status}): {body_text}");
+        bail!(
+            "TeamUps account check failed ({status}): {}",
+            error_body(&body_text)
+        );
     }
     let body: Value = serde_json::from_str(&body_text).context("invalid doctor/me JSON")?;
     let packs = body

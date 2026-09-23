@@ -256,7 +256,9 @@ fn sync_via_generic(
                 if target.exists() {
                     let _ = fs::remove_dir_all(&target);
                 }
-                if let Err(err) = extract_zip_bytes(&blob, &target) {
+                if let Err(err) = extract_zip_bytes(&blob, &target)
+                    .and_then(|_| normalize_skill_extract_dir(&target))
+                {
                     failed += 1;
                     outcomes.push(crate::evotown::SkillSyncOutcome {
                         skill_id,
@@ -325,6 +327,34 @@ fn save_lock_state(path: &Path, state: &Value) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, serde_json::to_string_pretty(state)? + "\n")?;
+    Ok(())
+}
+
+/// If zip unpacked to `{id}/{id}/SKILL.md`, hoist files to `{id}/SKILL.md`.
+fn normalize_skill_extract_dir(target_dir: &Path) -> Result<()> {
+    if target_dir.join("SKILL.md").exists() {
+        return Ok(());
+    }
+    let Some(name) = target_dir.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    let nested = target_dir.join(name);
+    if !nested.join("SKILL.md").exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&nested)? {
+        let entry = entry?;
+        let dest = target_dir.join(entry.file_name());
+        if dest.exists() {
+            if dest.is_dir() {
+                fs::remove_dir_all(&dest)?;
+            } else {
+                fs::remove_file(&dest)?;
+            }
+        }
+        fs::rename(entry.path(), &dest)?;
+    }
+    fs::remove_dir(&nested)?;
     Ok(())
 }
 

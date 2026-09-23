@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
 
-use super::resolve::{load_local_skills_layout_from_store, resolve_skills_source_from_store};
+use super::resolve::{load_local_skills_layout_from_store, resolve_cached_skill_dir};
 use super::sync_router::{execute_skills_sync_with_store, SkillsSyncOptions};
 use super::teamups::{TeamupsClient, TeamupsMallCatalog};
 use crate::evotown::SyncReport;
@@ -24,7 +24,14 @@ pub fn list_teamups_mall_catalog() -> Result<TeamupsMallCatalog> {
     let installed = local_installed_skill_ids(&store)?;
     for item in &mut items {
         item.installed = match item.kind.as_str() {
-            "skill" => installed.contains(&item.id),
+            "skill" => {
+                installed.contains(&item.id)
+                    || resolve_cached_skill_dir(
+                        &load_local_skills_layout_from_store(&store)?.skills_dir,
+                        &item.id,
+                    )
+                    .is_some()
+            }
             _ => pack_looks_installed(&store, &item.id, &installed),
         };
     }
@@ -51,22 +58,20 @@ pub fn install_teamups_mall_item(
 
     let store = open_settings_store()?;
     // Mall installs always go through TeamUps, even if skills sync is set to Evotown.
-    let resolved = resolve_skills_source_from_store(&store, Some(SkillsSourceKind::Teamups))?;
     let (pack_id, only_skills) = if kind == "skill" {
+        // Single-skill purchases (e.g. title-polish) use their slug as the doctor manifest id.
+        // Do not fall back to Provider "default pack" — that is for bulk sync only.
         let pack = pack_slug
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
-            .or_else(|| resolved.pack_slug.clone())
-            .context(
-                "this skill needs a pack id — open the pack first, or pick a pack from the store",
-            )?;
+            .unwrap_or_else(|| id.to_string());
         (pack, vec![id.to_string()])
     } else {
         (id.to_string(), Vec::new())
     };
 
-    execute_skills_sync_with_store(
+    let report = execute_skills_sync_with_store(
         &store,
         &SkillsSyncOptions {
             dry_run: false,
@@ -75,7 +80,17 @@ pub fn install_teamups_mall_item(
             pack_or_bundle_id: Some(pack_id),
             source_override: Some(SkillsSourceKind::Teamups),
         },
-    )
+    )?;
+    if report.installed == 0 {
+        let detail = report
+            .outcomes
+            .iter()
+            .find(|o| o.outcome == "failed")
+            .and_then(|o| o.detail.clone())
+            .unwrap_or_else(|| "nothing was downloaded".to_string());
+        bail!("TeamUps install failed: {detail}");
+    }
+    Ok(report)
 }
 
 fn teamups_mall_base_url(store: &crate::store::SettingsStore) -> Result<String> {
@@ -184,6 +199,19 @@ mod tests {
         assert!(items[0].free);
         assert!(!items[1].free);
         assert_eq!(items[2].id, "browser");
+    }
+
+    #[test]
+    #[ignore = "hits live teamups.vip + local license"]
+    fn live_install_title_polish() {
+        let report =
+            super::install_teamups_mall_item("skill", "title-polish", Some("title-polish"))
+                .expect("install title-polish");
+        assert!(
+            report.installed >= 1,
+            "expected install, got report: {:?}",
+            report
+        );
     }
 
     #[test]

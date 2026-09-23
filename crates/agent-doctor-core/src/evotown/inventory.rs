@@ -132,6 +132,11 @@ pub fn list_skills_inventory_with_config(
                 }
             }
         }
+        for id in lock_skills.keys() {
+            if crate::skills::resolve_cached_skill_dir(&config.skills_dir, id).is_some() {
+                skill_ids.insert(id.clone());
+            }
+        }
     }
 
     // Also include skills already present on agent runtimes ("built-in" / previously
@@ -172,9 +177,10 @@ fn build_skill_items(
     let presence = detect_runtime_presence();
     let mut skills = Vec::new();
     for skill_id in skill_ids {
-        let cache_path = skills_dir.join(&skill_id);
-        let installed_path = if cache_path.is_dir() && cache_path.join("SKILL.md").exists() {
-            cache_path.clone()
+        let installed_path = if let Some(cache_path) =
+            crate::skills::resolve_cached_skill_dir(skills_dir, &skill_id)
+        {
+            cache_path
         } else if let Some(agent_path) = agent_skills.get(&skill_id) {
             agent_path.clone()
         } else {
@@ -797,8 +803,9 @@ pub fn mount_synced_skills_with_config(
     let mut actions = Vec::new();
 
     for skill_id in &skill_ids {
-        let cache_source = config.skills_dir.join(skill_id);
-        let source = if cache_source.is_dir() && cache_source.join("SKILL.md").exists() {
+        let source = if let Some(cache_source) =
+            crate::skills::resolve_cached_skill_dir(&config.skills_dir, skill_id)
+        {
             cache_source
         } else if let Some(agent_path) = agent_skills.get(skill_id) {
             agent_path.clone()

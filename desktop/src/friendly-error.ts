@@ -16,6 +16,50 @@ export function withErrorDetail(message: string, error: unknown): string {
   return t("error.withDetail", { message, detail });
 }
 
+/** TeamUps browser-login failures: one plain sentence, no HTML or English dumps. */
+export function teamupsLoginFailure(error: unknown): string {
+  const lower = errorDetail(error).toLowerCase();
+  if (/\(404|\(405|\(501|html page/.test(lower)) {
+    return t("resources.mallLoginUnavailable");
+  }
+  if (/\(5\d\d/.test(lower)) {
+    return t("resources.mallLoginServerDown");
+  }
+  if (
+    /error sending request|dns|timed?\s*out|timeout|connection|unreachable|certificate|tls/.test(
+      lower,
+    )
+  ) {
+    return t("resources.mallLoginNetwork");
+  }
+  return t("resources.mallLoginFailed");
+}
+
+/** TeamUps mall install — hide English pack-id errors from beginners. */
+export function teamupsMallInstallFailure(error: unknown): string {
+  const lower = errorDetail(error).toLowerCase();
+  if (/pack id|pack slug required|needs a pack/.test(lower)) {
+    return t("resources.mallInstallNeedsUpdate");
+  }
+  if (/401|403|license|rejected/.test(lower)) {
+    return t("resources.mallInstallNeedLogin");
+  }
+  if (/produced no skills|nothing was downloaded|sha256 mismatch|invalid skill zip/.test(lower)) {
+    return t("resources.mallInstallBrokenPackage");
+  }
+  if (/manifest failed \(404|\"detail\":\"not found\"|teamups install failed/i.test(lower)) {
+    return t("resources.mallInstallWrongServer");
+  }
+  if (
+    /error sending request|dns|timed?\s*out|timeout|connection|unreachable|certificate|tls/.test(
+      lower,
+    )
+  ) {
+    return t("resources.mallInstallNetwork");
+  }
+  return t("resources.mallInstallFailed");
+}
+
 export type ProviderFailureKind = "key" | "url" | "model" | "missing" | "unknown";
 
 export type ProviderFailureExplain = {
