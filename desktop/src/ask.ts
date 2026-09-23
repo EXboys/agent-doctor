@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 
 export type AskRuntime =
   | "claude-code"
@@ -279,7 +280,7 @@ async function cancelAsk(): Promise<void> {
     await invoke<boolean>("cancel_prompt_session_command");
     setHint(t("ask.cancelling"), "warn");
   } catch (error) {
-    setHint(t("ask.cancelFailed", { error: String(error) }), "error");
+    setHint(withErrorDetail(t("ask.cancelFailed"), error), "error");
   }
 }
 
@@ -353,7 +354,7 @@ async function startAsk(hooks: AskPanelHooks): Promise<void> {
       );
     }
   } catch (error) {
-    setHint(t("ask.failed", { error: String(error) }), "error");
+    setHint(withErrorDetail(t("ask.failed"), error), "error");
     appendLog(String(error), "err");
   } finally {
     setBusy(false);

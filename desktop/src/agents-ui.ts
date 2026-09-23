@@ -44,12 +44,13 @@ export function runtimeClass(id: string): string {
   return "default";
 }
 
-export function metaRow(labelKey: MessageKey, value: string): string {
+export function metaRow(labelKey: MessageKey, value: string, detailTitle?: string): string {
   const compact = value.replace(/\s*\n\s*/g, " · ");
+  const title = detailTitle ?? compact;
   return `
     <div class="meta-row">
       <span class="meta-label">${t(labelKey)}</span>
-      <p class="meta-value" title="${escapeHtml(compact)}">${escapeHtml(compact)}</p>
+      <p class="meta-value" title="${escapeHtml(title)}">${escapeHtml(compact)}</p>
     </div>
   `;
 }
@@ -66,7 +67,8 @@ export function renderApiKeyRow(settings: HermesSettings): string {
   }
   return metaRow(
     "meta.apiKey",
-    t("meta.apiKeyMissing", { env: settings.api_key_env }),
+    t("meta.apiKeyMissing"),
+    settings.api_key_env || undefined,
   );
 }
 
@@ -77,9 +79,15 @@ export function genericRuntimeAdvancedMeta(
   return [
     runtime.profile.key_source ? metaRow("meta.secrets", runtime.profile.key_source) : "",
     includeVersion && runtime.version ? metaRow("meta.version", runtime.version) : "",
-    runtime.binary_path ? metaRow("meta.binary", runtime.binary_path) : "",
+    runtime.binary_path
+      ? metaRow("meta.binary", t("meta.binaryFound"), runtime.binary_path)
+      : "",
     runtime.config_paths.length
-      ? metaRow("meta.config", runtime.config_paths.join(" · "))
+      ? metaRow(
+          "meta.config",
+          t("meta.configCount", { count: String(runtime.config_paths.length) }),
+          runtime.config_paths.join(" · "),
+        )
       : "",
   ]
     .filter(Boolean)

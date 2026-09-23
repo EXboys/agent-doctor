@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { formatCount, formatRate } from "./format";
 import { appState } from "./app-state";
 import type {
@@ -163,7 +164,7 @@ async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
     skillsInventoryEl.hidden = false;
     skillsListEl.replaceChildren();
     skillsEmptyEl.hidden = false;
-    skillsEmptyEl.textContent = t("skills.loadFailed", { error: String(error) });
+    skillsEmptyEl.textContent = withErrorDetail(t("skills.loadFailed"), error);
     skillsDirEl.textContent = "";
     skillsFootnoteEl.textContent = "";
     updateResourcesHubSummary();
@@ -309,7 +310,7 @@ async function toggleSkillRuntimeMount(
     await loadSkillsInventory({ remoteStats: false });
   } catch (error) {
     chip.classList.toggle("is-on", wasMounted);
-    skillsFootnoteEl.textContent = t("skills.mountFailed", { error: String(error) });
+    skillsFootnoteEl.textContent = withErrorDetail(t("skills.mountFailed"), error);
   } finally {
     chip.classList.remove("is-busy");
   }
@@ -330,7 +331,7 @@ async function mountSyncedSkills(skillIds?: string[], runtimes?: string[]) {
     });
     await loadSkillsInventory({ remoteStats: false });
   } catch (error) {
-    skillsFootnoteEl.textContent = t("skills.mountFailed", { error: String(error) });
+    skillsFootnoteEl.textContent = withErrorDetail(t("skills.mountFailed"), error);
   } finally {
     setSkillsBusy(false);
   }

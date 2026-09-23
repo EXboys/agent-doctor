@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
 import {
   isAskRuntimeId,
@@ -202,7 +203,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       await renderReport(report);
       await deps.onDoctorReport(report);
     } catch (error) {
-      setStatusBanner("error", t("doctor.failed", { error: String(error) }));
+      setStatusBanner("error", withErrorDetail(t("doctor.failed"), error));
       updateHealthStrip(0, 0);
       runtimesEl.innerHTML = `<div class="empty-state">${t("doctor.empty")}</div>`;
       runtimeTabsEl.innerHTML = "";

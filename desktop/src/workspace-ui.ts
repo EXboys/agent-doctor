@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
 import type {
@@ -143,7 +144,7 @@ async function loadWorkspaces() {
     renderWorkspaces(doc);
   } catch (error) {
     workspaceStatusEl.textContent = t("workspaces.failed");
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
     workspaceListEl.innerHTML = "";
   }
 }
@@ -162,7 +163,7 @@ async function applyWorkspace(name: string) {
     workspaceHintEl.textContent = t("workspaces.updated", { name });
     await loadWorkspaces();
   } catch (error) {
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
   } finally {
     appState.workspaceBusy = false;
     if (appState.lastWorkspaces) {
@@ -184,7 +185,7 @@ async function registerWorkspace() {
       title: t("workspaces.registerPick"),
     });
   } catch (error) {
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
     return;
   }
 
@@ -205,7 +206,7 @@ async function registerWorkspace() {
     workspaceHintEl.textContent = t("workspaces.registered", { name: report.name });
     await loadWorkspaces();
   } catch (error) {
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
   } finally {
     appState.workspaceBusy = false;
     workspaceRegisterEl.disabled = false;
@@ -230,7 +231,7 @@ async function doctorWorkspace() {
   } catch (error) {
     workspaceChecksEl.hidden = true;
     workspaceChecksEl.innerHTML = "";
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
   } finally {
     appState.workspaceBusy = false;
     if (appState.lastWorkspaces) {
@@ -257,7 +258,7 @@ async function fixWorkspace() {
     appState.workspaceBusy = false;
     await doctorWorkspace();
   } catch (error) {
-    workspaceHintEl.textContent = String(error);
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
     appState.workspaceBusy = false;
     if (appState.lastWorkspaces) {
       renderWorkspaceManageList(appState.lastWorkspaces);
@@ -556,7 +557,7 @@ async function loadRemoteProjects(): Promise<void> {
     renderRemoteList(projects);
     remoteStatusEl.textContent = "";
   } catch (error) {
-    remoteStatusEl.textContent = t("remote.doctorFailed", { error: String(error) });
+    remoteStatusEl.textContent = withErrorDetail(t("remote.doctorFailed"), error);
     remoteHostListEl.innerHTML = "";
     remoteListEl.innerHTML = "";
   }
@@ -584,7 +585,7 @@ async function probeRemoteHostUi(id: string): Promise<void> {
   } catch (error) {
     remoteProbeStatus.set(id, "fail");
     remoteProbeMessage.set(id, String(error));
-    remoteHintEl.textContent = t("remote.probeFail", { id, error: String(error) });
+    remoteHintEl.textContent = withErrorDetail(t("remote.probeFail", { id }), error);
   } finally {
     remoteBusy = false;
     renderRemoteHostList(lastRemoteHosts);
@@ -602,7 +603,7 @@ async function removeRemoteHostUi(id: string): Promise<void> {
     await loadRemoteProjects();
     remoteHintEl.textContent = "";
   } catch (error) {
-    remoteHintEl.textContent = t("remote.removeHostFailed", { error: String(error) });
+    remoteHintEl.textContent = withErrorDetail(t("remote.removeHostFailed"), error);
   } finally {
     remoteBusy = false;
     renderRemoteHostList(lastRemoteHosts);
@@ -625,7 +626,7 @@ async function runRemoteDoctorUi(target: string): Promise<void> {
   } catch (error) {
     remoteChecksEl.hidden = true;
     remoteChecksEl.innerHTML = "";
-    remoteHintEl.textContent = t("remote.doctorFailed", { error: String(error) });
+    remoteHintEl.textContent = withErrorDetail(t("remote.doctorFailed"), error);
   } finally {
     remoteBusy = false;
     renderRemoteHostList(lastRemoteHosts);
@@ -641,7 +642,7 @@ async function removeRemoteProjectUi(host: string, project: string): Promise<voi
     await loadRemoteProjects();
     remoteHintEl.textContent = "";
   } catch (error) {
-    remoteHintEl.textContent = t("remote.removeFailed", { error: String(error) });
+    remoteHintEl.textContent = withErrorDetail(t("remote.removeFailed"), error);
   } finally {
     remoteBusy = false;
     renderRemoteHostList(lastRemoteHosts);
@@ -803,7 +804,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
           bootstrap.open = false;
         }
       } catch (error) {
-        remoteHintEl.textContent = t("remote.bootstrapFailed", { error: String(error) });
+        remoteHintEl.textContent = withErrorDetail(t("remote.bootstrapFailed"), error);
       } finally {
         remoteBusy = false;
         renderRemoteHostList(lastRemoteHosts);
@@ -840,7 +841,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
           addProject.hidden = true;
         }
       } catch (error) {
-        remoteHintEl.textContent = t("remote.projectFailed", { error: String(error) });
+        remoteHintEl.textContent = withErrorDetail(t("remote.projectFailed"), error);
       } finally {
         remoteBusy = false;
         renderRemoteHostList(lastRemoteHosts);

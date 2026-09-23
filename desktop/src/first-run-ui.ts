@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { applyStaticI18n, t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
 import {
   markFirstRunCompleted,
@@ -306,7 +307,7 @@ async function runFirstRunScan(opts?: { forceProbe?: boolean }): Promise<void> {
     firstRunBusy = false;
     await evaluateFirstRunFromReport(report, { forceProbe: opts?.forceProbe });
   } catch (error) {
-    showError(t("firstRun.scanFailed", { error: String(error) }), "scan");
+    showError(withErrorDetail(t("firstRun.scanFailed"), error), "scan");
   } finally {
     deps.setLoading(false);
   }
@@ -320,13 +321,14 @@ function installSucceeded(report: InstallRuntimeResponse): boolean {
 }
 
 function installFailureDetail(report: InstallRuntimeResponse): string {
-  return (
+  const reason =
     report.skipped.map((item) => item.reason).find(Boolean) ||
     report.manual_fallback[0] ||
-    (report.install_log_path
-      ? t("firstRun.installIncomplete", { detail: report.install_log_path })
-      : t("firstRun.installFailed", { error: "unknown" }))
-  );
+    "";
+  if (report.install_log_path) {
+    return withErrorDetail(t("firstRun.installIncomplete"), reason || report.install_log_path);
+  }
+  return withErrorDetail(t("firstRun.installFailed"), reason || "unknown");
 }
 
 async function runFirstRunInstall(target: FirstRunTarget): Promise<void> {
@@ -348,7 +350,7 @@ async function runFirstRunInstall(target: FirstRunTarget): Promise<void> {
     // Force re-probe so a freshly installed runtime is ranked correctly.
     await runFirstRunScan({ forceProbe: true });
   } catch (error) {
-    showError(t("firstRun.installFailed", { error: String(error) }), "install");
+    showError(withErrorDetail(t("firstRun.installFailed"), error), "install");
   }
 }
 
@@ -387,7 +389,7 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
     firstRunBusy = false;
     await runFirstRunScan({ forceProbe: true });
   } catch (error) {
-    showError(t("firstRun.fixFailed", { error: String(error) }), "repair");
+    showError(withErrorDetail(t("firstRun.fixFailed"), error), "repair");
   }
 }
 

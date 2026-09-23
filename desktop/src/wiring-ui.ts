@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t, type MessageKey } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import { isPersonalEdition, isTeamEdition, productEdition } from "./edition";
 import {
@@ -464,7 +465,7 @@ async function rewireCurrentMode(hintEl?: HTMLElement | null) {
     }
     void deps.refresh();
   } catch (error) {
-    const message = t("mode.rewireFailed", { error: String(error) });
+    const message = withErrorDetail(t("mode.rewireFailed"), error);
     showModeHint(message);
     if (hintEl) {
       hintEl.hidden = false;
@@ -481,7 +482,7 @@ async function loadEvotownStatus() {
     const status = await invoke<EvotownStatus>("get_evotown_status_command");
     renderEvotownStatus(status);
   } catch (error) {
-    evotownStatusEl.textContent = t("evotown.connectFailed", { error: String(error) });
+    evotownStatusEl.textContent = withErrorDetail(t("evotown.connectFailed"), error);
   }
 }
 
@@ -555,7 +556,7 @@ async function runEvotownOnboarding() {
       policies: String(report.policy?.policy_count ?? 0),
     });
   } catch (error) {
-    evotownHintEl.textContent = t("evotown.connectFailed", { error: String(error) });
+    evotownHintEl.textContent = withErrorDetail(t("evotown.connectFailed"), error);
   } finally {
     evotownConnectEl.disabled = false;
     evotownResyncEl.disabled = false;
@@ -627,7 +628,7 @@ async function resyncEvotownSkills() {
     });
     await deps.loadSkillsInventory();
   } catch (error) {
-    evotownHintEl.textContent = t("evotown.resyncFailed", { error: String(error) });
+    evotownHintEl.textContent = withErrorDetail(t("evotown.resyncFailed"), error);
   } finally {
     evotownResyncEl.disabled = false;
   }
@@ -643,7 +644,7 @@ async function loadPersonalProviderStatus() {
     renderPersonalProviderStatus(status);
     renderPersonalProviderList(doc);
   } catch (error) {
-    personalStatusEl.textContent = t("personal.applyFailed", { error: String(error) });
+    personalStatusEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
   }
 }
 
@@ -899,7 +900,7 @@ async function verifyPersonalProvider() {
       personalHintEl.textContent = t("personal.verifyFailed", { error: report.message });
     }
   } catch (error) {
-    personalHintEl.textContent = t("personal.verifyFailed", { error: String(error) });
+    personalHintEl.textContent = withErrorDetail(t("personal.verifyFailed"), error);
   } finally {
     setPersonalBusy(false);
   }
@@ -962,7 +963,7 @@ async function upsertPersonalProvider(activate: boolean) {
       showPersonalListView();
     }
   } catch (error) {
-    personalHintEl.textContent = t("personal.applyFailed", { error: String(error) });
+    personalHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
   } finally {
     setPersonalBusy(false);
   }
@@ -982,7 +983,7 @@ async function activateProviderById(id: string) {
       name: report.provider_name ?? id,
     });
   } catch (error) {
-    personalListHintEl.textContent = t("personal.applyFailed", { error: String(error) });
+    personalListHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
   } finally {
     setPersonalBusy(false);
   }
@@ -997,7 +998,7 @@ async function deleteProviderById(id: string) {
     personalListHintEl.textContent = t("personal.deleteOk");
     showPersonalListView();
   } catch (error) {
-    personalListHintEl.textContent = t("personal.applyFailed", { error: String(error) });
+    personalListHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
   } finally {
     setPersonalBusy(false);
   }

@@ -127,9 +127,9 @@ export function renderRepairExecuteResult(
 
   const canVerifyBrowserMcp = supportsBrowserMcp;
   const smoke = canVerifyBrowserMcp && execute.browser_smoke
-    ? `<p class="repair-browser-smoke ${execute.browser_smoke.ok ? "ok" : "fail"}"><strong>${escapeHtml(
+    ? `<p class="repair-browser-smoke ${execute.browser_smoke.ok ? "ok" : "fail"}" title="${escapeHtml(execute.browser_smoke.detail)}"><strong>${escapeHtml(
         execute.browser_smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail"),
-      )}</strong> ${escapeHtml(execute.browser_smoke.detail)}</p>`
+      )}</strong></p>`
     : "";
 
   const guideBlock = execute.guide_path
@@ -140,7 +140,7 @@ export function renderRepairExecuteResult(
     <div class="repair-execute-result">
       ${
         hasBackup
-          ? `<p class="repair-execute-backup">${escapeHtml(t("repair.applyResult", { backup: execute.backup_root }))}</p>`
+          ? `<p class="repair-execute-backup" title="${escapeHtml(execute.backup_root)}">${escapeHtml(t("repair.applyResult"))}</p>`
           : ""
       }
       ${outcome}

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import {
   isAskRuntimeId,
@@ -119,7 +120,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
       }
     } catch (error) {
-      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
     }
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     document.body.classList.add("is-diagnose-open");
@@ -306,12 +307,14 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       const smoke = await invoke<{ ok: boolean; detail: string }>("run_browser_smoke_command");
       if (slot) {
         slot.className = `repair-smoke-slot ${smoke.ok ? "ok" : "fail"}`;
-        slot.textContent = `${smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail")}: ${smoke.detail}`;
+        slot.textContent = smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail");
+        slot.title = smoke.detail || "";
       }
     } catch (error) {
       if (slot) {
         slot.className = "repair-smoke-slot fail";
-        slot.textContent = `${t("repair.browserSmokeFail")}: ${String(error)}`;
+        slot.textContent = t("repair.browserSmokeFail");
+        slot.title = String(error);
       }
     } finally {
       button?.removeAttribute("disabled");
@@ -352,7 +355,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         await deps.loadHermesModel();
       }
     } catch (error) {
-      hint.textContent = String(error);
+      hint.textContent = withErrorDetail(t("repair.rollbackFailed"), error);
     } finally {
       diagnoseButton?.removeAttribute("disabled");
       applyButton?.removeAttribute("disabled");
@@ -380,7 +383,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         await deps.loadHermesModel();
       }
     } catch (error) {
-      hint.textContent = String(error);
+      hint.textContent = withErrorDetail(t("repair.applyFailed"), error);
     } finally {
       diagnoseButton?.removeAttribute("disabled");
       applyButton?.removeAttribute("disabled");
@@ -405,7 +408,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         mountRepairPreview(preview, { resetFilter: true });
       } catch (error) {
         hint.hidden = false;
-        hint.textContent = String(error);
+        hint.textContent = withErrorDetail(t("repair.diagnoseFailed"), error);
         return;
       }
     }
@@ -441,8 +444,8 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       hint.replaceChildren();
       deps.setStatusBanner("ok", t("runtime.diagnosisReady"));
     } catch (error) {
-      hint.textContent = String(error);
-      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+      hint.textContent = withErrorDetail(t("runtime.openFailed"), error);
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
     } finally {
       button?.removeAttribute("disabled");
     }
@@ -471,7 +474,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       diagnoseDetailBodyEl.querySelector(".repair-panel")?.prepend(note);
       deps.setStatusBanner(report.active && detail.startsWith("applied:") ? "ok" : "warn", message);
     } catch (error) {
-      const message = String(error);
+      const message = withErrorDetail(t("repair.migrateFailed"), error);
       deps.setStatusBanner("error", message);
       const preview = repairPreviewByRuntime.get(runtime);
       if (preview) {
@@ -530,7 +533,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
           prompt: null,
           terminal,
         }).catch((error) => {
-          deps.setStatusBanner("error", String(error));
+          deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
         });
         return;
       }

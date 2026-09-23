@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import type { DoctorReport, InstallProgressEvent, InstallRuntimeResponse } from "./types";
 
@@ -222,7 +223,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
         if (logPath) {
           stickyHtml = `<div class="install-progress-done">${escapeHtml(
             nextHintText ?? t("runtime.installFailed"),
-          )}<p class="footnote">${escapeHtml(t("runtime.installLogHint", { path: logPath }))}</p><button type="button" class="btn-ghost" data-action="open-install-log" data-log-path="${escapeHtml(
+          )}<p class="footnote">${escapeHtml(t("runtime.installLogHint"))}</p><button type="button" class="btn-ghost" data-action="open-install-log" data-log-path="${escapeHtml(
             logPath,
           )}">${escapeHtml(t("runtime.openInstallLog"))}</button></div>`;
           stickyText = null;
@@ -231,7 +232,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       await deps.refresh();
       setStickyInstallHint(runtime, stickyHtml, stickyText);
     } catch (error) {
-      const message = String(error);
+      const message = withErrorDetail(t("runtime.installFailed"), error);
       setStickyInstallHint(runtime, null, message);
       try {
         await deps.refresh();
@@ -277,10 +278,9 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       }
       await deps.refresh();
     } catch (error) {
-      const message = String(error);
       if (hint) {
         hint.hidden = false;
-        hint.textContent = message;
+        hint.textContent = withErrorDetail(t("runtime.uninstallFailed"), error);
       }
     }
   }

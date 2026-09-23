@@ -1,7 +1,8 @@
-//! Hermes ask backend (`hermes chat -q -Q` + optional `--resume` / `--yolo`).
+//! Hermes ask backend (`hermes chat -q --format stream-json` + optional `--resume` / `--yolo`).
 //!
-//! Quiet mode (`-Q`) prints the final reply on stdout and `session_id:` on stderr —
-//! Ask surfaces only the reply, not the interactive CLI chrome.
+//! `stream-json` (implies quiet) emits JSONL on stdout: `system` / `text` / `tool_use` /
+//! `tool_result` / `result`. Ask maps those into live Status + Delta events so the UI is not
+//! stuck on “waiting for the model” during long tool loops. `session_id:` stays on stderr.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -121,8 +122,14 @@ fn run_hermes(
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
         Ok((status, exit_code, stdout, stderr)) => {
-            let reply = extract_hermes_reply(&stdout);
-            let runtime_thread_id = extract_hermes_session_id(&stderr)
+            let stream = extract_hermes_stream_final(&stdout);
+            let reply = stream
+                .text
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| extract_hermes_reply(&stdout));
+            let runtime_thread_id = stream
+                .session_id
+                .or_else(|| extract_hermes_session_id(&stderr))
                 .or_else(|| extract_hermes_session_id(&stdout))
                 .or_else(|| extract_hermes_session_id(&combine_output(&stdout, &stderr)))
                 .or_else(|| resume_session_id.map(str::to_string));
@@ -130,28 +137,24 @@ fn run_hermes(
             let combined = if !reply.trim().is_empty() {
                 reply.clone()
             } else if status != PromptSessionStatus::Succeeded {
-                extract_hermes_error_text(&stderr).unwrap_or_else(|| {
-                    let fallback = combine_output(&stdout, &stderr);
-                    extract_hermes_reply(&fallback)
-                })
+                stream
+                    .error
+                    .or_else(|| extract_hermes_error_text(&stderr))
+                    .unwrap_or_else(|| {
+                        let fallback = combine_output(&stdout, &stderr);
+                        extract_hermes_reply(&fallback)
+                    })
             } else {
                 String::new()
             };
 
-            if status == PromptSessionStatus::Succeeded && !reply.trim().is_empty() {
+            let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
+            // Live `text` deltas already filled the bubble — only fall back when nothing streamed.
+            if display.trim().is_empty() && !combined.trim().is_empty() {
                 emit(PromptSessionEvent::Delta {
                     session_id: session_id.clone(),
-                    text: reply,
+                    text: combined.clone(),
                 });
-            } else if status != PromptSessionStatus::Succeeded && !combined.trim().is_empty() {
-                // Surface a compact failure note into the transcript when no reply landed.
-                let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
-                if display.trim().is_empty() {
-                    emit(PromptSessionEvent::Delta {
-                        session_id: session_id.clone(),
-                        text: combined.clone(),
-                    });
-                }
             }
 
             let summary = summarize(&combined, &status, &runtime);
@@ -209,10 +212,12 @@ fn build_hermes_command(
     prepare_hermes_home(&overlay);
     let bin = std::env::var("AGENT_DOCTOR_HERMES_BIN").unwrap_or_else(|_| "hermes".into());
     let mut cmd = command_from_cli(&bin);
+    // stream-json implies quiet and yields live text/tool events (not a blank “waiting” spinner).
     cmd.arg("chat")
         .arg("-q")
         .arg(prompt)
-        .arg("-Q")
+        .arg("--format")
+        .arg("stream-json")
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -285,7 +290,7 @@ where
         };
         for (is_stdout, line) in drained {
             if is_stdout {
-                // Quiet-mode stdout is the final reply; emit once at completion as Delta.
+                handle_hermes_stream_line(session_id, &line, on_event);
                 continue;
             }
             if is_hermes_stderr_noise(&line) || is_runtime_stderr_noise(&line) {
@@ -341,6 +346,139 @@ where
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
     let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
     Ok((status, exit_code, stdout, stderr))
+}
+
+#[derive(Default)]
+struct HermesStreamFinal {
+    text: Option<String>,
+    session_id: Option<String>,
+    error: Option<String>,
+}
+
+/// Map one Hermes `stream-json` stdout line into Ask events (live text + tool chips).
+fn handle_hermes_stream_line<F>(session_id: &str, line: &str, on_event: &mut F)
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        // Legacy plain-text quiet mode (or a non-JSON banner) — ignore live; final extract handles it.
+        return;
+    };
+    let Some(ty) = value.get("type").and_then(|v| v.as_str()) else {
+        return;
+    };
+    match ty {
+        "system" => {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.to_string(),
+                phase: "thinking".into(),
+                message: "正在准备…".into(),
+            });
+        }
+        "text" => {
+            if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                if !text.is_empty() {
+                    on_event(PromptSessionEvent::Delta {
+                        session_id: session_id.to_string(),
+                        text: text.to_string(),
+                    });
+                }
+            }
+        }
+        "tool_use" => {
+            let name = value
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("tool")
+                .trim();
+            let label = hermes_tool_label(name);
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.to_string(),
+                phase: "tool".into(),
+                message: format!("调用工具 {label}…"),
+            });
+        }
+        "tool_result" => {
+            // Keep the last tool chip live until the next status/text; no extra row needed.
+        }
+        "result" => {
+            // Final envelope is read after the process exits via `extract_hermes_stream_final`.
+        }
+        _ => {}
+    }
+}
+
+fn hermes_tool_label(name: &str) -> &str {
+    match name {
+        "terminal" | "bash" | "shell" => "终端",
+        "execute_code" | "code_execution" | "code_execution_tool" => "运行代码",
+        "web_search" | "search" => "搜索",
+        "browser" | "browser_navigate" => "浏览器",
+        "read_file" | "read" => "读文件",
+        "write_file" | "write" | "edit_file" | "edit" => "改文件",
+        other => other,
+    }
+}
+
+/// Pull final reply + session id from stream-json stdout (prefers `result.text`, else joined `text`).
+fn extract_hermes_stream_final(stdout: &str) -> HermesStreamFinal {
+    let mut acc = String::new();
+    let mut out = HermesStreamFinal::default();
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("system") => {
+                if out.session_id.is_none() {
+                    out.session_id = value
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string);
+                }
+            }
+            Some("text") => {
+                if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                    acc.push_str(text);
+                }
+            }
+            Some("result") => {
+                if let Some(sid) = value
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    out.session_id = Some(sid.to_string());
+                }
+                if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                    if !text.trim().is_empty() {
+                        out.text = Some(text.to_string());
+                    }
+                }
+                if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+                    if !err.trim().is_empty() {
+                        out.error = Some(err.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if out.text.is_none() && !acc.trim().is_empty() {
+        out.text = Some(acc);
+    }
+    out
 }
 
 fn extract_hermes_session_id(text: &str) -> Option<String> {
@@ -591,7 +729,14 @@ Session: 20260814223955a98b96
         let bin = write_fake_bin(
             dir.path(),
             "fake-hermes",
-            "#!/bin/bash\necho hermes-ok\necho 'session_id: hermes-sid-1' >&2\nexit 0\n",
+            r#"#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"hermes-sid-1"}'
+echo '{"type":"tool_use","name":"terminal"}'
+echo '{"type":"text","text":"hermes-ok"}'
+echo '{"type":"result","session_id":"hermes-sid-1","exit_code":0,"text":"hermes-ok"}'
+echo 'session_id: hermes-sid-1' >&2
+exit 0
+"#,
         );
         std::env::set_var("AGENT_DOCTOR_HERMES_BIN", &bin);
         let events = StdMutex::new(Vec::new());
@@ -620,8 +765,26 @@ Session: 20260814223955a98b96
             e,
             PromptSessionEvent::Delta { text, .. } if text.contains("hermes-ok")
         )));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Status { phase, message, .. }
+                if phase == "tool" && message.contains("终端")
+        )));
         assert!(!evs
             .iter()
             .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
+    }
+
+    #[test]
+    fn parses_stream_json_final_reply() {
+        let stdout = r#"
+{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"text","text":"hel"}
+{"type":"text","text":"lo"}
+{"type":"result","session_id":"s1","exit_code":0,"text":"hello"}
+"#;
+        let got = extract_hermes_stream_final(stdout);
+        assert_eq!(got.text.as_deref(), Some("hello"));
+        assert_eq!(got.session_id.as_deref(), Some("s1"));
     }
 }

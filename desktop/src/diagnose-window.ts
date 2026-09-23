@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyStaticI18n, getLocale, t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
 import { escapeHtml } from "./format";
 import {
@@ -594,7 +595,7 @@ async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<voi
       setResult("hide");
     }
   } catch (error) {
-    setResult("error", t("diagnose.flow.scanFailed", { error: String(error) }));
+    setResult("error", withErrorDetail(t("diagnose.flow.scanFailed"), error));
   } finally {
     setBusy(false);
   }
@@ -748,7 +749,7 @@ async function runInstall(): Promise<void> {
       setResult("error", t("diagnose.flow.installFailedDetail", { error: detail }));
     }
   } catch (error) {
-    setResult("error", t("diagnose.flow.installFailedDetail", { error: String(error) }));
+    setResult("error", withErrorDetail(t("diagnose.flow.installFailedDetail"), error));
   } finally {
     unlisten();
     setBusy(false);
@@ -765,7 +766,7 @@ async function runAutoFix(): Promise<void> {
     setResult("ok", t("diagnose.flow.autoFixOk"));
     await refreshState({ preferStep: "config" });
   } catch (error) {
-    setResult("error", t("diagnose.flow.autoFixFailed", { error: String(error) }));
+    setResult("error", withErrorDetail(t("diagnose.flow.autoFixFailed"), error));
   } finally {
     setBusy(false);
   }
@@ -832,7 +833,7 @@ async function runVerifyAndSave(): Promise<void> {
     guideFillConfig = false;
     await refreshState({ preferStep: "test" });
   } catch (error) {
-    setResult("error", t("diagnose.flow.configFailed", { error: String(error) }));
+    setResult("error", withErrorDetail(t("diagnose.flow.configFailed"), error));
   } finally {
     setBusy(false);
   }
@@ -937,7 +938,7 @@ async function runScoreTest(opts?: { reusePreview?: boolean }): Promise<void> {
     }
   } catch (error) {
     hideScanMeter();
-    setResult("error", t("diagnose.flow.scoreFailed", { error: String(error) }));
+    setResult("error", withErrorDetail(t("diagnose.flow.scoreFailed"), error));
   } finally {
     setBusy(false);
   }
@@ -947,7 +948,7 @@ async function openAskYourself(): Promise<void> {
   try {
     await invoke("open_ask_window_command", { runtime: runtimeId });
   } catch (error) {
-    setResult("error", t("runtime.openFailed", { error: String(error) }));
+    setResult("error", withErrorDetail(t("runtime.openFailed"), error));
   }
 }
 
@@ -956,7 +957,7 @@ async function openTeamWiring(): Promise<void> {
     await invoke("focus_main_tab_command", { tab: "provider" });
     await invoke("close_diagnose_window_command", { destroy: false });
   } catch (error) {
-    setResult("error", String(error));
+    setResult("error", withErrorDetail(t("diagnose.flow.scanFailed"), error));
   }
 }
 

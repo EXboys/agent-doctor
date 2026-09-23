@@ -915,10 +915,13 @@ fn apply_ask_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
     // Ask is pre-created at startup (often as claude-code) and then reused.
     // Events alone can be missed; eval updates the injected runtime and calls
     // the chat page apply hook so the active session matches the Agents entry.
+    // Also persist to localStorage so a soft-reload cannot fall back to the
+    // create-time initialization_script (which is stuck on the first runtime).
     let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
     let script = format!(
         "(function(){{\
             window.__AD_ASK_RUNTIME__ = {runtime};\
+            try {{ localStorage.setItem('ad.ask.pendingRuntime', {runtime}); }} catch (e) {{}}\
             if (typeof window.__AD_ASK_APPLY_RUNTIME__ === 'function') {{\
                 window.__AD_ASK_APPLY_RUNTIME__({runtime});\
             }}\
@@ -955,10 +958,16 @@ fn open_or_focus_ask_window(app: &AppHandle, runtime: Option<&str>) -> Result<()
 
     // A previously crashed Ask webview can stay titled+blank forever while we only
     // hide/show it. Always soft-reload existing Ask windows so history paints again.
+    // Persist runtime before reload: create-time init script still injects the first
+    // runtime (usually claude-code) and would otherwise win over `__AD_ASK_RUNTIME__`.
     if already_exists {
         let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
         let reload = format!(
-            "window.__AD_ASK_RUNTIME__ = {runtime}; location.reload();",
+            "(function(){{\
+                window.__AD_ASK_RUNTIME__ = {runtime};\
+                try {{ localStorage.setItem('ad.ask.pendingRuntime', {runtime}); }} catch (e) {{}}\
+                location.reload();\
+            }})();",
             runtime = runtime_json
         );
         let _ = window.eval(&reload);

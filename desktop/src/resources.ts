@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatCount, formatRate } from "./format";
 import { getLocale, t, type MessageKey } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import {
   classifySkillCategory,
   skillCategoryLabelKey,
@@ -302,8 +303,9 @@ function renderMcpBrowserStatus(status: McpModuleStatus): void {
     : t("mcp.chromeMissing");
   mcpChromeEl.title = chrome.binary || "";
   mcpCdpEl.textContent = chrome.cdp_connected
-    ? t("mcp.cdpConnected", { port: String(chrome.port) })
-    : t("mcp.cdpIdle", { port: String(chrome.port) });
+    ? t("mcp.cdpConnected")
+    : t("mcp.cdpIdle");
+  mcpCdpEl.title = chrome.port ? `:${chrome.port}` : "";
   mcpConfiguredEl.textContent =
     status.configured_runtimes.length > 0
       ? t("mcp.configuredList", { list: status.configured_runtimes.join(", ") })
@@ -610,7 +612,7 @@ async function mountSkill(skillId: string): Promise<void> {
     });
     await loadSkills();
   } catch (error) {
-    footnoteEl.textContent = t("skills.mountFailed", { error: String(error) });
+    footnoteEl.textContent = withErrorDetail(t("skills.mountFailed"), error);
   }
 }
 
@@ -637,7 +639,7 @@ async function loadMcpStatus(): Promise<void> {
     lastMcpStatus = null;
     mcpBrowserBadgeEl.textContent = "—";
     mcpBrowserBadgeEl.className = "badge muted";
-    mcpFootnoteEl.textContent = t("mcp.loadFailed", { error: String(error) });
+    mcpFootnoteEl.textContent = withErrorDetail(t("mcp.loadFailed"), error);
     mcpTargetsEl.replaceChildren();
     renderResourcesList();
   }
@@ -682,7 +684,7 @@ async function diagnoseAndWireBrowserMcp(): Promise<void> {
       renderMcpTargets(lastMcpStatus.targets ?? [], lastWireActions);
     }
   } catch (error) {
-    mcpFootnoteEl.textContent = t("mcp.configureFailed", { error: String(error) });
+    mcpFootnoteEl.textContent = withErrorDetail(t("mcp.configureFailed"), error);
   } finally {
     mcpConfigureInFlight = false;
     const chromeOk = lastMcpStatus?.browser.chrome_found ?? false;

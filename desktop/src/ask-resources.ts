@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
+import { withErrorDetail } from "./friendly-error";
 import type {
   McpInventoryItem,
   McpInventoryReport,
@@ -564,7 +565,7 @@ export class AskResourcesController {
       this.renderMentions();
       this.renderResourceChips();
     } catch (error) {
-      opts.setStatus(t("chat.resourcesLoadFailed", { error: String(error) }), "warn");
+      opts.setStatus(withErrorDetail(t("chat.resourcesLoadFailed"), error), "warn");
     }
     return { workspaceCwd, workspaceDoc };
   }
