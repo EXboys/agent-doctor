@@ -676,4 +676,20 @@ jobs:
           # Clients always fetch <prefix>/latest.json (team package points at desktop-team/).
           "$OSSUTIL" cp "updater-manifest/${LATEST}" "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
           "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
-          echo "Synced updater assets to oss://${OSS_BUCKET}/${PREFIX}/"
+          # TeamUps /download 用人装包（.dmg / setup.exe）；updater 仍用 .app.tar.gz
+          EDITION="${{ matrix.edition }}"
+          mapfile -d '' installers < <(
+            if [ "$EDITION" = team ]; then
+              find desktop-artifacts -type f \( -name 'Agent.Doctor.Team_*.dmg' -o -name 'Agent.Doctor.Team_*-setup.exe' \) -print0
+            else
+              find desktop-artifacts -type f \( -name 'Agent.Doctor_*.dmg' -o -name 'Agent.Doctor_*-setup.exe' \) ! -name 'Agent.Doctor.Team_*' -print0
+            fi
+          )
+          for f in "${installers[@]+"${installers[@]}"}"; do
+            [ -n "$f" ] || continue
+            base="$(basename "$f" | tr ' ' '.')"
+            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded installer ${base}"
+          done
+          echo "Synced updater + installers to oss://${OSS_BUCKET}/${PREFIX}/"

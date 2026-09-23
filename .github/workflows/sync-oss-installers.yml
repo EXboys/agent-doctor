@@ -1,0 +1,95 @@
+name: Sync installers to OSS
+
+# 把 GitHub Release 里的用户安装包（.dmg / setup.exe）同步到国内 OSS，
+# 供 TeamUps /download 同源反代。updater 的 latest.json 仍用 sync-oss-latest。
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub release tag（已有 .dmg / setup.exe）"
+        required: true
+        default: "v0.1.44"
+      edition:
+        description: "personal → desktop/; team → desktop-team/"
+        required: true
+        default: "personal"
+        type: choice
+        options:
+          - personal
+          - team
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Upload installers to China OSS (${{ inputs.edition }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve edition
+        id: edition
+        run: |
+          eval "$(bash desktop/scripts/edition-meta.sh "${{ inputs.edition }}")"
+          echo "oss_prefix=$OSS_PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Download installers from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.release_tag }}"
+          mkdir -p ./oss-installers
+          if [ "${{ inputs.edition }}" = team ]; then
+            gh release download "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern 'Agent.Doctor.Team_*.dmg' \
+              --pattern 'Agent.Doctor.Team_*-setup.exe' \
+              --dir ./oss-installers \
+              || true
+          else
+            gh release download "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern 'Agent.Doctor_*.dmg' \
+              --pattern 'Agent.Doctor_*-setup.exe' \
+              --dir ./oss-installers \
+              || true
+            # gh pattern 可能仍拉到 Team；删掉
+            rm -f ./oss-installers/Agent.Doctor.Team_*
+          fi
+          ls -la ./oss-installers
+          test "$(find ./oss-installers -type f | wc -l)" -gt 0
+
+      - name: Upload to Aliyun OSS
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::error::OSS secrets missing"
+            exit 1
+          fi
+          PREFIX="${{ steps.edition.outputs.oss_prefix }}"
+          curl -fsSL -o ossutil.zip \
+            "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
+          unzip -qo ossutil.zip -d ossutil-bin
+          OSSUTIL="$(find ossutil-bin -type f -name 'ossutil*' ! -name '*.zip' | head -n 1)"
+          chmod +x "$OSSUTIL"
+          "$OSSUTIL" config \
+            -e "${OSS_ENDPOINT}" \
+            -i "${OSS_ACCESS_KEY_ID}" \
+            -k "${OSS_ACCESS_KEY_SECRET}" \
+            -L CH \
+            --config-file .ossutilconfig
+          for f in ./oss-installers/*; do
+            [ -f "$f" ] || continue
+            base="$(basename "$f" | tr ' ' '.')"
+            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded oss://${OSS_BUCKET}/${PREFIX}/${base}"
+          done
