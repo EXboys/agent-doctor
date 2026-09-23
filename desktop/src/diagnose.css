@@ -214,14 +214,20 @@ html:has(.diagnose-page) body {
   line-height: 1.45;
 }
 
-.diagnose-scan-meter {
-  margin: 0;
-  min-height: 28px;
+.diagnose-test-hint:not([hidden]) {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--primary-deep);
 }
 
-.diagnose-scan-meter.is-idle {
-  visibility: hidden;
-  pointer-events: none;
+.diagnose-scan-meter {
+  margin: 0;
+}
+
+.diagnose-scan-meter.is-idle,
+.diagnose-scan-meter[hidden] {
+  display: none !important;
 }
 
 .diagnose-scan-meter-head {
@@ -476,6 +482,64 @@ html:has(.diagnose-page) body {
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: var(--surface-muted);
+}
+
+.diagnose-check-list .repair-check-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  align-items: start;
+}
+
+.diagnose-check-list .repair-check-body.has-tech {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  column-gap: 10px;
+}
+
+.diagnose-check-list .repair-check-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.diagnose-check-list .repair-check-body strong {
+  font-size: 0.68rem;
+  color: var(--text);
+}
+
+.diagnose-check-list .repair-check-main > span {
+  color: var(--text-muted);
+}
+
+.diagnose-check-list .repair-check-tech {
+  min-width: 0;
+  max-height: 2.7em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--text-soft);
+  opacity: 0.72;
+  font-size: 0.56rem;
+  line-height: 1.35;
+  font-weight: 450;
+  text-align: right;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (max-width: 560px) {
+  .diagnose-check-list .repair-check-body.has-tech {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnose-check-list .repair-check-tech {
+    text-align: left;
+  }
 }
 
 .diagnose-check-list li.is-pending {

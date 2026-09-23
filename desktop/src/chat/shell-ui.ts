@@ -1,12 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { currentMonitor, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { AskResourcesController, type WorkspaceDoc } from "../ask-resources";
 import { t } from "../i18n";
 import { shortCwdLabel } from "./format";
-
-/** Matches `.chat-shell.is-resources-open` grid first column. */
-const RESOURCES_PANEL_WIDTH_PX = 320;
-const ASK_WINDOW_MIN_WIDTH_PX = 720;
 
 export type ShellUiEls = {
   shellEl: HTMLElement;
@@ -29,45 +24,12 @@ export type ShellUiDeps = ShellUiEls & {
 export type ShellUiApi = ReturnType<typeof createShellUiController>;
 
 export function createShellUiController(deps: ShellUiDeps) {
-  /** Remember width before opening Skills/MCP so close restores, not blindly -320. */
-  let askWidthBeforeResources: number | null = null;
-
-  async function adaptAskWindowForResources(open: boolean): Promise<void> {
-    try {
-      const win = getCurrentWindow();
-      const size = await win.innerSize();
-      const factor = await win.scaleFactor();
-      const logicalW = size.width / factor;
-      const logicalH = size.height / factor;
-
-      let nextW: number;
-      if (open) {
-        askWidthBeforeResources = logicalW;
-        nextW = logicalW + RESOURCES_PANEL_WIDTH_PX;
-        const monitor = await currentMonitor();
-        if (monitor) {
-          const maxW = monitor.size.width / monitor.scaleFactor - 24;
-          nextW = Math.min(nextW, maxW);
-        }
-      } else {
-        nextW = askWidthBeforeResources ?? logicalW - RESOURCES_PANEL_WIDTH_PX;
-        askWidthBeforeResources = null;
-      }
-      nextW = Math.max(ASK_WINDOW_MIN_WIDTH_PX, nextW);
-      if (Math.abs(nextW - logicalW) < 1) return;
-      await win.setSize(new LogicalSize(nextW, logicalH));
-    } catch {
-      // Browser / non-Tauri preview — CSS adaptation still applies.
-    }
-  }
-
   function toggleResourcesPanel(): void {
-    const willOpen = !deps.shellEl.classList.contains("is-resources-open");
     deps.askResources.toggleResourcesPanel();
-    void adaptAskWindowForResources(willOpen).finally(() => {
-      // After layout width settles, re-measure the prompt (placeholder may wrap).
-      requestAnimationFrame(() => deps.autoResizePrompt());
-    });
+    // CSS grid handles the panel width inside the existing Ask window.
+    // Avoid setSize/setPosition here — resizing the OS window while right-docked
+    // caused vertical-drag lock and intermittent hitch on macOS.
+    requestAnimationFrame(() => deps.autoResizePrompt());
   }
 
   function syncWorkspaceActivateButton(doc: WorkspaceDoc | null = deps.getWorkspaceDoc()): void {

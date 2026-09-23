@@ -24,6 +24,7 @@ struct RepairPreviewSummary {
 
 #[derive(Debug, Serialize)]
 struct RepairPreviewCheck {
+    id: String,
     title: String,
     status: String,
     message: String,
@@ -182,6 +183,7 @@ fn build_repair_preview_response(
                 ProbeStatus::NotChecked => summary.not_checked += 1,
             }
             RepairPreviewCheck {
+                id: check.id,
                 title: check.title,
                 status: probe_status_label(check.status).to_string(),
                 message: check.message,

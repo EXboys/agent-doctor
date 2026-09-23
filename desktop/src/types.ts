@@ -82,6 +82,7 @@ export interface RepairPreviewResponse {
     not_checked: number;
   };
   checks: Array<{
+    id?: string;
     title: string;
     status: "pass" | "warn" | "fail" | "n/a" | "not checked";
     message: string;

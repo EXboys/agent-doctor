@@ -184,12 +184,44 @@ export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {
   return preview.summary.fail > 0 || preview.summary.warn > 0;
 }
 
+const ACTION_ICON = {
+  diagnose:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 11h6M11 8v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  ask:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 8h4M7 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  native:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M7 9l3 3-3 3M12 15h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  uninstall:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+} as const;
+
+function actionButton(
+  kind: "primary" | "secondary",
+  action: string,
+  icon: string,
+  label: string,
+  opts?: { title?: string; extraAttrs?: string },
+): string {
+  const title = opts?.title ? ` title="${escapeHtml(opts.title)}"` : "";
+  const extra = opts?.extraAttrs ? ` ${opts.extraAttrs}` : "";
+  return `<button type="button" class="btn-${kind} btn-with-icon" data-action="${action}"${title}${extra}>${icon}<span>${escapeHtml(label)}</span></button>`;
+}
+
 export function renderStandardRuntimeActions(_runtimeId: string): string {
   return [
-    `<button type="button" class="btn-primary" data-action="diagnose-runtime">${t("runtime.diagnose")}</button>`,
-    `<button type="button" class="btn-secondary" data-action="ask-session">${t("runtime.ask")}</button>`,
-    `<button type="button" class="btn-secondary" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${t("runtime.openTerminal")}</button>`,
-    `<button type="button" class="btn-secondary" data-action="uninstall-runtime">${t("runtime.uninstall")}</button>`,
+    actionButton("primary", "diagnose-runtime", ACTION_ICON.diagnose, t("runtime.diagnose"), {
+      title: t("runtime.diagnoseHint"),
+    }),
+    actionButton("secondary", "ask-session", ACTION_ICON.ask, t("runtime.ask"), {
+      title: t("runtime.askHint"),
+    }),
+    actionButton("secondary", "open-session", ACTION_ICON.native, t("runtime.openTerminal"), {
+      title: t("runtime.openTerminalHint"),
+      extraAttrs: 'data-open-terminal="1"',
+    }),
+    actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
+      title: t("runtime.uninstallHint"),
+    }),
   ].join("");
 }
 

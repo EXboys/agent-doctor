@@ -5,56 +5,12 @@ import type {
   RepairPreviewResponse,
   RepairStatusFilter,
 } from "./types";
+import {
+  isGatewayConnectivityCheck,
+  renderPlainRepairCheckBody,
+} from "./repair-plain";
 
-function isGatewayConnectivityCheck(check: { title: string; message: string }): boolean {
-  return (
-    check.title === "Gateway connectivity" ||
-    /gateway (TCP|DNS|host|URL)/i.test(check.message)
-  );
-}
-
-function isUpstreamVersionCheck(check: { title?: string; message: string }): boolean {
-  return (
-    check.title === "Upstream version" ||
-    /matches the latest known release|Upgrading may break settings/i.test(check.message)
-  );
-}
-
-function parseUpstreamDetail(
-  details: string[],
-  key: "local" | "latest" | "recommended",
-): string | undefined {
-  const prefix = `${key}=`;
-  return details.find((item) => item.startsWith(prefix))?.slice(prefix.length);
-}
-
-export function plainUpstreamVersionCopy(check: {
-  status: string;
-  message: string;
-  details?: string[];
-}): { title: string; message: string } | null {
-  if (!isUpstreamVersionCheck(check)) {
-    return null;
-  }
-  const details = check.details ?? [];
-  const local = parseUpstreamDetail(details, "local") || "—";
-  const latest = parseUpstreamDetail(details, "latest") || "—";
-  const recommended = parseUpstreamDetail(details, "recommended");
-  if (check.status === "pass") {
-    return {
-      title: t("repair.upstreamVersionOkTitle"),
-      message: t("repair.upstreamVersionOkDesc", { local }),
-    };
-  }
-  let message = t("repair.upstreamVersionDesc", { local, latest });
-  if (recommended && recommended !== latest) {
-    message = `${message} ${t("repair.upstreamVersionRecommend", { recommended })}`;
-  }
-  return {
-    title: t("repair.upstreamVersionTitle"),
-    message,
-  };
-}
+export { plainUpstreamVersionCopy, isGatewayConnectivityCheck } from "./repair-plain";
 
 function renderRepairSummaryChip(
   filter: RepairStatusFilter,
@@ -229,35 +185,10 @@ export function renderRepairPreview(
   const checks = visibleChecks
     .map((check) => {
       const statusClass = repairStatusClass(check.status);
-      const details = check.details.length
-        ? `<span class="repair-check-detail">${escapeHtml(check.details[0])}${check.details.length > 1 ? ` +${check.details.length - 1}` : ""}</span>`
-        : "";
-      const legacyAgents = check.message.includes("agents.list is a legacy key");
-      const gatewayDown =
-        (check.status === "warn" || check.status === "fail") && isGatewayConnectivityCheck(check);
-      const upstream = plainUpstreamVersionCopy(check);
-      const title = gatewayDown
-        ? t("repair.gatewayUnreachableTitle")
-        : legacyAgents
-          ? t("repair.openclawLegacyAgentsTitle")
-          : upstream
-            ? upstream.title
-            : check.title;
-      const message = gatewayDown
-        ? t("repair.gatewayUnreachableDesc")
-        : legacyAgents
-          ? t("repair.openclawLegacyAgentsDesc")
-          : upstream
-            ? upstream.message
-            : check.message;
       return `
         <li class="repair-check is-${statusClass}">
           <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
-          <span class="repair-check-body">
-            <strong>${escapeHtml(title)}</strong>
-            <span>${escapeHtml(message)}</span>
-            ${details}
-          </span>
+          ${renderPlainRepairCheckBody(check)}
         </li>
       `;
     })

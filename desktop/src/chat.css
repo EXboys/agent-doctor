@@ -11,6 +11,8 @@
   --faint: #8b95a8;
   --accent: #2f6fed;
   --accent-soft: rgba(47, 111, 237, 0.1);
+  --user-bubble: #2f6fed;
+  --user-bubble-fg: #ffffff;
   --ok: #149a5a;
   --warn: #c47d12;
   --danger: #d64545;
@@ -36,8 +38,10 @@ html[data-theme="dark"] {
   --text: #f4f4f5;
   --muted: rgba(255, 255, 255, 0.72);
   --faint: rgba(255, 255, 255, 0.5);
-  --accent: #6b9aff;
-  --accent-soft: rgba(107, 154, 255, 0.16);
+  --accent: #8eb4ff;
+  --accent-soft: rgba(142, 180, 255, 0.14);
+  --user-bubble: #2a2a2e;
+  --user-bubble-fg: #f4f4f5;
   --ok: #3ecf8e;
   --warn: #e0a23a;
   --danger: #f07178;
@@ -69,7 +73,7 @@ html, body {
   max-height: 100%;
   min-height: 0;
   overflow: hidden;
-  transition: grid-template-columns 0.22s ease;
+  /* Avoid animating column widths — fights layout and feels like a hitch. */
 }
 
 .chat-shell.is-resources-open {
@@ -1785,8 +1789,8 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   align-self: flex-end;
   width: max-content;
   max-width: 100%;
-  background: var(--accent);
-  color: #fff;
+  background: var(--user-bubble);
+  color: var(--user-bubble-fg);
   border-bottom-right-radius: 6px;
   box-shadow: none;
 }
@@ -2878,14 +2882,41 @@ html[data-theme="dark"] .chat-prompt::placeholder {
 }
 
 html[data-theme="dark"] .chat-composer-box {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: #171717;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1c1c1f;
   box-shadow: none;
 }
 
 html[data-theme="dark"] .chat-composer-box:focus-within {
-  border-color: rgba(91, 143, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(91, 143, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+}
+
+html[data-theme="dark"] .chat-bubble.user {
+  background: var(--user-bubble);
+  color: var(--user-bubble-fg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="dark"] .chat-composer-bar .btn-send,
+html[data-theme="dark"] .btn-primary.btn-send {
+  background: #e8e8ea;
+  border-color: #e8e8ea;
+  color: #141416;
+}
+
+html[data-theme="dark"] .chat-composer-bar .btn-send:hover:not(:disabled),
+html[data-theme="dark"] .btn-primary.btn-send:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #0a0a0a;
+}
+
+html[data-theme="dark"] .chat-composer-bar .btn-send:disabled,
+html[data-theme="dark"] .btn-primary.btn-send:disabled {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: transparent;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 html[data-theme="dark"] .chat-composer-box.is-model-open:focus-within,

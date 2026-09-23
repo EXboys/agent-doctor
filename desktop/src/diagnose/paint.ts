@@ -8,7 +8,8 @@ import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { t } from "../i18n";
 import { supportsBrowserMcp } from "../agents-ui";
-import { repairCheckStatusLabel, repairStatusClass, plainUpstreamVersionCopy } from "../repair-ui";
+import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
+import { renderPlainRepairCheckBody } from "../repair-plain";
 import type { RepairPreviewResponse } from "../types";
 import * as dom from "./dom";
 import {
@@ -140,15 +141,14 @@ export function createDiagnosePaint(session: DiagnoseSession) {
     dom.scanMeterEl.hidden = false;
     dom.scanMeterEl.classList.remove("is-idle");
     dom.scanMeterLabelEl.textContent = label;
-    dom.scanMeterCountEl.textContent = `${current}/${total}`;
+    dom.scanMeterCountEl.textContent = total > 0 ? `${current}/${total}` : "";
     const percent = total <= 0 ? 0 : Math.round((current / total) * 100);
     dom.scanMeterFillEl.style.width = `${percent}%`;
   }
 
   function hideScanMeter(): void {
-    // Keep height reserved; only fade so the foot does not collapse.
-    dom.scanMeterEl.hidden = false;
     dom.scanMeterEl.classList.add("is-idle");
+    dom.scanMeterEl.hidden = true;
     dom.scanMeterFillEl.style.width = "0%";
   }
 
@@ -241,10 +241,7 @@ export function createDiagnosePaint(session: DiagnoseSession) {
 
     dom.checkListEl.innerHTML = checks
       .map((check, index) => {
-        const upstream = plainUpstreamVersionCopy(check);
-        const title = upstream?.title ?? check.title;
-        const message = upstream?.message ?? check.message;
-        const body = `<span><strong>${escapeHtml(title)}</strong> — ${escapeHtml(message)}</span>`;
+        const body = renderPlainRepairCheckBody(check);
         if (mode === "pending") {
           return `<li class="is-pending" data-check-index="${index}">
           <span class="diagnose-check-badge muted">${escapeHtml(t("diagnose.flow.waitingConfirm"))}</span>
@@ -498,8 +495,8 @@ export function createDiagnosePaint(session: DiagnoseSession) {
         dom.primaryEl.hidden = false;
         dom.primaryEl.textContent = t("diagnose.flow.askVerifyCta");
         dom.secondaryEl.hidden = false;
-        dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
-        dom.secondaryEl.dataset.fallback = "open-ask";
+        dom.secondaryEl.textContent = t("diagnose.flow.rescan");
+        dom.secondaryEl.dataset.fallback = "rescan";
       } else {
         session.primaryAction = session.testedOk ? "rescan" : "run-score";
         dom.primaryEl.hidden = false;

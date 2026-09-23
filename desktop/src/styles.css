@@ -2404,11 +2404,22 @@ body.is-diagnose-open .diagnose-detail {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   padding: 0 12px;
   border-radius: 10px;
   font-size: 0.74rem;
   font-weight: 650;
   box-shadow: none;
+}
+
+.btn-with-icon .btn-action-icon {
+  flex: 0 0 auto;
+  display: block;
+  opacity: 0.92;
+}
+
+.btn-with-icon > span {
+  line-height: 1;
 }
 
 .card-actions > .btn-primary {
@@ -3366,9 +3377,23 @@ body.is-diagnose-open .diagnose-detail {
 
 .repair-check-body {
   display: grid;
+  grid-template-columns: 1fr;
   gap: 2px;
   min-width: 0;
   font-size: 0.68rem;
+  align-items: start;
+}
+
+.repair-check-body.has-tech {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+.repair-check-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .repair-check-body strong {
@@ -3376,7 +3401,7 @@ body.is-diagnose-open .diagnose-detail {
   color: var(--text);
 }
 
-.repair-check-body span {
+.repair-check-main > span {
   color: var(--text-muted);
 }
 
@@ -3385,6 +3410,36 @@ body.is-diagnose-open .diagnose-detail {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.repair-check-tech {
+  min-width: 0;
+  max-height: 2.7em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--text-soft);
+  opacity: 0.72;
+  font-size: 0.58rem;
+  line-height: 1.35;
+  font-weight: 450;
+  text-align: right;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (max-width: 520px) {
+  .repair-check-body.has-tech {
+    grid-template-columns: 1fr;
+  }
+
+  .repair-check-tech {
+    text-align: left;
+    opacity: 0.7;
+  }
 }
 
 .repair-suggested {

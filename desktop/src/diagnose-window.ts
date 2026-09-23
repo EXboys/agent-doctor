@@ -217,6 +217,8 @@ dom.secondaryEl.addEventListener("click", () => {
     void actions.runVerifyAndSave();
   } else if (fallback === "open-team-wiring") {
     void actions.openTeamWiring();
+  } else if (fallback === "rescan") {
+    void refreshState({ preferStep: "test" });
   } else if (fallback === "open-ask") {
     void actions.openAskYourself();
   }

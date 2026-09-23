@@ -56,19 +56,22 @@ const preview: RepairPreviewResponse = {
   summary: { pass: 2, warn: 1, fail: 1, not_applicable: 0, not_checked: 0 },
   checks: [
     {
-      title: "Gateway",
+      id: "gateway.connectivity",
+      title: "Gateway connectivity",
       status: "fail",
-      message: "unreachable",
+      message: "gateway TCP timeout",
       details: ["timeout"],
     },
     {
-      title: "Config",
+      id: "hermes.api_key.configured",
+      title: "Hermes API key configured",
       status: "warn",
       message: "missing key",
       details: [],
     },
     {
-      title: "Binary",
+      id: "binary.exists",
+      title: "Binary exists",
       status: "pass",
       message: "ok",
       details: [],
@@ -138,6 +141,9 @@ const panelAll = renderRepairPreview(preview, "all", {
   supportsBrowserMcp: true,
 });
 assert(panelAll.includes("repair-check"), "checks list");
+assert(panelAll.includes("repair-check-tech"), "muted tech detail shown");
+assert(!panelAll.includes("<strong>Gateway connectivity</strong>"), "raw english title not primary");
+assert(panelAll.includes("gateway TCP timeout"), "raw message shown muted");
 assert(
   panelAll.includes('data-action="preview-repair"') ||
     panelAll.includes('data-action="apply-repair"') ||
