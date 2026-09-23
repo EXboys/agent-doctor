@@ -17,19 +17,23 @@ export function needsWiringFromPreview(preview: RepairPreviewResponse): boolean 
   if (preview.can_apply_repair) {
     return false;
   }
-  const suggested = preview.suggested_repairs.some((item) =>
-    /wire|provider|gateway|key|api|credential/i.test(`${item.id} ${item.title}`),
-  );
-  if (suggested) {
+  // Missing key/provider — not mere gateway reachability or version noise.
+  if (
+    preview.checks.some(
+      (check) =>
+        (check.status === "fail" || check.status === "warn") &&
+        /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id),
+    )
+  ) {
     return true;
   }
-  return preview.checks.some(
-    (check) =>
-      (check.status === "fail" || check.status === "warn") &&
-      /api.?key|provider|gateway|credential|endpoint|鉴权|密钥|接线/i.test(
-        `${check.title} ${check.message}`,
-      ),
-  );
+  return preview.suggested_repairs.some((item) => {
+    const blob = `${item.id} ${item.title}`;
+    if (/gateway|connectivity|dns|unreachable|upstream.?version/i.test(blob)) {
+      return false;
+    }
+    return /wire|provider|scaffold|credential|api.?key/i.test(blob);
+  });
 }
 
 export function isPreviewHealthy(preview: RepairPreviewResponse): boolean {

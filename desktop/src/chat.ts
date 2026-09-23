@@ -56,6 +56,7 @@ import { createAttachmentsController, type AttachmentsApi } from "./chat/attachm
 import { createContextMeterController, type ContextMeterApi } from "./chat/context-meter";
 import { createShellUiController, type ShellUiApi } from "./chat/shell-ui";
 import { createBackupUiController, type BackupUiApi } from "./chat/backup-ui";
+import { createVoiceInputController, type VoiceInputApi } from "./chat/voice";
 
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
@@ -68,6 +69,7 @@ const modelWrapEl = modelBtnEl.closest(".chat-model-wrap") as HTMLElement;
 const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
+const voiceEl = document.querySelector<HTMLButtonElement>("#chat-voice")!;
 const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
 const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
 const composerEl = document.querySelector<HTMLElement>(".chat-composer")!;
@@ -170,6 +172,7 @@ let activity!: ActivityApi;
 let modelPicker!: ModelPickerApi;
 let decision!: DecisionApi;
 let attachments!: AttachmentsApi;
+let voiceInput!: VoiceInputApi;
 let contextMeter!: ContextMeterApi;
 let shellUi!: ShellUiApi;
 let backupUi: BackupUiApi | undefined;
@@ -387,6 +390,7 @@ function applyI18n(): void {
   promptEl.placeholder = t("chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
+  voiceInput?.applyI18n();
   if (resourcesSearchEl) {
     resourcesSearchEl.placeholder = t("chat.resourcesSearch");
   }
@@ -479,6 +483,10 @@ function syncComposerUi(): void {
   }
   newSessionEl.disabled = false;
   attachEl.disabled = locked;
+  if (locked && voiceInput?.isListening()) {
+    void voiceInput.stopListening();
+  }
+  voiceInput?.syncEnabled();
   sessionListEl.classList.remove("is-busy");
   syncActionButton();
   updateElevatedLabel();
@@ -923,6 +931,14 @@ function wireChatControllers(): void {
       pendingAttachments = items;
     },
     setStatus: (text, tone) => setStatus(text, tone),
+  });
+
+  voiceInput = createVoiceInputController({
+    voiceBtnEl: voiceEl,
+    promptEl,
+    isComposerLocked: () => isComposerLocked(),
+    setStatus: (text, tone) => setStatus(text, tone),
+    autoResizePrompt: () => autoResizePrompt(),
   });
 
   contextMeter = createContextMeterController({

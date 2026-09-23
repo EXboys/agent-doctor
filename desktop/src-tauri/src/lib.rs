@@ -14,7 +14,14 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
+// Rebuild this crate (and re-embed Info.plist via generate_context!) whenever
+// desktop/src-tauri/Info.plist changes. Without this, `tauri:dev` can keep a
+// stale binary that lacks NSSpeechRecognitionUsageDescription and TCC-aborts.
+#[cfg(target_os = "macos")]
+const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
+
 mod commands;
+mod speech;
 mod state;
 mod tray;
 mod windows;
@@ -456,7 +463,10 @@ pub fn run() {
             resize_main_window_command,
             start_prompt_session_command,
             cancel_prompt_session_command,
-            resolve_permission_session_command
+            resolve_permission_session_command,
+            speech_capability_command,
+            speech_dictate_command,
+            speech_cancel_dictation_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

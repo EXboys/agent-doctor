@@ -574,6 +574,11 @@ pub fn apply_hermes_slot(
         effective_provider
     };
     HermesAdapter::apply_api_key(env_provider, api_key)?;
+    // Older Hermes/.env scaffolds leave `CUSTOM_API_KEY=` empty; that made
+    // probes claim credentials were missing even after OPENAI_API_KEY was set.
+    if effective_provider == "custom" {
+        let _ = HermesAdapter::clear_empty_env_key("CUSTOM_API_KEY");
+    }
 
     Ok(RuntimeSetupResult {
         runtime_id: "hermes".to_string(),

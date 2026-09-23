@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
-import { escapeHtml } from "./format";
 import {
   isAskRuntimeId,
   renderRuntimeCardActions,
@@ -11,9 +10,7 @@ import {
 } from "./agents-ui";
 import {
   preferredRepairFilter,
-  renderDiagnosePendingHtml,
   renderRelatedResourcesHtml,
-  renderRepairPreview,
 } from "./repair-ui";
 import {
   appState,
@@ -81,64 +78,14 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     });
   }
 
-  function diagnoseRuntimeLabel(runtimeId: string): string {
-    return (
-      appState.lastReport?.runtimes.find((item) => item.id === runtimeId)?.display_name ?? runtimeId
-    );
-  }
-
-  async function expandDiagnoseWindowIfNeeded(): Promise<void> {
-    diagnoseDetailEl.hidden = false;
-    document.body.classList.add("is-diagnose-layout");
-    // Ask / Diagnose big windows clamp or cover main — close them so aside can expand.
-    try {
-      await invoke("close_ask_window_command", { destroy: false });
-    } catch {
-      /* ask may already be closed */
-    }
-    try {
-      await invoke("close_diagnose_window_command", { destroy: false });
-    } catch {
-      /* diagnose may already be closed */
-    }
-    if (compactWidthBeforeDetail == null) {
-      try {
-        const size = await readMainWindowSize();
-        compactWidthBeforeDetail =
-          size.width > MAIN_COMPACT_WIDTH + 80 ? MAIN_COMPACT_WIDTH : size.width;
-      } catch {
-        compactWidthBeforeDetail = MAIN_COMPACT_WIDTH;
-      }
-    }
-    const compact = compactWidthBeforeDetail ?? MAIN_COMPACT_WIDTH;
-    document.body.style.setProperty("--compact-window-width", `${compact}px`);
-    diagnoseDetailOpen = true;
-    try {
-      const report = await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
-      // Keep expanding if something (Ask layout / clamp) shrank us again.
-      if (report.width < compact + MAIN_DETAIL_EXTRA - 40) {
-        await setMainWindowWidth(compact + MAIN_DETAIL_EXTRA);
-      }
-    } catch (error) {
-      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
-    }
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    document.body.classList.add("is-diagnose-open");
-  }
-
   function showDiagnosePending(
     runtimeId: string,
-    message: string,
-    step: "diagnose" | "repair" = "diagnose",
+    _message: string,
+    _step: "diagnose" | "repair" = "diagnose",
   ): void {
-    diagnoseDetailBodyEl.innerHTML = renderDiagnosePendingHtml(
-      runtimeId,
-      diagnoseRuntimeLabel(runtimeId),
-      message,
-      step,
-    );
-    diagnoseDetailEl.dataset.runtime = runtimeId;
-    void expandDiagnoseWindowIfNeeded();
+    void openDiagnoseWindow(runtimeId).catch((error) => {
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
+    });
   }
 
   function runtimeCardActionContext(runtime: RuntimeDoctorResult): RuntimeCardActionContext {
@@ -172,18 +119,28 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     }
   }
 
+  async function openDiagnoseWindow(runtime: string): Promise<void> {
+    // Prefer the independent diagnose window; never expand the old main-window aside.
+    try {
+      await closeDiagnoseDetail({ skipDismiss: true, keepContent: true });
+    } catch {
+      /* aside may already be closed */
+    }
+    await invoke("open_diagnose_window_command", { runtime });
+  }
+
   async function openDiagnoseDetail(report: RepairPreviewResponse): Promise<void> {
-    const filter = repairFilterByRuntime.get(report.runtime_id) ?? "all";
-    diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, filter, {
-      confirmPending: repairConfirmRuntimeIds.has(report.runtime_id),
-      isAskRuntime: isAskRuntimeId(report.runtime_id),
-      supportsBrowserMcp: supportsBrowserMcp(report.runtime_id),
-    });
-    diagnoseDetailEl.dataset.runtime = report.runtime_id;
-    await expandDiagnoseWindowIfNeeded();
+    repairPreviewByRuntime.set(report.runtime_id, report);
     const card = runtimeCardEl(report.runtime_id);
     if (card) {
+      mountRelatedResources(card, report.runtime_id);
       refreshRuntimeCardActions(card, report.runtime_id);
+    }
+    try {
+      await openDiagnoseWindow(report.runtime_id);
+      deps.setStatusBanner("ok", t("runtime.diagnosisReady"));
+    } catch (error) {
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
     }
   }
 
@@ -228,20 +185,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   }
 
   function refreshDiagnoseLocale(): void {
-    const runtime = diagnoseDetailEl.dataset.runtime;
-    if (!runtime || diagnoseDetailEl.hidden) {
-      return;
-    }
-    const report = repairPreviewByRuntime.get(runtime);
-    if (!report) {
-      return;
-    }
-    const filter = repairFilterByRuntime.get(runtime) ?? "all";
-    diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, filter, {
-      confirmPending: repairConfirmRuntimeIds.has(report.runtime_id),
-      isAskRuntime: isAskRuntimeId(report.runtime_id),
-      supportsBrowserMcp: supportsBrowserMcp(report.runtime_id),
-    });
+    // Locale for the independent diagnose window is handled inside diagnose.html.
   }
 
   function mountRelatedResources(card: HTMLElement, runtime: string): void {
@@ -252,7 +196,11 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     el.outerHTML = renderRelatedResourcesHtml(repairPreviewByRuntime.get(runtime));
   }
 
-  function mountRepairPreview(report: RepairPreviewResponse, opts?: { resetFilter?: boolean }): void {
+  /** Cache preview + refresh card chrome. Does not open the old aside. */
+  function mountRepairPreview(
+    report: RepairPreviewResponse,
+    opts?: { resetFilter?: boolean; open?: boolean },
+  ): void {
     const runtime = report.runtime_id;
     dismissedDiagnoseRuntimes.delete(runtime);
     repairPreviewByRuntime.set(runtime, report);
@@ -272,7 +220,11 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       mountRelatedResources(card, runtime);
       refreshRuntimeCardActions(card, runtime);
     }
-    void openDiagnoseDetail(report);
+    if (opts?.open) {
+      void openDiagnoseDetail(report);
+    } else {
+      void closeDiagnoseDetail({ skipDismiss: true, keepContent: true });
+    }
   }
 
   function applyRepairFilter(runtime: string, filter: RepairStatusFilter): void {
@@ -283,11 +235,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     const current = repairFilterByRuntime.get(runtime) ?? "all";
     const next = current === filter && filter !== "all" ? "all" : filter;
     repairFilterByRuntime.set(runtime, next);
-    diagnoseDetailBodyEl.innerHTML = renderRepairPreview(report, next, {
-      confirmPending: repairConfirmRuntimeIds.has(report.runtime_id),
-      isAskRuntime: isAskRuntimeId(report.runtime_id),
-      supportsBrowserMcp: supportsBrowserMcp(report.runtime_id),
-    });
+    // Filtering lives in the independent diagnose window; keep map only here.
   }
 
   async function openRepairGuide(path: string) {
@@ -341,15 +289,13 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         backup: null,
       });
       const report = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
-      mountRepairPreview(report, { resetFilter: true });
-      diagnoseDetailBodyEl.insertAdjacentHTML(
-        "afterbegin",
-        `<p class="repair-rollback-ok">${escapeHtml(
-          t("repair.rollbackDone", {
-            id: restore.backup_id,
-            count: String(restore.restored_files.length),
-          }),
-        )}</p>`,
+      mountRepairPreview(report, { resetFilter: true, open: true });
+      deps.setStatusBanner(
+        "ok",
+        t("repair.rollbackDone", {
+          id: restore.backup_id,
+          count: String(restore.restored_files.length),
+        }),
       );
       if (runtime === "hermes") {
         await deps.loadHermesModel();
@@ -378,7 +324,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     showDiagnosePending(runtime, t("repair.applying"), "repair");
     try {
       const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", { runtime });
-      mountRepairPreview(report, { resetFilter: true });
+      mountRepairPreview(report, { resetFilter: true, open: true });
       hint.hidden = false;
       hint.textContent = supportsBrowserMcp(runtime)
         ? t("repair.applyOkNextVerify")
@@ -413,7 +359,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       showDiagnosePending(runtime, t("runtime.diagnosing"));
       try {
         preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
-        mountRepairPreview(preview, { resetFilter: true });
+        mountRepairPreview(preview, { resetFilter: true, open: true });
       } catch (error) {
         hint.hidden = false;
         hint.textContent = withErrorDetail(t("repair.diagnoseFailed"), error);
@@ -423,7 +369,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
 
     if (!preview.can_apply_repair) {
       hint.hidden = false;
-      mountRepairPreview(preview);
+      mountRepairPreview(preview, { open: true });
       return;
     }
 
@@ -440,14 +386,8 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     button?.setAttribute("disabled", "true");
     hint.hidden = false;
     hint.textContent = t("runtime.diagnosing");
-    // Prefer big setup window over the narrow right aside.
     try {
-      await closeDiagnoseDetail({ skipDismiss: true, keepContent: true });
-    } catch {
-      /* aside may already be closed */
-    }
-    try {
-      await invoke("open_diagnose_window_command", { runtime });
+      await openDiagnoseWindow(runtime);
       hint.hidden = true;
       hint.replaceChildren();
       deps.setStatusBanner("ok", t("runtime.diagnosisReady"));
@@ -475,11 +415,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       const preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
         runtime,
       });
-      mountRepairPreview(preview, { resetFilter: true });
-      const note = document.createElement("p");
-      note.className = "repair-migrate-note";
-      note.textContent = message;
-      diagnoseDetailBodyEl.querySelector(".repair-panel")?.prepend(note);
+      mountRepairPreview(preview, { resetFilter: true, open: true });
       deps.setStatusBanner(report.active && detail.startsWith("applied:") ? "ok" : "warn", message);
     } catch (error) {
       const message = withErrorDetail(t("repair.migrateFailed"), error);
@@ -487,10 +423,6 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       const preview = repairPreviewByRuntime.get(runtime);
       if (preview) {
         await openDiagnoseDetail(preview);
-        const note = document.createElement("p");
-        note.className = "repair-migrate-note is-error";
-        note.textContent = message;
-        diagnoseDetailBodyEl.querySelector(".repair-panel")?.prepend(note);
       }
     }
   }
@@ -650,7 +582,6 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     closeDiagnoseDetail,
     refreshDiagnoseLocale,
     showDiagnosePending,
-    expandDiagnoseWindowIfNeeded,
     diagnoseRuntimeCard,
     applyRepairRuntimeCard,
     oneClickRepairRuntimeCard,

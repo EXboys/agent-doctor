@@ -2695,6 +2695,29 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   cursor: not-allowed;
 }
 
+.btn-voice .chat-voice-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.btn-voice.is-listening {
+  border-color: rgba(220, 70, 70, 0.45);
+  color: #c43b3b;
+  background: rgba(220, 70, 70, 0.1);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 70, 70, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(220, 70, 70, 0);
+  }
+}
+
 .chat-composer-bar .btn-send {
   min-width: 72px;
   height: 32px;

@@ -53,6 +53,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "entitlements": "Entitlements.plist"
+    },
     "resources": {
       "resources/": ""
     }

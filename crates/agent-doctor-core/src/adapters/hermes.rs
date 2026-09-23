@@ -201,6 +201,38 @@ impl HermesAdapter {
         Self::write_env_value(&Self::secrets_path(), &env_var, api_key.trim())
     }
 
+    /// Remove a blank `KEY=` line so empty scaffolds do not fail probes.
+    pub fn clear_empty_env_key(key: &str) -> Result<bool> {
+        let path = Self::secrets_path();
+        if !path.exists() {
+            return Ok(false);
+        }
+        let original = fs::read_to_string(&path)?;
+        let mut changed = false;
+        let lines: Vec<String> = original
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return Some(line.to_string());
+                }
+                let Some((name, value)) = trimmed.split_once('=') else {
+                    return Some(line.to_string());
+                };
+                if name.trim() == key && value.trim().is_empty() {
+                    changed = true;
+                    return None;
+                }
+                Some(line.to_string())
+            })
+            .collect();
+        if !changed {
+            return Ok(false);
+        }
+        fs::write(&path, format!("{}\n", lines.join("\n")))?;
+        Ok(true)
+    }
+
     pub fn read_settings(&self) -> Result<HermesSettings> {
         let model = self.read_model()?.unwrap_or(RuntimeModelState {
             provider: None,

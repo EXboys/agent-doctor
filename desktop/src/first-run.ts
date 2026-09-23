@@ -36,6 +36,9 @@ export interface FirstRunTarget {
   warn: number;
   canApply: boolean;
   topCheck?: string;
+  /** When set, wiring can one-click re-apply this saved personal provider. */
+  applyProviderId?: string;
+  applyProviderName?: string;
 }
 
 interface FirstRunStorage {
@@ -88,13 +91,46 @@ function sortRuntimes(runtimes: RuntimeDoctorResult[]): RuntimeDoctorResult[] {
 }
 
 function issueScore(preview: RepairPreviewResponse): number {
-  const { fail, warn } = preview.summary;
+  const blocking = preview.checks.filter(isFirstRunBlockingCheck);
+  const fail = blocking.filter((check) => check.status === "fail").length;
+  const warn = blocking.filter((check) => check.status === "warn").length;
   if (fail === 0 && warn === 0) {
     return 0;
   }
   // Prefer auto-fixable failures so the primary CTA can succeed.
   const fixBoost = preview.can_apply_repair ? 25 : 0;
   return fail * 100 + warn * 10 + fixBoost;
+}
+
+/** Soft network/version noise should not drive first-run CTAs. */
+function isFirstRunBlockingCheck(check: {
+  id: string;
+  status: string;
+}): boolean {
+  if (check.status !== "fail" && check.status !== "warn") {
+    return false;
+  }
+  return !/gateway\.connectivity|binary\.upstream_version/i.test(check.id);
+}
+
+function isCredentialWiringPreview(preview: RepairPreviewResponse): boolean {
+  const missingCredential = preview.checks.some(
+    (check) =>
+      (check.status === "fail" || check.status === "warn") &&
+      /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id),
+  );
+  if (missingCredential) {
+    return true;
+  }
+  return preview.suggested_repairs.some((item) => {
+    const blob = `${item.id} ${item.title}`;
+    if (/gateway|connectivity|dns|unreachable|upstream.?version/i.test(blob)) {
+      return false;
+    }
+    return /scaffold|wire-provider|configure-.*(?:api-?key|provider)|fix-.*api-key-scaffold/i.test(
+      blob,
+    );
+  });
 }
 
 /** Pick the single highest-impact problem for the first-run hero. */
@@ -126,17 +162,18 @@ export function pickBiggestFirstRunTarget(
     if (score <= 0) {
       continue;
     }
-    const topFail = preview.checks.find((c) => c.status === "fail");
-    const topWarn = preview.checks.find((c) => c.status === "warn");
+    const topFail = preview.checks.find(
+      (c) => c.status === "fail" && isFirstRunBlockingCheck(c),
+    );
+    const topWarn = preview.checks.find(
+      (c) => c.status === "warn" && isFirstRunBlockingCheck(c),
+    );
     const top = topFail?.title ?? topWarn?.title;
-    const kind: FirstRunActionKind =
-      preview.can_apply_repair
-        ? "repair"
-        : preview.suggested_repairs.some((s) => /wire|provider|gateway|key|api/i.test(s.id + s.title))
-          ? "wiring"
-          : preview.suggested_repairs.some((s) => s.auto_fixable)
-            ? "repair"
-            : "wiring";
+    const kind: FirstRunActionKind = preview.can_apply_repair
+      ? "repair"
+      : isCredentialWiringPreview(preview)
+        ? "wiring"
+        : "repair";
     const text =
       kind === "wiring"
         ? copy.needsWiring(runtime.display_name)
@@ -151,7 +188,7 @@ export function pickBiggestFirstRunTarget(
       best = {
         runtimeId: runtime.id,
         displayName: runtime.display_name,
-        kind: preview.can_apply_repair ? "repair" : kind,
+        kind,
         headline: text.headline,
         detail: text.detail,
         fail: preview.summary.fail,

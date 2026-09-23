@@ -29,6 +29,15 @@ fi
 
 export AGENT_DOCTOR_EDITION="$EDITION"
 cd "$DESKTOP_DIR"
+
+# macOS: wrap the bare cargo binary in a .app and launch via Launch Services so
+# TCC attributes mic/speech prompts to us (not Cursor/Terminal). See
+# scripts/macos-dev-app-runner.sh.
+RUNNER_ARGS=()
+if [[ "$(uname -s)" == "Darwin" ]] && [[ "${1:-}" == "dev" ]]; then
+  RUNNER_ARGS+=(--runner "$SCRIPT_DIR/macos-dev-app-runner.sh")
+fi
+
 echo "AGENT_DOCTOR_EDITION=$AGENT_DOCTOR_EDITION"
-echo "tauri --config src-tauri/tauri.${EDITION}.conf.json $*"
-exec npx tauri "$@" --config "src-tauri/tauri.${EDITION}.conf.json"
+echo "tauri --config src-tauri/tauri.${EDITION}.conf.json ${RUNNER_ARGS[*]:-} $*"
+exec npx tauri "$@" "${RUNNER_ARGS[@]}" --config "src-tauri/tauri.${EDITION}.conf.json"

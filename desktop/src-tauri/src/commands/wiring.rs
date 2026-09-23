@@ -77,10 +77,17 @@ pub fn delete_personal_provider_command(id: String) -> Result<PersonalProvidersD
 }
 
 #[tauri::command]
-pub fn activate_personal_provider_command(
+pub async fn activate_personal_provider_command(
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<PersonalProviderSetupReport, String> {
-    activate_personal_provider(&id).map_err(|error| error.to_string())
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        activate_personal_provider(&id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    update_tray_tooltip(&app);
+    Ok(report)
 }
 
 #[tauri::command]
@@ -93,19 +100,26 @@ pub fn verify_personal_provider_command(
 }
 
 #[tauri::command]
-pub fn apply_personal_provider_command(
+pub async fn apply_personal_provider_command(
+    app: tauri::AppHandle,
     url: String,
     key: String,
     model: String,
     protocol: String,
 ) -> Result<PersonalProviderSetupReport, String> {
-    execute_personal_provider_setup(&PersonalProviderOptions {
-        url,
-        api_key: key,
-        model,
-        protocol,
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        execute_personal_provider_setup(&PersonalProviderOptions {
+            url,
+            api_key: key,
+            model,
+            protocol,
+        })
+        .map_err(|error| error.to_string())
     })
-    .map_err(|error| error.to_string())
+    .await
+    .map_err(|error| error.to_string())??;
+    update_tray_tooltip(&app);
+    Ok(report)
 }
 
 #[tauri::command]

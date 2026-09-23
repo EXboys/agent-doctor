@@ -15,6 +15,8 @@ import { preferredRepairFilter } from "./repair-ui";
 import type {
   DoctorReport,
   InstallRuntimeResponse,
+  PersonalProviderSetupReport,
+  PersonalProviderStatus,
   RepairPreviewResponse,
   RepairStatusFilter,
 } from "./types";
@@ -50,7 +52,7 @@ let firstRunBusy = false;
 let firstRunAutoStarted = false;
 let firstRunError: string | null = null;
 /** Last action that failed — retry button re-runs this instead of a bare welcome scan. */
-let firstRunRetryKind: "scan" | "install" | "repair" = "scan";
+let firstRunRetryKind: "scan" | "install" | "repair" | "apply" = "scan";
 
 const firstRunEl = document.querySelector<HTMLElement>("#first-run")!;
 const firstRunTitleEl = document.querySelector<HTMLElement>("#first-run-title")!;
@@ -103,7 +105,7 @@ function setFirstRunPhase(phase: FirstRunPhase): void {
   applyStaticI18n(firstRunEl);
 }
 
-function showError(message: string, retry: "scan" | "install" | "repair"): void {
+function showError(message: string, retry: "scan" | "install" | "repair" | "apply"): void {
   firstRunError = message;
   firstRunRetryKind = retry;
   firstRunBusy = false;
@@ -207,9 +209,19 @@ function renderFirstRunUi(): void {
         : t("firstRun.install", { name: target.displayName });
     firstRunFootnoteEl.textContent = t("firstRun.footnote");
   } else if (target.kind === "wiring") {
-    firstRunTargetMetaEl.textContent = t("firstRun.targetMetaWiring");
-    firstRunPrimaryLabelEl.textContent = t("firstRun.wiring");
-    firstRunFootnoteEl.textContent = t("firstRun.footnoteWiring");
+    firstRunTargetMetaEl.textContent = target.applyProviderId
+      ? t("firstRun.targetMetaWiringReady")
+      : t("firstRun.targetMetaWiring");
+    if (target.applyProviderId) {
+      firstRunPrimaryLabelEl.textContent =
+        firstRunPhase === "fixing"
+          ? t("firstRun.wiringApplying")
+          : t("firstRun.wiringApply", { name: target.displayName });
+      firstRunFootnoteEl.textContent = t("firstRun.footnoteWiringReady");
+    } else {
+      firstRunPrimaryLabelEl.textContent = t("firstRun.wiring");
+      firstRunFootnoteEl.textContent = t("firstRun.footnoteWiring");
+    }
   } else {
     firstRunTargetMetaEl.textContent = t("firstRun.targetMetaRepair", {
       fail: String(target.fail),
@@ -248,6 +260,32 @@ function suspendForWiring(): void {
   firstRunPhase = "awaitingWiring";
   setFirstRunPhase("awaitingWiring");
   deps.setMainTab("provider");
+}
+
+/** If a personal provider is already saved, upgrade wiring CTA to one-click apply. */
+async function enrichWiringTarget(target: FirstRunTarget): Promise<FirstRunTarget> {
+  if (target.kind !== "wiring") {
+    return target;
+  }
+  try {
+    const status = await invoke<PersonalProviderStatus>("get_personal_provider_status_command");
+    if (!status.configured || !status.active_id) {
+      return target;
+    }
+    const providerName = status.active_name?.trim() || t("nav.wiring");
+    return {
+      ...target,
+      applyProviderId: status.active_id,
+      applyProviderName: providerName,
+      headline: t("firstRun.wiringReadyHeadline", { name: target.displayName }),
+      detail: t("firstRun.wiringReadyDetail", {
+        name: target.displayName,
+        provider: providerName,
+      }),
+    };
+  } catch {
+    return target;
+  }
 }
 
 function invalidatePreview(runtimeId: string): void {
@@ -298,7 +336,9 @@ async function evaluateFirstRunFromReport(
   renderFirstRunUi();
   try {
     await probeInstalledForFirstRun(report, { force: opts?.forceProbe });
-    firstRunTarget = pickBiggestFirstRunTarget(report, deps.repairPreviewByRuntime, firstRunCopy());
+    firstRunTarget = await enrichWiringTarget(
+      pickBiggestFirstRunTarget(report, deps.repairPreviewByRuntime, firstRunCopy()),
+    );
     firstRunPhase = firstRunTarget.kind === "none" ? "success" : "issue";
   } finally {
     firstRunBusy = false;
@@ -388,10 +428,12 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
       firstRunBusy = false;
       const lastReport = deps.getLastReport();
       if (lastReport) {
-        firstRunTarget = pickBiggestFirstRunTarget(
-          lastReport,
-          deps.repairPreviewByRuntime,
-          firstRunCopy(),
+        firstRunTarget = await enrichWiringTarget(
+          pickBiggestFirstRunTarget(
+            lastReport,
+            deps.repairPreviewByRuntime,
+            firstRunCopy(),
+          ),
         );
       }
       if (firstRunTarget?.kind === "wiring") {
@@ -426,6 +468,55 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
   }
 }
 
+async function runFirstRunApplyProvider(target: FirstRunTarget): Promise<void> {
+  const providerId = target.applyProviderId;
+  if (!providerId) {
+    suspendForWiring();
+    return;
+  }
+  firstRunBusy = true;
+  firstRunPhase = "fixing";
+  firstRunRetryKind = "apply";
+  renderFirstRunUi();
+  // Let the spinner paint before the heavy mode-switch work.
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+  try {
+    const report = await invoke<PersonalProviderSetupReport>(
+      "activate_personal_provider_command",
+      { id: providerId },
+    );
+    const hermes = report.runtimes.find((runtime) => runtime.runtime_id === target.runtimeId);
+    if (hermes && !hermes.applied) {
+      showError(
+        t("firstRun.wiringApplyFailed", { name: target.displayName }),
+        "apply",
+      );
+      return;
+    }
+    // Provider write touches every runtime — drop stale repair previews.
+    deps.repairPreviewByRuntime.clear();
+    deps.repairFilterByRuntime.clear();
+    deps.setStatusBanner(
+      "ok",
+      t("personal.applyOk", {
+        name: report.provider_name ?? target.applyProviderName ?? providerId,
+      }),
+    );
+    firstRunBusy = false;
+    await runFirstRunScan({ forceProbe: true });
+  } catch (error) {
+    showError(
+      withErrorDetail(
+        t("firstRun.wiringApplyFailed", { name: target.displayName }),
+        error,
+      ),
+      "apply",
+    );
+  }
+}
+
 async function runFirstRunVerify(target: FirstRunTarget): Promise<void> {
   firstRunBusy = true;
   renderFirstRunUi();
@@ -452,6 +543,10 @@ async function runFirstRunPrimaryAction(): Promise<void> {
       await runFirstRunRepair(firstRunTarget);
       return;
     }
+    if (firstRunRetryKind === "apply" && firstRunTarget?.kind === "wiring") {
+      await runFirstRunApplyProvider(firstRunTarget);
+      return;
+    }
     await runFirstRunScan({ forceProbe: true });
     return;
   }
@@ -473,6 +568,10 @@ async function runFirstRunPrimaryAction(): Promise<void> {
     return;
   }
   if (target.kind === "wiring") {
+    if (target.applyProviderId) {
+      await runFirstRunApplyProvider(target);
+      return;
+    }
     suspendForWiring();
     return;
   }
