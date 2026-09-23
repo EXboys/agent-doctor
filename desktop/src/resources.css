@@ -200,8 +200,23 @@
   background: linear-gradient(145deg, #3b82f6, #2563eb);
 }
 
+.res-catalog-icon.is-pack {
+  background: linear-gradient(145deg, #7c3aed, #6366f1);
+}
+
 .res-catalog-icon.is-mcp {
   background: linear-gradient(145deg, #0f766e, #0d9488);
+}
+
+.res-catalog-meta.mall-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.res-catalog-meta.mall-actions .btn-compact {
+  min-width: 4.5rem;
 }
 
 .res-catalog-icon.is-browser {

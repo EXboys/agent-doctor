@@ -403,6 +403,8 @@ pub fn run() {
             get_engine_register_status_command,
             run_engine_register_command,
             list_skills_inventory_command,
+            list_teamups_mall_catalog_command,
+            install_teamups_mall_item_command,
             list_mcp_inventory_command,
             mcp_status_command,
             mcp_configure_command,

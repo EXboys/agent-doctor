@@ -23,6 +23,7 @@
       <div class="resources-nav-row">
         <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
           <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true" data-i18n="resources.tabSkills">技能</button>
+          <button type="button" class="resources-section-tab" data-section="mall" role="tab" aria-selected="false" data-i18n="resources.tabMall">商城</button>
           <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false" data-i18n="resources.tabTools">工具</button>
           <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false" data-i18n="resources.tabBrowser">浏览器</button>
         </nav>
@@ -40,6 +41,21 @@
           <div id="resources-list" class="res-catalog-list" aria-live="polite"></div>
           <p id="resources-empty" class="section-hint" hidden data-i18n="resources.emptySkills">还没有技能</p>
           <p id="resources-footnote" class="section-footnote"></p>
+        </section>
+
+        <section class="resources-panel" id="panel-mall" data-section-panel="mall" hidden>
+          <div class="resources-toolbar">
+            <div class="filters" id="resources-mall-filters" role="group" aria-label="Mall filters">
+              <button type="button" class="filter-chip is-active" data-mall-filter="all" data-i18n="resources.filterAll">全部</button>
+              <button type="button" class="filter-chip" data-mall-filter="free" data-i18n="resources.mallFilterFree">免费</button>
+              <button type="button" class="filter-chip" data-mall-filter="paid" data-i18n="resources.mallFilterPaid">付费</button>
+              <button type="button" class="filter-chip" data-mall-filter="pack" data-i18n="resources.mallFilterPack">组合</button>
+              <button type="button" class="filter-chip" data-mall-filter="skill" data-i18n="resources.mallFilterSkill">技能</button>
+            </div>
+          </div>
+          <ul id="resources-mall-list" class="res-catalog-list" aria-live="polite"></ul>
+          <p id="resources-mall-empty" class="section-hint" hidden data-i18n="resources.emptyMall">商城暂时没有内容</p>
+          <p id="resources-mall-footnote" class="section-footnote" data-i18n="resources.mallFootnote">免费可直接安装；付费先开通再安装。</p>
         </section>
 
         <section class="resources-panel" id="panel-tools" data-section-panel="tools" hidden>

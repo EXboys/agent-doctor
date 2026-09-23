@@ -187,6 +187,30 @@ export interface SyncReport {
   installed: number;
   skipped: number;
   failed: number;
+  base_url?: string;
+  bundle_id?: string;
+  outcomes?: Array<{ skill_id: string; version: string; outcome: string; detail?: string | null }>;
+}
+
+export interface TeamupsCatalogItem {
+  id: string;
+  kind: string;
+  name: string;
+  description: string;
+  free: boolean;
+  price_label: string | null;
+  owned: boolean;
+  installed: boolean;
+  skill_count: number | null;
+  pack_slug: string | null;
+  purchase_url: string | null;
+  version: string | null;
+}
+
+export interface TeamupsMallCatalog {
+  base_url: string;
+  has_license: boolean;
+  items: TeamupsCatalogItem[];
 }
 
 export interface SkillAgentUsage {

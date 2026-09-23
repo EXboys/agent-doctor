@@ -2,11 +2,12 @@ use std::path::PathBuf;
 
 use agent_doctor_core::{
     browser_configured_runtimes, browser_mcp_wire_options_for_active_workspace,
-    diagnose_and_wire_browser_mcp, list_browser_mcp_targets, list_mcp_inventory,
-    list_skills_inventory_with_options, load_workspaces, mount_synced_skills,
-    resolve_agent_doctor_binary, unmount_synced_skills, BrowserMcpDiagnoseWireReport,
-    BrowserMcpTargetStatus, McpInventoryReport, SkillMountOptions, SkillMountReport,
-    SkillsInventoryOptions, SkillsInventoryReport,
+    diagnose_and_wire_browser_mcp, install_teamups_mall_item, list_browser_mcp_targets,
+    list_mcp_inventory, list_skills_inventory_with_options, list_teamups_mall_catalog,
+    load_workspaces, mount_synced_skills, resolve_agent_doctor_binary, unmount_synced_skills,
+    BrowserMcpDiagnoseWireReport, BrowserMcpTargetStatus, McpInventoryReport, SkillMountOptions,
+    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncReport,
+    TeamupsMallCatalog,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -301,5 +302,27 @@ pub fn unmount_synced_skills_command(
         runtimes: runtimes.unwrap_or_default(),
         include_active_workspace: true,
     })
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_teamups_mall_catalog_command() -> Result<TeamupsMallCatalog, String> {
+    tauri::async_runtime::spawn_blocking(list_teamups_mall_catalog)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn install_teamups_mall_item_command(
+    kind: String,
+    id: String,
+    pack_slug: Option<String>,
+) -> Result<SyncReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        install_teamups_mall_item(&kind, &id, pack_slug.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())
 }

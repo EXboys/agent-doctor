@@ -52,7 +52,7 @@ pub fn default_teamups_base_url() -> String {
         .ok()
         .map(|v| v.trim().trim_end_matches('/').to_string())
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "https://www.teamups.ai".to_string())
+        .unwrap_or_else(|| "https://teamups.vip".to_string())
 }
 
 pub fn default_skills_cache_dir() -> PathBuf {

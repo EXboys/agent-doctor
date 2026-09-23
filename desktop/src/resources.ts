@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatCount, formatRate } from "./format";
 import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
@@ -18,11 +19,15 @@ import type {
   ResourceRow,
   SkillMountReport,
   SkillsInventoryReport,
+  SyncReport,
+  TeamupsCatalogItem,
+  TeamupsMallCatalog,
 } from "./types";
 
-type ResourcesSection = "skills" | "tools" | "browser";
+type ResourcesSection = "skills" | "mall" | "tools" | "browser";
 type SkillFilter = "all" | "issue" | SkillCategoryId;
 type ToolFilter = "all" | "issue";
+type MallFilter = "all" | "free" | "paid" | "pack" | "skill";
 
 const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
 const MCP_USER_DATA_DIR_KEY = "agent-doctor.mcp.userDataDir";
@@ -40,6 +45,10 @@ const emptyEl = document.querySelector<HTMLElement>("#resources-empty")!;
 const footnoteEl = document.querySelector<HTMLElement>("#resources-footnote")!;
 const toolsListEl = document.querySelector<HTMLUListElement>("#resources-tools-list")!;
 const toolsEmptyEl = document.querySelector<HTMLElement>("#resources-tools-empty")!;
+const mallFiltersEl = document.querySelector<HTMLElement>("#resources-mall-filters")!;
+const mallListEl = document.querySelector<HTMLUListElement>("#resources-mall-list")!;
+const mallEmptyEl = document.querySelector<HTMLElement>("#resources-mall-empty")!;
+const mallFootnoteEl = document.querySelector<HTMLElement>("#resources-mall-footnote")!;
 
 const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
 const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
@@ -59,12 +68,15 @@ const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 
 let lastSkillsInventory: SkillsInventoryReport | null = null;
 let lastMcpStatus: McpModuleStatus | null = null;
+let lastMallCatalog: TeamupsMallCatalog | null = null;
 let lastWireActions: BrowserMcpTargetAction[] | null = null;
 let skillFilter: SkillFilter = "all";
 let toolFilter: ToolFilter = "all";
+let mallFilter: MallFilter = "all";
 let resourceQuery = "";
 let activeSection: ResourcesSection = "skills";
 let mcpConfigureInFlight = false;
+let mallActionInFlight = false;
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
@@ -92,6 +104,9 @@ function setSection(section: ResourcesSection): void {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+  if (section === "mall" && !lastMallCatalog) {
+    void loadMall();
+  }
 }
 
 function rowMatchesQuery(row: ResourceRow, extra = ""): boolean {
@@ -107,21 +122,45 @@ function countToolMatches(): number {
   return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
 }
 
+function countMallMatches(): number {
+  return filteredMallItems().length;
+}
+
+function filteredMallItems(): TeamupsCatalogItem[] {
+  const items = lastMallCatalog?.items ?? [];
+  return items.filter((item) => {
+    if (mallFilter === "free" && !item.free) return false;
+    if (mallFilter === "paid" && item.free) return false;
+    if (mallFilter === "pack" && item.kind !== "pack") return false;
+    if (mallFilter === "skill" && item.kind !== "skill") return false;
+    if (!resourceQuery) return true;
+    const blob = `${item.name} ${item.description} ${item.id} ${item.kind}`.toLowerCase();
+    return blob.includes(resourceQuery);
+  });
+}
+
 /** When searching, leave Browser (no list) and jump to the tab that has hits. */
 function maybeJumpToSearchHits(): void {
   if (!resourceQuery) return;
   const skillHits = countSkillMatches();
   const toolHits = countToolMatches();
+  const mallHits = countMallMatches();
   if (activeSection === "browser") {
     if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
     else if (toolHits > 0) setSection("tools");
     else setSection("skills");
     return;
   }
-  if (activeSection === "skills" && skillHits === 0 && toolHits > 0) {
-    setSection("tools");
-  } else if (activeSection === "tools" && toolHits === 0 && skillHits > 0) {
-    setSection("skills");
+  if (activeSection === "skills" && skillHits === 0) {
+    if (mallHits > 0) setSection("mall");
+    else if (toolHits > 0) setSection("tools");
+  } else if (activeSection === "mall" && mallHits === 0) {
+    if (skillHits > 0) setSection("skills");
+    else if (toolHits > 0) setSection("tools");
+  } else if (activeSection === "tools" && toolHits === 0) {
+    if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
   }
 }
 
@@ -578,6 +617,96 @@ function renderToolsList(): void {
   }
 }
 
+function canInstallMallItem(item: TeamupsCatalogItem): boolean {
+  return item.free || item.owned || Boolean(lastMallCatalog?.has_license);
+}
+
+function renderMallList(): void {
+  mallFiltersEl.querySelectorAll<HTMLButtonElement>("[data-mall-filter]").forEach((chip) => {
+    chip.classList.toggle("is-active", chip.dataset.mallFilter === mallFilter);
+  });
+
+  const rows = filteredMallItems();
+  mallListEl.replaceChildren();
+  mallEmptyEl.hidden = rows.length > 0;
+  mallEmptyEl.textContent = resourceQuery
+    ? t("chat.resourcesNoMatch")
+    : t("resources.emptyMall");
+  if (lastMallCatalog && lastMallCatalog.items.length > 0) {
+    mallFootnoteEl.textContent = `${t("resources.mallCount", {
+      count: String(rows.length),
+      total: String(lastMallCatalog.items.length),
+    })} · ${t("resources.mallFootnote")}`;
+  } else {
+    mallFootnoteEl.textContent = t("resources.mallFootnote");
+  }
+
+  for (const item of rows) {
+    const li = document.createElement("li");
+    li.className = "res-catalog-item";
+
+    const icon = document.createElement("div");
+    icon.className = `res-catalog-icon ${item.kind === "pack" ? "is-pack" : "is-skill"}`;
+    icon.textContent = (item.name.trim()[0] || "?").toUpperCase();
+
+    const body = document.createElement("div");
+    body.className = "res-catalog-body";
+    const titleRow = document.createElement("div");
+    titleRow.className = "res-catalog-title-row";
+    const title = document.createElement("strong");
+    title.textContent = item.name;
+    const badge = document.createElement("span");
+    badge.className = "res-catalog-badge";
+    badge.textContent =
+      item.kind === "pack" ? t("resources.mallPackBadge") : t("resources.mallSkillBadge");
+    titleRow.append(title, badge);
+
+    const desc = document.createElement("p");
+    desc.className = "res-catalog-desc";
+    const bits = [item.description.trim()];
+    if (item.skill_count != null) {
+      bits.push(t("resources.mallSkillCount", { count: String(item.skill_count) }));
+    }
+    if (item.price_label) {
+      bits.push(item.free ? t("resources.mallFree") : item.price_label);
+    }
+    desc.textContent = bits.filter(Boolean).join(" · ") || item.id;
+
+    body.append(titleRow, desc);
+
+    const meta = document.createElement("div");
+    meta.className = "res-catalog-meta mall-actions";
+
+    if (item.installed) {
+      const done = document.createElement("span");
+      done.className = "tone-ok";
+      done.textContent = t("resources.mallInstalled");
+      meta.appendChild(done);
+    } else if (canInstallMallItem(item)) {
+      const installBtn = document.createElement("button");
+      installBtn.type = "button";
+      installBtn.className = "btn-primary btn-compact";
+      installBtn.textContent = t("resources.mallInstall");
+      installBtn.addEventListener("click", () => {
+        void installMallItem(item, installBtn);
+      });
+      meta.appendChild(installBtn);
+    } else {
+      const buyBtn = document.createElement("button");
+      buyBtn.type = "button";
+      buyBtn.className = "btn-secondary btn-compact";
+      buyBtn.textContent = t("resources.mallBuy");
+      buyBtn.addEventListener("click", () => {
+        void openMallPurchase(item);
+      });
+      meta.appendChild(buyBtn);
+    }
+
+    li.append(icon, body, meta);
+    mallListEl.appendChild(li);
+  }
+}
+
 function renderResourcesList(): void {
   const uniqueMcp = new Set(
     (lastMcpStatus?.inventory.servers ?? [])
@@ -596,6 +725,7 @@ function renderResourcesList(): void {
 
   renderSkillsList();
   renderToolsList();
+  renderMallList();
 }
 
 async function mountSkill(skillId: string): Promise<void> {
@@ -627,6 +757,63 @@ async function loadSkills(): Promise<void> {
   renderResourcesList();
 }
 
+async function loadMall(): Promise<void> {
+  mallFootnoteEl.textContent = t("resources.mallFootnote");
+  try {
+    lastMallCatalog = await invoke<TeamupsMallCatalog>("list_teamups_mall_catalog_command");
+    renderMallList();
+  } catch (error) {
+    lastMallCatalog = null;
+    mallListEl.replaceChildren();
+    mallEmptyEl.hidden = false;
+    mallEmptyEl.textContent = withErrorDetail(t("resources.mallLoadFailed"), error);
+    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoadFailed"), error);
+  }
+}
+
+async function openMallPurchase(item: TeamupsCatalogItem): Promise<void> {
+  const url = item.purchase_url?.trim();
+  if (!url) {
+    mallFootnoteEl.textContent = t("resources.mallInstallFailed");
+    return;
+  }
+  try {
+    await openUrl(url);
+    mallFootnoteEl.textContent = t("resources.mallFootnote");
+  } catch (error) {
+    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallInstallFailed"), error);
+  }
+}
+
+async function installMallItem(
+  item: TeamupsCatalogItem,
+  button: HTMLButtonElement,
+): Promise<void> {
+  if (mallActionInFlight) return;
+  mallActionInFlight = true;
+  button.disabled = true;
+  const previous = button.textContent;
+  button.textContent = t("resources.mallInstalling");
+  mallFootnoteEl.textContent = t("resources.mallInstalling");
+  try {
+    const report = await invoke<SyncReport>("install_teamups_mall_item_command", {
+      kind: item.kind,
+      id: item.id,
+      packSlug: item.pack_slug,
+    });
+    mallFootnoteEl.textContent = t("resources.mallInstallOk", {
+      installed: String(report.installed),
+    });
+    await Promise.all([loadMall(), loadSkills()]);
+  } catch (error) {
+    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallInstallFailed"), error);
+    button.disabled = false;
+    button.textContent = previous;
+  } finally {
+    mallActionInFlight = false;
+  }
+}
+
 async function loadMcpStatus(): Promise<void> {
   try {
     const status = await invoke<McpModuleStatus>("mcp_status_command", {
@@ -646,7 +833,7 @@ async function loadMcpStatus(): Promise<void> {
 }
 
 async function refreshAll(): Promise<void> {
-  await Promise.all([loadMcpStatus(), loadSkills()]);
+  await Promise.all([loadMcpStatus(), loadSkills(), loadMall()]);
 }
 
 async function diagnoseAndWireBrowserMcp(): Promise<void> {
@@ -698,6 +885,7 @@ sectionTabsEl.addEventListener("click", (event) => {
   if (!btn?.dataset.section) return;
   if (
     btn.dataset.section === "skills" ||
+    btn.dataset.section === "mall" ||
     btn.dataset.section === "tools" ||
     btn.dataset.section === "browser"
   ) {
@@ -713,11 +901,20 @@ toolFiltersEl.addEventListener("click", (event) => {
   renderToolsList();
 });
 
+mallFiltersEl.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-mall-filter]");
+  const filter = button?.dataset.mallFilter as MallFilter | undefined;
+  if (!filter) return;
+  mallFilter = filter;
+  renderMallList();
+});
+
 searchEl.addEventListener("input", () => {
   resourceQuery = searchEl.value.trim().toLowerCase();
   maybeJumpToSearchHits();
   renderSkillsList();
   renderToolsList();
+  renderMallList();
 });
 
 refreshAllEl.addEventListener("click", () => {
@@ -780,6 +977,7 @@ void listen<{ section?: string }>("resources-window-focus", (event) => {
   const section = event.payload?.section;
   if (section === "browser") setSection("browser");
   else if (section === "tools" || section === "mcp") setSection("tools");
+  else if (section === "mall" || section === "store") setSection("mall");
   else if (section === "skills" || section === "catalog") setSection("skills");
   void refreshAll();
 });

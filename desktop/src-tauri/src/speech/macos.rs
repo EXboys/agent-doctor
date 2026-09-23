@@ -14,6 +14,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 #[link(name = "Speech", kind = "framework")]
+extern "C" {}
+
 #[link(name = "AVFAudio", kind = "framework")]
 extern "C" {}
 

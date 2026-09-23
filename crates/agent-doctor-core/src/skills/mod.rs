@@ -3,16 +3,20 @@
 mod custom;
 mod evotown_source;
 pub(crate) mod local;
+mod mall;
 mod resolve;
 mod sync_router;
 mod teamups;
 
+pub use mall::{install_teamups_mall_item, list_teamups_mall_catalog};
 pub use resolve::{
     load_local_skills_layout, resolve_skills_source, save_skills_source_override,
     LocalSkillsLayout, ResolvedSkillsSource,
 };
 pub use sync_router::{execute_skills_sync, SkillsSyncOptions};
-pub use teamups::{TeamupsClient, TeamupsPackManifest, TeamupsSkillEntry};
+pub use teamups::{
+    TeamupsCatalogItem, TeamupsClient, TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,
+};
 
 use anyhow::Result;
 use serde_json::Value;
