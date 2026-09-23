@@ -22,10 +22,32 @@
 
       <div class="resources-nav-row">
         <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
-          <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true" data-i18n="resources.tabSkills">技能</button>
-          <button type="button" class="resources-section-tab" data-section="mall" role="tab" aria-selected="false" data-i18n="resources.tabMall">商城</button>
-          <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false" data-i18n="resources.tabTools">工具</button>
-          <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false" data-i18n="resources.tabBrowser">浏览器</button>
+          <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true">
+            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3l2.2 4.5L19 8.2l-3.5 3.4.8 4.9L12 14.8 7.7 16.5l.8-4.9L5 8.2l4.8-.7L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+            <span data-i18n="resources.tabSkills">技能</span>
+          </button>
+          <button type="button" class="resources-section-tab" data-section="mall" role="tab" aria-selected="false">
+            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 8h16l-1.2 11.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <path d="M8 8V6.5A4 4 0 0 1 12 2.5 4 4 0 0 1 16 6.5V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <span data-i18n="resources.tabMall">商城</span>
+          </button>
+          <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false">
+            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8 2-2.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+            <span data-i18n="resources.tabTools">工具</span>
+          </button>
+          <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false">
+            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M3.5 9h17M8 4.5v4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <span data-i18n="resources.tabBrowser">浏览器</span>
+          </button>
         </nav>
         <label class="resources-search">
           <span aria-hidden="true">⌕</span>
