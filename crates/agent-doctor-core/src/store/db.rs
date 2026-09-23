@@ -401,6 +401,10 @@ impl SettingsStore {
         self.secrets.get(SECRET_TEAMUPS_LICENSE)
     }
 
+    pub fn clear_teamups_license(&self) -> Result<()> {
+        self.secrets.delete(SECRET_TEAMUPS_LICENSE)
+    }
+
     pub fn set_custom_skills_token(&self, token: &str) -> Result<()> {
         self.secrets.set(SECRET_CUSTOM_SKILLS_TOKEN, token)
     }

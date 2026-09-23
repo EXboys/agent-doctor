@@ -4,10 +4,11 @@ use agent_doctor_core::{
     browser_configured_runtimes, browser_mcp_wire_options_for_active_workspace,
     diagnose_and_wire_browser_mcp, install_teamups_mall_item, list_browser_mcp_targets,
     list_mcp_inventory, list_skills_inventory_with_options, list_teamups_mall_catalog,
-    load_workspaces, mount_synced_skills, resolve_agent_doctor_binary, unmount_synced_skills,
+    load_workspaces, mount_synced_skills, poll_teamups_login, resolve_agent_doctor_binary,
+    sign_out_teamups, start_teamups_login, teamups_account_status, unmount_synced_skills,
     BrowserMcpDiagnoseWireReport, BrowserMcpTargetStatus, McpInventoryReport, SkillMountOptions,
     SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SyncReport,
-    TeamupsMallCatalog,
+    TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginStart, TeamupsMallCatalog,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -308,6 +309,38 @@ pub fn unmount_synced_skills_command(
 #[tauri::command]
 pub async fn list_teamups_mall_catalog_command() -> Result<TeamupsMallCatalog, String> {
     tauri::async_runtime::spawn_blocking(list_teamups_mall_catalog)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn start_teamups_login_command() -> Result<TeamupsLoginStart, String> {
+    tauri::async_runtime::spawn_blocking(start_teamups_login)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn poll_teamups_login_command(device_code: String) -> Result<TeamupsLoginPoll, String> {
+    tauri::async_runtime::spawn_blocking(move || poll_teamups_login(&device_code))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn teamups_account_status_command() -> Result<TeamupsAccountStatus, String> {
+    tauri::async_runtime::spawn_blocking(teamups_account_status)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sign_out_teamups_command() -> Result<TeamupsAccountStatus, String> {
+    tauri::async_runtime::spawn_blocking(sign_out_teamups)
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())

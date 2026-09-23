@@ -213,6 +213,26 @@ export interface TeamupsMallCatalog {
   items: TeamupsCatalogItem[];
 }
 
+export interface TeamupsAccountStatus {
+  base_url: string;
+  signed_in: boolean;
+  pack_count: number;
+  packs: string[];
+}
+
+export interface TeamupsLoginStart {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  interval_sec: number;
+  expires_in_sec: number;
+}
+
+export interface TeamupsLoginPoll {
+  status: "pending" | "approved" | "expired" | "denied";
+  packs: string[];
+}
+
 export interface SkillAgentUsage {
   runtime: string;
   scope: string;

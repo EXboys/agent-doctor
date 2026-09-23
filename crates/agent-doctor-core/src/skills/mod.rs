@@ -7,6 +7,7 @@ mod mall;
 mod resolve;
 mod sync_router;
 mod teamups;
+mod teamups_auth;
 
 pub use mall::{install_teamups_mall_item, list_teamups_mall_catalog};
 pub use resolve::{
@@ -16,6 +17,10 @@ pub use resolve::{
 pub use sync_router::{execute_skills_sync, SkillsSyncOptions};
 pub use teamups::{
     TeamupsCatalogItem, TeamupsClient, TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,
+};
+pub use teamups_auth::{
+    poll_teamups_login, sign_out_teamups, start_teamups_login, teamups_account_status,
+    TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
 };
 
 use anyhow::Result;

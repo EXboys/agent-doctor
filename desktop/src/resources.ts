@@ -20,7 +20,10 @@ import type {
   SkillMountReport,
   SkillsInventoryReport,
   SyncReport,
+  TeamupsAccountStatus,
   TeamupsCatalogItem,
+  TeamupsLoginPoll,
+  TeamupsLoginStart,
   TeamupsMallCatalog,
 } from "./types";
 
@@ -49,6 +52,9 @@ const mallFiltersEl = document.querySelector<HTMLElement>("#resources-mall-filte
 const mallListEl = document.querySelector<HTMLUListElement>("#resources-mall-list")!;
 const mallEmptyEl = document.querySelector<HTMLElement>("#resources-mall-empty")!;
 const mallFootnoteEl = document.querySelector<HTMLElement>("#resources-mall-footnote")!;
+const mallAccountStatusEl = document.querySelector<HTMLElement>("#resources-mall-account-status")!;
+const mallLoginEl = document.querySelector<HTMLButtonElement>("#resources-mall-login")!;
+const mallLogoutEl = document.querySelector<HTMLButtonElement>("#resources-mall-logout")!;
 
 const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
 const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
@@ -69,6 +75,7 @@ const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 let lastSkillsInventory: SkillsInventoryReport | null = null;
 let lastMcpStatus: McpModuleStatus | null = null;
 let lastMallCatalog: TeamupsMallCatalog | null = null;
+let lastTeamupsAccount: TeamupsAccountStatus | null = null;
 let lastWireActions: BrowserMcpTargetAction[] | null = null;
 let skillFilter: SkillFilter = "all";
 let toolFilter: ToolFilter = "all";
@@ -77,6 +84,8 @@ let resourceQuery = "";
 let activeSection: ResourcesSection = "skills";
 let mcpConfigureInFlight = false;
 let mallActionInFlight = false;
+let mallLoginInFlight = false;
+let mallLoginTimer: number | null = null;
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
@@ -618,10 +627,35 @@ function renderToolsList(): void {
 }
 
 function canInstallMallItem(item: TeamupsCatalogItem): boolean {
-  return item.free || item.owned || Boolean(lastMallCatalog?.has_license);
+  return item.free || item.owned;
+}
+
+function stopMallLoginPoll(): void {
+  if (mallLoginTimer != null) {
+    window.clearTimeout(mallLoginTimer);
+    mallLoginTimer = null;
+  }
+}
+
+function renderMallAccount(): void {
+  const signedIn = Boolean(lastTeamupsAccount?.signed_in);
+  mallLoginEl.hidden = signedIn;
+  mallLogoutEl.hidden = !signedIn;
+  mallLoginEl.disabled = mallLoginInFlight;
+  mallLogoutEl.disabled = mallLoginInFlight;
+  if (mallLoginInFlight) {
+    mallAccountStatusEl.textContent = t("resources.mallLoggingIn");
+  } else if (signedIn) {
+    mallAccountStatusEl.textContent = t("resources.mallAccountSignedIn", {
+      count: String(lastTeamupsAccount?.pack_count ?? 0),
+    });
+  } else {
+    mallAccountStatusEl.textContent = t("resources.mallAccountSignedOut");
+  }
 }
 
 function renderMallList(): void {
+  renderMallAccount();
   mallFiltersEl.querySelectorAll<HTMLButtonElement>("[data-mall-filter]").forEach((chip) => {
     chip.classList.toggle("is-active", chip.dataset.mallFilter === mallFilter);
   });
@@ -670,6 +704,9 @@ function renderMallList(): void {
     if (item.price_label) {
       bits.push(item.free ? t("resources.mallFree") : item.price_label);
     }
+    if (item.owned && !item.free) {
+      bits.push(t("resources.mallOwned"));
+    }
     desc.textContent = bits.filter(Boolean).join(" · ") || item.id;
 
     body.append(titleRow, desc);
@@ -695,9 +732,15 @@ function renderMallList(): void {
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
       buyBtn.className = "btn-secondary btn-compact";
-      buyBtn.textContent = t("resources.mallBuy");
+      buyBtn.textContent = lastTeamupsAccount?.signed_in
+        ? t("resources.mallBuy")
+        : t("resources.mallLogin");
       buyBtn.addEventListener("click", () => {
-        void openMallPurchase(item);
+        if (lastTeamupsAccount?.signed_in) {
+          void openMallPurchase(item);
+        } else {
+          void startMallLogin();
+        }
       });
       meta.appendChild(buyBtn);
     }
@@ -760,7 +803,12 @@ async function loadSkills(): Promise<void> {
 async function loadMall(): Promise<void> {
   mallFootnoteEl.textContent = t("resources.mallFootnote");
   try {
-    lastMallCatalog = await invoke<TeamupsMallCatalog>("list_teamups_mall_catalog_command");
+    const [catalog, account] = await Promise.all([
+      invoke<TeamupsMallCatalog>("list_teamups_mall_catalog_command"),
+      invoke<TeamupsAccountStatus>("teamups_account_status_command").catch(() => null),
+    ]);
+    lastMallCatalog = catalog;
+    lastTeamupsAccount = account;
     renderMallList();
   } catch (error) {
     lastMallCatalog = null;
@@ -768,6 +816,79 @@ async function loadMall(): Promise<void> {
     mallEmptyEl.hidden = false;
     mallEmptyEl.textContent = withErrorDetail(t("resources.mallLoadFailed"), error);
     mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoadFailed"), error);
+    renderMallAccount();
+  }
+}
+
+async function scheduleMallLoginPoll(
+  deviceCode: string,
+  intervalSec: number,
+  expiresAt: number,
+): Promise<void> {
+  stopMallLoginPoll();
+  const tick = async () => {
+    if (Date.now() >= expiresAt) {
+      mallLoginInFlight = false;
+      renderMallAccount();
+      mallFootnoteEl.textContent = t("resources.mallLoginExpired");
+      return;
+    }
+    try {
+      const poll = await invoke<TeamupsLoginPoll>("poll_teamups_login_command", {
+        deviceCode,
+      });
+      if (poll.status === "pending") {
+        mallLoginTimer = window.setTimeout(() => {
+          void tick();
+        }, Math.max(1, intervalSec) * 1000);
+        return;
+      }
+      mallLoginInFlight = false;
+      if (poll.status === "approved") {
+        mallFootnoteEl.textContent = t("resources.mallLoginOk");
+        await loadMall();
+        return;
+      }
+      if (poll.status === "expired" || poll.status === "denied") {
+        mallFootnoteEl.textContent = t("resources.mallLoginExpired");
+        renderMallAccount();
+        return;
+      }
+    } catch (error) {
+      mallLoginInFlight = false;
+      mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoginFailed"), error);
+      renderMallAccount();
+    }
+  };
+  await tick();
+}
+
+async function startMallLogin(): Promise<void> {
+  if (mallLoginInFlight) return;
+  mallLoginInFlight = true;
+  renderMallAccount();
+  mallFootnoteEl.textContent = t("resources.mallLoggingIn");
+  try {
+    const started = await invoke<TeamupsLoginStart>("start_teamups_login_command");
+    await openUrl(started.verification_url);
+    const expiresAt = Date.now() + Math.max(30, started.expires_in_sec) * 1000;
+    await scheduleMallLoginPoll(started.device_code, started.interval_sec, expiresAt);
+  } catch (error) {
+    mallLoginInFlight = false;
+    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoginFailed"), error);
+    renderMallAccount();
+  }
+}
+
+async function signOutMallAccount(): Promise<void> {
+  if (mallLoginInFlight) return;
+  stopMallLoginPoll();
+  try {
+    lastTeamupsAccount = await invoke<TeamupsAccountStatus>("sign_out_teamups_command");
+    mallFootnoteEl.textContent = t("resources.mallLogoutOk");
+    await loadMall();
+  } catch (error) {
+    mallFootnoteEl.textContent = withErrorDetail(t("resources.mallLoginFailed"), error);
   }
 }
 
@@ -907,6 +1028,14 @@ mallFiltersEl.addEventListener("click", (event) => {
   if (!filter) return;
   mallFilter = filter;
   renderMallList();
+});
+
+mallLoginEl.addEventListener("click", () => {
+  void startMallLogin();
+});
+
+mallLogoutEl.addEventListener("click", () => {
+  void signOutMallAccount();
 });
 
 searchEl.addEventListener("input", () => {

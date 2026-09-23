@@ -158,6 +158,31 @@
   gap: 10px;
 }
 
+.resources-mall-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 111, 237, 0.14);
+  border-radius: 12px;
+  background: rgba(47, 111, 237, 0.05);
+}
+
+.resources-mall-account-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text, #152033);
+  line-height: 1.4;
+}
+
+.resources-mall-account-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .resources-search {
   display: inline-flex;
   align-items: center;

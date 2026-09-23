@@ -66,6 +66,13 @@
         </section>
 
         <section class="resources-panel" id="panel-mall" data-section-panel="mall" hidden>
+          <div class="resources-mall-account" id="resources-mall-account">
+            <p id="resources-mall-account-status" class="resources-mall-account-status" data-i18n="resources.mallAccountSignedOut">登录后可安装已开通的方案</p>
+            <div class="resources-mall-account-actions">
+              <button id="resources-mall-login" type="button" class="btn-primary btn-compact" data-i18n="resources.mallLogin">登录 TeamUps</button>
+              <button id="resources-mall-logout" type="button" class="btn-secondary btn-compact" hidden data-i18n="resources.mallLogout">退出登录</button>
+            </div>
+          </div>
           <div class="resources-toolbar">
             <div class="filters" id="resources-mall-filters" role="group" aria-label="Mall filters">
               <button type="button" class="filter-chip is-active" data-mall-filter="all" data-i18n="resources.filterAll">全部</button>
@@ -76,8 +83,8 @@
             </div>
           </div>
           <ul id="resources-mall-list" class="res-catalog-list" aria-live="polite"></ul>
-          <p id="resources-mall-empty" class="section-hint" hidden data-i18n="resources.emptyMall">商城暂时没有内容</p>
-          <p id="resources-mall-footnote" class="section-footnote" data-i18n="resources.mallFootnote">免费可直接安装；付费先开通再安装。</p>
+          <p id="resources-mall-empty" class="section-hint" hidden data-i18n="resources.emptyMall">TeamUps 商城暂时没有内容</p>
+          <p id="resources-mall-footnote" class="section-footnote" data-i18n="resources.mallFootnote">来自 TeamUps。免费可直接安装；付费先开通再安装。</p>
         </section>
 
         <section class="resources-panel" id="panel-tools" data-section-panel="tools" hidden>

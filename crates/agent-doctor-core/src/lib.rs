@@ -127,8 +127,10 @@ pub use setup::{
 };
 pub use skills::{
     execute_skills_sync, install_teamups_mall_item, list_teamups_mall_catalog,
-    load_local_skills_layout, resolve_skills_source, save_skills_source_override,
-    LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsCatalogItem, TeamupsClient,
+    load_local_skills_layout, poll_teamups_login, resolve_skills_source,
+    save_skills_source_override, sign_out_teamups, start_teamups_login, teamups_account_status,
+    LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsAccountStatus,
+    TeamupsCatalogItem, TeamupsClient, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
     TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,
 };
 pub use store::{
