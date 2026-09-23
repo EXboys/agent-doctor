@@ -22,7 +22,7 @@ export function needsWiringFromPreview(preview: RepairPreviewResponse): boolean 
     preview.checks.some(
       (check) =>
         (check.status === "fail" || check.status === "warn") &&
-        /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id),
+        /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id ?? ""),
     )
   ) {
     return true;

@@ -104,20 +104,20 @@ function issueScore(preview: RepairPreviewResponse): number {
 
 /** Soft network/version noise should not drive first-run CTAs. */
 function isFirstRunBlockingCheck(check: {
-  id: string;
+  id?: string;
   status: string;
 }): boolean {
   if (check.status !== "fail" && check.status !== "warn") {
     return false;
   }
-  return !/gateway\.connectivity|binary\.upstream_version/i.test(check.id);
+  return !/gateway\.connectivity|binary\.upstream_version/i.test(check.id ?? "");
 }
 
 function isCredentialWiringPreview(preview: RepairPreviewResponse): boolean {
   const missingCredential = preview.checks.some(
     (check) =>
       (check.status === "fail" || check.status === "warn") &&
-      /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id),
+      /api_key\.(configured|required)|provider\.(missing|required)/i.test(check.id ?? ""),
   );
   if (missingCredential) {
     return true;

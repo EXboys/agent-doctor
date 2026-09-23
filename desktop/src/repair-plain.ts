@@ -24,7 +24,11 @@ export function isGatewayConnectivityCheck(check: RepairCheckLike): boolean {
   );
 }
 
-function isUpstreamVersionCheck(check: RepairCheckLike): boolean {
+function isUpstreamVersionCheck(check: {
+  id?: string;
+  title?: string;
+  message: string;
+}): boolean {
   return (
     check.id === "binary.upstream_version" ||
     check.title === "Upstream version" ||
