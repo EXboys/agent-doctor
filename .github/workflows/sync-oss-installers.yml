@@ -93,3 +93,13 @@ jobs:
             "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
             echo "Uploaded oss://${OSS_BUCKET}/${PREFIX}/${base}"
           done
+          CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX}"
+          python3 scripts/build-download-manifest.py \
+            --installers ./oss-installers \
+            --version "${{ inputs.release_tag }}" \
+            --cdn-base "${CDN_BASE}" \
+            --edition "${{ inputs.edition }}" \
+            --out ./download.json
+          "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${PREFIX}/download.json" -f --config-file .ossutilconfig
+          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/download.json" public-read -f --config-file .ossutilconfig || true
+          echo "Uploaded download.json"

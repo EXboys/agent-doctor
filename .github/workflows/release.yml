@@ -692,4 +692,25 @@ jobs:
             "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
             echo "Uploaded installer ${base}"
           done
+          # TeamUps 下载页读 download.json（人装包）；latest.json 仍给 Tauri updater
+          mkdir -p ./download-manifest-src
+          if [ "$EDITION" = team ]; then
+            find desktop-artifacts -type f \( -name 'Agent.Doctor.Team_*.dmg' -o -name 'Agent.Doctor.Team_*-setup.exe' \) -exec cp {} ./download-manifest-src/ \;
+          else
+            find desktop-artifacts -type f \( -name 'Agent.Doctor_*.dmg' -o -name 'Agent.Doctor_*-setup.exe' \) ! -name 'Agent.Doctor.Team_*' -exec cp {} ./download-manifest-src/ \;
+          fi
+          if [ "$(find ./download-manifest-src -type f | wc -l)" -gt 0 ]; then
+            CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX}"
+            python3 scripts/build-download-manifest.py \
+              --installers ./download-manifest-src \
+              --version "${GITHUB_REF_NAME}" \
+              --cdn-base "${CDN_BASE}" \
+              --edition "${EDITION}" \
+              --out ./download.json
+            "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${PREFIX}/download.json" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/download.json" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded download.json"
+          else
+            echo "::warning::No .dmg/.exe installers — skipped download.json"
+          fi
           echo "Synced updater + installers to oss://${OSS_BUCKET}/${PREFIX}/"
