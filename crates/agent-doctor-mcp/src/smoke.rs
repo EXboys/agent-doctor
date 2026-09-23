@@ -87,7 +87,7 @@ fn run_navigate(
     let ws = instance
         .ws_endpoint
         .clone()
-        .context("Chrome started but page WebSocket endpoint is missing")?;
+        .context("browser started but page WebSocket endpoint is missing")?;
     let mut ctx = BrowserContext::connect(&ws)?;
     let nav = ctx
         .navigate(&options.url)

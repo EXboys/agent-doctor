@@ -432,6 +432,9 @@ pub fn launch_chrome(
     let mut cmd = Command::new(&discovery.binary_path);
 
     cmd.arg(format!("--remote-debugging-port={}", port))
+        // Required by Chromium/Edge 111+: without this, CDP HTTP/WS from non-Chrome
+        // clients often never yields a usable page endpoint (CI Edge smoke fails here).
+        .arg("--remote-allow-origins=*")
         .arg(format!(
             "--user-data-dir={}",
             discovery.user_data_dir.display()
@@ -447,6 +450,10 @@ pub fn launch_chrome(
 
     if headless {
         cmd.arg("--headless=new");
+        // Edge/Chromium on GitHub-hosted Linux runners can stall creating the first
+        // page target without these (GPU / dbus probes).
+        cmd.arg("--disable-gpu");
+        cmd.arg("--disable-software-rasterizer");
     }
 
     // GitHub Actions / containers often lack a usable sandbox user namespace.
@@ -469,13 +476,17 @@ pub fn launch_chrome(
         )
     })?;
 
-    // Wait for Chrome to start listening (cold profile can be slow).
+    // Wait for DevTools HTTP, then a page WebSocket (cold Edge profile can be slow).
     let mut ws_endpoint = None;
-    for _ in 0..20 {
+    let mut last_err = None;
+    for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(500));
-        if let Ok(endpoint) = find_ws_endpoint_http(port) {
-            ws_endpoint = Some(endpoint);
-            break;
+        match find_ws_endpoint_http(port) {
+            Ok(endpoint) => {
+                ws_endpoint = Some(endpoint);
+                break;
+            }
+            Err(err) => last_err = Some(err),
         }
         if let Some(status) = child.try_wait().ok().flatten() {
             anyhow::bail!(
@@ -486,11 +497,23 @@ pub fn launch_chrome(
         }
     }
 
+    let Some(ws_endpoint) = ws_endpoint else {
+        let version = chrome_devtools_version_summary(port).unwrap_or_else(|| "unreachable".into());
+        let detail = last_err
+            .map(|e| format!("{e:#}"))
+            .unwrap_or_else(|| "no page target yet".into());
+        let _ = child.kill();
+        let _ = child.wait();
+        anyhow::bail!(
+            "browser started but page WebSocket endpoint is missing on :{port} ({version}). {detail}"
+        );
+    };
+
     Ok(ChromeInstance {
         process: Some(child),
         debug_port: port,
         user_data_dir: discovery.user_data_dir.clone(),
-        ws_endpoint,
+        ws_endpoint: Some(ws_endpoint),
     })
 }
 
@@ -515,12 +538,12 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
     if let Ok(list) = chrome_http_json(port, "/json/list") {
         if let Some(arr) = list.as_array() {
             for target in arr {
-                let is_page = target
+                let ty = target
                     .get("type")
                     .and_then(|v| v.as_str())
-                    .map(|t| t == "page")
-                    .unwrap_or(true);
-                if !is_page {
+                    .unwrap_or("page");
+                // Edge headless may expose `webview` / `tab` before a classic `page`.
+                if !matches!(ty, "page" | "webview" | "tab") {
                     continue;
                 }
                 if let Some(ws) = target.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
@@ -542,28 +565,30 @@ fn find_ws_endpoint_http(port: u16) -> Result<String> {
 ///   without hard-coding major versions.
 fn create_blank_page_ws_endpoint(port: u16) -> Result<String> {
     let mut errors = Vec::new();
-    for method in ["PUT", "GET"] {
-        match chrome_http_json_method(port, method, "/json/new?about:blank") {
-            Ok(created) => {
-                if let Some(ws) = created
-                    .get("webSocketDebuggerUrl")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                {
-                    return Ok(ws);
+    for path in ["/json/new?about:blank", "/json/new"] {
+        for method in ["PUT", "GET"] {
+            match chrome_http_json_method(port, method, path) {
+                Ok(created) => {
+                    if let Some(ws) = created
+                        .get("webSocketDebuggerUrl")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                    {
+                        return Ok(ws);
+                    }
+                    errors.push(format!(
+                        "{method} {path} returned JSON without webSocketDebuggerUrl"
+                    ));
                 }
-                errors.push(format!(
-                    "{method} /json/new returned JSON without webSocketDebuggerUrl"
-                ));
+                Err(err) => errors.push(format!("{method} {path}: {err:#}")),
             }
-            Err(err) => errors.push(format!("{method} /json/new: {err:#}")),
         }
     }
 
     let version_hint = chrome_devtools_version_summary(port).unwrap_or_else(|| "unknown".into());
     anyhow::bail!(
         "Failed to create a Chrome page target via /json/new (Chrome DevTools {version_hint}). \
-         Tried PUT then GET. Details: {}",
+         Tried PUT/GET on /json/new?about:blank and /json/new. Details: {}",
         errors.join(" | ")
     )
 }
