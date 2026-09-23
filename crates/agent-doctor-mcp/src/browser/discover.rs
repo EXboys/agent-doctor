@@ -3,6 +3,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+#[cfg(windows)]
+use super::paths::home_dir;
 use super::paths::{resolve_profile_directory, resolve_user_data_dir};
 use super::types::{BrowserDiscovery, BrowserFamily};
 
