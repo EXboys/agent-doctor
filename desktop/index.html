@@ -315,7 +315,16 @@
               <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">添加</button>
             </div>
             <ul id="workspace-list" class="ws-manage-list" aria-live="polite"></ul>
-            <ul id="workspace-checks" class="repair-checks" hidden></ul>
+            <div id="workspace-checks-panel" class="workspace-checks-panel" hidden>
+              <div class="workspace-checks-header">
+                <div class="workspace-checks-heading">
+                  <strong data-i18n="workspaces.checksTitle">检查结果</strong>
+                  <span id="workspace-checks-summary" class="workspace-checks-summary"></span>
+                </div>
+                <button id="workspace-checks-toggle" type="button" class="btn-ghost btn-compact"></button>
+              </div>
+              <ul id="workspace-checks" class="repair-checks"></ul>
+            </div>
             <p id="workspace-status" class="section-footnote"></p>
             <p id="workspace-hint" class="section-footnote"></p>
           </section>

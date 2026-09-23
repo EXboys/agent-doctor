@@ -1160,6 +1160,51 @@ body.is-diagnose-open .diagnose-detail {
   padding-bottom: 8px;
 }
 
+.workspace-checks-panel {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.workspace-checks-panel[hidden] {
+  display: none !important;
+}
+
+.workspace-checks-panel.is-collapsed .repair-checks {
+  display: none;
+}
+
+.workspace-checks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-checks-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-checks-heading strong {
+  font-size: 0.74rem;
+  color: var(--text);
+}
+
+.workspace-checks-summary {
+  font-size: 0.66rem;
+  color: var(--text-soft);
+}
+
+.workspace-checks-panel .repair-checks {
+  margin-top: 2px;
+}
+
 .ws-manage-main {
   min-width: 0;
 }

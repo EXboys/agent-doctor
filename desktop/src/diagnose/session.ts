@@ -11,6 +11,7 @@ export type PrimaryAction =
   | "run-score"
   | "auto-fix"
   | "ask-verify"
+  | "open-ask"
   | "rescan"
   | "none";
 

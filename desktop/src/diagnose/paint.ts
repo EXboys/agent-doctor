@@ -490,19 +490,23 @@ export function createDiagnosePaint(session: DiagnoseSession) {
           ? t("diagnose.flow.testOkDetail")
           : t("diagnose.flow.testOkDetailNoBrowser")
         : t("diagnose.flow.testDetail");
-      if (session.testedOk && browserVerify) {
-        session.primaryAction = "ask-verify";
+      if (session.testedOk) {
+        // Keep「重新检查」on the right for every agent; left is the next step.
+        if (browserVerify) {
+          session.primaryAction = "ask-verify";
+          dom.primaryEl.textContent = t("diagnose.flow.askVerifyCta");
+        } else {
+          session.primaryAction = "open-ask";
+          dom.primaryEl.textContent = t("diagnose.flow.openAskYourself");
+        }
         dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = t("diagnose.flow.askVerifyCta");
         dom.secondaryEl.hidden = false;
         dom.secondaryEl.textContent = t("diagnose.flow.rescan");
         dom.secondaryEl.dataset.fallback = "rescan";
       } else {
-        session.primaryAction = session.testedOk ? "rescan" : "run-score";
+        session.primaryAction = "run-score";
         dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = session.testedOk
-          ? t("diagnose.flow.rescan")
-          : t("diagnose.flow.testCta");
+        dom.primaryEl.textContent = t("diagnose.flow.testCta");
         dom.secondaryEl.hidden = false;
         dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
         dom.secondaryEl.dataset.fallback = "open-ask";

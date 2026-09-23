@@ -200,6 +200,9 @@ dom.primaryEl.addEventListener("click", () => {
     case "ask-verify":
       void actions.openAskForVerify();
       break;
+    case "open-ask":
+      void actions.openAskYourself();
+      break;
     case "rescan":
       void refreshState({ preferStep: "test" });
       break;

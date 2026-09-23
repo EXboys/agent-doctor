@@ -26,7 +26,10 @@ let deps!: WorkspaceUiDeps;
 
 const workspaceStatusEl = document.querySelector<HTMLElement>("#workspace-status")!;
 const workspaceListEl = document.querySelector<HTMLUListElement>("#workspace-list")!;
+const workspaceChecksPanelEl = document.querySelector<HTMLElement>("#workspace-checks-panel")!;
 const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-checks")!;
+const workspaceChecksSummaryEl = document.querySelector<HTMLElement>("#workspace-checks-summary")!;
+const workspaceChecksToggleEl = document.querySelector<HTMLButtonElement>("#workspace-checks-toggle")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
 const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
@@ -229,8 +232,7 @@ async function doctorWorkspace() {
     const report = await invoke<WorkspaceDoctorReport>("workspace_doctor_command");
     renderWorkspaceChecks(report);
   } catch (error) {
-    workspaceChecksEl.hidden = true;
-    workspaceChecksEl.innerHTML = "";
+    clearWorkspaceChecks();
     workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
   } finally {
     appState.workspaceBusy = false;
@@ -287,15 +289,61 @@ function workspaceStatusClass(status: WorkspaceCheck["status"]): string {
   return "fail";
 }
 
+function clearWorkspaceChecks() {
+  lastWorkspaceDoctorReport = null;
+  workspaceChecksCollapsed = false;
+  workspaceChecksPanelEl.hidden = true;
+  workspaceChecksPanelEl.classList.remove("is-collapsed");
+  workspaceChecksEl.innerHTML = "";
+  workspaceChecksSummaryEl.textContent = "";
+  workspaceChecksToggleEl.textContent = "";
+}
+
+function syncWorkspaceChecksToggle() {
+  workspaceChecksPanelEl.classList.toggle("is-collapsed", workspaceChecksCollapsed);
+  workspaceChecksToggleEl.textContent = workspaceChecksCollapsed
+    ? t("workspaces.expandChecks")
+    : t("workspaces.collapseChecks");
+  workspaceChecksToggleEl.setAttribute(
+    "aria-expanded",
+    workspaceChecksCollapsed ? "false" : "true",
+  );
+}
+
+function toggleWorkspaceChecks() {
+  if (!lastWorkspaceDoctorReport) {
+    return;
+  }
+  workspaceChecksCollapsed = !workspaceChecksCollapsed;
+  syncWorkspaceChecksToggle();
+}
+
 function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
   if (!report.checks.length) {
-    workspaceChecksEl.hidden = true;
-    workspaceChecksEl.innerHTML = "";
+    clearWorkspaceChecks();
     workspaceHintEl.textContent = t("workspaces.noActive");
     return;
   }
 
-  workspaceChecksEl.hidden = false;
+  lastWorkspaceDoctorReport = report;
+  workspaceChecksCollapsed = false;
+
+  let pass = 0;
+  let warn = 0;
+  let fail = 0;
+  for (const check of report.checks) {
+    if (check.status === "pass") pass += 1;
+    else if (check.status === "warn") warn += 1;
+    else fail += 1;
+  }
+  const summary = t("workspaces.doctorSummary", {
+    pass: String(pass),
+    warn: String(warn),
+    fail: String(fail),
+  });
+
+  workspaceChecksPanelEl.hidden = false;
+  workspaceChecksSummaryEl.textContent = summary;
   workspaceChecksEl.innerHTML = report.checks
     .map(
       (check) => `
@@ -309,21 +357,12 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
       `,
     )
     .join("");
-
-  let pass = 0;
-  let warn = 0;
-  let fail = 0;
-  for (const check of report.checks) {
-    if (check.status === "pass") pass += 1;
-    else if (check.status === "warn") warn += 1;
-    else fail += 1;
-  }
-  workspaceHintEl.textContent = t("workspaces.doctorSummary", {
-    pass: String(pass),
-    warn: String(warn),
-    fail: String(fail),
-  });
+  syncWorkspaceChecksToggle();
+  workspaceHintEl.textContent = "";
 }
+
+let lastWorkspaceDoctorReport: WorkspaceDoctorReport | null = null;
+let workspaceChecksCollapsed = false;
 
 let lastRemoteProjects: RemoteProjectRow[] = [];
 let lastRemoteHosts: RemoteHostRow[] = [];
@@ -667,6 +706,10 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     void registerWorkspace();
   });
 
+  workspaceChecksToggleEl.addEventListener("click", () => {
+    toggleWorkspaceChecks();
+  });
+
   workspaceListEl.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-workspace-action]");
     if (!button) {
@@ -862,6 +905,12 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
       }
       renderRemoteHostList(lastRemoteHosts);
       renderRemoteList(lastRemoteProjects);
+      if (lastWorkspaceDoctorReport) {
+        const collapsed = workspaceChecksCollapsed;
+        renderWorkspaceChecks(lastWorkspaceDoctorReport);
+        workspaceChecksCollapsed = collapsed;
+        syncWorkspaceChecksToggle();
+      }
     },
   };
 }
