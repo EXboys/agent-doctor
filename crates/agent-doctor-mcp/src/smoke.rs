@@ -53,6 +53,25 @@ pub struct SmokeReport {
 
 /// End-to-end: launch → `/json/new` → `Page.navigate` → assert load.
 pub fn smoke_browser_navigate(options: &SmokeOptions) -> Result<SmokeReport> {
+    // Fixed port: one attempt. Ephemeral: retry once with a fresh port/profile
+    // (Edge on Linux CI occasionally never binds CDP on the first launch).
+    let attempts = if options.port.is_some() { 1 } else { 2 };
+    let mut last_err = None;
+    for attempt in 0..attempts {
+        match smoke_browser_navigate_once(options) {
+            Ok(report) => return Ok(report),
+            Err(err) => {
+                last_err = Some(err);
+                if attempt + 1 < attempts {
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("browser smoke failed")))
+}
+
+fn smoke_browser_navigate_once(options: &SmokeOptions) -> Result<SmokeReport> {
     let discovery = discover_browser(options.family)?;
     let port = match options.port {
         Some(port) => port,

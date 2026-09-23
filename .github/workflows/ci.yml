@@ -109,18 +109,26 @@ jobs:
       - name: Build CLI
         run: cargo build --release -p agent-doctor
 
+      - name: Install xvfb (Edge headless stability)
+        if: matrix.browser == 'edge'
+        run: sudo apt-get install -y xvfb
+
       - name: CDP navigate smoke
         run: |
           if [ "${{ matrix.browser }}" = "chrome" ]; then
             export AGENT_DOCTOR_BROWSER_BINARY="${{ steps.setup-chrome.outputs.chrome-path }}"
+            SMOKE_PREFIX=()
           else
             export AGENT_DOCTOR_BROWSER_BINARY="${{ steps.setup-edge.outputs.edge-path }}"
+            # Edge 153 on ubuntu-latest sometimes never binds CDP under
+            # --headless=new; xvfb + our legacy-headless fallback is more reliable.
+            SMOKE_PREFIX=(xvfb-run -a)
           fi
           echo "Using browser binary: $AGENT_DOCTOR_BROWSER_BINARY"
           test -n "$AGENT_DOCTOR_BROWSER_BINARY"
           test -x "$AGENT_DOCTOR_BROWSER_BINARY"
           "$AGENT_DOCTOR_BROWSER_BINARY" --version || true
-          ./target/release/agent-doctor mcp smoke \
+          "${SMOKE_PREFIX[@]}" ./target/release/agent-doctor mcp smoke \
             --browser "${{ matrix.browser }}" \
             --url https://example.com/ \
             --json
