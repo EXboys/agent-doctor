@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { applyStaticI18n, t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
+import { supportsBrowserMcp } from "./agents-ui";
 import {
   markFirstRunCompleted,
   markFirstRunDismissed,
@@ -28,6 +29,7 @@ export interface FirstRunUiDeps {
   setStatusBanner: (kind: "ok" | "warn" | "error" | "neutral", message: string) => void;
   updateAgentsSecurityOverview: (report: DoctorReport) => void;
   setMainTab: (tab: "provider") => void;
+  openAskWindowForVerify: (runtime: string) => Promise<void>;
 }
 
 export interface FirstRunUiApi {
@@ -89,7 +91,8 @@ function firstRunCopy() {
 
 function setFirstRunPhase(phase: FirstRunPhase): void {
   firstRunPhase = phase;
-  const active = phase !== "hidden" && phase !== "awaitingWiring";
+  const active =
+    phase !== "hidden" && phase !== "awaitingWiring";
   firstRunEl.hidden = !active;
   firstRunEl.classList.toggle("is-error", phase === "error");
   deps.panelDiagnoseEl.classList.toggle("is-first-run", active);
@@ -164,6 +167,19 @@ function renderFirstRunUi(): void {
       firstRunPhase === "scanning" ? t("firstRun.scanning") : t("firstRun.probing");
     firstRunSecondaryEl.textContent = t("firstRun.skip");
     firstRunFootnoteEl.textContent = t("firstRun.footnote");
+    return;
+  }
+
+  if (firstRunPhase === "awaitingVerify" && firstRunTarget) {
+    const target = firstRunTarget;
+    firstRunTitleEl.textContent = t("firstRun.verifyHeadline", { name: target.displayName });
+    firstRunDescEl.textContent = t("firstRun.verifyDetail");
+    firstRunTargetEl.hidden = false;
+    firstRunTargetNameEl.textContent = target.displayName;
+    firstRunTargetMetaEl.textContent = t("firstRun.targetMetaVerify");
+    firstRunPrimaryLabelEl.textContent = t("firstRun.verify");
+    firstRunSecondaryEl.textContent = t("firstRun.verifySkip");
+    firstRunFootnoteEl.textContent = t("firstRun.footnoteVerify");
     return;
   }
 
@@ -368,7 +384,7 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
       deps.repairPreviewByRuntime.set(target.runtimeId, preview);
     }
     if (!preview.can_apply_repair) {
-      // Re-rank: may become wiring or another runtime.
+      // Cannot auto-fix here — steer toward wiring in place.
       firstRunBusy = false;
       const lastReport = deps.getLastReport();
       if (lastReport) {
@@ -378,8 +394,13 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
           firstRunCopy(),
         );
       }
-      firstRunPhase = firstRunTarget?.kind === "none" ? "success" : "issue";
-      renderFirstRunUi();
+      if (firstRunTarget?.kind === "wiring") {
+        firstRunPhase = "issue";
+        renderFirstRunUi();
+        deps.setStatusBanner("warn", t("firstRun.repairNotAuto"));
+        return;
+      }
+      showError(t("firstRun.repairNotAuto"), "repair");
       return;
     }
     const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", {
@@ -387,9 +408,34 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
     });
     deps.repairPreviewByRuntime.set(target.runtimeId, report);
     firstRunBusy = false;
+    if (supportsBrowserMcp(target.runtimeId)) {
+      firstRunTarget = {
+        ...target,
+        fail: report.summary.fail,
+        warn: report.summary.warn,
+        canApply: report.can_apply_repair,
+      };
+      firstRunPhase = "awaitingVerify";
+      renderFirstRunUi();
+      deps.setStatusBanner("ok", t("repair.applyOkNextVerify"));
+      return;
+    }
     await runFirstRunScan({ forceProbe: true });
   } catch (error) {
     showError(withErrorDetail(t("firstRun.fixFailed"), error), "repair");
+  }
+}
+
+async function runFirstRunVerify(target: FirstRunTarget): Promise<void> {
+  firstRunBusy = true;
+  renderFirstRunUi();
+  try {
+    await deps.openAskWindowForVerify(target.runtimeId);
+    exitFirstRun({ completed: true });
+  } catch (error) {
+    showError(withErrorDetail(t("runtime.openFailed"), error), "repair");
+  } finally {
+    firstRunBusy = false;
   }
 }
 
@@ -411,6 +457,10 @@ async function runFirstRunPrimaryAction(): Promise<void> {
   }
   if (firstRunPhase === "welcome" || firstRunPhase === "scanning") {
     await runFirstRunScan();
+    return;
+  }
+  if (firstRunPhase === "awaitingVerify" && firstRunTarget) {
+    await runFirstRunVerify(firstRunTarget);
     return;
   }
   if (firstRunPhase === "success") {
@@ -466,6 +516,10 @@ export function initFirstRunUi(d: FirstRunUiDeps): FirstRunUiApi {
   firstRunSecondaryEl.addEventListener("click", () => {
     if (firstRunBusy && firstRunPhase !== "error") {
       // Soft cancel: dismiss even mid-scan so users are never trapped.
+    }
+    if (firstRunPhase === "awaitingVerify") {
+      exitFirstRun({ completed: true });
+      return;
     }
     exitFirstRun({ completed: firstRunPhase === "success" });
   });

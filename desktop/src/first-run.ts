@@ -19,6 +19,7 @@ export type FirstRunPhase =
   | "fixing"
   | "installing"
   | "awaitingWiring"
+  | "awaitingVerify"
   | "error"
   | "success"
   | "hidden";

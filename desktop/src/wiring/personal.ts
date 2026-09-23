@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
-import { withErrorDetail } from "../friendly-error";
+import { formatProviderFailure, withProviderFailure } from "../friendly-error";
 import { t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
@@ -194,7 +194,7 @@ export function createPersonalController(deps: PersonalDeps) {
       renderPersonalProviderStatus(status);
       renderPersonalProviderList(doc);
     } catch (error) {
-      personalStatusEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
+      personalStatusEl.textContent = withProviderFailure("personal.applyFailed", error);
     }
   }
 
@@ -208,7 +208,22 @@ export function createPersonalController(deps: PersonalDeps) {
     personalFormViewEl.hidden = false;
     personalFormTitleEl.textContent =
       mode === "edit" ? t("personal.formEdit") : t("personal.formAdd");
-    personalHintEl.textContent = "";
+    setPersonalHint("hide");
+  }
+
+  function setPersonalHint(
+    tone: "ok" | "error" | "busy" | "info" | "hide",
+    message = "",
+  ): void {
+    personalHintEl.classList.remove("is-ok", "is-error", "is-busy", "is-info");
+    if (tone === "hide" || !message) {
+      personalHintEl.hidden = true;
+      personalHintEl.textContent = "";
+      return;
+    }
+    personalHintEl.hidden = false;
+    personalHintEl.textContent = message;
+    personalHintEl.classList.add(`is-${tone}`);
   }
 
   function resetPersonalForm() {
@@ -271,7 +286,7 @@ export function createPersonalController(deps: PersonalDeps) {
     const protocol: ProviderProtocol =
       personalProtocolEl.value === "anthropic" ? "anthropic" : "openai";
     if (!name || !url || !model || (requireKey && !key && !id)) {
-      personalHintEl.textContent = t("personal.missingFields");
+      setPersonalHint("error", t("personal.missingFields"));
       return null;
     }
     return { id, name, url, key, model, protocol };
@@ -288,14 +303,15 @@ export function createPersonalController(deps: PersonalDeps) {
   async function verifyPersonalProvider() {
     const values = personalFormValues(true);
     if (!values) {
+      setPersonalHint("error", t("personal.missingFields"));
       return;
     }
     if (!values.key) {
-      personalHintEl.textContent = t("personal.missingFields");
+      setPersonalHint("error", t("personal.missingFields"));
       return;
     }
     setPersonalBusy(true);
-    personalHintEl.textContent = t("personal.verifying");
+    setPersonalHint("busy", t("personal.verifying"));
     try {
       const report = await invoke<PersonalProviderVerifyReport>("verify_personal_provider_command", {
         url: values.url,
@@ -313,18 +329,17 @@ export function createPersonalController(deps: PersonalDeps) {
             mergeLiveModels(base, report.models_sample, personalModelEl.value),
           );
         }
-        const sample =
-          report.models_sample.length > 0
-            ? ` (${report.models_sample.slice(0, 3).join(", ")})`
-            : "";
-        personalHintEl.textContent = t("personal.verifyOk", {
-          message: `${report.message}${sample}`,
-        });
+        setPersonalHint("ok", t("personal.verifyOk"));
       } else {
-        personalHintEl.textContent = t("personal.verifyFailed", { error: report.message });
+        setPersonalHint(
+          "error",
+          formatProviderFailure(report.message, {
+            statusCode: report.status_code,
+          }),
+        );
       }
     } catch (error) {
-      personalHintEl.textContent = withErrorDetail(t("personal.verifyFailed"), error);
+      setPersonalHint("error", withProviderFailure("personal.verifyFailed", error));
     } finally {
       setPersonalBusy(false);
     }
@@ -334,10 +349,11 @@ export function createPersonalController(deps: PersonalDeps) {
     const editing = Boolean(personalIdEl.value.trim());
     const values = personalFormValues(!editing);
     if (!values) {
+      setPersonalHint("error", t("personal.missingFields"));
       return;
     }
     setPersonalBusy(true);
-    personalHintEl.textContent = activate ? t("personal.applying") : t("personal.saving");
+    setPersonalHint("busy", activate ? t("personal.applying") : t("personal.saving"));
     try {
       if (activate) {
         // Save first without activate, then activate for a proper setup report.
@@ -365,10 +381,12 @@ export function createPersonalController(deps: PersonalDeps) {
         await loadPersonalProviderStatus();
         await deps.loadModeStatus();
         await deps.refresh();
+        personalListHintEl.hidden = false;
         personalListHintEl.textContent = t("personal.applyOk", {
           name: report.provider_name ?? values.name,
         });
         resetPersonalForm();
+        setPersonalHint("hide");
         showPersonalListView();
       } else {
         await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
@@ -383,12 +401,14 @@ export function createPersonalController(deps: PersonalDeps) {
         personalKeyEl.value = "";
         await loadPersonalProviderStatus();
         await deps.loadModeStatus();
+        personalListHintEl.hidden = false;
         personalListHintEl.textContent = t("personal.saveOk", { name: values.name });
         resetPersonalForm();
+        setPersonalHint("hide");
         showPersonalListView();
       }
     } catch (error) {
-      personalHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
+      setPersonalHint("error", withProviderFailure("personal.applyFailed", error));
     } finally {
       setPersonalBusy(false);
     }
@@ -408,7 +428,7 @@ export function createPersonalController(deps: PersonalDeps) {
         name: report.provider_name ?? id,
       });
     } catch (error) {
-      personalListHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
+      personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
     } finally {
       setPersonalBusy(false);
     }
@@ -425,7 +445,7 @@ export function createPersonalController(deps: PersonalDeps) {
       personalListHintEl.textContent = t("personal.deleteOk");
       showPersonalListView();
     } catch (error) {
-      personalListHintEl.textContent = withErrorDetail(t("personal.applyFailed"), error);
+      personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
     } finally {
       setPersonalBusy(false);
     }
@@ -497,7 +517,7 @@ export function createPersonalController(deps: PersonalDeps) {
         if (item) {
           fillPersonalForm(item);
           showPersonalFormView("edit");
-          personalHintEl.textContent = t("personal.keyKeepHint");
+          setPersonalHint("info", t("personal.keyKeepHint"));
         }
         return;
       }

@@ -379,6 +379,14 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     try {
       const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", { runtime });
       mountRepairPreview(report, { resetFilter: true });
+      hint.hidden = false;
+      hint.textContent = supportsBrowserMcp(runtime)
+        ? t("repair.applyOkNextVerify")
+        : t("repair.applyOkNextAsk");
+      deps.setStatusBanner(
+        "ok",
+        supportsBrowserMcp(runtime) ? t("repair.applyOkNextVerify") : t("repair.applyOkNextAsk"),
+      );
       if (runtime === "hermes") {
         await deps.loadHermesModel();
       }

@@ -47,6 +47,7 @@ export interface AgentsPanelApi {
   setLoading: (loading: boolean) => void;
   setStatusBanner: (kind: "ok" | "warn" | "error" | "neutral", message: string) => void;
   updateAgentsSecurityOverview: (report: DoctorReport) => void;
+  openAskWindowForVerify: (runtime: string) => Promise<void>;
   loadProfiles: () => Promise<void>;
   renderProfiles: (doc: ProfilesDocument) => void;
   updateAgentsWorkspaceChip: (doc: WorkspacesDocument) => void;
@@ -478,6 +479,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     setLoading,
     setStatusBanner,
     updateAgentsSecurityOverview,
+    openAskWindowForVerify: sessions.openAskWindowForVerify,
     loadProfiles: presets.loadProfiles,
     renderProfiles: presets.renderProfiles,
     updateAgentsWorkspaceChip: workspaceChip.updateAgentsWorkspaceChip,

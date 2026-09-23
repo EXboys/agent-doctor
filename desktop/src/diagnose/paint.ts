@@ -6,6 +6,7 @@ import {
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { t } from "../i18n";
+import { supportsBrowserMcp } from "../agents-ui";
 import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
 import type { RepairPreviewResponse } from "../types";
 import * as dom from "./dom";
@@ -464,20 +465,32 @@ export function createDiagnosePaint(session: DiagnoseSession) {
       } else {
         paintHeroTone("busy");
       }
+      const browserVerify = supportsBrowserMcp(session.runtimeId);
       dom.headlineEl.textContent = session.testedOk
         ? t("diagnose.flow.testOkHeadline")
         : t("diagnose.flow.testHeadline");
       dom.detailEl.textContent = session.testedOk
-        ? t("diagnose.flow.testOkDetail")
+        ? browserVerify
+          ? t("diagnose.flow.testOkDetail")
+          : t("diagnose.flow.testOkDetailNoBrowser")
         : t("diagnose.flow.testDetail");
-      session.primaryAction = session.testedOk ? "rescan" : "run-score";
-      dom.primaryEl.hidden = false;
-      dom.primaryEl.textContent = session.testedOk
-        ? t("diagnose.flow.rescan")
-        : t("diagnose.flow.testCta");
-      dom.secondaryEl.hidden = false;
-      dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
-      dom.secondaryEl.dataset.fallback = "open-ask";
+      if (session.testedOk && browserVerify) {
+        session.primaryAction = "ask-verify";
+        dom.primaryEl.hidden = false;
+        dom.primaryEl.textContent = t("diagnose.flow.askVerifyCta");
+        dom.secondaryEl.hidden = false;
+        dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
+        dom.secondaryEl.dataset.fallback = "open-ask";
+      } else {
+        session.primaryAction = session.testedOk ? "rescan" : "run-score";
+        dom.primaryEl.hidden = false;
+        dom.primaryEl.textContent = session.testedOk
+          ? t("diagnose.flow.rescan")
+          : t("diagnose.flow.testCta");
+        dom.secondaryEl.hidden = false;
+        dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
+        dom.secondaryEl.dataset.fallback = "open-ask";
+      }
     }
   }
 

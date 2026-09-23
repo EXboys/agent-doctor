@@ -8,8 +8,9 @@ import {
   type DiagnoseStepId,
 } from "../diagnose-flow";
 import { isPersonalEdition } from "../edition";
-import { withErrorDetail } from "../friendly-error";
+import { withErrorDetail, formatProviderFailure, withProviderFailure } from "../friendly-error";
 import { t } from "../i18n";
+import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
 import type {
   EvotownStatus,
   InstallProgressEvent,
@@ -92,7 +93,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         runtime: session.runtimeId,
       });
       paint.setResult("ok", t("diagnose.flow.autoFixOk"));
-      await deps.refreshState({ preferStep: "config" });
+      await deps.refreshState({ preferStep: "test" });
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("diagnose.flow.autoFixFailed"), error));
     } finally {
@@ -122,7 +123,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         protocol,
       });
       if (!verify.ok) {
-        paint.setResult("error", t("diagnose.flow.verifyFailed", { error: verify.message }));
+        paint.setResult(
+          "error",
+          formatProviderFailure(verify.message, { statusCode: verify.status_code }),
+        );
         return;
       }
 
@@ -150,9 +154,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       if (!probeOk) {
         paint.setResult(
           "error",
-          t("diagnose.flow.saveProbeFailed", {
-            error: setup.verify?.message ?? t("diagnose.flow.verifyFailedShort"),
-          }),
+          formatProviderFailure(
+            setup.verify?.message ?? t("diagnose.flow.verifyFailedShort"),
+            { statusCode: setup.verify?.status_code },
+          ),
         );
         session.configured = false;
         session.activeStep = "config";
@@ -163,7 +168,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       session.guideFillConfig = false;
       await deps.refreshState({ preferStep: "test" });
     } catch (error) {
-      paint.setResult("error", withErrorDetail(t("diagnose.flow.configFailed"), error));
+      paint.setResult("error", withProviderFailure("diagnose.flow.configFailed", error));
     } finally {
       paint.setBusy(false);
     }
@@ -291,6 +296,19 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     }
   }
 
+  async function openAskForVerify(): Promise<void> {
+    try {
+      localStorage.setItem(
+        ASK_VERIFY_DRAFT_KEY,
+        JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
+      );
+      await invoke("open_ask_window_command", { runtime: session.runtimeId });
+      paint.setResult("ok", t("diagnose.flow.askVerifyHint"));
+    } catch (error) {
+      paint.setResult("error", withErrorDetail(t("runtime.openFailed"), error));
+    }
+  }
+
   async function openTeamWiring(): Promise<void> {
     try {
       await invoke("focus_main_tab_command", { tab: "provider" });
@@ -318,6 +336,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     runVerifyAndSave,
     runScoreTest,
     openAskYourself,
+    openAskForVerify,
     openTeamWiring,
     closeWindow,
   };

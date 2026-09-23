@@ -130,6 +130,7 @@ refs.firstRun = initFirstRunUi({
   setStatusBanner: (kind, message) => refs.agents!.setStatusBanner(kind, message),
   updateAgentsSecurityOverview: (report) => refs.agents!.updateAgentsSecurityOverview(report),
   setMainTab: (tab) => setMainTab(tab),
+  openAskWindowForVerify: (runtime) => refs.agents!.openAskWindowForVerify(runtime),
 });
 
 langSwitchEl.addEventListener("click", (event) => {

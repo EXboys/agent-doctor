@@ -10,6 +10,7 @@ export type PrimaryAction =
   | "open-team-wiring"
   | "run-score"
   | "auto-fix"
+  | "ask-verify"
   | "rescan"
   | "none";
 
