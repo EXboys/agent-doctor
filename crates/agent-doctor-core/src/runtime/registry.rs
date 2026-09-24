@@ -4,27 +4,33 @@ use anyhow::{Context, Result};
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
-    ClaudeCodeAdapter, CodexAdapter, DeepSeekHarnessAdapter, HermesAdapter, OpenClawAdapter,
+    ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter,
+    OpenClawAdapter, QoderAdapter, WorkbuddyAdapter,
 };
 use crate::lifecycle::{
-    run_claude_code_lifecycle, run_codex_lifecycle, run_deepseek_harness_lifecycle,
-    run_hermes_lifecycle, run_openclaw_lifecycle, DeepSeekHarnessLifecycleAction,
-    HermesLifecycleAction, NpmCliLifecycleAction, OpenClawLifecycleAction,
+    run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
+    run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
+    run_qoder_lifecycle, run_workbuddy_lifecycle, CursorLifecycleAction,
+    DeepSeekHarnessLifecycleAction, HermesLifecycleAction, NpmCliLifecycleAction,
+    OpenClawLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction,
 };
 use crate::probe::runtimes::{
     claude_code_probe_deep, codex_probe_deep, deepseek_harness_probe_deep, openclaw_probe_deep,
-    probe_deep, schema_claude_code, schema_codex, schema_deepseek_harness, schema_hermes,
-    schema_openclaw,
+    probe_deep, probe_deep_noop, schema_claude_code, schema_codex, schema_cursor,
+    schema_deepseek_harness, schema_hermes, schema_openclaw, schema_qoder, schema_workbuddy,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
-    apply_codex_playbook_filtered, apply_deepseek_harness_playbook,
-    apply_deepseek_harness_playbook_filtered, apply_hermes_playbook,
-    apply_hermes_playbook_filtered, apply_openclaw_playbook, apply_openclaw_playbook_filtered,
-    suggest_claude_code_repairs, suggest_codex_repairs, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult, SuggestedRepair,
+    apply_codex_playbook_filtered, apply_cursor_playbook, apply_cursor_playbook_filtered,
+    apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,
+    apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
+    apply_openclaw_playbook_filtered, apply_qoder_playbook, apply_qoder_playbook_filtered,
+    apply_workbuddy_playbook, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
+    suggest_codex_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
+    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
+    suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +108,9 @@ const CLAUDE_ENV: &[&str] = &["ANTHROPIC", "CLAUDE"];
 const CODEX_ENV: &[&str] = &["OPENAI", "CODEX"];
 const HERMES_ENV: &[&str] = &["HERMES", "OPENAI", "ANTHROPIC", "DEEPSEEK", "GOOGLE"];
 const DEEPSEEK_HARNESS_ENV: &[&str] = &["DSH", "DEEPSEEK"];
+const QODER_ENV: &[&str] = &["QODER"];
+const WORKBUDDY_ENV: &[&str] = &["CODEBUDDY", "WORKBUDDY", "TENCENT"];
+const CURSOR_ENV: &[&str] = &["CURSOR"];
 
 fn openclaw_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(OpenClawAdapter)
@@ -121,6 +130,18 @@ fn hermes_adapter() -> Box<dyn RuntimeAdapter> {
 
 fn deepseek_harness_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(DeepSeekHarnessAdapter)
+}
+
+fn qoder_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(QoderAdapter)
+}
+
+fn workbuddy_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(WorkbuddyAdapter)
+}
+
+fn cursor_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(CursorAdapter)
 }
 
 fn run_openclaw_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -161,6 +182,30 @@ fn run_codex_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
         RuntimeLifecycleAction::Update => NpmCliLifecycleAction::Update,
     };
     run_codex_lifecycle(action)
+}
+
+fn run_qoder_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => QoderLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => QoderLifecycleAction::Update,
+    };
+    run_qoder_lifecycle(action)
+}
+
+fn run_workbuddy_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => WorkbuddyLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => WorkbuddyLifecycleAction::Update,
+    };
+    run_workbuddy_lifecycle(action)
+}
+
+fn run_cursor_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => CursorLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => CursorLifecycleAction::Update,
+    };
+    run_cursor_lifecycle(action)
 }
 
 static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
@@ -234,6 +279,48 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_codex_playbook),
         run_lifecycle: Some(run_codex_lifecycle_action),
     },
+    RuntimeDescriptor {
+        id: "qoder",
+        probe: RuntimeProbeSpec {
+            binary_name: "qoder",
+            config_format: ConfigFormat::Json,
+            env_keywords: QODER_ENV,
+        },
+        create_adapter: qoder_adapter,
+        schema_probe: Some(schema_qoder),
+        deep_probe: Some(probe_deep_noop),
+        suggest_repairs: Some(suggest_qoder_repairs),
+        apply_playbook: Some(apply_qoder_playbook),
+        run_lifecycle: Some(run_qoder_lifecycle_action),
+    },
+    RuntimeDescriptor {
+        id: "workbuddy",
+        probe: RuntimeProbeSpec {
+            binary_name: "codebuddy",
+            config_format: ConfigFormat::Json,
+            env_keywords: WORKBUDDY_ENV,
+        },
+        create_adapter: workbuddy_adapter,
+        schema_probe: Some(schema_workbuddy),
+        deep_probe: Some(probe_deep_noop),
+        suggest_repairs: Some(suggest_workbuddy_repairs),
+        apply_playbook: Some(apply_workbuddy_playbook),
+        run_lifecycle: Some(run_workbuddy_lifecycle_action),
+    },
+    RuntimeDescriptor {
+        id: "cursor",
+        probe: RuntimeProbeSpec {
+            binary_name: "agent",
+            config_format: ConfigFormat::Json,
+            env_keywords: CURSOR_ENV,
+        },
+        create_adapter: cursor_adapter,
+        schema_probe: Some(schema_cursor),
+        deep_probe: Some(probe_deep_noop),
+        suggest_repairs: Some(suggest_cursor_repairs),
+        apply_playbook: Some(apply_cursor_playbook),
+        run_lifecycle: Some(run_cursor_lifecycle_action),
+    },
 ];
 
 pub fn all_runtime_ids() -> impl Iterator<Item = &'static str> {
@@ -243,6 +330,7 @@ pub fn all_runtime_ids() -> impl Iterator<Item = &'static str> {
 pub fn descriptor_by_id(runtime_id: &str) -> Option<&'static RuntimeDescriptor> {
     let runtime_id = match runtime_id.trim().to_ascii_lowercase().as_str() {
         "dsh" | "deepseek" | "deepseek_harness" => "deepseek-harness",
+        "cursor-cli" | "cursor-agent" => "cursor",
         _ => runtime_id,
     };
     RUNTIME_REGISTRY.iter().find(|entry| entry.id == runtime_id)
@@ -333,6 +421,15 @@ pub fn apply_runtime_playbook_filtered(
     if runtime_id == "codex" {
         return apply_codex_playbook_filtered(probe, only_ids);
     }
+    if runtime_id == "qoder" {
+        return apply_qoder_playbook_filtered(probe, only_ids);
+    }
+    if runtime_id == "workbuddy" {
+        return apply_workbuddy_playbook_filtered(probe, only_ids);
+    }
+    if runtime_id == "cursor" {
+        return apply_cursor_playbook_filtered(probe, only_ids);
+    }
     let apply = descriptor_by_id(runtime_id)
         .and_then(|entry| entry.apply_playbook)
         .with_context(|| format!("runtime '{runtime_id}' has no repair playbook"))?;
@@ -372,7 +469,10 @@ mod tests {
                 "hermes",
                 "deepseek-harness",
                 "claude-code",
-                "codex"
+                "codex",
+                "qoder",
+                "workbuddy",
+                "cursor"
             ]
         );
         let unique: std::collections::HashSet<_> = ids.iter().copied().collect();

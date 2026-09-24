@@ -2,6 +2,7 @@ pub mod claude_code;
 pub mod codex;
 pub mod deepseek_harness;
 pub mod hermes;
+pub mod json_settings;
 pub mod openclaw;
 
 pub(crate) use claude_code::{
@@ -12,4 +13,8 @@ pub(crate) use deepseek_harness::{
     probe_deep as deepseek_harness_probe_deep, probe_schema as schema_deepseek_harness,
 };
 pub(crate) use hermes::{probe_deep, probe_schema as schema_hermes};
+pub(crate) use json_settings::{
+    probe_deep_noop, probe_schema_cursor as schema_cursor, probe_schema_qoder as schema_qoder,
+    probe_schema_workbuddy as schema_workbuddy,
+};
 pub(crate) use openclaw::{probe_deep as openclaw_probe_deep, probe_schema as schema_openclaw};

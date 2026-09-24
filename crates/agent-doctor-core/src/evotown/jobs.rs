@@ -169,6 +169,9 @@ pub fn normalize_runtime(raw: &str) -> String {
         "openclaw" | "claw" => "openclaw".into(),
         "hermes" => "hermes".into(),
         "deepseek-harness" | "deepseek_harness" | "deepseek" | "dsh" => "deepseek-harness".into(),
+        "cursor" | "cursor-cli" | "cursor-agent" => "cursor".into(),
+        "qoder" => "qoder".into(),
+        "workbuddy" | "codebuddy" => "workbuddy".into(),
         other => other.to_string(),
     }
 }

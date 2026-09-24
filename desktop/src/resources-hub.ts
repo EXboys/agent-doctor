@@ -35,6 +35,9 @@ const RUNTIME_LABELS: Record<string, string> = {
   "claude-code": "Claude",
   codex: "Codex",
   "deepseek-harness": "DeepSeek Harness",
+  qoder: "Qoder",
+  workbuddy: "WorkBuddy",
+  cursor: "Cursor",
 };
 
 const SKILL_MOUNT_RUNTIME_ORDER = [

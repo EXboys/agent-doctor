@@ -145,6 +145,7 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
     let mut facts = Vec::new();
 
     probe_binary(&ctx, &mut checks, &mut facts);
+    adopt_adapter_discovery(adapter, &mut checks, &mut facts);
     probe_configs(adapter, &ctx, &mut checks, &mut facts);
     probe_env_conflicts(&ctx, &mut checks, &mut facts);
     descriptor.run_deep_probe(&mut checks, &mut facts);
@@ -224,6 +225,39 @@ fn probe_upstream_version(
         crate::version_check::VersionCompareStatus::Unknown => {
             // Cache empty / offline — stay quiet so diagnose is not noisy.
         }
+    }
+}
+
+fn adopt_adapter_discovery(
+    adapter: &dyn RuntimeAdapter,
+    checks: &mut [ProbeCheck],
+    facts: &mut Vec<DiagnosticFact>,
+) {
+    let discovery = adapter.discover();
+    if !discovery.installed {
+        return;
+    }
+    let Some(check) = checks.iter_mut().find(|item| item.id == "binary.exists") else {
+        return;
+    };
+    if check.status != ProbeStatus::Fail {
+        return;
+    }
+    check.status = ProbeStatus::Pass;
+    check.severity = ProbeSeverity::Info;
+    check.message = format!("{} is on this computer", adapter.display_name());
+    check.sensitivity = SensitivityLevel::LocalPath;
+    if let Some(path) = discovery.binary_path {
+        check.details = vec![path.display().to_string()];
+        facts.retain(|fact| fact.key != "binary.path");
+        facts.push(DiagnosticFact::new(
+            "binary.path",
+            path.display().to_string(),
+            SensitivityLevel::LocalPath,
+        ));
+    }
+    if let Some(fact) = facts.iter_mut().find(|item| item.key == "binary.installed") {
+        fact.value = "true".into();
     }
 }
 

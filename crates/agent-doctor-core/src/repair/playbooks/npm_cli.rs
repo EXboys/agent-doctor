@@ -26,7 +26,11 @@ use agent_doctor_mcp::{wire_browser_mcp, WireBrowserMcpOptions};
 
 use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
-use crate::lifecycle::{run_claude_code_lifecycle, run_codex_lifecycle, NpmCliLifecycleAction};
+use crate::lifecycle::{
+    run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle, run_qoder_lifecycle,
+    run_workbuddy_lifecycle, CursorLifecycleAction, NpmCliLifecycleAction, QoderLifecycleAction,
+    WorkbuddyLifecycleAction,
+};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::{SkippedRepairAction, SuggestedRepair};
 use crate::setup::{
@@ -45,6 +49,36 @@ pub fn suggest_claude_code_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedR
 
 pub fn suggest_codex_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
     suggest_npm_cli_repairs("codex", "Codex", probe)
+}
+
+pub fn suggest_qoder_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+    suggest_install_only("qoder", "Qoder", probe)
+}
+
+pub fn suggest_workbuddy_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+    suggest_install_only("workbuddy", "WorkBuddy", probe)
+}
+
+pub fn suggest_cursor_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+    suggest_install_only("cursor", "Cursor", probe)
+}
+
+fn suggest_install_only(
+    runtime_id: &str,
+    display: &str,
+    probe: &RuntimeProbeReport,
+) -> Vec<SuggestedRepair> {
+    probe
+        .checks
+        .iter()
+        .filter(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
+        .map(|_| SuggestedRepair {
+            id: format!("fix-{runtime_id}-install"),
+            title: format!("Install {display}"),
+            description: "Install the official app. Needs a network connection.".to_string(),
+            auto_fixable: true,
+        })
+        .collect()
 }
 
 fn suggest_npm_cli_repairs(
@@ -361,6 +395,58 @@ pub fn apply_codex_playbook_filtered(
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
     apply_npm_cli_playbook("codex", probe, only_ids)
+}
+
+pub fn apply_qoder_playbook(probe: &RuntimeProbeReport) -> Result<PlaybookApplyResult> {
+    apply_qoder_playbook_filtered(probe, None)
+}
+
+pub fn apply_qoder_playbook_filtered(
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    apply_install_only_playbook("qoder", probe, only_ids)
+}
+
+pub fn apply_workbuddy_playbook(probe: &RuntimeProbeReport) -> Result<PlaybookApplyResult> {
+    apply_workbuddy_playbook_filtered(probe, None)
+}
+
+pub fn apply_workbuddy_playbook_filtered(
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    apply_install_only_playbook("workbuddy", probe, only_ids)
+}
+
+pub fn apply_cursor_playbook(probe: &RuntimeProbeReport) -> Result<PlaybookApplyResult> {
+    apply_cursor_playbook_filtered(probe, None)
+}
+
+pub fn apply_cursor_playbook_filtered(
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    apply_install_only_playbook("cursor", probe, only_ids)
+}
+
+fn apply_install_only_playbook(
+    runtime_id: &str,
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    let mut result = PlaybookApplyResult::default();
+    let install_id = format!("fix-{runtime_id}-install");
+    if should_run(&install_id, only_ids) && needs_install(probe) {
+        match run_install(runtime_id) {
+            Ok(()) => result.executed.push(install_id),
+            Err(error) => result.skipped.push(SkippedRepairAction {
+                id: install_id,
+                reason: error.to_string(),
+            }),
+        }
+    }
+    Ok(result)
 }
 
 fn apply_npm_cli_playbook(
@@ -715,6 +801,9 @@ fn run_install(runtime_id: &str) -> Result<()> {
     match runtime_id {
         "claude-code" => run_claude_code_lifecycle(NpmCliLifecycleAction::Install),
         "codex" => run_codex_lifecycle(NpmCliLifecycleAction::Install),
+        "qoder" => run_qoder_lifecycle(QoderLifecycleAction::Install),
+        "workbuddy" => run_workbuddy_lifecycle(WorkbuddyLifecycleAction::Install),
+        "cursor" => run_cursor_lifecycle(CursorLifecycleAction::Install),
         other => bail!("no npm install playbook for {other}"),
     }
 }

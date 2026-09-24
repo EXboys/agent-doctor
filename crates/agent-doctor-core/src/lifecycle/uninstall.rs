@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 
-use crate::adapters::util::ensure_managed_runtime_path;
+use crate::adapters::util::{ensure_managed_runtime_path, find_all_binaries, home_join};
 use crate::adapters::DEEPSEEK_HARNESS_NPM_PACKAGE;
 
 use super::npm_target::{
@@ -15,6 +15,8 @@ fn npm_cli_binary_name(runtime_id: &str) -> Option<&'static str> {
         "codex" => Some("codex"),
         "deepseek-harness" => Some("dsh"),
         "openclaw" => Some("openclaw"),
+        "qoder" => Some("qoder"),
+        "workbuddy" => Some("codebuddy"),
         _ => None,
     }
 }
@@ -24,6 +26,21 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         "claude-code" => "@anthropic-ai/claude-code",
         "codex" => "@openai/codex",
         "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
+        "qoder" => {
+            return Ok(
+                "rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.qoder/bin/qoder\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
+                    .to_string(),
+            );
+        }
+        "workbuddy" => {
+            return Ok(
+                "rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
+                    .to_string(),
+            );
+        }
+        "cursor" => {
+            return Ok("rm -f \"$HOME/.local/bin/agent\"".to_string());
+        }
         "openclaw" => {
             return Ok(
                 "openclaw uninstall --service --yes --non-interactive; npm uninstall -g openclaw"
@@ -118,8 +135,68 @@ fn normalize_bin_key(path: &std::path::Path) -> String {
         .to_string()
 }
 
+fn is_user_managed_binary(path: &std::path::Path) -> bool {
+    let home = home_join("");
+    path.starts_with(&home)
+        || path.starts_with("/usr/local/bin")
+        || path.starts_with("/opt/homebrew/bin")
+}
+
+fn uninstall_native_cli(binary_names: &[&str], npm_package: &str, npm_binary: &str) -> Result<()> {
+    ensure_managed_runtime_path();
+    let mut removed = false;
+    for name in binary_names {
+        for path in find_all_binaries(name) {
+            if !is_user_managed_binary(&path) {
+                continue;
+            }
+            match std::fs::remove_file(&path) {
+                Ok(()) => removed = true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    if crate::lifecycle::nodejs::ensure_npm().is_ok()
+        && uninstall_npm_package(npm_package, npm_binary).is_ok()
+    {
+        removed = true;
+    }
+    if removed {
+        return Ok(());
+    }
+    bail!("没找到能卸的安装。可能是用别的方式装的。");
+}
+
+fn uninstall_cursor_cli() -> Result<()> {
+    ensure_managed_runtime_path();
+    let mut removed = false;
+    let local_agent = home_join(".local/bin/agent");
+    if local_agent.is_file() {
+        std::fs::remove_file(&local_agent)?;
+        removed = true;
+    }
+    for path in find_all_binaries("agent") {
+        let text = path.to_string_lossy();
+        if text.contains("cursor-agent") && std::fs::remove_file(&path).is_ok() {
+            removed = true;
+        }
+    }
+    if removed {
+        return Ok(());
+    }
+    bail!("没找到 Cursor 命令行。电脑上的 Cursor 窗口不会被卸掉。");
+}
+
 pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
     match runtime_id {
+        "qoder" => uninstall_native_cli(&["qoder"], "@qoder-ai/qodercli", "qoder"),
+        "workbuddy" => uninstall_native_cli(
+            &["codebuddy", "workbuddy"],
+            "@tencent-ai/codebuddy-code",
+            "codebuddy",
+        ),
+        "cursor" => uninstall_cursor_cli(),
         "hermes" => {
             let command = hermes_uninstall_shell_command();
             run_shell_command(&command)
@@ -161,6 +238,9 @@ mod tests {
             uninstall_shell_command("deepseek-harness").unwrap(),
             "npm uninstall -g @deepseek-ai/dsh"
         );
+        let qoder = uninstall_shell_command("qoder").unwrap();
+        assert!(qoder.contains(".local/bin/qoder"));
+        assert!(!qoder.starts_with("npm uninstall"));
     }
 
     #[test]

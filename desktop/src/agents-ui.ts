@@ -14,6 +14,9 @@ export const RUNTIME_SHORT: Record<string, string> = {
   "claude-code": "CC",
   codex: "CX",
   "deepseek-harness": "DSH",
+  qoder: "QO",
+  workbuddy: "WB",
+  cursor: "CU",
 };
 
 export const ASK_RUNTIME_IDS = new Set([
@@ -177,6 +180,12 @@ export function canOpenSession(runtimeId: string): boolean {
   return isAskRuntimeId(runtimeId);
 }
 
+function canUninstallRuntime(runtime: RuntimeDoctorResult): boolean {
+  if (runtime.id !== "cursor") return true;
+  const path = runtime.binary_path ?? "";
+  return path.includes("cursor-agent") || path.includes("/.local/bin/agent") || /[/\\]agent\.exe$/i.test(path);
+}
+
 export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {
   if (!preview) {
     return false;
@@ -235,9 +244,22 @@ export function renderRuntimeCardActions(
   }
 
   if (!ctx.isAskRuntime) {
-    return canOpenSession(runtime.id)
-      ? `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`
-      : "";
+    if (canOpenSession(runtime.id)) {
+      return `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`;
+    }
+    const actions = [
+      actionButton("primary", "diagnose-runtime", ACTION_ICON.diagnose, t("runtime.diagnose"), {
+        title: t("runtime.diagnoseHint"),
+      }),
+    ];
+    if (canUninstallRuntime(runtime)) {
+      actions.push(
+        actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
+          title: t("runtime.uninstallHint"),
+        }),
+      );
+    }
+    return actions.join("");
   }
 
   const parts: string[] = [renderStandardRuntimeActions(runtime.id)];

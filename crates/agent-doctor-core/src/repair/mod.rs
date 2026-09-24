@@ -30,11 +30,14 @@ pub use planner::{
 };
 pub use playbooks::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
-    apply_codex_playbook_filtered, apply_deepseek_harness_playbook,
-    apply_deepseek_harness_playbook_filtered, apply_hermes_playbook,
-    apply_hermes_playbook_filtered, apply_openclaw_playbook, apply_openclaw_playbook_filtered,
-    suggest_claude_code_repairs, suggest_codex_repairs, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, suggest_openclaw_repairs, PlaybookApplyResult,
+    apply_codex_playbook_filtered, apply_cursor_playbook, apply_cursor_playbook_filtered,
+    apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,
+    apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
+    apply_openclaw_playbook_filtered, apply_qoder_playbook, apply_qoder_playbook_filtered,
+    apply_workbuddy_playbook, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
+    suggest_codex_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
+    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
+    suggest_workbuddy_repairs, PlaybookApplyResult,
 };
 pub use repair_loop::{execute_repair_loop, RepairLoopOptions, RepairLoopReport, RepairLoopRound};
 pub use restore::{

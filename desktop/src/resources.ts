@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -35,6 +36,7 @@ import type {
   DoctorReport,
   InstallProgressEvent,
   InstallRuntimeResponse,
+  OpenSessionReport,
   RuntimeDoctorResult,
 } from "./types";
 
@@ -91,6 +93,7 @@ let lastMcpStatus: McpModuleStatus | null = null;
 let lastMallCatalog: TeamupsMallCatalog | null = null;
 let lastDoctorReport: DoctorReport | null = null;
 const agentInstallInFlight = new Set<string>();
+const agentOpenInFlight = new Set<string>();
 const agentInstallHint = new Map<string, string>();
 let lastTeamupsAccount: TeamupsAccountStatus | null = null;
 let lastWireActions: BrowserMcpTargetAction[] | null = null;
@@ -118,6 +121,9 @@ const RUNTIME_LABELS: Record<string, string> = {
   "claude-code": "Claude",
   codex: "Codex",
   "deepseek-harness": "DeepSeek Harness",
+  qoder: "Qoder",
+  workbuddy: "WorkBuddy",
+  cursor: "Cursor",
 };
 
 const SKILL_MOUNT_RUNTIME_ORDER = [
@@ -229,6 +235,9 @@ function agentCatalogBlurb(runtime: string): string {
   if (runtime === "claude-code") return t("resources.agentBlurbClaude");
   if (runtime === "codex") return t("resources.agentBlurbCodex");
   if (runtime === "deepseek-harness") return t("resources.agentBlurbDeepseek");
+  if (runtime === "qoder") return t("resources.agentBlurbQoder");
+  if (runtime === "workbuddy") return t("resources.agentBlurbWorkbuddy");
+  if (runtime === "cursor") return t("resources.agentBlurbCursor");
   return "";
 }
 
@@ -238,8 +247,78 @@ function agentMatchesQuery(runtime: RuntimeDoctorResult): boolean {
   return blob.includes(resourceQuery);
 }
 
+function catalogFallbackRuntime(id: string, displayName: string): RuntimeDoctorResult {
+  return {
+    id,
+    display_name: displayName,
+    installed: false,
+    version: null,
+    binary_path: null,
+    config_paths: [],
+    profile: { gateway_url: null, key_source: null },
+  };
+}
+
+let cursorOnThisComputer = false;
+
+function cursorAlreadyOnThisComputer(runtime: RuntimeDoctorResult): boolean {
+  if (runtime.id !== "cursor") return runtime.installed;
+  return (
+    runtime.installed ||
+    cursorOnThisComputer ||
+    Boolean(runtime.profile?.key_source) ||
+    (runtime.binary_path ?? "").includes("Cursor.app")
+  );
+}
+
+function withCatalogInstallState(runtime: RuntimeDoctorResult): RuntimeDoctorResult {
+  if (runtime.id !== "cursor" || runtime.installed || !cursorAlreadyOnThisComputer(runtime)) {
+    return runtime;
+  }
+  return { ...runtime, installed: true };
+}
+
+async function markerLooksPresent(path: string): Promise<boolean> {
+  try {
+    const response = await fetch(convertFileSrc(path));
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshCursorOnThisComputer(): Promise<void> {
+  try {
+    const home = (await homeDir()).replace(/[/\\]+$/, "");
+    const markers = [
+      "/Applications/Cursor.app/Contents/Info.plist",
+      `${home}/Applications/Cursor.app/Contents/Info.plist`,
+      `${home}/.cursor/argv.json`,
+      `${home}/.cursor/cli-config.json`,
+    ];
+    for (const marker of markers) {
+      if (await markerLooksPresent(marker)) {
+        cursorOnThisComputer = true;
+        return;
+      }
+    }
+  } catch {
+    // Keep the last doctor result when the desktop check is unavailable.
+  }
+}
+
 function catalogAgents(): RuntimeDoctorResult[] {
-  return (lastDoctorReport?.runtimes ?? []).filter((runtime) => !runtime.installed && agentMatchesQuery(runtime));
+  const fromDoctor = lastDoctorReport?.runtimes ?? [];
+  const seen = new Set(fromDoctor.map((runtime) => runtime.id));
+  const extras = [
+    catalogFallbackRuntime("qoder", "Qoder"),
+    catalogFallbackRuntime("workbuddy", "WorkBuddy"),
+    catalogFallbackRuntime("cursor", "Cursor"),
+  ].filter((runtime) => !seen.has(runtime.id));
+  return [...fromDoctor, ...extras]
+    .map(withCatalogInstallState)
+    .filter((runtime) => agentMatchesQuery(runtime))
+    .sort((a, b) => Number(a.installed) - Number(b.installed));
 }
 
 function countAgentMatches(): number {
@@ -1668,11 +1747,12 @@ async function loadMcpStatus(): Promise<void> {
 
 function renderAgentCatalog(): void {
   const rows = catalogAgents();
-  agentsListEl.replaceChildren();
-  if (!lastDoctorReport) {
-    agentsEmptyEl.hidden = true;
-    return;
+  const missing = rows.some((runtime) => !runtime.installed);
+  const hintEl = document.querySelector<HTMLElement>("#resources-agents-hint");
+  if (hintEl) {
+    hintEl.textContent = missing ? t("resources.agentCatalogHint") : t("resources.agentCatalogHintAllOn");
   }
+  agentsListEl.replaceChildren();
   if (rows.length === 0) {
     agentsEmptyEl.hidden = false;
     agentsEmptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptyAgents");
@@ -1707,16 +1787,29 @@ function renderAgentCatalog(): void {
 
     const metaWrap = document.createElement("div");
     metaWrap.className = "res-catalog-meta mall-actions";
-    const busy = agentInstallInFlight.has(runtime.id);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn-primary btn-compact";
-    btn.textContent = busy ? t("runtime.installing") : t("runtime.install");
-    btn.disabled = busy;
-    btn.addEventListener("click", () => {
-      void installCatalogAgent(runtime.id);
-    });
-    metaWrap.appendChild(btn);
+    if (runtime.installed) {
+      const opening = agentOpenInFlight.has(runtime.id);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-primary btn-compact";
+      btn.textContent = opening ? t("runtime.opening") : t("runtime.open");
+      btn.disabled = opening;
+      btn.addEventListener("click", () => {
+        void openCatalogAgent(runtime.id);
+      });
+      metaWrap.appendChild(btn);
+    } else {
+      const busy = agentInstallInFlight.has(runtime.id);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-primary btn-compact";
+      btn.textContent = busy ? t("runtime.installing") : t("runtime.install");
+      btn.disabled = busy;
+      btn.addEventListener("click", () => {
+        void installCatalogAgent(runtime.id);
+      });
+      metaWrap.appendChild(btn);
+    }
 
     li.append(icon, body, metaWrap);
     agentsListEl.appendChild(li);
@@ -1775,6 +1868,27 @@ async function installCatalogAgent(runtime: string): Promise<void> {
   }
 }
 
+async function openCatalogAgent(runtime: string): Promise<void> {
+  if (agentOpenInFlight.has(runtime) || agentInstallInFlight.has(runtime)) return;
+  agentOpenInFlight.add(runtime);
+  renderAgentCatalog();
+  setAgentInstallHint(runtime, t("runtime.opening"), "busy");
+  try {
+    await invoke<OpenSessionReport>("open_session_command", {
+      runtime,
+      cwd: null,
+      prompt: null,
+      terminal: null,
+    });
+    setAgentInstallHint(runtime, t("resources.agentOpened"), "ok");
+  } catch (error) {
+    setAgentInstallHint(runtime, withErrorDetail(t("runtime.openFailed"), error), "error");
+  } finally {
+    agentOpenInFlight.delete(runtime);
+    renderAgentCatalog();
+  }
+}
+
 async function loadDoctor(): Promise<void> {
   try {
     lastDoctorReport = await invoke<DoctorReport>("run_doctor_command");
@@ -1785,9 +1899,8 @@ async function loadDoctor(): Promise<void> {
       active_preset: null,
       runtimes: [],
     };
-    agentsEmptyEl.hidden = false;
-    agentsEmptyEl.textContent = t("doctor.failed");
   }
+  await refreshCursorOnThisComputer();
   renderAgentCatalog();
 }
 

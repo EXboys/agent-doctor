@@ -35,5 +35,6 @@ fn method_label(method: &agent_doctor_core::OpenSessionMethod) -> &'static str {
     match method {
         agent_doctor_core::OpenSessionMethod::DeepLink => "deep-link",
         agent_doctor_core::OpenSessionMethod::Terminal => "terminal",
+        agent_doctor_core::OpenSessionMethod::App => "app",
     }
 }

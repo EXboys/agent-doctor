@@ -1,3 +1,4 @@
+pub mod cursor;
 pub mod deepseek_harness;
 mod download_route;
 pub mod hermes;
@@ -5,13 +6,16 @@ pub mod nodejs;
 pub mod npm_cli;
 mod npm_target;
 pub mod openclaw;
+pub mod qoder;
 mod runner;
 mod uninstall;
+pub mod workbuddy;
 
 pub use download_route::{use_china_mirrors, NPM_MIRROR};
 
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 
+pub use cursor::{cursor_install_shell_command, run_cursor_lifecycle, CursorLifecycleAction};
 pub use deepseek_harness::{
     deepseek_harness_install_shell_command, deepseek_harness_shell_command,
     deepseek_harness_update_shell_command, run_deepseek_harness_lifecycle,
@@ -29,6 +33,10 @@ pub use openclaw::{
     openclaw_doctor_fix_shell_command, openclaw_install_shell_command, openclaw_shell_command,
     run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClawLifecycleAction,
 };
+pub use qoder::{qoder_install_shell_command, run_qoder_lifecycle, QoderLifecycleAction};
 pub use runner::{
     run_shell_command_capturing, run_shell_command_streaming, write_install_log, ShellCapture,
+};
+pub use workbuddy::{
+    run_workbuddy_lifecycle, workbuddy_install_shell_command, WorkbuddyLifecycleAction,
 };
