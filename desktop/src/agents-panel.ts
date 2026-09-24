@@ -65,7 +65,10 @@ let deps!: AgentsPanelDeps;
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
-const runtimeAddAgentEl = document.querySelector<HTMLButtonElement>("#runtime-add-agent")!;
+const runtimeTabsMoreEl = document.querySelector<HTMLButtonElement>("#runtime-tabs-more")!;
+const runtimeSectionEl = document.querySelector<HTMLElement>(".runtime-section")!;
+const HOME_AGENT_VISIBLE = 6;
+let runtimeTabsExpanded = false;
 const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
 const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
 const agentsSecurityTitleEl = document.querySelector<HTMLElement>("#agents-security-title")!;
@@ -105,39 +108,37 @@ function updateHealthStrip(installed: number, total: number, scanning = false): 
     return;
   }
   if (total === 0 || installed === 0) {
-    healthPillEl.classList.add("is-bad");
-    healthLabelEl.textContent = t("health.bad");
+    healthPillEl.classList.add("is-partial");
+    healthLabelEl.textContent = t("health.empty");
     return;
   }
-  if (installed === total) {
-    healthPillEl.classList.add("is-good");
-    healthLabelEl.textContent = t("health.good");
-    return;
-  }
-  healthPillEl.classList.add("is-partial");
-  healthLabelEl.textContent = t("health.partial", {
-    installed: String(installed),
-    total: String(total),
-  });
+  healthPillEl.classList.add("is-good");
+  healthLabelEl.textContent = t("health.good");
 }
 
 function updateAgentsSecurityOverview(report: DoctorReport): void {
   const installed = report.runtimes.filter((runtime) => runtime.installed).length;
-  const total = report.runtimes.length;
   const issueCount = [...repairPreviewByRuntime.values()].reduce(
     (count, preview) => count + preview.summary.fail + preview.summary.warn,
     0,
   );
-  const readiness = total > 0 ? Math.round((installed / total) * 100) : 0;
+  const environmentOk = installed > 0 && issueCount === 0;
+  const readiness = environmentOk ? 100 : installed === 0 ? 0 : 70;
   agentsReadinessRingEl.style.setProperty("--readiness", String(readiness));
-  agentsReadinessValueEl.textContent = total > 0 ? `${installed}/${total}` : "—";
+  agentsReadinessValueEl.textContent = installed > 0 ? String(installed) : "0";
   agentsSecurityTitleEl.textContent =
-    installed === total && total > 0 ? t("agents.securityReady") : t("agents.securityTitle");
-  agentsSecurityDescEl.textContent = t("agents.securityDesc", {
-    installed: String(installed),
-    total: String(total),
-    issues: String(issueCount),
-  });
+    installed === 0
+      ? t("agents.securityEmpty")
+      : environmentOk
+        ? t("agents.securityReady")
+        : t("agents.securityTitle");
+  agentsSecurityDescEl.textContent =
+    installed === 0
+      ? t("agents.securityDescEmpty")
+      : t("agents.securityDesc", {
+          installed: String(installed),
+          issues: String(issueCount),
+        });
   agentsSecurityInstalledEl.textContent = t("agents.runtimeAvailable", {
     count: String(installed),
   });
@@ -146,12 +147,42 @@ function updateAgentsSecurityOverview(report: DoctorReport): void {
   });
   agentsSecurityIssuesEl.classList.toggle("has-issues", issueCount > 0);
   const overview = document.querySelector<HTMLElement>("#agents-security-overview");
-  overview?.classList.toggle("is-ok", installed === total && total > 0 && issueCount === 0);
+  overview?.classList.toggle("is-ok", environmentOk);
   agentsReadinessRingEl.classList.toggle("is-warn", issueCount > 0 && installed > 0);
-  agentsReadinessRingEl.classList.toggle(
-    "is-fail",
-    installed === 0 || (issueCount > 0 && installed < total),
-  );
+  agentsReadinessRingEl.classList.toggle("is-fail", false);
+  agentsReadinessRingEl.classList.toggle("is-empty", installed === 0);
+}
+
+function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: string): void {
+  const solo = installedRuntimes.length < 2;
+  runtimeSectionEl.classList.toggle("is-solo", solo);
+  runtimeTabsEl.hidden = solo;
+  if (solo) {
+    runtimeTabsEl.innerHTML = "";
+    runtimeTabsMoreEl.hidden = true;
+    return;
+  }
+  const overflow = installedRuntimes.length > HOME_AGENT_VISIBLE;
+  if (
+    overflow &&
+    installedRuntimes.slice(HOME_AGENT_VISIBLE).some((runtime) => runtime.id === selectedId)
+  ) {
+    runtimeTabsExpanded = true;
+  }
+  const visible =
+    overflow && !runtimeTabsExpanded
+      ? installedRuntimes.slice(0, HOME_AGENT_VISIBLE)
+      : installedRuntimes;
+  runtimeTabsEl.innerHTML = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
+  if (!overflow) {
+    runtimeTabsMoreEl.hidden = true;
+    return;
+  }
+  runtimeTabsMoreEl.hidden = false;
+  const hidden = installedRuntimes.length - HOME_AGENT_VISIBLE;
+  runtimeTabsMoreEl.textContent = runtimeTabsExpanded
+    ? t("runtimes.showLess")
+    : t("runtimes.showMore", { count: String(hidden) });
 }
 
 function hasActiveWorkspace(): boolean {
@@ -238,7 +269,15 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       diagnose.runtimeCardActionContext(runtime),
     );
     const relatedResourcesHtml = renderRelatedResourcesHtml(preview);
-    return renderRuntimeCard(runtime, appState.hermesModel, actionsHtml, relatedResourcesHtml);
+    const solo =
+      (appState.lastReport?.runtimes.filter((item) => item.installed).length ?? 0) === 1;
+    return renderRuntimeCard(
+      runtime,
+      appState.hermesModel,
+      actionsHtml,
+      relatedResourcesHtml,
+      solo,
+    );
   }
 
   async function renderReport(
@@ -249,12 +288,12 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const installed = report.runtimes.filter((runtime) => runtime.installed).length;
     const total = report.runtimes.length;
 
-    installedCountEl.textContent = `${installed}/${total}`;
+    installedCountEl.textContent = String(installed);
     profileStatusEl.textContent = report.active_preset ?? t("status.none");
     if (!opts?.relocalize) {
       lastScanEl.textContent = formatTime(new Date());
     }
-    runtimeCountEl.textContent = `${installed}/${total}`;
+    runtimeCountEl.textContent = String(installed);
     updateHealthStrip(installed, total);
     updateAgentsSecurityOverview(report);
 
@@ -273,16 +312,16 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     }
 
     const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
-    const canAddMore = report.runtimes.some((runtime) => !runtime.installed);
-    runtimeAddAgentEl.hidden = !canAddMore || installedRuntimes.length === 0;
-    runtimeAddAgentEl.textContent = t("runtimes.addAnother");
     if (installedRuntimes.length === 0) {
       appState.activeRuntimeId = null;
       runtimeTabsEl.innerHTML = "";
+      runtimeTabsEl.hidden = true;
+      runtimeTabsMoreEl.hidden = true;
+      runtimeSectionEl.classList.remove("is-solo");
       runtimesEl.innerHTML = `
-        <div class="empty-state">
+        <div class="runtime-empty">
           <p>${t("runtimes.emptyInstalled")}</p>
-          <p class="empty-state-hint">${t("runtimes.emptyInstalledHint")}</p>
+          <p class="runtime-empty-hint">${t("runtimes.emptyInstalledHint")}</p>
           <button type="button" class="btn-primary" data-action="open-agent-catalog">${t("runtimes.addAgent")}</button>
         </div>
       `;
@@ -294,11 +333,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
     appState.activeRuntimeId = selectedId;
-    runtimeTabsEl.innerHTML = renderRuntimeTabs(
-      installedRuntimes,
-      selectedId,
-      repairPreviewByRuntime,
-    );
+    paintRuntimeTabs(installedRuntimes, selectedId);
 
     const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
     runtimesEl.innerHTML = activeRuntime ? buildRuntimeCardHtml(activeRuntime) : "";
@@ -346,11 +381,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         return;
       }
       appState.activeRuntimeId = selectedId;
-      runtimeTabsEl.innerHTML = renderRuntimeTabs(
-        installedRuntimes,
-        selectedId,
-        repairPreviewByRuntime,
-      );
+      paintRuntimeTabs(installedRuntimes, selectedId);
       const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
       if (activeRuntime) {
         const preview = repairPreviewByRuntime.get(selectedId);
@@ -385,8 +416,13 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   diagnose.bindEvents();
 
-  runtimeAddAgentEl.addEventListener("click", () => {
-    void invoke("open_resources_window_command", { section: "agents" });
+  runtimeTabsMoreEl.addEventListener("click", () => {
+    runtimeTabsExpanded = !runtimeTabsExpanded;
+    const report = appState.lastReport;
+    if (!report) return;
+    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
+    if (selectedId) paintRuntimeTabs(installedRuntimes, selectedId);
   });
 
   runtimeTabsEl.addEventListener("click", (event) => {
@@ -421,6 +457,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     if (action === "open-agent-catalog") {
       void invoke("open_resources_window_command", { section: "agents" });
+      return;
+    }
+    if (action === "open-resources-skills") {
+      void invoke("open_resources_window_command", { section: "skills" });
       return;
     }
 

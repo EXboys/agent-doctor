@@ -1,3 +1,4 @@
+import { agentBrandIconHtml } from "./agent-brand";
 import { t, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
@@ -36,6 +37,11 @@ export const BROWSER_MCP_RUNTIME_IDS = new Set([
 
 export function isAskRuntimeId(runtimeId: string): boolean {
   return ASK_RUNTIME_IDS.has(runtimeId);
+}
+
+/** Desktop app (not Agent Doctor Ask / CLI). Open the product window. */
+export function isDesktopAppRuntimeId(runtimeId: string): boolean {
+  return runtimeId === "cursor";
 }
 
 export function supportsBrowserMcp(runtimeId: string): boolean {
@@ -291,11 +297,45 @@ export function renderRuntimeCardActions(
   return parts.join("");
 }
 
+function agentHomeBlurb(runtimeId: string): string {
+  if (runtimeId === "hermes") return t("resources.agentBlurbHermes");
+  if (runtimeId === "openclaw") return t("resources.agentBlurbOpenclaw");
+  if (runtimeId === "claude-code") return t("resources.agentBlurbClaude");
+  if (runtimeId === "codex") return t("resources.agentBlurbCodex");
+  if (runtimeId === "deepseek-harness") return t("resources.agentBlurbDeepseek");
+  if (runtimeId === "qoder") return t("resources.agentBlurbQoder");
+  if (runtimeId === "workbuddy") return t("resources.agentBlurbWorkbuddy");
+  if (runtimeId === "cursor") return t("resources.agentBlurbCursor");
+  return "";
+}
+
+function renderSoloHero(runtime: RuntimeDoctorResult): string {
+  const blurb = agentHomeBlurb(runtime.id);
+  return `
+    <div class="runtime-solo-hero">
+      <span class="runtime-solo-logo" aria-hidden="true">${agentBrandIconHtml(runtime.id)}</span>
+      <div class="runtime-solo-copy">
+        <p class="runtime-solo-kicker">${escapeHtml(t("runtimes.soloKicker"))}</p>
+        <h2 class="runtime-tab-title">${escapeHtml(runtimeListName(runtime))}</h2>
+        ${blurb ? `<p class="runtime-solo-blurb">${escapeHtml(blurb)}</p>` : ""}
+      </div>
+    </div>
+    <div class="runtime-solo-next">
+      <p>${escapeHtml(t("runtimes.soloNext"))}</p>
+      <div class="runtime-solo-next-actions">
+        <button type="button" class="btn-secondary" data-action="open-resources-skills">${escapeHtml(t("runtimes.soloAddSkills"))}</button>
+        <button type="button" class="btn-ghost" data-action="open-agent-catalog">${escapeHtml(t("runtimes.soloSeeOthers"))}</button>
+      </div>
+    </div>
+  `;
+}
+
 export function renderHermesCard(
   runtime: RuntimeDoctorResult,
   hermesModel: HermesSettings | null,
   actionsHtml: string,
   relatedResourcesHtml: string,
+  solo = false,
 ): string {
   const model = hermesModel ?? {
     provider: "",
@@ -328,7 +368,8 @@ export function renderHermesCard(
     : t("runtime.installed");
 
   return `
-    <article class="runtime hermes" data-runtime="hermes">
+    <article class="runtime hermes${solo ? " is-solo" : ""}" data-runtime="hermes">
+      ${solo ? renderSoloHero(runtime) : ""}
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="badge ${badgeClass}">${badgeText}</span>
@@ -346,9 +387,10 @@ export function renderRuntimeCard(
   hermesModel: HermesSettings | null,
   actionsHtml: string,
   relatedResourcesHtml: string,
+  solo = false,
 ): string {
   if (runtime.id === "hermes" && runtime.installed) {
-    return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml);
+    return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml, solo);
   }
 
   const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
@@ -369,7 +411,8 @@ export function renderRuntimeCard(
       : "";
 
   return `
-    <article class="runtime ${runtimeClass(runtime.id)}" data-runtime="${runtime.id}">
+    <article class="runtime ${runtimeClass(runtime.id)}${solo ? " is-solo" : ""}" data-runtime="${runtime.id}">
+      ${solo ? renderSoloHero(runtime) : ""}
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="runtime-badges">
@@ -470,6 +513,7 @@ export function renderRuntimeTabs(
           data-runtime-tab="${runtime.id}"
         >
           <span class="runtime-tab-dot ${runtimeTabDotClass(runtime, preview)}" aria-hidden="true"></span>
+          <span class="runtime-tab-logo" aria-hidden="true">${agentBrandIconHtml(runtime.id)}</span>
           <span class="runtime-tab-label">${escapeHtml(shortName)}</span>
           <span class="runtime-tab-meta">${escapeHtml(displayMeta)}</span>
         </button>

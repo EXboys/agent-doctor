@@ -103,7 +103,7 @@
             <section class="health-card agents-security-overview" id="agents-security-overview" aria-live="polite">
               <div class="health-card-ring agents-readiness-ring" id="agents-readiness-ring">
                 <strong id="agents-readiness-value">—</strong>
-                <span data-i18n="agents.readiness">运行时就绪</span>
+                <span data-i18n="agents.readiness">本机 Agent</span>
               </div>
               <div class="health-card-copy agents-security-copy">
                 <h2 id="agents-security-title" data-i18n="agents.securityTitle">Agent 环境状态</h2>
@@ -117,7 +117,7 @@
 
             <section class="widget-section runtime-section">
               <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
-              <button id="runtime-add-agent" type="button" class="runtime-add-agent" hidden data-i18n="runtimes.addAnother">再装一个</button>
+              <button id="runtime-tabs-more" type="button" class="runtime-tabs-more" hidden></button>
               <span id="runtime-count" class="sr-only">—</span>
               <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
             </section>
@@ -136,7 +136,7 @@
             <div class="resources-hub-cards">
               <button id="open-resources-agents" type="button" class="resources-hub-card">
                 <span class="resources-hub-card-kicker" data-i18n="resources.tabAgents">Agent</span>
-                <strong class="resources-hub-card-title" data-i18n="resources.hubAgentsCardTitle">还能装</strong>
+                <strong class="resources-hub-card-title" data-i18n="resources.hubAgentsCardTitle">Agent</strong>
                 <span class="resources-hub-card-meta" id="hub-agents-count">—</span>
                 <span class="resources-hub-card-desc" data-i18n="resources.hubAgentsCardDesc">把新的 Agent 装到本机</span>
               </button>

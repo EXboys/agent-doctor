@@ -189,6 +189,9 @@ pub fn skill_mount_runtime_ids() -> Vec<String> {
     if presence.deepseek_harness {
         out.push("deepseek-harness".into());
     }
+    if presence.cursor {
+        out.push("cursor".into());
+    }
     out
 }
 
@@ -477,6 +480,9 @@ fn detect_agents_using(
     if presence.deepseek_harness {
         agents.push(probe_deepseek_harness(skill_id, cache_path, workspaces));
     }
+    if presence.cursor {
+        agents.push(probe_cursor(skill_id, cache_path, workspaces));
+    }
 
     // Stable order matching Agents tab.
     let order = [
@@ -485,6 +491,7 @@ fn detect_agents_using(
         "claude-code",
         "codex",
         "deepseek-harness",
+        "cursor",
     ];
     agents.sort_by_key(|a| order.iter().position(|id| *id == a.runtime).unwrap_or(99));
     agents
@@ -497,6 +504,7 @@ struct RuntimePresence {
     claude_code: bool,
     codex: bool,
     deepseek_harness: bool,
+    cursor: bool,
 }
 
 fn detect_runtime_presence() -> RuntimePresence {
@@ -508,6 +516,7 @@ fn detect_runtime_presence() -> RuntimePresence {
         claude_code: runtime_present("claude-code"),
         codex: runtime_present("codex"),
         deepseek_harness: runtime_present("deepseek-harness"),
+        cursor: runtime_present("cursor"),
     }
 }
 
@@ -520,8 +529,17 @@ fn runtime_present(runtime_id: &str) -> bool {
         }
         "codex" => home_join(".codex").is_dir() || which_exists("codex"),
         "deepseek-harness" => deepseek_harness_present(),
+        "cursor" => cursor_present(),
         _ => false,
     }
+}
+
+fn cursor_present() -> bool {
+    home_join(".cursor").is_dir()
+        || PathBuf::from("/Applications/Cursor.app").is_dir()
+        || home_join("Applications/Cursor.app").is_dir()
+        || which_exists("cursor")
+        || which_exists("cursor-agent")
 }
 
 fn deepseek_harness_present() -> bool {
@@ -579,6 +597,46 @@ fn probe_claude_code(
     let primary = hits.first().map(|(_, p)| p.clone()).unwrap_or_else(|| user);
     SkillAgentUsage {
         runtime: "claude-code".into(),
+        scope: if hits.is_empty() {
+            "not mounted".into()
+        } else {
+            hits.iter()
+                .map(|(s, _)| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        path: primary.display().to_string(),
+        mounted: !hits.is_empty(),
+    }
+}
+
+fn probe_cursor(
+    skill_id: &str,
+    cache_path: &Path,
+    workspaces: &WorkspacesDocument,
+) -> SkillAgentUsage {
+    let mut hits: Vec<(String, PathBuf)> = Vec::new();
+    let user = home_join(".cursor/skills").join(skill_id);
+    if path_has_skill(&user, cache_path) {
+        hits.push(("user".into(), user.clone()));
+    }
+    for (name, entry) in &workspaces.workspaces {
+        let project = entry.path.join(".cursor/skills").join(skill_id);
+        if path_has_skill(&project, cache_path) {
+            let active = workspaces.active.as_deref() == Some(name.as_str());
+            hits.push((
+                if active {
+                    format!("ws:{name}*")
+                } else {
+                    format!("ws:{name}")
+                },
+                project,
+            ));
+        }
+    }
+    let primary = hits.first().map(|(_, p)| p.clone()).unwrap_or_else(|| user);
+    SkillAgentUsage {
+        runtime: "cursor".into(),
         scope: if hits.is_empty() {
             "not mounted".into()
         } else {
@@ -845,7 +903,7 @@ fn path_has_skill(path: &Path, cache_path: &Path) -> bool {
 pub struct SkillMountOptions {
     /// Empty = all cached skills.
     pub skill_ids: Vec<String>,
-    /// Empty = all present runtimes (hermes/openclaw/claude-code/codex).
+    /// Empty = all present runtimes (hermes/openclaw/claude-code/codex/cursor).
     pub runtimes: Vec<String>,
     /// Also symlink into the active workspace project `.claude/skills/`.
     pub include_active_workspace: bool,
@@ -1116,6 +1174,7 @@ fn resolve_mount_runtimes(only: &[String]) -> Vec<String> {
         "claude-code",
         "codex",
         "deepseek-harness",
+        "cursor",
     ];
     if only.is_empty() {
         return all
@@ -1160,6 +1219,16 @@ fn mount_targets_for(
                 if let Some(active) = workspaces.active.as_deref() {
                     if let Some(entry) = workspaces.workspaces.get(active) {
                         targets.push(entry.path.join(".dsh/skills").join(skill_id));
+                    }
+                }
+            }
+        }
+        "cursor" => {
+            targets.push(home_join(".cursor/skills").join(skill_id));
+            if include_active_workspace {
+                if let Some(active) = workspaces.active.as_deref() {
+                    if let Some(entry) = workspaces.workspaces.get(active) {
+                        targets.push(entry.path.join(".cursor/skills").join(skill_id));
                     }
                 }
             }
@@ -1344,6 +1413,33 @@ mod tests {
                 .any(|id| id == "deepseek-harness"),
             "available_mount_runtimes missing deepseek-harness: {:?}",
             report.available_mount_runtimes
+        );
+    }
+
+    #[test]
+    fn cursor_in_skill_agent_list_when_present() {
+        if !cursor_present() {
+            return;
+        }
+        let report = list_skills_inventory_with_options(&SkillsInventoryOptions {
+            remote_stats: false,
+        })
+        .expect("inventory");
+        assert!(
+            report
+                .available_mount_runtimes
+                .iter()
+                .any(|id| id == "cursor"),
+            "available_mount_runtimes missing cursor: {:?}",
+            report.available_mount_runtimes
+        );
+        let Some(skill) = report.skills.first() else {
+            return;
+        };
+        let runtimes: Vec<&str> = skill.agents.iter().map(|a| a.runtime.as_str()).collect();
+        assert!(
+            runtimes.contains(&"cursor"),
+            "first skill agents missing cursor: {runtimes:?}"
         );
     }
 

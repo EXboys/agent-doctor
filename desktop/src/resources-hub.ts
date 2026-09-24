@@ -46,6 +46,7 @@ const SKILL_MOUNT_RUNTIME_ORDER = [
   "claude-code",
   "codex",
   "deepseek-harness",
+  "cursor",
 ] as const;
 
 function renderSkillsInventory(report: SkillsInventoryReport) {
@@ -262,27 +263,17 @@ let hubRefresh: Promise<void> | null = null;
 let hubRefreshedAt = 0;
 
 async function loadResourcesHub() {
-  // Paint whatever we already have so the tab switch feels instant.
+  // Cards only need counts already in memory. Scanning 100+ skills here freezes the tab.
   updateResourcesHubSummary();
+  const now = Date.now();
+  const mcpFresh = appState.lastMcpStatus != null && now - hubRefreshedAt < 60_000;
+  if (mcpFresh) {
+    return;
+  }
   if (hubRefresh) {
     return hubRefresh;
   }
-
-  const now = Date.now();
-  // Hub cards only need a skill count + browser badge. Full inventory (118 skills ×
-  // mount probes) belongs in the library window — do not rescan on every tab click.
-  const skillsReady = appState.lastSkillsInventory != null;
-  const mcpFresh = appState.lastMcpStatus != null && now - hubRefreshedAt < 30_000;
-  if (skillsReady && mcpFresh) {
-    return;
-  }
-
-  hubRefresh = Promise.all([
-    mcpFresh ? Promise.resolve() : loadMcpStatus(),
-    skillsReady
-      ? Promise.resolve()
-      : loadSkillsInventory({ remoteStats: false }),
-  ])
+  hubRefresh = loadMcpStatus()
     .then(() => {
       hubRefreshedAt = Date.now();
     })
@@ -293,9 +284,14 @@ async function loadResourcesHub() {
 }
 
 async function openResourcesWindow(
-  section?: "agents" | "skills" | "tools" | "browser" | "catalog",
+  section?: "agents" | "skills" | "mall" | "tools" | "browser" | "catalog" | "store",
 ): Promise<void> {
-  const normalized = !section || section === "catalog" ? "skills" : section;
+  const normalized =
+    !section || section === "catalog"
+      ? "skills"
+      : section === "store"
+        ? "mall"
+        : section;
   await invoke("open_resources_window_command", { section: normalized });
 }
 
@@ -374,7 +370,7 @@ export interface ResourcesHubApi {
   updateResourcesHubSummary: () => void;
   loadMcpStatus: () => Promise<void>;
   loadResourcesHub: () => Promise<void>;
-  openResourcesWindow: (section?: "agents" | "skills" | "tools" | "browser" | "catalog") => Promise<void>;
+  openResourcesWindow: (section?: "agents" | "skills" | "mall" | "tools" | "browser" | "catalog" | "store") => Promise<void>;
   toggleSkillRuntimeMount: (
     chip: HTMLButtonElement,
     skillId: string,

@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { setAgentBrandIcon } from "./agent-brand";
 import { homeDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -40,7 +41,7 @@ import type {
   RuntimeDoctorResult,
 } from "./types";
 
-type ResourcesSection = "agents" | "skills" | "tools" | "browser";
+type ResourcesSection = "agents" | "skills" | "mall" | "tools" | "browser";
 type SkillFilter = "all" | "issue" | "store" | SkillCategoryId;
 type ToolFilter = "all" | "issue";
 type MallFilter = "all" | "free" | "paid" | "pack" | "skill";
@@ -49,9 +50,7 @@ const MCP_SHOW_UI_KEY = "agent-doctor.mcp.showUi";
 const MCP_USER_DATA_DIR_KEY = "agent-doctor.mcp.userDataDir";
 const MCP_PROFILE_DIRECTORY_KEY = "agent-doctor.mcp.profileDirectory";
 
-const subtitleEl = document.querySelector<HTMLElement>("#resources-subtitle")!;
-const refreshAllEl = document.querySelector<HTMLButtonElement>("#resources-refresh-all")!;
-const closeEl = document.querySelector<HTMLButtonElement>("#resources-close")!;
+const subtitleEl = document.querySelector<HTMLElement>("#resources-subtitle");
 const sectionTabsEl = document.querySelector<HTMLElement>("#resources-section-tabs")!;
 const skillsPanelEl = document.querySelector<HTMLElement>("#panel-skills")!;
 const skillFiltersEl = document.querySelector<HTMLElement>("#resources-skill-filters")!;
@@ -132,6 +131,14 @@ const SKILL_MOUNT_RUNTIME_ORDER = [
   "claude-code",
   "codex",
   "deepseek-harness",
+  "cursor",
+] as const;
+
+const AGENT_FILTER_ORDER = [
+  ...SKILL_MOUNT_RUNTIME_ORDER,
+  "qoder",
+  "workbuddy",
+  "cursor",
 ] as const;
 
 function agentChipLabel(runtime: string): string {
@@ -168,22 +175,45 @@ function applyI18n(): void {
   searchEl.placeholder = t("resources.searchGlobal");
   mcpDiagnoseWireEl.title = t("mcp.diagnoseWireHint");
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
+  const mallTab = document.querySelector<HTMLButtonElement>("#resources-tab-mall");
+  if (mallTab) mallTab.hidden = !personalEdition;
+}
+
+function skillsPanelActive(): boolean {
+  return activeSection === "skills" || activeSection === "mall";
 }
 
 function setSection(section: ResourcesSection): void {
+  if (section === "mall" && !personalEdition) section = "skills";
+  if (section === "mall") {
+    skillFilter = "store";
+    agentFilter = "all";
+  } else if (section === "skills" && skillFilter === "store") {
+    skillFilter = "all";
+  }
   activeSection = section;
+  const panelSection = section === "mall" ? "skills" : section;
   sectionTabsEl.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((btn) => {
     const active = btn.dataset.section === section;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
   document.querySelectorAll<HTMLElement>("[data-section-panel]").forEach((panel) => {
-    const active = panel.dataset.sectionPanel === section;
+    const active = panel.dataset.sectionPanel === panelSection;
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
-  if (section === "agents" && !lastDoctorReport) {
+  if ((section === "agents" || section === "skills") && !lastDoctorReport) {
     void loadDoctor();
+  }
+  if (section === "mall") {
+    if (lastMallCatalog) renderResourcesList();
+    else void loadMall();
+    return;
+  }
+  if (section === "skills") {
+    if (lastSkillsInventory || lastMallCatalog) renderResourcesList();
+    else void loadSkills();
   }
 }
 
@@ -223,6 +253,10 @@ function countSkillMatches(): number {
   return buildUnifiedSkillEntries()
     .filter((entry) => entryMatchesQuery(entry))
     .length;
+}
+
+function countLocalSkillMatches(): number {
+  return buildLocalSkillEntries().filter((entry) => entryMatchesQuery(entry)).length;
 }
 
 function countToolMatches(): number {
@@ -288,20 +322,19 @@ async function markerLooksPresent(path: string): Promise<boolean> {
 }
 
 async function refreshCursorOnThisComputer(): Promise<void> {
+  const known = lastDoctorReport?.runtimes.find((runtime) => runtime.id === "cursor");
+  if (known?.installed || known?.profile?.key_source) {
+    cursorOnThisComputer = true;
+    return;
+  }
   try {
     const home = (await homeDir()).replace(/[/\\]+$/, "");
     const markers = [
       "/Applications/Cursor.app/Contents/Info.plist",
-      `${home}/Applications/Cursor.app/Contents/Info.plist`,
       `${home}/.cursor/argv.json`,
-      `${home}/.cursor/cli-config.json`,
     ];
-    for (const marker of markers) {
-      if (await markerLooksPresent(marker)) {
-        cursorOnThisComputer = true;
-        return;
-      }
-    }
+    const hits = await Promise.all(markers.map((marker) => markerLooksPresent(marker)));
+    if (hits.some(Boolean)) cursorOnThisComputer = true;
   } catch {
     // Keep the last doctor result when the desktop check is unavailable.
   }
@@ -377,28 +410,36 @@ function filteredMallItems(): TeamupsCatalogItem[] {
 /** When searching, leave Browser (no list) and jump to the tab that has hits. */
 function maybeJumpToSearchHits(): void {
   if (!resourceQuery) return;
-  const skillHits = countSkillMatches();
+  const skillHits = countLocalSkillMatches();
   const toolHits = countToolMatches();
   const agentHits = countAgentMatches();
+  const mallHits = personalEdition ? filteredMallItems().length : 0;
   if (activeSection === "browser") {
     if (agentHits > 0) setSection("agents");
     else if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
     else if (toolHits > 0) setSection("tools");
     else setSection("skills");
     return;
   }
+  if (activeSection === "mall" && mallHits === 0) {
+    if (skillHits > 0) setSection("skills");
+    else if (agentHits > 0) setSection("agents");
+    else if (toolHits > 0) setSection("tools");
+    return;
+  }
   if (activeSection === "skills" && skillHits === 0) {
-    if (agentHits > 0) setSection("agents");
+    if (mallHits > 0) setSection("mall");
+    else if (agentHits > 0) setSection("agents");
     else if (toolHits > 0) setSection("tools");
   } else if (activeSection === "tools" && toolHits === 0) {
     if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
     else if (agentHits > 0) setSection("agents");
   } else if (activeSection === "agents" && agentHits === 0) {
     if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
     else if (toolHits > 0) setSection("tools");
-  }
-  if (activeSection === "skills" && resourceQuery && skillHits > 0 && skillFilter === "store") {
-    skillFilter = "all";
   }
 }
 
@@ -922,30 +963,13 @@ function appendFilterChip(
   parent.appendChild(btn);
 }
 
-function appendScopeChips(localCount: number, storeCount: number): void {
-  if (!personalEdition) return;
-  appendFilterChip(`${t("resources.scopeLocal")} ${localCount}`, !isStoreScope(), () => {
-    if (!isStoreScope()) return;
-    skillFilter = "all";
-    skillNavActive = "all";
-    skillsStatusMessage = null;
-    renderResourcesList();
-  }, { scope: "local" });
-  appendFilterChip(`${t("resources.scopeStore")} ${storeCount}`, isStoreScope(), () => {
-    if (skillFilter === "store") return;
-    skillFilter = "store";
-    agentFilter = "all";
-    skillsStatusMessage = null;
-    if (!lastMallCatalog) {
-      void loadMall().then(() => renderResourcesList());
-      return;
-    }
-    renderResourcesList();
-  }, { scope: "store" });
-  const rule = document.createElement("span");
-  rule.className = "resources-nav-rule";
-  rule.setAttribute("aria-hidden", "true");
-  skillFiltersEl.appendChild(rule);
+function installedSkillAgents(): string[] {
+  const installed = new Set<string>();
+  for (const runtime of lastDoctorReport?.runtimes ?? []) {
+    if (withCatalogInstallState(runtime).installed) installed.add(runtime.id);
+  }
+  if (cursorOnThisComputer) installed.add("cursor");
+  return AGENT_FILTER_ORDER.filter((id) => installed.has(id));
 }
 
 function renderSkillFilters(): void {
@@ -967,7 +991,6 @@ function renderSkillFilters(): void {
   const showStoreChrome = isStoreScope();
   mallAccountEl.hidden = !showStoreChrome;
   skillFiltersEl.replaceChildren();
-  appendScopeChips(local.length, storeItems.length);
 
   if (showStoreChrome) {
     agentBarEl.hidden = true;
@@ -1031,6 +1054,16 @@ function renderSkillFilters(): void {
 }
 
 function renderAgentBar(local: UnifiedSkillEntry[]): void {
+  const agents = installedSkillAgents();
+  if (agentFilter !== "all" && !agents.includes(agentFilter)) {
+    agentFilter = "all";
+  }
+  if (agents.length < 2) {
+    agentBarEl.hidden = true;
+    agentHintEl.hidden = true;
+    agentHintEl.replaceChildren();
+    return;
+  }
   agentBarEl.hidden = false;
   agentFiltersEl.replaceChildren();
   appendFilterChip(
@@ -1043,7 +1076,7 @@ function renderAgentBar(local: UnifiedSkillEntry[]): void {
     { agentFilter: "all" },
     agentFiltersEl,
   );
-  for (const runtime of SKILL_MOUNT_RUNTIME_ORDER) {
+  for (const runtime of agents) {
     const count = local.filter((entry) => entryMountedOn(entry, runtime)).length;
     appendFilterChip(
       agentChipLabel(runtime),
@@ -1509,10 +1542,12 @@ function renderResourcesList(): void {
       .filter((s) => !s.is_browser)
       .map((s) => s.name.trim().toLowerCase()),
   );
-  subtitleEl.textContent = t("resources.windowSubtitle", {
-    skills: String(lastSkillsInventory?.skills.length ?? 0),
-    mcp: String(uniqueMcp.size),
-  });
+  if (subtitleEl) {
+    subtitleEl.textContent = t("resources.windowSubtitle", {
+      skills: String(lastSkillsInventory?.skills.length ?? 0),
+      mcp: String(uniqueMcp.size),
+    });
+  }
   renderSkillsList();
   renderToolsList();
   if (!skillsStatusMessage) {
@@ -1585,7 +1620,9 @@ async function loadSkills(): Promise<void> {
   } catch {
     lastSkillsInventory = null;
   }
-  renderResourcesList();
+  if (skillsPanelActive()) {
+    renderResourcesList();
+  }
 }
 
 async function loadMall(): Promise<void> {
@@ -1597,7 +1634,9 @@ async function loadMall(): Promise<void> {
     lastMallCatalog = catalog;
     lastTeamupsAccount = account;
     applyAccountOwnership();
-    renderResourcesList();
+    if (skillsPanelActive()) {
+      renderResourcesList();
+    }
   } catch (error) {
     lastMallCatalog = null;
     setSkillsFootnote(withErrorDetail(t("resources.mallLoadFailed"), error));
@@ -1765,8 +1804,8 @@ function renderAgentCatalog(): void {
     li.dataset.runtime = runtime.id;
 
     const icon = document.createElement("span");
-    icon.className = "res-catalog-icon is-skill";
-    icon.textContent = (agentChipLabel(runtime.id).charAt(0) || "?").toUpperCase();
+    icon.className = "res-catalog-icon is-agent";
+    setAgentBrandIcon(icon, runtime.id);
 
     const body = document.createElement("div");
     body.className = "res-catalog-body";
@@ -1791,7 +1830,7 @@ function renderAgentCatalog(): void {
       const opening = agentOpenInFlight.has(runtime.id);
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "btn-primary btn-compact";
+      btn.className = "btn-secondary btn-compact";
       btn.textContent = opening ? t("runtime.opening") : t("runtime.open");
       btn.disabled = opening;
       btn.addEventListener("click", () => {
@@ -1902,12 +1941,60 @@ async function loadDoctor(): Promise<void> {
   }
   await refreshCursorOnThisComputer();
   renderAgentCatalog();
+  if (activeSection === "skills") renderResourcesList();
 }
 
-async function refreshAll(): Promise<void> {
-  const loads: Array<Promise<void>> = [loadMcpStatus(), loadSkills(), loadDoctor()];
-  if (personalEdition) loads.push(loadMall());
-  await Promise.all(loads);
+let refreshInFlight: Promise<void> | null = null;
+let lastRefreshAt = 0;
+
+function paintVisibleSection(): void {
+  if (activeSection === "agents") {
+    renderAgentCatalog();
+    return;
+  }
+  if (activeSection === "tools") {
+    renderToolsList();
+    return;
+  }
+  if (activeSection === "browser") {
+    return;
+  }
+  renderResourcesList();
+}
+
+async function refreshVisible(): Promise<void> {
+  if (activeSection === "agents") {
+    await loadDoctor();
+    void loadMcpStatus();
+    void loadSkills();
+    return;
+  }
+  if (activeSection === "tools" || activeSection === "browser") {
+    await loadMcpStatus();
+    void loadDoctor();
+    void loadSkills();
+    return;
+  }
+  await loadSkills();
+  if (personalEdition) void loadMall();
+  void loadDoctor();
+  void loadMcpStatus();
+}
+
+async function refreshAll(force = false): Promise<void> {
+  if (refreshInFlight) return refreshInFlight;
+  if (!force && lastRefreshAt > 0 && Date.now() - lastRefreshAt < 12_000) {
+    paintVisibleSection();
+    return;
+  }
+  refreshInFlight = refreshVisible()
+    .then(() => {
+      lastRefreshAt = Date.now();
+    })
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
 }
 
 async function diagnoseAndWireBrowserMcp(): Promise<void> {
@@ -1960,6 +2047,7 @@ sectionTabsEl.addEventListener("click", (event) => {
   if (
     btn.dataset.section === "agents" ||
     btn.dataset.section === "skills" ||
+    btn.dataset.section === "mall" ||
     btn.dataset.section === "tools" ||
     btn.dataset.section === "browser"
   ) {
@@ -1993,16 +2081,9 @@ searchEl.addEventListener("input", () => {
   renderAgentCatalog();
 });
 
-refreshAllEl.addEventListener("click", () => {
-  skillsStatusMessage = null;
-  void refreshAll();
-});
 mcpRefreshEl.addEventListener("click", () => {
   lastWireActions = null;
   void loadMcpStatus();
-});
-closeEl.addEventListener("click", () => {
-  void invoke("close_resources_window_command", { destroy: false });
 });
 
 mcpShowUiEl.addEventListener("change", () => {
@@ -2049,18 +2130,15 @@ mcpDiagnoseWireEl.addEventListener("click", () => {
 });
 
 applyI18n();
-void refreshAll();
 void listen<{ section?: string }>("resources-window-focus", (event) => {
   const section = event.payload?.section;
   if (section === "agents") setSection("agents");
   else if (section === "browser") setSection("browser");
   else if (section === "tools" || section === "mcp") setSection("tools");
-  else if (section === "mall" || section === "store") {
-    setSection("skills");
-    skillFilter = "store";
-    if (!lastMallCatalog) void loadMall();
-    else renderResourcesList();
-  }
+  else if (section === "mall" || section === "store") setSection("mall");
   else if (section === "skills" || section === "catalog") setSection("skills");
   void refreshAll();
 });
+window.setTimeout(() => {
+  if (lastRefreshAt === 0 && !refreshInFlight) void refreshAll(true);
+}, 80);

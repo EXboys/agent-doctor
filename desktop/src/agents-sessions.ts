@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isDesktopAppRuntimeId } from "./agents-ui";
 import { t } from "./i18n";
 import type { OpenSessionReport } from "./types";
 
@@ -26,8 +27,25 @@ const ASK_VERIFY_DRAFT_KEY = "agent-doctor.ask.verifyDraft";
 const openingSessionRuntimes = new Set<string>();
 
 export function createAgentsSessions(deps: AgentsSessionsDeps) {
+  async function openDesktopApp(runtime: string): Promise<void> {
+    await withTimeout(
+      invoke("open_session_command", {
+        runtime,
+        cwd: null,
+        prompt: null,
+        terminal: null,
+      }),
+      15_000,
+      new Error(t("runtime.openTimeout")),
+    );
+  }
+
   async function openAskWindow(runtime: string): Promise<void> {
     try {
+      if (isDesktopAppRuntimeId(runtime)) {
+        await openDesktopApp(runtime);
+        return;
+      }
       await withTimeout(
         invoke("open_ask_window_command", { runtime }),
         15_000,
@@ -45,6 +63,10 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
 
   async function openAskWindowForVerify(runtime: string): Promise<void> {
     try {
+      if (isDesktopAppRuntimeId(runtime)) {
+        await openDesktopApp(runtime);
+        return;
+      }
       localStorage.setItem(
         ASK_VERIFY_DRAFT_KEY,
         JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),

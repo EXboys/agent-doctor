@@ -9,53 +9,51 @@
   </head>
   <body class="resources-page">
     <div class="resources-shell">
-      <header class="resources-top">
-        <div>
-          <h1 data-i18n="resources.windowTitle">Skills / MCP</h1>
-          <p id="resources-subtitle" class="resources-subtitle">—</p>
-        </div>
-        <div class="resources-top-actions">
-          <button id="resources-refresh-all" type="button" class="btn-secondary btn-compact" data-i18n="resources.refresh">刷新</button>
-          <button id="resources-close" type="button" class="btn-ghost btn-compact" data-i18n="chat.close">关闭</button>
-        </div>
-      </header>
-
-      <div class="resources-nav-row">
-        <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
+      <aside class="resources-rail">
+        <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist" aria-label="Resources">
           <button type="button" class="resources-section-tab" data-section="agents" role="tab" aria-selected="false">
-            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
               <path d="M5.5 19c1.2-3 3.6-4.5 6.5-4.5S17.8 16 19 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
             <span data-i18n="resources.tabAgents">Agent</span>
           </button>
           <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true">
-            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 3l2.2 4.5L19 8.2l-3.5 3.4.8 4.9L12 14.8 7.7 16.5l.8-4.9L5 8.2l4.8-.7L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4.5 10.2 12 4.8l7.5 5.4V19a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.2H10.2V20.5H6A1.5 1.5 0 0 1 4.5 19v-8.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
             </svg>
-            <span data-i18n="resources.tabSkills">技能</span>
+            <span data-i18n="resources.tabLocal">本机</span>
+          </button>
+          <button type="button" class="resources-section-tab" data-section="mall" role="tab" aria-selected="false" id="resources-tab-mall">
+            <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 9.5h14l-1.1 9.2a1.6 1.6 0 0 1-1.6 1.4H7.7a1.6 1.6 0 0 1-1.6-1.4L5 9.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <path d="M8.2 9.5V8a3.8 3.8 0 0 1 7.6 0v1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <span data-i18n="resources.tabMall">云市场</span>
           </button>
           <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false">
-            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8 2-2.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
             </svg>
             <span data-i18n="resources.tabTools">工具</span>
           </button>
           <button type="button" class="resources-section-tab" data-section="browser" role="tab" aria-selected="false">
-            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
               <path d="M3.5 9h17M8 4.5v4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
             <span data-i18n="resources.tabBrowser">浏览器</span>
           </button>
         </nav>
-        <label class="resources-search">
-          <span aria-hidden="true">⌕</span>
-          <input id="resources-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="resources.searchGlobal" placeholder="搜索技能或工具…" />
-        </label>
-      </div>
-
-      <main class="resources-body">
+      </aside>
+      <div class="resources-main">
+        <div class="resources-main-head">
+          <label class="resources-search">
+            <span aria-hidden="true">⌕</span>
+            <input id="resources-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="resources.searchGlobal" placeholder="搜索技能或工具…" />
+          </label>
+        </div>
+        <main class="resources-body">
         <section class="resources-panel" id="panel-agents" data-section-panel="agents" hidden>
           <p class="section-hint" id="resources-agents-hint" data-i18n="resources.agentCatalogHint">点安装。装好后会出现在首页。</p>
           <ul id="resources-agents-list" class="res-catalog-list" aria-live="polite"></ul>
@@ -143,7 +141,8 @@
           </details>
           <p id="mcp-footnote" class="section-footnote"></p>
         </section>
-      </main>
+        </main>
+      </div>
     </div>
     <script type="module" src="/src/resources.ts"></script>
   </body>

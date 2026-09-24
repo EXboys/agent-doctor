@@ -7,7 +7,7 @@ import {
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { t } from "../i18n";
-import { supportsBrowserMcp } from "../agents-ui";
+import { isDesktopAppRuntimeId, supportsBrowserMcp } from "../agents-ui";
 import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
 import { renderPlainRepairCheckBody } from "../repair-plain";
 import type { RepairPreviewResponse } from "../types";
@@ -407,6 +407,11 @@ export function createDiagnosePaint(session: DiagnoseSession) {
     );
     dom.panelTestEl.hidden = true;
     dom.testHintEl.hidden = session.activeStep !== "test";
+    if (session.activeStep === "test") {
+      dom.testHintEl.textContent = isDesktopAppRuntimeId(session.runtimeId)
+        ? t("diagnose.flow.testHintDesktop", { name: session.displayName })
+        : t("diagnose.flow.testHint");
+    }
     if (session.activeStep !== "test") {
       hideScanMeter();
     }
@@ -482,14 +487,21 @@ export function createDiagnosePaint(session: DiagnoseSession) {
         paintHeroTone("busy");
       }
       const browserVerify = supportsBrowserMcp(session.runtimeId);
+      const desktopApp = isDesktopAppRuntimeId(session.runtimeId);
       dom.headlineEl.textContent = session.testedOk
-        ? t("diagnose.flow.testOkHeadline")
+        ? desktopApp
+          ? t("diagnose.flow.testOkHeadlineDesktop", { name: session.displayName })
+          : t("diagnose.flow.testOkHeadline")
         : t("diagnose.flow.testHeadline");
       dom.detailEl.textContent = session.testedOk
-        ? browserVerify
-          ? t("diagnose.flow.testOkDetail")
-          : t("diagnose.flow.testOkDetailNoBrowser")
-        : t("diagnose.flow.testDetail");
+        ? desktopApp
+          ? t("diagnose.flow.testOkDetailDesktop", { name: session.displayName })
+          : browserVerify
+            ? t("diagnose.flow.testOkDetail")
+            : t("diagnose.flow.testOkDetailNoBrowser")
+        : desktopApp
+          ? t("diagnose.flow.testDetailDesktop", { name: session.displayName })
+          : t("diagnose.flow.testDetail");
       if (session.testedOk) {
         // Keep「重新检查」on the right for every agent; left is the next step.
         if (browserVerify) {
@@ -497,7 +509,9 @@ export function createDiagnosePaint(session: DiagnoseSession) {
           dom.primaryEl.textContent = t("diagnose.flow.askVerifyCta");
         } else {
           session.primaryAction = "open-ask";
-          dom.primaryEl.textContent = t("diagnose.flow.openAskYourself");
+          dom.primaryEl.textContent = desktopApp
+            ? t("diagnose.flow.openDesktopApp", { name: session.displayName })
+            : t("diagnose.flow.openAskYourself");
         }
         dom.primaryEl.hidden = false;
         dom.secondaryEl.hidden = false;
@@ -507,9 +521,13 @@ export function createDiagnosePaint(session: DiagnoseSession) {
         session.primaryAction = "run-score";
         dom.primaryEl.hidden = false;
         dom.primaryEl.textContent = t("diagnose.flow.testCta");
-        dom.secondaryEl.hidden = false;
-        dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
-        dom.secondaryEl.dataset.fallback = "open-ask";
+        if (desktopApp) {
+          dom.secondaryEl.hidden = true;
+        } else {
+          dom.secondaryEl.hidden = false;
+          dom.secondaryEl.textContent = t("diagnose.flow.openAskYourself");
+          dom.secondaryEl.dataset.fallback = "open-ask";
+        }
       }
     }
   }

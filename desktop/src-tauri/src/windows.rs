@@ -683,7 +683,6 @@ pub(crate) fn open_or_focus_resources_window(
     let _ = window.unminimize();
     let _ = window.show();
     layout_main_and_resources_side_by_side(app);
-    layout_main_and_resources_side_by_side(app);
     let _ = window.set_focus();
     let section = section
         .map(str::trim)

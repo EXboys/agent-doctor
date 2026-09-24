@@ -9,6 +9,7 @@ import {
 } from "../diagnose-flow";
 import { isPersonalEdition } from "../edition";
 import { withErrorDetail, formatProviderFailure, withProviderFailure } from "../friendly-error";
+import { isDesktopAppRuntimeId } from "../agents-ui";
 import { t } from "../i18n";
 import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
 import type {
@@ -288,8 +289,22 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     }
   }
 
+  async function openDesktopApp(): Promise<void> {
+    await invoke("open_session_command", {
+      runtime: session.runtimeId,
+      cwd: null,
+      prompt: null,
+      terminal: null,
+    });
+    paint.setResult("ok", t("diagnose.flow.openedDesktop", { name: session.displayName }));
+  }
+
   async function openAskYourself(): Promise<void> {
     try {
+      if (isDesktopAppRuntimeId(session.runtimeId)) {
+        await openDesktopApp();
+        return;
+      }
       await invoke("open_ask_window_command", { runtime: session.runtimeId });
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("runtime.openFailed"), error));
@@ -298,6 +313,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function openAskForVerify(): Promise<void> {
     try {
+      if (isDesktopAppRuntimeId(session.runtimeId)) {
+        await openDesktopApp();
+        return;
+      }
       localStorage.setItem(
         ASK_VERIFY_DRAFT_KEY,
         JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
