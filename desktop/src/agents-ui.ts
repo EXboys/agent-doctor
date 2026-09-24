@@ -405,6 +405,12 @@ function lookupPreview(
   return typeof previews === "function" ? previews(runtimeId) : previews.get(runtimeId);
 }
 
+export function runtimeListName(runtime: { id: string; display_name: string }): string {
+  if (runtime.id === "claude-code") return "Claude";
+  if (runtime.id === "codex") return "Codex";
+  return runtime.display_name.replace(/\s+(Code|CLI)$/i, "");
+}
+
 export function renderRuntimeTabs(
   runtimes: RuntimeDoctorResult[],
   selectedId: string,
@@ -414,12 +420,7 @@ export function renderRuntimeTabs(
     .map((runtime) => {
       const active = runtime.id === selectedId;
       const preview = lookupPreview(previews, runtime.id);
-      const shortName =
-        runtime.id === "claude-code"
-          ? "Claude"
-          : runtime.id === "codex"
-            ? "Codex"
-            : runtime.display_name.replace(/\s+(Code|CLI)$/i, "");
+      const shortName = runtimeListName(runtime);
       const stateLabel = !runtime.installed
         ? t("runtime.notInstalled")
         : runtimeHasProblems(preview)

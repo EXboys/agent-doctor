@@ -99,6 +99,7 @@ refs.agents = initAgentsPanel({
   loadWorkspaces: () => refs.workspace!.loadWorkspaces(),
   rewireCurrentMode: (hintEl) => refs.wiring!.rewireCurrentMode(hintEl),
   onDoctorReport: async (report) => {
+    refs.resources?.updateResourcesHubSummary();
     if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && !refs.firstRun.isBusy()) {
       await refs.firstRun.evaluateFirstRunFromReport(report);
     }

@@ -117,6 +117,7 @@
 
             <section class="widget-section runtime-section">
               <div id="runtime-tabs" class="runtime-tabs" role="tablist" aria-label="Runtimes"></div>
+              <button id="runtime-add-agent" type="button" class="runtime-add-agent" hidden data-i18n="runtimes.addAnother">再装一个</button>
               <span id="runtime-count" class="sr-only">—</span>
               <div id="runtimes" class="runtime-panels" aria-live="polite"></div>
             </section>
@@ -128,11 +129,17 @@
             <div class="section-label section-label-stack">
               <div class="section-heading">
                 <h2 data-i18n="resources.hubTitle">资源</h2>
-                <p class="section-sub" data-i18n="resources.hubHint">给 Agent 加技能，或设置浏览器。</p>
+                <p class="section-sub" data-i18n="resources.hubHint">装 Agent、加技能，或设置浏览器。</p>
               </div>
               <span id="hub-mcp-badge" class="badge muted">—</span>
             </div>
             <div class="resources-hub-cards">
+              <button id="open-resources-agents" type="button" class="resources-hub-card">
+                <span class="resources-hub-card-kicker" data-i18n="resources.tabAgents">Agent</span>
+                <strong class="resources-hub-card-title" data-i18n="resources.hubAgentsCardTitle">还能装</strong>
+                <span class="resources-hub-card-meta" id="hub-agents-count">—</span>
+                <span class="resources-hub-card-desc" data-i18n="resources.hubAgentsCardDesc">把新的 Agent 装到本机</span>
+              </button>
               <button id="open-resources-window" type="button" class="resources-hub-card">
                 <span class="resources-hub-card-kicker" data-i18n="resources.hubSkills">技能</span>
                 <strong class="resources-hub-card-title" data-i18n="resources.hubSkillsCardTitle">技能库</strong>

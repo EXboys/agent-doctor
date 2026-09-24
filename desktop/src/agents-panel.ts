@@ -65,6 +65,7 @@ let deps!: AgentsPanelDeps;
 const statusEl = document.querySelector<HTMLElement>("#status")!;
 const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
+const runtimeAddAgentEl = document.querySelector<HTMLButtonElement>("#runtime-add-agent")!;
 const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
 const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
 const agentsSecurityTitleEl = document.querySelector<HTMLElement>("#agents-security-title")!;
@@ -271,25 +272,35 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       appState.hermesModel = null;
     }
 
-    if (report.runtimes.length === 0) {
+    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const canAddMore = report.runtimes.some((runtime) => !runtime.installed);
+    runtimeAddAgentEl.hidden = !canAddMore || installedRuntimes.length === 0;
+    runtimeAddAgentEl.textContent = t("runtimes.addAnother");
+    if (installedRuntimes.length === 0) {
       appState.activeRuntimeId = null;
       runtimeTabsEl.innerHTML = "";
-      runtimesEl.innerHTML = `<div class="empty-state">${t("runtimes.empty")}</div>`;
+      runtimesEl.innerHTML = `
+        <div class="empty-state">
+          <p>${t("runtimes.emptyInstalled")}</p>
+          <p class="empty-state-hint">${t("runtimes.emptyInstalledHint")}</p>
+          <button type="button" class="btn-primary" data-action="open-agent-catalog">${t("runtimes.addAgent")}</button>
+        </div>
+      `;
       if (!opts?.relocalize) {
         void diagnose.closeDiagnoseDetail({ skipDismiss: true });
       }
       return;
     }
 
-    const selectedId = resolveActiveRuntimeId(report.runtimes, appState.activeRuntimeId)!;
+    const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
     appState.activeRuntimeId = selectedId;
     runtimeTabsEl.innerHTML = renderRuntimeTabs(
-      report.runtimes,
+      installedRuntimes,
       selectedId,
       repairPreviewByRuntime,
     );
 
-    const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
+    const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
     runtimesEl.innerHTML = activeRuntime ? buildRuntimeCardHtml(activeRuntime) : "";
     if (opts?.relocalize) {
       diagnose.refreshDiagnoseLocale();
@@ -329,17 +340,18 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       if (appState.lastReport !== report) {
         return;
       }
-      const selectedId = resolveActiveRuntimeId(report.runtimes, appState.activeRuntimeId);
+      const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+      const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
       if (!selectedId) {
         return;
       }
       appState.activeRuntimeId = selectedId;
       runtimeTabsEl.innerHTML = renderRuntimeTabs(
-        report.runtimes,
+        installedRuntimes,
         selectedId,
         repairPreviewByRuntime,
       );
-      const activeRuntime = report.runtimes.find((runtime) => runtime.id === selectedId);
+      const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
       if (activeRuntime) {
         const preview = repairPreviewByRuntime.get(selectedId);
         const hint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
@@ -373,6 +385,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   diagnose.bindEvents();
 
+  runtimeAddAgentEl.addEventListener("click", () => {
+    void invoke("open_resources_window_command", { section: "agents" });
+  });
+
   runtimeTabsEl.addEventListener("click", (event) => {
     const tab = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-runtime-tab]");
     const runtimeId = tab?.dataset.runtimeTab;
@@ -400,6 +416,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
     if (!action) {
+      return;
+    }
+
+    if (action === "open-agent-catalog") {
+      void invoke("open_resources_window_command", { section: "agents" });
       return;
     }
 

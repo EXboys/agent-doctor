@@ -26,6 +26,8 @@ const hubMcpCountEl = document.querySelector<HTMLElement>("#hub-mcp-count")!;
 const hubConfiguredEl = document.querySelector<HTMLElement>("#hub-configured")!;
 const openResourcesWindowEl = document.querySelector<HTMLButtonElement>("#open-resources-window")!;
 const openResourcesBrowserEl = document.querySelector<HTMLButtonElement>("#open-resources-browser")!;
+const openResourcesAgentsEl = document.querySelector<HTMLButtonElement>("#open-resources-agents")!;
+const hubAgentsCountEl = document.querySelector<HTMLElement>("#hub-agents-count")!;
 
 const RUNTIME_LABELS: Record<string, string> = {
   hermes: "Hermes",
@@ -199,6 +201,13 @@ function updateResourcesHubSummary(): void {
   hubSkillsCountEl.textContent = appState.lastSkillsInventory
     ? t("resources.hubSkillsCount", { count: String(skillCount) })
     : "—";
+  const knownAgents = appState.lastReport?.runtimes ?? [];
+  const missingAgents = knownAgents.filter((runtime) => !runtime.installed).length;
+  hubAgentsCountEl.textContent = knownAgents.length
+    ? missingAgents > 0
+      ? t("resources.hubAgentsAvailable", { count: String(missingAgents) })
+      : t("resources.hubAgentsAllOn")
+    : "—";
   hubMcpCountEl.textContent = appState.lastMcpStatus ? String(mcpCount) : "—";
 
   const chrome = appState.lastMcpStatus?.browser;
@@ -281,7 +290,7 @@ async function loadResourcesHub() {
 }
 
 async function openResourcesWindow(
-  section?: "skills" | "tools" | "browser" | "catalog",
+  section?: "agents" | "skills" | "tools" | "browser" | "catalog",
 ): Promise<void> {
   const normalized = !section || section === "catalog" ? "skills" : section;
   await invoke("open_resources_window_command", { section: normalized });
@@ -362,7 +371,7 @@ export interface ResourcesHubApi {
   updateResourcesHubSummary: () => void;
   loadMcpStatus: () => Promise<void>;
   loadResourcesHub: () => Promise<void>;
-  openResourcesWindow: (section?: "skills" | "tools" | "browser" | "catalog") => Promise<void>;
+  openResourcesWindow: (section?: "agents" | "skills" | "tools" | "browser" | "catalog") => Promise<void>;
   toggleSkillRuntimeMount: (
     chip: HTMLButtonElement,
     skillId: string,
@@ -381,6 +390,9 @@ export function initResourcesHub(_deps?: Record<string, never>): ResourcesHubApi
   });
   openResourcesBrowserEl.addEventListener("click", () => {
     void openResourcesWindow("browser");
+  });
+  openResourcesAgentsEl.addEventListener("click", () => {
+    void openResourcesWindow("agents");
   });
   skillsRefreshEl.addEventListener("click", () => {
     void loadSkillsInventory();

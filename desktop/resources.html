@@ -22,6 +22,13 @@
 
       <div class="resources-nav-row">
         <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist">
+          <button type="button" class="resources-section-tab" data-section="agents" role="tab" aria-selected="false">
+            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M5.5 19c1.2-3 3.6-4.5 6.5-4.5S17.8 16 19 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <span data-i18n="resources.tabAgents">Agent</span>
+          </button>
           <button type="button" class="resources-section-tab is-active" data-section="skills" role="tab" aria-selected="true">
             <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 3l2.2 4.5L19 8.2l-3.5 3.4.8 4.9L12 14.8 7.7 16.5l.8-4.9L5 8.2l4.8-.7L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
@@ -49,6 +56,11 @@
       </div>
 
       <main class="resources-body">
+        <section class="resources-panel" id="panel-agents" data-section-panel="agents" hidden>
+          <p class="section-hint" id="resources-agents-hint" data-i18n="resources.agentCatalogHint">点安装。装好后会出现在首页。</p>
+          <ul id="resources-agents-list" class="res-catalog-list" aria-live="polite"></ul>
+          <p id="resources-agents-empty" class="section-hint" hidden data-i18n="resources.emptyAgents">都能用的都已经装上了。回首页就能检查。</p>
+        </section>
         <section class="resources-panel is-active" id="panel-skills" data-section-panel="skills">
           <div class="resources-skills-sticky" id="resources-skills-sticky">
             <div

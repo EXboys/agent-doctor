@@ -32,9 +32,13 @@ import type {
   TeamupsLoginPoll,
   TeamupsLoginStart,
   TeamupsMallCatalog,
+  DoctorReport,
+  InstallProgressEvent,
+  InstallRuntimeResponse,
+  RuntimeDoctorResult,
 } from "./types";
 
-type ResourcesSection = "skills" | "tools" | "browser";
+type ResourcesSection = "agents" | "skills" | "tools" | "browser";
 type SkillFilter = "all" | "issue" | "store" | SkillCategoryId;
 type ToolFilter = "all" | "issue";
 type MallFilter = "all" | "free" | "paid" | "pack" | "skill";
@@ -63,6 +67,8 @@ const mallAccountEl = document.querySelector<HTMLElement>("#resources-mall-accou
 const mallAccountStatusEl = document.querySelector<HTMLElement>("#resources-mall-account-status")!;
 const mallLoginEl = document.querySelector<HTMLButtonElement>("#resources-mall-login")!;
 const mallLogoutEl = document.querySelector<HTMLButtonElement>("#resources-mall-logout")!;
+const agentsListEl = document.querySelector<HTMLUListElement>("#resources-agents-list")!;
+const agentsEmptyEl = document.querySelector<HTMLElement>("#resources-agents-empty")!;
 
 const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
 const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
@@ -83,6 +89,9 @@ const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 let lastSkillsInventory: SkillsInventoryReport | null = null;
 let lastMcpStatus: McpModuleStatus | null = null;
 let lastMallCatalog: TeamupsMallCatalog | null = null;
+let lastDoctorReport: DoctorReport | null = null;
+const agentInstallInFlight = new Set<string>();
+const agentInstallHint = new Map<string, string>();
 let lastTeamupsAccount: TeamupsAccountStatus | null = null;
 let lastWireActions: BrowserMcpTargetAction[] | null = null;
 let skillFilter: SkillFilter = "all";
@@ -167,6 +176,9 @@ function setSection(section: ResourcesSection): void {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+  if (section === "agents" && !lastDoctorReport) {
+    void loadDoctor();
+  }
 }
 
 function setSkillsFootnote(message: string | null): void {
@@ -209,6 +221,29 @@ function countSkillMatches(): number {
 
 function countToolMatches(): number {
   return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
+}
+
+function agentCatalogBlurb(runtime: string): string {
+  if (runtime === "hermes") return t("resources.agentBlurbHermes");
+  if (runtime === "openclaw") return t("resources.agentBlurbOpenclaw");
+  if (runtime === "claude-code") return t("resources.agentBlurbClaude");
+  if (runtime === "codex") return t("resources.agentBlurbCodex");
+  if (runtime === "deepseek-harness") return t("resources.agentBlurbDeepseek");
+  return "";
+}
+
+function agentMatchesQuery(runtime: RuntimeDoctorResult): boolean {
+  if (!resourceQuery) return true;
+  const blob = `${agentChipLabel(runtime.id)} ${runtime.display_name} ${agentCatalogBlurb(runtime.id)}`.toLowerCase();
+  return blob.includes(resourceQuery);
+}
+
+function catalogAgents(): RuntimeDoctorResult[] {
+  return (lastDoctorReport?.runtimes ?? []).filter((runtime) => !runtime.installed && agentMatchesQuery(runtime));
+}
+
+function countAgentMatches(): number {
+  return catalogAgents().length;
 }
 
 function applyAccountOwnership(): void {
@@ -265,16 +300,23 @@ function maybeJumpToSearchHits(): void {
   if (!resourceQuery) return;
   const skillHits = countSkillMatches();
   const toolHits = countToolMatches();
+  const agentHits = countAgentMatches();
   if (activeSection === "browser") {
-    if (skillHits > 0) setSection("skills");
+    if (agentHits > 0) setSection("agents");
+    else if (skillHits > 0) setSection("skills");
     else if (toolHits > 0) setSection("tools");
     else setSection("skills");
     return;
   }
-  if (activeSection === "skills" && skillHits === 0 && toolHits > 0) {
-    setSection("tools");
-  } else if (activeSection === "tools" && toolHits === 0 && skillHits > 0) {
-    setSection("skills");
+  if (activeSection === "skills" && skillHits === 0) {
+    if (agentHits > 0) setSection("agents");
+    else if (toolHits > 0) setSection("tools");
+  } else if (activeSection === "tools" && toolHits === 0) {
+    if (skillHits > 0) setSection("skills");
+    else if (agentHits > 0) setSection("agents");
+  } else if (activeSection === "agents" && agentHits === 0) {
+    if (skillHits > 0) setSection("skills");
+    else if (toolHits > 0) setSection("tools");
   }
   if (activeSection === "skills" && resourceQuery && skillHits > 0 && skillFilter === "store") {
     skillFilter = "all";
@@ -1624,8 +1666,133 @@ async function loadMcpStatus(): Promise<void> {
   }
 }
 
+function renderAgentCatalog(): void {
+  const rows = catalogAgents();
+  agentsListEl.replaceChildren();
+  if (!lastDoctorReport) {
+    agentsEmptyEl.hidden = true;
+    return;
+  }
+  if (rows.length === 0) {
+    agentsEmptyEl.hidden = false;
+    agentsEmptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptyAgents");
+    return;
+  }
+  agentsEmptyEl.hidden = true;
+  for (const runtime of rows) {
+    const li = document.createElement("li");
+    li.className = "res-catalog-item";
+    li.dataset.runtime = runtime.id;
+
+    const icon = document.createElement("span");
+    icon.className = "res-catalog-icon is-skill";
+    icon.textContent = (agentChipLabel(runtime.id).charAt(0) || "?").toUpperCase();
+
+    const body = document.createElement("div");
+    body.className = "res-catalog-body";
+    const titleRow = document.createElement("div");
+    titleRow.className = "res-catalog-title-row";
+    const strong = document.createElement("strong");
+    strong.textContent = agentChipLabel(runtime.id);
+    titleRow.appendChild(strong);
+    const desc = document.createElement("div");
+    desc.className = "res-catalog-desc";
+    desc.textContent = agentCatalogBlurb(runtime.id);
+    const hint = document.createElement("p");
+    hint.className = "res-agent-install-hint";
+    const saved = agentInstallHint.get(runtime.id);
+    hint.hidden = !saved;
+    hint.textContent = saved ?? "";
+    body.append(titleRow, desc, hint);
+
+    const metaWrap = document.createElement("div");
+    metaWrap.className = "res-catalog-meta mall-actions";
+    const busy = agentInstallInFlight.has(runtime.id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary btn-compact";
+    btn.textContent = busy ? t("runtime.installing") : t("runtime.install");
+    btn.disabled = busy;
+    btn.addEventListener("click", () => {
+      void installCatalogAgent(runtime.id);
+    });
+    metaWrap.appendChild(btn);
+
+    li.append(icon, body, metaWrap);
+    agentsListEl.appendChild(li);
+  }
+}
+
+function setAgentInstallHint(runtime: string, message: string, tone: "ok" | "warn" | "error" | "busy"): void {
+  const row = agentsListEl.querySelector<HTMLElement>(`[data-runtime="${CSS.escape(runtime)}"]`);
+  const hint = row?.querySelector<HTMLElement>(".res-agent-install-hint");
+  if (!hint) return;
+  hint.hidden = !message;
+  hint.textContent = message;
+  hint.classList.toggle("is-ok", tone === "ok");
+  hint.classList.toggle("is-warn", tone === "warn" || tone === "error");
+  if (message) agentInstallHint.set(runtime, message);
+  else agentInstallHint.delete(runtime);
+}
+
+async function installCatalogAgent(runtime: string): Promise<void> {
+  if (agentInstallInFlight.has(runtime)) return;
+  agentInstallInFlight.add(runtime);
+  renderAgentCatalog();
+  setAgentInstallHint(runtime, t("runtime.installing"), "busy");
+  const unlisten = await listen<InstallProgressEvent>("install-progress", (event) => {
+    if (event.payload.runtime_id !== runtime) return;
+    const text = event.payload.message.trim();
+    const status =
+      event.payload.phase === "verifying"
+        ? t("runtime.installVerifying")
+        : text && !text.startsWith("$ ")
+          ? text
+          : t("runtime.installing");
+    setAgentInstallHint(runtime, status, "busy");
+  });
+  try {
+    const report = await invoke<InstallRuntimeResponse>("install_runtime_command", {
+      runtime,
+      force: false,
+    });
+    if (!report.install_needed || report.install_succeeded || report.after_installed) {
+      agentInstallHint.delete(runtime);
+    } else {
+      const detail =
+        report.skipped.map((item) => item.reason).find(Boolean) ||
+        report.manual_fallback[0] ||
+        t("runtime.installFailed");
+      setAgentInstallHint(runtime, `${t("runtime.installFailed")} ${detail}`, "error");
+    }
+    await loadDoctor();
+  } catch (error) {
+    setAgentInstallHint(runtime, withErrorDetail(t("runtime.installFailed"), error), "error");
+  } finally {
+    agentInstallInFlight.delete(runtime);
+    unlisten();
+    renderAgentCatalog();
+  }
+}
+
+async function loadDoctor(): Promise<void> {
+  try {
+    lastDoctorReport = await invoke<DoctorReport>("run_doctor_command");
+  } catch {
+    lastDoctorReport = {
+      profile_env_path: null,
+      profile_env_exists: false,
+      active_preset: null,
+      runtimes: [],
+    };
+    agentsEmptyEl.hidden = false;
+    agentsEmptyEl.textContent = t("doctor.failed");
+  }
+  renderAgentCatalog();
+}
+
 async function refreshAll(): Promise<void> {
-  const loads: Array<Promise<void>> = [loadMcpStatus(), loadSkills()];
+  const loads: Array<Promise<void>> = [loadMcpStatus(), loadSkills(), loadDoctor()];
   if (personalEdition) loads.push(loadMall());
   await Promise.all(loads);
 }
@@ -1678,6 +1845,7 @@ sectionTabsEl.addEventListener("click", (event) => {
   const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-section]");
   if (!btn?.dataset.section) return;
   if (
+    btn.dataset.section === "agents" ||
     btn.dataset.section === "skills" ||
     btn.dataset.section === "tools" ||
     btn.dataset.section === "browser"
@@ -1709,6 +1877,7 @@ searchEl.addEventListener("input", () => {
   maybeJumpToSearchHits();
   renderSkillsList();
   renderToolsList();
+  renderAgentCatalog();
 });
 
 refreshAllEl.addEventListener("click", () => {
@@ -1770,7 +1939,8 @@ applyI18n();
 void refreshAll();
 void listen<{ section?: string }>("resources-window-focus", (event) => {
   const section = event.payload?.section;
-  if (section === "browser") setSection("browser");
+  if (section === "agents") setSection("agents");
+  else if (section === "browser") setSection("browser");
   else if (section === "tools" || section === "mcp") setSection("tools");
   else if (section === "mall" || section === "store") {
     setSection("skills");
