@@ -12,8 +12,9 @@ use super::config::{
     default_policy_cache_path, default_skills_dir, default_skills_lock_path, load_evotown_config,
     EvotownConfig, DEFAULT_BUNDLE_ID, DEFAULT_RUNTIME_TARGET,
 };
-use crate::adapters::util::home_join;
+use crate::adapters::util::{discover_binary, home_join};
 use crate::workspace::{load_workspaces, WorkspacesDocument};
+use crate::DeepSeekHarnessAdapter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillAgentUsage {
@@ -45,6 +46,8 @@ pub struct SkillsInventoryReport {
     pub lock_path: String,
     pub bundle_id: Option<String>,
     pub skills: Vec<SkillInventoryItem>,
+    /// Installed runtimes that support skill mounts (Hermes, Claude, DeepSeek Harness, …).
+    pub available_mount_runtimes: Vec<String>,
     pub remote_stats_ok: bool,
     pub remote_stats_error: Option<String>,
 }
@@ -161,9 +164,32 @@ pub fn list_skills_inventory_with_config(
         lock_path: config.skills_lock_path.display().to_string(),
         bundle_id,
         skills,
+        available_mount_runtimes: skill_mount_runtime_ids(),
         remote_stats_ok: remote.is_ok(),
         remote_stats_error: remote.err().map(|e| e.to_string()),
     })
+}
+
+/// Runtime ids eligible for `mount_synced_skills` on this machine (stable UI order).
+pub fn skill_mount_runtime_ids() -> Vec<String> {
+    let presence = detect_runtime_presence();
+    let mut out = Vec::new();
+    if presence.hermes {
+        out.push("hermes".into());
+    }
+    if presence.openclaw {
+        out.push("openclaw".into());
+    }
+    if presence.claude_code {
+        out.push("claude-code".into());
+    }
+    if presence.codex {
+        out.push("codex".into());
+    }
+    if presence.deepseek_harness {
+        out.push("deepseek-harness".into());
+    }
+    out
 }
 
 fn build_skill_items(
@@ -262,9 +288,11 @@ fn discover_agent_skills(
     collect_skill_dirs(&home_join(".hermes/skills"), &mut found);
     collect_skill_dirs(&home_join(".openclaw/skills"), &mut found);
     collect_skill_dirs(&home_join(".openclaw/workspace/skills"), &mut found);
+    collect_skill_dirs(&DeepSeekHarnessAdapter::home().join("skills"), &mut found);
 
     for entry in workspaces.workspaces.values() {
         collect_skill_dirs(&entry.path.join(".claude/skills"), &mut found);
+        collect_skill_dirs(&entry.path.join(".dsh/skills"), &mut found);
         collect_skill_dirs(&entry.codex_home.join("skills"), &mut found);
         collect_skill_dirs(&entry.openclaw_workspace.join("skills"), &mut found);
         if !entry.hermes_profile.is_empty() {
@@ -446,9 +474,18 @@ fn detect_agents_using(
     if presence.codex {
         agents.push(probe_codex(skill_id, cache_path, workspaces));
     }
+    if presence.deepseek_harness {
+        agents.push(probe_deepseek_harness(skill_id, cache_path, workspaces));
+    }
 
     // Stable order matching Agents tab.
-    let order = ["hermes", "openclaw", "claude-code", "codex"];
+    let order = [
+        "hermes",
+        "openclaw",
+        "claude-code",
+        "codex",
+        "deepseek-harness",
+    ];
     agents.sort_by_key(|a| order.iter().position(|id| *id == a.runtime).unwrap_or(99));
     agents
 }
@@ -459,14 +496,18 @@ struct RuntimePresence {
     openclaw: bool,
     claude_code: bool,
     codex: bool,
+    deepseek_harness: bool,
 }
 
 fn detect_runtime_presence() -> RuntimePresence {
+    // Finder-launched apps often have a minimal PATH; seed common bin dirs first.
+    crate::adapters::util::ensure_managed_runtime_path();
     RuntimePresence {
         hermes: runtime_present("hermes"),
         openclaw: runtime_present("openclaw"),
         claude_code: runtime_present("claude-code"),
         codex: runtime_present("codex"),
+        deepseek_harness: runtime_present("deepseek-harness"),
     }
 }
 
@@ -478,8 +519,33 @@ fn runtime_present(runtime_id: &str) -> bool {
             home_join(".claude").is_dir() || which_exists("claude") || which_exists("claude-code")
         }
         "codex" => home_join(".codex").is_dir() || which_exists("codex"),
+        "deepseek-harness" => deepseek_harness_present(),
         _ => false,
     }
+}
+
+fn deepseek_harness_present() -> bool {
+    if DeepSeekHarnessAdapter::home().is_dir() {
+        return true;
+    }
+    if discover_binary("dsh").installed {
+        return true;
+    }
+    for path in deepseek_harness_binary_candidates() {
+        if path.is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+fn deepseek_harness_binary_candidates() -> [PathBuf; 4] {
+    [
+        home_join(".local/bin/dsh"),
+        PathBuf::from("/opt/homebrew/bin/dsh"),
+        PathBuf::from("/usr/local/bin/dsh"),
+        home_join("bin/dsh"),
+    ]
 }
 
 fn which_exists(binary: &str) -> bool {
@@ -619,6 +685,49 @@ fn probe_hermes(
         .unwrap_or_else(|| default_root.join(skill_id));
     SkillAgentUsage {
         runtime: "hermes".into(),
+        scope: if hits.is_empty() {
+            "not mounted".into()
+        } else {
+            hits.iter()
+                .map(|(s, _)| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        path: primary.display().to_string(),
+        mounted: !hits.is_empty(),
+    }
+}
+
+fn probe_deepseek_harness(
+    skill_id: &str,
+    cache_path: &Path,
+    workspaces: &WorkspacesDocument,
+) -> SkillAgentUsage {
+    let mut hits: Vec<(String, PathBuf)> = Vec::new();
+    let user = DeepSeekHarnessAdapter::home().join("skills").join(skill_id);
+    if path_has_skill(&user, cache_path) {
+        hits.push(("user".into(), user.clone()));
+    }
+    for (name, entry) in &workspaces.workspaces {
+        let project = entry.path.join(".dsh/skills").join(skill_id);
+        if path_has_skill(&project, cache_path) {
+            let active = workspaces.active.as_deref() == Some(name.as_str());
+            hits.push((
+                if active {
+                    format!("ws:{name}*")
+                } else {
+                    format!("ws:{name}")
+                },
+                project,
+            ));
+        }
+    }
+    let primary = hits
+        .first()
+        .map(|(_, p)| p.clone())
+        .unwrap_or_else(|| DeepSeekHarnessAdapter::home().join("skills").join(skill_id));
+    SkillAgentUsage {
+        runtime: "deepseek-harness".into(),
         scope: if hits.is_empty() {
             "not mounted".into()
         } else {
@@ -1001,7 +1110,13 @@ fn resolve_mount_skill_ids(
 }
 
 fn resolve_mount_runtimes(only: &[String]) -> Vec<String> {
-    let all = ["hermes", "openclaw", "claude-code", "codex"];
+    let all = [
+        "hermes",
+        "openclaw",
+        "claude-code",
+        "codex",
+        "deepseek-harness",
+    ];
     if only.is_empty() {
         return all
             .iter()
@@ -1039,6 +1154,16 @@ fn mount_targets_for(
             }
         }
         "codex" => targets.push(home_join(".codex/skills").join(skill_id)),
+        "deepseek-harness" => {
+            targets.push(DeepSeekHarnessAdapter::home().join("skills").join(skill_id));
+            if include_active_workspace {
+                if let Some(active) = workspaces.active.as_deref() {
+                    if let Some(entry) = workspaces.workspaces.get(active) {
+                        targets.push(entry.path.join(".dsh/skills").join(skill_id));
+                    }
+                }
+            }
+        }
         _ => {}
     }
     targets
@@ -1192,6 +1317,37 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_in_skill_agent_list_when_harness_present() {
+        if !DeepSeekHarnessAdapter::home().is_dir() && !which_exists("dsh") {
+            return;
+        }
+        assert!(
+            runtime_present("deepseek-harness"),
+            "expected deepseek-harness to be present on this machine"
+        );
+        let report = list_skills_inventory_with_options(&SkillsInventoryOptions {
+            remote_stats: false,
+        })
+        .expect("inventory");
+        let Some(skill) = report.skills.first() else {
+            return;
+        };
+        let runtimes: Vec<&str> = skill.agents.iter().map(|a| a.runtime.as_str()).collect();
+        assert!(
+            runtimes.contains(&"deepseek-harness"),
+            "first skill agents missing deepseek-harness: {runtimes:?}"
+        );
+        assert!(
+            report
+                .available_mount_runtimes
+                .iter()
+                .any(|id| id == "deepseek-harness"),
+            "available_mount_runtimes missing deepseek-harness: {:?}",
+            report.available_mount_runtimes
+        );
+    }
+
+    #[test]
     fn mount_uses_local_cache_without_remote_credentials() {
         let temp = TempDir::new().unwrap();
         let cache = temp.path().join("skills");
@@ -1213,12 +1369,13 @@ mod tests {
             &config,
             &SkillMountOptions {
                 skill_ids: vec!["demo-skill".into()],
-                runtimes: vec![],
+                // Hermetic: do not touch real agent homes on dev machines.
+                runtimes: vec!["__test-no-runtime__".into()],
                 include_active_workspace: false,
             },
         )
         .unwrap();
-        // No runtimes in sandbox → skipped counts, but never fails for missing Evotown.
         assert_eq!(report.failed, 0);
+        assert_eq!(report.mounted, 0);
     }
 }

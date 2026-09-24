@@ -260,6 +260,7 @@ export interface SkillsInventoryReport {
   lock_path: string;
   bundle_id: string | null;
   skills: SkillInventoryItem[];
+  available_mount_runtimes?: string[];
   remote_stats_ok: boolean;
   remote_stats_error: string | null;
 }

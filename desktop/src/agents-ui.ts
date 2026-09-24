@@ -417,7 +417,9 @@ export function renderRuntimeTabs(
       const shortName =
         runtime.id === "claude-code"
           ? "Claude"
-          : runtime.display_name.replace(/\s+Code$/i, "");
+          : runtime.id === "codex"
+            ? "Codex"
+            : runtime.display_name.replace(/\s+(Code|CLI)$/i, "");
       const stateLabel = !runtime.installed
         ? t("runtime.notInstalled")
         : runtimeHasProblems(preview)

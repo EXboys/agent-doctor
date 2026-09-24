@@ -28,13 +28,6 @@
             </svg>
             <span data-i18n="resources.tabSkills">技能</span>
           </button>
-          <button type="button" class="resources-section-tab" data-section="mall" role="tab" aria-selected="false">
-            <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 8h16l-1.2 11.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-              <path d="M8 8V6.5A4 4 0 0 1 12 2.5 4 4 0 0 1 16 6.5V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            </svg>
-            <span data-i18n="resources.tabMall">商城</span>
-          </button>
           <button type="button" class="resources-section-tab" data-section="tools" role="tab" aria-selected="false">
             <svg class="resources-section-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8 2-2.1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
@@ -57,34 +50,35 @@
 
       <main class="resources-body">
         <section class="resources-panel is-active" id="panel-skills" data-section-panel="skills">
-          <div class="resources-toolbar">
-            <div class="filters" id="resources-skill-filters" role="group" aria-label="Skill categories"></div>
+          <div class="resources-skills-sticky" id="resources-skills-sticky">
+            <div
+              class="resources-skills-nav filters filters-scroll"
+              id="resources-skill-filters"
+              role="group"
+              aria-label="Skill filters"
+            ></div>
+            <div class="resources-agent-bar" id="resources-agent-bar" hidden>
+              <div class="resources-agent-nav">
+                <div
+                  class="resources-agent-chips filters-scroll"
+                  id="resources-agent-filters"
+                  role="group"
+                  aria-label="Agent filters"
+                ></div>
+              </div>
+              <p class="resources-agent-hint" id="resources-agent-hint" hidden></p>
+            </div>
+            <div class="resources-mall-account" id="resources-mall-account" hidden>
+              <p id="resources-mall-account-status" class="resources-mall-account-status">—</p>
+              <div class="resources-mall-account-actions">
+                <button id="resources-mall-login" type="button" class="btn-primary btn-compact" data-i18n="resources.mallLogin">登录 TeamUps</button>
+                <button id="resources-mall-logout" type="button" class="btn-ghost btn-compact" hidden data-i18n="resources.mallLogout">退出登录</button>
+              </div>
+            </div>
           </div>
           <div id="resources-list" class="res-catalog-list" aria-live="polite"></div>
           <p id="resources-empty" class="section-hint" hidden data-i18n="resources.emptySkills">还没有技能</p>
           <p id="resources-footnote" class="section-footnote"></p>
-        </section>
-
-        <section class="resources-panel" id="panel-mall" data-section-panel="mall" hidden>
-          <div class="resources-mall-account" id="resources-mall-account">
-            <p id="resources-mall-account-status" class="resources-mall-account-status" data-i18n="resources.mallAccountSignedOut">登录后可安装已开通的方案</p>
-            <div class="resources-mall-account-actions">
-              <button id="resources-mall-login" type="button" class="btn-primary btn-compact" data-i18n="resources.mallLogin">登录 TeamUps</button>
-              <button id="resources-mall-logout" type="button" class="btn-secondary btn-compact" hidden data-i18n="resources.mallLogout">退出登录</button>
-            </div>
-          </div>
-          <div class="resources-toolbar">
-            <div class="filters" id="resources-mall-filters" role="group" aria-label="Mall filters">
-              <button type="button" class="filter-chip is-active" data-mall-filter="all" data-i18n="resources.filterAll">全部</button>
-              <button type="button" class="filter-chip" data-mall-filter="free" data-i18n="resources.mallFilterFree">免费</button>
-              <button type="button" class="filter-chip" data-mall-filter="paid" data-i18n="resources.mallFilterPaid">付费</button>
-              <button type="button" class="filter-chip" data-mall-filter="pack" data-i18n="resources.mallFilterPack">组合</button>
-              <button type="button" class="filter-chip" data-mall-filter="skill" data-i18n="resources.mallFilterSkill">技能</button>
-            </div>
-          </div>
-          <ul id="resources-mall-list" class="res-catalog-list" aria-live="polite"></ul>
-          <p id="resources-mall-empty" class="section-hint" hidden data-i18n="resources.emptyMall">TeamUps 商城暂时没有内容</p>
-          <p id="resources-mall-footnote" class="section-footnote" data-i18n="resources.mallFootnote">来自 TeamUps。免费可直接安装；付费先开通再安装。</p>
         </section>
 
         <section class="resources-panel" id="panel-tools" data-section-panel="tools" hidden>

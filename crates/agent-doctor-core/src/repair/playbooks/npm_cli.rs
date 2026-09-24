@@ -44,7 +44,7 @@ pub fn suggest_claude_code_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedR
 }
 
 pub fn suggest_codex_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    suggest_npm_cli_repairs("codex", "Codex CLI", probe)
+    suggest_npm_cli_repairs("codex", "Codex", probe)
 }
 
 fn suggest_npm_cli_repairs(

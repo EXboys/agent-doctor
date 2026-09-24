@@ -2548,10 +2548,6 @@ body.is-diagnose-open .diagnose-detail {
   margin-bottom: 10px;
 }
 
-.runtime-tabs > .runtime-tab:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
-
 .runtime-head .runtime-tabs {
   margin-bottom: 0;
 }

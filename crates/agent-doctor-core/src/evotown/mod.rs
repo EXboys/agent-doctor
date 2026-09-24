@@ -20,9 +20,10 @@ pub use connect::{
 };
 pub use inventory::{
     list_skills_inventory, list_skills_inventory_with_config, list_skills_inventory_with_options,
-    mount_synced_skills, mount_synced_skills_with_config, unmount_synced_skills,
-    unmount_synced_skills_with_config, SkillAgentUsage, SkillInventoryItem, SkillMountAction,
-    SkillMountOptions, SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport,
+    mount_synced_skills, mount_synced_skills_with_config, skill_mount_runtime_ids,
+    unmount_synced_skills, unmount_synced_skills_with_config, SkillAgentUsage, SkillInventoryItem,
+    SkillMountAction, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
+    SkillsInventoryReport,
 };
 pub use jobs::{
     execute_job, is_known_dispatch_runtime, known_dispatch_runtimes, normalize_runtime,

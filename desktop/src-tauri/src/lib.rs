@@ -403,6 +403,7 @@ pub fn run() {
             get_engine_register_status_command,
             run_engine_register_command,
             list_skills_inventory_command,
+            skill_mount_runtime_ids_command,
             list_teamups_mall_catalog_command,
             start_teamups_login_command,
             poll_teamups_login_command,

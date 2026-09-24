@@ -750,7 +750,7 @@ pub fn apply_codex_slot(
     let env_key = codex_slot_env_key(&slot);
     Ok(RuntimeSetupResult {
         runtime_id: "codex".to_string(),
-        display_name: "Codex CLI".to_string(),
+        display_name: "Codex".to_string(),
         applied: true,
         config_path: Some(path.display().to_string()),
         backup_path: backup_path.map(|p| p.display().to_string()),

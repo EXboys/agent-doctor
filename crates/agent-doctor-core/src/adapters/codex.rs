@@ -107,7 +107,7 @@ impl RuntimeAdapter for CodexAdapter {
     }
 
     fn display_name(&self) -> &'static str {
-        "Codex CLI"
+        "Codex"
     }
 
     fn discover(&self) -> AdapterDiscovery {

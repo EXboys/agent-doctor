@@ -35,6 +35,14 @@ const RUNTIME_LABELS: Record<string, string> = {
   "deepseek-harness": "DeepSeek Harness",
 };
 
+const SKILL_MOUNT_RUNTIME_ORDER = [
+  "hermes",
+  "openclaw",
+  "claude-code",
+  "codex",
+  "deepseek-harness",
+] as const;
+
 function renderSkillsInventory(report: SkillsInventoryReport) {
   skillsInventoryEl.hidden = false;
   skillsDirEl.textContent = t("skills.dir", { dir: report.skills_dir });
@@ -77,13 +85,23 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
 
     const agents = document.createElement("div");
     agents.className = "skills-agents";
-    if (skill.agents.length === 0) {
+    const fromApi = new Map(skill.agents.map((agent) => [agent.runtime, agent]));
+    const agentRows = SKILL_MOUNT_RUNTIME_ORDER.map(
+      (runtime) =>
+        fromApi.get(runtime) ?? {
+          runtime,
+          scope: "not mounted",
+          path: "",
+          mounted: false,
+        },
+    );
+    if (agentRows.length === 0) {
       const none = document.createElement("span");
       none.className = "skills-runtime";
       none.textContent = t("skills.na");
       agents.appendChild(none);
     } else {
-      for (const agent of skill.agents) {
+      for (const agent of agentRows) {
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = agent.mounted ? "skills-runtime is-on" : "skills-runtime";
