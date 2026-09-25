@@ -205,15 +205,22 @@
 }
 
 .resources-skills-sticky {
-  position: sticky;
-  top: -16px;
-  z-index: 4;
-  margin: -4px -4px 0;
-  padding: 8px 4px 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: linear-gradient(180deg, #ffffff 78%, rgba(255, 255, 255, 0.92) 100%);
+  margin: 0;
+  padding: 2px 0 0;
+  background: #fff;
+}
+
+.resources-skills-sticky[hidden] {
+  display: none !important;
+}
+
+.resources-skills-nav,
+.resources-agent-chips,
+.resources-skills-sticky .filters-scroll {
+  background: #fff;
 }
 
 .resources-scope-tabs {

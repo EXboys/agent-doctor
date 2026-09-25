@@ -58,6 +58,7 @@ const skillsPanelEl = document.querySelector<HTMLElement>("#panel-skills")!;
 const skillScopeEl = document.querySelector<HTMLElement>("#resources-skill-scope")!;
 const skillScopeHintEl = document.querySelector<HTMLElement>("#resources-scope-hint")!;
 const panelLeadEl = document.querySelector<HTMLElement>("#resources-panel-lead")!;
+const skillsStickyEl = document.querySelector<HTMLElement>("#resources-skills-sticky")!;
 const skillFiltersEl = document.querySelector<HTMLElement>("#resources-skill-filters")!;
 const agentBarEl = document.querySelector<HTMLElement>("#resources-agent-bar")!;
 const agentFiltersEl = document.querySelector<HTMLElement>("#resources-agent-filters")!;
@@ -217,6 +218,7 @@ function syncSkillScopeChrome(): void {
     skillScopeHintEl.textContent =
       scope === "store" ? t("resources.skillScopeStoreHint") : t("resources.skillScopeLocalHint");
   }
+  skillsStickyEl.hidden = activeSection !== "skills";
   syncPanelLead();
 }
 
@@ -1339,8 +1341,7 @@ function scrollToSkillGroup(id: SkillFilter): void {
   }
   const heading = listEl.querySelector<HTMLElement>(`[data-skill-group="${id}"]`);
   if (!heading) return;
-  const sticky = document.querySelector<HTMLElement>("#resources-skills-sticky");
-  const offset = (sticky?.offsetHeight ?? 0) + 8;
+  const offset = 8;
   const top = heading.getBoundingClientRect().top - skillsPanelEl.getBoundingClientRect().top
     + skillsPanelEl.scrollTop
     - offset;
