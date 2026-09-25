@@ -97,9 +97,9 @@ pub use gateway::{gateway_restart_hint, restart_workspace_gateways, GatewayResta
 pub use hook_status::{workspace_hook_status, ShellHookStatus};
 pub use matrix::{workspace_capability_matrix, CapabilityCell, CapabilityMatrix};
 pub use mcp_inventory::{
-    browser_configured_runtimes, ensure_stable_agent_doctor_cli, list_mcp_inventory,
-    list_mcp_inventory_with_doc, probe_browser_mcp_for_runtime, resolve_agent_doctor_binary,
-    McpInventoryItem, McpInventoryReport,
+    browser_configured_runtimes, ensure_stable_agent_doctor_cli, invalidate_mcp_inventory_cache,
+    list_mcp_inventory, list_mcp_inventory_with_doc, probe_browser_mcp_for_runtime,
+    resolve_agent_doctor_binary, McpInventoryItem, McpInventoryReport,
 };
 pub use paths_check::{scan_workspace_path_references, PathReferenceIssue};
 pub use shell::{
@@ -196,9 +196,9 @@ pub fn load_workspaces() -> Result<WorkspacesDocument> {
 }
 
 fn default_workspace_project_path() -> PathBuf {
-    dirs::home_dir()
-        .or_else(dirs::document_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
+    // Prefer $HOME only. Resolving `dirs::document_dir()` on macOS can pop the
+    // Documents TCC prompt even when we never intended to use 文稿.
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Create and activate a `default` workspace (user home) when the registry is empty,
@@ -315,6 +315,7 @@ pub fn init_workspace(
     if doc.active.is_none() {
         doc.active = Some(workspace_name.clone());
     }
+    invalidate_mcp_inventory_cache();
     let config_path = save_workspaces(&doc)?;
 
     let mut init_bindings = bindings;
@@ -385,6 +386,7 @@ pub fn use_workspace_with_options(
     let snapshot = apply_workspace_snapshot(&entry, &data_root)?;
     save_workspace_snapshot(&entry, &data_root)?;
 
+    invalidate_mcp_inventory_cache();
     let env_file = write_active_env(name, &entry)?;
 
     let gateway_restarts = if options.restart_gateways {
@@ -898,6 +900,18 @@ mod tests {
             },
         );
         assert_eq!(unique_workspace_name("foo", &workspaces), "foo-2");
+    }
+
+    #[test]
+    fn default_workspace_path_is_home_not_documents() {
+        if let Some(home) = dirs::home_dir() {
+            let path = default_workspace_project_path();
+            assert_eq!(path, home);
+            assert!(
+                !path.ends_with("Documents") && !path.ends_with("文稿"),
+                "default workspace must not resolve the Documents folder"
+            );
+        }
     }
 
     #[test]

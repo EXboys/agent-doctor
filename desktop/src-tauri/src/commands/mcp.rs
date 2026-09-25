@@ -35,6 +35,8 @@ pub struct McpModuleStatus {
     pub targets: Vec<BrowserMcpTargetStatus>,
     pub binary: String,
     pub config_snippet: serde_json::Value,
+    #[serde(default)]
+    pub browser_deferred: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,10 +74,37 @@ pub fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
 pub fn mcp_status_command(
     port: Option<u16>,
     probe_chrome: Option<bool>,
+    discover_chrome: Option<bool>,
 ) -> Result<McpModuleStatus, String> {
     let port = port.unwrap_or(DEFAULT_BROWSER_MCP_PORT);
     let inventory = list_mcp_inventory().map_err(|error| error.to_string())?;
     let configured_runtimes = browser_configured_runtimes(&inventory);
+    let discover = discover_chrome.unwrap_or(true);
+    // The resources hub only needs counts. Discovering Chrome reads
+    // Google Chrome.app (macOS “other apps” / Files prompt) and resolving the
+    // CLI can re-stat the project under Documents — both already asked at boot.
+    if !discover {
+        return Ok(McpModuleStatus {
+            browser: BrowserMcpStatus {
+                chrome_found: false,
+                binary: None,
+                version: None,
+                user_data_dir: None,
+                profile_directory: resolve_profile_directory(None),
+                system_user_data_dir: String::new(),
+                isolated_user_data_dir: String::new(),
+                cdp_connected: false,
+                ws_endpoint: None,
+                port,
+            },
+            inventory,
+            configured_runtimes,
+            targets: Vec::new(),
+            binary: String::new(),
+            config_snippet: serde_json::json!({ "deferred": true }),
+            browser_deferred: true,
+        });
+    }
     let targets = list_browser_mcp_targets();
     let binary_result = resolve_agent_doctor_binary();
     let binary = binary_result
@@ -111,6 +140,7 @@ pub fn mcp_status_command(
         targets,
         binary,
         config_snippet,
+        browser_deferred: false,
     })
 }
 

@@ -1,6 +1,5 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { setAgentBrandIcon } from "./agent-brand";
-import { homeDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -418,31 +417,14 @@ function withCatalogInstallState(runtime: RuntimeDoctorResult): RuntimeDoctorRes
   return { ...runtime, installed: true };
 }
 
-async function markerLooksPresent(path: string): Promise<boolean> {
-  try {
-    const response = await fetch(convertFileSrc(path));
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function refreshCursorOnThisComputer(): Promise<void> {
   const known = lastDoctorReport?.runtimes.find((runtime) => runtime.id === "cursor");
-  if (known?.installed || known?.profile?.key_source) {
+  if (
+    known?.installed ||
+    known?.profile?.key_source ||
+    (known?.binary_path ?? "").includes("Cursor.app")
+  ) {
     cursorOnThisComputer = true;
-    return;
-  }
-  try {
-    const home = (await homeDir()).replace(/[/\\]+$/, "");
-    const markers = [
-      "/Applications/Cursor.app/Contents/Info.plist",
-      `${home}/.cursor/argv.json`,
-    ];
-    const hits = await Promise.all(markers.map((marker) => markerLooksPresent(marker)));
-    if (hits.some(Boolean)) cursorOnThisComputer = true;
-  } catch {
-    // Keep the last doctor result when the desktop check is unavailable.
   }
 }
 
@@ -2052,6 +2034,7 @@ async function loadMcpStatus(): Promise<void> {
     const status = await invoke<McpModuleStatus>("mcp_status_command", {
       port: null,
       probeChrome: false,
+      discoverChrome: activeSection === "browser" || activeSection === "tools",
     });
     renderMcpBrowserStatus(status);
     renderResourcesList();

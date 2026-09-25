@@ -191,22 +191,31 @@ refs.wiring.refreshPresetGroupLabels();
 refs.wiring.applyProviderPreset("deepseek");
 refs.wiring.showPersonalListView();
 
+function afterFirstPaint(task: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(task);
+  });
+}
+
 // A webview reload can preserve the native width from an open diagnose panel
 // while resetting the frontend's detail state. Always restore compact startup.
 void refs.agents.setMainWindowWidth(refs.agents.MAIN_COMPACT_WIDTH);
-void refs.agents.loadProfiles();
-void refs.workspace.loadWorkspaces();
-void refs.workspace.loadRemoteProjects();
-if (isTeamEdition()) {
-  void refs.wiring.loadEvotownStatus();
-} else {
-  void refs.wiring.loadPersonalProviderStatus();
-}
-void refs.wiring.loadModeStatus();
-// Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
-// wake Chrome until the user opens Resources or clicks Browser smoke.
-refs.firstRun.initPersonalFirstRun();
-if (refs.firstRun.getPhase() === "hidden") {
-  void refs.agents.refresh();
-}
-void initUpdaterUi({ versionEl: appVersionEl, checkBtn: checkUpdateEl });
+// Show chrome first. Workspace / doctor I/O can raise an OS folder prompt.
+afterFirstPaint(() => {
+  void refs.agents.loadProfiles();
+  void refs.workspace.loadWorkspaces();
+  void refs.workspace.loadRemoteProjects();
+  if (isTeamEdition()) {
+    void refs.wiring.loadEvotownStatus();
+  } else {
+    void refs.wiring.loadPersonalProviderStatus();
+  }
+  void refs.wiring.loadModeStatus();
+  // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
+  // wake Chrome until the user opens Resources or clicks Browser smoke.
+  refs.firstRun.initPersonalFirstRun();
+  if (refs.firstRun.getPhase() === "hidden") {
+    void refs.agents.refresh();
+  }
+  void initUpdaterUi({ versionEl: appVersionEl, checkBtn: checkUpdateEl });
+});

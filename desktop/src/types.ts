@@ -347,6 +347,7 @@ export interface McpModuleStatus {
   targets: BrowserMcpTargetStatus[];
   binary: string;
   config_snippet: unknown;
+  browser_deferred?: boolean;
 }
 
 export interface McpConfigureReport {

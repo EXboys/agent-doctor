@@ -67,11 +67,44 @@ fn rc_references_hook(contents: &str, hook_path: &Path) -> bool {
 }
 
 fn powershell_profile_path() -> PathBuf {
-    if let Ok(profile) = std::env::var("USERPROFILE") {
-        return PathBuf::from(profile)
-            .join("Documents")
-            .join("PowerShell")
-            .join("Microsoft.PowerShell_profile.ps1");
+    // Windows PowerShell lives under Documents. Never probe that path on
+    // macOS/Linux — `exists()` on ~/Documents trips the Files-and-Folders prompt.
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(profile)
+                .join("Documents")
+                .join("PowerShell")
+                .join("Microsoft.PowerShell_profile.ps1");
+        }
+        return home_join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1");
     }
-    home_join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
+    #[cfg(not(windows))]
+    {
+        home_join(".config/powershell/Microsoft.PowerShell_profile.ps1")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::powershell_profile_path;
+
+    #[test]
+    fn unix_powershell_profile_skips_documents_folder() {
+        #[cfg(not(windows))]
+        {
+            let path = powershell_profile_path();
+            let rendered = path.to_string_lossy();
+            assert!(
+                !rendered.contains("/Documents/") && !rendered.contains("/文稿/"),
+                "must not stat ~/Documents on Unix: {rendered}"
+            );
+            assert!(rendered.contains(".config/powershell"));
+        }
+        #[cfg(windows)]
+        {
+            let path = powershell_profile_path();
+            assert!(path.to_string_lossy().contains("Documents"));
+        }
+    }
 }

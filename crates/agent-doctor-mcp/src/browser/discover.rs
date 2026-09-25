@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 
@@ -8,9 +9,25 @@ use super::paths::home_dir;
 use super::paths::{resolve_profile_directory, resolve_user_data_dir};
 use super::types::{BrowserDiscovery, BrowserFamily};
 
+static CHROME_DISCOVERY: Mutex<Option<Result<BrowserDiscovery, String>>> = Mutex::new(None);
+
 /// Discover Chrome / Edge / Chromium on the local machine.
 pub fn discover_chrome() -> Result<BrowserDiscovery> {
-    discover_browser(BrowserFamily::Auto)
+    if let Ok(guard) = CHROME_DISCOVERY.lock() {
+        if let Some(cached) = guard.as_ref() {
+            return cached.clone().map_err(|error| anyhow::anyhow!("{error}"));
+        }
+    }
+    let result = discover_browser(BrowserFamily::Auto);
+    if let Ok(mut guard) = CHROME_DISCOVERY.lock() {
+        *guard = Some(
+            result
+                .as_ref()
+                .map(|value| value.clone())
+                .map_err(|error| error.to_string()),
+        );
+    }
+    result
 }
 
 /// Discover a Chromium-family browser, optionally pinning Chrome vs Edge.

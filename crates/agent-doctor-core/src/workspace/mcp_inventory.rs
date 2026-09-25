@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -12,6 +14,15 @@ use crate::adapters::util::{find_all_binaries, find_binary, home_join};
 use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
 
 use super::{load_workspaces, WorkspacesDocument};
+
+const MCP_INVENTORY_CACHE_TTL: Duration = Duration::from_secs(45);
+static MCP_INVENTORY_CACHE: Mutex<Option<(Instant, McpInventoryReport)>> = Mutex::new(None);
+
+pub fn invalidate_mcp_inventory_cache() {
+    if let Ok(mut guard) = MCP_INVENTORY_CACHE.lock() {
+        *guard = None;
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpInventoryItem {
@@ -40,8 +51,19 @@ pub struct McpInventoryReport {
 }
 
 pub fn list_mcp_inventory() -> Result<McpInventoryReport> {
+    if let Ok(guard) = MCP_INVENTORY_CACHE.lock() {
+        if let Some((at, report)) = guard.as_ref() {
+            if at.elapsed() < MCP_INVENTORY_CACHE_TTL {
+                return Ok(report.clone());
+            }
+        }
+    }
     let doc = load_workspaces().unwrap_or_default();
-    Ok(list_mcp_inventory_with_doc(&doc))
+    let report = list_mcp_inventory_with_doc(&doc);
+    if let Ok(mut guard) = MCP_INVENTORY_CACHE.lock() {
+        *guard = Some((Instant::now(), report.clone()));
+    }
+    Ok(report)
 }
 
 pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryReport {
@@ -955,6 +977,62 @@ args = ["mcp", "browser", "--port", "9222"]
                 .expect("codex browser MCP");
             assert!(codex.is_browser);
             assert!(browser_configured_runtimes(&report).contains(&"codex".to_string()));
+        });
+    }
+
+    #[test]
+    fn list_mcp_inventory_reuses_cache_without_rereading_project() {
+        with_temp_home(|home| {
+            invalidate_mcp_inventory_cache();
+            let config = dirs::config_dir().expect("config dir");
+            let ws_dir = config.join("agent-doctor");
+            fs::create_dir_all(&ws_dir).unwrap();
+            let project = home.join("proj");
+            fs::create_dir_all(&project).unwrap();
+            fs::write(
+                project.join(".mcp.json"),
+                r#"{"mcpServers":{"browser":{"command":"agent-doctor","args":["mcp","browser"]}}}"#,
+            )
+            .unwrap();
+            fs::write(
+                ws_dir.join("workspaces.yaml"),
+                format!(
+                    "active: demo\nworkspaces:\n  demo:\n    path: {}\n    hermes_profile: demo\n    codex_home: {}\n    openclaw_agent_id: demo\n    openclaw_workspace: {}\n",
+                    project.display(),
+                    home.join("codex").display(),
+                    home.join("oc").display()
+                ),
+            )
+            .unwrap();
+
+            let first = list_mcp_inventory().expect("first inventory");
+            assert!(
+                first
+                    .servers
+                    .iter()
+                    .any(|s| s.scope == "project" && s.name == "browser"),
+                "expected project browser from disk"
+            );
+
+            fs::write(project.join(".mcp.json"), r#"{"mcpServers":{}}"#).unwrap();
+            let second = list_mcp_inventory().expect("cached inventory");
+            assert!(
+                second
+                    .servers
+                    .iter()
+                    .any(|s| s.scope == "project" && s.name == "browser"),
+                "second call must reuse cache and not re-stat the project file"
+            );
+
+            invalidate_mcp_inventory_cache();
+            let third = list_mcp_inventory().expect("fresh inventory");
+            assert!(
+                !third
+                    .servers
+                    .iter()
+                    .any(|s| s.scope == "project" && s.name == "browser"),
+                "after invalidate, empty mcpServers should drop the project browser"
+            );
         });
     }
 }

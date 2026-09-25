@@ -6,5 +6,11 @@
   <string>需要用麦克风听你说话，才能把话写进问答框。</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>需要用语音识别，才能把你说的话写成文字，方便提问。</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>项目文件夹常在「文稿」里。允许后才能检查和修复这个项目里的 Agent。</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>项目文件夹有时在桌面上。允许后才能检查和修复这个项目里的 Agent。</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>项目文件夹有时在「下载」里。允许后才能检查和修复这个项目里的 Agent。</string>
 </dict>
 </plist>

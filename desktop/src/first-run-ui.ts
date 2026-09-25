@@ -603,7 +603,11 @@ function initPersonalFirstRun(): void {
   renderFirstRunUi();
   if (!firstRunAutoStarted) {
     firstRunAutoStarted = true;
-    void runFirstRunScan();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void runFirstRunScan();
+      });
+    });
   }
 }
 

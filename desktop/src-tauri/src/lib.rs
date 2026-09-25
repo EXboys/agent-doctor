@@ -1,12 +1,13 @@
 use agent_doctor_core::{
     apply_profile_model, ensure_default_workspace, evotown_status, execute_evotown_onboarding,
-    execute_register, execute_skills_sync, load_doctor_node_config, load_profiles, load_workspaces,
-    open_interactive_session, run_doctor, run_prompt_session_with_cancel, set_runtime_model,
-    use_profile, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset,
-    HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport,
-    ProfilesDocument, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
-    PromptSessionOptions, PromptSessionReport, RegisterOptions, RegisterReport, RuntimeModelPreset,
-    SkillsSyncOptions, SyncReport, UseProfileReport,
+    execute_register, execute_skills_sync, list_mcp_inventory, load_doctor_node_config,
+    load_profiles, load_workspaces, open_interactive_session, run_doctor,
+    run_prompt_session_with_cancel, set_runtime_model, use_profile, ApplyReport, DoctorReport,
+    EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings, OnboardingOptions,
+    OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument, PromptSessionCancel,
+    PromptSessionControl, PromptSessionEvent, PromptSessionOptions, PromptSessionReport,
+    RegisterOptions, RegisterReport, RuntimeModelPreset, SkillsSyncOptions, SyncReport,
+    UseProfileReport,
 };
 
 use std::path::PathBuf;
@@ -368,29 +369,21 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
-            // Seed default workspace + auto-trust Codex project paths for end users.
-            let _ = ensure_default_workspace();
-            if let Ok(doc) = load_workspaces() {
-                if let Some(active) = doc.active.as_ref() {
-                    if let Some(entry) = doc.workspaces.get(active) {
-                        let _ = agent_doctor_core::workspace::backends::bind_codex_for_project(
-                            &entry.codex_home,
-                            Some(&entry.path),
-                        );
-                    }
-                }
-            }
+            // Paint the main window first. Seeding a workspace can hit macOS
+            // Files-and-Folders prompts (Documents / Desktop) and must not
+            // block the first frame on a blank chrome.
             if let Some(window) = app.get_webview_window("main") {
                 windows::attach_main_window_close_behavior(&window);
             }
             windows::show_main_window(app.handle());
             tray::setup_tray(app);
+            seed_default_workspace_in_background();
             // Pre-create Ask on the UI thread at startup. Creating it on first
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
             let _ = windows::ensure_ask_window(app.handle(), "claude-code");
-            let _ = windows::ensure_resources_window(app.handle());
-            let _ = windows::ensure_diagnose_window(app.handle(), "openclaw");
+            // Do not pre-create Resources / Diagnose: their pages scan Chrome and
+            // the project folder and would re-raise the same macOS Files prompt.
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -477,6 +470,27 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn seed_default_workspace_in_background() {
+    let _ = std::thread::Builder::new()
+        .name("ad-seed-workspace".into())
+        .spawn(|| {
+            let _ = ensure_default_workspace();
+            if let Ok(doc) = load_workspaces() {
+                if let Some(active) = doc.active.as_ref() {
+                    if let Some(entry) = doc.workspaces.get(active) {
+                        let _ = agent_doctor_core::workspace::backends::bind_codex_for_project(
+                            &entry.codex_home,
+                            Some(&entry.path),
+                        );
+                    }
+                }
+            }
+            // Warm inventory in this thread so later “Resources” clicks reuse it
+            // instead of statting Documents / Chrome again.
+            let _ = list_mcp_inventory();
+        });
 }
 
 #[cfg(test)]

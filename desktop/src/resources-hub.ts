@@ -229,6 +229,12 @@ function updateResourcesHubSummary(): void {
     hubBrowserStatusEl.textContent = "—";
     return;
   }
+  if (appState.lastMcpStatus.browser_deferred) {
+    hubMcpBadgeEl.textContent = "—";
+    hubMcpBadgeEl.classList.add("muted");
+    hubBrowserStatusEl.textContent = "—";
+    return;
+  }
   if (!chrome.chrome_found) {
     hubMcpBadgeEl.textContent = t("mcp.badgeMissing");
     hubMcpBadgeEl.classList.add("bad");
@@ -249,6 +255,7 @@ async function loadMcpStatus() {
     const status = await invoke<McpModuleStatus>("mcp_status_command", {
       port: null,
       probeChrome: false,
+      discoverChrome: false,
     });
     appState.lastMcpStatus = status;
     updateResourcesHubSummary();
