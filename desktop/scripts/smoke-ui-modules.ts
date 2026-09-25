@@ -94,6 +94,7 @@ const preview: RepairPreviewResponse = {
 // 1) Agents refresh / card render
 assert(isAskRuntimeId("hermes"), "hermes is ask runtime");
 assert(supportsBrowserMcp("hermes"), "hermes supports browser mcp");
+assert(supportsBrowserMcp("deepseek-harness"), "deepseek harness supports browser mcp");
 const actions = renderRuntimeCardActions(runtime, "<div>adv</div>", {
   preview,
   confirmPending: false,

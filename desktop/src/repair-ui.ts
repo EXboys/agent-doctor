@@ -80,6 +80,7 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-codex-browser-mcp": "repair.fix.codexBrowserMcp",
   "fix-hermes-browser-mcp": "repair.fix.hermesBrowserMcp",
   "fix-openclaw-browser-mcp": "repair.fix.openclawBrowserMcp",
+  "fix-deepseek-harness-browser-mcp": "repair.fix.deepseekBrowserMcp",
 };
 
 export function repairFixLabel(actionId: string): string {

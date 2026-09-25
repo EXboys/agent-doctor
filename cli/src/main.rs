@@ -567,7 +567,7 @@ enum McpAction {
     },
     /// Configure browser MCP for a runtime (codex, claude-code)
     Configure {
-        /// Runtime id (codex, claude-code, hermes, or openclaw)
+        /// Runtime id (codex, claude-code, hermes, openclaw, or deepseek-harness)
         runtime: String,
         /// Chrome DevTools Protocol port
         #[arg(long, default_value_t = 9222)]

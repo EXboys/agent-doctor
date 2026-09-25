@@ -366,6 +366,7 @@ export type ResourceRow = {
   issue: boolean;
   skillId?: string;
   needsMount?: boolean;
+  action?: "open-browser";
 };
 
 export interface PersonalProviderStatus {

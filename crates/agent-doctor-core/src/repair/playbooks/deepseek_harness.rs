@@ -40,6 +40,11 @@ pub fn suggest_deepseek_harness_repairs(probe: &RuntimeProbeReport) -> Vec<Sugge
             });
         }
     }
+    items.extend(super::npm_cli::suggest_browser_mcp_repairs(
+        "deepseek-harness",
+        "DeepSeek Harness",
+        probe,
+    ));
     items
 }
 
@@ -83,6 +88,9 @@ pub fn apply_deepseek_harness_playbook_filtered(
             }),
         }
     }
+    let browser = super::npm_cli::apply_browser_mcp_repair("deepseek-harness", probe, only_ids)?;
+    result.executed.extend(browser.executed);
+    result.skipped.extend(browser.skipped);
     Ok(result)
 }
 

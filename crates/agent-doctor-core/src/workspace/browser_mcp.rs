@@ -172,7 +172,9 @@ pub fn diagnose_and_wire_browser_mcp(
     if installed_ids.is_empty() {
         issues.push(BrowserMcpDiagnoseIssue {
             code: "no_installed_runtimes".into(),
-            message: "No installed Codex / Claude Code / Hermes / OpenClaw to write".into(),
+            message:
+                "No installed Codex / Claude Code / Hermes / OpenClaw / DeepSeek Harness to write"
+                    .into(),
         });
     }
 
@@ -275,15 +277,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn targets_cover_four_wire_runtimes() {
+    fn targets_cover_five_wire_runtimes() {
         let targets = list_browser_mcp_targets();
-        assert_eq!(targets.len(), 4);
+        assert_eq!(targets.len(), 5);
         assert_eq!(
             targets
                 .iter()
                 .map(|t| t.runtime_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["codex", "claude-code", "hermes", "openclaw"]
+            vec![
+                "codex",
+                "claude-code",
+                "hermes",
+                "openclaw",
+                "deepseek-harness"
+            ]
         );
     }
 }

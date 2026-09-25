@@ -41,7 +41,8 @@ import type {
   RuntimeDoctorResult,
 } from "./types";
 
-type ResourcesSection = "agents" | "skills" | "mall" | "tools" | "browser";
+type ResourcesSection = "agents" | "skills" | "tools" | "browser";
+type SkillScope = "local" | "store";
 type SkillFilter = "all" | "issue" | "store" | SkillCategoryId;
 type ToolFilter = "all" | "issue";
 type MallFilter = "all" | "free" | "paid" | "pack" | "skill";
@@ -52,7 +53,11 @@ const MCP_PROFILE_DIRECTORY_KEY = "agent-doctor.mcp.profileDirectory";
 
 const subtitleEl = document.querySelector<HTMLElement>("#resources-subtitle");
 const sectionTabsEl = document.querySelector<HTMLElement>("#resources-section-tabs")!;
+const mainHeadEl = document.querySelector<HTMLElement>("#resources-main-head")!;
 const skillsPanelEl = document.querySelector<HTMLElement>("#panel-skills")!;
+const skillScopeEl = document.querySelector<HTMLElement>("#resources-skill-scope")!;
+const skillScopeHintEl = document.querySelector<HTMLElement>("#resources-scope-hint")!;
+const panelLeadEl = document.querySelector<HTMLElement>("#resources-panel-lead")!;
 const skillFiltersEl = document.querySelector<HTMLElement>("#resources-skill-filters")!;
 const agentBarEl = document.querySelector<HTMLElement>("#resources-agent-bar")!;
 const agentFiltersEl = document.querySelector<HTMLElement>("#resources-agent-filters")!;
@@ -64,6 +69,7 @@ const emptyEl = document.querySelector<HTMLElement>("#resources-empty")!;
 const footnoteEl = document.querySelector<HTMLElement>("#resources-footnote")!;
 const toolsListEl = document.querySelector<HTMLUListElement>("#resources-tools-list")!;
 const toolsEmptyEl = document.querySelector<HTMLElement>("#resources-tools-empty")!;
+const toolsFootnoteEl = document.querySelector<HTMLElement>("#resources-tools-footnote")!;
 const mallAccountEl = document.querySelector<HTMLElement>("#resources-mall-account")!;
 const mallAccountStatusEl = document.querySelector<HTMLElement>("#resources-mall-account-status")!;
 const mallLoginEl = document.querySelector<HTMLButtonElement>("#resources-mall-login")!;
@@ -175,51 +181,144 @@ function applyI18n(): void {
   searchEl.placeholder = t("resources.searchGlobal");
   mcpDiagnoseWireEl.title = t("mcp.diagnoseWireHint");
   document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
-  const mallTab = document.querySelector<HTMLButtonElement>("#resources-tab-mall");
-  if (mallTab) mallTab.hidden = !personalEdition;
+  skillScopeEl.setAttribute("aria-label", t("resources.skillScopeAria"));
+  syncSkillScopeChrome();
 }
 
 function skillsPanelActive(): boolean {
-  return activeSection === "skills" || activeSection === "mall";
+  return activeSection === "skills";
 }
 
-function setSection(section: ResourcesSection): void {
-  if (section === "mall" && !personalEdition) section = "skills";
-  if (section === "mall") {
-    skillFilter = "store";
-    agentFilter = "all";
-  } else if (section === "skills" && skillFilter === "store") {
-    skillFilter = "all";
+function currentSkillScope(): SkillScope {
+  return personalEdition && skillFilter === "store" ? "store" : "local";
+}
+
+function showScopeChrome(): boolean {
+  return personalEdition && (activeSection === "skills" || activeSection === "tools");
+}
+
+function syncSkillScopeChrome(): void {
+  const showScope = showScopeChrome();
+  const scope = currentSkillScope();
+  mainHeadEl.classList.toggle("is-skills", showScope);
+  skillScopeEl.hidden = !showScope;
+  skillScopeHintEl.hidden = !showScope;
+  mallAccountEl.hidden = !(showScope && scope === "store");
+  if (!mallAccountEl.hidden) renderMallAccount();
+  skillScopeEl.querySelectorAll<HTMLButtonElement>("[data-skill-scope]").forEach((btn) => {
+    const active = btn.dataset.skillScope === scope;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (activeSection === "tools") {
+    skillScopeHintEl.textContent =
+      scope === "store" ? t("resources.toolScopeStoreHint") : t("resources.toolScopeLocalHint");
+  } else {
+    skillScopeHintEl.textContent =
+      scope === "store" ? t("resources.skillScopeStoreHint") : t("resources.skillScopeLocalHint");
   }
+  syncPanelLead();
+}
+
+function syncPanelLead(): void {
+  if (activeSection === "agents") {
+    panelLeadEl.hidden = false;
+    const missing = catalogAgents().some((runtime) => !runtime.installed);
+    panelLeadEl.textContent = missing
+      ? t("resources.agentCatalogHint")
+      : t("resources.agentCatalogHintAllOn");
+    return;
+  }
+  if (activeSection === "browser") {
+    panelLeadEl.hidden = false;
+    panelLeadEl.textContent = t("resources.hubBrowserCardDesc");
+    return;
+  }
+  panelLeadEl.hidden = true;
+}
+
+function paintSection(section: ResourcesSection): void {
   activeSection = section;
-  const panelSection = section === "mall" ? "skills" : section;
   sectionTabsEl.querySelectorAll<HTMLButtonElement>("[data-section]").forEach((btn) => {
     const active = btn.dataset.section === section;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
   document.querySelectorAll<HTMLElement>("[data-section-panel]").forEach((panel) => {
-    const active = panel.dataset.sectionPanel === panelSection;
+    const active = panel.dataset.sectionPanel === section;
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
-  if ((section === "agents" || section === "skills") && !lastDoctorReport) {
-    void loadDoctor();
+  syncSkillScopeChrome();
+}
+
+function setSkillScope(scope: SkillScope): void {
+  if (scope === "store" && !personalEdition) scope = "local";
+  if (scope === "store") {
+    skillFilter = "store";
+    agentFilter = "all";
+  } else if (skillFilter === "store") {
+    skillFilter = "all";
   }
-  if (section === "mall") {
+  syncSkillScopeChrome();
+  if (activeSection === "tools") {
+    if (scope === "store") {
+      if (lastMallCatalog) renderToolsList();
+      else void loadMall();
+    } else if (lastMcpStatus) {
+      renderToolsList();
+    } else {
+      void loadMcpStatus();
+    }
+    return;
+  }
+  if (scope === "store") {
     if (lastMallCatalog) renderResourcesList();
     else void loadMall();
     return;
   }
-  if (section === "skills") {
-    if (lastSkillsInventory || lastMallCatalog) renderResourcesList();
-    else void loadSkills();
+  if (lastSkillsInventory || lastMallCatalog) renderResourcesList();
+  else void loadSkills();
+}
+
+function setSection(section: ResourcesSection | "mall"): void {
+  if (section === "mall") {
+    paintSection("skills");
+    if ((activeSection === "skills" || section === "mall") && !lastDoctorReport) {
+      void loadDoctor();
+    }
+    setSkillScope(personalEdition ? "store" : "local");
+    return;
+  }
+  paintSection(section);
+  if ((section === "agents" || section === "skills") && !lastDoctorReport) {
+    void loadDoctor();
+  }
+  if (section === "skills" || section === "tools") {
+    setSkillScope(currentSkillScope());
   }
 }
 
 function setSkillsFootnote(message: string | null): void {
   skillsStatusMessage = message;
   syncSkillsFootnote();
+  if (activeSection === "tools") {
+    toolsFootnoteEl.textContent = message ?? defaultToolsFootnote();
+  }
+}
+
+function defaultToolsFootnote(): string {
+  if (isStoreScope()) {
+    if (lastMallCatalog && lastMallCatalog.items.length > 0) {
+      const rows = filteredMallToolItems();
+      return t("resources.mallListHint", {
+        count: String(rows.length),
+        total: String(mallToolPool().length),
+      });
+    }
+    return t("resources.mallFootnoteShort");
+  }
+  return "";
 }
 
 function defaultSkillsFootnote(): string {
@@ -260,6 +359,11 @@ function countLocalSkillMatches(): number {
 }
 
 function countToolMatches(): number {
+  if (isStoreScope()) return filteredMallToolItems().length;
+  return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
+}
+
+function countLocalToolMatches(): number {
   return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
 }
 
@@ -392,6 +496,27 @@ function applyAccountOwnership(): void {
   }
 }
 
+function isMallToolItem(item: TeamupsCatalogItem): boolean {
+  const kind = item.kind.trim().toLowerCase();
+  return kind === "mcp" || kind === "tool" || kind === "tools";
+}
+
+function mallToolPool(): TeamupsCatalogItem[] {
+  return (lastMallCatalog?.items ?? []).filter(isMallToolItem);
+}
+
+function filteredMallToolItems(): TeamupsCatalogItem[] {
+  return mallToolPool()
+    .filter((item) => {
+      if (mallFilter === "free" && !item.free) return false;
+      if (mallFilter === "paid" && item.free) return false;
+      if (!resourceQuery) return true;
+      const blob = `${item.name} ${item.description} ${item.id}`.toLowerCase();
+      return blob.includes(resourceQuery);
+    })
+    .sort((a, b) => Number(b.owned) - Number(a.owned));
+}
+
 function filteredMallItems(): TeamupsCatalogItem[] {
   const items = lastMallCatalog?.items ?? [];
   return items
@@ -411,29 +536,37 @@ function filteredMallItems(): TeamupsCatalogItem[] {
 function maybeJumpToSearchHits(): void {
   if (!resourceQuery) return;
   const skillHits = countLocalSkillMatches();
-  const toolHits = countToolMatches();
+  const toolHits = countLocalToolMatches();
+  const mallToolHits = personalEdition ? filteredMallToolItems().length : 0;
   const agentHits = countAgentMatches();
   const mallHits = personalEdition ? filteredMallItems().length : 0;
   if (activeSection === "browser") {
     if (agentHits > 0) setSection("agents");
     else if (skillHits > 0) setSection("skills");
     else if (mallHits > 0) setSection("mall");
-    else if (toolHits > 0) setSection("tools");
+    else if (toolHits > 0 || mallToolHits > 0) setSection("tools");
     else setSection("skills");
     return;
   }
-  if (activeSection === "mall" && mallHits === 0) {
-    if (skillHits > 0) setSection("skills");
+  if (activeSection === "skills" && currentSkillScope() === "store" && mallHits === 0) {
+    if (skillHits > 0) setSkillScope("local");
     else if (agentHits > 0) setSection("agents");
-    else if (toolHits > 0) setSection("tools");
+    else if (toolHits > 0 || mallToolHits > 0) setSection("tools");
     return;
   }
-  if (activeSection === "skills" && skillHits === 0) {
-    if (mallHits > 0) setSection("mall");
+  if (activeSection === "skills" && currentSkillScope() === "local" && skillHits === 0) {
+    if (mallHits > 0) setSkillScope("store");
     else if (agentHits > 0) setSection("agents");
-    else if (toolHits > 0) setSection("tools");
-  } else if (activeSection === "tools" && toolHits === 0) {
-    if (skillHits > 0) setSection("skills");
+    else if (toolHits > 0 || mallToolHits > 0) setSection("tools");
+  } else if (activeSection === "tools" && currentSkillScope() === "store" && mallToolHits === 0) {
+    if (toolHits > 0) setSkillScope("local");
+    else if (skillHits > 0) setSection("skills");
+    else if (mallHits > 0) setSection("mall");
+    else if (agentHits > 0) setSection("agents");
+    return;
+  } else if (activeSection === "tools" && currentSkillScope() === "local" && toolHits === 0) {
+    if (mallToolHits > 0) setSkillScope("store");
+    else if (skillHits > 0) setSection("skills");
     else if (mallHits > 0) setSection("mall");
     else if (agentHits > 0) setSection("agents");
   } else if (activeSection === "agents" && agentHits === 0) {
@@ -668,8 +801,37 @@ function renderMcpBrowserStatus(status: McpModuleStatus): void {
   mcpDiagnoseWireEl.disabled = !canWire;
 }
 
+function browserToolRow(): ResourceRow | null {
+  if (!lastMcpStatus) return null;
+  const ready =
+    lastMcpStatus.browser.chrome_found && lastMcpStatus.configured_runtimes.length > 0;
+  const agents = lastMcpStatus.configured_runtimes
+    .map((runtime) => {
+      if (runtime === "claude-code") return "Claude";
+      if (runtime === "codex") return "Codex";
+      if (runtime === "openclaw") return "OpenClaw";
+      if (runtime === "hermes") return "Hermes";
+      if (runtime === "deepseek-harness") return "DeepSeek";
+      return runtime;
+    })
+    .filter(Boolean);
+  return {
+    kind: "mcp",
+    name: t("resources.toolBrowserName"),
+    sub: agents.length
+      ? `${t("resources.toolBrowserDesc")} ${agents.join(" · ")}`
+      : t("resources.toolBrowserDesc"),
+    meta: ready ? t("resources.toolBrowserReady") : t("resources.toolBrowserNeedSetup"),
+    tone: ready ? "ok" : "warn",
+    issue: !ready,
+    action: "open-browser",
+  };
+}
+
 function buildMcpRows(): ResourceRow[] {
   const rows: ResourceRow[] = [];
+  const browser = browserToolRow();
+  if (browser) rows.push(browser);
   const mcpGroups = new Map<string, McpInventoryItem[]>();
   for (const server of lastMcpStatus?.inventory.servers ?? []) {
     if (server.is_browser) continue; // Browser has its own tab.
@@ -725,7 +887,7 @@ type UnifiedSkillEntry = {
   canUnmount?: boolean;
   mallItem?: TeamupsCatalogItem;
   storeOnly: boolean;
-  iconKind: "skill" | "pack";
+  iconKind: "skill" | "pack" | "mcp";
   agents?: SkillAgentUsage[];
 };
 
@@ -811,7 +973,11 @@ function entryFromMallItem(item: TeamupsCatalogItem): UnifiedSkillEntry | null {
   }
   const category: SkillCategoryId = "other";
   const badgeLabel =
-    item.kind === "pack" ? t("resources.mallPackBadge") : t("resources.mallSkillBadge");
+    item.kind === "pack"
+      ? t("resources.mallPackBadge")
+      : isMallToolItem(item)
+        ? t("resources.toolBadge")
+        : t("resources.mallSkillBadge");
   const issue = storeIssue(item);
   return {
     key: `store:${item.kind}:${item.id}`,
@@ -825,7 +991,7 @@ function entryFromMallItem(item: TeamupsCatalogItem): UnifiedSkillEntry | null {
     issue,
     mallItem: item,
     storeOnly: true,
-    iconKind: item.kind === "pack" ? "pack" : "skill",
+    iconKind: item.kind === "pack" ? "pack" : isMallToolItem(item) ? "mcp" : "skill",
   };
 }
 
@@ -894,7 +1060,9 @@ function appendResourceRow(parent: HTMLElement, row: ResourceRow, tagLabel: stri
 
   const icon = document.createElement("span");
   icon.className = "res-catalog-icon";
-  icon.classList.add(row.kind === "skill" ? "is-skill" : "is-mcp");
+  icon.classList.add(
+    row.action === "open-browser" ? "is-browser" : row.kind === "skill" ? "is-skill" : "is-mcp",
+  );
   icon.textContent = (row.name.trim().charAt(0) || "?").toUpperCase();
 
   const body = document.createElement("div");
@@ -929,6 +1097,28 @@ function appendResourceRow(parent: HTMLElement, row: ResourceRow, tagLabel: stri
       void mountSkill(skillId);
     });
     metaWrap.appendChild(btn);
+  }
+
+  if (row.action === "open-browser") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "res-catalog-link";
+    btn.textContent = row.tone === "ok" ? t("resources.toolBrowserView") : t("resources.toolBrowserOpen");
+    const openBrowser = () => setSection("browser");
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openBrowser();
+    });
+    metaWrap.appendChild(btn);
+    li.classList.add("is-link");
+    li.tabIndex = 0;
+    li.addEventListener("click", openBrowser);
+    li.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openBrowser();
+      }
+    });
   }
 
   li.append(icon, body, metaWrap);
@@ -989,7 +1179,6 @@ function renderSkillFilters(): void {
   }
 
   const showStoreChrome = isStoreScope();
-  mallAccountEl.hidden = !showStoreChrome;
   skillFiltersEl.replaceChildren();
 
   if (showStoreChrome) {
@@ -1375,7 +1564,9 @@ function appendUnifiedSkillRow(parent: HTMLElement, entry: UnifiedSkillEntry): v
 
   const icon = document.createElement("span");
   icon.className = "res-catalog-icon";
-  icon.classList.add(entry.iconKind === "pack" ? "is-pack" : "is-skill");
+  icon.classList.add(
+    entry.iconKind === "pack" ? "is-pack" : entry.iconKind === "mcp" ? "is-mcp" : "is-skill",
+  );
   icon.textContent = (entry.name.trim().charAt(0) || "?").toUpperCase();
 
   const body = document.createElement("div");
@@ -1405,7 +1596,43 @@ function appendUnifiedSkillRow(parent: HTMLElement, entry: UnifiedSkillEntry): v
   appendUnifiedSkillActions(metaWrap, entry);
 
   li.append(icon, body, metaWrap);
+  bindCollapsibleRow(li, desc);
   parent.appendChild(li);
+}
+
+function bindCollapsibleRow(li: HTMLElement, desc: HTMLElement): void {
+  li.classList.add("is-collapsible");
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "res-catalog-more";
+  more.hidden = true;
+  desc.insertAdjacentElement("afterend", more);
+
+  const syncMore = () => {
+    const expanded = li.classList.contains("is-expanded");
+    more.textContent = expanded ? t("resources.rowCollapse") : t("resources.rowExpand");
+    if (expanded) {
+      more.hidden = false;
+      return;
+    }
+    more.hidden = desc.scrollHeight <= desc.clientHeight + 2;
+  };
+
+  const toggle = () => {
+    li.classList.toggle("is-expanded");
+    requestAnimationFrame(syncMore);
+  };
+
+  more.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggle();
+  });
+  li.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    if (more.hidden && !li.classList.contains("is-expanded")) return;
+    toggle();
+  });
+  requestAnimationFrame(syncMore);
 }
 
 function renderSkillsList(): void {
@@ -1489,14 +1716,64 @@ function renderSkillsList(): void {
 }
 
 function renderToolsList(): void {
+  if (isStoreScope()) {
+    if (mallFilter === "pack" || mallFilter === "skill") mallFilter = "all";
+    toolFiltersEl.replaceChildren();
+    const mallChips: Array<{ id: MallFilter; label: string }> = [
+      { id: "all", label: t("resources.filterAll") },
+      { id: "free", label: t("resources.mallFilterFree") },
+      { id: "paid", label: t("resources.mallFilterPaid") },
+    ];
+    for (const chip of mallChips) {
+      appendFilterChip(
+        chip.label,
+        mallFilter === chip.id,
+        () => {
+          mallFilter = chip.id;
+          renderToolsList();
+        },
+        { mallFilter: chip.id },
+        toolFiltersEl,
+      );
+    }
+    const items = filteredMallToolItems();
+    toolsListEl.replaceChildren();
+    toolsEmptyEl.hidden = items.length > 0;
+    toolsEmptyEl.textContent = resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptyToolsStore");
+    for (const item of items) {
+      const entry = entryFromMallItem(item);
+      if (entry) appendUnifiedSkillRow(toolsListEl, entry);
+    }
+    toolsFootnoteEl.textContent = skillsStatusMessage ?? defaultToolsFootnote();
+    return;
+  }
+
+  toolFiltersEl.replaceChildren();
+  appendFilterChip(
+    t("resources.filterAll"),
+    toolFilter === "all",
+    () => {
+      toolFilter = "all";
+      renderToolsList();
+    },
+    { toolFilter: "all" },
+    toolFiltersEl,
+  );
+  appendFilterChip(
+    t("resources.filterIssue"),
+    toolFilter === "issue",
+    () => {
+      toolFilter = "issue";
+      renderToolsList();
+    },
+    { toolFilter: "issue" },
+    toolFiltersEl,
+  );
+
   const allRows = buildMcpRows();
   const rows = allRows.filter((row) => {
     if (toolFilter === "issue" && !row.issue) return false;
     return rowMatchesQuery(row);
-  });
-
-  toolFiltersEl.querySelectorAll<HTMLButtonElement>("[data-tool-filter]").forEach((chip) => {
-    chip.classList.toggle("is-active", chip.dataset.toolFilter === toolFilter);
   });
 
   toolsListEl.replaceChildren();
@@ -1505,6 +1782,7 @@ function renderToolsList(): void {
   for (const row of rows) {
     appendResourceRow(toolsListEl, row, t("resources.toolBadge"));
   }
+  toolsFootnoteEl.textContent = skillsStatusMessage ?? defaultToolsFootnote();
 }
 
 function canInstallMallItem(item: TeamupsCatalogItem): boolean {
@@ -1754,9 +2032,11 @@ async function installMallItem(
     setSkillsFootnote(t("resources.mallInstallOk", {
       installed: String(report.installed),
     }));
-    skillFilter = "issue";
-    highlightSkillKey = item.kind === "skill" ? item.id : null;
-    await Promise.all([loadMall(), loadSkills()]);
+    if (activeSection === "skills") {
+      skillFilter = "issue";
+      highlightSkillKey = item.kind === "skill" ? item.id : null;
+    }
+    await Promise.all([loadMall(), loadSkills(), loadMcpStatus()]);
   } catch (error) {
     setSkillsFootnote(teamupsMallInstallFailure(error));
     button.disabled = false;
@@ -1791,6 +2071,7 @@ function renderAgentCatalog(): void {
   if (hintEl) {
     hintEl.textContent = missing ? t("resources.agentCatalogHint") : t("resources.agentCatalogHintAllOn");
   }
+  if (activeSection === "agents") syncPanelLead();
   agentsListEl.replaceChildren();
   if (rows.length === 0) {
     agentsEmptyEl.hidden = false;
@@ -1971,6 +2252,7 @@ async function refreshVisible(): Promise<void> {
   }
   if (activeSection === "tools" || activeSection === "browser") {
     await loadMcpStatus();
+    if (personalEdition && isStoreScope()) void loadMall();
     void loadDoctor();
     void loadSkills();
     return;
@@ -2047,12 +2329,17 @@ sectionTabsEl.addEventListener("click", (event) => {
   if (
     btn.dataset.section === "agents" ||
     btn.dataset.section === "skills" ||
-    btn.dataset.section === "mall" ||
     btn.dataset.section === "tools" ||
     btn.dataset.section === "browser"
   ) {
     setSection(btn.dataset.section as ResourcesSection);
   }
+});
+
+skillScopeEl.addEventListener("click", (event) => {
+  const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-skill-scope]");
+  const scope = btn?.dataset.skillScope;
+  if (scope === "local" || scope === "store") setSkillScope(scope);
 });
 
 toolFiltersEl.addEventListener("click", (event) => {

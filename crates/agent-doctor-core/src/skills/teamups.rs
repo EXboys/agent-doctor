@@ -590,6 +590,8 @@ pub(crate) fn parse_catalog_entries(
             .to_ascii_lowercase();
         let kind = if kind.contains("skill") {
             "skill".to_string()
+        } else if kind.contains("mcp") || kind.contains("tool") || kind.contains("server") {
+            "mcp".to_string()
         } else if kind.contains("pack")
             || kind.contains("bundle")
             || kind.contains("combo")

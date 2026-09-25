@@ -11,7 +11,7 @@ use crate::browser::BrowserDiscovery;
 /// Options for configuring an MCP server entry in a runtime's config.
 #[derive(Debug, Clone)]
 pub struct McpConfigureOptions {
-    /// The runtime to configure (codex, claude-code, hermes, openclaw)
+    /// The runtime to configure (codex, claude-code, hermes, openclaw, deepseek-harness)
     pub runtime: String,
     /// Port for the Chrome debugging endpoint
     pub port: u16,
@@ -118,6 +118,18 @@ fn resolve_openclaw_config_path() -> Result<PathBuf> {
         .context("Cannot find home directory for OpenClaw config")
 }
 
+fn resolve_dsh_home() -> Result<PathBuf> {
+    if let Ok(from_env) = std::env::var("DSH_HOME") {
+        let path = PathBuf::from(from_env.trim());
+        if !path.as_os_str().is_empty() {
+            return Ok(path);
+        }
+    }
+    home_dir()
+        .map(|home| home.join(".dsh"))
+        .context("Cannot resolve DeepSeek Harness home (set DSH_HOME)")
+}
+
 /// Find the MCP servers config path for a given runtime.
 ///
 /// - Claude Code with `project_path`: `<project>/.mcp.json` (workspace isolation)
@@ -161,8 +173,9 @@ pub fn mcp_servers_path_with_openclaw(
             }
             resolve_openclaw_config_path()
         }
+        "deepseek-harness" | "dsh" => Ok(resolve_dsh_home()?.join("cordis.patch.yml")),
         _ => anyhow::bail!(
-            "Unsupported runtime: {runtime}. Supported: codex, claude-code, hermes, openclaw"
+            "Unsupported runtime: {runtime}. Supported: codex, claude-code, hermes, openclaw, deepseek-harness"
         ),
     }
 }
@@ -330,6 +343,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
             write_mcp_servers(&config_path, &servers)?;
         }
         "hermes" => write_hermes_browser_mcp(&config_path, &command, &args)?,
+        "deepseek-harness" | "dsh" => write_dsh_browser_mcp(&config_path, &command, &args)?,
         "openclaw" => {
             // Runtime loads global openclaw.json; also mirror into workspace .mcp.json
             // so inventory / Doctor narrative matches Claude project isolation.
@@ -358,6 +372,127 @@ fn write_claude_style_browser_mcp(
         servers = json!({ "browser": entry });
     }
     write_mcp_servers(config_path, &servers)
+}
+
+const DSH_MCP_CLIENT: &str = "@deepseek-ai/dsh-mcp-client";
+const DSH_BROWSER_PLUGIN_ID: &str = "mcp-browser";
+
+fn dsh_browser_plugin_entry(command: &str, args: &[String]) -> serde_yaml::Value {
+    use serde_yaml::{Mapping, Value as YamlValue};
+
+    let mut config = Mapping::new();
+    config.insert(
+        YamlValue::String("serverName".into()),
+        YamlValue::String("browser".into()),
+    );
+    config.insert(
+        YamlValue::String("transport".into()),
+        YamlValue::String("stdio".into()),
+    );
+    config.insert(
+        YamlValue::String("command".into()),
+        YamlValue::String(command.into()),
+    );
+    config.insert(
+        YamlValue::String("args".into()),
+        YamlValue::Sequence(
+            args.iter()
+                .map(|arg| YamlValue::String(arg.clone()))
+                .collect(),
+        ),
+    );
+    let mut item = Mapping::new();
+    item.insert(
+        YamlValue::String("id".into()),
+        YamlValue::String(DSH_BROWSER_PLUGIN_ID.into()),
+    );
+    item.insert(
+        YamlValue::String("name".into()),
+        YamlValue::String(DSH_MCP_CLIENT.into()),
+    );
+    item.insert(
+        YamlValue::String("config".into()),
+        YamlValue::Mapping(config),
+    );
+    YamlValue::Mapping(item)
+}
+
+fn is_dsh_browser_plugin(value: &serde_yaml::Value) -> bool {
+    let Some(map) = value.as_mapping() else {
+        return false;
+    };
+    if map
+        .get(serde_yaml::Value::String("id".into()))
+        .and_then(serde_yaml::Value::as_str)
+        == Some(DSH_BROWSER_PLUGIN_ID)
+    {
+        return true;
+    }
+    let name = map
+        .get(serde_yaml::Value::String("name".into()))
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("");
+    if !name.contains("dsh-mcp-client") {
+        return false;
+    }
+    map.get(serde_yaml::Value::String("config".into()))
+        .and_then(|config| config.get("serverName"))
+        .and_then(serde_yaml::Value::as_str)
+        == Some("browser")
+}
+
+fn upsert_dsh_browser_seq(seq: &mut Vec<serde_yaml::Value>, entry: serde_yaml::Value) {
+    if let Some(index) = seq.iter().position(is_dsh_browser_plugin) {
+        seq[index] = entry;
+    } else {
+        seq.push(entry);
+    }
+}
+
+fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    use serde_yaml::Value as YamlValue;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let mut root: YamlValue = if config_path.exists() {
+        let raw = fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        if raw.trim().is_empty() {
+            YamlValue::Sequence(Vec::new())
+        } else {
+            serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Sequence(Vec::new()))
+        }
+    } else {
+        YamlValue::Sequence(Vec::new())
+    };
+
+    let entry = dsh_browser_plugin_entry(command, args);
+    match &mut root {
+        YamlValue::Sequence(seq) => upsert_dsh_browser_seq(seq, entry),
+        YamlValue::Mapping(map) => {
+            let key = YamlValue::String("plugins".into());
+            let seq = match map.get_mut(&key) {
+                Some(YamlValue::Sequence(seq)) => seq,
+                _ => {
+                    map.insert(key.clone(), YamlValue::Sequence(Vec::new()));
+                    map.get_mut(&key)
+                        .and_then(YamlValue::as_sequence_mut)
+                        .expect("plugins sequence")
+                }
+            };
+            upsert_dsh_browser_seq(seq, entry);
+        }
+        _ => root = YamlValue::Sequence(vec![entry]),
+    }
+
+    let rendered = serde_yaml::to_string(&root)
+        .with_context(|| format!("Failed to serialize {}", config_path.display()))?;
+    fs::write(config_path, rendered)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    Ok(())
 }
 
 fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
@@ -575,5 +710,41 @@ foo = true
         assert!(rendered.contains("foo = true"));
         assert!(rendered.contains("[mcp_servers.browser]"));
         assert!(rendered.contains("command = \"/bin/agent-doctor\""));
+    }
+
+    #[test]
+    fn dsh_patch_path_is_under_dsh_home() {
+        let path = mcp_servers_path("deepseek-harness", None, None, None).unwrap();
+        assert!(path.ends_with("cordis.patch.yml"));
+    }
+
+    #[test]
+    fn dsh_patch_write_upserts_browser_plugin() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(&path, "- id: keep-me\n  name: other\n").unwrap();
+        write_dsh_browser_mcp(
+            &path,
+            "/bin/agent-doctor",
+            &["mcp".into(), "browser".into()],
+        )
+        .unwrap();
+        write_dsh_browser_mcp(
+            &path,
+            "/bin/agent-doctor",
+            &[
+                "mcp".into(),
+                "browser".into(),
+                "--port".into(),
+                "9222".into(),
+            ],
+        )
+        .unwrap();
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("keep-me"));
+        assert_eq!(rendered.matches("mcp-browser").count(), 1);
+        assert!(rendered.contains("@deepseek-ai/dsh-mcp-client"));
+        assert!(rendered.contains("serverName: browser"));
+        assert!(rendered.contains("--port"));
     }
 }

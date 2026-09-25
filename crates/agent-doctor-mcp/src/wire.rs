@@ -12,7 +12,13 @@ use crate::config::{configure_for, mcp_servers_path_with_openclaw, McpConfigureO
 use crate::status::DEFAULT_BROWSER_MCP_PORT;
 
 /// Default runtimes that accept Agent Doctor Browser MCP wiring.
-pub const BROWSER_MCP_WIRE_RUNTIMES: &[&str] = &["codex", "claude-code", "hermes", "openclaw"];
+pub const BROWSER_MCP_WIRE_RUNTIMES: &[&str] = &[
+    "codex",
+    "claude-code",
+    "hermes",
+    "openclaw",
+    "deepseek-harness",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserMcpWireResult {
@@ -148,10 +154,11 @@ pub fn wire_browser_mcp_defaults(binary: &Path) -> Result<BrowserMcpWireReport> 
 /// Human-readable next steps after installing Claude Code / Codex / Hermes / OpenClaw.
 pub fn wiring_next_steps_for_runtime(runtime: &str) -> Option<Vec<String>> {
     match runtime {
-        "claude-code" | "claude" | "codex" | "hermes" | "openclaw" => Some(vec![
+        "claude-code" | "claude" | "codex" | "hermes" | "openclaw" | "deepseek-harness"
+        | "dsh" => Some(vec![
             "Configure a Personal Provider or connect Evotown (Team), then switch mode to write LLM gateway settings into this runtime.".to_string(),
             "CLI: `agent-doctor mode personal` or `agent-doctor mode team` (add `--with-browser-mcp` to also write Browser MCP).".to_string(),
-            "Optional Browser MCP only: `agent-doctor mcp configure <codex|claude-code|hermes|openclaw>`.".to_string(),
+            "Optional Browser MCP only: `agent-doctor mcp configure <codex|claude-code|hermes|openclaw|deepseek-harness>`.".to_string(),
         ]),
         _ => None,
     }
@@ -167,13 +174,20 @@ mod tests {
         assert!(wiring_next_steps_for_runtime("codex").is_some());
         assert!(wiring_next_steps_for_runtime("hermes").is_some());
         assert!(wiring_next_steps_for_runtime("openclaw").is_some());
+        assert!(wiring_next_steps_for_runtime("deepseek-harness").is_some());
     }
 
     #[test]
     fn default_wire_runtimes_are_stable() {
         assert_eq!(
             BROWSER_MCP_WIRE_RUNTIMES,
-            &["codex", "claude-code", "hermes", "openclaw"]
+            &[
+                "codex",
+                "claude-code",
+                "hermes",
+                "openclaw",
+                "deepseek-harness"
+            ]
         );
     }
 }

@@ -33,6 +33,7 @@ export const BROWSER_MCP_RUNTIME_IDS = new Set([
   "codex",
   "hermes",
   "openclaw",
+  "deepseek-harness",
 ]);
 
 export function isAskRuntimeId(runtimeId: string): boolean {

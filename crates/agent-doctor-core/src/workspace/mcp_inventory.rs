@@ -110,6 +110,13 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
         "openclaw",
     ));
 
+    let dsh_patch = crate::DeepSeekHarnessAdapter::home().join("cordis.patch.yml");
+    servers.extend(read_servers_from_dsh_patch(
+        &dsh_patch,
+        "dsh-home",
+        "deepseek-harness",
+    ));
+
     // Legacy mistaken path — still surface if present so users can clean it up.
     let settings = home_join(".claude/settings.json");
     servers.extend(read_servers_from_json(
@@ -148,7 +155,10 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
 
-    if !matches!(runtime_id, "claude-code" | "codex" | "hermes" | "openclaw") {
+    if !matches!(
+        runtime_id,
+        "claude-code" | "codex" | "hermes" | "openclaw" | "deepseek-harness"
+    ) {
         return;
     }
 
@@ -159,7 +169,7 @@ pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::p
         .iter()
         .filter(|item| item.is_browser && item.runtime_hint == runtime_id)
         .max_by_key(|item| match item.scope.as_str() {
-            "project" | "openclaw-workspace" | "codex-home" | "hermes-home" => 2,
+            "project" | "openclaw-workspace" | "codex-home" | "hermes-home" | "dsh-home" => 2,
             "openclaw-global" | "claude-user" => 1,
             _ => 0,
         });
@@ -310,6 +320,69 @@ fn read_servers_from_yaml(path: &Path, scope: &str, runtime_hint: &str) -> Vec<M
                 .unwrap_or_default();
             Some(item_from_command_args(
                 name,
+                command,
+                args,
+                path,
+                scope,
+                runtime_hint,
+            ))
+        })
+        .collect()
+}
+
+fn read_servers_from_dsh_patch(
+    path: &Path,
+    scope: &str,
+    runtime_hint: &str,
+) -> Vec<McpInventoryItem> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw) else {
+        return Vec::new();
+    };
+    let items = match &value {
+        serde_yaml::Value::Sequence(seq) => seq.as_slice(),
+        serde_yaml::Value::Mapping(map) => map
+            .get(serde_yaml::Value::String("plugins".into()))
+            .and_then(serde_yaml::Value::as_sequence)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+        _ => &[],
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let map = item.as_mapping()?;
+            let name = map
+                .get(serde_yaml::Value::String("name".into()))
+                .and_then(serde_yaml::Value::as_str)
+                .unwrap_or("");
+            if !name.contains("dsh-mcp-client") {
+                return None;
+            }
+            let config = map.get(serde_yaml::Value::String("config".into()))?;
+            let server_name = config
+                .get("serverName")
+                .and_then(serde_yaml::Value::as_str)
+                .unwrap_or("mcp");
+            let command = config.get("command").and_then(serde_yaml::Value::as_str);
+            let args = config
+                .get("args")
+                .and_then(serde_yaml::Value::as_sequence)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(serde_yaml::Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some(item_from_command_args(
+                server_name,
                 command,
                 args,
                 path,
