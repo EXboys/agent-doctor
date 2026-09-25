@@ -1,15 +1,34 @@
 import type { ChatAttachment, ChatSession } from "./types";
 import { MAX_CONTEXT_MESSAGES } from "./types";
 
+export type ImageReading = {
+  name: string;
+  text: string;
+};
+
 export function attachmentSummary(attachments: ChatAttachment[] | undefined): string {
   if (!attachments?.length) return "";
-  return attachments.map((item) => `- ${item.path}`).join("\n");
+  return attachments.map((item) => `- ${item.name}`).join("\n");
+}
+
+export function imageReadingBlock(readings: ImageReading[] | undefined): string {
+  const useful = (readings ?? []).filter((item) => item.text.trim());
+  if (useful.length === 0) return "";
+  const body = useful
+    .map((item) => `--- ${item.name} ---\n${item.text.trim()}`)
+    .join("\n\n");
+  return (
+    "The user attached pictures. The current model may not see images. " +
+    "Text already read from those pictures on this computer:\n\n" +
+    body
+  );
 }
 
 export function buildPromptWithHistory(
   userText: string,
   attachments: ChatAttachment[],
   session: ChatSession,
+  readings?: ImageReading[],
 ): string {
   const responseStyle =
     "Response style: answer the user directly and concisely. Lead with the result. " +
@@ -18,7 +37,10 @@ export function buildPromptWithHistory(
   // Native resume already carries thread history — only send this turn.
   if (session.runtimeThreadId?.trim()) {
     const parts: string[] = [responseStyle];
-    if (attachments.length > 0) {
+    const pictureText = imageReadingBlock(readings);
+    if (pictureText) {
+      parts.push(pictureText);
+    } else if (attachments.length > 0) {
       parts.push(
         `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
       );
@@ -47,7 +69,10 @@ export function buildPromptWithHistory(
     parts.push(`Conversation so far:\n\n${transcript}`);
   }
 
-  if (attachments.length > 0) {
+  const pictureText = imageReadingBlock(readings);
+  if (pictureText) {
+    parts.push(pictureText);
+  } else if (attachments.length > 0) {
     parts.push(
       `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
     );

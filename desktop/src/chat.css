@@ -1844,8 +1844,8 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-msg-user .chat-bubble.user {
   max-width: 100%;
-  min-width: min-content;
-  flex-shrink: 0;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .chat-msg-assistant.is-compact .chat-bubble.assistant {
@@ -2735,6 +2735,19 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-bubble-attachment-image {
+  display: block;
+  max-width: min(240px, 100%);
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .chat-bubble-attach {

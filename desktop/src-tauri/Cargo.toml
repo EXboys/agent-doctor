@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 agent-doctor-core.workspace = true
 agent-doctor-mcp.workspace = true
+agent-doctor-ocr.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

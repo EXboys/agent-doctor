@@ -75,19 +75,31 @@ pub struct OpenSessionReport {
     pub detail: String,
 }
 
-/// Resolve cwd: explicit option → active workspace → process cwd.
+fn existing_dir(path: &Path) -> Option<PathBuf> {
+    path.is_dir().then(|| path.to_path_buf())
+}
+
+/// Resolve cwd: existing explicit dir → existing workspace → home → process cwd.
+/// Missing folders (deleted projects / leftover temp paths) never fail Ask.
 pub fn resolve_session_cwd(explicit: Option<&Path>) -> PathBuf {
     if let Some(path) = explicit {
-        return path.to_path_buf();
+        if let Some(dir) = existing_dir(path) {
+            return dir;
+        }
     }
     if let Ok(doc) = ensure_default_workspace().or_else(|_| load_workspaces()) {
         if let Some(active) = doc.active.as_deref() {
             if let Some(entry) = doc.workspaces.get(active) {
-                return entry.path.clone();
+                if let Some(dir) = existing_dir(&entry.path) {
+                    return dir;
+                }
             }
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    dirs::home_dir()
+        .and_then(|home| existing_dir(&home))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Build the official Claude Code deep link (`claude-cli://open`).
@@ -867,7 +879,19 @@ fn escape_applescript(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn resolve_session_cwd_skips_missing_explicit_dir() {
+        let missing = PathBuf::from("/this/path/should/not/exist/agent-doctor-cwd-test");
+        assert!(!missing.exists());
+        let cwd = resolve_session_cwd(Some(&missing));
+        assert!(
+            cwd.is_dir(),
+            "fallback must be an existing directory: {}",
+            cwd.display()
+        );
+    }
 
     #[test]
     fn builds_claude_deep_link_with_cwd_and_prompt() {

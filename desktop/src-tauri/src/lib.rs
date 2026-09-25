@@ -466,7 +466,8 @@ pub fn run() {
             resolve_permission_session_command,
             speech_capability_command,
             speech_dictate_command,
-            speech_cancel_dictation_command
+            speech_cancel_dictation_command,
+            read_image_texts_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

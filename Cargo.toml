@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/agent-doctor-core", "crates/agent-doctor-mcp", "cli", "desktop/src-tauri"]
+members = ["crates/agent-doctor-core", "crates/agent-doctor-mcp", "crates/agent-doctor-ocr", "cli", "desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.46"
@@ -11,6 +11,7 @@ authors = ["Agent Doctor Contributors"]
 [workspace.dependencies]
 agent-doctor-core = { path = "crates/agent-doctor-core" }
 agent-doctor-mcp = { path = "crates/agent-doctor-mcp" }
+agent-doctor-ocr = { path = "crates/agent-doctor-ocr" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

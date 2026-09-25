@@ -71,6 +71,7 @@ export type SendDeps = {
     text: string,
     attachments: ChatAttachment[],
     chatSessionId: string,
+    readings?: import("./context").ImageReading[],
   ) => string;
   setDisplayedCwd: (cwd: string) => void;
   sessionById: (id: string | null | undefined) => ChatSession | undefined;
@@ -83,6 +84,7 @@ export type SendDeps = {
   expireLivePermissionCards: () => void;
   settleRunRouting: () => void;
   renderSessionList: () => void;
+  readImageTextEnabled: () => boolean;
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
@@ -183,7 +185,35 @@ export function createSendController(deps: SendDeps) {
     deps.setStatus(t("chat.running", { runtime }), "muted");
     deps.pushActivity("think", t("chat.waitingModel"));
 
-    const prompt = deps.buildPromptWithHistory(promptUserText, attachments, chatSessionId);
+    const imagePaths = attachments.filter((item) => item.kind === "image").map((item) => item.path);
+    let readings: import("./context").ImageReading[] = [];
+    if (imagePaths.length > 0 && deps.readImageTextEnabled()) {
+      deps.setStatus(t("chat.readingImages"), "muted");
+      deps.pushActivity("think", t("chat.readingImages"));
+      try {
+        const report = await invoke<{
+          readings: { name: string; text: string; ok: boolean }[];
+        }>("read_image_texts_command", { paths: imagePaths });
+        readings = (report.readings ?? [])
+          .filter((item) => item.ok && item.text.trim())
+          .map((item) => ({ name: item.name, text: item.text }));
+        if (readings.length === 0) {
+          deps.setStatus(t("chat.readingImagesNone"), "warn");
+        } else {
+          deps.setStatus(t("chat.running", { runtime }), "muted");
+        }
+      } catch {
+        readings = [];
+        deps.setStatus(t("chat.readingImagesNone"), "warn");
+      }
+    }
+
+    const prompt = deps.buildPromptWithHistory(
+      promptUserText,
+      attachments,
+      chatSessionId,
+      readings,
+    );
 
     try {
       const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
@@ -224,9 +254,13 @@ export function createSendController(deps: SendDeps) {
           deps.appendBubble("meta", t("chat.forceStopped"), { persist: false });
         }
       } else {
-        deps.setStatus(t("chat.failed", { error: message }), "error");
+        const failed =
+          /session cwd does not exist/i.test(message)
+            ? t("chat.failedCwd")
+            : withErrorDetail(t("chat.failed"), error);
+        deps.setStatus(failed, "error");
         if (deps.getStore().activeId === chatSessionId) {
-          deps.appendBubble("meta", message, { persist: false });
+          deps.appendBubble("meta", failed, { persist: false });
         }
       }
     } finally {

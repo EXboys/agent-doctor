@@ -37,6 +37,7 @@ import {
 import { shortCwdLabel } from "./chat/format";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
+  type ImageReading,
   contextUsagePercent as contextUsagePercentBase,
 } from "./chat/context";
 import {
@@ -57,11 +58,14 @@ import { createContextMeterController, type ContextMeterApi } from "./chat/conte
 import { createShellUiController, type ShellUiApi } from "./chat/shell-ui";
 import { createBackupUiController, type BackupUiApi } from "./chat/backup-ui";
 import { createVoiceInputController, type VoiceInputApi } from "./chat/voice";
+import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
 const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
+const readImageEl = document.querySelector<HTMLInputElement>("#chat-read-image")!;
+const readImageWrapEl = document.querySelector<HTMLElement>("#chat-read-image-wrap");
 const modelBtnEl = document.querySelector<HTMLButtonElement>("#chat-model-btn")!;
 const modelLabelEl = document.querySelector<HTMLElement>("#chat-model-label")!;
 const modelMenuEl = document.querySelector<HTMLElement>("#chat-model-menu")!;
@@ -117,9 +121,10 @@ function buildPromptWithHistory(
   userText: string,
   attachments: ChatAttachment[],
   sessionId?: string,
+  readings?: ImageReading[],
 ): string {
   const session = sessionById(sessionId) ?? (busy ? runTargetSession() : activeSession());
-  return buildPromptWithHistoryBase(userText, attachments, session);
+  return buildPromptWithHistoryBase(userText, attachments, session, readings);
 }
 
 function contextUsagePercent(session: ChatSession, draft = ""): number {
@@ -390,6 +395,9 @@ function applyI18n(): void {
   promptEl.placeholder = t("chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
+  if (readImageWrapEl) {
+    readImageWrapEl.title = t("chat.readImageTextHint");
+  }
   voiceInput?.applyI18n();
   if (resourcesSearchEl) {
     resourcesSearchEl.placeholder = t("chat.resourcesSearch");
@@ -1263,8 +1271,8 @@ function wireChatControllers(): void {
     appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
     autoResizePrompt: () => autoResizePrompt(),
     renderPendingAttachments: () => renderPendingAttachments(),
-    buildPromptWithHistory: (text, attachments, chatSessionId) =>
-      buildPromptWithHistory(text, attachments, chatSessionId),
+    buildPromptWithHistory: (text, attachments, chatSessionId, readings) =>
+      buildPromptWithHistory(text, attachments, chatSessionId, readings),
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
     sessionById: (id) => sessionById(id),
     runTargetSession: () => runTargetSession(),
@@ -1276,6 +1284,7 @@ function wireChatControllers(): void {
     expireLivePermissionCards: () => expireLivePermissionCards(),
     settleRunRouting: () => settleRunRouting(),
     renderSessionList: () => renderSessionList(),
+    readImageTextEnabled: () => readImageTextEnabled(),
   });
 }
 
@@ -1299,6 +1308,7 @@ function boot(): void {
     console.error("Ask: early paint failed", error);
   }
   applyI18n();
+  readImageEl.checked = readImageTextEnabled();
   try {
     readInitialRuntime();
   } catch (error) {
@@ -1380,6 +1390,9 @@ function boot(): void {
     if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
       elevatedEl.checked = false;
     }
+  });
+  readImageEl.addEventListener("change", () => {
+    setReadImageTextEnabled(readImageEl.checked);
   });
   promptEl.addEventListener("input", () => {
     autoResizePrompt();
