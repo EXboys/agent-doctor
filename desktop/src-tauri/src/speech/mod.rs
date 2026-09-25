@@ -1,97 +1,52 @@
-//! Pluggable on-device speech recognition for Ask composer.
-//!
-//! Backends (compile-time selected):
-//! - macOS: `SFSpeechRecognizer` + `AVAudioEngine`
-//! - Windows: `Windows.Media.SpeechRecognition`
-//! - other: unavailable stub
-//!
-//! Session API is shared so the UI stays backend-agnostic.
+//! Thin Tauri bridge over `agent-doctor-voice`.
+//! Recognition and synthesis run on blocking threads; this module only emits events.
 
-mod backend;
-mod live_ctrl;
-mod types;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(not(any(target_os = "macos", windows)))]
-mod unsupported;
-#[cfg(windows)]
-mod windows;
-
-use backend::active_backend;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use agent_doctor_voice::{self as voice, SpeechError, SpeechEvent, SpeechOptions};
 use tauri::{AppHandle, Emitter};
-use types::{
-    SpeechCapability, SpeechError, SpeechErrorCode, SpeechEvent, SpeechOptions, SpeechResult,
-};
 
-pub use types::{SpeechCapability as SpeechCapabilityDto, SpeechResult as SpeechResultDto};
+pub use voice::{SpeechCapability as SpeechCapabilityDto, SpeechResult as SpeechResultDto};
 
-static DICTATION_BUSY: AtomicBool = AtomicBool::new(false);
-static DICTATION_CANCEL: AtomicBool = AtomicBool::new(false);
-static LAST_PARTIAL: Mutex<String> = Mutex::new(String::new());
-
-pub fn capability() -> SpeechCapability {
-    active_backend().capability()
-}
-
-pub fn cancel_dictation() {
-    DICTATION_CANCEL.store(true, Ordering::SeqCst);
-}
+static LISTEN_EPOCH: AtomicU64 = AtomicU64::new(0);
+static LISTEN_CANCEL_EPOCH: AtomicU64 = AtomicU64::new(0);
+static DICTATE_CANCEL: AtomicU64 = AtomicU64::new(0);
+static DICTATE_EPOCH: AtomicU64 = AtomicU64::new(0);
+static SPEAK_EPOCH: AtomicU64 = AtomicU64::new(0);
+static SPEAK_CANCEL_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 fn emit_event(app: &AppHandle, event: SpeechEvent) {
     let _ = app.emit("speech-event", event);
 }
 
-pub fn dictate(app: AppHandle, language: Option<String>) -> Result<SpeechResult, SpeechError> {
-    if DICTATION_BUSY
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return Err(SpeechError::new(
-            SpeechErrorCode::Busy,
-            "dictation already running",
-        ));
-    }
-    DICTATION_CANCEL.store(false, Ordering::SeqCst);
-    if let Ok(mut guard) = LAST_PARTIAL.lock() {
-        guard.clear();
-    }
+pub fn capability() -> voice::SpeechCapability {
+    voice::capability()
+}
 
-    let backend = active_backend();
+pub fn cancel_dictation() {
+    let epoch = DICTATE_EPOCH.load(Ordering::SeqCst);
+    DICTATE_CANCEL.store(epoch, Ordering::SeqCst);
+}
+
+pub fn dictate(
+    app: AppHandle,
+    language: Option<String>,
+) -> Result<voice::SpeechResult, SpeechError> {
+    let epoch = DICTATE_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
     let options = SpeechOptions { language };
-
-    let result = (|| {
-        if !backend.capability().available {
-            return Err(SpeechError::new(
-                SpeechErrorCode::Unavailable,
-                "backend unavailable",
-            ));
-        }
-
-        let app_partial = app.clone();
-        backend.recognize_once(
-            options,
-            &|text| {
-                if let Ok(mut guard) = LAST_PARTIAL.lock() {
-                    if *guard == text {
-                        return;
-                    }
-                    *guard = text.to_string();
-                }
-                emit_event(
-                    &app_partial,
-                    SpeechEvent::Partial {
-                        text: text.to_string(),
-                    },
-                );
-            },
-            &|| DICTATION_CANCEL.load(Ordering::SeqCst),
-        )
-    })();
-
-    DICTATION_BUSY.store(false, Ordering::SeqCst);
+    let app_partial = app.clone();
+    let result = voice::dictate(
+        options,
+        &|text| {
+            emit_event(
+                &app_partial,
+                SpeechEvent::Partial {
+                    text: text.to_string(),
+                },
+            );
+        },
+        &|| DICTATE_CANCEL.load(Ordering::SeqCst) >= epoch,
+    );
 
     match &result {
         Ok(ok) => {
@@ -103,7 +58,7 @@ pub fn dictate(app: AppHandle, language: Option<String>) -> Result<SpeechResult,
                 },
             );
         }
-        Err(err) if err.code == SpeechErrorCode::Cancelled => {
+        Err(err) if err.code == voice::SpeechErrorCode::Cancelled => {
             emit_event(&app, SpeechEvent::Cancelled);
         }
         Err(err) => {
@@ -116,18 +71,49 @@ pub fn dictate(app: AppHandle, language: Option<String>) -> Result<SpeechResult,
             );
         }
     }
-
     result
 }
 
-/// Test helper: ensure the factory returns a named backend.
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub fn cancel_listen() {
+    let epoch = LISTEN_EPOCH.load(Ordering::SeqCst);
+    LISTEN_CANCEL_EPOCH.store(epoch, Ordering::SeqCst);
+}
 
-    #[test]
-    fn backend_id_is_stable() {
-        let id = active_backend().id();
-        assert!(!id.is_empty());
-    }
+pub fn listen(app: AppHandle, language: Option<String>) -> Result<(), SpeechError> {
+    let epoch = LISTEN_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+    let options = SpeechOptions { language };
+    let app_partial = app.clone();
+    voice::listen_session(
+        options,
+        &|text| {
+            emit_event(
+                &app_partial,
+                SpeechEvent::Partial {
+                    text: text.to_string(),
+                },
+            );
+        },
+        &|text| {
+            emit_event(
+                &app_partial,
+                SpeechEvent::Final {
+                    text: text.to_string(),
+                    confidence: 1.0,
+                },
+            );
+        },
+        &|| LISTEN_CANCEL_EPOCH.load(Ordering::SeqCst) >= epoch,
+    )
+}
+
+pub fn cancel_speak() {
+    let epoch = SPEAK_EPOCH.load(Ordering::SeqCst);
+    SPEAK_CANCEL_EPOCH.store(epoch, Ordering::SeqCst);
+}
+
+pub fn speak(text: String, language: Option<String>) -> Result<(), SpeechError> {
+    let epoch = SPEAK_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+    voice::speak(&text, language.as_deref(), &|| {
+        SPEAK_CANCEL_EPOCH.load(Ordering::SeqCst) >= epoch
+    })
 }

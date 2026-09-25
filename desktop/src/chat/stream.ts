@@ -52,6 +52,8 @@ export type StreamDeps = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
+  onTurnCompleted: (text: string, status: string) => void;
+  onPermissionNeeded: () => void;
 };
 
 export type StreamApi = ReturnType<typeof createStreamController>;
@@ -97,6 +99,7 @@ export function createStreamController(deps: StreamDeps) {
         case "permission_request":
           deps.pushPermissionCard(payload);
           deps.noteVerifyBrowserSignal(payload.tool_name, "tool");
+          deps.onPermissionNeeded();
           break;
         case "permission_resolved":
           deps.markPermissionResolved(payload.request_id, payload.allowed);
@@ -157,6 +160,7 @@ export function createStreamController(deps: StreamDeps) {
           } else if (!viewing) {
             deps.setStatus(t("chat.doneElsewhere"), "ok");
           }
+          deps.onTurnCompleted(finalAssistantText, payload.status);
           deps.renderSessionList();
           break;
         }

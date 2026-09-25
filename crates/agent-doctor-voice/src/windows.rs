@@ -154,4 +154,102 @@ impl SpeechBackend for WindowsSpeechBackend {
     ) -> Result<SpeechResult, SpeechError> {
         recognize_once_inner(options, should_cancel)
     }
+
+    fn speak(
+        &self,
+        text: &str,
+        language: Option<&str>,
+        should_cancel: &dyn Fn() -> bool,
+    ) -> Result<(), SpeechError> {
+        speak_text(text, language, should_cancel)
+    }
+}
+
+fn speak_text(
+    text: &str,
+    language: Option<&str>,
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), SpeechError> {
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+    use windows::Media::Core::MediaSource;
+    use windows::Media::Playback::{MediaPlaybackState, MediaPlayer};
+    use windows::Media::SpeechSynthesis::SpeechSynthesizer;
+
+    let synth = SpeechSynthesizer::new().map_err(|e| {
+        SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            format!("create SpeechSynthesizer: {e}"),
+        )
+    })?;
+    if let Some(lang) = language {
+        if let Ok(voices) = SpeechSynthesizer::AllVoices() {
+            let wanted = lang.to_ascii_lowercase();
+            let count = voices.Size().unwrap_or(0);
+            for index in 0..count {
+                let Ok(voice) = voices.GetAt(index) else {
+                    continue;
+                };
+                let voice_lang = voice
+                    .Language()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if voice_lang.starts_with(&wanted) || wanted.starts_with(&voice_lang) {
+                    let _ = synth.SetVoice(&voice);
+                    break;
+                }
+            }
+        }
+    }
+
+    let stream = block_on(
+        synth
+            .SynthesizeTextToStreamAsync(&HSTRING::from(text))
+            .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("synthesize: {e}")))?,
+        should_cancel,
+    )?;
+    let source = MediaSource::CreateFromStream(&stream, &HSTRING::from("audio/wav"))
+        .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("media source: {e}")))?;
+    let player = MediaPlayer::new()
+        .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("media player: {e}")))?;
+    player
+        .SetSource(&source)
+        .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("set source: {e}")))?;
+    player
+        .Play()
+        .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("play: {e}")))?;
+
+    let started = std::time::Instant::now();
+    let mut heard = false;
+    loop {
+        if should_cancel() {
+            let _ = player.Pause();
+            return Err(SpeechError::new(
+                SpeechErrorCode::Cancelled,
+                "speech cancelled",
+            ));
+        }
+        if started.elapsed() > std::time::Duration::from_secs(180) {
+            let _ = player.Pause();
+            return Ok(());
+        }
+        let playing = player
+            .PlaybackSession()
+            .and_then(|session| session.PlaybackState())
+            .unwrap_or(MediaPlaybackState::None);
+        let active = matches!(
+            playing,
+            MediaPlaybackState::Playing
+                | MediaPlaybackState::Buffering
+                | MediaPlaybackState::Opening
+        );
+        if active {
+            heard = true;
+        } else if heard || started.elapsed() > std::time::Duration::from_millis(800) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(80));
+    }
 }

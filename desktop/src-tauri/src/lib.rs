@@ -467,6 +467,11 @@ pub fn run() {
             speech_capability_command,
             speech_dictate_command,
             speech_cancel_dictation_command,
+            voice_listen_start_command,
+            voice_listen_stop_command,
+            voice_speak_command,
+            voice_speak_stop_command,
+            voice_hosted_reduce_command,
             read_image_texts_command
         ])
         .run(tauri::generate_context!())

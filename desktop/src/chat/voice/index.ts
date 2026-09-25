@@ -6,6 +6,8 @@ export type VoiceInputDeps = {
   voiceBtnEl: HTMLButtonElement;
   promptEl: HTMLTextAreaElement;
   isComposerLocked: () => boolean;
+  /** Hosted voice already owns the microphone. */
+  isHostedActive?: () => boolean;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   autoResizePrompt: () => void;
   /** Optional override for tests / alternate backends. */
@@ -71,7 +73,8 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
     const locked = deps.isComposerLocked();
     const available = !!provider && provider.id !== "null";
     deps.voiceBtnEl.hidden = !available;
-    deps.voiceBtnEl.disabled = !available || locked || starting;
+    const hosted = deps.isHostedActive?.() ?? false;
+    deps.voiceBtnEl.disabled = !available || locked || starting || hosted;
   }
 
   async function ensureProvider(): Promise<VoiceProvider> {

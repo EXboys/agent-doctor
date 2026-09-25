@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 agent-doctor-core.workspace = true
 agent-doctor-mcp.workspace = true
 agent-doctor-ocr.workspace = true
+agent-doctor-voice.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -35,15 +36,3 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-block2 = "0.6"
-objc2 = { version = "0.6", features = ["exception"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError"] }
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
-  "Foundation",
-  "Globalization",
-  "Media_SpeechRecognition",
-] }

@@ -58,6 +58,7 @@ import { createContextMeterController, type ContextMeterApi } from "./chat/conte
 import { createShellUiController, type ShellUiApi } from "./chat/shell-ui";
 import { createBackupUiController, type BackupUiApi } from "./chat/backup-ui";
 import { createVoiceInputController, type VoiceInputApi } from "./chat/voice";
+import { createHostedController, type HostedApi } from "./chat/hosted";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 
 
@@ -74,6 +75,12 @@ const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
 const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
 const voiceEl = document.querySelector<HTMLButtonElement>("#chat-voice")!;
+const mainEl = document.querySelector<HTMLElement>("#chat-main")!;
+const dialogModeEl = document.querySelector<HTMLButtonElement>("#chat-mode-dialog")!;
+const voiceModeEl = document.querySelector<HTMLButtonElement>("#chat-mode-voice")!;
+const islandEl = document.querySelector<HTMLButtonElement>("#chat-island")!;
+const islandTitleEl = document.querySelector<HTMLElement>("#chat-island-title")!;
+const islandDetailEl = document.querySelector<HTMLElement>("#chat-island-detail")!;
 const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
 const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
 const composerEl = document.querySelector<HTMLElement>(".chat-composer")!;
@@ -178,6 +185,8 @@ let modelPicker!: ModelPickerApi;
 let decision!: DecisionApi;
 let attachments!: AttachmentsApi;
 let voiceInput!: VoiceInputApi;
+let hosted: HostedApi | null = null;
+let latestActivityText = "";
 let contextMeter!: ContextMeterApi;
 let shellUi!: ShellUiApi;
 let backupUi: BackupUiApi | undefined;
@@ -399,6 +408,7 @@ function applyI18n(): void {
     readImageWrapEl.title = t("chat.readImageTextHint");
   }
   voiceInput?.applyI18n();
+  hosted?.applyI18n();
   if (resourcesSearchEl) {
     resourcesSearchEl.placeholder = t("chat.resourcesSearch");
   }
@@ -550,6 +560,7 @@ function appendStderrLine(line: string): void {
   activity.appendStderrLine(line);
 }
 function pushActivity(phase: string, message: string): void {
+  latestActivityText = message.trim();
   activity.pushActivity(phase, message);
 }
 function settleActivity(): void {
@@ -831,7 +842,7 @@ async function cancelAsk(): Promise<void> {
   await send.cancelAsk();
 }
 
-async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
+async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
   await send.sendAsk(opts);
 }
 
@@ -945,6 +956,7 @@ function wireChatControllers(): void {
     voiceBtnEl: voiceEl,
     promptEl,
     isComposerLocked: () => isComposerLocked(),
+    isHostedActive: () => hosted?.isActive() ?? false,
     setStatus: (text, tone) => setStatus(text, tone),
     autoResizePrompt: () => autoResizePrompt(),
   });
@@ -1208,6 +1220,8 @@ function wireChatControllers(): void {
     setStatus: (text, tone) => setStatus(text, tone),
     showQuickReplies: (sourceText) => showQuickReplies(sourceText),
     renderSessionList: () => renderSessionList(),
+    onTurnCompleted: (text, status) => hosted?.noteTurnCompleted(text, status),
+    onPermissionNeeded: () => hosted?.notePermission(),
   });
 
   send = createSendController({
@@ -1285,6 +1299,21 @@ function wireChatControllers(): void {
     settleRunRouting: () => settleRunRouting(),
     renderSessionList: () => renderSessionList(),
     readImageTextEnabled: () => readImageTextEnabled(),
+  });
+
+  hosted = createHostedController({
+    mainEl,
+    dialogModeEl,
+    voiceModeEl,
+    islandEl,
+    islandTitleEl,
+    islandDetailEl,
+    promptEl,
+    setStatus: (text, tone) => setStatus(text, tone),
+  latestActivity: () => latestActivityText,
+  sendAsk: (opts) => sendAsk(opts),
+    stopDictation: () => voiceInput.stopListening(),
+    syncDictation: () => voiceInput.syncEnabled(),
   });
 }
 

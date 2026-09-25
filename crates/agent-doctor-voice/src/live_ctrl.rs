@@ -8,8 +8,11 @@ pub const SILENCE_LIMIT: Duration = Duration::from_millis(1200);
 pub const NO_SPEECH_LIMIT: Duration = Duration::from_secs(8);
 /// Hard cap for continuous speech → finalize.
 pub const HARD_CAP: Duration = Duration::from_secs(30);
-/// Grace after `endAudio` before falling back to best text / timeout.
-pub const FINAL_GRACE: Duration = Duration::from_secs(10);
+/// Grace after `endAudio` before falling back to the text we already have.
+pub const UTTERANCE_GRACE: Duration = Duration::from_millis(700);
+/// Grace when `endAudio` produced no text yet. The recognizer often
+/// returns the sentence only after the buffer is closed.
+pub const FINAL_GRACE: Duration = Duration::from_millis(2000);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveAction {
@@ -37,7 +40,12 @@ impl LiveState {
 pub fn next_action(state: &LiveState) -> LiveAction {
     if state.end_audio_sent {
         let sent_at = state.end_audio_at.unwrap_or(Duration::ZERO);
-        if state.elapsed.saturating_sub(sent_at) >= FINAL_GRACE {
+        let wait = if state.have_text {
+            UTTERANCE_GRACE
+        } else {
+            FINAL_GRACE
+        };
+        if state.elapsed.saturating_sub(sent_at) >= wait {
             return LiveAction::CancelTimeout;
         }
         return LiveAction::Continue;
@@ -84,6 +92,18 @@ mod tests {
             Duration::from_millis(2300),
         );
         assert_eq!(next_action(&s), LiveAction::EndAudio);
+    }
+
+    #[test]
+    fn stable_text_after_end_audio_finishes_quickly() {
+        let s = LiveState {
+            have_text: true,
+            last_change: Some(Duration::from_millis(1000)),
+            elapsed: Duration::from_millis(2000),
+            end_audio_sent: true,
+            end_audio_at: Some(Duration::from_millis(1200)),
+        };
+        assert_eq!(next_action(&s), LiveAction::CancelTimeout);
     }
 
     #[test]

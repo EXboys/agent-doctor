@@ -119,7 +119,7 @@ export function createSendController(deps: SendDeps) {
       deps.setStatus(withErrorDetail(t("chat.cancelFailed"), error), "error");
     }
   }
-  async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
+  async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
     if (deps.getBusy()) {
       if (deps.getRunningChatSessionId() && deps.getRunningChatSessionId() !== deps.getStore().activeId) {
         deps.setStatus(t("chat.otherSessionRunning"), "warn");
@@ -135,7 +135,7 @@ export function createSendController(deps: SendDeps) {
 
     const runtime = deps.selectedRuntime();
     const elevated = deps.selectedRuntime() !== "deepseek-harness" && deps.elevatedEl.checked;
-    if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
+    if (elevated && !opts?.fromVoice && !window.confirm(t("chat.elevatedConfirm"))) return;
 
     const chatSessionId = deps.getStore().activeId;
     const resumeThreadId = deps.activeSession().runtimeThreadId?.trim() || null;
