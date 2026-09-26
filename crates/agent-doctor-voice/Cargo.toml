@@ -20,6 +20,7 @@ objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSErr
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Foundation",
+    "Foundation_Collections",
     "Globalization",
     "Media_Core",
     "Media_Playback",
