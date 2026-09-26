@@ -18,6 +18,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// main thread. The wait loop stays off the main thread so the window can
 /// still paint and deliver events.
 fn on_main<R: Send + 'static, F: FnOnce() -> R + Send + 'static>(work: F) -> R {
+    let already_main = unsafe {
+        AnyClass::get(c"NSThread")
+            .map(|class| {
+                let value: bool = msg_send![class, isMainThread];
+                value
+            })
+            .unwrap_or(false)
+    };
+    if already_main {
+        return work();
+    }
     let slot = Arc::new((Mutex::new(None::<R>), Condvar::new()));
     let slot_for_block = slot.clone();
     let work = Arc::new(Mutex::new(Some(work)));
@@ -476,7 +487,7 @@ fn recognize_from_microphone(
             // Text often arrives only after that, so quiet audio ends the sentence
             // even when no words have been reported yet.
             let voice_at = last_voice_ms.load(Ordering::Relaxed);
-            if !end_audio_sent && voice_at > 0 && now_ms().saturating_sub(voice_at) >= 800 {
+            if !end_audio_sent && voice_at > 0 && now_ms().saturating_sub(voice_at) >= 2500 {
                 drop(guard);
                 end_request_audio(request_bits);
                 end_audio_sent = true;

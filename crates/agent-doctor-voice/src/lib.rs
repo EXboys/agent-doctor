@@ -25,8 +25,9 @@ use std::time::Duration;
 use backend::active_backend;
 
 pub use policy::{
-    ack_sentence, classify_utterance, permission_sentence, reduce, spoken_reply, status_sentence,
-    HostedEffect, HostedInput, HostedState, HostedStep, UtteranceKind,
+    ack_sentence, asks_about_permission, classify_decision, classify_utterance, failure_sentence,
+    permission_brief, permission_sentence, reduce, spoken_reply, status_sentence, HostedEffect,
+    HostedInput, HostedState, HostedStep, UtteranceKind,
 };
 pub use types::{
     SpeechCapability, SpeechError, SpeechErrorCode, SpeechEvent, SpeechOptions, SpeechResult,

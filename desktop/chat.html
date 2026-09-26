@@ -165,27 +165,6 @@
           <div id="chat-boot-placeholder" class="chat-bubble meta" style="margin:0">正在加载会话…</div>
         </div>
 
-        <section id="chat-voice-stage" class="chat-voice-stage" hidden>
-          <button id="chat-island" type="button" class="chat-island" aria-pressed="false">
-            <span class="chat-mascot" aria-hidden="true">
-              <span class="chat-mascot-cap"></span>
-              <span class="chat-mascot-face">
-                <span class="chat-mascot-eye is-left"></span>
-                <span class="chat-mascot-eye is-right"></span>
-                <span class="chat-mascot-mouth"></span>
-              </span>
-            </span>
-            <span class="chat-island-copy">
-              <strong id="chat-island-title">正在听</strong>
-              <span id="chat-island-detail"></span>
-            </span>
-            <span class="chat-island-bars" aria-hidden="true"><i></i><i></i><i></i></span>
-          </button>
-          <p id="chat-island-hint" class="chat-island-hint" data-i18n="chat.modeVoiceHint">
-            说完停一下。这里会变成「正在问 AI」，然后把回复读出来。说「退出」或点「对话」回来。
-          </p>
-        </section>
-
         <footer class="chat-composer">
           <div id="chat-decision-dock" class="chat-decision-dock" hidden role="region" aria-live="assertive">
             <div class="chat-decision-dock-body">
@@ -197,6 +176,30 @@
           </div>
           <div id="chat-mentions" class="chat-mentions" hidden></div>
           <div id="chat-attachments" class="chat-attachments" hidden></div>
+          <section id="chat-voice-stage" class="chat-voice-stage" hidden>
+            <button id="chat-island" type="button" class="chat-island" aria-pressed="false">
+              <span class="chat-mascot" aria-hidden="true">
+                <span class="chat-mascot-cap"></span>
+                <span class="chat-mascot-face">
+                  <span class="chat-mascot-eye is-left"></span>
+                  <span class="chat-mascot-eye is-right"></span>
+                  <span class="chat-mascot-mouth"></span>
+                </span>
+              </span>
+              <span class="chat-island-copy">
+                <strong id="chat-island-title">正在听</strong>
+                <span id="chat-island-detail"></span>
+              </span>
+              <span class="chat-island-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+            </button>
+            <div id="chat-island-choice" class="chat-island-choice" hidden>
+              <button id="chat-island-allow" type="button" class="chat-island-allow" data-i18n="chat.permissionAllow">允许</button>
+              <button id="chat-island-deny" type="button" class="chat-island-deny" data-i18n="chat.permissionDeny">拒绝</button>
+            </div>
+            <p id="chat-island-hint" class="chat-island-hint" data-i18n="chat.modeVoiceHint">
+              说完停几秒。这里会变成「正在问 AI」，然后把回复读出来。说「退出」或点「对话」回来。
+            </p>
+          </section>
           <div class="chat-composer-box">
             <div class="chat-prompt-wrap">
               <textarea

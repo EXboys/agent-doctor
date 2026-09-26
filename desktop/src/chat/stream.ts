@@ -53,7 +53,12 @@ export type StreamDeps = {
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
   onTurnCompleted: (text: string, status: string) => void;
-  onPermissionNeeded: () => void;
+  onPermissionNeeded: (payload: {
+    session_id: string;
+    request_id: string;
+    tool_name: string;
+    detail: string;
+  }) => void;
 };
 
 export type StreamApi = ReturnType<typeof createStreamController>;
@@ -99,7 +104,7 @@ export function createStreamController(deps: StreamDeps) {
         case "permission_request":
           deps.pushPermissionCard(payload);
           deps.noteVerifyBrowserSignal(payload.tool_name, "tool");
-          deps.onPermissionNeeded();
+          deps.onPermissionNeeded(payload);
           break;
         case "permission_resolved":
           deps.markPermissionResolved(payload.request_id, payload.allowed);

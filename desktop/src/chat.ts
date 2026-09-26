@@ -1218,10 +1218,16 @@ function wireChatControllers(): void {
     setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
     settleRunRouting: () => settleRunRouting(),
     setStatus: (text, tone) => setStatus(text, tone),
-    showQuickReplies: (sourceText) => showQuickReplies(sourceText),
+    showQuickReplies: (sourceText) => {
+      if (hosted?.isActive()) {
+        hideDecisionDock();
+        return;
+      }
+      showQuickReplies(sourceText);
+    },
     renderSessionList: () => renderSessionList(),
     onTurnCompleted: (text, status) => hosted?.noteTurnCompleted(text, status),
-    onPermissionNeeded: () => hosted?.notePermission(),
+    onPermissionNeeded: (payload) => hosted?.notePermission(payload),
   });
 
   send = createSendController({
@@ -1314,6 +1320,7 @@ function wireChatControllers(): void {
   sendAsk: (opts) => sendAsk(opts),
     stopDictation: () => voiceInput.stopListening(),
     syncDictation: () => voiceInput.syncEnabled(),
+    hideChoice: () => hideDecisionDock(),
   });
 }
 

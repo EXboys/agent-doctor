@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 /// End-of-utterance silence → send `endAudio`.
-pub const SILENCE_LIMIT: Duration = Duration::from_millis(1200);
+pub const SILENCE_LIMIT: Duration = Duration::from_millis(2500);
 /// No text at all within this budget → cancel with no-speech.
 pub const NO_SPEECH_LIMIT: Duration = Duration::from_secs(8);
 /// Hard cap for continuous speech → finalize.
@@ -89,7 +89,7 @@ mod tests {
         let s = state(
             true,
             Some(Duration::from_millis(1000)),
-            Duration::from_millis(2300),
+            Duration::from_millis(3600),
         );
         assert_eq!(next_action(&s), LiveAction::EndAudio);
     }

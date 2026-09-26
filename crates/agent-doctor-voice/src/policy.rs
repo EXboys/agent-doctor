@@ -77,7 +77,7 @@ fn is_status(normalized: &str) -> bool {
     ];
     PHRASES
         .iter()
-        .any(|phrase| loose == *phrase || normalized == *phrase)
+        .any(|phrase| loose == *phrase || normalized == *phrase || loose.contains(phrase))
 }
 
 pub fn status_sentence(activity: &str, zh: bool) -> String {
@@ -101,6 +101,216 @@ pub fn ack_sentence(zh: bool) -> String {
         "先记下了，这轮结束后再问。".into()
     } else {
         "I'll ask that after this reply.".into()
+    }
+}
+
+pub fn failure_sentence(zh: bool) -> String {
+    if zh {
+        "这次 AI 没有答成。详细说明在屏幕上。你可以再说一遍，或点对话打字。".into()
+    } else {
+        "The AI didn't finish this time. Details are on the screen. Say another question, or tap Chat to type.".into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionRisk {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceDecision {
+    Allow,
+    Deny,
+    Neither,
+}
+
+pub fn classify_decision(text: &str) -> VoiceDecision {
+    let normalized = normalize(text);
+    if normalized.is_empty() {
+        return VoiceDecision::Neither;
+    }
+    const ALLOW: &[&str] = &["允许", "同意", "allow", "yes"];
+    const DENY: &[&str] = &["拒绝", "不行", "不可以", "deny", "no"];
+    if ALLOW.iter().any(|phrase| normalized == *phrase) {
+        return VoiceDecision::Allow;
+    }
+    if DENY.iter().any(|phrase| normalized == *phrase) {
+        return VoiceDecision::Deny;
+    }
+    VoiceDecision::Neither
+}
+
+fn permission_risk(command: &str) -> PermissionRisk {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return PermissionRisk::Low;
+    }
+    let lower = trimmed.to_lowercase();
+    const HIGH: &[&str] = &[
+        "api_key",
+        "api-key",
+        "secret",
+        "password",
+        "credential",
+        "token",
+        "key=",
+        "_key",
+        "sudo",
+        " rm ",
+        "rm -",
+        "curl",
+        "wget",
+        "chmod",
+        "chown",
+        "printenv",
+        ".env",
+        "settings.json",
+        " -delete",
+        " -exec",
+    ];
+    if lower.split_whitespace().next() == Some("env")
+        || lower.contains(" env ")
+        || lower.contains(";env")
+        || lower.contains("|env")
+        || HIGH.iter().any(|needle| lower.contains(needle))
+    {
+        return PermissionRisk::High;
+    }
+    if command_is_basic(&lower) {
+        return PermissionRisk::Low;
+    }
+    PermissionRisk::Medium
+}
+
+/// Look, list, and version checks. Writing, installing, and running scripts stay medium.
+fn command_is_basic(lower: &str) -> bool {
+    if lower.contains('>') || lower.contains('<') {
+        return false;
+    }
+    let segments = lower
+        .split([';', '\n', '|', '&'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty());
+    let mut any = false;
+    for part in segments {
+        any = true;
+        if !segment_is_basic(part) {
+            return false;
+        }
+    }
+    any
+}
+
+fn segment_is_basic(part: &str) -> bool {
+    let mut words = part.split_whitespace();
+    let Some(bin) = words.next() else {
+        return false;
+    };
+    let bin = bin.rsplit('/').next().unwrap_or(bin);
+    const LOOK: &[&str] = &[
+        "ls", "pwd", "whoami", "date", "uname", "hostname", "echo", "printf", "cat", "head",
+        "tail", "wc", "grep", "rg", "find", "which", "type", "file", "stat", "du", "df", "tree",
+        "basename", "dirname", "realpath", "readlink", "sw_vers", "uptime",
+    ];
+    if bin == "pmset" {
+        return part.contains("-g") || part.contains("batt");
+    }
+    if LOOK.contains(&bin) {
+        return true;
+    }
+    if bin == "git" {
+        const READ: &[&str] = &[
+            "status",
+            "diff",
+            "log",
+            "show",
+            "branch",
+            "remote",
+            "rev-parse",
+            "ls-files",
+            "blame",
+        ];
+        return words.next().is_some_and(|sub| READ.contains(&sub));
+    }
+    const VERSIONED: &[&str] = &[
+        "node", "npm", "pnpm", "yarn", "bun", "python", "python3", "cargo", "rustc", "go",
+    ];
+    if VERSIONED.contains(&bin) {
+        let rest: Vec<&str> = words.collect();
+        return rest.is_empty()
+            || rest
+                .iter()
+                .all(|arg| matches!(*arg, "-v" | "--version" | "-V"));
+    }
+    false
+}
+
+/// Spoken ask: what it wants, how risky it is, and whether to allow it.
+/// The raw command stays on screen.
+pub fn permission_brief(summary: &str, command: &str, zh: bool) -> String {
+    let risk = permission_risk(command);
+    let summary = summary.trim();
+    let human = !summary.is_empty()
+        && !summary.contains('{')
+        && !summary.contains('|')
+        && summary.chars().count() < 48
+        && !(zh && summary.is_ascii());
+    if zh {
+        let what = match risk {
+            PermissionRisk::High => "它想查看设置或密钥。".to_string(),
+            PermissionRisk::Medium | PermissionRisk::Low if human => {
+                format!("它想做这件事：{summary}。")
+            }
+            PermissionRisk::Low => "它想做几项只读检查，看看这台电脑的情况。".to_string(),
+            PermissionRisk::Medium => "它想在这台电脑上执行一条命令。".to_string(),
+        };
+        let (level, advice) = match risk {
+            PermissionRisk::High => ("高", "不建议允许。"),
+            PermissionRisk::Medium => ("中等", "请你看完屏幕上的内容再决定。"),
+            PermissionRisk::Low => ("低", "可以允许。"),
+        };
+        format!("{what}危险程度{level}，{advice}说「允许」或「拒绝」。没听清就问「确认的是什么」。")
+    } else {
+        let what = match risk {
+            PermissionRisk::High => "It wants to look at settings or secrets.".to_string(),
+            PermissionRisk::Medium | PermissionRisk::Low if human => {
+                format!("It wants to do this: {summary}.")
+            }
+            PermissionRisk::Low => "This is a basic command that only looks.".to_string(),
+            PermissionRisk::Medium => "It wants to run a command on this computer.".to_string(),
+        };
+        let (level, advice) = match risk {
+            PermissionRisk::High => ("high", "Allowing is not recommended."),
+            PermissionRisk::Medium => ("medium", "Read what is on the screen, then decide."),
+            PermissionRisk::Low => ("low", "Allowing is fine."),
+        };
+        format!(
+            "{what} Risk is {level}. {advice} Say allow or deny. The full text is on the screen."
+        )
+    }
+}
+
+pub fn asks_about_permission(text: &str) -> bool {
+    let normalized = normalize(text);
+    [
+        "确认",
+        "什么内容",
+        "危险",
+        "允不允许",
+        "要不要允许",
+        "能不能允许",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase))
+}
+
+pub fn permission_repeat(zh: bool) -> String {
+    if zh {
+        "请说「允许」或「拒绝」。".into()
+    } else {
+        "Say allow or deny.".into()
     }
 }
 
@@ -291,6 +501,10 @@ pub struct HostedState {
     pub model_busy: bool,
     pub speaking: bool,
     pub permission_spoken: bool,
+    #[serde(default)]
+    pub awaiting_permission: bool,
+    #[serde(default)]
+    pub permission_script: Option<String>,
     pub held: Option<String>,
     pub queued_reply: Option<String>,
 }
@@ -313,9 +527,13 @@ pub enum HostedInput {
         text: String,
         announce: bool,
         zh: bool,
+        #[serde(default)]
+        failed: bool,
     },
     SpeakFinished,
     PermissionNeeded {
+        summary: String,
+        command: String,
         zh: bool,
     },
     ListenFailed,
@@ -329,6 +547,7 @@ pub enum HostedEffect {
     StopSpeak,
     Speak { text: String },
     Send { text: String },
+    Decide { allow: bool },
     Leave,
 }
 
@@ -351,12 +570,18 @@ pub fn reduce(mut state: HostedState, input: HostedInput) -> HostedStep {
                 effects.push(HostedEffect::StartListen);
             }
         }
-        HostedInput::Leave | HostedInput::ListenFailed => {
+        HostedInput::Leave => {
             if state.active || state.speaking {
                 state = HostedState::default();
                 effects.push(HostedEffect::StopListen);
                 effects.push(HostedEffect::StopSpeak);
                 effects.push(HostedEffect::Leave);
+            }
+        }
+        HostedInput::ListenFailed => {
+            if state.active && !state.speaking && (!state.model_busy || state.awaiting_permission) {
+                effects.push(HostedEffect::StopListen);
+                effects.push(HostedEffect::StartListen);
             }
         }
         HostedInput::Heard {
@@ -365,47 +590,98 @@ pub fn reduce(mut state: HostedState, input: HostedInput) -> HostedStep {
             zh,
         } => {
             if state.active && !state.speaking {
-                match classify_utterance(&text) {
-                    UtteranceKind::Exit => {
-                        state = HostedState::default();
-                        effects.push(HostedEffect::StopListen);
-                        effects.push(HostedEffect::StopSpeak);
-                        effects.push(HostedEffect::Leave);
+                if state.awaiting_permission {
+                    match classify_decision(&text) {
+                        VoiceDecision::Allow | VoiceDecision::Deny => {
+                            let allow = matches!(classify_decision(&text), VoiceDecision::Allow);
+                            state.awaiting_permission = false;
+                            state.permission_script = None;
+                            effects.push(HostedEffect::StopListen);
+                            effects.push(HostedEffect::Decide { allow });
+                        }
+                        VoiceDecision::Neither => match classify_utterance(&text) {
+                            _ if asks_about_permission(&text) => {
+                                state.speaking = true;
+                                effects.push(HostedEffect::StopListen);
+                                effects.push(HostedEffect::Speak {
+                                    text: state
+                                        .permission_script
+                                        .clone()
+                                        .unwrap_or_else(|| permission_repeat(zh)),
+                                });
+                            }
+                            UtteranceKind::Exit => {
+                                state = HostedState::default();
+                                effects.push(HostedEffect::StopListen);
+                                effects.push(HostedEffect::StopSpeak);
+                                effects.push(HostedEffect::Leave);
+                            }
+                            _ => {
+                                state.speaking = true;
+                                effects.push(HostedEffect::StopListen);
+                                effects.push(HostedEffect::Speak {
+                                    text: permission_repeat(zh),
+                                });
+                            }
+                        },
                     }
-                    UtteranceKind::Status => {
-                        state.speaking = true;
-                        effects.push(HostedEffect::StopListen);
-                        effects.push(HostedEffect::Speak {
-                            text: status_sentence(&status_line, zh),
-                        });
-                    }
-                    UtteranceKind::Message => {
-                        let text = text.trim().to_string();
-                        if text.is_empty() {
-                            // Keep listening.
-                        } else if state.model_busy {
-                            state.held = Some(text);
+                } else {
+                    match classify_utterance(&text) {
+                        UtteranceKind::Exit => {
+                            state = HostedState::default();
+                            effects.push(HostedEffect::StopListen);
+                            effects.push(HostedEffect::StopSpeak);
+                            effects.push(HostedEffect::Leave);
+                        }
+                        UtteranceKind::Status => {
                             state.speaking = true;
                             effects.push(HostedEffect::StopListen);
-                            effects.push(HostedEffect::Speak {
-                                text: ack_sentence(zh),
-                            });
-                        } else {
-                            state.model_busy = true;
-                            state.permission_spoken = false;
-                            effects.push(HostedEffect::StopListen);
-                            effects.push(HostedEffect::Send { text });
-                            effects.push(HostedEffect::StartListen);
+                            let text = if state.permission_script.is_some() {
+                                state
+                                    .permission_script
+                                    .clone()
+                                    .unwrap_or_else(|| permission_repeat(zh))
+                            } else {
+                                status_sentence(&status_line, zh)
+                            };
+                            effects.push(HostedEffect::Speak { text });
+                        }
+                        UtteranceKind::Message => {
+                            let text = text.trim().to_string();
+                            if text.is_empty() {
+                                // Keep listening.
+                            } else if state.model_busy {
+                                state.held = Some(text);
+                                state.speaking = true;
+                                effects.push(HostedEffect::StopListen);
+                                effects.push(HostedEffect::Speak {
+                                    text: ack_sentence(zh),
+                                });
+                            } else {
+                                state.model_busy = true;
+                                state.permission_spoken = false;
+                                effects.push(HostedEffect::StopListen);
+                                effects.push(HostedEffect::Send { text });
+                            }
                         }
                     }
                 }
             }
         }
-        HostedInput::ModelFinished { text, announce, zh } => {
+        HostedInput::ModelFinished {
+            text,
+            announce,
+            zh,
+            failed,
+        } => {
             if state.active {
                 state.model_busy = false;
                 state.permission_spoken = false;
-                let script = if announce && !text.trim().is_empty() {
+                state.awaiting_permission = false;
+                state.permission_script = None;
+                let script = if failed {
+                    Some(failure_sentence(zh))
+                } else if announce && !text.trim().is_empty() {
                     Some(spoken_reply(&text, zh))
                 } else {
                     None
@@ -430,28 +706,34 @@ pub fn reduce(mut state: HostedState, input: HostedInput) -> HostedStep {
                 if let Some(script) = state.queued_reply.take() {
                     state.speaking = true;
                     effects.push(HostedEffect::Speak { text: script });
+                } else if state.awaiting_permission {
+                    effects.push(HostedEffect::StartListen);
                 } else if !state.model_busy {
                     if let Some(held) = state.held.take() {
                         state.model_busy = true;
                         state.permission_spoken = false;
                         effects.push(HostedEffect::Send { text: held });
-                        effects.push(HostedEffect::StartListen);
                     } else {
                         effects.push(HostedEffect::StartListen);
                     }
-                } else {
-                    effects.push(HostedEffect::StartListen);
                 }
             }
         }
-        HostedInput::PermissionNeeded { zh } => {
-            if state.active && !state.speaking && !state.permission_spoken {
+        HostedInput::PermissionNeeded {
+            summary,
+            command,
+            zh,
+        } => {
+            if state.active {
+                state.awaiting_permission = true;
                 state.permission_spoken = true;
+                let script = permission_brief(&summary, &command, zh);
+                state.permission_script = Some(script.clone());
+                state.queued_reply = None;
                 state.speaking = true;
+                effects.push(HostedEffect::StopSpeak);
                 effects.push(HostedEffect::StopListen);
-                effects.push(HostedEffect::Speak {
-                    text: permission_sentence(zh),
-                });
+                effects.push(HostedEffect::Speak { text: script });
             }
         }
     }
@@ -526,6 +808,10 @@ mod tests {
             effect,
             HostedEffect::Send { text } if text == "帮我看一下"
         )));
+        assert!(!asking
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, HostedEffect::StartListen)));
 
         let held = reduce(
             asking.state,
@@ -547,6 +833,7 @@ mod tests {
                 text: "看完了".into(),
                 announce: true,
                 zh: true,
+                failed: false,
             },
         );
         assert!(done
@@ -572,6 +859,115 @@ mod tests {
             }),
             Some("顺便改个标题")
         );
+    }
+
+    #[test]
+    fn failed_run_is_spoken_without_success_leadin() {
+        let state = HostedState {
+            active: true,
+            model_busy: true,
+            ..HostedState::default()
+        };
+        let step = reduce(
+            state,
+            HostedInput::ModelFinished {
+                text: String::new(),
+                announce: true,
+                zh: true,
+                failed: true,
+            },
+        );
+        assert!(!step.state.model_busy);
+        assert!(step.effects.iter().any(|effect| matches!(
+            effect,
+            HostedEffect::Speak { text } if text.contains("没有答成") || text.contains("didn't finish")
+        )));
+    }
+
+    #[test]
+    fn basic_lookup_commands_can_be_allowed() {
+        for command in ["ls", "pwd", "git status", "cat README.md", "node --version"] {
+            let spoken = permission_brief("看看项目", command, true);
+            assert!(spoken.contains("危险程度低"), "{command}: {spoken}");
+            assert!(spoken.contains("可以允许"), "{command}: {spoken}");
+        }
+        let install = permission_brief("安装依赖", "npm install", true);
+        assert!(install.contains("危险程度中等"), "{install}");
+    }
+
+    #[test]
+    fn secret_command_is_high_risk_and_not_recommended() {
+        let spoken = permission_brief(
+            "Check Claude Code endpoint settings",
+            "cat ~/.claude/settings.json; env | grep KEY",
+            true,
+        );
+        assert!(spoken.contains("密钥"));
+        assert!(spoken.contains("危险程度高"));
+        assert!(spoken.contains("不建议允许"));
+        assert!(spoken.contains("允许"));
+        assert!(!spoken.contains("settings.json"));
+    }
+
+    #[test]
+    fn voice_allow_and_deny_resolve_the_card() {
+        let waiting = HostedState {
+            active: true,
+            model_busy: true,
+            awaiting_permission: true,
+            ..HostedState::default()
+        };
+        let allowed = reduce(
+            waiting.clone(),
+            HostedInput::Heard {
+                text: "允许".into(),
+                status_line: String::new(),
+                zh: true,
+            },
+        );
+        assert!(!allowed.state.awaiting_permission);
+        assert!(allowed
+            .effects
+            .contains(&HostedEffect::Decide { allow: true }));
+        let denied = reduce(
+            waiting,
+            HostedInput::Heard {
+                text: "拒绝".into(),
+                status_line: String::new(),
+                zh: true,
+            },
+        );
+        assert!(denied
+            .effects
+            .contains(&HostedEffect::Decide { allow: false }));
+    }
+
+    #[test]
+    fn listen_failure_retries_without_leaving_voice() {
+        let state = HostedState {
+            active: true,
+            ..HostedState::default()
+        };
+        let step = reduce(state, HostedInput::ListenFailed);
+        assert!(step.state.active);
+        assert!(step.effects.contains(&HostedEffect::StopListen));
+        assert!(step.effects.contains(&HostedEffect::StartListen));
+        assert!(!step
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, HostedEffect::Leave)));
+    }
+
+    #[test]
+    fn listen_failure_while_busy_does_not_open_mic() {
+        let state = HostedState {
+            active: true,
+            model_busy: true,
+            ..HostedState::default()
+        };
+        let step = reduce(state, HostedInput::ListenFailed);
+        assert!(step.state.active);
+        assert!(step.effects.is_empty());
     }
 
     #[test]
