@@ -35,7 +35,7 @@ export type StreamDeps = {
   isViewingRunningSession: () => boolean;
   flushPendingTextSync: () => void;
   appendAssistantChunk: (chunk: string) => void;
-  clearEphemeralActivity: () => void;
+  clearEphemeralActivity: (dropStderr?: boolean) => void;
   sealAssistantBubble: () => void;
   expireLivePermissionCards: () => void;
   hideDecisionDock: () => void;
@@ -122,7 +122,7 @@ export function createStreamController(deps: StreamDeps) {
           const hadAssistantText = deps.getTurnHadAssistantText();
           const finalAssistantText = deps.getAssistantRaw();
           if (viewing) {
-            deps.clearEphemeralActivity();
+            deps.clearEphemeralActivity(payload.status === "succeeded");
           }
           deps.sealAssistantBubble();
           deps.expireLivePermissionCards();

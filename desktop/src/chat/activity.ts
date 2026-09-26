@@ -92,12 +92,13 @@ export function createActivityController(deps: ActivityDeps) {
   }
 
   /** Drop ephemeral progress rows so they don't litter the transcript. */
-  function clearEphemeralActivity(): void {
+  function clearEphemeralActivity(dropStderr = false): void {
     settleActivity();
     finishToolGroup(true);
     for (const row of deps.logEl.querySelectorAll<HTMLElement>(".chat-activity")) {
       const kind = row.dataset.kind ?? "";
-      if (kind === "tool" || kind === "error") continue;
+      if (kind === "tool") continue;
+      if (kind === "error" && !(dropStderr && row.dataset.stderr === "1")) continue;
       row.remove();
     }
     deps.setLifecycleActivityEl(null);

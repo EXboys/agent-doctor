@@ -452,6 +452,8 @@ fn recognize_from_microphone(
     let mut end_audio_sent = false;
     let mut end_audio_at: Option<std::time::Instant> = None;
     let mut last_ui_partial = String::new();
+    let mut unwritten = crate::turn_end::UnwrittenVoice::default();
+    let mut tracked_text = String::new();
 
     let outcome = 'session: loop {
         if should_cancel() {
@@ -470,8 +472,15 @@ fn recognize_from_microphone(
             if let Some(err) = guard.error.take() {
                 break 'session Err(err);
             }
-            if let Some(final_result) = guard.final_result.clone() {
-                break 'session Ok(final_result);
+            // The system often marks a sentence final the moment the voice dips.
+            // That is not the send. Keep the text and let the quiet timer decide.
+            if let Some(final_result) = guard.final_result.take() {
+                let changed = guard.best.as_ref().map(|result| result.text.as_str())
+                    != Some(final_result.text.as_str());
+                if changed {
+                    guard.last_change = Some(now);
+                }
+                guard.best = Some(final_result);
             }
 
             if let Some(best) = guard.best.clone() {
@@ -486,8 +495,32 @@ fn recognize_from_microphone(
             // Closing the buffer is what makes the recognizer finish a sentence.
             // Text often arrives only after that, so quiet audio ends the sentence
             // even when no words have been reported yet.
+            let heard = guard
+                .best
+                .as_ref()
+                .map(|result| result.text.clone())
+                .unwrap_or_default();
+            let text_changed = heard != tracked_text;
+            let text_stable_ms = guard
+                .last_change
+                .map(|changed| now.saturating_duration_since(changed).as_millis() as u64)
+                .unwrap_or(0);
             let voice_at = last_voice_ms.load(Ordering::Relaxed);
-            if !end_audio_sent && voice_at > 0 && now_ms().saturating_sub(voice_at) >= 2500 {
+            let quiet_for = if voice_at == 0 {
+                0
+            } else {
+                now_ms().saturating_sub(voice_at)
+            };
+            unwritten = crate::turn_end::note_unwritten_voice(
+                unwritten,
+                !heard.trim().is_empty(),
+                text_changed,
+                text_stable_ms,
+                quiet_for,
+            );
+            tracked_text = heard.clone();
+            let required_quiet = crate::turn_end::quiet_ms(&heard, unwritten.sound_after_words);
+            if !end_audio_sent && voice_at > 0 && quiet_for >= required_quiet {
                 drop(guard);
                 end_request_audio(request_bits);
                 end_audio_sent = true;
@@ -499,7 +532,8 @@ fn recognize_from_microphone(
             snapshot.end_audio_sent = end_audio_sent;
             snapshot.end_audio_at = end_audio_at.map(|t| t.saturating_duration_since(started_at));
 
-            match live_ctrl::next_action(&snapshot) {
+            let voice_recent = voice_at > 0 && quiet_for < required_quiet;
+            match live_ctrl::next_action_with_voice(&snapshot, voice_recent) {
                 LiveAction::Continue => break,
                 LiveAction::EndAudio => {
                     drop(guard);

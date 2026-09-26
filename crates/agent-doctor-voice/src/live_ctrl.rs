@@ -37,6 +37,16 @@ impl LiveState {
     }
 }
 
+/// Text can sit still while the person is still making a sound the recognizer
+/// has not turned into words yet (a trailing「额」). Do not close the microphone
+/// on that pause.
+pub fn next_action_with_voice(state: &LiveState, voice_recent: bool) -> LiveAction {
+    match next_action(state) {
+        LiveAction::EndAudio if voice_recent => LiveAction::Continue,
+        action => action,
+    }
+}
+
 pub fn next_action(state: &LiveState) -> LiveAction {
     if state.end_audio_sent {
         let sent_at = state.end_audio_at.unwrap_or(Duration::ZERO);
@@ -104,6 +114,18 @@ mod tests {
             end_audio_at: Some(Duration::from_millis(1200)),
         };
         assert_eq!(next_action(&s), LiveAction::CancelTimeout);
+    }
+
+    #[test]
+    fn recent_voice_keeps_the_microphone_open() {
+        let s = state(
+            true,
+            Some(Duration::from_millis(1000)),
+            Duration::from_millis(3600),
+        );
+        assert_eq!(next_action(&s), LiveAction::EndAudio);
+        assert_eq!(next_action_with_voice(&s, true), LiveAction::Continue);
+        assert_eq!(next_action_with_voice(&s, false), LiveAction::EndAudio);
     }
 
     #[test]

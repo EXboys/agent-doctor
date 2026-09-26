@@ -1,5 +1,5 @@
 use crate::speech::{self, SpeechCapabilityDto, SpeechResultDto};
-use agent_doctor_voice::{HostedInput, HostedState, HostedStep};
+use agent_doctor_voice::{assess_turn_end, HostedInput, HostedState, HostedStep, TurnEnd};
 use tauri::AppHandle;
 
 #[tauri::command]
@@ -57,4 +57,11 @@ pub fn voice_speak_stop_command() {
 #[tauri::command]
 pub fn voice_hosted_reduce_command(state: HostedState, input: HostedInput) -> HostedStep {
     agent_doctor_voice::reduce(state, input)
+}
+
+/// How long to wait before sending this spoken sentence, and the text to send.
+/// A later on-device model can replace the rules behind this command.
+#[tauri::command]
+pub fn voice_turn_end_command(text: String) -> TurnEnd {
+    assess_turn_end(&text)
 }

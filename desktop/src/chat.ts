@@ -553,8 +553,8 @@ function dismissLifecycleActivity(): void {
 function finishToolGroup(collapse = true): void {
   activity.finishToolGroup(collapse);
 }
-function clearEphemeralActivity(): void {
-  activity.clearEphemeralActivity();
+function clearEphemeralActivity(dropStderr = false): void {
+  activity.clearEphemeralActivity(dropStderr);
 }
 function appendStderrLine(line: string): void {
   activity.appendStderrLine(line);
@@ -1207,7 +1207,7 @@ function wireChatControllers(): void {
     isViewingRunningSession: () => isViewingRunningSession(),
     flushPendingTextSync: () => flushPendingTextSync(),
     appendAssistantChunk: (chunk) => appendAssistantChunk(chunk),
-    clearEphemeralActivity: () => clearEphemeralActivity(),
+    clearEphemeralActivity: (dropStderr) => clearEphemeralActivity(dropStderr),
     sealAssistantBubble: () => sealAssistantBubble(),
     expireLivePermissionCards: () => expireLivePermissionCards(),
     hideDecisionDock: () => hideDecisionDock(),

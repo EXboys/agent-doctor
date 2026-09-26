@@ -13,6 +13,7 @@ mod live_ctrl;
 #[cfg(target_os = "macos")]
 mod macos;
 mod policy;
+mod turn_end;
 #[cfg(not(any(target_os = "macos", windows)))]
 mod unsupported;
 #[cfg(windows)]
@@ -28,6 +29,10 @@ pub use policy::{
     ack_sentence, asks_about_permission, classify_decision, classify_utterance, failure_sentence,
     permission_brief, permission_sentence, reduce, spoken_reply, status_sentence, HostedEffect,
     HostedInput, HostedState, HostedStep, UtteranceKind,
+};
+pub use turn_end::{
+    assess_turn_end, set_turn_end_decider, RuleTurnEnd, TurnEnd, TurnEndDecider, COMPLETE_HOLD_MS,
+    THINKING_HOLD_MS,
 };
 pub use types::{
     SpeechCapability, SpeechError, SpeechErrorCode, SpeechEvent, SpeechOptions, SpeechResult,

@@ -247,10 +247,7 @@ export function createHostedController(deps: HostedDeps) {
     if (state.speaking) return;
     if (heard === sentUtterance) return;
     sentUtterance = heard;
-    if (partialTimer != null) {
-      window.clearTimeout(partialTimer);
-      partialTimer = null;
-    }
+    cancelHold();
     partial = "";
     kept = "";
     lastUtterance = heard;
@@ -265,7 +262,9 @@ export function createHostedController(deps: HostedDeps) {
     });
   }
 
+  // Fallback when the pause decision cannot be reached.
   const HOLD_MS = 2500;
+  let holdGen = 0;
 
   function collapseStutter(text: string): string {
     const s = text.trim();
@@ -294,25 +293,60 @@ export function createHostedController(deps: HostedDeps) {
   function rememberSpeech(text: string, isFinal: boolean): void {
     const next = collapseStutter(text);
     if (!next) return;
-    const before = partial;
-    if (isFinal) {
-      kept = joinHeard(kept, next);
-      partial = kept;
-    } else {
-      partial = joinHeard(kept, next);
+    if (!isFinal) {
+      const live = joinHeard(kept, next);
+      if (live !== partial) cancelHold();
+      partial = live;
+      islandError = "";
+      render();
+      return;
     }
+    kept = joinHeard(kept, next);
+    partial = kept;
     islandError = "";
     render();
-    if (partial !== before) armPartialTimer(partial);
-    else if (partialTimer == null) armPartialTimer(partial);
+    armPartialTimer(partial);
+  }
+
+  function cancelHold(): void {
+    holdGen += 1;
+    if (partialTimer != null) {
+      window.clearTimeout(partialTimer);
+      partialTimer = null;
+    }
   }
 
   function armPartialTimer(text: string): void {
     if (partialTimer != null) window.clearTimeout(partialTimer);
-    partialTimer = window.setTimeout(() => {
-      partialTimer = null;
-      if (partial.trim() === text.trim()) commitUtterance(text);
-    }, HOLD_MS);
+    partialTimer = null;
+    const gen = ++holdGen;
+    void (async () => {
+      let hold = 0;
+      let toSend = text;
+      try {
+        const decision = await invoke<{ thinking: boolean; holdMs: number; textToSend: string }>(
+          "voice_turn_end_command",
+          { text },
+        );
+        // Quiet time is already spent in the microphone before this final arrives.
+        toSend = decision.textToSend ?? text;
+      } catch {
+        hold = HOLD_MS;
+      }
+      if (gen !== holdGen || partial.trim() !== text.trim()) return;
+      partialTimer = window.setTimeout(() => {
+        partialTimer = null;
+        if (gen !== holdGen || partial.trim() !== text.trim()) return;
+        if (!toSend.trim()) {
+          cancelHold();
+          partial = "";
+          kept = "";
+          render();
+          return;
+        }
+        commitUtterance(toSend);
+      }, hold);
+    })();
   }
 
   function enqueue(input: HostedInput): void {
@@ -348,6 +382,7 @@ export function createHostedController(deps: HostedDeps) {
     if (listenPromise) return;
     if ((state.modelBusy || state.speaking) && !state.awaitingPermission) return;
     const epoch = ++listenEpoch;
+    cancelHold();
     partial = "";
     kept = "";
     sessionUnlisten = await listen<SpeechEventDto>("speech-event", (event) => {
@@ -405,6 +440,7 @@ export function createHostedController(deps: HostedDeps) {
 
   async function stopListen(): Promise<void> {
     listenEpoch += 1;
+    cancelHold();
     partial = "";
     kept = "";
     const pending = listenPromise;
@@ -520,6 +556,7 @@ export function createHostedController(deps: HostedDeps) {
           deps.setStatus(failureCopy(failDetail), "warn");
           failDetail = "";
         }
+        cancelHold();
         partial = "";
         kept = "";
         render();

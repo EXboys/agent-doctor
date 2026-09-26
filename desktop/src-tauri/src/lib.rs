@@ -472,6 +472,7 @@ pub fn run() {
             voice_speak_command,
             voice_speak_stop_command,
             voice_hosted_reduce_command,
+            voice_turn_end_command,
             read_image_texts_command
         ])
         .run(tauri::generate_context!())

@@ -95,6 +95,10 @@ export function isQuietStderr(line: string): boolean {
     /resumed session/i.test(text) ||
     lower.includes("unrecognized_model") ||
     lower.includes("unrecognized model") ||
+    lower.startsWith("[agent/embedded]") ||
+    lower.includes("preserved orphaned user message") ||
+    lower.includes("network connection was interrupted") ||
+    lower.includes("transient same-model retry") ||
     lower.startsWith("[secrets]") ||
     lower.includes("secrets.resolve unavailable") ||
     lower.includes("resolved command secrets locally") ||
