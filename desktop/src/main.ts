@@ -200,22 +200,26 @@ function afterFirstPaint(task: () => void): void {
 // A webview reload can preserve the native width from an open diagnose panel
 // while resetting the frontend's detail state. Always restore compact startup.
 void refs.agents.setMainWindowWidth(refs.agents.MAIN_COMPACT_WIDTH);
+const bootAgents = refs.agents;
+const bootWorkspace = refs.workspace;
+const bootWiring = refs.wiring;
+const bootFirstRun = refs.firstRun;
 // Show chrome first. Workspace / doctor I/O can raise an OS folder prompt.
 afterFirstPaint(() => {
-  void refs.agents.loadProfiles();
-  void refs.workspace.loadWorkspaces();
-  void refs.workspace.loadRemoteProjects();
+  void bootAgents.loadProfiles();
+  void bootWorkspace.loadWorkspaces();
+  void bootWorkspace.loadRemoteProjects();
   if (isTeamEdition()) {
-    void refs.wiring.loadEvotownStatus();
+    void bootWiring.loadEvotownStatus();
   } else {
-    void refs.wiring.loadPersonalProviderStatus();
+    void bootWiring.loadPersonalProviderStatus();
   }
-  void refs.wiring.loadModeStatus();
+  void bootWiring.loadModeStatus();
   // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
   // wake Chrome until the user opens Resources or clicks Browser smoke.
-  refs.firstRun.initPersonalFirstRun();
-  if (refs.firstRun.getPhase() === "hidden") {
-    void refs.agents.refresh();
+  bootFirstRun.initPersonalFirstRun();
+  if (bootFirstRun.getPhase() === "hidden") {
+    void bootAgents.refresh();
   }
   void initUpdaterUi({ versionEl: appVersionEl, checkBtn: checkUpdateEl });
 });
