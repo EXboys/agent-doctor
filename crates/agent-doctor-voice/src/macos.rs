@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// `AVAudioEngine` only delivers microphone buffers when it is started on the
 /// main thread. The wait loop stays off the main thread so the window can
 /// still paint and deliver events.
-fn on_main<R: Send + 'static, F: FnOnce() -> R + Send + 'static>(work: F) -> R {
+pub(crate) fn on_main<R: Send + 'static, F: FnOnce() -> R + Send + 'static>(work: F) -> R {
     let already_main = unsafe {
         AnyClass::get(c"NSThread")
             .map(|class| {
@@ -88,7 +88,7 @@ impl LiveSession {
     }
 }
 
-fn require_class(name: &CStr) -> Result<&'static AnyClass, SpeechError> {
+pub(crate) fn require_class(name: &CStr) -> Result<&'static AnyClass, SpeechError> {
     AnyClass::get(name).ok_or_else(|| {
         SpeechError::new(
             SpeechErrorCode::Unavailable,
@@ -218,7 +218,7 @@ fn now_ms() -> u64 {
 }
 
 /// Loudness of one microphone buffer. Used to notice when the person stops talking.
-fn buffer_rms(buffer: *mut AnyObject) -> f32 {
+pub(crate) fn buffer_rms(buffer: *mut AnyObject) -> f32 {
     unsafe {
         let frames: usize = msg_send![buffer, frameLength];
         if frames == 0 {
@@ -341,11 +341,17 @@ fn recognize_from_microphone(
                 };
                 let code = classify_recognition_nserror(&detail);
                 let mut data = lock.lock().unwrap_or_else(|e| e.into_inner());
-                // A trailing "no speech" / cancel error must not wipe text we already have.
-                if code == SpeechErrorCode::Failed || data.best.is_none() {
-                    data.error = Some(SpeechError::new(code, detail));
-                    cvar.notify_one();
+                let have_text = data
+                    .best
+                    .as_ref()
+                    .is_some_and(|item| !item.text.trim().is_empty());
+                // The engine often ends the task once it has a sentence. That is not
+                // a new listen, and it must not throw away the sentence already heard.
+                if have_text && code != SpeechErrorCode::Cancelled {
+                    return;
                 }
+                data.error = Some(SpeechError::new(code, detail));
+                cvar.notify_one();
                 return;
             }
 
@@ -366,20 +372,25 @@ fn recognize_from_microphone(
             let is_final: bool = msg_send![result, isFinal];
             let now = std::time::Instant::now();
             let mut data = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let earlier = data
+                .best
+                .as_ref()
+                .map(|item| item.text.as_str())
+                .unwrap_or("");
+            let merged = crate::turn_end::merge_heard(earlier, &text);
+            let changed = earlier != merged;
             let recognized = SpeechResult {
-                text,
+                text: merged,
                 confidence: 0.0,
                 is_final,
             };
-            if is_final {
-                data.final_result = Some(recognized);
-            } else if data.best.as_ref().map(|r| r.text.as_str()) != Some(recognized.text.as_str())
-            {
+            if changed {
                 data.last_change = Some(now);
-                data.best = Some(recognized);
-            } else {
-                data.best = Some(recognized);
             }
+            if is_final {
+                data.final_result = Some(recognized.clone());
+            }
+            data.best = Some(recognized);
             cvar.notify_one();
         });
         let block: RcBlock<dyn Fn(*mut AnyObject, *mut AnyObject)> = block.copy();
@@ -451,6 +462,7 @@ fn recognize_from_microphone(
     let started_at = std::time::Instant::now();
     let mut end_audio_sent = false;
     let mut end_audio_at: Option<std::time::Instant> = None;
+    let mut closed_text: Option<String> = None;
     let mut last_ui_partial = String::new();
     let mut unwritten = crate::turn_end::UnwrittenVoice::default();
     let mut tracked_text = String::new();
@@ -469,18 +481,42 @@ fn recognize_from_microphone(
         loop {
             let now = std::time::Instant::now();
 
+            if let Some(closed) = closed_text.clone() {
+                let current = guard
+                    .best
+                    .as_ref()
+                    .map(|result| result.text.as_str())
+                    .unwrap_or("");
+                if current != closed {
+                    guard.final_result = None;
+                    guard.best = Some(SpeechResult {
+                        text: closed,
+                        confidence: 0.0,
+                        is_final: true,
+                    });
+                }
+            }
+
             if let Some(err) = guard.error.take() {
                 break 'session Err(err);
             }
             // The system often marks a sentence final the moment the voice dips.
             // That is not the send. Keep the text and let the quiet timer decide.
             if let Some(final_result) = guard.final_result.take() {
-                let changed = guard.best.as_ref().map(|result| result.text.as_str())
-                    != Some(final_result.text.as_str());
-                if changed {
+                let earlier = guard
+                    .best
+                    .as_ref()
+                    .map(|result| result.text.clone())
+                    .unwrap_or_default();
+                let merged = crate::turn_end::merge_heard(&earlier, &final_result.text);
+                if earlier != merged {
                     guard.last_change = Some(now);
                 }
-                guard.best = Some(final_result);
+                guard.best = Some(SpeechResult {
+                    text: merged,
+                    confidence: final_result.confidence,
+                    is_final: true,
+                });
             }
 
             if let Some(best) = guard.best.clone() {
@@ -520,7 +556,16 @@ fn recognize_from_microphone(
             );
             tracked_text = heard.clone();
             let required_quiet = crate::turn_end::quiet_ms(&heard, unwritten.sound_after_words);
-            if !end_audio_sent && voice_at > 0 && quiet_for >= required_quiet {
+            let text_settled = !heard.trim().is_empty() && text_stable_ms >= required_quiet;
+            let voice_settled = if voice_at == 0 {
+                text_settled
+            } else {
+                quiet_for >= required_quiet
+            };
+            // Send only after both the words and the microphone have been still.
+            // A result that arrives late must not skip the wait.
+            if !end_audio_sent && text_settled && voice_settled {
+                closed_text = Some(heard.clone());
                 drop(guard);
                 end_request_audio(request_bits);
                 end_audio_sent = true;
@@ -532,7 +577,8 @@ fn recognize_from_microphone(
             snapshot.end_audio_sent = end_audio_sent;
             snapshot.end_audio_at = end_audio_at.map(|t| t.saturating_duration_since(started_at));
 
-            let voice_recent = voice_at > 0 && quiet_for < required_quiet;
+            let voice_recent = !heard.trim().is_empty()
+                && (quiet_for < required_quiet || text_stable_ms < required_quiet);
             match live_ctrl::next_action_with_voice(&snapshot, voice_recent) {
                 LiveAction::Continue => break,
                 LiveAction::EndAudio => {
@@ -639,6 +685,11 @@ fn speak_text(
     if text.trim().is_empty() {
         return Ok(());
     }
+    match crate::macos_playback::speak_with_barge(text, language, should_cancel) {
+        Ok(()) => return Ok(()),
+        Err(err) if err.detail == crate::macos_playback::PLAYBACK_UNAVAILABLE => {}
+        Err(err) => return Err(err),
+    }
     unsafe {
         let synth_class = require_class(c"AVSpeechSynthesizer")?;
         let synth: *mut AnyObject = msg_send![synth_class, new];
@@ -667,12 +718,29 @@ fn speak_text(
             }
         }
         let _: () = msg_send![synth, speakUtterance: utterance];
+        let mut watch: Option<crate::macos_playback::BleedWatch> = None;
 
         let started = std::time::Instant::now();
         let mut heard = false;
+        let mut watch_tried = false;
         loop {
+            if heard && watch.is_none() && !watch_tried {
+                watch_tried = true;
+                watch = crate::macos_playback::start_bleed_watch().ok();
+            }
+            if watch.as_ref().is_some_and(|item| item.interrupted()) {
+                let _: () = msg_send![synth, stopSpeakingAtBoundary: 0isize];
+                if let Some(item) = watch.take() {
+                    item.stop();
+                }
+                eprintln!("[voice] barge interrupt");
+                return Ok(());
+            }
             if should_cancel() {
                 let _: () = msg_send![synth, stopSpeakingAtBoundary: 0isize];
+                if let Some(item) = watch.take() {
+                    item.stop();
+                }
                 return Err(SpeechError::new(
                     SpeechErrorCode::Cancelled,
                     "speech cancelled",
@@ -680,15 +748,21 @@ fn speak_text(
             }
             if started.elapsed() > Duration::from_secs(180) {
                 let _: () = msg_send![synth, stopSpeakingAtBoundary: 0isize];
+                if let Some(item) = watch.take() {
+                    item.stop();
+                }
                 return Ok(());
             }
             let speaking: bool = msg_send![synth, isSpeaking];
             if speaking {
                 heard = true;
             } else if heard || started.elapsed() > Duration::from_millis(700) {
+                if let Some(item) = watch.take() {
+                    item.stop();
+                }
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(80));
+            std::thread::sleep(Duration::from_millis(40));
         }
     }
 }

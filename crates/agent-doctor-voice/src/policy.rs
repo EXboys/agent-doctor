@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-const MAX_BODY_CHARS: usize = 180;
+/// Safety cap so a huge reply does not talk for many minutes.
+/// Normal answers are spoken in full. Remote voice has no screen to read.
+const MAX_BODY_CHARS: usize = 1200;
 const MAX_STATUS_CHARS: usize = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,18 +357,13 @@ pub fn spoken_reply(markdown: &str, zh: bool) -> String {
     if truncated {
         let mut clipped: String = body.chars().take(MAX_BODY_CHARS).collect();
         clipped.push_str(if zh {
-            "后面还有，完整内容在屏幕上。"
+            "后面还有一段，太长了，我先念到这里。"
         } else {
-            " The rest is on the screen."
+            " The rest is longer, so I will stop here."
         });
         body = clipped;
     }
-    let lead = if zh {
-        "AI 已经有回复，内容如下。"
-    } else {
-        "The reply is ready. Here it is."
-    };
-    format!("{lead}{body}")
+    body
 }
 
 fn clip_chars(text: &str, max: usize) -> String {
@@ -778,15 +775,18 @@ mod tests {
     #[test]
     fn spoken_reply_skips_code_and_caps_length() {
         let spoken = spoken_reply("先说结论。\n```rust\nfn main() {}\n```\n", true);
-        assert!(spoken.starts_with("AI 已经有回复，内容如下。"));
-        assert!(spoken.contains("先说结论"));
+        assert!(spoken.starts_with("先说结论"));
         assert!(spoken.contains("这里有一段代码"));
         assert!(!spoken.contains("fn main"));
 
         let long = "字".repeat(400);
-        let clipped = spoken_reply(&long, true);
-        assert!(clipped.contains("后面还有，完整内容在屏幕上。"));
-        assert!(clipped.chars().count() < 250);
+        let spoken_long = spoken_reply(&long, true);
+        assert!(!spoken_long.contains("我先念到这里"));
+        assert!(spoken_long.contains(&"字".repeat(400)));
+
+        let huge = "字".repeat(1500);
+        let clipped = spoken_reply(&huge, true);
+        assert!(clipped.contains("后面还有一段，太长了，我先念到这里。"));
     }
 
     #[test]

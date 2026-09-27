@@ -209,8 +209,8 @@ export function createHostedController(deps: HostedDeps) {
       deps.islandEl.classList.add("is-listening");
     }
     if (!asking && !state.modelBusy && !state.speaking && partial.trim()) {
-      title = partial.trim();
-      detail = t("chat.hostedWillSend");
+      title = t("chat.hostedListening");
+      detail = partial.trim();
       deps.islandEl.classList.add("is-listening");
     }
     deps.islandTitleEl.textContent = title;
@@ -284,24 +284,29 @@ export function createHostedController(deps: HostedDeps) {
     const a = earlier.trim();
     const b = latest.trim();
     if (!a) return b;
-    if (!b || a === b || a.endsWith(b)) return a;
+    if (!b) return a;
     if (b.startsWith(a)) return b;
-    const gap = /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b) ? " " : "";
-    return `${a}${gap}${b}`;
+    if (a.startsWith(b) || a.endsWith(b)) return a;
+    let shared = 0;
+    const ac = Array.from(a);
+    const bc = Array.from(b);
+    while (shared < ac.length && shared < bc.length && ac[shared] === bc[shared]) shared += 1;
+    if (shared >= 2) return bc.length >= ac.length ? b : a;
+    return a;
   }
 
   function rememberSpeech(text: string, isFinal: boolean): void {
     const next = collapseStutter(text);
     if (!next) return;
     if (!isFinal) {
-      const live = joinHeard(kept, next);
+      const live = joinHeard(partial, next);
       if (live !== partial) cancelHold();
       partial = live;
       islandError = "";
       render();
       return;
     }
-    kept = joinHeard(kept, next);
+    kept = joinHeard(partial, next);
     partial = kept;
     islandError = "";
     render();
@@ -328,7 +333,7 @@ export function createHostedController(deps: HostedDeps) {
           "voice_turn_end_command",
           { text },
         );
-        // Quiet time is already spent in the microphone before this final arrives.
+        // The microphone stayed open for this pause. The sentence on screen is already the whole listen.
         toSend = decision.textToSend ?? text;
       } catch {
         hold = HOLD_MS;

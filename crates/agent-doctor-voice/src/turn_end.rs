@@ -100,6 +100,7 @@ pub fn note_unwritten_voice(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn quiet_ms(text: &str, sound_after_words: bool) -> u64 {
     if text.trim().is_empty() {
         return COMPLETE_HOLD_MS;
@@ -109,6 +110,42 @@ pub fn quiet_ms(text: &str, sound_after_words: bool) -> u64 {
     } else {
         COMPLETE_HOLD_MS
     }
+}
+
+pub fn merge_heard(earlier: &str, latest: &str) -> String {
+    let earlier = earlier.trim();
+    let latest = latest.trim();
+    if earlier.is_empty() {
+        return latest.to_string();
+    }
+    if latest.is_empty() {
+        return earlier.to_string();
+    }
+    // The recognizer's latest result is the whole sentence so far.
+    // A longer update of the same sentence replaces. A short tail does not.
+    // A different sentence (another voice, or the engine starting over) does not
+    // replace the sentence already on screen. Never concatenate.
+    if latest.starts_with(earlier) {
+        return latest.to_string();
+    }
+    if earlier.starts_with(latest) || earlier.ends_with(latest) {
+        return earlier.to_string();
+    }
+    if shared_prefix_chars(earlier, latest) >= 2 {
+        return if latest.chars().count() >= earlier.chars().count() {
+            latest.to_string()
+        } else {
+            earlier.to_string()
+        };
+    }
+    earlier.to_string()
+}
+
+fn shared_prefix_chars(a: &str, b: &str) -> usize {
+    a.chars()
+        .zip(b.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 pub fn assess_turn_end(text: &str) -> TurnEnd {
@@ -209,6 +246,27 @@ mod tests {
     fn ongoing_speech_does_not_count_as_a_later_sound() {
         let speaking = note_unwritten_voice(UnwrittenVoice::default(), true, false, 100, 0);
         assert!(!speaking.sound_after_words);
+    }
+
+    #[test]
+    fn a_later_fragment_does_not_erase_earlier_words() {
+        assert_eq!(
+            merge_heard("完全干净的那个熊猫", "熊猫"),
+            "完全干净的那个熊猫"
+        );
+        assert_eq!(
+            merge_heard("完全干净的那个", "完全干净的那个熊猫"),
+            "完全干净的那个熊猫"
+        );
+        assert_eq!(merge_heard("前面一句", "Fax"), "前面一句");
+        assert_eq!(
+            merge_heard("我想让你帮我看一下桌面", "我喜欢"),
+            "我想让你帮我看一下桌面"
+        );
+        assert_eq!(
+            merge_heard("你好你好这里怎么样", "你好你好这里怎么样啊"),
+            "你好你好这里怎么样啊"
+        );
     }
 
     #[test]

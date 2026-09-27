@@ -240,7 +240,8 @@ fn recognize_live(
                 if let Ok(text) = hypothesis.Text() {
                     let value = text.to_string();
                     if !value.trim().is_empty() {
-                        *hypothesis_slot.lock().unwrap_or_else(|e| e.into_inner()) = value;
+                        let mut slot = hypothesis_slot.lock().unwrap_or_else(|e| e.into_inner());
+                        *slot = crate::turn_end::merge_heard(&slot, &value);
                     }
                 }
             }
@@ -334,7 +335,14 @@ fn listen_until_utterance(
             on_partial(&shown);
         }
         if let Some(result) = finished.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            return result;
+            return match result {
+                Ok(speech) => Ok(SpeechResult {
+                    text: crate::turn_end::merge_heard(&shown, &speech.text),
+                    confidence: speech.confidence,
+                    is_final: true,
+                }),
+                Err(err) => Err(err),
+            };
         }
         if completed.load(Ordering::SeqCst) {
             if shown.is_empty() {
@@ -466,9 +474,27 @@ fn speak_text(
 
     let started = std::time::Instant::now();
     let mut heard = false;
+    let mut watch: Option<super::windows_barge::BleedWatch> = None;
+    let mut watch_tried = false;
+    let stop_watch = |watch: &mut Option<super::windows_barge::BleedWatch>| {
+        if let Some(item) = watch.take() {
+            item.stop();
+        }
+    };
     loop {
+        if heard && !watch_tried {
+            watch_tried = true;
+            watch = super::windows_barge::start_bleed_watch();
+        }
+        if watch.as_ref().is_some_and(|item| item.interrupted()) {
+            let _ = player.Pause();
+            stop_watch(&mut watch);
+            eprintln!("[voice] barge interrupt");
+            return Ok(());
+        }
         if should_cancel() {
             let _ = player.Pause();
+            stop_watch(&mut watch);
             return Err(SpeechError::new(
                 SpeechErrorCode::Cancelled,
                 "speech cancelled",
@@ -476,6 +502,7 @@ fn speak_text(
         }
         if started.elapsed() > std::time::Duration::from_secs(180) {
             let _ = player.Pause();
+            stop_watch(&mut watch);
             return Ok(());
         }
         let playing = player
@@ -491,8 +518,9 @@ fn speak_text(
         if active {
             heard = true;
         } else if heard || started.elapsed() > std::time::Duration::from_millis(800) {
+            stop_watch(&mut watch);
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(80));
+        std::thread::sleep(std::time::Duration::from_millis(40));
     }
 }

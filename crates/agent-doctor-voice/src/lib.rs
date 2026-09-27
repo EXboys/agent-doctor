@@ -8,20 +8,30 @@
 //! Hosted-mode wording and the listen/speak state machine live in [`policy`]
 //! so the desktop app can drive them without a microphone.
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod activity;
 mod backend;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod barge;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod live_ctrl;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod macos_playback;
 mod policy;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod turn_end;
 #[cfg(not(any(target_os = "macos", windows)))]
 mod unsupported;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+mod windows_barge;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use backend::active_backend;
 
@@ -135,6 +145,13 @@ pub fn speak(
 ) -> Result<(), SpeechError> {
     if text.trim().is_empty() {
         return Ok(());
+    }
+    // The listen engine must release the microphone before echo-cancelled
+    // playback can start. Otherwise playback falls back to a path that
+    // cannot hear the person.
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while RECOGNIZER_BUSY.load(Ordering::SeqCst) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(40));
     }
     active_backend().speak(text, language, should_cancel)
 }
