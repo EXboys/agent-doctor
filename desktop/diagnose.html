@@ -8,17 +8,12 @@
     <link rel="stylesheet" href="/src/diagnose.css" />
   </head>
   <body class="diagnose-page">
-    <div class="diagnose-shell">
+    <div class="diagnose-shell" id="diagnose-shell">
+      <div class="diagnose-main">
       <header class="diagnose-top">
         <div>
           <p class="diagnose-eyebrow" data-i18n="diagnose.flow.eyebrow">准备 Agent</p>
           <h1 id="diagnose-title">—</h1>
-          <p id="diagnose-subtitle" class="diagnose-subtitle" data-i18n="diagnose.flow.subtitle">
-            按安装 → 配置 → 测试走完，就可以用了
-          </p>
-        </div>
-        <div class="diagnose-top-actions">
-          <button id="diagnose-close" type="button" class="btn-ghost btn-compact" data-i18n="chat.close">关闭</button>
         </div>
       </header>
 
@@ -82,6 +77,16 @@
             <div class="diagnose-actions" id="diagnose-actions">
               <button id="diagnose-primary" type="button" class="btn-primary">—</button>
               <button id="diagnose-secondary" type="button" class="btn-secondary">—</button>
+              <button
+                id="diagnose-deep-toggle"
+                type="button"
+                class="btn-secondary diagnose-deep-entry"
+                hidden
+                data-i18n="diagnose.flow.deepOpen"
+                aria-expanded="false"
+              >
+                深度诊断
+              </button>
             </div>
           </div>
         </section>
@@ -161,6 +166,36 @@
           </div>
         </section>
       </main>
+      </div>
+
+      <aside
+        class="diagnose-deep-drawer"
+        id="diagnose-deep"
+        hidden
+        aria-hidden="true"
+        aria-labelledby="diagnose-deep-title"
+      >
+        <div class="diagnose-deep-drawer-head">
+          <strong id="diagnose-deep-title" data-i18n="diagnose.flow.deepTitle">深度诊断</strong>
+          <button
+            id="diagnose-deep-close"
+            type="button"
+            class="diagnose-deep-close"
+            data-i18n-title="diagnose.flow.deepCloseHint"
+            title="收起深度诊断，回到左边检查"
+            aria-label="收起"
+          >
+            <span data-i18n="diagnose.flow.deepClose">收起</span>
+            <svg class="diagnose-deep-close-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M6.2 3.2a.75.75 0 0 1 1.06 0l4 4a.75.75 0 0 1 0 1.06l-4 4a.75.75 0 1 1-1.06-1.06L9.44 8 6.2 4.76a.75.75 0 0 1 0-1.06Z"
+              />
+            </svg>
+          </button>
+        </div>
+        <div class="diagnose-deep-drawer-body" id="diagnose-deep-body"></div>
+      </aside>
     </div>
     <script type="module" src="/src/diagnose-window.ts"></script>
   </body>

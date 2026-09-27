@@ -19,6 +19,7 @@ import type {
   RuntimeDoctorResult,
 } from "./types";
 import { createDiagnoseActions } from "./diagnose/actions";
+import { createDeepChat, type DeepPresetId } from "./diagnose/deep-chat";
 import * as dom from "./diagnose/dom";
 import { createDiagnosePaint } from "./diagnose/paint";
 import { renderPresetChips } from "./diagnose/presets";
@@ -38,7 +39,8 @@ declare global {
 
 const session = createDiagnoseSession(resolveInitialRuntime());
 rememberDiagnoseRuntime(session.runtimeId);
-const paint = createDiagnosePaint(session);
+const deepChat = createDeepChat(session);
+const paint = createDiagnosePaint(session, deepChat);
 
 function runtimeFromDoctor(report: DoctorReport): RuntimeDoctorResult | undefined {
   return report.runtimes.find((item) => item.id === session.runtimeId);
@@ -227,8 +229,53 @@ dom.secondaryEl.addEventListener("click", () => {
   }
 });
 
-dom.closeEl.addEventListener("click", () => {
-  void actions.closeWindow();
+dom.deepToggleEl.addEventListener("click", () => {
+  // Do not gate on session.busy — scoring must not block opening the AI chat.
+  actions.toggleDeep();
+});
+
+dom.deepCloseEl.addEventListener("click", () => {
+  actions.toggleDeep(false);
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) {
+    return;
+  }
+  if (!session.deepOpen) {
+    return;
+  }
+  event.preventDefault();
+  actions.toggleDeep(false);
+});
+
+function handleDeepBodyClick(event: Event): void {
+  const target = event.target as HTMLElement | null;
+  if (!target) {
+    return;
+  }
+  const preset = target.closest<HTMLButtonElement>("[data-deep-preset]");
+  if (preset?.dataset.deepPreset) {
+    event.preventDefault();
+    void deepChat.usePreset(preset.dataset.deepPreset as DeepPresetId);
+    return;
+  }
+  if (target.closest("#diagnose-deep-stop")) {
+    event.preventDefault();
+    void deepChat.stop();
+  }
+}
+
+// Listen on the drawer root so clicks still work after the body HTML is replaced.
+dom.deepEl.addEventListener("click", handleDeepBodyClick);
+
+dom.deepBodyEl.addEventListener("submit", (event) => {
+  const form = (event.target as HTMLElement).closest("#diagnose-deep-form");
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+  void deepChat.send();
 });
 
 document.documentElement.classList.add("is-opaque-shell");
@@ -245,4 +292,8 @@ void listen<{ runtime?: string }>("diagnose-window-focus", (event) => {
   } else {
     void refreshState();
   }
+});
+
+window.addEventListener("beforeunload", () => {
+  deepChat.dispose();
 });

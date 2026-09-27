@@ -107,15 +107,83 @@ pub(crate) fn layout_main_and_diagnose_side_by_side(app: &AppHandle) {
     layout_main_and_secondary_side_by_side(app, DIAGNOSE_WINDOW_LABEL);
 }
 
-fn hide_secondary_window(app: &AppHandle, label: &str) {
-    let Some(window) = app.get_webview_window(label) else {
+fn secondary_is_visible(app: &AppHandle, label: &str) -> bool {
+    app.get_webview_window(label)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
+
+fn another_secondary_is_visible(app: &AppHandle, except: &str) -> bool {
+    [
+        ASK_WINDOW_LABEL,
+        RESOURCES_WINDOW_LABEL,
+        DIAGNOSE_WINDOW_LABEL,
+    ]
+    .into_iter()
+    .any(|label| label != except && secondary_is_visible(app, label))
+}
+
+/// When Ask / Resources / Diagnose already share the screen, open the next one
+/// slightly offset so it stays visible instead of replacing the others.
+fn place_secondary_cascaded(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let Some(main) = app.get_webview_window("main") else {
         return;
     };
-    if !window.is_visible().unwrap_or(false) {
+    let Some((work_x, work_y, work_w, work_h, scale)) = monitor_work_area(&main) else {
         return;
+    };
+    let deco_w = window_decoration_width(window, scale);
+    let deco_h = window_decoration_height(window, scale);
+    let (main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
+    let gap = ASK_WINDOW_MARGIN;
+    let open_count = [
+        ASK_WINDOW_LABEL,
+        RESOURCES_WINDOW_LABEL,
+        DIAGNOSE_WINDOW_LABEL,
+    ]
+    .into_iter()
+    .filter(|label| secondary_is_visible(app, label))
+    .count()
+    .saturating_sub(1);
+    let step = 36.0 * open_count as f64;
+    let outer_w = ((work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_w) * 0.92)
+        .max(ASK_WINDOW_MIN_WIDTH)
+        .min(work_w - MAIN_WINDOW_MARGIN * 2.0);
+    let outer_h = ((work_h - MAIN_WINDOW_MARGIN * 2.0) * 0.88).max(ASK_WINDOW_MIN_HEIGHT);
+    let inner_w = (outer_w - deco_w).max(ASK_WINDOW_MIN_WIDTH);
+    let inner_h = (outer_h - deco_h).max(ASK_WINDOW_MIN_HEIGHT);
+    let x = (work_x + MAIN_WINDOW_MARGIN + main_w + gap + step)
+        .min(work_x + work_w - MAIN_WINDOW_MARGIN - outer_w);
+    let y =
+        (work_y + MAIN_WINDOW_MARGIN + step).min(work_y + work_h - MAIN_WINDOW_MARGIN - outer_h);
+    let _ = window.set_size(LogicalSize::new(inner_w, inner_h));
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+fn show_secondary_window(
+    app: &AppHandle,
+    label: &str,
+    window: &tauri::WebviewWindow,
+    dock: fn(&AppHandle),
+) {
+    let was_visible = window.is_visible().unwrap_or(false);
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
     }
-    let _ = window.set_skip_taskbar(true);
-    let _ = window.hide();
+    let _ = window.set_skip_taskbar(false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    if !was_visible {
+        if another_secondary_is_visible(app, label) {
+            place_secondary_cascaded(app, window);
+        } else {
+            dock(app);
+            // Second pass after chrome metrics are valid.
+            dock(app);
+        }
+    }
+    let _ = window.set_focus();
 }
 
 fn position_main_window_left(window: &tauri::WebviewWindow) {
@@ -334,15 +402,30 @@ fn resize_main_window(
     })
 }
 
+/// Leave fullscreen before dismissing. Otherwise macOS keeps an empty Space
+/// in Mission Control (a black "Agent Doctor — Ask" thumbnail) after maximize.
+fn dismiss_secondary_window(window: &tauri::WebviewWindow, destroy: bool) {
+    let _ = window.set_fullscreen(false);
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    }
+    // On macOS, hide-after-maximize still leaves a Mission Control Space.
+    // Destroy so the independent window is really gone; the next open recreates it.
+    if destroy || cfg!(target_os = "macos") {
+        let _ = window.destroy();
+        return;
+    }
+    // Windows: keep the WebView2 shell so the next open does not rebuild it.
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.hide();
+}
+
 fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
-    let hide = window.clone();
+    let win = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
-            // Hide instead of destroy so WebView2 is not rebuilt on the next Ask
-            // (rebuild on Windows can hang the UI thread and leave a blank shell).
             api.prevent_close();
-            let _ = hide.set_skip_taskbar(true);
-            let _ = hide.hide();
+            dismiss_secondary_window(&win, false);
         }
     });
 }
@@ -418,22 +501,13 @@ pub(crate) fn open_or_focus_ask_window(
     let already_exists = app.get_webview_window(ASK_WINDOW_LABEL).is_some();
     let window = ensure_ask_window(app, runtime)?;
     apply_ask_runtime_in_webview(&window, runtime);
-    // Right-dock slot is shared with Resources — only one secondary on the right.
-    hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
-    hide_secondary_window(app, DIAGNOSE_WINDOW_LABEL);
-    // Pair with main: left/right side-by-side, top and bottom aligned.
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-    }
-    let _ = window.set_skip_taskbar(false);
-    let _ = window.unminimize();
-    let _ = window.show();
-    layout_main_and_ask_side_by_side(app);
-    // Second pass after Ask chrome metrics are valid.
-    layout_main_and_ask_side_by_side(app);
-    let _ = window.set_focus();
-
+    // Ask / Resources / Diagnose can stay open together.
+    show_secondary_window(
+        app,
+        ASK_WINDOW_LABEL,
+        &window,
+        layout_main_and_ask_side_by_side,
+    );
     // A previously crashed Ask webview can stay titled+blank forever while we only
     // hide/show it. Always soft-reload existing Ask windows so history paints again.
     // Persist runtime before reload: create-time init script still injects the first
@@ -464,24 +538,16 @@ pub(crate) fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), Str
     let Some(window) = app.get_webview_window(ASK_WINDOW_LABEL) else {
         return Ok(());
     };
-    if destroy {
-        window
-            .destroy()
-            .map_err(|err| format!("failed to close ask window: {err}"))?;
-    } else {
-        let _ = window.set_skip_taskbar(true);
-        let _ = window.hide();
-    }
+    dismiss_secondary_window(&window, destroy);
     Ok(())
 }
 
 fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
-    let hide = window.clone();
+    let win = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = hide.set_skip_taskbar(true);
-            let _ = hide.hide();
+            dismiss_secondary_window(&win, false);
         }
     });
 }
@@ -515,12 +581,11 @@ pub(crate) fn ensure_resources_window(app: &AppHandle) -> Result<tauri::WebviewW
 }
 
 fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
-    let hide = window.clone();
+    let win = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = hide.set_skip_taskbar(true);
-            let _ = hide.hide();
+            dismiss_secondary_window(&win, false);
         }
     });
 }
@@ -610,20 +675,13 @@ pub(crate) fn open_or_focus_diagnose_window(
 
     let already_exists = app.get_webview_window(DIAGNOSE_WINDOW_LABEL).is_some();
     let window = ensure_diagnose_window(app, runtime)?;
-    // Same right-dock slot as Ask / Resources.
-    hide_secondary_window(app, ASK_WINDOW_LABEL);
-    hide_secondary_window(app, RESOURCES_WINDOW_LABEL);
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-    }
-    let _ = window.set_skip_taskbar(false);
-    let _ = window.unminimize();
-    let _ = window.show();
-    layout_main_and_diagnose_side_by_side(app);
-    layout_main_and_diagnose_side_by_side(app);
-    let _ = window.set_focus();
-
+    // Ask / Resources / Diagnose can stay open together.
+    show_secondary_window(
+        app,
+        DIAGNOSE_WINDOW_LABEL,
+        &window,
+        layout_main_and_diagnose_side_by_side,
+    );
     if already_exists {
         // Prefer soft switch; reload only if the page has not registered yet.
         // Persist to sessionStorage first so a reload cannot fall back to the
@@ -656,14 +714,7 @@ pub(crate) fn close_diagnose_window(app: &AppHandle, destroy: bool) -> Result<()
     let Some(window) = app.get_webview_window(DIAGNOSE_WINDOW_LABEL) else {
         return Ok(());
     };
-    if destroy {
-        window
-            .destroy()
-            .map_err(|err| format!("failed to close diagnose window: {err}"))?;
-    } else {
-        let _ = window.set_skip_taskbar(true);
-        let _ = window.hide();
-    }
+    dismiss_secondary_window(&window, destroy);
     Ok(())
 }
 
@@ -672,18 +723,13 @@ pub(crate) fn open_or_focus_resources_window(
     section: Option<&str>,
 ) -> Result<(), String> {
     let window = ensure_resources_window(app)?;
-    // Same right-dock as Ask — hide Ask so Resources does not stack over main.
-    hide_secondary_window(app, ASK_WINDOW_LABEL);
-    hide_secondary_window(app, DIAGNOSE_WINDOW_LABEL);
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-    }
-    let _ = window.set_skip_taskbar(false);
-    let _ = window.unminimize();
-    let _ = window.show();
-    layout_main_and_resources_side_by_side(app);
-    let _ = window.set_focus();
+    // Ask / Resources / Diagnose can stay open together.
+    show_secondary_window(
+        app,
+        RESOURCES_WINDOW_LABEL,
+        &window,
+        layout_main_and_resources_side_by_side,
+    );
     let section = section
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -699,14 +745,7 @@ pub(crate) fn close_resources_window(app: &AppHandle, destroy: bool) -> Result<(
     let Some(window) = app.get_webview_window(RESOURCES_WINDOW_LABEL) else {
         return Ok(());
     };
-    if destroy {
-        window
-            .destroy()
-            .map_err(|err| format!("failed to close resources window: {err}"))?;
-    } else {
-        let _ = window.set_skip_taskbar(true);
-        let _ = window.hide();
-    }
+    dismiss_secondary_window(&window, destroy);
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type {
   VoiceCapability,
   VoiceProvider,
@@ -25,6 +26,20 @@ type SpeechEventDto =
   | { type: "error"; code: string; detail: string }
   | { type: "cancelled" };
 
+async function listenSpeechEvents(
+  handler: (payload: SpeechEventDto) => void,
+): Promise<UnlistenFn> {
+  const onEvent = (event: { payload: SpeechEventDto }) => {
+    if (event?.payload) handler(event.payload);
+  };
+  try {
+    return await listen<SpeechEventDto>("speech-event", onEvent);
+  } catch {
+    // Secondary windows: fall back to this webview's listener.
+    return getCurrentWebviewWindow().listen<SpeechEventDto>("speech-event", onEvent);
+  }
+}
+
 /** Native OS speech via Tauri (`SFSpeechRecognizer` / Windows Media Speech). */
 export function createNativeVoiceProvider(): VoiceProvider {
   return {
@@ -40,10 +55,11 @@ export function createNativeVoiceProvider(): VoiceProvider {
     async start(options: VoiceStartOptions = {}) {
       let unlisten: UnlistenFn | undefined;
       try {
+        // Register partial listener BEFORE starting recognition so early
+        // hypotheses are not missed (same as Ask composer).
         if (options.onPartial) {
-          unlisten = await listen<SpeechEventDto>("speech-event", (event) => {
-            const payload = event.payload;
-            if (payload?.type === "partial" && typeof payload.text === "string") {
+          unlisten = await listenSpeechEvents((payload) => {
+            if (payload.type === "partial" && typeof payload.text === "string") {
               options.onPartial?.(payload.text);
             }
           });

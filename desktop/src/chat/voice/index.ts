@@ -4,7 +4,8 @@ import { resolveVoiceProvider } from "./providers";
 
 export type VoiceInputDeps = {
   voiceBtnEl: HTMLButtonElement;
-  promptEl: HTMLTextAreaElement;
+  /** Live input node — prefer a getter so rebuilt composers still receive partials. */
+  promptEl: HTMLTextAreaElement | (() => HTMLTextAreaElement | null);
   isComposerLocked: () => boolean;
   /** Hosted voice already owns the microphone. */
   isHostedActive?: () => boolean;
@@ -18,6 +19,12 @@ export type VoiceInputApi = ReturnType<typeof createVoiceInputController>;
 
 function preferredSpeechLanguage(): string {
   return getLocale() === "zh" ? "zh-CN" : "en-US";
+}
+
+function resolvePromptEl(
+  promptEl: VoiceInputDeps["promptEl"],
+): HTMLTextAreaElement | null {
+  return typeof promptEl === "function" ? promptEl() : promptEl;
 }
 
 function appendToPrompt(promptEl: HTMLTextAreaElement, text: string): void {
@@ -58,6 +65,10 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
   /** Text already in the prompt when this dictation started. */
   let baseline = "";
 
+  function prompt(): HTMLTextAreaElement | null {
+    return resolvePromptEl(deps.promptEl);
+  }
+
   function setListeningUi(active: boolean): void {
     listening = active;
     deps.voiceBtnEl.classList.toggle("is-listening", active);
@@ -87,41 +98,48 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
   function applyPartial(text: string): void {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const el = prompt();
+    if (!el) return;
     if (!baseline.trim()) {
-      deps.promptEl.value = trimmed;
+      el.value = trimmed;
     } else if (/\s$/.test(baseline)) {
-      deps.promptEl.value = `${baseline}${trimmed}`;
+      el.value = `${baseline}${trimmed}`;
     } else {
-      deps.promptEl.value = `${baseline} ${trimmed}`;
+      el.value = `${baseline} ${trimmed}`;
     }
     deps.autoResizePrompt();
   }
 
   async function startListening(): Promise<void> {
     if (listening || starting || deps.isComposerLocked()) return;
-    const active = await ensureProvider();
-    if (active.id === "null") {
-      deps.setStatus(t("chat.voiceUnavailable"), "warn");
-      syncEnabled();
-      return;
-    }
-
+    // Lock before any await so a second click cannot start a parallel dictate.
     starting = true;
     syncEnabled();
-    baseline = deps.promptEl.value;
-    setListeningUi(true);
-    deps.setStatus(t("chat.voiceListening"), "muted");
-
     try {
+      const active = await ensureProvider();
+      if (active.id === "null") {
+        deps.setStatus(t("chat.voiceUnavailable"), "warn");
+        return;
+      }
+
+      const el = prompt();
+      baseline = el?.value ?? "";
+      setListeningUi(true);
+      deps.setStatus(t("chat.voiceListening"), "muted");
+      el?.focus();
+
       const result = await active.start({
         language: preferredSpeechLanguage(),
         onPartial: (text) => applyPartial(text),
       });
       // Final text replaces the partial preview built on baseline.
-      deps.promptEl.value = baseline;
-      appendToPrompt(deps.promptEl, result.text);
-      deps.autoResizePrompt();
-      deps.promptEl.focus();
+      const live = prompt();
+      if (live) {
+        live.value = baseline;
+        appendToPrompt(live, result.text);
+        deps.autoResizePrompt();
+        live.focus();
+      }
       if (result.text.trim()) {
         deps.setStatus(t("chat.voiceDone"), "ok");
       } else {
@@ -130,9 +148,11 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
     } catch (error) {
       const parsed = parseVoiceError(error);
       if (parsed.code !== "cancelled") {
-        // Restore baseline if we had been showing partials.
-        deps.promptEl.value = baseline;
-        deps.autoResizePrompt();
+        const live = prompt();
+        if (live) {
+          live.value = baseline;
+          deps.autoResizePrompt();
+        }
         deps.setStatus(mapErrorMessage(parsed.code), "warn");
       } else {
         deps.setStatus(t("chat.voiceCancelled"), "muted");
@@ -181,7 +201,7 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
   return {
     syncEnabled,
     applyI18n,
-    isListening: () => listening,
+    isListening: () => listening || starting,
     toggle,
     stopListening,
   };

@@ -349,6 +349,28 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     }
   }
 
+  function toggleDeep(force?: boolean): void {
+    if (!session.preview || !session.installed) {
+      return;
+    }
+    session.deepOpen = force ?? !session.deepOpen;
+    if (!session.deepOpen) {
+      session.repairConfirmPending = false;
+    }
+    paint.paintDeep();
+    // After collapse, put focus back on the entry so the next step is obvious.
+    // After open, land on 收起 so Esc / click-away feel connected.
+    queueMicrotask(() => {
+      if (session.deepOpen) {
+        dom.deepCloseEl.focus();
+        return;
+      }
+      if (!dom.deepToggleEl.hidden) {
+        dom.deepToggleEl.focus();
+      }
+    });
+  }
+
   return {
     runInstall,
     runAutoFix,
@@ -358,5 +380,6 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     openAskForVerify,
     openTeamWiring,
     closeWindow,
+    toggleDeep,
   };
 }
