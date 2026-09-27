@@ -27,4 +27,16 @@ impl SpeechBackend for UnsupportedSpeechBackend {
             "speech recognition is not available on this system",
         ))
     }
+
+    fn speak(
+        &self,
+        _text: &str,
+        _language: Option<&str>,
+        _should_cancel: &dyn Fn() -> bool,
+    ) -> Result<(), SpeechError> {
+        Err(SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            "speech synthesis is not available on this system",
+        ))
+    }
 }

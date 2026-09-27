@@ -65,10 +65,8 @@ dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
  "agent-doctor-ocr",
+ "agent-doctor-voice",
  "anyhow",
- "block2",
- "objc2",
- "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
@@ -78,7 +76,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
- "windows 0.58.0",
 ]
 
 [[package]]
@@ -103,6 +100,18 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "serde",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "agent-doctor-voice"
+version = "0.1.46"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-foundation",
+ "serde",
+ "serde_json",
  "windows 0.58.0",
 ]
 
@@ -3633,9 +3642,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-platform-verifier"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
+checksum = "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
@@ -3654,9 +3663,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-platform-verifier-android"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
+checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
@@ -4559,9 +4568,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-updater"
-version = "2.11.0"
+version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28d8cabdeb0564f03ae261963de4bc3d98321cd3d213e76a81b7d344e5df606"
+checksum = "7a5cad8ed5948d988e1018ecd31e27cacedbf72ce3fb972940c3e4bf51639e4b"
 dependencies = [
  "base64 0.22.1",
  "dirs",

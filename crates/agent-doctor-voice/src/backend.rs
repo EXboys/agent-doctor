@@ -11,6 +11,12 @@ pub trait SpeechBackend: Send + Sync {
         on_partial: &dyn Fn(&str),
         should_cancel: &dyn Fn() -> bool,
     ) -> Result<SpeechResult, SpeechError>;
+    fn speak(
+        &self,
+        text: &str,
+        language: Option<&str>,
+        should_cancel: &dyn Fn() -> bool,
+    ) -> Result<(), SpeechError>;
 }
 
 pub fn active_backend() -> Box<dyn SpeechBackend> {

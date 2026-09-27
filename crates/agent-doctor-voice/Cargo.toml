@@ -1,0 +1,36 @@
+[package]
+name = "agent-doctor-voice"
+description = "On-device speech recognition and spoken replies for Ask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Media",
+    "Media_Audio",
+    "Media_Capture",
+    "Media_Core",
+    "Media_MediaProperties",
+    "Media_Playback",
+    "Media_Render",
+    "Media_SpeechRecognition",
+    "Media_SpeechSynthesis",
+    "Storage_Streams",
+    "Win32_System_WinRT",
+] }

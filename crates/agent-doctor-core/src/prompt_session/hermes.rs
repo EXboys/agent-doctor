@@ -635,6 +635,15 @@ fn is_hermes_stderr_noise(line: &str) -> bool {
     if lower.contains("resumed session") || lower.starts_with("resume this session") {
         return true;
     }
+    // Embedded-agent diagnostics. A dropped connection is retried; the reply
+    // still arrives. These lines are not something to show in the chat.
+    if lower.starts_with("[agent/embedded]")
+        || lower.contains("preserved orphaned user message")
+        || lower.contains("network connection was interrupted")
+        || lower.contains("transient same-model retry")
+    {
+        return true;
+    }
     if trimmed.starts_with("⚠") || trimmed.starts_with("⚠️") {
         // Auxiliary / compression notices are not actionable Ask errors.
         if trimmed.contains("auxiliary") || trimmed.contains("OPENROUTER") {
@@ -662,6 +671,19 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         path
+    }
+
+    #[test]
+    fn hides_embedded_agent_diagnostics_from_ask() {
+        assert!(is_hermes_stderr_noise(
+            "[agent/embedded] embedded run agent end: runId=1 isError=true model=deepseek-v4-flash provider=personal error=LLM request failed: network connection was interrupted. rawError=Connection error."
+        ));
+        assert!(is_hermes_stderr_noise(
+            "[agent/embedded] transient same-model retry 1/8 for personal/deepseek-v4-flash reason=timeout: delayMs=1412"
+        ));
+        assert!(is_hermes_stderr_noise(
+            "[agent/embedded] Preserved orphaned user message without removing the active session leaf."
+        ));
     }
 
     #[test]

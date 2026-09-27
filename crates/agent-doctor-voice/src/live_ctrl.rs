@@ -3,13 +3,16 @@
 use std::time::Duration;
 
 /// End-of-utterance silence → send `endAudio`.
-pub const SILENCE_LIMIT: Duration = Duration::from_millis(1200);
+pub const SILENCE_LIMIT: Duration = Duration::from_millis(2500);
 /// No text at all within this budget → cancel with no-speech.
 pub const NO_SPEECH_LIMIT: Duration = Duration::from_secs(8);
 /// Hard cap for continuous speech → finalize.
 pub const HARD_CAP: Duration = Duration::from_secs(30);
-/// Grace after `endAudio` before falling back to best text / timeout.
-pub const FINAL_GRACE: Duration = Duration::from_secs(10);
+/// Grace after `endAudio` before falling back to the text we already have.
+pub const UTTERANCE_GRACE: Duration = Duration::from_millis(700);
+/// Grace when `endAudio` produced no text yet. The recognizer often
+/// returns the sentence only after the buffer is closed.
+pub const FINAL_GRACE: Duration = Duration::from_millis(2000);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveAction {
@@ -34,10 +37,25 @@ impl LiveState {
     }
 }
 
+/// Text can sit still while the person is still making a sound the recognizer
+/// has not turned into words yet (a trailing「额」). Do not close the microphone
+/// on that pause.
+pub fn next_action_with_voice(state: &LiveState, voice_recent: bool) -> LiveAction {
+    match next_action(state) {
+        LiveAction::EndAudio if voice_recent => LiveAction::Continue,
+        action => action,
+    }
+}
+
 pub fn next_action(state: &LiveState) -> LiveAction {
     if state.end_audio_sent {
         let sent_at = state.end_audio_at.unwrap_or(Duration::ZERO);
-        if state.elapsed.saturating_sub(sent_at) >= FINAL_GRACE {
+        let wait = if state.have_text {
+            UTTERANCE_GRACE
+        } else {
+            FINAL_GRACE
+        };
+        if state.elapsed.saturating_sub(sent_at) >= wait {
             return LiveAction::CancelTimeout;
         }
         return LiveAction::Continue;
@@ -81,9 +99,33 @@ mod tests {
         let s = state(
             true,
             Some(Duration::from_millis(1000)),
-            Duration::from_millis(2300),
+            Duration::from_millis(3600),
         );
         assert_eq!(next_action(&s), LiveAction::EndAudio);
+    }
+
+    #[test]
+    fn stable_text_after_end_audio_finishes_quickly() {
+        let s = LiveState {
+            have_text: true,
+            last_change: Some(Duration::from_millis(1000)),
+            elapsed: Duration::from_millis(2000),
+            end_audio_sent: true,
+            end_audio_at: Some(Duration::from_millis(1200)),
+        };
+        assert_eq!(next_action(&s), LiveAction::CancelTimeout);
+    }
+
+    #[test]
+    fn recent_voice_keeps_the_microphone_open() {
+        let s = state(
+            true,
+            Some(Duration::from_millis(1000)),
+            Duration::from_millis(3600),
+        );
+        assert_eq!(next_action(&s), LiveAction::EndAudio);
+        assert_eq!(next_action_with_voice(&s, true), LiveAction::Continue);
+        assert_eq!(next_action_with_voice(&s, false), LiveAction::EndAudio);
     }
 
     #[test]

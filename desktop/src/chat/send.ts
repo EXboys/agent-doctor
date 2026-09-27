@@ -8,7 +8,7 @@ import {
   stripMentionTokens,
   type AskRuntime,
 } from "../ask-resources";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
 import { withErrorDetail } from "../friendly-error";
 import type {
   ChatAttachment,
@@ -119,7 +119,7 @@ export function createSendController(deps: SendDeps) {
       deps.setStatus(withErrorDetail(t("chat.cancelFailed"), error), "error");
     }
   }
-  async function sendAsk(opts?: { verifyMcp?: boolean }): Promise<void> {
+  async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
     if (deps.getBusy()) {
       if (deps.getRunningChatSessionId() && deps.getRunningChatSessionId() !== deps.getStore().activeId) {
         deps.setStatus(t("chat.otherSessionRunning"), "warn");
@@ -135,7 +135,7 @@ export function createSendController(deps: SendDeps) {
 
     const runtime = deps.selectedRuntime();
     const elevated = deps.selectedRuntime() !== "deepseek-harness" && deps.elevatedEl.checked;
-    if (elevated && !window.confirm(t("chat.elevatedConfirm"))) return;
+    if (elevated && !opts?.fromVoice && !window.confirm(t("chat.elevatedConfirm"))) return;
 
     const chatSessionId = deps.getStore().activeId;
     const resumeThreadId = deps.activeSession().runtimeThreadId?.trim() || null;
@@ -158,7 +158,13 @@ export function createSendController(deps: SendDeps) {
     const cleaned = stripMentionTokens(text);
     const userText = cleaned || text || t("chat.attachOnlyPrompt");
     const constraint = buildMentionConstraint(mentions);
-    const promptUserText = constraint ? `${constraint}\n\n${userText}` : userText;
+    const voiceNote = opts?.fromVoice
+      ? getLocale() === "zh"
+        ? "这是对方用语音说的、再转成文字发过来的，不是键盘打的。请直接回答这句话。不要说你听不到声音，也不要提醒对方只能打字。转写可能少几个字，按能看懂的意思回。\n\n"
+        : "This message was spoken and turned into text. It was not typed. Answer it directly. Do not say you cannot hear them, and do not tell them to type. A few words may be missing; reply to the meaning you can follow.\n\n"
+      : "";
+    const promptBody = `${voiceNote}${userText}`;
+    const promptUserText = constraint ? `${constraint}\n\n${promptBody}` : promptBody;
     const selectedMcps = mentions.filter((m) => m.kind === "mcp").map((m) => m.id);
 
     await deps.ensureListener();

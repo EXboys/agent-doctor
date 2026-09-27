@@ -35,7 +35,7 @@ export type StreamDeps = {
   isViewingRunningSession: () => boolean;
   flushPendingTextSync: () => void;
   appendAssistantChunk: (chunk: string) => void;
-  clearEphemeralActivity: () => void;
+  clearEphemeralActivity: (dropStderr?: boolean) => void;
   sealAssistantBubble: () => void;
   expireLivePermissionCards: () => void;
   hideDecisionDock: () => void;
@@ -52,6 +52,13 @@ export type StreamDeps = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
+  onTurnCompleted: (text: string, status: string) => void;
+  onPermissionNeeded: (payload: {
+    session_id: string;
+    request_id: string;
+    tool_name: string;
+    detail: string;
+  }) => void;
 };
 
 export type StreamApi = ReturnType<typeof createStreamController>;
@@ -97,6 +104,7 @@ export function createStreamController(deps: StreamDeps) {
         case "permission_request":
           deps.pushPermissionCard(payload);
           deps.noteVerifyBrowserSignal(payload.tool_name, "tool");
+          deps.onPermissionNeeded(payload);
           break;
         case "permission_resolved":
           deps.markPermissionResolved(payload.request_id, payload.allowed);
@@ -114,7 +122,7 @@ export function createStreamController(deps: StreamDeps) {
           const hadAssistantText = deps.getTurnHadAssistantText();
           const finalAssistantText = deps.getAssistantRaw();
           if (viewing) {
-            deps.clearEphemeralActivity();
+            deps.clearEphemeralActivity(payload.status === "succeeded");
           }
           deps.sealAssistantBubble();
           deps.expireLivePermissionCards();
@@ -157,6 +165,7 @@ export function createStreamController(deps: StreamDeps) {
           } else if (!viewing) {
             deps.setStatus(t("chat.doneElsewhere"), "ok");
           }
+          deps.onTurnCompleted(finalAssistantText, payload.status);
           deps.renderSessionList();
           break;
         }

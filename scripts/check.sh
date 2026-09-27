@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-CLI_PACKAGES=(-p agent-doctor-core -p agent-doctor-ocr -p agent-doctor)
+CLI_PACKAGES=(-p agent-doctor-core -p agent-doctor-ocr -p agent-doctor-voice -p agent-doctor)
 DESKTOP_PACKAGE=(-p agent-doctor-desktop)
 
 usage() {

@@ -349,19 +349,8 @@ function rowMatchesQuery(row: ResourceRow, extra = ""): boolean {
   return `${row.name} ${row.sub} ${row.meta} ${extra}`.toLowerCase().includes(resourceQuery);
 }
 
-function countSkillMatches(): number {
-  return buildUnifiedSkillEntries()
-    .filter((entry) => entryMatchesQuery(entry))
-    .length;
-}
-
 function countLocalSkillMatches(): number {
   return buildLocalSkillEntries().filter((entry) => entryMatchesQuery(entry)).length;
-}
-
-function countToolMatches(): number {
-  if (isStoreScope()) return filteredMallToolItems().length;
-  return buildMcpRows().filter((row) => rowMatchesQuery(row)).length;
 }
 
 function countLocalToolMatches(): number {
