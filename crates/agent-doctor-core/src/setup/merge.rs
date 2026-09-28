@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -8,7 +9,7 @@ use anyhow::{Context, Result as AnyhowResult};
 use serde_json::{json, Map, Value as JsonValue};
 use serde_yaml::{Mapping, Value as YamlValue};
 
-use crate::adapters::util::home_join;
+use crate::adapters::util::{home_dir, home_join};
 use crate::adapters::HermesAdapter;
 use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult};
 
@@ -793,6 +794,281 @@ pub fn strip_codex_project_denied_provider_keys(path: &std::path::Path) -> Anyho
     Ok(changed)
 }
 
+/// Drop Codex tools whose program file is already gone.
+///
+/// Codex starts every `[mcp_servers.*]` entry when a message is sent. A path
+/// left behind by ChatGPT, an old Codex install, or a removed app then shows
+/// up as a failure on that message. Names like `agent-doctor` stay, because
+/// those are looked up when the tool actually starts.
+pub fn drop_unreachable_codex_mcp_servers(path: &Path) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut doc = raw.parse::<toml_edit::DocumentMut>()?;
+    let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(|item| item.as_table_mut())
+    else {
+        return Ok(false);
+    };
+    let stale: Vec<String> = servers
+        .iter()
+        .filter_map(|(name, entry)| {
+            let command = entry
+                .as_table()
+                .and_then(|table| table.get("command"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            command_path_missing(command).then(|| name.to_string())
+        })
+        .collect();
+    if stale.is_empty() {
+        return Ok(false);
+    }
+    for name in &stale {
+        servers.remove(name);
+    }
+    fs::write(path, doc.to_string())?;
+    Ok(true)
+}
+
+/// True when `command` is a file path and that file is not there.
+/// A bare program name is left alone.
+pub(crate) fn command_path_missing(command: &str) -> bool {
+    let command = command.trim();
+    if command.is_empty() {
+        return false;
+    }
+    let looks_like_path =
+        Path::new(command).is_absolute() || command.contains('/') || command.contains('\\');
+    looks_like_path && !Path::new(command).is_file()
+}
+
+struct AskToolRoots {
+    home: PathBuf,
+    cwd: PathBuf,
+    codex_homes: Vec<PathBuf>,
+    hermes_configs: Vec<PathBuf>,
+    dsh_patches: Vec<PathBuf>,
+    extra_mcp_json: Vec<PathBuf>,
+}
+
+/// Remove tools whose program file is gone, from every config Ask is about to start.
+///
+/// Claude, Codex, Hermes, OpenClaw, and DeepSeek Harness all launch their tool
+/// list when a message is sent. This runs first, so a missing program never
+/// becomes an error on that message.
+pub fn drop_unreachable_ask_tools(cwd: &Path) {
+    let mut roots = AskToolRoots {
+        home: home_dir(),
+        cwd: cwd.to_path_buf(),
+        codex_homes: Vec::new(),
+        hermes_configs: Vec::new(),
+        dsh_patches: Vec::new(),
+        extra_mcp_json: Vec::new(),
+    };
+    if let Ok(doc) = crate::workspace::load_workspaces() {
+        if let Some(entry) = doc
+            .active
+            .as_ref()
+            .and_then(|name| doc.workspaces.get(name))
+        {
+            roots.codex_homes.push(entry.codex_home.clone());
+            roots.extra_mcp_json.push(entry.path.join(".mcp.json"));
+            roots
+                .extra_mcp_json
+                .push(entry.openclaw_workspace.join(".mcp.json"));
+            roots.hermes_configs.push(
+                home_dir()
+                    .join(".hermes/profiles")
+                    .join(&entry.hermes_profile)
+                    .join("config.yaml"),
+            );
+        }
+    }
+    let overlay = crate::prompt_session::env::collect_overlay_env();
+    if let Some(home) = overlay.get("CODEX_HOME") {
+        roots.codex_homes.push(PathBuf::from(home));
+    }
+    if let Some(home) = overlay.get("HERMES_HOME") {
+        roots
+            .hermes_configs
+            .push(PathBuf::from(home).join("config.yaml"));
+    }
+    if let Some(home) = overlay.get("DSH_HOME") {
+        roots
+            .dsh_patches
+            .push(PathBuf::from(home).join("cordis.patch.yml"));
+    }
+    drop_unreachable_ask_tools_in(&roots);
+}
+
+fn drop_unreachable_ask_tools_in(roots: &AskToolRoots) {
+    let _ = drop_unreachable_codex_mcp_servers(&roots.home.join(".codex/config.toml"));
+    let _ = drop_unreachable_codex_mcp_servers(&roots.cwd.join(".codex").join("config.toml"));
+    let _ = drop_unreachable_json_mcp_servers(&roots.cwd.join(".mcp.json"));
+    let _ = drop_unreachable_json_mcp_servers(&roots.home.join(".claude.json"));
+    let _ = drop_unreachable_json_mcp_servers(&roots.home.join(".claude/settings.json"));
+    let _ = drop_unreachable_yaml_mcp_servers(&roots.home.join(".hermes/config.yaml"));
+    let _ = drop_unreachable_json_mcp_servers(&roots.home.join(".openclaw/openclaw.json"));
+    let _ = drop_unreachable_dsh_mcp_plugins(&roots.home.join(".dsh/cordis.patch.yml"));
+    for home in &roots.codex_homes {
+        let _ = drop_unreachable_codex_mcp_servers(&home.join("config.toml"));
+    }
+    for path in &roots.hermes_configs {
+        let _ = drop_unreachable_yaml_mcp_servers(path);
+    }
+    for path in &roots.dsh_patches {
+        let _ = drop_unreachable_dsh_mcp_plugins(path);
+    }
+    for path in &roots.extra_mcp_json {
+        let _ = drop_unreachable_json_mcp_servers(path);
+    }
+}
+
+/// Claude, OpenClaw, and project `.mcp.json` store tools under `mcpServers`
+/// and/or `mcp.servers`.
+pub fn drop_unreachable_json_mcp_servers(path: &Path) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut doc: JsonValue = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    let mut changed = false;
+    if let Some(map) = doc.get_mut("mcpServers").and_then(JsonValue::as_object_mut) {
+        changed |= prune_json_server_map(map);
+    }
+    if let Some(map) = doc
+        .pointer_mut("/mcp/servers")
+        .and_then(JsonValue::as_object_mut)
+    {
+        changed |= prune_json_server_map(map);
+    }
+    if !changed {
+        return Ok(false);
+    }
+    let rendered = serde_json::to_string_pretty(&doc)?;
+    fs::write(path, format!("{rendered}\n"))?;
+    Ok(true)
+}
+
+fn prune_json_server_map(map: &mut serde_json::Map<String, JsonValue>) -> bool {
+    let stale: Vec<String> = map
+        .iter()
+        .filter(|(_, entry)| json_command_missing(entry))
+        .map(|(name, _)| name.clone())
+        .collect();
+    if stale.is_empty() {
+        return false;
+    }
+    for name in stale {
+        map.remove(&name);
+    }
+    true
+}
+
+fn json_command_missing(entry: &JsonValue) -> bool {
+    entry
+        .get("command")
+        .and_then(JsonValue::as_str)
+        .is_some_and(command_path_missing)
+}
+
+/// Hermes `config.yaml` stores tools under `mcp_servers`.
+pub fn drop_unreachable_yaml_mcp_servers(path: &Path) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut root: YamlValue = match serde_yaml::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    let Some(servers) = root
+        .get_mut("mcp_servers")
+        .and_then(YamlValue::as_mapping_mut)
+    else {
+        return Ok(false);
+    };
+    let stale: Vec<YamlValue> = servers
+        .iter()
+        .filter_map(|(name, entry)| {
+            let command = entry.get("command").and_then(YamlValue::as_str)?;
+            command_path_missing(command).then(|| name.clone())
+        })
+        .collect();
+    if stale.is_empty() {
+        return Ok(false);
+    }
+    for name in stale {
+        servers.remove(&name);
+    }
+    fs::write(path, serde_yaml::to_string(&root)?)?;
+    Ok(true)
+}
+
+/// DeepSeek Harness lists MCP plugins in `cordis.patch.yml`.
+pub fn drop_unreachable_dsh_mcp_plugins(path: &Path) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut root: YamlValue = match serde_yaml::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    let changed = match &mut root {
+        YamlValue::Sequence(seq) => prune_dsh_plugin_seq(seq),
+        YamlValue::Mapping(map) => {
+            let key = YamlValue::String("plugins".into());
+            match map.get_mut(&key) {
+                Some(YamlValue::Sequence(seq)) => prune_dsh_plugin_seq(seq),
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    if !changed {
+        return Ok(false);
+    }
+    fs::write(path, serde_yaml::to_string(&root)?)?;
+    Ok(true)
+}
+
+fn prune_dsh_plugin_seq(seq: &mut Vec<YamlValue>) -> bool {
+    let before = seq.len();
+    seq.retain(|item| !dsh_plugin_command_missing(item));
+    seq.len() != before
+}
+
+fn dsh_plugin_command_missing(item: &YamlValue) -> bool {
+    let Some(map) = item.as_mapping() else {
+        return false;
+    };
+    let name = map
+        .get(YamlValue::String("name".into()))
+        .and_then(YamlValue::as_str)
+        .unwrap_or("");
+    let id = map
+        .get(YamlValue::String("id".into()))
+        .and_then(YamlValue::as_str)
+        .unwrap_or("");
+    if !name.contains("dsh-mcp-client") && id != "mcp-browser" {
+        return false;
+    }
+    let Some(config) = map.get(YamlValue::String("config".into())) else {
+        return false;
+    };
+    config
+        .get("command")
+        .and_then(YamlValue::as_str)
+        .is_some_and(command_path_missing)
+}
+
 pub(crate) fn codex_slot_display_name(slot: &str) -> &'static str {
     if slot == CODEX_TEAM_SLOT {
         "Company Gateway"
@@ -954,6 +1230,219 @@ rich_ui = true
         assert!(rendered.contains("openai_base_url = \"https://example.com/v1\""));
         assert!(rendered.contains("[model_providers.personal]"));
         assert!(rendered.contains("base_url = \"https://example.com/v1\""));
+    }
+
+    #[test]
+    fn drops_every_tool_whose_program_file_is_missing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+model = "keep-me"
+
+[mcp_servers.node_repl]
+command = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
+args = []
+
+[mcp_servers.old_browser]
+command = "/no/such/agent-doctor"
+
+[mcp_servers.browser]
+command = "agent-doctor"
+args = ["mcp", "browser"]
+
+[mcp_servers.remote]
+url = "https://example.com/mcp"
+"#,
+        )
+        .unwrap();
+
+        assert!(drop_unreachable_codex_mcp_servers(&path).unwrap());
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(!rendered.contains("node_repl"));
+        assert!(!rendered.contains("old_browser"));
+        assert!(rendered.contains("[mcp_servers.browser]"));
+        assert!(rendered.contains("[mcp_servers.remote]"));
+        assert!(rendered.contains("model = \"keep-me\""));
+        assert!(!drop_unreachable_codex_mcp_servers(&path).unwrap());
+    }
+
+    #[test]
+    fn keeps_node_repl_when_its_program_exists() {
+        let dir = tempdir().unwrap();
+        let program = dir.path().join("node_repl");
+        fs::write(&program, "").unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            format!(
+                "[mcp_servers.node_repl]\ncommand = \"{}\"\n",
+                program.display()
+            ),
+        )
+        .unwrap();
+
+        assert!(!drop_unreachable_codex_mcp_servers(&path).unwrap());
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("node_repl"));
+    }
+
+    #[test]
+    fn drops_missing_tools_from_claude_openclaw_hermes_and_dsh() {
+        let dir = tempdir().unwrap();
+
+        let claude = dir.path().join(".mcp.json");
+        fs::write(
+            &claude,
+            r#"{"mcpServers":{"gone":{"command":"/no/such/claude-tool"},"browser":{"command":"agent-doctor","args":["mcp","browser"]}}}"#,
+        )
+        .unwrap();
+        assert!(drop_unreachable_json_mcp_servers(&claude).unwrap());
+        let claude_text = fs::read_to_string(&claude).unwrap();
+        assert!(!claude_text.contains("gone"));
+        assert!(claude_text.contains("browser"));
+
+        let openclaw = dir.path().join("openclaw.json");
+        fs::write(
+            &openclaw,
+            r#"{"mcp":{"servers":{"gone":{"command":"/no/such/openclaw-tool"},"browser":{"command":"agent-doctor"}}}}"#,
+        )
+        .unwrap();
+        assert!(drop_unreachable_json_mcp_servers(&openclaw).unwrap());
+        let openclaw_text = fs::read_to_string(&openclaw).unwrap();
+        assert!(!openclaw_text.contains("gone"));
+        assert!(openclaw_text.contains("browser"));
+
+        let hermes = dir.path().join("config.yaml");
+        fs::write(
+            &hermes,
+            "mcp_servers:\n  gone:\n    command: /no/such/hermes-tool\n  browser:\n    command: agent-doctor\n",
+        )
+        .unwrap();
+        assert!(drop_unreachable_yaml_mcp_servers(&hermes).unwrap());
+        let hermes_text = fs::read_to_string(&hermes).unwrap();
+        assert!(!hermes_text.contains("gone"));
+        assert!(hermes_text.contains("browser"));
+
+        let dsh = dir.path().join("cordis.patch.yml");
+        fs::write(
+            &dsh,
+            "plugins:\n  - id: mcp-browser\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /no/such/dsh-tool\n  - id: keep-me\n    name: other-plugin\n    config:\n      command: /no/such/not-a-tool\n",
+        )
+        .unwrap();
+        assert!(drop_unreachable_dsh_mcp_plugins(&dsh).unwrap());
+        let dsh_text = fs::read_to_string(&dsh).unwrap();
+        assert!(!dsh_text.contains("dsh-mcp-client"));
+        assert!(dsh_text.contains("keep-me"));
+    }
+
+    #[test]
+    fn clears_every_assistant_config_before_a_message() {
+        let dir = tempdir().unwrap();
+        let home = dir.path().join("home");
+        let cwd = dir.path().join("project");
+        let codex_home = dir.path().join("codex-home");
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::create_dir_all(home.join(".hermes")).unwrap();
+        fs::create_dir_all(home.join(".openclaw")).unwrap();
+        fs::create_dir_all(home.join(".dsh")).unwrap();
+        fs::create_dir_all(cwd.join(".codex")).unwrap();
+        fs::create_dir_all(&codex_home).unwrap();
+
+        let missing = "command: /no/such/tool\n";
+        fs::write(
+            home.join(".codex/config.toml"),
+            "[mcp_servers.gone]\ncommand = \"/no/such/codex-tool\"\n[mcp_servers.keep]\ncommand = \"agent-doctor\"\n",
+        )
+        .unwrap();
+        fs::write(
+            cwd.join(".codex/config.toml"),
+            "[mcp_servers.local_gone]\ncommand = \"bin/missing\"\n",
+        )
+        .unwrap();
+        fs::write(
+            cwd.join(".mcp.json"),
+            r#"{"mcpServers":{"gone":{"command":"/no/such/project-tool"},"keep":{"command":"agent-doctor"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".claude.json"),
+            r#"{"mcpServers":{"gone":{"command":"/no/such/claude-tool"},"keep":{"command":"claude"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"mcpServers":{"gone":{"command":"/no/such/settings-tool"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".hermes/config.yaml"),
+            format!("mcp_servers:\n  gone:\n    {missing}  keep:\n    command: agent-doctor\n"),
+        )
+        .unwrap();
+        fs::write(
+            home.join(".openclaw/openclaw.json"),
+            r#"{"mcp":{"servers":{"gone":{"command":"/no/such/openclaw-tool"},"keep":{"command":"agent-doctor"}}},"mcpServers":{"legacy":{"command":"/no/such/legacy-tool"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".dsh/cordis.patch.yml"),
+            "- id: mcp-browser\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    command: /no/such/dsh-tool\n- id: keep-me\n  name: other-plugin\n",
+        )
+        .unwrap();
+        fs::write(
+            codex_home.join("config.toml"),
+            "[mcp_servers.gone]\ncommand = \"/no/such/isolated-tool\"\n[mcp_servers.keep]\ncommand = \"agent-doctor\"\n",
+        )
+        .unwrap();
+        let profile = home.join(".hermes/profiles/work/config.yaml");
+        fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        fs::write(
+            &profile,
+            "mcp_servers:\n  gone:\n    command: /no/such/profile-tool\n",
+        )
+        .unwrap();
+
+        drop_unreachable_ask_tools_in(&AskToolRoots {
+            home: home.clone(),
+            cwd: cwd.clone(),
+            codex_homes: vec![codex_home.clone()],
+            hermes_configs: vec![profile.clone()],
+            dsh_patches: Vec::new(),
+            extra_mcp_json: Vec::new(),
+        });
+
+        let codex = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+        assert!(!codex.contains("gone"));
+        assert!(codex.contains("keep"));
+        let project_codex = fs::read_to_string(cwd.join(".codex/config.toml")).unwrap();
+        assert!(!project_codex.contains("local_gone"));
+        assert!(!project_codex.contains("bin/missing"));
+        let project_mcp = fs::read_to_string(cwd.join(".mcp.json")).unwrap();
+        assert!(!project_mcp.contains("gone"));
+        assert!(project_mcp.contains("keep"));
+        let claude = fs::read_to_string(home.join(".claude.json")).unwrap();
+        assert!(!claude.contains("/no/such/claude-tool"));
+        assert!(claude.contains("keep"));
+        let settings = fs::read_to_string(home.join(".claude/settings.json")).unwrap();
+        assert!(!settings.contains("gone"));
+        let hermes = fs::read_to_string(home.join(".hermes/config.yaml")).unwrap();
+        assert!(!hermes.contains("/no/such/tool"));
+        assert!(hermes.contains("keep"));
+        let openclaw = fs::read_to_string(home.join(".openclaw/openclaw.json")).unwrap();
+        assert!(!openclaw.contains("/no/such/openclaw-tool"));
+        assert!(!openclaw.contains("legacy"));
+        assert!(openclaw.contains("keep"));
+        let dsh = fs::read_to_string(home.join(".dsh/cordis.patch.yml")).unwrap();
+        assert!(!dsh.contains("dsh-mcp-client"));
+        assert!(dsh.contains("keep-me"));
+        let isolated = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+        assert!(!isolated.contains("gone"));
+        assert!(isolated.contains("keep"));
+        let profile_text = fs::read_to_string(&profile).unwrap();
+        assert!(!profile_text.contains("gone"));
     }
 }
 

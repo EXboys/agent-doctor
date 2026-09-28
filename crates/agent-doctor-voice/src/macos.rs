@@ -6,10 +6,13 @@ use super::backend::SpeechBackend;
 use super::live_ctrl::{self, LiveAction, LiveState};
 use super::types::{SpeechCapability, SpeechError, SpeechErrorCode, SpeechOptions, SpeechResult};
 use block2::{RcBlock, StackBlock};
+use objc2::exception::{catch, Exception};
 use objc2::msg_send;
+use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2_foundation::NSString;
 use std::ffi::CStr;
+use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -53,6 +56,69 @@ pub(crate) fn on_main<R: Send + 'static, F: FnOnce() -> R + Send + 'static>(work
         guard = cvar.wait(guard).unwrap_or_else(|e| e.into_inner());
     }
     guard.take().expect("main-thread speech job did not finish")
+}
+
+/// An audio-format mismatch is thrown as an Objective-C exception. Catch it
+/// here so the app stays open and speech can fall back.
+pub(crate) fn guard_audio_call(work: impl FnOnce() + UnwindSafe) -> Result<(), SpeechError> {
+    match catch(work) {
+        Ok(()) => Ok(()),
+        Err(exception) => Err(SpeechError::new(
+            SpeechErrorCode::Failed,
+            format!(
+                "microphone format rejected: {}",
+                objc_exception_text(&exception)
+            ),
+        )),
+    }
+}
+
+/// Install a microphone tap using the microphone's own format.
+pub(crate) unsafe fn install_input_tap(
+    input: *mut AnyObject,
+    block: &RcBlock<dyn Fn(*mut AnyObject, *mut AnyObject)>,
+) -> Result<(), SpeechError> {
+    let format: *mut AnyObject = msg_send![input, outputFormatForBus: 0usize];
+    if format.is_null() {
+        return Err(SpeechError::new(
+            SpeechErrorCode::Failed,
+            "microphone format unavailable",
+        ));
+    }
+    let sample_rate: f64 = msg_send![format, sampleRate];
+    let channels: u32 = msg_send![format, channelCount];
+    if !sample_rate.is_finite() || sample_rate < 1.0 || channels == 0 {
+        return Err(SpeechError::new(
+            SpeechErrorCode::Failed,
+            format!("microphone format is empty ({sample_rate} Hz, {channels} ch)"),
+        ));
+    }
+    // Pass no format so the tap keeps the microphone's own format. Forcing a
+    // speaker format here makes AVAudioEngine raise instead of returning an error.
+    guard_audio_call(AssertUnwindSafe(|| {
+        let _: () = unsafe {
+            msg_send![
+                input,
+                installTapOnBus: 0usize,
+                bufferSize: 1024u32,
+                format: std::ptr::null_mut::<AnyObject>(),
+                block: &**block
+            ]
+        };
+    }))
+}
+
+fn objc_exception_text(exception: &Option<Retained<Exception>>) -> String {
+    let Some(exception) = exception else {
+        return "audio engine rejected the microphone".to_string();
+    };
+    let rendered = format!("{exception:?}");
+    let rendered = rendered.trim();
+    if rendered.is_empty() || rendered == "exception" {
+        "audio engine rejected the microphone".to_string()
+    } else {
+        rendered.to_string()
+    }
 }
 
 #[link(name = "Speech", kind = "framework")]
@@ -433,13 +499,7 @@ fn recognize_from_microphone(
             let _: () = msg_send![request, appendAudioPCMBuffer: buffer];
         });
         let tap_block = tap_block.copy();
-        let _: () = msg_send![
-            input_node,
-            installTapOnBus: 0usize,
-            bufferSize: 1024u32,
-            format: recording_format,
-            block: &*tap_block
-        ];
+        install_input_tap(input_node, &tap_block)?;
 
         let mut engine_error: *mut AnyObject = std::ptr::null_mut();
         let started: bool = msg_send![audio_engine, startAndReturnError: &mut engine_error];

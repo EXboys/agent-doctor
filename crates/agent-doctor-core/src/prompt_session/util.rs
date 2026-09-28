@@ -132,6 +132,15 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     if lower.contains("ignored unsupported project-local config") {
         return true;
     }
+    // A tool whose program file is gone is removed before send. If one still
+    // reports that, it is not a failure of this message.
+    if (lower.contains("os error 2")
+        || lower.contains("no such file")
+        || lower.contains("系统找不到"))
+        && (lower.contains("mcp") || lower.contains("node_repl"))
+    {
+        return true;
+    }
     [
         "openai codex",
         "reading additional input from stdin",
@@ -185,6 +194,14 @@ pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hides_missing_tool_startup_on_every_runtime() {
+        assert!(is_runtime_stderr_noise(
+            "MCP client for `node_repl` failed to start: MCP startup failed: No such file or directory (os error 2)"
+        ));
+        assert!(!is_runtime_stderr_noise("provider rejected the key"));
+    }
 
     #[test]
     fn humanizes_apply_patch_hunk_error() {

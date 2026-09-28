@@ -122,6 +122,11 @@ fn run_codex_app_server(
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let overlay = collect_overlay_env();
     prepare_codex_home(&overlay);
+    // Project-local Codex config is loaded with the message's folder, separate
+    // from ~/.codex. A missing tool there fails the same way.
+    let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(
+        &cwd.join(".codex").join("config.toml"),
+    );
     let browser_mcp = wants_browser_mcp(options);
     if browser_mcp {
         if let Some(note) = ensure_browser_mcp_for_ask("codex", &cwd, &overlay) {
@@ -726,6 +731,12 @@ fn handle_notification<F>(
                 .and_then(|v| v.as_str())
                 .unwrap_or("starting");
             let error = params.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            // A missing program is cleaned before launch. If one still fails
+            // that way, the reply can continue — don't show it as this message failing.
+            if status == "failed" && mcp_startup_is_missing_program(error) {
+                eprintln!("[ask] ignored missing tool {name}: {error}");
+                return;
+            }
             let message = if error.is_empty() {
                 format!("MCP {name}: {status}")
             } else {
@@ -819,6 +830,11 @@ fn handle_notification<F>(
         }
         _ => {}
     }
+}
+
+fn mcp_startup_is_missing_program(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("os error 2") || lower.contains("no such file") || lower.contains("系统找不到")
 }
 
 fn is_agent_message_type(item_type: &str) -> bool {
@@ -1001,6 +1017,17 @@ fn shorten_tool_label(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_program_startup_is_not_a_message_failure() {
+        assert!(mcp_startup_is_missing_program(
+            "MCP startup failed: No such file or directory (os error 2)"
+        ));
+        assert!(mcp_startup_is_missing_program(
+            "系统找不到指定的路径。 (os error 3)"
+        ));
+        assert!(!mcp_startup_is_missing_program("connection refused"));
+    }
 
     #[test]
     fn shortens_zsh_lc_wrappers() {

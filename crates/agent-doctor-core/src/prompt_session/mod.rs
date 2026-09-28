@@ -188,7 +188,20 @@ pub fn run_prompt_session_with_cancel<F>(
 where
     F: FnMut(PromptSessionEvent),
 {
+    if options.prompt.trim().is_empty() {
+        bail!("prompt must not be empty");
+    }
     let runtime = normalize_runtime(&options.runtime);
+    match runtime.as_str() {
+        "claude-code" | "codex" | "deepseek-harness" | "hermes" | "openclaw" => {}
+        other => bail!(
+            "ask supports claude-code, codex, deepseek-harness, hermes, or openclaw (got '{other}')"
+        ),
+    }
+    let cwd = crate::session_launch::resolve_session_cwd(options.cwd.as_deref());
+    // Every assistant starts its tools as part of sending. Drop missing
+    // programs first so that failure never shows up on the message.
+    crate::setup::merge::drop_unreachable_ask_tools(&cwd);
     match runtime.as_str() {
         "claude-code" => ClaudeAskBackend.run(options, cancel, control, &mut on_event),
         "codex" => CodexAskBackend.run(options, cancel, control, &mut on_event),

@@ -3,6 +3,7 @@
 //! Voice processing removes the audio being played from the mic. The barge
 //! gate then decides whether the person has started talking.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
@@ -15,7 +16,7 @@ use objc2::sel;
 
 use super::activity::{EchoCleanedActivity, SpeechActivity};
 use super::barge::{self, BargeAction};
-use super::macos::{buffer_rms, on_main, require_class};
+use super::macos::{buffer_rms, guard_audio_call, install_input_tap, on_main, require_class};
 use super::types::{SpeechError, SpeechErrorCode};
 use objc2_foundation::NSString;
 
@@ -269,7 +270,14 @@ fn start_engine(
         let mixer: *mut AnyObject = msg_send![engine, mainMixerNode];
         // Voice processing only starts when every node uses the microphone rate.
         // Speech buffers are a different rate, so they are converted before play.
-        let _: () = msg_send![engine, connect: player, to: mixer, format: hw_format];
+        if let Err(err) = guard_audio_call(AssertUnwindSafe(|| {
+            let _: () = msg_send![engine, connect: player, to: mixer, format: hw_format];
+        })) {
+            let _: () = msg_send![hw_format, release];
+            let _: () = msg_send![player, release];
+            let _: () = msg_send![engine, release];
+            return Err(err);
+        }
 
         let mut engine_error: *mut AnyObject = std::ptr::null_mut();
         let started: bool = msg_send![engine, startAndReturnError: &mut engine_error];
@@ -317,13 +325,13 @@ fn start_engine(
             }
         });
         let tap = tap.copy();
-        let _: () = msg_send![
-            input,
-            installTapOnBus: 0usize,
-            bufferSize: 1024u32,
-            format: hw_format,
-            block: &*tap
-        ];
+        if let Err(err) = install_input_tap(input, &tap) {
+            let _: () = msg_send![engine, stop];
+            let _: () = msg_send![hw_format, release];
+            let _: () = msg_send![player, release];
+            let _: () = msg_send![engine, release];
+            return Err(err);
+        }
         std::mem::forget(tap);
 
         let planned = schedule_buffer(player, hw_format, buffer);
@@ -363,7 +371,14 @@ unsafe fn schedule_buffer(
     let _: () = msg_send![buffer, release];
     let frames: usize = msg_send![playable, frameLength];
     let rate: f64 = msg_send![target_format, sampleRate];
-    let _: () = msg_send![player, scheduleBuffer: playable];
+    if guard_audio_call(AssertUnwindSafe(|| {
+        let _: () = unsafe { msg_send![player, scheduleBuffer: playable] };
+    }))
+    .is_err()
+    {
+        let _: () = msg_send![playable, release];
+        return Duration::ZERO;
+    }
     let _: () = msg_send![playable, release];
     if rate > 0.0 {
         Duration::from_secs_f64(frames as f64 / rate)
@@ -582,7 +597,6 @@ pub(super) fn start_bleed_watch() -> Result<BleedWatch, SpeechError> {
             let _: () = msg_send![engine, release];
             return Err(unavailable());
         }
-        let format: *mut AnyObject = msg_send![input, outputFormatForBus: 0usize];
         let gate = Arc::new(Mutex::new((barge::BleedGate::new(), 0.0_f32, 0_u64)));
         let tap = StackBlock::new(move |buffer: *mut AnyObject, _when: *mut AnyObject| {
             if buffer.is_null() {
@@ -621,13 +635,11 @@ pub(super) fn start_bleed_watch() -> Result<BleedWatch, SpeechError> {
             }
         });
         let tap = tap.copy();
-        let _: () = msg_send![
-            input,
-            installTapOnBus: 0usize,
-            bufferSize: 1024u32,
-            format: format,
-            block: &*tap
-        ];
+        if let Err(err) = install_input_tap(input, &tap) {
+            eprintln!("[voice] barge watch failed: {}", err.detail);
+            let _: () = msg_send![engine, release];
+            return Err(unavailable());
+        }
         std::mem::forget(tap);
         let mut engine_error: *mut AnyObject = std::ptr::null_mut();
         let started: bool = msg_send![engine, startAndReturnError: &mut engine_error];

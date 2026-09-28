@@ -258,16 +258,19 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
         let _ = clear_codex_chatgpt_auth_for_gateway();
         let _ = apply_codex_slot(&url, &key, model.as_deref(), Some(&slot));
     }
+    let global = crate::adapters::util::home_join(".codex");
+    let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(&global.join("config.toml"));
     if let Some(home) = overlay.get("CODEX_HOME").map(PathBuf::from) {
         let project = crate::session_launch::resolve_session_cwd(None);
         let _ = crate::workspace::backends::bind_codex_for_project(&home, Some(&project));
         // Existing installs may still have provider keys in ~/.codex from older
         // wiring. Strip them when Ask uses an isolated CODEX_HOME so newer Codex
         // does not warn on every app-server turn.
-        let global = crate::adapters::util::home_join(".codex");
         if !crate::workspace::path::paths_equal(&home, &global) {
             let _ =
                 crate::setup::strip_codex_project_denied_provider_keys(&global.join("config.toml"));
+            let _ =
+                crate::setup::merge::drop_unreachable_codex_mcp_servers(&home.join("config.toml"));
         }
     }
 }
