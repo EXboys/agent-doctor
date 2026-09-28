@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::execute::{
     build_audit_report, create_runtime_backup_snapshot, probe_health_summary, probe_issue_score,
 };
+use super::llm::LlmConfig;
 use super::planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
     PlannerOptions, RepairPlanner,
@@ -33,6 +34,9 @@ pub struct RepairLoopOptions {
     pub apply_confirmed_writes: bool,
     pub max_rounds: Option<u32>,
     pub use_ai_planner: bool,
+    /// Model for the AI planner; `None` reads it from the environment.
+    #[serde(skip)]
+    pub llm: Option<LlmConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,7 +98,10 @@ pub fn execute_repair_loop(
 
         let mut context = build_masked_repair_context(runtime_id, &current_probe, suggested);
         let plan_result = if options.use_ai_planner {
-            AiRepairPlanner.plan(&mut context, &planner_options)?
+            AiRepairPlanner {
+                config: options.llm.clone(),
+            }
+            .plan(&mut context, &planner_options)?
         } else {
             DeterministicPlanner.plan(&mut context, &planner_options)?
         };

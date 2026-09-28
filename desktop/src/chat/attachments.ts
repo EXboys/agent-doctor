@@ -107,6 +107,11 @@ export function createAttachmentsController(deps: AttachmentsDeps) {
       const paths = (Array.isArray(selected) ? selected : [selected]).filter(Boolean);
       addAttachmentPaths(paths);
     } catch (error) {
+      const detail = String(error ?? "");
+      if (/not allowed|forbidden|acl|capability/i.test(detail)) {
+        deps.setStatus(t("chat.attachNeedRestart"), "warn");
+        return;
+      }
       deps.setStatus(withErrorDetail(t("chat.attachFailed"), error), "error");
     }
   }

@@ -128,3 +128,47 @@ export function providerChipForUrl(url: string, fallbackName: string): string {
   const name = fallbackName.trim();
   return name || "Provider";
 }
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Short label for pickers when the provider chip is already visible nearby. */
+export function shortModelLabel(modelId: string, presetId?: string | null): string {
+  let raw = modelId.trim();
+  if (!raw) {
+    return "—";
+  }
+  if (raw.includes("/")) {
+    raw = raw.slice(raw.lastIndexOf("/") + 1);
+  }
+  const prefixes: string[] = [];
+  if (presetId) {
+    prefixes.push(presetId);
+    const chip = PRESET_CHIPS_BY_ID[presetId];
+    if (chip) {
+      prefixes.push(chip);
+    }
+  }
+  for (const prefix of prefixes) {
+    const re = new RegExp(`^${escapeRegExp(prefix)}[-_.\\s]*`, "i");
+    if (re.test(raw) && raw.length > prefix.length) {
+      raw = raw.replace(re, "");
+      break;
+    }
+  }
+  raw = raw.replace(/^[-_.\s]+/, "").trim();
+  if (!raw) {
+    return modelId.trim();
+  }
+  return raw
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (/^v?\d/i.test(part)) {
+        return part.toUpperCase();
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}

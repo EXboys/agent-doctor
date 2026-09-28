@@ -175,6 +175,8 @@ export function renderRepairPreview(
     confirmPending?: boolean;
     isAskRuntime?: boolean;
     supportsBrowserMcp?: boolean;
+    /** Skip the check list — used when checks already show above (deep diagnose). */
+    actionsOnly?: boolean;
   },
 ): string {
   const summary = report.summary;
@@ -379,24 +381,45 @@ export function renderRepairPreview(
     summary.not_checked ? `${summary.not_checked} ${t("repair.notChecked")}` : "",
   ].filter(Boolean);
 
+  const situation = opts?.actionsOnly
+    ? `<p class="repair-deep-situation">${escapeHtml(
+        funnelNeedsRepair
+          ? t("diagnose.flow.deepNeedFix")
+          : funnelNeedsVerify
+            ? t("diagnose.flow.deepNeedVerify")
+            : showGatewayNext
+              ? t("diagnose.flow.deepNeedWiring")
+              : healthy
+                ? t("diagnose.flow.deepLooksGood")
+                : t("diagnose.flow.deepNeedLook"),
+      )}</p>`
+    : "";
+
+  const checklist = opts?.actionsOnly
+    ? ""
+    : showRepairConfirm
+      ? ""
+      : `<div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
+              ${summaryChips}
+            </div>
+            <ul class="repair-checks">${checks}${emptyList}</ul>`;
+
   return `
-    <div class="repair-panel" data-runtime="${escapeHtml(report.runtime_id)}">
-      <div class="repair-panel-head">
+    <div class="repair-panel${opts?.actionsOnly ? " is-actions-only" : ""}" data-runtime="${escapeHtml(report.runtime_id)}">
+      ${
+        opts?.actionsOnly
+          ? ""
+          : `<div class="repair-panel-head">
         <strong>${escapeHtml(report.display_name)}</strong>
         <span>${escapeHtml(headBits.join(" · "))}</span>
         <button type="button" class="repair-panel-close" data-action="close-diagnose-detail">${escapeHtml(t("repair.closeDetail"))}</button>
-      </div>
+      </div>`
+      }
+      ${situation}
       ${funnel}
       ${repairConfirm}
       ${showRepairConfirm ? "" : suggested}
-      ${
-        showRepairConfirm
-          ? ""
-          : `<div class="repair-summary" role="tablist" aria-label="${escapeHtml(t("repair.filterLabel"))}">
-              ${summaryChips}
-            </div>
-            <ul class="repair-checks">${checks}${emptyList}</ul>`
-      }
+      ${checklist}
       ${
         !showRepairConfirm && (applyButton || rollbackButton)
           ? `<div class="repair-panel-actions">${applyButton}${rollbackButton}</div>`

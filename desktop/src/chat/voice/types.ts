@@ -36,7 +36,7 @@ export interface VoiceProvider {
 
 export function parseVoiceError(raw: unknown): { code: VoiceErrorCode; detail: string } {
   const text = raw instanceof Error ? raw.message : String(raw ?? "");
-  const match = text.match(/speech\.([a-z_]+):(.*)$/i);
+  const match = text.match(/speech\.([a-z_]+):([^\n]*)/i);
   if (match) {
     const code = match[1].toLowerCase() as VoiceErrorCode;
     const known: VoiceErrorCode[] = [
@@ -48,8 +48,11 @@ export function parseVoiceError(raw: unknown): { code: VoiceErrorCode; detail: s
       "failed",
     ];
     if (known.includes(code)) {
-      return { code, detail: match[2] ?? "" };
+      return { code, detail: (match[2] ?? "").trim() };
     }
+  }
+  if (/not allowed|forbidden|denied|acl|capability/i.test(text)) {
+    return { code: "permission_denied", detail: text };
   }
   return { code: "failed", detail: text };
 }

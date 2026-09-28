@@ -34,7 +34,7 @@ const RUNTIME_LABELS: Record<string, string> = {
   openclaw: "OpenClaw",
   "claude-code": "Claude",
   codex: "Codex",
-  "deepseek-harness": "DeepSeek Harness",
+  "deepseek-harness": "DeepSeek",
   qoder: "Qoder",
   workbuddy: "WorkBuddy",
   cursor: "Cursor",

@@ -21,15 +21,689 @@ html:has(.diagnose-page) body {
 
 .diagnose-shell {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
   margin: 0;
-  padding: 12px 14px 12px;
+  padding: 0;
   height: 100%;
   max-height: 100%;
   min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
+  background: var(--bg);
+}
+
+.diagnose-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Deep diagnose — Cursor-style secondary rail: hairline, quiet chrome, light thread. */
+.diagnose-shell.is-deep-open {
+  gap: 0;
+  padding: 0;
+}
+
+.diagnose-shell.is-deep-open .diagnose-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.diagnose-deep-drawer {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-left: 1px solid transparent;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg) 35%, #fff);
+  box-shadow: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+  transition:
+    flex-basis 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease,
+    visibility 0.24s,
+    border-color 0.18s ease;
+}
+
+.diagnose-shell.is-deep-open .diagnose-deep-drawer {
+  flex: 0 0 min(340px, 36%);
+  width: min(340px, 36%);
+  min-width: 280px;
+  max-width: 380px;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  border-left-color: var(--border);
+}
+
+.diagnose-deep-drawer[hidden] {
+  display: none !important;
+}
+
+.diagnose-deep-drawer-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px 16px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.diagnose-deep-drawer-head > strong {
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: var(--text-muted);
+}
+
+.diagnose-deep-close {
+  appearance: none;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    transform 0.1s ease;
+}
+
+.diagnose-deep-close:hover {
+  color: var(--text);
+  background: #fff;
+  border-color: var(--border);
+}
+
+.diagnose-deep-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.diagnose-deep-close:active {
+  transform: scale(0.97);
+}
+
+.diagnose-deep-close-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.diagnose-deep-close:hover .diagnose-deep-close-icon {
+  opacity: 1;
+}
+
+.diagnose-deep-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.diagnose-deep-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.diagnose-deep-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: transparent;
+}
+
+.diagnose-deep-activity {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 94%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.diagnose-deep-activity-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.diagnose-deep-activity-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-muted) 70%, transparent);
+  animation: diagnose-deep-dot 1.2s ease-in-out infinite;
+}
+
+.diagnose-deep-activity-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.diagnose-deep-activity-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes diagnose-deep-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.diagnose-deep-bubble.is-assistant.is-streaming .diagnose-deep-bubble-text::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+  animation: diagnose-deep-caret 1s step-end infinite;
+}
+
+@keyframes diagnose-deep-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.diagnose-deep-composer-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 12px 14px;
+  border-top: 0;
+  background: transparent;
+}
+
+.diagnose-deep-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: auto 0;
+  padding: 8px 0 4px;
+}
+
+.diagnose-deep-starters-kicker {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.diagnose-deep-starter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.diagnose-deep-starter {
+  appearance: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.diagnose-deep-starter:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, #fff);
+}
+
+.diagnose-deep-starter:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.diagnose-deep-starter strong {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.diagnose-deep-starter span {
+  font-size: 0.66rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.diagnose-deep-bubble {
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.diagnose-deep-bubble.is-user {
+  align-self: flex-end;
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 16px 16px 6px 16px;
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+}
+
+.diagnose-deep-bubble.is-user .diagnose-deep-bubble-text {
+  white-space: pre-wrap;
+}
+
+.diagnose-deep-attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0;
+  max-width: 100%;
+}
+
+.diagnose-deep-bubble-text + .diagnose-deep-attach-strip {
+  margin-top: 8px;
+}
+
+.diagnose-deep-attach-image {
+  display: block;
+  max-width: min(220px, 100%);
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.diagnose-deep-bubble.is-assistant .diagnose-deep-attach-image {
+  background: var(--surface-inset, #eef2f8);
+}
+
+.diagnose-deep-attach-file {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnose-deep-bubble.is-assistant {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 16px 16px 16px 6px;
+  background: var(--surface, #fff);
+  color: var(--text);
+}
+
+.diagnose-deep-bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.diagnose-deep-bubble-actions .diagnose-deep-repair {
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.diagnose-deep-bubble-actions span {
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
+.diagnose-deep-bubble.is-meta {
+  align-self: center;
+  max-width: 100%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  padding: 2px 0;
+}
+
+.diagnose-deep-bubble-text.chat-md {
+  white-space: normal;
+}
+
+.diagnose-deep-bubble-text.chat-md > :first-child {
+  margin-top: 0;
+}
+
+.diagnose-deep-bubble-text.chat-md > :last-child {
+  margin-bottom: 0;
+}
+
+.diagnose-deep-bubble-text.chat-md p,
+.diagnose-deep-bubble-text.chat-md ul,
+.diagnose-deep-bubble-text.chat-md ol {
+  margin: 0 0 0.55em;
+}
+
+.diagnose-deep-bubble-text.chat-md p:last-child,
+.diagnose-deep-bubble-text.chat-md ul:last-child,
+.diagnose-deep-bubble-text.chat-md ol:last-child {
+  margin-bottom: 0;
+}
+
+.diagnose-deep-bubble-text.chat-md strong {
+  font-weight: 750;
+  color: var(--text);
+}
+
+.diagnose-deep-bubble-text.chat-md ul,
+.diagnose-deep-bubble-text.chat-md ol {
+  padding-left: 1.2em;
+}
+
+.diagnose-deep-bubble-text.chat-md li + li {
+  margin-top: 0.25em;
+}
+
+.diagnose-deep-bubble-text.chat-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, #f8fafc);
+}
+
+.diagnose-deep-bubble-text.chat-md pre {
+  margin: 0.55em 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.diagnose-deep-bubble-text.chat-md pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.diagnose-deep-composer {
+  margin: 0;
+}
+
+.diagnose-deep-composer-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.diagnose-deep-composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.diagnose-deep-composer-box.is-drop-target {
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+  background: color-mix(in srgb, #3b82f6 4%, #fff);
+}
+
+.diagnose-deep-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+.diagnose-deep-attachments[hidden] {
+  display: none !important;
+}
+
+/* Reuse class names from chat/attachments.ts chip renderer */
+.diagnose-deep-composer-box .chat-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, #fff);
+}
+
+.diagnose-deep-composer-box .chat-attach-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #eef2f8;
+  flex: 0 0 auto;
+}
+
+.diagnose-deep-composer-box .chat-attach-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: #eef2f8;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.diagnose-deep-composer-box .chat-attach-name {
+  min-width: 0;
+  max-width: 140px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diagnose-deep-composer-box .chat-attach-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.diagnose-deep-composer-box .chat-attach-remove:hover {
+  color: var(--danger, #dc2626);
+}
+
+.diagnose-deep-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: calc(1.4em * 2 + 16px);
+  max-height: calc(1.4em * 5 + 16px);
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  padding: 10px 12px 4px;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text);
+  background: transparent;
+}
+
+.diagnose-deep-prompt:focus {
+  outline: none;
+}
+
+.diagnose-deep-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+
+.diagnose-deep-composer-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.diagnose-deep-tool {
+  appearance: none;
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+
+.diagnose-deep-tool:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 60%, #fff);
+}
+
+.diagnose-deep-tool:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diagnose-deep-tool-voice.is-listening {
+  border-color: rgba(220, 70, 70, 0.45);
+  color: #c43b3b;
+  background: rgba(220, 70, 70, 0.08);
+}
+
+.diagnose-deep-tool-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.diagnose-deep-voice-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.diagnose-deep-composer-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.diagnose-deep-send {
+  min-width: 3.6rem;
+  height: 28px;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
 .diagnose-top,
@@ -59,19 +733,6 @@ html:has(.diagnose-page) body {
   font-size: 0.92rem;
   font-weight: 700;
   line-height: 1.25;
-}
-
-.diagnose-subtitle {
-  margin: 4px 0 0;
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  line-height: 1.4;
-}
-
-.diagnose-top-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
 }
 
 /* Steps: three small cards (original) */
@@ -258,30 +919,34 @@ html:has(.diagnose-page) body {
   transition: width 0.2s ease;
 }
 
+.diagnose-deep-entry {
+  min-width: 0;
+}
+
 .diagnose-actions {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
-.diagnose-actions .btn-primary,
-.diagnose-actions .btn-secondary {
+.diagnose-actions > :not([hidden]) {
+  flex: 1 1 0;
   min-width: 0;
-  width: 100%;
+  width: auto;
   padding: 8px 12px;
   min-height: 34px;
   font-size: 0.74rem;
   border-radius: 10px;
 }
 
-.diagnose-actions .btn-secondary[hidden],
-.diagnose-actions .btn-primary[hidden] {
-  visibility: hidden;
-  pointer-events: none;
+.diagnose-actions > .btn-primary:not([hidden]) {
+  flex: 1.15 1 0;
 }
 
-.diagnose-actions:has(.btn-secondary[hidden]):not(:has(.btn-primary[hidden])) {
-  grid-template-columns: 1.2fr 1fr;
+.diagnose-actions .btn-secondary[hidden],
+.diagnose-actions .btn-primary[hidden],
+.diagnose-actions .diagnose-deep-entry[hidden] {
+  display: none !important;
 }
 
 .diagnose-panel {
@@ -296,19 +961,40 @@ html:has(.diagnose-page) body {
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08);
 }
 
+.diagnose-config-personal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diagnose-config-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diagnose-config-label,
+.diagnose-field > span {
+  margin: 0;
+  font-size: 0.64rem;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
 .diagnose-preset-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 10px;
+  margin: 0;
 }
 
 .diagnose-preset-chips .provider-chip {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.66rem;
+  padding: 5px 11px;
+  font-size: 0.68rem;
+  font-weight: 600;
   cursor: pointer;
   color: var(--text);
 }
@@ -322,32 +1008,101 @@ html:has(.diagnose-page) body {
 .diagnose-form-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 12px;
 }
 
-.diagnose-form-grid label {
+.diagnose-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 0.64rem;
   color: var(--text-muted);
 }
 
-.diagnose-form-grid input,
-.diagnose-form-grid select {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px 9px;
-  font-size: 0.72rem;
+.diagnose-field-key input {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-strong));
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
   color: inherit;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--accent) 3%, #fff);
 }
 
-.diagnose-form-grid input:focus,
-.diagnose-form-grid select:focus {
+.diagnose-field-key small {
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-soft, var(--text-muted));
+}
+
+.diagnose-field-url input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: var(--surface-muted, #f4f7fb);
+}
+
+.diagnose-form-grid input:focus {
   outline: none;
   border-color: rgba(59, 130, 246, 0.55);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.diagnose-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diagnose-model-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.diagnose-model-chip strong {
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.diagnose-model-chip span {
+  font-size: 0.6rem;
+  font-weight: 650;
+  color: var(--accent, #2563eb);
+}
+
+.diagnose-model-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, #fff);
+}
+
+.diagnose-model-chip.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, #fff);
+  color: var(--primary-deep, #1d4ed8);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.diagnose-model-chip.is-active span {
+  color: var(--primary-deep, #1d4ed8);
 }
 
 .diagnose-team-status {

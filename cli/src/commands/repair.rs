@@ -141,6 +141,7 @@ fn run_loop(runtime: &str, apply: bool, plan: &str, json: bool) -> Result<()> {
             apply_confirmed_writes: apply,
             max_rounds: None,
             use_ai_planner,
+            llm: None,
         },
     )?;
 

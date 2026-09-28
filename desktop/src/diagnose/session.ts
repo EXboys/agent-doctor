@@ -1,5 +1,5 @@
 import type { DiagnoseScore, DiagnoseStepId } from "../diagnose-flow";
-import type { RepairPreviewResponse } from "../types";
+import type { RepairPreviewResponse, RepairStatusFilter } from "../types";
 
 export const SCORE_MIN_MS = 2800;
 export const SCORE_MAX_MS = 4000;
@@ -31,6 +31,10 @@ export type DiagnoseSession = {
   canAutoFix: boolean;
   checkFilter: CheckFilter;
   guideFillConfig: boolean;
+  /** Full repair panel (one-click / rollback / Chrome check). */
+  deepOpen: boolean;
+  repairConfirmPending: boolean;
+  deepFilter: RepairStatusFilter;
 };
 
 const RUNTIME_STORAGE_KEY = "ad-diagnose-runtime";
@@ -80,6 +84,9 @@ export function createDiagnoseSession(runtimeId: string): DiagnoseSession {
     canAutoFix: false,
     checkFilter: "all",
     guideFillConfig: false,
+    deepOpen: false,
+    repairConfirmPending: false,
+    deepFilter: "all",
   };
 }
 

@@ -6,11 +6,12 @@ import {
 } from "../diagnose-flow";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
-import { t } from "../i18n";
+import { applyStaticI18n, t } from "../i18n";
 import { isDesktopAppRuntimeId, supportsBrowserMcp } from "../agents-ui";
 import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
 import { renderPlainRepairCheckBody } from "../repair-plain";
 import type { RepairPreviewResponse } from "../types";
+import type { DeepChatApi } from "./deep-chat";
 import * as dom from "./dom";
 import {
   SCORE_MAX_MS,
@@ -21,7 +22,7 @@ import {
 
 export type DiagnosePaintApi = ReturnType<typeof createDiagnosePaint>;
 
-export function createDiagnosePaint(session: DiagnoseSession) {
+export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepChatApi) {
   function setResult(kind: "ok" | "error" | "busy" | "hide", message = ""): void {
     if (kind === "hide" || !message) {
       dom.resultEl.hidden = true;
@@ -128,7 +129,8 @@ export function createDiagnosePaint(session: DiagnoseSession) {
 
   function focusConfigFill(): void {
     dom.panelConfigEl.hidden = false;
-    const target = !dom.urlEl.value.trim() ? dom.urlEl : dom.keyEl;
+    // Key is the only field beginners usually need to paste.
+    const target = dom.keyEl;
     try {
       target.focus({ preventScroll: true });
     } catch {
@@ -384,6 +386,36 @@ export function createDiagnosePaint(session: DiagnoseSession) {
     }
   }
 
+  function paintDeep(): void {
+    const hasPreview = Boolean(session.preview && session.installed);
+    const deepVisible = Boolean(session.deepOpen && hasPreview);
+    // Entry only when closed — avoid a second “收起” that swaps with “深度诊断”.
+    dom.deepToggleEl.hidden = !hasPreview || session.deepOpen;
+    if (!hasPreview) {
+      session.deepOpen = false;
+      session.repairConfirmPending = false;
+      dom.deepBodyEl.replaceChildren();
+    }
+    applyStaticI18n(dom.deepEl);
+    applyStaticI18n(dom.deepToggleEl);
+    // Keep the drawer in DOM while preview exists so open/close can animate.
+    dom.deepEl.hidden = !hasPreview;
+    dom.shellEl.classList.toggle("is-deep-open", deepVisible);
+    dom.deepEl.setAttribute("aria-hidden", deepVisible ? "false" : "true");
+    if (deepVisible) {
+      dom.deepEl.removeAttribute("inert");
+    } else {
+      dom.deepEl.setAttribute("inert", "");
+    }
+    dom.deepCloseEl.setAttribute("aria-label", t("diagnose.flow.deepClose"));
+    dom.deepToggleEl.setAttribute("aria-expanded", session.deepOpen ? "true" : "false");
+    dom.deepToggleEl.textContent = t("diagnose.flow.deepOpen");
+    if (!session.deepOpen || !session.preview) {
+      return;
+    }
+    deepChat?.paint();
+  }
+
   function paintAll(): void {
     ensureDetailsOpen();
     paintSteps();
@@ -530,6 +562,7 @@ export function createDiagnosePaint(session: DiagnoseSession) {
         }
       }
     }
+    paintDeep();
   }
 
   return {
@@ -540,6 +573,7 @@ export function createDiagnosePaint(session: DiagnoseSession) {
     paintChecks,
     paintSteps,
     paintAll,
+    paintDeep,
     paintBootShell,
     ensureDetailsOpen,
     focusConfigFill,

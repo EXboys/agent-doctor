@@ -98,6 +98,11 @@ pub use repair::{
     RepairToolExecutor, RepairToolKind, RepairToolResult, RestoreReport, SecretVault,
     SensitivityLevel, SkippedRepairAction, SnapshotFile, SuggestedRepair,
 };
+pub use repair::{
+    deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
+    DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
+    DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
+};
 pub use runtime::{adapter_by_id, all_adapters};
 pub use runtime::{
     all_runtime_ids, apply_runtime_playbook, apply_runtime_playbook_filtered, descriptor_by_id,

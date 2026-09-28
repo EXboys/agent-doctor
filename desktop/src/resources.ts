@@ -125,7 +125,7 @@ const RUNTIME_LABELS: Record<string, string> = {
   openclaw: "OpenClaw",
   "claude-code": "Claude",
   codex: "Codex",
-  "deepseek-harness": "DeepSeek Harness",
+  "deepseek-harness": "DeepSeek",
   qoder: "Qoder",
   workbuddy: "WorkBuddy",
   cursor: "Cursor",
@@ -144,11 +144,9 @@ const AGENT_FILTER_ORDER = [
   ...SKILL_MOUNT_RUNTIME_ORDER,
   "qoder",
   "workbuddy",
-  "cursor",
 ] as const;
 
 function agentChipLabel(runtime: string): string {
-  if (runtime === "deepseek-harness") return "DeepSeek";
   return RUNTIME_LABELS[runtime] ?? runtime;
 }
 

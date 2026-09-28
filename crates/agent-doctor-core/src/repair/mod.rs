@@ -1,3 +1,4 @@
+mod deep_diagnose;
 mod execute;
 mod explain;
 mod llm;
@@ -11,6 +12,11 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 
+pub use deep_diagnose::{
+    deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
+    DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
+    DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
+};
 pub use execute::{
     backups_root, execute_repair, probe_health_summary, probe_issue_score, RepairExecuteOptions,
     RepairExecuteReport, SkippedRepairAction,

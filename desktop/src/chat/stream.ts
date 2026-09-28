@@ -1,4 +1,5 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { t } from "../i18n";
 import { preferPlainSummary } from "./format";
 import type { PromptSessionEvent, SessionStore } from "./types";
@@ -68,7 +69,7 @@ export function createStreamController(deps: StreamDeps) {
 
   async function ensureListener(): Promise<void> {
     if (unlisten) return;
-    unlisten = await listen<PromptSessionEvent>("prompt-session-event", (event) => {
+    unlisten = await getCurrentWebviewWindow().listen<PromptSessionEvent>("prompt-session-event", (event) => {
       const payload = event.payload;
       const eventSessionId = "session_id" in payload ? payload.session_id : undefined;
       if (payload.type !== "started" && !deps.isEventForCurrentRun(eventSessionId)) {
