@@ -1,29 +1,27 @@
-//! Deep diagnose = Agent chat on top of rule-based checks (not another checklist).
+//! Deep diagnose = Agent Doctor's own agent loop on top of the rule checks.
+//! The runtime under diagnosis never answers for itself.
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { ask } from "@tauri-apps/plugin-dialog";
 import {
   createAttachmentsController,
   type AttachmentsApi,
 } from "../chat/attachments";
-import {
-  attachmentSummary,
-  imageReadingBlock,
-  type ImageReading,
-} from "../chat/context";
+import { imageReadingBlock, type ImageReading } from "../chat/context";
 import { enhanceCodeBlocks } from "../chat/copy-ui";
 import { readImageTextEnabled } from "../chat/image-text";
-import type { ChatAttachment, PromptSessionEvent, PromptSessionReport } from "../chat/types";
+import type { ChatAttachment } from "../chat/types";
 import {
   createVoiceInputController,
   type VoiceInputApi,
 } from "../chat/voice";
 import { withErrorDetail } from "../friendly-error";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
 import { renderMarkdown } from "../markdown";
 import * as dom from "./dom";
 import type { DiagnoseSession } from "./session";
-import type { RepairPreviewResponse } from "../types";
 
 export type DeepPresetId = "explain" | "fix" | "browser" | "health";
 
@@ -32,6 +30,34 @@ type DeepBubble = {
   role: "user" | "assistant" | "meta";
   text: string;
   attachments?: ChatAttachment[];
+  /** Offer Agent Doctor's repair loop under this answer. */
+  offerRepair?: boolean;
+};
+
+type DeepDiagnoseEvent =
+  | { type: "checking" }
+  | { type: "thinking"; round: number }
+  | { type: "tool"; tool: string; target: string | null };
+
+type DeepDiagnoseReport = {
+  answer: string;
+  model: string;
+  tool_calls: number;
+  open_issues: number;
+};
+
+type DeepRepairSummary = {
+  runtime_id: string;
+  backup_id: string;
+  issue_score_before: number;
+  issue_score_after: number;
+  executed: string[];
+  skipped: { id: string; reason: string }[];
+};
+
+export type DeepChatHooks = {
+  /** Re-run the left-side checks after a repair changed files. */
+  onRepaired?: () => void | Promise<void>;
 };
 
 function attachmentStripHtml(attachments: ChatAttachment[] | undefined): string {
@@ -59,6 +85,8 @@ export type DeepChatApi = {
   send: (text?: string) => Promise<void>;
   usePreset: (id: DeepPresetId) => Promise<void>;
   stop: () => Promise<void>;
+  /** Agent Doctor's repair loop (backup first), after the person confirms. */
+  repair: () => Promise<void>;
   dispose: () => void;
 };
 
@@ -70,56 +98,53 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function issueBrief(preview: RepairPreviewResponse | null): string {
-  if (!preview) {
-    return t("diagnose.flow.deepCtxNone");
-  }
-  const issues = preview.checks.filter(
-    (check) => check.status === "fail" || check.status === "warn",
-  );
-  if (issues.length === 0) {
-    return t("diagnose.flow.deepCtxClean", {
-      pass: String(preview.summary.pass),
-      total: String(preview.checks.length),
-    });
-  }
-  return issues
-    .slice(0, 8)
-    .map((check) => {
-      const label = check.status === "fail" ? t("repair.fail") : t("repair.warn");
-      return `- [${label}] ${check.title}: ${check.message}`;
-    })
-    .join("\n");
-}
-
-function buildAgentPrompt(
+/** Rule checks are gathered by the loop itself; only add what the user supplied. */
+function buildQuestion(
   userText: string,
-  preview: RepairPreviewResponse | null,
   attachments: ChatAttachment[],
   readings: ImageReading[],
 ): string {
-  const parts = [
-    t("diagnose.flow.deepAgentLead"),
-    issueBrief(preview),
-    "",
-  ];
+  const parts = [userText.trim()];
   const pictureText = imageReadingBlock(readings);
   if (pictureText) {
-    parts.push(pictureText, "");
+    parts.push("", pictureText);
   } else if (attachments.length > 0) {
-    parts.push(
-      `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
-      "",
-    );
+    parts.push("", t("diagnose.flow.deepAttachNames", {
+      names: attachments.map((item) => item.name).join(getLocale() === "zh" ? "、" : ", "),
+    }));
   }
-  parts.push(t("diagnose.flow.deepAgentUser", { text: userText.trim() }));
   return parts.join("\n");
 }
 
-export function createDeepChat(session: DiagnoseSession): DeepChatApi {
+function fileLabel(target: string | null): string {
+  if (!target) {
+    return "";
+  }
+  const parts = target.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? target;
+}
+
+function friendlyDeepError(error: unknown): string {
+  const message = String(error);
+  if (message.includes("deep_diagnose_no_provider")) {
+    return t("diagnose.flow.deepNoProvider");
+  }
+  if (message.includes("deep_diagnose_unsupported_protocol")) {
+    return t("diagnose.flow.deepUnsupportedProtocol");
+  }
+  if (message.includes("deep_diagnose_cancelled")) {
+    return t("diagnose.flow.deepStoppedDone");
+  }
+  if (/already running/i.test(message)) {
+    return t("diagnose.flow.deepBusy");
+  }
+  return withErrorDetail(t("diagnose.flow.deepFailedGeneric"), error);
+}
+
+export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = {}): DeepChatApi {
   const bubbles: DeepBubble[] = [];
   let busy = false;
-  let assistantId: string | null = null;
+  let repairing = false;
   let statusText = "";
   let unlisten: UnlistenFn | null = null;
   let shellReady = false;
@@ -132,7 +157,7 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
   }
 
   function activityHtml(): string {
-    if (!busy || assistantId) {
+    if (!busy) {
       return "";
     }
     return `<div class="diagnose-deep-activity" id="diagnose-deep-activity" aria-live="polite">
@@ -145,10 +170,6 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
 
   function setStatus(next: string): void {
     statusText = next.trim();
-    if (assistantId) {
-      dom.deepBodyEl.querySelector("#diagnose-deep-activity")?.remove();
-      return;
-    }
     const textNode = dom.deepBodyEl.querySelector<HTMLElement>(".diagnose-deep-activity-text");
     if (textNode) {
       textNode.textContent = statusText || t("diagnose.flow.deepThinking");
@@ -186,7 +207,12 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
     if (!actions) {
       return;
     }
-    if (busy) {
+    if (repairing) {
+      // The repair loop writes files after a backup; it runs to the end once started.
+      actions.innerHTML = `<button type="button" class="btn-ghost diagnose-deep-send" disabled>
+        ${escapeHtml(t("diagnose.flow.deepRepairingShort"))}
+      </button>`;
+    } else if (busy) {
       actions.innerHTML = `<button type="button" class="btn-ghost diagnose-deep-send" id="diagnose-deep-stop">
         ${escapeHtml(t("diagnose.flow.deepStop"))}
       </button>`;
@@ -249,10 +275,16 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
       .map((bubble) => {
         if (bubble.role === "assistant") {
           const html = bubble.text.trim() ? renderMarkdown(bubble.text) : "";
-          const streaming =
-            busy && assistantId === bubble.id ? " is-streaming" : "";
-          return `<div class="diagnose-deep-bubble is-assistant${streaming}" data-bubble-id="${escapeHtml(bubble.id)}">
-          <div class="diagnose-deep-bubble-text chat-md">${html}</div>
+          const repair = bubble.offerRepair
+            ? `<div class="diagnose-deep-bubble-actions">
+                <button type="button" class="btn-secondary diagnose-deep-repair" data-deep-repair ${
+                  busy || repairing ? "disabled" : ""
+                }>${escapeHtml(t("diagnose.flow.deepRepairCta"))}</button>
+                <span>${escapeHtml(t("diagnose.flow.deepRepairHint"))}</span>
+              </div>`
+            : "";
+          return `<div class="diagnose-deep-bubble is-assistant" data-bubble-id="${escapeHtml(bubble.id)}">
+          <div class="diagnose-deep-bubble-text chat-md">${html}</div>${repair}
         </div>`;
         }
         const textHtml = bubble.text.trim()
@@ -432,6 +464,7 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
     role: DeepBubble["role"],
     text: string,
     attachments?: ChatAttachment[],
+    extra?: Pick<DeepBubble, "offerRepair">,
   ): string {
     const id = `deep-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     bubbles.push({
@@ -439,43 +472,16 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
       role,
       text,
       attachments: attachments?.length ? [...attachments] : undefined,
+      ...extra,
     });
     paint();
     return id;
   }
 
-  function appendAssistant(text: string): void {
-    if (!text) {
-      return;
-    }
-    if (!assistantId) {
-      assistantId = pushBubble("assistant", text);
-      return;
-    }
-    const bubble = bubbles.find((item) => item.id === assistantId);
-    if (!bubble) {
-      assistantId = pushBubble("assistant", text);
-      return;
-    }
-    bubble.text += text;
-    dom.deepBodyEl.querySelector("#diagnose-deep-activity")?.remove();
-    const bubbleEl = dom.deepBodyEl.querySelector<HTMLElement>(
-      `[data-bubble-id="${assistantId}"]`,
-    );
-    const node = bubbleEl?.querySelector<HTMLElement>(".diagnose-deep-bubble-text");
-    if (bubbleEl && node) {
-      bubbleEl.classList.add("is-streaming");
-      node.innerHTML = bubble.text.trim() ? renderMarkdown(bubble.text) : "";
-      if (bubble.text.trim()) {
-        enhanceCodeBlocks(node);
-      }
-      const thread = dom.deepBodyEl.querySelector<HTMLElement>("#diagnose-deep-thread");
-      if (thread) {
-        thread.scrollTop = thread.scrollHeight;
-      }
-    } else {
-      paint();
-    }
+  function historyForLoop(): { role: string; content: string }[] {
+    return bubbles
+      .filter((bubble) => bubble.role === "user" || bubble.role === "assistant")
+      .map((bubble) => ({ role: bubble.role, content: bubble.text }));
   }
 
   async function ensureListen(): Promise<void> {
@@ -483,45 +489,33 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
       return;
     }
     try {
-      unlisten = await listen<PromptSessionEvent>("prompt-session-event", (event) => {
-        const payload = event.payload;
-        if (!payload || typeof payload !== "object" || !("type" in payload)) {
-          return;
-        }
-        switch (payload.type) {
-          case "started":
-            setStatus(t("diagnose.flow.deepStarted"));
-            break;
-          case "status":
-            if (payload.message) {
-              setStatus(payload.message);
+      unlisten = await getCurrentWebviewWindow().listen<DeepDiagnoseEvent>(
+        "deep-diagnose-event",
+        (event) => {
+          const payload = event.payload;
+          switch (payload?.type) {
+            case "checking":
+              setStatus(t("diagnose.flow.deepChecking"));
+              break;
+            case "thinking":
+              setStatus(t("diagnose.flow.deepThinking"));
+              break;
+            case "tool": {
+              const name = fileLabel(payload.target);
+              setStatus(
+                payload.tool === "grep_files"
+                  ? t("diagnose.flow.deepSearching")
+                  : name
+                    ? t("diagnose.flow.deepReadingFile", { name })
+                    : t("diagnose.flow.deepReadingConfig"),
+              );
+              break;
             }
-            break;
-          case "delta":
-            if (payload.text) {
-              setStatus(t("diagnose.flow.deepWriting"));
-              appendAssistant(payload.text);
-            }
-            break;
-          case "stderr_line":
-            if (payload.line?.trim()) {
-              setStatus(payload.line.trim().slice(0, 120));
-            }
-            break;
-          case "completed":
-            setStatus(
-              payload.status === "succeeded"
-                ? t("diagnose.flow.deepDone")
-                : t("diagnose.flow.deepFailed", { status: String(payload.status) }),
-            );
-            if (!assistantId && payload.summary?.trim()) {
-              appendAssistant(payload.summary.trim());
-            }
-            break;
-          default:
-            break;
-        }
-      });
+            default:
+              break;
+          }
+        },
+      );
     } catch {
       unlisten = null;
     }
@@ -530,7 +524,7 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
   async function stop(): Promise<void> {
     setStatus(t("diagnose.flow.deepStopping"));
     try {
-      await invoke<boolean>("cancel_prompt_session_command");
+      await invoke<boolean>("cancel_deep_diagnose_command");
     } catch {
       /* ignore */
     }
@@ -545,14 +539,14 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
       textarea?.focus();
       return;
     }
-    if (busy) {
+    if (busy || repairing) {
       pushBubble("meta", t("diagnose.flow.deepBusy"));
       return;
     }
 
+    const history = historyForLoop();
     busy = true;
-    assistantId = null;
-    statusText = t("diagnose.flow.deepConnecting");
+    statusText = t("diagnose.flow.deepChecking");
     if (textarea) {
       textarea.value = "";
     }
@@ -583,37 +577,67 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
     }
 
     try {
-      setStatus(t("diagnose.flow.deepConnecting"));
-      const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
+      const report = await invoke<DeepDiagnoseReport>("deep_diagnose_chat_command", {
         runtime: session.runtimeId,
-        prompt: buildAgentPrompt(text, session.preview, attachments, readings),
-        cwd: null,
-        timeoutSec: 180,
-        dangerouslySkipPermissions: true,
-        fullAuto: true,
-        resumeThreadId: null,
-        selectedMcps: null,
+        question: buildQuestion(text, attachments, readings),
+        history,
+        locale: getLocale(),
       });
-      if (!assistantId && report.summary?.trim()) {
-        pushBubble("assistant", report.summary.trim());
-      } else if (!assistantId) {
-        pushBubble(
-          "meta",
-          report.status === "succeeded"
-            ? t("diagnose.flow.deepDone")
-            : t("diagnose.flow.deepFailed", { status: report.status }),
-        );
+      const answer = report.answer.trim() || t("diagnose.flow.deepEmptyAnswer");
+      // Only the latest answer offers a repair; older buttons would act on stale checks.
+      for (const bubble of bubbles) {
+        bubble.offerRepair = false;
       }
+      pushBubble("assistant", answer, undefined, { offerRepair: report.open_issues > 0 });
     } catch (error) {
-      const message = String(error);
-      if (/already running/i.test(message)) {
-        pushBubble("meta", t("diagnose.flow.deepBusy"));
-      } else {
-        pushBubble("meta", withErrorDetail(t("diagnose.flow.deepFailedGeneric"), error));
-      }
+      pushBubble("meta", friendlyDeepError(error));
     } finally {
       busy = false;
-      assistantId = null;
+      statusText = "";
+      paint();
+    }
+  }
+
+  async function repair(): Promise<void> {
+    if (busy || repairing) {
+      return;
+    }
+    const ok = await ask(t("diagnose.flow.deepRepairConfirm"), {
+      title: t("diagnose.flow.deepRepairCta"),
+      kind: "info",
+      okLabel: t("diagnose.flow.deepRepairOk"),
+      cancelLabel: t("diagnose.flow.deepRepairCancel"),
+    });
+    if (!ok) {
+      return;
+    }
+    for (const bubble of bubbles) {
+      bubble.offerRepair = false;
+    }
+    repairing = true;
+    busy = true;
+    statusText = t("diagnose.flow.deepRepairing");
+    paint();
+    try {
+      const summary = await invoke<DeepRepairSummary>("deep_repair_command", {
+        runtime: session.runtimeId,
+      });
+      if (summary.executed.length > 0) {
+        pushBubble(
+          "assistant",
+          summary.issue_score_after < summary.issue_score_before
+            ? t("diagnose.flow.deepRepairDone", { count: String(summary.executed.length) })
+            : t("diagnose.flow.deepRepairNoGain", { count: String(summary.executed.length) }),
+        );
+      } else {
+        pushBubble("assistant", t("diagnose.flow.deepRepairNothing"));
+      }
+      await hooks.onRepaired?.();
+    } catch (error) {
+      pushBubble("meta", friendlyDeepError(error));
+    } finally {
+      repairing = false;
+      busy = false;
       statusText = "";
       paint();
     }
@@ -646,5 +670,5 @@ export function createDeepChat(session: DiagnoseSession): DeepChatApi {
     voiceApi = null;
   }
 
-  return { paint, send, usePreset, stop, dispose };
+  return { paint, send, usePreset, stop, repair, dispose };
 }

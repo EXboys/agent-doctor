@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -5,15 +7,43 @@ use serde_json::{json, Value};
 const DEFAULT_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 const MAX_AGENT_TURNS: usize = 8;
+/// Reasoning models can think for a while before the first token.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LlmConfig {
     pub api_url: String,
     pub api_key: String,
     pub model: String,
 }
 
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("api_url", &self.api_url)
+            .field("api_key", &"<redacted>")
+            .field("model", &self.model)
+            .finish()
+    }
+}
+
 impl LlmConfig {
+    /// OpenAI-compatible gateway base (e.g. `https://api.deepseek.com/v1`) or a full
+    /// `.../chat/completions` URL.
+    pub fn from_gateway(gateway_url: &str, api_key: &str, model: &str) -> Self {
+        let base = gateway_url.trim().trim_end_matches('/');
+        let api_url = if base.ends_with("/chat/completions") {
+            base.to_string()
+        } else {
+            format!("{base}/chat/completions")
+        };
+        Self {
+            api_url,
+            api_key: api_key.trim().to_string(),
+            model: model.trim().to_string(),
+        }
+    }
+
     pub fn from_env() -> Option<Self> {
         let api_key = std::env::var("AGENT_DOCTOR_LLM_API_KEY")
             .or_else(|_| std::env::var("OPENAI_API_KEY"))
@@ -154,15 +184,46 @@ pub fn repair_tool_definitions() -> Value {
     ])
 }
 
+/// Tools that never change files or run commands (deep diagnose Q&A).
+pub fn read_only_tool_definitions() -> Value {
+    let Value::Array(all) = repair_tool_definitions() else {
+        return json!([]);
+    };
+    Value::Array(
+        all.into_iter()
+            .filter(|tool| {
+                matches!(
+                    tool.pointer("/function/name").and_then(Value::as_str),
+                    Some("read_file" | "list_dir" | "grep_files")
+                )
+            })
+            .collect(),
+    )
+}
+
 pub fn chat_with_tools(config: &LlmConfig, messages: &[Value]) -> Result<LlmTurn> {
-    let client = reqwest::blocking::Client::new();
-    let body = json!({
+    chat_with_tool_set(config, messages, Some(&repair_tool_definitions()))
+}
+
+/// `tools: None` asks for a plain answer (used to force a final reply).
+pub fn chat_with_tool_set(
+    config: &LlmConfig,
+    messages: &[Value],
+    tools: Option<&Value>,
+) -> Result<LlmTurn> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .context("failed to build LLM HTTP client")?;
+    let mut body = json!({
         "model": config.model,
         "messages": messages,
-        "tools": repair_tool_definitions(),
-        "tool_choice": "auto",
         "temperature": 0.1,
     });
+    if let Some(tools) = tools {
+        body["tools"] = tools.clone();
+        body["tool_choice"] = json!("auto");
+    }
 
     let response = client
         .post(&config.api_url)

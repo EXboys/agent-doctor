@@ -225,6 +225,7 @@ async fn open_session_command(
 #[allow(clippy::too_many_arguments)]
 async fn start_prompt_session_command(
     app: AppHandle,
+    window: tauri::Window,
     state: State<'_, PromptSessionState>,
     runtime: String,
     prompt: String,
@@ -235,9 +236,14 @@ async fn start_prompt_session_command(
     resume_thread_id: Option<String>,
     selected_mcps: Option<Vec<String>>,
 ) -> Result<PromptSessionReport, String> {
+    let owner_label = window.label().to_string();
     {
         let guard = state.cancel.lock().map_err(|e| e.to_string())?;
         if guard.is_some() {
+            let owner = state.owner.lock().map_err(|e| e.to_string())?;
+            if owner.as_deref().is_some_and(|label| label != owner_label) {
+                return Err("prompt session busy in another window".into());
+            }
             return Err("another ask session is already running".into());
         }
     }
@@ -251,6 +257,10 @@ async fn start_prompt_session_command(
     {
         let mut guard = state.control.lock().map_err(|e| e.to_string())?;
         *guard = Some(control.clone());
+    }
+    {
+        let mut guard = state.owner.lock().map_err(|e| e.to_string())?;
+        *guard = Some(owner_label.clone());
     }
 
     let options = PromptSessionOptions {
@@ -284,15 +294,16 @@ async fn start_prompt_session_command(
     };
 
     let app_for_emit = app.clone();
+    let emit_target = owner_label.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         run_prompt_session_with_cancel(
             &options,
             cancel,
             control_for_run,
             |event: PromptSessionEvent| {
-                // Emit once. `AppHandle::emit` already broadcasts to every webview;
-                // also targeting the ask window duplicated every chat event.
-                let _ = app_for_emit.emit("prompt-session-event", &event);
+                // Only the window that started this run: Ask and Diagnose share the
+                // event name, and a broadcast made each one render the other's reply.
+                let _ = app_for_emit.emit_to(emit_target.as_str(), "prompt-session-event", &event);
             },
         )
     })
@@ -304,6 +315,9 @@ async fn start_prompt_session_command(
     if let Ok(mut guard) = state.control.lock() {
         *guard = None;
     }
+    if let Ok(mut guard) = state.owner.lock() {
+        *guard = None;
+    }
 
     let report = result
         .map_err(|e| e.to_string())?
@@ -312,7 +326,19 @@ async fn start_prompt_session_command(
 }
 
 #[tauri::command]
-fn cancel_prompt_session_command(state: State<'_, PromptSessionState>) -> Result<bool, String> {
+fn cancel_prompt_session_command(
+    window: tauri::Window,
+    state: State<'_, PromptSessionState>,
+) -> Result<bool, String> {
+    {
+        let owner = state.owner.lock().map_err(|e| e.to_string())?;
+        if owner
+            .as_deref()
+            .is_some_and(|label| label != window.label())
+        {
+            return Ok(false);
+        }
+    }
     let guard = state.cancel.lock().map_err(|e| e.to_string())?;
     if let Some(cancel) = guard.as_ref() {
         cancel.request();
@@ -337,7 +363,14 @@ fn resolve_permission_session_command(
     control
         .respond_permission(&request_id, allow)
         .map_err(|e| format!("{e:#}"))?;
-    let _ = app.emit(
+    let owner = state
+        .owner
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .unwrap_or_else(|| "main".to_string());
+    let _ = app.emit_to(
+        owner.as_str(),
         "prompt-session-event",
         &PromptSessionEvent::PermissionResolved {
             session_id,
@@ -369,6 +402,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
+            app.manage(DeepDiagnoseState::default());
             // Paint the main window first. Seeding a workspace can hit macOS
             // Files-and-Folders prompts (Documents / Desktop) and must not
             // block the first frame on a blank chrome.
@@ -447,6 +481,9 @@ pub fn run() {
             apply_profile_model_command,
             run_repair_preview_command,
             run_repair_execute_command,
+            deep_diagnose_chat_command,
+            cancel_deep_diagnose_command,
+            deep_repair_command,
             run_browser_smoke_command,
             run_repair_rollback_command,
             install_runtime_command,

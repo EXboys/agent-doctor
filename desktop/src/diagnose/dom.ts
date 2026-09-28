@@ -25,6 +25,7 @@ export const configPersonalEl = document.querySelector<HTMLElement>("#diagnose-c
 export const configTeamEl = document.querySelector<HTMLElement>("#diagnose-config-team")!;
 export const teamStatusEl = document.querySelector<HTMLElement>("#diagnose-team-status")!;
 export const presetChipsEl = document.querySelector<HTMLElement>("#diagnose-preset-chips")!;
+export const modelChipsEl = document.querySelector<HTMLElement>("#diagnose-model-chips")!;
 export const urlEl = document.querySelector<HTMLInputElement>("#diagnose-url")!;
 export const keyEl = document.querySelector<HTMLInputElement>("#diagnose-key")!;
 export const modelEl = document.querySelector<HTMLSelectElement>("#diagnose-model")!;

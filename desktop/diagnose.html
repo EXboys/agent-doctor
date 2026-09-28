@@ -105,20 +105,37 @@
         </section>
 
         <section class="diagnose-panel" id="diagnose-panel-config" hidden>
-          <div id="diagnose-config-personal">
-            <div class="diagnose-preset-chips" id="diagnose-preset-chips" role="listbox"></div>
+          <div id="diagnose-config-personal" class="diagnose-config-personal">
+            <div class="diagnose-config-block">
+              <p class="diagnose-config-label" data-i18n="diagnose.flow.fieldProvider">服务商</p>
+              <div class="diagnose-preset-chips" id="diagnose-preset-chips" role="listbox"></div>
+            </div>
             <div class="diagnose-form-grid">
-              <label>
+              <label class="diagnose-field diagnose-field-key">
+                <span data-i18n="diagnose.flow.fieldKey">密钥</span>
+                <input
+                  id="diagnose-key"
+                  type="password"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="sk-…"
+                />
+                <small data-i18n="diagnose.flow.fieldKeyHint">从服务商网站复制后，粘贴到这里</small>
+              </label>
+              <div class="diagnose-field diagnose-field-model">
+                <span data-i18n="diagnose.flow.fieldModel">模型</span>
+                <div
+                  class="diagnose-model-chips"
+                  id="diagnose-model-chips"
+                  role="listbox"
+                  data-i18n-title="diagnose.flow.fieldModel"
+                  aria-label="模型"
+                ></div>
+                <select id="diagnose-model" hidden tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <label class="diagnose-field diagnose-field-url">
                 <span data-i18n="diagnose.flow.fieldUrl">地址</span>
                 <input id="diagnose-url" type="url" spellcheck="false" autocomplete="off" />
-              </label>
-              <label>
-                <span data-i18n="diagnose.flow.fieldKey">密钥</span>
-                <input id="diagnose-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…" />
-              </label>
-              <label>
-                <span data-i18n="diagnose.flow.fieldModel">模型</span>
-                <select id="diagnose-model"></select>
               </label>
               <input id="diagnose-protocol" type="hidden" value="openai" />
               <input id="diagnose-provider-name" type="hidden" value="DeepSeek" />

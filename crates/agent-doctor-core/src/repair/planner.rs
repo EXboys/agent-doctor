@@ -82,8 +82,11 @@ impl RepairPlanner for DeterministicPlanner {
 }
 
 /// LLM agent planner: read/edit/bash tools with mask on the wire, unmask locally before apply.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct AiRepairPlanner;
+#[derive(Debug, Default, Clone)]
+pub struct AiRepairPlanner {
+    /// `None` falls back to `AGENT_DOCTOR_LLM_*` / `OPENAI_API_KEY` (CLI behavior).
+    pub config: Option<LlmConfig>,
+}
 
 impl RepairPlanner for AiRepairPlanner {
     fn plan(
@@ -91,7 +94,7 @@ impl RepairPlanner for AiRepairPlanner {
         context: &mut MaskedRepairContext,
         options: &PlannerOptions,
     ) -> anyhow::Result<PlannerResult> {
-        let Some(config) = LlmConfig::from_env() else {
+        let Some(config) = self.config.clone().or_else(LlmConfig::from_env) else {
             return DeterministicPlanner.plan(context, options);
         };
 

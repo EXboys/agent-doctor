@@ -1,3 +1,4 @@
+mod deep_diagnose;
 mod mcp;
 mod ocr;
 mod remote;
@@ -7,6 +8,7 @@ mod versions;
 mod wiring;
 mod workspace;
 
+pub use deep_diagnose::*;
 pub use mcp::*;
 pub use ocr::*;
 pub use remote::*;

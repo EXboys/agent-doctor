@@ -129,7 +129,8 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
 
   function focusConfigFill(): void {
     dom.panelConfigEl.hidden = false;
-    const target = !dom.urlEl.value.trim() ? dom.urlEl : dom.keyEl;
+    // Key is the only field beginners usually need to paste.
+    const target = dom.keyEl;
     try {
       target.focus({ preventScroll: true });
     } catch {

@@ -263,6 +263,21 @@ pub(crate) fn load_personal_provider_entry(id: &str) -> Result<PersonalProviderE
         .with_context(|| format!("provider not found: {id}"))
 }
 
+/// Active provider including its key, for Agent Doctor's own model calls.
+/// Read-only: never migrates or rewrites the store.
+pub fn load_active_personal_provider() -> Result<Option<PersonalProviderEntry>> {
+    let Some(path) = personal_providers_path() else {
+        return Ok(None);
+    };
+    let store = load_store(&path)?;
+    Ok(store
+        .active_id
+        .as_ref()
+        .and_then(|id| store.providers.iter().find(|p| &p.id == id))
+        .filter(|entry| !entry.api_key.trim().is_empty())
+        .cloned())
+}
+
 pub fn load_personal_provider_status() -> Result<PersonalProviderStatus> {
     let profile_path = agent_profile_path();
     let store_path = personal_providers_path();

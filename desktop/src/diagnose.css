@@ -416,6 +416,29 @@ html:has(.diagnose-page) body {
   color: var(--text);
 }
 
+.diagnose-deep-bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.diagnose-deep-bubble-actions .diagnose-deep-repair {
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.diagnose-deep-bubble-actions span {
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
 .diagnose-deep-bubble.is-meta {
   align-self: center;
   max-width: 100%;
@@ -938,19 +961,40 @@ html:has(.diagnose-page) body {
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08);
 }
 
+.diagnose-config-personal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diagnose-config-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diagnose-config-label,
+.diagnose-field > span {
+  margin: 0;
+  font-size: 0.64rem;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
 .diagnose-preset-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 10px;
+  margin: 0;
 }
 
 .diagnose-preset-chips .provider-chip {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.66rem;
+  padding: 5px 11px;
+  font-size: 0.68rem;
+  font-weight: 600;
   cursor: pointer;
   color: var(--text);
 }
@@ -964,32 +1008,101 @@ html:has(.diagnose-page) body {
 .diagnose-form-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 12px;
 }
 
-.diagnose-form-grid label {
+.diagnose-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 0.64rem;
   color: var(--text-muted);
 }
 
-.diagnose-form-grid input,
-.diagnose-form-grid select {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px 9px;
-  font-size: 0.72rem;
+.diagnose-field-key input {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border-strong));
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
   color: inherit;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--accent) 3%, #fff);
 }
 
-.diagnose-form-grid input:focus,
-.diagnose-form-grid select:focus {
+.diagnose-field-key small {
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-soft, var(--text-muted));
+}
+
+.diagnose-field-url input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: var(--surface-muted, #f4f7fb);
+}
+
+.diagnose-form-grid input:focus {
   outline: none;
   border-color: rgba(59, 130, 246, 0.55);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.diagnose-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diagnose-model-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.diagnose-model-chip strong {
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.diagnose-model-chip span {
+  font-size: 0.6rem;
+  font-weight: 650;
+  color: var(--accent, #2563eb);
+}
+
+.diagnose-model-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, #fff);
+}
+
+.diagnose-model-chip.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, #fff);
+  color: var(--primary-deep, #1d4ed8);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.diagnose-model-chip.is-active span {
+  color: var(--primary-deep, #1d4ed8);
 }
 
 .diagnose-team-status {

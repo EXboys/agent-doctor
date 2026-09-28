@@ -211,6 +211,7 @@ where
                     apply_confirmed_writes: true,
                     max_rounds: None,
                     use_ai_planner,
+                    llm: None,
                 },
             )?;
             after_probe = loop_report.after_probe.clone();

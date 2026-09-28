@@ -3,7 +3,7 @@ import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
-import { modelsForProviderUrl, providerChipForUrl } from "../provider-models";
+import { modelsForProviderUrl } from "../provider-models";
 import type {
   PersonalProviderListItem,
   PersonalProviderStatus,
@@ -77,12 +77,11 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const runtimeName = runtimeDisplayName(deps.selectedRuntime());
     const wiredProvider = deps.getWiredProvider();
     if (wiredProvider) {
-      const chip = providerChipForUrl(wiredProvider.url, wiredProvider.name);
       const model = wiredProvider.model.trim() || "—";
-      deps.modelLabelEl.textContent = `${chip} · ${model}`;
+      deps.modelLabelEl.textContent = model;
       deps.modelBtnEl.disabled = deps.isComposerLocked();
       deps.modelBtnEl.title = t("chat.modelPickHint");
-      deps.modelBtnEl.setAttribute("aria-label", deps.modelLabelEl.textContent);
+      deps.modelBtnEl.setAttribute("aria-label", model);
       return;
     }
     // Personal: keep clickable so the menu can say “go wire a provider”.

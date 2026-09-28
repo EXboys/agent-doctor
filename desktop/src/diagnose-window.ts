@@ -39,7 +39,9 @@ declare global {
 
 const session = createDiagnoseSession(resolveInitialRuntime());
 rememberDiagnoseRuntime(session.runtimeId);
-const deepChat = createDeepChat(session);
+const deepChat = createDeepChat(session, {
+  onRepaired: () => refreshState({ preferStep: "test" }),
+});
 const paint = createDiagnosePaint(session, deepChat);
 
 function runtimeFromDoctor(report: DoctorReport): RuntimeDoctorResult | undefined {
@@ -263,6 +265,11 @@ function handleDeepBodyClick(event: Event): void {
   if (target.closest("#diagnose-deep-stop")) {
     event.preventDefault();
     void deepChat.stop();
+    return;
+  }
+  if (target.closest("[data-deep-repair]")) {
+    event.preventDefault();
+    void deepChat.repair();
   }
 }
 

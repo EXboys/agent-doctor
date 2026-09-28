@@ -582,6 +582,11 @@ html, body {
     box-shadow 0.15s ease;
 }
 
+/* `display: inline-flex` above beats the UA `[hidden]` rule. */
+.chat-elevated[hidden] {
+  display: none !important;
+}
+
 .chat-elevated:hover {
   border-color: rgba(47, 111, 237, 0.35);
   color: var(--text);

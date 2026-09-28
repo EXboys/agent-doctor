@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 
@@ -162,7 +163,7 @@ async function ensureListener(): Promise<void> {
   if (unlisten) {
     return;
   }
-  unlisten = await listen<PromptSessionEvent>("prompt-session-event", (event) => {
+  unlisten = await getCurrentWebviewWindow().listen<PromptSessionEvent>("prompt-session-event", (event) => {
     const payload = event.payload;
     switch (payload.type) {
       case "started":
@@ -212,17 +213,23 @@ export function focusAskPanel(runtime?: AskRuntime): void {
 
 function updateElevatedLabel(): void {
   const label = document.querySelector<HTMLElement>("[data-ask-elevated-label]");
-  if (!label) {
-    return;
-  }
-  const runtime = selectedRuntime();
   const { elevated } = els();
+  const wrap = elevated?.closest<HTMLElement>("label, .ask-elevated") ?? null;
+  const runtime = selectedRuntime();
   if (runtime === "deepseek-harness") {
-    label.textContent = t("ask.elevatedDeepseekHarness");
     if (elevated) {
       elevated.checked = false;
       elevated.disabled = true;
     }
+    if (wrap) {
+      wrap.hidden = true;
+    }
+    return;
+  }
+  if (wrap) {
+    wrap.hidden = false;
+  }
+  if (!label) {
     return;
   }
   if (elevated) {

@@ -249,7 +249,17 @@ export function createSendController(deps: SendDeps) {
       }
     } catch (error) {
       const message = String(error);
-      if (/already running/i.test(message)) {
+      if (/busy in another window/i.test(message)) {
+        // Diagnose owns the running turn — never cancel it from here.
+        deps.setStatus(t("chat.otherWindowRunning"), "warn");
+        if (deps.getStore().activeId === chatSessionId) {
+          deps.appendBubble("meta", t("chat.otherWindowRunning"), { persist: false });
+        }
+        if (!deps.promptEl.value.trim()) {
+          deps.promptEl.value = text;
+          deps.autoResizePrompt();
+        }
+      } else if (/already running/i.test(message)) {
         try {
           await invoke<boolean>("cancel_prompt_session_command");
         } catch {
