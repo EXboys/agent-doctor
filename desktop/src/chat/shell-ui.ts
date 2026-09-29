@@ -1,7 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { AskResourcesController, type WorkspaceDoc } from "../ask-resources";
 import { t } from "../i18n";
 import { shortCwdLabel } from "./format";
+import { useWorkspace, focusMainTab, openResourcesWindow } from "../ipc";
 
 export type ShellUiEls = {
   shellEl: HTMLElement;
@@ -94,7 +95,7 @@ export function createShellUiController(deps: ShellUiDeps) {
     deps.workspaceActivateEl.disabled = true;
     deps.setStatus(t("ask.workspaceActivating", { name }), "muted");
     try {
-      await invoke("use_workspace_command", { name });
+      await useWorkspace({ name });
       deps.setStatus(t("ask.workspaceActivated", { name }), "ok");
       await loadAskResources();
     } catch (error) {
@@ -105,7 +106,7 @@ export function createShellUiController(deps: ShellUiDeps) {
 
   async function openMainWorkspace(): Promise<void> {
     try {
-      await invoke("focus_main_tab_command", { tab: "workspace" });
+      await focusMainTab({ tab: "workspace" });
     } catch (error) {
       deps.setStatus(String(error), "error");
     }
@@ -113,7 +114,7 @@ export function createShellUiController(deps: ShellUiDeps) {
 
   async function openMainResources(): Promise<void> {
     try {
-      await invoke("open_resources_window_command", { section: "catalog" });
+      await openResourcesWindow({ section: "catalog" });
     } catch (error) {
       deps.setStatus(String(error), "error");
     }

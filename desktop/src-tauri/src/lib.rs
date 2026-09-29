@@ -2,12 +2,12 @@ use agent_doctor_core::{
     apply_profile_model, ensure_default_workspace, evotown_status, execute_evotown_onboarding,
     execute_register, execute_skills_sync, list_mcp_inventory, load_doctor_node_config,
     load_profiles, load_workspaces, open_interactive_session, run_doctor,
-    run_prompt_session_with_cancel, set_runtime_model, use_profile, ApplyReport, DoctorReport,
-    EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings, OnboardingOptions,
-    OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument, PromptSessionCancel,
-    PromptSessionControl, PromptSessionEvent, PromptSessionOptions, PromptSessionReport,
-    RegisterOptions, RegisterReport, RuntimeModelPreset, SkillsSyncOptions, SyncReport,
-    UseProfileReport,
+    run_prompt_session_with_cancel, runtime_catalog, set_runtime_model, use_profile, ApplyReport,
+    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
+    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument,
+    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
+    PromptSessionReport, RegisterOptions, RegisterReport, RuntimeCatalogEntry, RuntimeModelPreset,
+    SkillsSyncOptions, SyncReport, UseProfileReport,
 };
 
 use std::path::PathBuf;
@@ -202,6 +202,11 @@ fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn runtime_catalog_command() -> Vec<RuntimeCatalogEntry> {
+    runtime_catalog()
+}
+
+#[tauri::command]
 async fn open_session_command(
     runtime: String,
     cwd: Option<String>,
@@ -382,6 +387,7 @@ fn resolve_permission_session_command(
 }
 
 pub fn run() {
+    agent_doctor_mcp::register_browser_mcp_wire_backend();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -489,6 +495,7 @@ pub fn run() {
             install_runtime_command,
             uninstall_runtime_command,
             open_path_command,
+            runtime_catalog_command,
             open_session_command,
             open_ask_window_command,
             close_ask_window_command,
@@ -539,7 +546,96 @@ fn seed_default_workspace_in_background() {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+
     use crate::tray::format_tray_tooltip;
+
+    fn command_names(text: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let bytes = text.as_bytes();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'"' {
+                let start = i + 1;
+                let mut end = start;
+                while end < bytes.len() && bytes[end] != b'"' {
+                    end += 1;
+                }
+                let token = &text[start..end];
+                if token.ends_with("_command")
+                    && token.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                {
+                    names.push(token.to_string());
+                }
+                i = end + 1;
+                continue;
+            }
+            i += 1;
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn handler_idents(lib_rs: &str) -> Vec<String> {
+        let start = lib_rs
+            .find("tauri::generate_handler!")
+            .expect("generate_handler");
+        let rest = &lib_rs[start..];
+        let end = rest.find("])").expect("handler list end");
+        let mut names: Vec<String> = rest[..end]
+            .split(|c: char| !c.is_ascii_lowercase() && c != '_')
+            .filter(|token| token.ends_with("_command"))
+            .map(str::to_string)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    #[test]
+    fn ipc_contract_matches_registered_commands() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let lib_rs = fs::read_to_string(manifest.join("src/lib.rs")).expect("lib.rs");
+        let frontend = manifest.join("../src");
+        let ipc = fs::read_to_string(frontend.join("ipc.ts")).expect("ipc.ts");
+        let registered = handler_idents(&lib_rs);
+        let declared = command_names(&ipc);
+        assert_eq!(
+            declared, registered,
+            "desktop/src/ipc.ts must name every Tauri command and no others"
+        );
+
+        let mut stray = Vec::new();
+        visit_ts(&frontend, &mut stray);
+        assert!(
+            stray.is_empty(),
+            "command names belong in ipc.ts, found {stray:?}"
+        );
+    }
+
+    fn visit_ts(dir: &Path, stray: &mut Vec<String>) {
+        let entries = fs::read_dir(dir).expect("read frontend");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit_ts(&path, stray);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("ts") {
+                continue;
+            }
+            if path.file_name().and_then(|name| name.to_str()) == Some("ipc.ts") {
+                continue;
+            }
+            let text = fs::read_to_string(&path).expect("read ts");
+            let found = command_names(&text);
+            if !found.is_empty() {
+                stray.push(format!("{}: {}", path.display(), found.join(", ")));
+            }
+        }
+    }
 
     #[test]
     fn tooltip_shows_busy_over_status() {

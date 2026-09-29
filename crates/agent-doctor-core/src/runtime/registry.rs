@@ -1,11 +1,15 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
     ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter,
     OpenClawAdapter, QoderAdapter, WorkbuddyAdapter,
+};
+use crate::evotown::{
+    run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook, AssignedJob, JobResult,
 };
 use crate::lifecycle::{
     run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
@@ -21,16 +25,25 @@ use crate::probe::runtimes::{
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
+use crate::prompt_session::{
+    AskBackend, ClaudeAskBackend, CodexAskBackend, DeepSeekHarnessAskBackend, HermesAskBackend,
+    OpenClawAskBackend,
+};
 use crate::repair::{
-    apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
-    apply_codex_playbook_filtered, apply_cursor_playbook, apply_cursor_playbook_filtered,
-    apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,
-    apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
-    apply_openclaw_playbook_filtered, apply_qoder_playbook, apply_qoder_playbook_filtered,
-    apply_workbuddy_playbook, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
+    apply_claude_code_playbook_filtered, apply_codex_playbook_filtered,
+    apply_cursor_playbook_filtered, apply_deepseek_harness_playbook_filtered,
+    apply_hermes_playbook_filtered, apply_openclaw_playbook_filtered,
+    apply_qoder_playbook_filtered, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
     suggest_codex_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
     suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
     suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
+};
+use crate::session_launch::{
+    open_claude_code, open_codex, open_cursor_app, open_in_terminal, OpenSessionReport,
+};
+use crate::setup::{EffectorKind, WriteSemantics};
+use crate::workspace::backends::{
+    bind_claude_code, bind_codex_for_project, bind_hermes, bind_openclaw, RuntimeBindReport,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,10 +71,40 @@ type AdapterFactory = fn() -> Box<dyn RuntimeAdapter>;
 type DeepProbeFn = fn(&mut Vec<ProbeCheck>, &mut Vec<DiagnosticFact>);
 type SchemaProbeFn = fn(&Path, &ParsedConfig, &mut Vec<ProbeCheck>, &mut Vec<DiagnosticFact>);
 type SuggestRepairsFn = fn(&RuntimeProbeReport) -> Vec<SuggestedRepair>;
-type ApplyPlaybookFn = fn(&RuntimeProbeReport) -> Result<PlaybookApplyResult>;
+type ApplyPlaybookFn = fn(&RuntimeProbeReport, Option<&[String]>) -> Result<PlaybookApplyResult>;
 type RunLifecycleFn = fn(RuntimeLifecycleAction) -> Result<()>;
+type WorkspaceBindFn = for<'a> fn(&WorkspaceBindInput<'a>) -> Result<RuntimeBindReport>;
+type AskSession = &'static (dyn AskBackend + Sync);
+type OpenSessionFn = fn(&Path, Option<&str>, bool) -> Result<OpenSessionReport>;
+type DispatchJobFn = fn(&AssignedJob) -> Result<JobResult>;
+
+/// How an interactive session is opened. `None` means launch is unsupported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenSessionKind {
+    Terminal,
+    DeepLink,
+    App,
+}
 
 use crate::repair::DiagnosticFact;
+
+/// Gateway projection for one runtime. `None` on the descriptor means wiring is unsupported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WiringSpec {
+    pub write_semantics: WriteSemantics,
+    pub effector: EffectorKind,
+    pub openai_compatible: bool,
+    pub anthropic_compatible: bool,
+}
+
+/// Inputs shared by per-runtime workspace binders.
+pub struct WorkspaceBindInput<'a> {
+    pub project_path: &'a Path,
+    pub hermes_profile: &'a str,
+    pub codex_home: &'a Path,
+    pub openclaw_agent_id: &'a str,
+    pub openclaw_workspace: &'a Path,
+}
 
 #[derive(Clone, Copy)]
 pub struct RuntimeDescriptor {
@@ -71,8 +114,35 @@ pub struct RuntimeDescriptor {
     schema_probe: Option<SchemaProbeFn>,
     deep_probe: Option<DeepProbeFn>,
     suggest_repairs: Option<SuggestRepairsFn>,
+    /// Filtered repair. `None` means this runtime has no playbook.
     apply_playbook: Option<ApplyPlaybookFn>,
     run_lifecycle: Option<RunLifecycleFn>,
+    /// `None` means personal/team gateway wiring is not supported.
+    wiring: Option<WiringSpec>,
+    /// `None` means Ask is not supported.
+    ask: Option<AskSession>,
+    /// `None` means project isolation is not supported.
+    workspace_bind: Option<WorkspaceBindFn>,
+    /// Short name for desktop chips. Full product name stays on the adapter.
+    label: &'static str,
+    open_session: Option<OpenSessionFn>,
+    open_session_kind: Option<OpenSessionKind>,
+    /// Evotown `job.assign`. `None` means this runtime is not dispatched.
+    dispatch: Option<DispatchJobFn>,
+    /// Skills can be mounted onto this runtime.
+    skill_mount: bool,
+    /// Browser MCP can be written into this runtime's config.
+    browser_mcp: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RuntimeCatalogEntry {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub ask: bool,
+    pub opens_app: bool,
+    pub browser_mcp: bool,
+    pub skill_mount: bool,
 }
 
 impl RuntimeDescriptor {
@@ -100,6 +170,14 @@ impl RuntimeDescriptor {
         if let Some(deep_probe) = self.deep_probe {
             deep_probe(checks, facts);
         }
+    }
+
+    pub(crate) fn wiring(&self) -> Option<WiringSpec> {
+        self.wiring
+    }
+
+    pub(crate) fn supports_workspace_bind(&self) -> bool {
+        self.workspace_bind.is_some()
     }
 }
 
@@ -142,6 +220,113 @@ fn workbuddy_adapter() -> Box<dyn RuntimeAdapter> {
 
 fn cursor_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(CursorAdapter)
+}
+
+const WIRE_GATEWAY: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Additive,
+    effector: EffectorKind::RestartGateway,
+    openai_compatible: true,
+    anthropic_compatible: false,
+};
+
+const WIRE_CODEX: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Additive,
+    effector: EffectorKind::ManualRestart,
+    openai_compatible: true,
+    anthropic_compatible: false,
+};
+
+const WIRE_CLAUDE: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Exclusive,
+    effector: EffectorKind::None,
+    openai_compatible: false,
+    anthropic_compatible: true,
+};
+
+static OPENCLAW_ASK: OpenClawAskBackend = OpenClawAskBackend;
+static HERMES_ASK: HermesAskBackend = HermesAskBackend;
+static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBackend;
+static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
+static CODEX_ASK: CodexAskBackend = CodexAskBackend;
+
+fn bind_openclaw_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
+    bind_openclaw(input.openclaw_agent_id, input.openclaw_workspace)
+}
+
+fn bind_hermes_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
+    bind_hermes(input.hermes_profile, input.project_path)
+}
+
+fn bind_claude_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
+    bind_claude_code(input.project_path)
+}
+
+fn bind_codex_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
+    bind_codex_for_project(input.codex_home, Some(input.project_path))
+}
+
+fn open_openclaw_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("openclaw", &["openclaw", "tui"], cwd, prompt)
+}
+
+fn open_hermes_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("hermes", &["hermes"], cwd, prompt)
+}
+
+fn open_deepseek_session(
+    cwd: &Path,
+    _prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("deepseek-harness", &["dsh", "web"], cwd, None)
+}
+
+fn open_claude_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_claude_code(cwd, prompt, prefer_deep_link)
+}
+
+fn open_codex_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_codex(cwd, prompt)
+}
+
+fn open_qoder_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("qoder", &["qoder"], cwd, prompt)
+}
+
+fn open_workbuddy_session(
+    cwd: &Path,
+    prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_in_terminal("workbuddy", &["codebuddy"], cwd, prompt)
+}
+
+fn open_cursor_session(
+    cwd: &Path,
+    _prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_cursor_app(cwd)
 }
 
 fn run_openclaw_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -220,8 +405,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_openclaw),
         deep_probe: Some(openclaw_probe_deep),
         suggest_repairs: Some(suggest_openclaw_repairs),
-        apply_playbook: Some(apply_openclaw_playbook),
+        apply_playbook: Some(apply_openclaw_playbook_filtered),
         run_lifecycle: Some(run_openclaw_lifecycle_action),
+        wiring: Some(WIRE_GATEWAY),
+        ask: Some(&OPENCLAW_ASK),
+        workspace_bind: Some(bind_openclaw_workspace),
+        label: "OpenClaw",
+        open_session: Some(open_openclaw_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: Some(run_openclaw_hook),
+        skill_mount: true,
+        browser_mcp: true,
     },
     RuntimeDescriptor {
         id: "hermes",
@@ -234,8 +428,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_hermes),
         deep_probe: Some(probe_deep),
         suggest_repairs: Some(suggest_hermes_repairs),
-        apply_playbook: Some(apply_hermes_playbook),
+        apply_playbook: Some(apply_hermes_playbook_filtered),
         run_lifecycle: Some(run_hermes_lifecycle_action),
+        wiring: Some(WIRE_GATEWAY),
+        ask: Some(&HERMES_ASK),
+        workspace_bind: Some(bind_hermes_workspace),
+        label: "Hermes",
+        open_session: Some(open_hermes_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: Some(run_hermes_hook),
+        skill_mount: true,
+        browser_mcp: true,
     },
     RuntimeDescriptor {
         id: "deepseek-harness",
@@ -248,8 +451,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_deepseek_harness),
         deep_probe: Some(deepseek_harness_probe_deep),
         suggest_repairs: Some(suggest_deepseek_harness_repairs),
-        apply_playbook: Some(apply_deepseek_harness_playbook),
+        apply_playbook: Some(apply_deepseek_harness_playbook_filtered),
         run_lifecycle: Some(run_deepseek_harness_lifecycle_action),
+        wiring: None,
+        ask: Some(&DEEPSEEK_HARNESS_ASK),
+        workspace_bind: None,
+        label: "DeepSeek",
+        open_session: Some(open_deepseek_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: None,
+        skill_mount: true,
+        browser_mcp: true,
     },
     RuntimeDescriptor {
         id: "claude-code",
@@ -262,8 +474,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_claude_code),
         deep_probe: Some(claude_code_probe_deep),
         suggest_repairs: Some(suggest_claude_code_repairs),
-        apply_playbook: Some(apply_claude_code_playbook),
+        apply_playbook: Some(apply_claude_code_playbook_filtered),
         run_lifecycle: Some(run_claude_code_lifecycle_action),
+        wiring: Some(WIRE_CLAUDE),
+        ask: Some(&CLAUDE_ASK),
+        workspace_bind: Some(bind_claude_workspace),
+        label: "Claude",
+        open_session: Some(open_claude_session),
+        open_session_kind: Some(OpenSessionKind::DeepLink),
+        dispatch: Some(run_claude_cli),
+        skill_mount: true,
+        browser_mcp: true,
     },
     RuntimeDescriptor {
         id: "codex",
@@ -276,8 +497,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_codex),
         deep_probe: Some(codex_probe_deep),
         suggest_repairs: Some(suggest_codex_repairs),
-        apply_playbook: Some(apply_codex_playbook),
+        apply_playbook: Some(apply_codex_playbook_filtered),
         run_lifecycle: Some(run_codex_lifecycle_action),
+        wiring: Some(WIRE_CODEX),
+        ask: Some(&CODEX_ASK),
+        workspace_bind: Some(bind_codex_workspace),
+        label: "Codex",
+        open_session: Some(open_codex_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: Some(run_codex_cli),
+        skill_mount: true,
+        browser_mcp: true,
     },
     RuntimeDescriptor {
         id: "qoder",
@@ -290,8 +520,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_qoder),
         deep_probe: Some(probe_deep_noop),
         suggest_repairs: Some(suggest_qoder_repairs),
-        apply_playbook: Some(apply_qoder_playbook),
+        apply_playbook: Some(apply_qoder_playbook_filtered),
         run_lifecycle: Some(run_qoder_lifecycle_action),
+        wiring: None,
+        ask: None,
+        workspace_bind: None,
+        label: "Qoder",
+        open_session: Some(open_qoder_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: None,
+        skill_mount: false,
+        browser_mcp: false,
     },
     RuntimeDescriptor {
         id: "workbuddy",
@@ -304,8 +543,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_workbuddy),
         deep_probe: Some(probe_deep_noop),
         suggest_repairs: Some(suggest_workbuddy_repairs),
-        apply_playbook: Some(apply_workbuddy_playbook),
+        apply_playbook: Some(apply_workbuddy_playbook_filtered),
         run_lifecycle: Some(run_workbuddy_lifecycle_action),
+        wiring: None,
+        ask: None,
+        workspace_bind: None,
+        label: "WorkBuddy",
+        open_session: Some(open_workbuddy_session),
+        open_session_kind: Some(OpenSessionKind::Terminal),
+        dispatch: None,
+        skill_mount: false,
+        browser_mcp: false,
     },
     RuntimeDescriptor {
         id: "cursor",
@@ -318,8 +566,17 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_cursor),
         deep_probe: Some(probe_deep_noop),
         suggest_repairs: Some(suggest_cursor_repairs),
-        apply_playbook: Some(apply_cursor_playbook),
+        apply_playbook: Some(apply_cursor_playbook_filtered),
         run_lifecycle: Some(run_cursor_lifecycle_action),
+        wiring: None,
+        ask: None,
+        workspace_bind: None,
+        label: "Cursor",
+        open_session: Some(open_cursor_session),
+        open_session_kind: Some(OpenSessionKind::App),
+        dispatch: None,
+        skill_mount: true,
+        browser_mcp: false,
     },
 ];
 
@@ -403,40 +660,74 @@ pub fn apply_runtime_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let runtime_id = descriptor_by_id(runtime_id)
-        .map(|descriptor| descriptor.id)
-        .unwrap_or(runtime_id);
-    if runtime_id == "openclaw" {
-        return apply_openclaw_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "hermes" {
-        return apply_hermes_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "deepseek-harness" {
-        return apply_deepseek_harness_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "claude-code" {
-        return apply_claude_code_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "codex" {
-        return apply_codex_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "qoder" {
-        return apply_qoder_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "workbuddy" {
-        return apply_workbuddy_playbook_filtered(probe, only_ids);
-    }
-    if runtime_id == "cursor" {
-        return apply_cursor_playbook_filtered(probe, only_ids);
-    }
-    let apply = descriptor_by_id(runtime_id)
+    let descriptor = descriptor_by_id(runtime_id);
+    let runtime_id = descriptor.map(|entry| entry.id).unwrap_or(runtime_id);
+    let apply = descriptor
         .and_then(|entry| entry.apply_playbook)
         .with_context(|| format!("runtime '{runtime_id}' has no repair playbook"))?;
-    if only_ids.is_some() {
-        anyhow::bail!("runtime '{runtime_id}' does not support filtered playbook execution yet");
+    apply(probe, only_ids)
+}
+
+pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
+    descriptor_by_id(runtime_id).and_then(|entry| entry.ask)
+}
+
+pub(crate) fn ask_runtime_ids() -> Vec<&'static str> {
+    RUNTIME_REGISTRY
+        .iter()
+        .filter(|entry| entry.ask.is_some())
+        .map(|entry| entry.id)
+        .collect()
+}
+
+pub(crate) fn bind_workspace_runtimes(
+    input: &WorkspaceBindInput,
+) -> Result<Vec<RuntimeBindReport>> {
+    let mut reports = Vec::new();
+    for entry in RUNTIME_REGISTRY {
+        if let Some(bind) = entry.workspace_bind {
+            reports.push(bind(input)?);
+        }
     }
-    apply(probe)
+    Ok(reports)
+}
+
+pub(crate) fn open_session(runtime_id: &str) -> Option<OpenSessionFn> {
+    descriptor_by_id(runtime_id).and_then(|entry| entry.open_session)
+}
+
+pub(crate) fn dispatch_job(runtime_id: &str) -> Option<DispatchJobFn> {
+    descriptor_by_id(runtime_id).and_then(|entry| entry.dispatch)
+}
+
+pub(crate) fn dispatch_runtime_ids() -> Vec<&'static str> {
+    RUNTIME_REGISTRY
+        .iter()
+        .filter(|entry| entry.dispatch.is_some())
+        .map(|entry| entry.id)
+        .collect()
+}
+
+pub(crate) fn skill_mount_runtime_ids() -> Vec<&'static str> {
+    RUNTIME_REGISTRY
+        .iter()
+        .filter(|entry| entry.skill_mount)
+        .map(|entry| entry.id)
+        .collect()
+}
+
+pub fn runtime_catalog() -> Vec<RuntimeCatalogEntry> {
+    RUNTIME_REGISTRY
+        .iter()
+        .map(|entry| RuntimeCatalogEntry {
+            id: entry.id,
+            label: entry.label,
+            ask: entry.ask.is_some(),
+            opens_app: entry.open_session_kind == Some(OpenSessionKind::App),
+            browser_mcp: entry.browser_mcp,
+            skill_mount: entry.skill_mount,
+        })
+        .collect()
 }
 
 pub fn run_runtime_lifecycle(runtime_id: &str, action: RuntimeLifecycleAction) -> Result<()> {
@@ -569,6 +860,81 @@ mod tests {
                 "{} missing schema_probe",
                 entry.id
             );
+            assert!(
+                entry.apply_playbook.is_some(),
+                "{} missing filtered playbook",
+                entry.id
+            );
         }
+    }
+
+    #[test]
+    fn optional_capabilities_live_on_the_descriptor() {
+        let wired: Vec<_> = RUNTIME_REGISTRY
+            .iter()
+            .filter(|entry| entry.wiring.is_some())
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(wired, vec!["openclaw", "hermes", "claude-code", "codex"]);
+        let ask: Vec<_> = RUNTIME_REGISTRY
+            .iter()
+            .filter(|entry| entry.ask.is_some())
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(
+            ask,
+            vec![
+                "openclaw",
+                "hermes",
+                "deepseek-harness",
+                "claude-code",
+                "codex"
+            ]
+        );
+        let workspace: Vec<_> = RUNTIME_REGISTRY
+            .iter()
+            .filter(|entry| entry.workspace_bind.is_some())
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(
+            workspace,
+            vec!["openclaw", "hermes", "claude-code", "codex"]
+        );
+        assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
+        assert!(descriptor_by_id("workbuddy").unwrap().ask.is_none());
+        assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
+        assert!(descriptor_by_id("deepseek-harness")
+            .unwrap()
+            .wiring
+            .is_none());
+        assert_eq!(
+            dispatch_runtime_ids(),
+            vec!["openclaw", "hermes", "claude-code", "codex"]
+        );
+        assert!(RUNTIME_REGISTRY
+            .iter()
+            .all(|entry| entry.open_session.is_some()));
+        assert_eq!(
+            descriptor_by_id("cursor").unwrap().open_session_kind,
+            Some(OpenSessionKind::App)
+        );
+        assert_eq!(descriptor_by_id("claude-code").unwrap().label, "Claude");
+        let catalog = runtime_catalog();
+        assert_eq!(catalog.len(), RUNTIME_REGISTRY.len());
+        assert!(catalog
+            .iter()
+            .any(|entry| entry.id == "codex" && entry.browser_mcp && entry.ask));
+        let mut browser_ids: Vec<_> = RUNTIME_REGISTRY
+            .iter()
+            .filter(|entry| entry.browser_mcp)
+            .map(|entry| entry.id)
+            .collect();
+        let mut listed = crate::BROWSER_MCP_WIRE_RUNTIMES.to_vec();
+        browser_ids.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(browser_ids, listed);
+        assert!(catalog
+            .iter()
+            .any(|entry| entry.id == "qoder" && !entry.skill_mount && !entry.ask));
     }
 }

@@ -18,7 +18,10 @@ import { initWiringUi } from "./wiring-ui";
 import { initWorkspaceUi } from "./workspace-ui";
 import { initResourcesHub } from "./resources-hub";
 import { initFirstRunUi } from "./first-run-ui";
+import { loadRuntimeCatalog } from "./runtime-catalog";
 import type { DoctorReport, MainTabId, WorkspaceDoctorReport } from "./types";
+
+await loadRuntimeCatalog();
 
 // Native OS title bar — fill the window edge-to-edge (no frameless traffic lights).
 document.documentElement.classList.add("is-opaque-shell");

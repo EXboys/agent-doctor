@@ -1,7 +1,8 @@
+import { cancelDeepDiagnose, readImageTexts, deepDiagnoseChat, deepRepair } from "../ipc";
 //! Deep diagnose = Agent Doctor's own agent loop on top of the rule checks.
 //! The runtime under diagnosis never answers for itself.
 
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -38,22 +39,6 @@ type DeepDiagnoseEvent =
   | { type: "checking" }
   | { type: "thinking"; round: number }
   | { type: "tool"; tool: string; target: string | null };
-
-type DeepDiagnoseReport = {
-  answer: string;
-  model: string;
-  tool_calls: number;
-  open_issues: number;
-};
-
-type DeepRepairSummary = {
-  runtime_id: string;
-  backup_id: string;
-  issue_score_before: number;
-  issue_score_after: number;
-  executed: string[];
-  skipped: { id: string; reason: string }[];
-};
 
 export type DeepChatHooks = {
   /** Re-run the left-side checks after a repair changed files. */
@@ -524,7 +509,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
   async function stop(): Promise<void> {
     setStatus(t("diagnose.flow.deepStopping"));
     try {
-      await invoke<boolean>("cancel_deep_diagnose_command");
+      await cancelDeepDiagnose();
     } catch {
       /* ignore */
     }
@@ -561,9 +546,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     if (imagePaths.length > 0 && readImageTextEnabled()) {
       setStatus(t("chat.readingImages"));
       try {
-        const report = await invoke<{
-          readings: { name: string; text: string; ok: boolean }[];
-        }>("read_image_texts_command", { paths: imagePaths });
+        const report = await readImageTexts({ paths: imagePaths });
         readings = (report.readings ?? [])
           .filter((item) => item.ok && item.text.trim())
           .map((item) => ({ name: item.name, text: item.text }));
@@ -577,7 +560,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     }
 
     try {
-      const report = await invoke<DeepDiagnoseReport>("deep_diagnose_chat_command", {
+      const report = await deepDiagnoseChat({
         runtime: session.runtimeId,
         question: buildQuestion(text, attachments, readings),
         history,
@@ -619,7 +602,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     statusText = t("diagnose.flow.deepRepairing");
     paint();
     try {
-      const summary = await invoke<DeepRepairSummary>("deep_repair_command", {
+      const summary = await deepRepair({
         runtime: session.runtimeId,
       });
       if (summary.executed.length > 0) {

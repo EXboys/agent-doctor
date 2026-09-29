@@ -1,7 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { isDesktopAppRuntimeId } from "./agents-ui";
 import { t } from "./i18n";
-import type { OpenSessionReport } from "./types";
+import { openSession, openAskWindow as openAskWindowCommand, closeAskWindow } from "./ipc";
 
 export interface AgentsSessionsDeps {
   setStatusBanner: (kind: "ok" | "warn" | "error" | "neutral", message: string) => void;
@@ -29,7 +29,7 @@ const openingSessionRuntimes = new Set<string>();
 export function createAgentsSessions(deps: AgentsSessionsDeps) {
   async function openDesktopApp(runtime: string): Promise<void> {
     await withTimeout(
-      invoke("open_session_command", {
+      openSession({
         runtime,
         cwd: null,
         prompt: null,
@@ -47,13 +47,13 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
         return;
       }
       await withTimeout(
-        invoke("open_ask_window_command", { runtime }),
+        openAskWindowCommand({ runtime }),
         15_000,
         new Error(t("runtime.openTimeout")),
       );
     } catch (error) {
       try {
-        await invoke("close_ask_window_command", { destroy: true });
+        await closeAskWindow({ destroy: true });
       } catch {
         /* window may already be gone or the UI thread is stuck */
       }
@@ -72,13 +72,13 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
         JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
       );
       await withTimeout(
-        invoke("open_ask_window_command", { runtime }),
+        openAskWindowCommand({ runtime }),
         15_000,
         new Error(t("runtime.openTimeout")),
       );
     } catch (error) {
       try {
-        await invoke("close_ask_window_command", { destroy: true });
+        await closeAskWindow({ destroy: true });
       } catch {
         /* window may already be gone or the UI thread is stuck */
       }
@@ -105,7 +105,7 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
     }
     try {
       const report = await withTimeout(
-        invoke<OpenSessionReport>("open_session_command", {
+        openSession({
           runtime,
           cwd: null,
           prompt: null,

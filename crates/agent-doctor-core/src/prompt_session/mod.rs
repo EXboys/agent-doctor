@@ -25,11 +25,11 @@ use crate::evotown::normalize_runtime;
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
 
-use claude::ClaudeAskBackend;
-use codex_app_server::CodexAskBackend;
-use deepseek_harness::DeepSeekHarnessAskBackend;
-use hermes::HermesAskBackend;
-use openclaw::OpenClawAskBackend;
+pub(crate) use claude::ClaudeAskBackend;
+pub(crate) use codex_app_server::CodexAskBackend;
+pub(crate) use deepseek_harness::DeepSeekHarnessAskBackend;
+pub(crate) use hermes::HermesAskBackend;
+pub(crate) use openclaw::OpenClawAskBackend;
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -192,28 +192,15 @@ where
         bail!("prompt must not be empty");
     }
     let runtime = normalize_runtime(&options.runtime);
-    match runtime.as_str() {
-        "claude-code" | "codex" | "deepseek-harness" | "hermes" | "openclaw" => {}
-        other => bail!(
-            "ask supports claude-code, codex, deepseek-harness, hermes, or openclaw (got '{other}')"
-        ),
-    }
+    let Some(backend) = crate::runtime::ask_backend(&runtime) else {
+        let supported = crate::runtime::ask_runtime_ids().join(", ");
+        bail!("ask supports {supported} (got '{runtime}')");
+    };
     let cwd = crate::session_launch::resolve_session_cwd(options.cwd.as_deref());
     // Every assistant starts its tools as part of sending. Drop missing
     // programs first so that failure never shows up on the message.
     crate::setup::merge::drop_unreachable_ask_tools(&cwd);
-    match runtime.as_str() {
-        "claude-code" => ClaudeAskBackend.run(options, cancel, control, &mut on_event),
-        "codex" => CodexAskBackend.run(options, cancel, control, &mut on_event),
-        "deepseek-harness" => {
-            DeepSeekHarnessAskBackend.run(options, cancel, control, &mut on_event)
-        }
-        "hermes" => HermesAskBackend.run(options, cancel, control, &mut on_event),
-        "openclaw" => OpenClawAskBackend.run(options, cancel, control, &mut on_event),
-        other => bail!(
-            "ask supports claude-code, codex, deepseek-harness, hermes, or openclaw (got '{other}')"
-        ),
-    }
+    backend.run(options, cancel, control, &mut on_event)
 }
 
 #[cfg(test)]
@@ -268,8 +255,11 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
-        assert!(format!("{err:#}")
-            .contains("claude-code, codex, deepseek-harness, hermes, or openclaw"));
+        let message = format!("{err:#}");
+        assert!(message.contains("ask supports"));
+        assert!(message.contains("openclaw"));
+        assert!(message.contains("got 'not-a-runtime'"));
+        assert!(!crate::runtime::ask_runtime_ids().contains(&"qoder"));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::backend::AskBackend;
-use super::control::{CodexReplyKind, PromptSessionControl};
+use super::control::PromptSessionControl;
 use super::env::{
     apply_codex_env, apply_overlay_env, codex_provider_config_args, collect_overlay_env,
     format_command_display, prepare_codex_home, resolve_codex_overlay,
@@ -18,13 +18,16 @@ use super::env::{
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
-    is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    is_runtime_stderr_noise, join_reader, push_capped, strip_runtime_stderr_noise, summarize,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use crate::session_launch::resolve_session_cwd;
+
+mod protocol;
+pub(crate) use protocol::*;
 
 type CodexPumpOutcome = (
     (PromptSessionStatus, Option<i32>, String, String),
@@ -370,7 +373,15 @@ fn build_app_server_command(
     Ok(cmd)
 }
 
-struct PumpState {
+/// How long to keep the stdout pipe open after stdin EOF.
+///
+/// `codex app-server` stdio mode leaves on stdin EOF (same contract as LSP and
+/// MCP). Its own watchdog can then sit for up to 45s, so Ask reaps the process
+/// after this grace. The stdout reader stays up the whole time: dropping it
+/// first is what makes the server log `Failed to write to stdout: Broken pipe`.
+const APP_SERVER_SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
+
+pub(crate) struct PumpState {
     session_id: String,
     waiting_thread: Option<u64>,
     waiting_turn: Option<u64>,
@@ -429,8 +440,9 @@ where
     });
 
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
-    let mut status = PromptSessionStatus::Succeeded;
-    let mut exit_code: Option<i32> = Some(0);
+    let status;
+    let exit_code;
+    let mut shutdown_started: Option<Instant> = None;
 
     loop {
         let drained = {
@@ -448,11 +460,6 @@ where
             }
         }
 
-        if state.turn_done {
-            force_stop_child(child, pid);
-            break;
-        }
-
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             status = PromptSessionStatus::Cancelled;
@@ -466,20 +473,36 @@ where
             break;
         }
 
+        // One-shot Ask: stdin EOF is the server's shutdown signal. Keep reading
+        // stdout until the process leaves or the grace expires, then SIGKILL.
+        if state.turn_done && shutdown_started.is_none() {
+            control.close();
+            shutdown_started = Some(Instant::now());
+        }
+
         match child.try_wait() {
             Ok(Some(wait_status)) => {
                 exit_code = wait_status.code();
-                status = if wait_status.success() && state.turn_done {
+                // A finished turn stays successful even if the server's shutdown
+                // exit code is non-zero. Leaving before the turn is a failure.
+                status = if state.turn_done {
                     PromptSessionStatus::Succeeded
-                } else if wait_status.success() {
-                    // Process exited before turn completed — treat as failure.
-                    PromptSessionStatus::Failed
                 } else {
                     PromptSessionStatus::Failed
                 };
                 break;
             }
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
+            Ok(None) => {
+                if shutdown_started
+                    .is_some_and(|started| started.elapsed() >= APP_SERVER_SHUTDOWN_GRACE)
+                {
+                    force_stop_child(child, pid);
+                    status = PromptSessionStatus::Succeeded;
+                    exit_code = None;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(40));
+            }
             Err(error) => return Err(error).context("failed waiting for codex app-server"),
         }
     }
@@ -494,529 +517,26 @@ where
     for (is_stdout, line) in drained {
         if is_stdout {
             let _ = handle_rpc_line(line, control, state, on_event);
+        } else if !is_runtime_stderr_noise(&line) {
+            on_event(PromptSessionEvent::StderrLine {
+                session_id: state.session_id.clone(),
+                line: humanize_runtime_error(&line),
+            });
         }
     }
 
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
+    let stderr = stderr_acc
+        .lock()
+        .map(|g| strip_runtime_stderr_noise(&g))
+        .unwrap_or_default();
     Ok((status, exit_code, stdout, stderr))
-}
-
-fn handle_rpc_line<F>(
-    line: String,
-    control: &PromptSessionControl,
-    state: &mut PumpState,
-    on_event: &mut F,
-) -> Result<()>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let Ok(value) = serde_json::from_str::<Value>(&line) else {
-        if !line.trim().is_empty() {
-            on_event(PromptSessionEvent::StdoutLine {
-                session_id: state.session_id.clone(),
-                line,
-            });
-        }
-        return Ok(());
-    };
-
-    // JSON-RPC response
-    if let Some(id) = value.get("id") {
-        if value.get("result").is_some() || value.get("error").is_some() {
-            return handle_rpc_response(&value, id, control, state, on_event);
-        }
-    }
-
-    // Server-initiated request (approvals)
-    if let (Some(id), Some(method)) = (
-        value.get("id"),
-        value.get("method").and_then(|m| m.as_str()),
-    ) {
-        return handle_server_request(method, id, value.get("params"), control, state, on_event);
-    }
-
-    // Notification
-    if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
-        handle_notification(method, value.get("params"), state, on_event);
-    }
-
-    Ok(())
-}
-
-fn handle_rpc_response<F>(
-    value: &Value,
-    id: &Value,
-    control: &PromptSessionControl,
-    state: &mut PumpState,
-    on_event: &mut F,
-) -> Result<()>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let id_num = id.as_u64().or_else(|| id.as_i64().map(|n| n as u64));
-
-    if let Some(err) = value.get("error") {
-        let msg = err
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("codex app-server error");
-        on_event(PromptSessionEvent::StderrLine {
-            session_id: state.session_id.clone(),
-            line: humanize_runtime_error(msg),
-        });
-        if state.waiting_thread == id_num || state.waiting_turn == id_num {
-            state.turn_done = true;
-        }
-        return Ok(());
-    }
-
-    if state.waiting_thread == id_num {
-        state.waiting_thread = None;
-        let thread_id = value
-            .pointer("/result/thread/id")
-            .or_else(|| value.pointer("/result/thread/sessionId"))
-            .or_else(|| value.pointer("/result/threadId"))
-            .or_else(|| value.pointer("/result/id"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .context("thread/start missing thread id")?;
-        state.thread_id = Some(thread_id.clone());
-
-        let turn_id = next_rpc_id();
-        state.waiting_turn = Some(turn_id);
-        on_event(PromptSessionEvent::Status {
-            session_id: state.session_id.clone(),
-            phase: "requesting".into(),
-            message: "正在请求模型…".into(),
-        });
-        control.write_line(
-            &json!({
-                "method": "turn/start",
-                "id": turn_id,
-                "params": {
-                    "threadId": thread_id,
-                    "input": [{ "type": "text", "text": state.prompt }],
-                    "cwd": state.cwd,
-                    "approvalPolicy": state.approval_policy,
-                    // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).
-                    "sandboxPolicy": turn_sandbox_policy(&state.cwd)
-                }
-            })
-            .to_string(),
-        )?;
-        return Ok(());
-    }
-
-    if state.waiting_turn == id_num {
-        state.waiting_turn = None;
-        // Turn accepted; completion arrives via turn/completed notification.
-    }
-
-    Ok(())
-}
-
-fn handle_server_request<F>(
-    method: &str,
-    id: &Value,
-    params: Option<&Value>,
-    control: &PromptSessionControl,
-    state: &mut PumpState,
-    on_event: &mut F,
-) -> Result<()>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let request_id = match id {
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    };
-
-    let params = params.cloned().unwrap_or(Value::Null);
-    if let Some(kind) = codex_reply_kind(method, &params) {
-        if !state.interactive {
-            control.remember_codex_reply(&request_id, kind);
-            let _ = control.respond_permission(&request_id, false);
-            return Ok(());
-        }
-        let (tool_name, detail, input_json) = permission_from_codex(method, &params);
-        control.remember_codex_reply(&request_id, kind);
-        on_event(PromptSessionEvent::Status {
-            session_id: state.session_id.clone(),
-            phase: "permission".into(),
-            message: format!("等待确认：{tool_name}"),
-        });
-        on_event(PromptSessionEvent::PermissionRequest {
-            session_id: state.session_id.clone(),
-            request_id,
-            tool_name,
-            detail,
-            input_json,
-        });
-        return Ok(());
-    }
-
-    on_event(PromptSessionEvent::Status {
-        session_id: state.session_id.clone(),
-        phase: "info".into(),
-        message: format!("auto-decline unsupported request: {method}"),
-    });
-    let _ = control.decline_codex_rpc(id);
-    Ok(())
-}
-
-fn handle_notification<F>(
-    method: &str,
-    params: Option<&Value>,
-    state: &mut PumpState,
-    on_event: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
-    let params = params.cloned().unwrap_or(Value::Null);
-    match method {
-        "turn/started" => {
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: "requesting".into(),
-                message: "正在请求模型…".into(),
-            });
-        }
-        "turn/completed" | "turn/finished" => {
-            state.turn_done = true;
-            if !state.saw_agent_delta {
-                if let Some(text) = turn_completed_agent_text(&params) {
-                    state.saw_agent_delta = true;
-                    on_event(PromptSessionEvent::Delta {
-                        session_id: state.session_id.clone(),
-                        text,
-                    });
-                }
-            }
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: "writing".into(),
-                message: "本轮完成".into(),
-            });
-        }
-        "turn/failed" => {
-            state.turn_done = true;
-            let msg = params
-                .pointer("/error/message")
-                .or_else(|| params.pointer("/turn/error/message"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Codex turn failed");
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: state.session_id.clone(),
-                line: humanize_runtime_error(msg),
-            });
-        }
-        "item/agentMessage/delta" => {
-            if let Some(text) = json_delta_text(&params) {
-                // Do NOT emit Status on every delta — the chat UI seals the
-                // assistant bubble on phase changes, which otherwise stores
-                // one localStorage message per token.
-                state.saw_agent_delta = true;
-                on_event(PromptSessionEvent::Delta {
-                    session_id: state.session_id.clone(),
-                    text,
-                });
-            }
-        }
-        "mcpServer/startupStatus/updated" => {
-            let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("mcp");
-            let status = params
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("starting");
-            let error = params.get("error").and_then(|v| v.as_str()).unwrap_or("");
-            // A missing program is cleaned before launch. If one still fails
-            // that way, the reply can continue — don't show it as this message failing.
-            if status == "failed" && mcp_startup_is_missing_program(error) {
-                eprintln!("[ask] ignored missing tool {name}: {error}");
-                return;
-            }
-            let message = if error.is_empty() {
-                format!("MCP {name}: {status}")
-            } else {
-                format!("MCP {name}: {status} ({error})")
-            };
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: if status == "failed" { "error" } else { "mcp" }.into(),
-                message,
-            });
-        }
-        "item/completed" | "item/started" => {
-            let item = params.get("item").cloned().unwrap_or(Value::Null);
-            let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match item_type {
-                // Prefer streamed deltas; only fall back to the completed payload
-                // when no delta arrived (some turns emit text only on completed).
-                // Official app-server uses camelCase `agentMessage`; older builds used snake_case.
-                t if is_agent_message_type(t) && method == "item/completed" => {
-                    if !state.saw_agent_delta {
-                        if let Some(text) = agent_item_text(&item) {
-                            state.saw_agent_delta = true;
-                            on_event(PromptSessionEvent::Delta {
-                                session_id: state.session_id.clone(),
-                                text,
-                            });
-                        }
-                    }
-                }
-                t if is_agent_message_type(t) => {}
-                "commandExecution" | "command_execution" | "fileChange" | "file_change"
-                | "mcpToolCall" | "mcp_tool_call" => {
-                    // Emit once on start — completed would duplicate the same chip in UI.
-                    if method == "item/started" {
-                        let label = item
-                            .get("command")
-                            .and_then(|v| {
-                                if let Some(s) = v.as_str() {
-                                    Some(s.to_string())
-                                } else if let Some(arr) = v.as_array() {
-                                    Some(
-                                        arr.iter()
-                                            .filter_map(|x| x.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(" "),
-                                    )
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| {
-                                item.get("tool")
-                                    .and_then(|v| v.as_str())
-                                    .map(str::to_string)
-                            })
-                            .or_else(|| {
-                                let server = item.get("server").and_then(|v| v.as_str());
-                                let tool = item.get("tool").and_then(|v| v.as_str());
-                                match (server, tool) {
-                                    (Some(s), Some(t)) => Some(format!("{s}/{t}")),
-                                    _ => None,
-                                }
-                            })
-                            .unwrap_or_else(|| item_type.to_string());
-                        let label = shorten_tool_label(&label);
-                        on_event(PromptSessionEvent::Status {
-                            session_id: state.session_id.clone(),
-                            phase: "tool".into(),
-                            message: label,
-                        });
-                    }
-                }
-                "error" => {
-                    if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
-                        on_event(PromptSessionEvent::StderrLine {
-                            session_id: state.session_id.clone(),
-                            line: humanize_runtime_error(msg),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        "error" => {
-            if let Some(msg) = params.get("message").and_then(|v| v.as_str()) {
-                on_event(PromptSessionEvent::StderrLine {
-                    session_id: state.session_id.clone(),
-                    line: humanize_runtime_error(msg),
-                });
-            }
-        }
-        _ => {}
-    }
-}
-
-fn mcp_startup_is_missing_program(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("os error 2") || lower.contains("no such file") || lower.contains("系统找不到")
-}
-
-fn is_agent_message_type(item_type: &str) -> bool {
-    item_type == "agentMessage" || item_type == "agent_message"
-}
-
-fn json_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) if !s.is_empty() => Some(s.clone()),
-        Value::Object(map) => map
-            .get("text")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string),
-        Value::Array(items) => {
-            let joined = items
-                .iter()
-                .filter_map(json_text)
-                .collect::<Vec<_>>()
-                .join("");
-            if joined.is_empty() {
-                None
-            } else {
-                Some(joined)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn json_delta_text(params: &Value) -> Option<String> {
-    params
-        .get("delta")
-        .and_then(json_text)
-        .or_else(|| params.pointer("/item/text").and_then(json_text))
-}
-
-fn agent_item_text(item: &Value) -> Option<String> {
-    json_text(&item.get("text").cloned().unwrap_or(Value::Null))
-        .or_else(|| json_text(&item.get("content").cloned().unwrap_or(Value::Null)))
-        .or_else(|| json_text(&item.get("message").cloned().unwrap_or(Value::Null)))
-}
-
-fn turn_completed_agent_text(params: &Value) -> Option<String> {
-    if let Some(text) = params
-        .pointer("/turn/lastAgentMessage")
-        .or_else(|| params.pointer("/lastAgentMessage"))
-        .or_else(|| params.pointer("/turn/last_agent_message"))
-        .and_then(json_text)
-    {
-        return Some(text);
-    }
-    let items = params
-        .pointer("/turn/items")
-        .or_else(|| params.get("items"))
-        .and_then(|v| v.as_array())?;
-    for item in items.iter().rev() {
-        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if is_agent_message_type(item_type) {
-            if let Some(text) = agent_item_text(item) {
-                return Some(text);
-            }
-        }
-    }
-    None
-}
-
-fn codex_reply_kind(method: &str, params: &Value) -> Option<CodexReplyKind> {
-    let lower = method.to_ascii_lowercase();
-    if lower.contains("elicitation") {
-        return Some(CodexReplyKind::Elicitation);
-    }
-    if lower.contains("permissions") && lower.contains("requestapproval") {
-        let requested = params
-            .get("permissions")
-            .cloned()
-            .unwrap_or(Value::Object(Default::default()));
-        return Some(CodexReplyKind::Permissions { requested });
-    }
-    if lower.contains("requestapproval")
-        || lower.ends_with("requestuserinput")
-        || lower.contains("requestuserinput")
-    {
-        return Some(CodexReplyKind::Decision);
-    }
-    None
-}
-
-pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, String, String) {
-    let tool_name = if method.contains("fileChange") || method.contains("file_change") {
-        "FileChange".to_string()
-    } else if method.contains("permissions") {
-        "Permissions".to_string()
-    } else if method.to_ascii_lowercase().contains("elicitation") {
-        params
-            .get("serverName")
-            .or_else(|| params.get("server"))
-            .and_then(|v| v.as_str())
-            .map(|s| format!("MCP {s}"))
-            .unwrap_or_else(|| "MCP".to_string())
-    } else if method.to_ascii_lowercase().contains("requestuserinput") {
-        params
-            .get("tool")
-            .or_else(|| params.get("toolName"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("Tool")
-            .to_string()
-    } else {
-        "Bash".to_string()
-    };
-
-    let detail = params
-        .get("reason")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            params
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            params.get("command").and_then(|v| {
-                if let Some(s) = v.as_str() {
-                    Some(s.to_string())
-                } else if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    )
-                } else {
-                    None
-                }
-            })
-        })
-        .or_else(|| {
-            params
-                .get("cwd")
-                .and_then(|v| v.as_str())
-                .map(|c| format!("cwd: {c}"))
-        })
-        .unwrap_or_else(|| params.to_string());
-
-    (tool_name, detail, params.to_string())
-}
-
-/// Collapse shell wrappers like `/bin/zsh -lc 'pwd'` → `pwd` for compact UI chips.
-fn shorten_tool_label(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return t.to_string();
-    }
-    // `/bin/zsh -lc 'cmd'` or `zsh -lc "cmd"`
-    if let Some(idx) = t.find(" -lc ") {
-        let rest = t[idx + 5..].trim();
-        let unquoted = rest
-            .strip_prefix('\'')
-            .and_then(|s| s.strip_suffix('\''))
-            .or_else(|| rest.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-            .unwrap_or(rest)
-            .trim();
-        if !unquoted.is_empty() {
-            return unquoted.to_string();
-        }
-    }
-    // argv form: /bin/zsh -lc pwd
-    let parts: Vec<&str> = t.split_whitespace().collect();
-    if parts.len() >= 3 && parts[1] == "-lc" {
-        return parts[2..].join(" ");
-    }
-    t.to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prompt_session::control::CodexReplyKind;
 
     #[test]
     fn missing_program_startup_is_not_a_message_failure() {
@@ -1231,6 +751,108 @@ time.sleep(5)
         assert!(evs.iter().any(|e| matches!(
             e,
             PromptSessionEvent::Delta { text, .. } if text.contains("codex-ok")
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn app_server_shutdown_hides_broken_pipe() {
+        use crate::prompt_session::util::TEST_ENV_LOCK;
+        use std::fs;
+        use std::path::{Path, PathBuf};
+        use std::sync::Mutex as StdMutex;
+        use tempfile::tempdir;
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        fn write_fake_bin(dir: &Path, name: &str, script: &str) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.join(name);
+            fs::write(&path, script).expect("write fake bin");
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+            path
+        }
+
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "fake-codex",
+            r##"#!/usr/bin/env python3
+import json, sys
+
+def read():
+    line = sys.stdin.readline()
+    if not line:
+        return None
+    return json.loads(line)
+
+msg = read()
+print(json.dumps({"id": msg["id"], "result": {"userAgent": "fake"}}), flush=True)
+read()  # initialized
+msg = read()
+print(json.dumps({"id": msg["id"], "result": {"thread": {"id": "thr_bye"}}}), flush=True)
+msg = read()
+print(json.dumps({"id": msg["id"], "result": {"turn": {"id": "turn_1"}}}), flush=True)
+print(json.dumps({
+  "method": "turn/completed",
+  "params": {"turn": {"id": "turn_1", "items": [{"type": "agentMessage", "text": "done-ok"}]}}
+}), flush=True)
+print("provider rejected the key", file=sys.stderr, flush=True)
+print(
+    "2026-09-28T09:19:04.710092Z ERROR codex_app_server_transport::transport::stdio: Failed to write to stdout: Broken pipe (os error 32)",
+    file=sys.stderr,
+    flush=True,
+)
+# Stdio servers exit when the client closes stdin. Don't block the test if
+# the parent is still flushing.
+sys.exit(0)
+"##,
+        );
+        std::env::set_var("AGENT_DOCTOR_CODEX_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = CodexAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "codex".into(),
+                    prompt: "hi".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 10,
+                    dangerously_skip_permissions: false,
+                    full_auto: true,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                },
+                PromptSessionCancel::new(),
+                Some(PromptSessionControl::new()),
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_CODEX_BIN");
+        assert_eq!(
+            report.status,
+            PromptSessionStatus::Succeeded,
+            "{}",
+            report.summary
+        );
+        assert!(!report.summary.to_ascii_lowercase().contains("broken pipe"));
+        assert!(!report
+            .log_excerpt
+            .to_ascii_lowercase()
+            .contains("broken pipe"));
+        let evs = events.lock().unwrap();
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Delta { text, .. } if text.contains("done-ok")
+        )));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::StderrLine { line, .. } if line.contains("provider rejected")
+        )));
+        assert!(!evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::StderrLine { line, .. } if line.to_ascii_lowercase().contains("broken pipe")
         )));
     }
 }

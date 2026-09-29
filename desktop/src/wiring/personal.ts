@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
@@ -8,13 +8,12 @@ import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
 import type {
   PersonalProviderListItem,
-  PersonalProviderSetupReport,
   PersonalProvidersDocument,
   PersonalProviderStatus,
-  PersonalProviderVerifyReport,
   ProviderProtocol,
 } from "../types";
 import type { PresetsApi } from "./presets";
+import { getPersonalProviderStatus, listPersonalProviders, verifyPersonalProvider as verifyPersonalProviderCommand, upsertPersonalProvider as upsertPersonalProviderCommand, activatePersonalProvider, deletePersonalProvider } from "../ipc";
 
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -187,8 +186,8 @@ export function createPersonalController(deps: PersonalDeps) {
   async function loadPersonalProviderStatus() {
     try {
       const [status, doc] = await Promise.all([
-        invoke<PersonalProviderStatus>("get_personal_provider_status_command"),
-        invoke<PersonalProvidersDocument>("list_personal_providers_command"),
+        getPersonalProviderStatus(),
+        listPersonalProviders(),
       ]);
       appState.personalProvidersDoc = doc;
       renderPersonalProviderStatus(status);
@@ -313,7 +312,7 @@ export function createPersonalController(deps: PersonalDeps) {
     setPersonalBusy(true);
     setPersonalHint("busy", t("personal.verifying"));
     try {
-      const report = await invoke<PersonalProviderVerifyReport>("verify_personal_provider_command", {
+      const report = await verifyPersonalProviderCommand({
         url: values.url,
         key: values.key,
         protocol: values.protocol,
@@ -357,7 +356,7 @@ export function createPersonalController(deps: PersonalDeps) {
     try {
       if (activate) {
         // Save first without activate, then activate for a proper setup report.
-        const doc = await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
+        const doc = await upsertPersonalProviderCommand({
           id: values.id,
           name: values.name,
           url: values.url,
@@ -373,10 +372,7 @@ export function createPersonalController(deps: PersonalDeps) {
         if (!targetId) {
           throw new Error("saved provider id missing");
         }
-        const report = await invoke<PersonalProviderSetupReport>(
-          "activate_personal_provider_command",
-          { id: targetId },
-        );
+        const report = await activatePersonalProvider({ id: targetId });
         personalKeyEl.value = "";
         await loadPersonalProviderStatus();
         await deps.loadModeStatus();
@@ -389,7 +385,7 @@ export function createPersonalController(deps: PersonalDeps) {
         setPersonalHint("hide");
         showPersonalListView();
       } else {
-        await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
+        await upsertPersonalProviderCommand({
           id: values.id,
           name: values.name,
           url: values.url,
@@ -418,7 +414,7 @@ export function createPersonalController(deps: PersonalDeps) {
     setPersonalBusy(true);
     personalListHintEl.textContent = t("personal.applying");
     try {
-      const report = await invoke<PersonalProviderSetupReport>("activate_personal_provider_command", {
+      const report = await activatePersonalProvider({
         id,
       });
       await loadPersonalProviderStatus();
@@ -437,7 +433,7 @@ export function createPersonalController(deps: PersonalDeps) {
   async function deleteProviderById(id: string) {
     setPersonalBusy(true);
     try {
-      const doc = await invoke<PersonalProvidersDocument>("delete_personal_provider_command", {
+      const doc = await deletePersonalProvider({
         id,
       });
       appState.personalProvidersDoc = doc;

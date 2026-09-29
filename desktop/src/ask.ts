@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
+import { cancelPromptSession, startPromptSession } from "./ipc";
 
 export type AskRuntime =
   | "claude-code"
@@ -12,17 +13,6 @@ export type AskRuntime =
   | "deepseek-harness";
 
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
-
-interface PromptSessionReport {
-  session_id: string;
-  runtime: string;
-  cwd: string;
-  status: PromptSessionStatus;
-  exit_code: number | null;
-  summary: string;
-  log_excerpt: string;
-  duration_ms: number;
-}
 
 type PromptSessionEvent =
   | { type: "started"; session_id: string; runtime: string; cwd: string; command: string }
@@ -284,7 +274,7 @@ export function initAskPanel(hooks: AskPanelHooks): void {
 
 async function cancelAsk(): Promise<void> {
   try {
-    await invoke<boolean>("cancel_prompt_session_command");
+    await cancelPromptSession();
     setHint(t("ask.cancelling"), "warn");
   } catch (error) {
     setHint(withErrorDetail(t("ask.cancelFailed"), error), "error");
@@ -327,7 +317,7 @@ async function startAsk(hooks: AskPanelHooks): Promise<void> {
   }
 
   try {
-    const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
+    const report = await startPromptSession({
       runtime,
       prompt: text,
       cwd: null, // backend resolves active workspace when null

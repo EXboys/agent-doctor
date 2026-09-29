@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "../i18n";
 import {
   cleanToolLabel,
@@ -7,6 +7,7 @@ import {
 } from "./format";
 import { assistantMsgWrap, bubblePlainText } from "./copy-ui";
 import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from "./types";
+import { resolvePermissionSession } from "../ipc";
 
 export type PermissionsDeps = {
   logEl: HTMLElement;
@@ -187,7 +188,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       const items = [...pendingPermissionBatch];
       try {
         for (const item of items) {
-          await invoke<boolean>("resolve_permission_session_command", {
+          await resolvePermissionSession({
             sessionId: item.sessionId,
             requestId: item.requestId,
             allow,
@@ -359,7 +360,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
         if (card.dataset.resolved === "1") return;
         setLocalBusy(true);
         try {
-          await invoke<boolean>("resolve_permission_session_command", {
+          await resolvePermissionSession({
             sessionId: meta.backendSessionId ?? "",
             requestId: meta.requestId,
             allow,
@@ -624,7 +625,6 @@ export function createPermissionsController(deps: PermissionsDeps) {
     }
     deps.flushSessionListRender();
   }
-
 
   return {
     get pendingPermissionBatch() {

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import {
   AskMentionMenuController,
   AskResourcesController,
@@ -14,9 +14,9 @@ import type {
   ChatAttachment,
   ChatMessage,
   ChatSession,
-  PromptSessionReport,
   SessionStore,
 } from "./types";
+import { cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
 
 export type SendDeps = {
   promptEl: HTMLTextAreaElement;
@@ -94,7 +94,7 @@ export function createSendController(deps: SendDeps) {
     const gen = deps.getBusyGen();
     deps.clearQuickReplies();
     try {
-      const stopped = await invoke<boolean>("cancel_prompt_session_command");
+      const stopped = await cancelPromptSession();
       deps.setStatus(t("chat.cancelling"), "warn");
       deps.pushActivity("think", t("chat.cancelling"));
       if (!stopped && deps.getBusy() && deps.getBusyGen() === gen) {
@@ -197,9 +197,7 @@ export function createSendController(deps: SendDeps) {
       deps.setStatus(t("chat.readingImages"), "muted");
       deps.pushActivity("think", t("chat.readingImages"));
       try {
-        const report = await invoke<{
-          readings: { name: string; text: string; ok: boolean }[];
-        }>("read_image_texts_command", { paths: imagePaths });
+        const report = await readImageTexts({ paths: imagePaths });
         readings = (report.readings ?? [])
           .filter((item) => item.ok && item.text.trim())
           .map((item) => ({ name: item.name, text: item.text }));
@@ -222,7 +220,7 @@ export function createSendController(deps: SendDeps) {
     );
 
     try {
-      const report = await invoke<PromptSessionReport>("start_prompt_session_command", {
+      const report = await startPromptSession({
         runtime,
         prompt,
         cwd: deps.getWorkspaceCwd()?.trim() || null,
@@ -261,7 +259,7 @@ export function createSendController(deps: SendDeps) {
         }
       } else if (/already running/i.test(message)) {
         try {
-          await invoke<boolean>("cancel_prompt_session_command");
+          await cancelPromptSession();
         } catch {
           /* ignore */
         }

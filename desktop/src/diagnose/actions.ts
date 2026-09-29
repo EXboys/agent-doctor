@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -13,19 +13,14 @@ import { isDesktopAppRuntimeId } from "../agents-ui";
 import { t } from "../i18n";
 import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
 import type {
-  EvotownStatus,
   InstallProgressEvent,
-  InstallRuntimeResponse,
-  PersonalProviderSetupReport,
-  PersonalProviderStatus,
-  PersonalProvidersDocument,
-  PersonalProviderVerifyReport,
   ProviderProtocol,
   RepairPreviewResponse,
 } from "../types";
 import * as dom from "./dom";
 import type { DiagnosePaintApi } from "./paint";
 import type { DiagnoseSession } from "./session";
+import { installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, getEvotownStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
 
 export type DiagnoseActionsDeps = {
   session: DiagnoseSession;
@@ -64,7 +59,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     });
 
     try {
-      const report = await invoke<InstallRuntimeResponse>("install_runtime_command", {
+      const report = await installRuntime({
         runtime: session.runtimeId,
         force: false,
       });
@@ -90,7 +85,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     paint.setBusy(true);
     paint.setResult("busy", t("diagnose.flow.autoFixing"));
     try {
-      session.preview = await invoke<RepairPreviewResponse>("run_repair_execute_command", {
+      session.preview = await runRepairExecute({
         runtime: session.runtimeId,
       });
       paint.setResult("ok", t("diagnose.flow.autoFixOk"));
@@ -118,7 +113,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     paint.setBusy(true);
     paint.setResult("busy", t("diagnose.flow.verifying"));
     try {
-      const verify = await invoke<PersonalProviderVerifyReport>("verify_personal_provider_command", {
+      const verify = await verifyPersonalProvider({
         url,
         key,
         protocol,
@@ -132,7 +127,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       }
 
       paint.setResult("busy", t("diagnose.flow.saving"));
-      const doc = await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
+      const doc = await upsertPersonalProvider({
         id: null,
         name,
         url,
@@ -147,7 +142,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       if (!targetId) {
         throw new Error("saved provider id missing");
       }
-      const setup = await invoke<PersonalProviderSetupReport>("activate_personal_provider_command", {
+      const setup = await activatePersonalProvider({
         id: targetId,
       });
       dom.keyEl.value = "";
@@ -194,12 +189,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         paint.paintChecks(session.preview, { mode: "pending" });
         paint.setScanMeter(0, session.preview.checks.length, t("diagnose.flow.confirming"));
         if (isPersonalEdition()) {
-          const status = await invoke<PersonalProviderStatus>(
-            "get_personal_provider_status_command",
-          );
+          const status = await getPersonalProviderStatus();
           providerOk = status.configured;
         } else {
-          const status = await invoke<EvotownStatus>("get_evotown_status_command");
+          const status = await getEvotownStatus();
           providerOk = status.configured;
         }
       } else {
@@ -212,12 +205,10 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           deps.loadPreview(),
           (async () => {
             if (isPersonalEdition()) {
-              const status = await invoke<PersonalProviderStatus>(
-                "get_personal_provider_status_command",
-              );
+              const status = await getPersonalProviderStatus();
               return status.configured;
             }
-            const status = await invoke<EvotownStatus>("get_evotown_status_command");
+            const status = await getEvotownStatus();
             return status.configured;
           })(),
         ]);
@@ -290,7 +281,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
   }
 
   async function openDesktopApp(): Promise<void> {
-    await invoke("open_session_command", {
+    await openSession({
       runtime: session.runtimeId,
       cwd: null,
       prompt: null,
@@ -305,7 +296,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         await openDesktopApp();
         return;
       }
-      await invoke("open_ask_window_command", { runtime: session.runtimeId });
+      await openAskWindow({ runtime: session.runtimeId });
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("runtime.openFailed"), error));
     }
@@ -321,7 +312,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         ASK_VERIFY_DRAFT_KEY,
         JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
       );
-      await invoke("open_ask_window_command", { runtime: session.runtimeId });
+      await openAskWindow({ runtime: session.runtimeId });
       paint.setResult("ok", t("diagnose.flow.askVerifyHint"));
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("runtime.openFailed"), error));
@@ -330,8 +321,8 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function openTeamWiring(): Promise<void> {
     try {
-      await invoke("focus_main_tab_command", { tab: "provider" });
-      await invoke("close_diagnose_window_command", { destroy: false });
+      await focusMainTab({ tab: "provider" });
+      await closeDiagnoseWindow({ destroy: false });
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("diagnose.flow.scanFailed"), error));
     }
@@ -339,7 +330,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function closeWindow(): Promise<void> {
     try {
-      await invoke("close_diagnose_window_command", { destroy: false });
+      await closeDiagnoseWindow({ destroy: false });
     } catch {
       try {
         await getCurrentWindow().hide();

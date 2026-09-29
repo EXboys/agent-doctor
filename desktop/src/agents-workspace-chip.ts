@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "./i18n";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
 import type { MainTabId, WorkspacesDocument } from "./types";
+import { useWorkspace } from "./ipc";
 
 export interface AgentsWorkspaceChipDeps {
   setMainTab: (tab: MainTabId) => void;
@@ -87,7 +88,7 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
     closeAgentsWsPicker();
     agentsWsNameEl.textContent = name;
     try {
-      await invoke("use_workspace_command", { name });
+      await useWorkspace({ name });
       await deps.loadWorkspaces();
       // Refresh CTA now that workspace is active.
       const activeRuntimeId = deps.getActiveRuntimeId();

@@ -1,13 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
 import type {
-  EngineRegisterStatus,
   EvotownStatus,
-  OnboardingReport,
-  RegisterReport,
-  SyncReport,
 } from "../types";
+import { getEngineRegisterStatus, getEvotownStatus, runEvotownOnboarding as runEvotownOnboardingCommand, runEngineRegister as runEngineRegisterCommand, runSync } from "../ipc";
 
 const evotownSectionEl = document.querySelector<HTMLElement>("#evotown-section")!;
 const evotownStatusEl = document.querySelector<HTMLElement>("#evotown-status")!;
@@ -46,7 +43,7 @@ export function createEvotownController(deps: EvotownDeps) {
 
   async function loadEngineRegisterStatus() {
     try {
-      const status = await invoke<EngineRegisterStatus>("get_engine_register_status_command");
+      const status = await getEngineRegisterStatus();
       if (status.registered && status.engine_id) {
         evotownEngineStatusEl.textContent = t("evotown.engineReady", { id: status.engine_id });
         evotownEngineBadgeEl.hidden = false;
@@ -115,7 +112,7 @@ export function createEvotownController(deps: EvotownDeps) {
 
   async function loadEvotownStatus() {
     try {
-      const status = await invoke<EvotownStatus>("get_evotown_status_command");
+      const status = await getEvotownStatus();
       renderEvotownStatus(status);
     } catch (error) {
       evotownStatusEl.textContent = withErrorDetail(t("evotown.connectFailed"), error);
@@ -136,7 +133,7 @@ export function createEvotownController(deps: EvotownDeps) {
     evotownResyncEl.disabled = true;
     evotownHintEl.textContent = t("evotown.connecting");
     try {
-      const report = await invoke<OnboardingReport>("run_evotown_onboarding_command", {
+      const report = await runEvotownOnboardingCommand({
         url,
         key,
         syncSkills: true,
@@ -168,7 +165,7 @@ export function createEvotownController(deps: EvotownDeps) {
     evotownEngineRegisterEl.disabled = true;
     evotownEngineHintEl.textContent = t("evotown.engineRegistering");
     try {
-      const report = await invoke<RegisterReport>("run_engine_register_command", {
+      const report = await runEngineRegisterCommand({
         bootstrapToken: bootstrap,
         engineId: evotownEngineIdEl.value.trim() || null,
         rotate: evotownEngineRotateEl.checked,
@@ -190,7 +187,7 @@ export function createEvotownController(deps: EvotownDeps) {
     evotownResyncEl.disabled = true;
     evotownHintEl.textContent = t("evotown.resyncRunning");
     try {
-      const report = await invoke<SyncReport>("run_sync_command");
+      const report = await runSync();
       evotownHintEl.textContent = t("evotown.resyncOk", {
         installed: String(report.installed),
         skipped: String(report.skipped),

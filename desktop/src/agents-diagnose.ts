@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import {
@@ -22,11 +22,10 @@ import type {
   DoctorReport,
   RepairPreviewResponse,
   RepairStatusFilter,
-  RestoreSummary,
   RuntimeDoctorResult,
   WindowSizeReport,
-  WorkspaceFixReport,
 } from "./types";
+import { resizeMainWindow, openDiagnoseWindow as openDiagnoseWindowCommand, openPath, runBrowserSmoke, runRepairRollback, runRepairPreview, runRepairExecute, workspaceFix, openSession } from "./ipc";
 
 export const MAIN_COMPACT_WIDTH = 420;
 /** Room for diagnose aside beside the compact agents column. */
@@ -65,14 +64,14 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   }
 
   async function setMainWindowWidth(width: number): Promise<WindowSizeReport> {
-    return invoke<WindowSizeReport>("resize_main_window_command", {
+    return resizeMainWindow({
       width,
       height: null,
     });
   }
 
   async function readMainWindowSize(): Promise<WindowSizeReport> {
-    return invoke<WindowSizeReport>("resize_main_window_command", {
+    return resizeMainWindow({
       width: null,
       height: null,
     });
@@ -126,7 +125,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     } catch {
       /* aside may already be closed */
     }
-    await invoke("open_diagnose_window_command", { runtime });
+    await openDiagnoseWindowCommand({ runtime });
   }
 
   async function openDiagnoseDetail(report: RepairPreviewResponse): Promise<void> {
@@ -239,7 +238,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   }
 
   async function openRepairGuide(path: string) {
-    await invoke("open_path_command", { path });
+    await openPath({ path });
   }
 
   async function runBrowserSmokeFromCard(root: HTMLElement): Promise<void> {
@@ -252,7 +251,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       slot.textContent = t("repair.browserSmokeRunning");
     }
     try {
-      const smoke = await invoke<{ ok: boolean; detail: string }>("run_browser_smoke_command");
+      const smoke = await runBrowserSmoke();
       if (slot) {
         slot.className = `repair-smoke-slot ${smoke.ok ? "ok" : "fail"}`;
         slot.textContent = smoke.ok ? t("repair.browserSmokeOk") : t("repair.browserSmokeFail");
@@ -284,11 +283,11 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     hint.hidden = false;
     hint.textContent = t("repair.rollingBack");
     try {
-      const restore = await invoke<RestoreSummary>("run_repair_rollback_command", {
+      const restore = await runRepairRollback({
         runtime,
         backup: null,
       });
-      const report = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
+      const report = await runRepairPreview({ runtime });
       mountRepairPreview(report, { resetFilter: true, open: true });
       deps.setStatusBanner(
         "ok",
@@ -323,7 +322,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     hint.textContent = t("repair.applying");
     showDiagnosePending(runtime, t("repair.applying"), "repair");
     try {
-      const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", { runtime });
+      const report = await runRepairExecute({ runtime });
       mountRepairPreview(report, { resetFilter: true, open: true });
       hint.hidden = false;
       hint.textContent = supportsBrowserMcp(runtime)
@@ -358,7 +357,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       hint.textContent = t("runtime.diagnosing");
       showDiagnosePending(runtime, t("runtime.diagnosing"));
       try {
-        preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", { runtime });
+        preview = await runRepairPreview({ runtime });
         mountRepairPreview(preview, { resetFilter: true, open: true });
       } catch (error) {
         hint.hidden = false;
@@ -402,7 +401,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
   async function migrateClaudeGlobalMcp(runtime: string): Promise<void> {
     showDiagnosePending(runtime, t("workspaces.fixRunning"), "repair");
     try {
-      const report = await invoke<WorkspaceFixReport>("workspace_fix_command", {
+      const report = await workspaceFix({
         migrateClaudeMcp: true,
       });
       const migration = report.actions.find((action) => action.id === "workspace.claude.mcp_migration");
@@ -412,7 +411,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         : detail.startsWith("applied:")
           ? t("repair.migrateWrote")
           : t("repair.migrateKeptGlobal");
-      const preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+      const preview = await runRepairPreview({
         runtime,
       });
       mountRepairPreview(preview, { resetFilter: true, open: true });
@@ -467,7 +466,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       if (action === "open-session" && runtime) {
         const terminal =
           target.closest<HTMLElement>("[data-action='open-session']")?.dataset.openTerminal === "1";
-        void invoke("open_session_command", {
+        void openSession({
           runtime,
           cwd: null,
           prompt: null,

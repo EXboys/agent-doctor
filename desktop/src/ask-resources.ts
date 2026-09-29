@@ -1,12 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import type {
   McpInventoryItem,
-  McpInventoryReport,
   SkillInventoryItem,
-  SkillsInventoryReport,
 } from "./types";
+import { listSkillsInventory, listMcpInventory, listWorkspaces } from "./ipc";
 
 export type AskRuntime =
   | "claude-code"
@@ -522,12 +521,12 @@ export class AskResourcesController {
     let workspaceDoc: WorkspaceDoc | null = null;
     try {
       const [skillsReport, mcpReport] = await Promise.all([
-        invoke<SkillsInventoryReport>("list_skills_inventory_command", { remoteStats: false }),
-        invoke<McpInventoryReport>("list_mcp_inventory_command"),
+        listSkillsInventory({ remoteStats: false }),
+        listMcpInventory(),
       ]);
       workspaceCwd = mcpReport.workspace_path;
       try {
-        const doc = await invoke<WorkspaceDoc>("list_workspaces_command");
+        const doc = await listWorkspaces();
         workspaceDoc = doc;
         opts.renderWorkspaceSwitcher(doc);
         if (doc.active && doc.workspaces[doc.active]?.path) {

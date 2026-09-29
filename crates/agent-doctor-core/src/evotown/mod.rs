@@ -29,6 +29,7 @@ pub use jobs::{
     execute_job, is_known_dispatch_runtime, known_dispatch_runtimes, normalize_runtime,
     resolve_runtime, AssignedJob, JobResult,
 };
+pub(crate) use jobs::{run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook};
 pub use policy::{execute_policy_pull, PolicyPullReport};
 pub use preferred_runtime::{
     preferred_runtime_status, read_preferred_runtime_from_env_file, resolve_preferred_runtime,

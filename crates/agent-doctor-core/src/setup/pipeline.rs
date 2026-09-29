@@ -52,43 +52,22 @@ pub struct RuntimeStrategy {
     pub anthropic_compatible: bool,
 }
 
-pub fn runtime_strategies() -> &'static [RuntimeStrategy] {
-    &[
-        RuntimeStrategy {
-            runtime_id: "openclaw",
-            write_semantics: WriteSemantics::Additive,
-            effector: EffectorKind::RestartGateway,
-            openai_compatible: true,
-            anthropic_compatible: false,
-        },
-        RuntimeStrategy {
-            runtime_id: "hermes",
-            write_semantics: WriteSemantics::Additive,
-            effector: EffectorKind::RestartGateway,
-            openai_compatible: true,
-            anthropic_compatible: false,
-        },
-        RuntimeStrategy {
-            runtime_id: "codex",
-            write_semantics: WriteSemantics::Additive,
-            effector: EffectorKind::ManualRestart,
-            openai_compatible: true,
-            anthropic_compatible: false,
-        },
-        RuntimeStrategy {
-            runtime_id: "claude-code",
-            write_semantics: WriteSemantics::Exclusive,
-            effector: EffectorKind::None,
-            openai_compatible: false,
-            anthropic_compatible: true,
-        },
-    ]
+pub fn runtime_strategies() -> Vec<RuntimeStrategy> {
+    crate::runtime::all_runtime_ids()
+        .filter_map(strategy_for)
+        .collect()
 }
 
-pub fn strategy_for(runtime_id: &str) -> Option<&'static RuntimeStrategy> {
-    runtime_strategies()
-        .iter()
-        .find(|s| s.runtime_id == runtime_id)
+pub fn strategy_for(runtime_id: &str) -> Option<RuntimeStrategy> {
+    let entry = crate::runtime::descriptor_by_id(runtime_id)?;
+    let wiring = entry.wiring()?;
+    Some(RuntimeStrategy {
+        runtime_id: entry.id,
+        write_semantics: wiring.write_semantics,
+        effector: wiring.effector,
+        openai_compatible: wiring.openai_compatible,
+        anthropic_compatible: wiring.anthropic_compatible,
+    })
 }
 
 pub fn effector_label(kind: EffectorKind) -> &'static str {
@@ -791,9 +770,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strategy_table_covers_core_runtimes() {
-        for id in ["openclaw", "hermes", "codex", "claude-code"] {
-            assert!(strategy_for(id).is_some(), "missing strategy for {id}");
+    fn strategy_table_covers_wired_runtimes_only() {
+        use crate::runtime::all_runtime_ids;
+
+        for id in all_runtime_ids() {
+            let wired = matches!(id, "openclaw" | "hermes" | "codex" | "claude-code");
+            assert_eq!(strategy_for(id).is_some(), wired, "{id}");
         }
         let oc = strategy_for("openclaw").unwrap();
         assert_eq!(oc.effector, EffectorKind::RestartGateway);
@@ -809,6 +791,8 @@ mod tests {
         let cd = strategy_for("claude-code").unwrap();
         assert!(cd.anthropic_compatible);
         assert!(!cd.openai_compatible);
+        assert!(strategy_for("deepseek-harness").is_none());
+        assert!(strategy_for("qoder").is_none());
     }
 
     #[test]

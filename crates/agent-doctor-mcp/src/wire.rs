@@ -1,70 +1,17 @@
 //! Wire Browser MCP into Claude Code / Codex after setup or mode switch.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+
+pub use agent_doctor_core::{
+    BrowserMcpWireReport, BrowserMcpWireResult, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
+};
 
 use crate::browser::{
     discover_chrome, resolve_profile_directory, resolve_user_data_dir, BrowserDiscovery,
 };
 use crate::config::{configure_for, mcp_servers_path_with_openclaw, McpConfigureOptions};
-use crate::status::DEFAULT_BROWSER_MCP_PORT;
-
-/// Default runtimes that accept Agent Doctor Browser MCP wiring.
-pub const BROWSER_MCP_WIRE_RUNTIMES: &[&str] = &[
-    "codex",
-    "claude-code",
-    "hermes",
-    "openclaw",
-    "deepseek-harness",
-];
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowserMcpWireResult {
-    pub runtime: String,
-    pub ok: bool,
-    pub config_path: Option<String>,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct BrowserMcpWireReport {
-    pub results: Vec<BrowserMcpWireResult>,
-}
-
-#[derive(Debug, Clone)]
-pub struct WireBrowserMcpOptions {
-    pub port: u16,
-    pub headless: bool,
-    pub user_data_dir: Option<PathBuf>,
-    pub profile_directory: Option<String>,
-    pub binary: PathBuf,
-    pub project_path: Option<PathBuf>,
-    pub codex_home: Option<PathBuf>,
-    pub hermes_home: Option<PathBuf>,
-    /// OpenClaw agent workspace — mirrors Browser MCP into `<ws>/.mcp.json`.
-    pub openclaw_workspace: Option<PathBuf>,
-    /// When empty, wires [`BROWSER_MCP_WIRE_RUNTIMES`].
-    pub runtimes: Vec<String>,
-}
-
-impl WireBrowserMcpOptions {
-    pub fn with_binary(binary: PathBuf) -> Self {
-        Self {
-            port: DEFAULT_BROWSER_MCP_PORT,
-            headless: false,
-            user_data_dir: None,
-            profile_directory: None,
-            binary,
-            project_path: None,
-            codex_home: None,
-            hermes_home: None,
-            openclaw_workspace: None,
-            runtimes: Vec::new(),
-        }
-    }
-}
 
 /// Upsert the `browser` MCP entry for each requested runtime.
 ///

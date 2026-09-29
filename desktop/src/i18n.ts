@@ -42,6 +42,14 @@ export function t(key: MessageKey, params?: Record<string, string>): string {
   return text;
 }
 
+/** Blurb keyed by runtime id (`resources.agentBlurb.<id>` in en.ts / zh.ts). */
+export function tRuntimeBlurb(runtimeId: string): string {
+  const key = `resources.agentBlurb.${runtimeId}`;
+  const localized = messages[locale] as Record<string, string>;
+  const english = messages.en as Record<string, string>;
+  return localized[key] ?? english[key] ?? "";
+}
+
 export function applyStaticI18n(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
     const key = element.dataset.i18n as MessageKey | undefined;

@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod browser;
 pub mod config;
 pub mod mcp;
@@ -8,6 +9,7 @@ pub mod status;
 pub mod tools;
 pub mod wire;
 
+pub use backend::register_browser_mcp_wire_backend;
 pub use browser::{
     cdp_automation_markers, cdp_port_is_headless, cdp_user_data_dir, connect_chrome,
     discover_browser, discover_chrome, isolated_chrome_user_data_dir, kill_chrome_on_port,

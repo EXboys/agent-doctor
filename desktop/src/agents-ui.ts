@@ -1,7 +1,13 @@
 import { agentBrandIconHtml } from "./agent-brand";
-import { t, type MessageKey } from "./i18n";
+import { t, tRuntimeBlurb, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
+import {
+  isAskRuntimeId as catalogIsAskRuntimeId,
+  isDesktopAppRuntimeId as catalogIsDesktopAppRuntimeId,
+  isKnownRuntimeId,
+  supportsBrowserMcp as catalogSupportsBrowserMcp,
+} from "./runtime-catalog";
 import type {
   HermesSettings,
   RepairPreviewResponse,
@@ -9,48 +15,21 @@ import type {
   RuntimeVersionStatus,
 } from "./types";
 
-export const RUNTIME_SHORT: Record<string, string> = {
-  openclaw: "OC",
-  hermes: "HE",
-  "claude-code": "CC",
-  codex: "CX",
-  "deepseek-harness": "DSH",
-  qoder: "QO",
-  workbuddy: "WB",
-  cursor: "CU",
-};
-
-export const ASK_RUNTIME_IDS = new Set([
-  "claude-code",
-  "codex",
-  "hermes",
-  "openclaw",
-  "deepseek-harness",
-]);
-
-export const BROWSER_MCP_RUNTIME_IDS = new Set([
-  "claude-code",
-  "codex",
-  "hermes",
-  "openclaw",
-  "deepseek-harness",
-]);
-
 export function isAskRuntimeId(runtimeId: string): boolean {
-  return ASK_RUNTIME_IDS.has(runtimeId);
+  return catalogIsAskRuntimeId(runtimeId);
 }
 
 /** Desktop app (not Agent Doctor Ask / CLI). Open the product window. */
 export function isDesktopAppRuntimeId(runtimeId: string): boolean {
-  return runtimeId === "cursor";
+  return catalogIsDesktopAppRuntimeId(runtimeId);
 }
 
 export function supportsBrowserMcp(runtimeId: string): boolean {
-  return BROWSER_MCP_RUNTIME_IDS.has(runtimeId);
+  return catalogSupportsBrowserMcp(runtimeId);
 }
 
 export function runtimeClass(id: string): string {
-  if (id in RUNTIME_SHORT) {
+  if (isKnownRuntimeId(id)) {
     return id;
   }
   return "default";
@@ -299,15 +278,7 @@ export function renderRuntimeCardActions(
 }
 
 function agentHomeBlurb(runtimeId: string): string {
-  if (runtimeId === "hermes") return t("resources.agentBlurbHermes");
-  if (runtimeId === "openclaw") return t("resources.agentBlurbOpenclaw");
-  if (runtimeId === "claude-code") return t("resources.agentBlurbClaude");
-  if (runtimeId === "codex") return t("resources.agentBlurbCodex");
-  if (runtimeId === "deepseek-harness") return t("resources.agentBlurbDeepseek");
-  if (runtimeId === "qoder") return t("resources.agentBlurbQoder");
-  if (runtimeId === "workbuddy") return t("resources.agentBlurbWorkbuddy");
-  if (runtimeId === "cursor") return t("resources.agentBlurbCursor");
-  return "";
+  return tRuntimeBlurb(runtimeId);
 }
 
 function renderSoloHero(runtime: RuntimeDoctorResult): string {

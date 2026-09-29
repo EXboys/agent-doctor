@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod adapters;
+pub mod browser_wire;
 pub mod doctor;
 pub mod edition;
 pub mod evotown;
@@ -29,6 +30,11 @@ pub use adapters::{
     HermesSettings, OpenClawAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV,
     DEEPSEEK_HARNESS_CLI, DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID,
     DEEPSEEK_HARNESS_VERSION,
+};
+pub use browser_wire::{
+    install_browser_mcp_wire_backend, BrowserMcpWireBackend, BrowserMcpWireReport,
+    BrowserMcpWireResult, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
+    DEFAULT_BROWSER_MCP_PORT,
 };
 pub use doctor::{run_doctor, DoctorReport, RuntimeDoctorResult};
 pub use edition::{ensure_edition_allows_mode, product_edition, ProductEdition};
@@ -103,11 +109,11 @@ pub use repair::{
     DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
     DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
 };
-pub use runtime::{adapter_by_id, all_adapters};
 pub use runtime::{
-    all_runtime_ids, apply_runtime_playbook, apply_runtime_playbook_filtered, descriptor_by_id,
-    run_runtime_lifecycle, runtime_supports_lifecycle, runtime_supports_playbook,
-    suggest_runtime_repairs, RuntimeDescriptor, RuntimeLifecycleAction, RuntimeProbeSpec,
+    adapter_by_id, all_adapters, all_runtime_ids, apply_runtime_playbook,
+    apply_runtime_playbook_filtered, descriptor_by_id, run_runtime_lifecycle, runtime_catalog,
+    runtime_supports_lifecycle, runtime_supports_playbook, suggest_runtime_repairs,
+    RuntimeCatalogEntry, RuntimeDescriptor, RuntimeLifecycleAction, RuntimeProbeSpec,
 };
 pub use session_launch::{
     claude_cli_deep_link, open_interactive_session, resolve_session_cwd, OpenSessionMethod,

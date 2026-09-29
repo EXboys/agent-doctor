@@ -638,6 +638,7 @@ enum McpChromeAction {
     },
 }
 fn main() -> Result<()> {
+    agent_doctor_mcp::register_browser_mcp_wire_backend();
     let cli = Cli::parse();
     match cli.command {
         Commands::Doctor { json, explain } => commands::doctor::run(json, explain)?,

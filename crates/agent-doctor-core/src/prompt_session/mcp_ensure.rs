@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use agent_doctor_mcp::{
-    discover_chrome, wire_browser_mcp, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
+use crate::browser_wire::{
+    ensure_chrome_for_wire, wire_browser_mcp, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
 };
 
 use crate::workspace::{load_workspaces, resolve_agent_doctor_binary};
@@ -132,10 +132,9 @@ pub(crate) fn ensure_browser_mcp_for_ask(
         ));
     }
 
-    let discovery = match discover_chrome() {
-        Ok(d) => d,
-        Err(err) => return Some(format!("browser MCP skipped: Chrome not found ({err})")),
-    };
+    if let Err(err) = ensure_chrome_for_wire() {
+        return Some(format!("browser MCP skipped: Chrome not found ({err})"));
+    }
     let binary = match resolve_mcp_binary() {
         Ok(path) => path,
         Err(err) => return Some(format!("browser MCP skipped: {err}")),
@@ -150,7 +149,10 @@ pub(crate) fn ensure_browser_mcp_for_ask(
     options.openclaw_workspace = openclaw_workspace;
     options.runtimes = vec![runtime.to_string()];
 
-    let report = wire_browser_mcp(&discovery, &options);
+    let report = match wire_browser_mcp(&options) {
+        Ok(report) => report,
+        Err(err) => return Some(format!("browser MCP skipped: {err}")),
+    };
     let mut notes = Vec::new();
     for item in report.results {
         if item.ok {

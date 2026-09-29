@@ -7,7 +7,7 @@ use crate::browser::{
     system_chrome_user_data_dir,
 };
 
-pub const DEFAULT_BROWSER_MCP_PORT: u16 = 9222;
+pub const DEFAULT_BROWSER_MCP_PORT: u16 = agent_doctor_core::DEFAULT_BROWSER_MCP_PORT;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserMcpStatus {

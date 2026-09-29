@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
@@ -24,16 +24,14 @@ import { createAgentsSessions } from "./agents-sessions";
 import { createAgentsWorkspaceChip } from "./agents-workspace-chip";
 import type {
   DoctorReport,
-  HermesSettings,
   MainTabId,
   ProfilesDocument,
-  RepairPreviewResponse,
   RepairStatusFilter,
   RuntimeDoctorResult,
-  RuntimeVersionStatus,
   WindowSizeReport,
   WorkspacesDocument,
 } from "./types";
+import { getHermesModel, runDoctor, checkRuntimeVersions, runRepairPreview, openResourcesWindow } from "./ipc";
 
 export interface AgentsPanelDeps {
   setMainTab: (tab: MainTabId) => void;
@@ -191,7 +189,7 @@ function hasActiveWorkspace(): boolean {
 
 async function loadHermesModel(): Promise<void> {
   try {
-    appState.hermesModel = await invoke<HermesSettings>("get_hermes_model_command");
+    appState.hermesModel = await getHermesModel();
   } catch {
     appState.hermesModel = null;
   }
@@ -234,7 +232,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   async function refresh() {
     setLoading(true);
     try {
-      const report = await invoke<DoctorReport>("run_doctor_command");
+      const report = await runDoctor();
       await renderReport(report);
       await deps.onDoctorReport(report);
     } catch (error) {
@@ -365,7 +363,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
     try {
-      const rows = await invoke<RuntimeVersionStatus[]>("check_runtime_versions_command", {
+      const rows = await checkRuntimeVersions({
         installed,
       });
       appState.runtimeVersions.clear();
@@ -400,7 +398,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         }
         if (preview && !diagnose.hasDismissed(selectedId)) {
           try {
-            const next = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+            const next = await runRepairPreview({
               runtime: selectedId,
             });
             diagnose.mountRepairPreview(next);
@@ -456,11 +454,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     }
 
     if (action === "open-agent-catalog") {
-      void invoke("open_resources_window_command", { section: "agents" });
+      void openResourcesWindow({ section: "agents" });
       return;
     }
     if (action === "open-resources-skills") {
-      void invoke("open_resources_window_command", { section: "skills" });
+      void openResourcesWindow({ section: "skills" });
       return;
     }
 

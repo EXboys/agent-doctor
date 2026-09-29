@@ -1,13 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
+
+import { runtimeLabel, skillMountRuntimeIds } from "./runtime-catalog";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { formatCount, formatRate } from "./format";
 import { appState } from "./app-state";
 import type {
-  McpModuleStatus,
-  SkillMountReport,
   SkillsInventoryReport,
 } from "./types";
+import { listSkillsInventory, mcpStatus, openResourcesWindow as openResourcesWindowCommand, unmountSyncedSkills, mountSyncedSkills as mountSyncedSkillsCommand } from "./ipc";
 
 const skillsInventoryEl = document.querySelector<HTMLElement>("#skills-inventory")!;
 const skillsRefreshEl = document.querySelector<HTMLButtonElement>("#skills-refresh")!;
@@ -28,26 +28,6 @@ const openResourcesWindowEl = document.querySelector<HTMLButtonElement>("#open-r
 const openResourcesBrowserEl = document.querySelector<HTMLButtonElement>("#open-resources-browser")!;
 const openResourcesAgentsEl = document.querySelector<HTMLButtonElement>("#open-resources-agents")!;
 const hubAgentsCountEl = document.querySelector<HTMLElement>("#hub-agents-count")!;
-
-const RUNTIME_LABELS: Record<string, string> = {
-  hermes: "Hermes",
-  openclaw: "OpenClaw",
-  "claude-code": "Claude",
-  codex: "Codex",
-  "deepseek-harness": "DeepSeek",
-  qoder: "Qoder",
-  workbuddy: "WorkBuddy",
-  cursor: "Cursor",
-};
-
-const SKILL_MOUNT_RUNTIME_ORDER = [
-  "hermes",
-  "openclaw",
-  "claude-code",
-  "codex",
-  "deepseek-harness",
-  "cursor",
-] as const;
 
 function renderSkillsInventory(report: SkillsInventoryReport) {
   skillsInventoryEl.hidden = false;
@@ -92,7 +72,7 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
     const agents = document.createElement("div");
     agents.className = "skills-agents";
     const fromApi = new Map(skill.agents.map((agent) => [agent.runtime, agent]));
-    const agentRows = SKILL_MOUNT_RUNTIME_ORDER.map(
+    const agentRows = skillMountRuntimeIds().map(
       (runtime) =>
         fromApi.get(runtime) ?? {
           runtime,
@@ -111,14 +91,14 @@ function renderSkillsInventory(report: SkillsInventoryReport) {
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = agent.mounted ? "skills-runtime is-on" : "skills-runtime";
-        const runtimeLabel = RUNTIME_LABELS[agent.runtime] ?? agent.runtime;
+        const runtimeLabelText = runtimeLabel(agent.runtime);
         chip.title = agent.mounted
-          ? `${t("skills.unmountRuntime", { runtime: runtimeLabel })}\n${agent.path}`
-          : `${t("skills.mountRuntime", { runtime: runtimeLabel })}\n${agent.path}`;
+          ? `${t("skills.unmountRuntime", { runtime: runtimeLabelText })}\n${agent.path}`
+          : `${t("skills.mountRuntime", { runtime: runtimeLabelText })}\n${agent.path}`;
         const dot = document.createElement("i");
         dot.className = "skills-runtime-dot";
         const label = document.createElement("span");
-        label.textContent = runtimeLabel;
+        label.textContent = runtimeLabelText;
         chip.append(dot, label);
         chip.addEventListener("click", () => {
           void toggleSkillRuntimeMount(chip, skill.skill_id, agent.runtime, agent.mounted);
@@ -175,7 +155,7 @@ function paintSkillsInventory(report: SkillsInventoryReport): void {
 
 async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
   try {
-    const report = await invoke<SkillsInventoryReport>("list_skills_inventory_command", {
+    const report = await listSkillsInventory({
       remoteStats: opts?.remoteStats ?? true,
     });
     appState.lastSkillsInventory = report;
@@ -216,7 +196,7 @@ function updateResourcesHubSummary(): void {
 
   const chrome = appState.lastMcpStatus?.browser;
   const configured = appState.lastMcpStatus?.configured_runtimes ?? [];
-  const agentLabels = configured.map((id) => RUNTIME_LABELS[id] ?? id);
+  const agentLabels = configured.map((id) => runtimeLabel(id));
   hubConfiguredEl.textContent =
     agentLabels.length > 0
       ? t("resources.hubAgentsOk", { list: agentLabels.join("、") })
@@ -252,7 +232,7 @@ function updateResourcesHubSummary(): void {
 
 async function loadMcpStatus() {
   try {
-    const status = await invoke<McpModuleStatus>("mcp_status_command", {
+    const status = await mcpStatus({
       port: null,
       probeChrome: false,
       discoverChrome: false,
@@ -299,7 +279,7 @@ async function openResourcesWindow(
       : section === "store"
         ? "mall"
         : section;
-  await invoke("open_resources_window_command", { section: normalized });
+  await openResourcesWindowCommand({ section: normalized });
 }
 
 function setSkillsBusy(busy: boolean) {
@@ -320,11 +300,11 @@ async function toggleSkillRuntimeMount(
   skillsFootnoteEl.textContent = wasMounted ? t("skills.unmounting") : t("skills.mounting");
   try {
     const report = wasMounted
-      ? await invoke<SkillMountReport>("unmount_synced_skills_command", {
+      ? await unmountSyncedSkills({
           skillIds: [skillId],
           runtimes: [runtime],
         })
-      : await invoke<SkillMountReport>("mount_synced_skills_command", {
+      : await mountSyncedSkillsCommand({
           skillIds: [skillId],
           runtimes: [runtime],
         });
@@ -353,7 +333,7 @@ async function mountSyncedSkills(skillIds?: string[], runtimes?: string[]) {
   setSkillsBusy(true);
   skillsFootnoteEl.textContent = t("skills.mounting");
   try {
-    const report = await invoke<SkillMountReport>("mount_synced_skills_command", {
+    const report = await mountSyncedSkillsCommand({
       skillIds: skillIds ?? null,
       runtimes: runtimes ?? null,
     });
@@ -369,7 +349,6 @@ async function mountSyncedSkills(skillIds?: string[], runtimes?: string[]) {
     setSkillsBusy(false);
   }
 }
-
 
 export interface ResourcesHubApi {
   renderSkillsInventory: (report: SkillsInventoryReport) => void;

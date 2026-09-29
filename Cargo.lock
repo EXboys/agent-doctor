@@ -35,7 +35,6 @@ dependencies = [
 name = "agent-doctor-core"
 version = "0.1.48"
 dependencies = [
- "agent-doctor-mcp",
  "anyhow",
  "base64 0.22.1",
  "dirs",
@@ -82,6 +81,7 @@ dependencies = [
 name = "agent-doctor-mcp"
 version = "0.1.48"
 dependencies = [
+ "agent-doctor-core",
  "anyhow",
  "base64 0.22.1",
  "serde",

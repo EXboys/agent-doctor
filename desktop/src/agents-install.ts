@@ -1,10 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
-import type { DoctorReport, InstallProgressEvent, InstallRuntimeResponse } from "./types";
+import type { DoctorReport, InstallProgressEvent } from "./types";
+import { installRuntime, uninstallRuntime as uninstallRuntimeCommand } from "./ipc";
 
 export interface AgentsInstallDeps {
   refresh: () => Promise<void>;
@@ -202,7 +203,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
     });
 
     try {
-      const report = await invoke<InstallRuntimeResponse>("install_runtime_command", {
+      const report = await installRuntime({
         runtime,
         force,
       });
@@ -299,7 +300,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
     }
     deps.setStatusBanner("neutral", t("runtime.uninstalling"));
     try {
-      await invoke("uninstall_runtime_command", { runtime });
+      await uninstallRuntimeCommand({ runtime });
       if (hint) {
         hint.textContent = t("runtime.uninstallOk");
       }

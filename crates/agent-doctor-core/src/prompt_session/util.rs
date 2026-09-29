@@ -141,6 +141,11 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     {
         return true;
     }
+    // Codex app-server logs this when the client has already finished reading
+    // stdout (stdio JSON-RPC shutdown). The turn itself already completed.
+    if is_stdio_shutdown_noise(&lower) {
+        return true;
+    }
     [
         "openai codex",
         "reading additional input from stdin",
@@ -155,6 +160,30 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     ]
     .iter()
     .any(|p| lower.starts_with(p) || lower == *p)
+}
+
+/// `EPIPE` / Windows `ERROR_NO_DATA` from a stdio peer that already closed its
+/// end of the pipe. Expected while an app-server or LSP-style child shuts down.
+fn is_stdio_shutdown_noise(lower: &str) -> bool {
+    let closed = lower.contains("broken pipe")
+        || lower.contains("os error 32")
+        || lower.contains("os error 232")
+        || lower.contains("pipe is being closed")
+        || lower.contains("pipe has been ended");
+    if !closed {
+        return false;
+    }
+    lower.contains("stdout")
+        || lower.contains("stdin")
+        || lower.contains("stdio")
+        || lower.contains("codex_app_server_transport")
+}
+
+pub(crate) fn strip_runtime_stderr_noise(raw: &str) -> String {
+    raw.lines()
+        .filter(|line| !is_runtime_stderr_noise(line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Map Codex app-server / policy jargon into short Chinese UI copy.
@@ -201,6 +230,15 @@ mod tests {
             "MCP client for `node_repl` failed to start: MCP startup failed: No such file or directory (os error 2)"
         ));
         assert!(!is_runtime_stderr_noise("provider rejected the key"));
+        assert!(is_runtime_stderr_noise(
+            "2026-09-28T09:19:04.710092Z ERROR codex_app_server_transport::transport::stdio: Failed to write to stdout: Broken pipe (os error 32)"
+        ));
+        assert!(is_runtime_stderr_noise(
+            "Failed to write to stdout: The pipe is being closed. (os error 232)"
+        ));
+        assert!(!is_runtime_stderr_noise(
+            "Failed to write to stdout: permission denied (os error 13)"
+        ));
     }
 
     #[test]

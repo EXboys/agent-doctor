@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
@@ -6,7 +6,6 @@ import { escapeHtml } from "./format";
 import { appState } from "./app-state";
 import type {
   RemoteDoctorReport,
-  RemoteHostProbeReport,
   RemoteHostProbeStatus,
   RemoteHostRow,
   RemoteHostsDocument,
@@ -14,9 +13,9 @@ import type {
   RemoteProbeCheck,
   WorkspaceCheck,
   WorkspaceDoctorReport,
-  WorkspaceFixReport,
   WorkspacesDocument,
 } from "./types";
+import { listWorkspaces, useWorkspace, initWorkspace, workspaceDoctor, workspaceFix, listRemoteHosts, listRemoteHostRows, listRemoteProjects, probeRemoteHost, removeRemoteHost, runRemoteDoctor, removeRemoteProject, bootstrapRemoteHost, addRemoteProject } from "./ipc";
 
 export interface WorkspaceUiDeps {
   onWorkspacesChanged: (doc: WorkspacesDocument) => void;
@@ -143,7 +142,7 @@ function renderWorkspaces(doc: WorkspacesDocument) {
 
 async function loadWorkspaces() {
   try {
-    const doc = await invoke<WorkspacesDocument>("list_workspaces_command");
+    const doc = await listWorkspaces();
     renderWorkspaces(doc);
   } catch (error) {
     workspaceStatusEl.textContent = t("workspaces.failed");
@@ -162,7 +161,7 @@ async function applyWorkspace(name: string) {
   renderWorkspaceManageList(appState.lastWorkspaces ?? { active: null, workspaces: {} });
   workspaceHintEl.textContent = t("workspaces.applying", { name });
   try {
-    await invoke("use_workspace_command", { name });
+    await useWorkspace({ name });
     workspaceHintEl.textContent = t("workspaces.updated", { name });
     await loadWorkspaces();
   } catch (error) {
@@ -201,7 +200,7 @@ async function registerWorkspace() {
   workspaceRegisterEl.disabled = true;
   workspaceHintEl.textContent = t("workspaces.registering");
   try {
-    const report = await invoke<{ name: string }>("init_workspace_command", {
+    const report = await initWorkspace({
       path,
       name: null,
       gitRoot: true,
@@ -229,7 +228,7 @@ async function doctorWorkspace() {
   }
   workspaceHintEl.textContent = t("workspaces.doctorRunning");
   try {
-    const report = await invoke<WorkspaceDoctorReport>("workspace_doctor_command");
+    const report = await workspaceDoctor();
     renderWorkspaceChecks(report);
   } catch (error) {
     clearWorkspaceChecks();
@@ -252,7 +251,7 @@ async function fixWorkspace() {
   }
   workspaceHintEl.textContent = t("workspaces.fixRunning");
   try {
-    const report = await invoke<WorkspaceFixReport>("workspace_fix_command", {
+    const report = await workspaceFix({
       migrateClaudeMcp: false,
     });
     const applied = report.actions.filter((action) => action.applied).length;
@@ -578,9 +577,9 @@ function renderRemoteChecks(report: RemoteDoctorReport): void {
 async function loadRemoteProjects(): Promise<void> {
   try {
     const [hostsDoc, hostRows, projects] = await Promise.all([
-      invoke<RemoteHostsDocument>("list_remote_hosts_command"),
-      invoke<RemoteHostRow[]>("list_remote_host_rows_command"),
-      invoke<RemoteProjectRow[]>("list_remote_projects_command"),
+      listRemoteHosts(),
+      listRemoteHostRows(),
+      listRemoteProjects(),
     ]);
     const known = new Set(hostRows.map((row) => row.host_id));
     for (const id of [...remoteProbeStatus.keys()]) {
@@ -615,7 +614,7 @@ async function probeRemoteHostUi(id: string): Promise<void> {
     window.setTimeout(() => resolve(), 0);
   });
   try {
-    const report = await invoke<RemoteHostProbeReport>("probe_remote_host_command", { id });
+    const report = await probeRemoteHost({ id });
     remoteProbeStatus.set(id, report.ok ? "ok" : "fail");
     remoteProbeMessage.set(id, report.message);
     remoteHintEl.textContent = report.ok
@@ -636,7 +635,7 @@ async function removeRemoteHostUi(id: string): Promise<void> {
   if (!id || remoteBusy) return;
   remoteBusy = true;
   try {
-    await invoke("remove_remote_host_command", { id });
+    await removeRemoteHost({ id });
     remoteProbeStatus.delete(id);
     remoteProbeMessage.delete(id);
     await loadRemoteProjects();
@@ -657,7 +656,7 @@ async function runRemoteDoctorUi(target: string): Promise<void> {
   renderRemoteList(lastRemoteProjects);
   remoteHintEl.textContent = t("remote.doctorRunning");
   try {
-    const report = await invoke<RemoteDoctorReport>("run_remote_doctor_command", {
+    const report = await runRemoteDoctor({
       target,
       runtime: null,
     });
@@ -677,7 +676,7 @@ async function removeRemoteProjectUi(host: string, project: string): Promise<voi
   if (remoteBusy) return;
   remoteBusy = true;
   try {
-    await invoke("remove_remote_project_command", { host, name: project });
+    await removeRemoteProject({ host, name: project });
     await loadRemoteProjects();
     remoteHintEl.textContent = "";
   } catch (error) {
@@ -688,7 +687,6 @@ async function removeRemoteProjectUi(host: string, project: string): Promise<voi
     renderRemoteList(lastRemoteProjects);
   }
 }
-
 
 export interface WorkspaceUiApi {
   loadWorkspaces: () => Promise<void>;
@@ -810,7 +808,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     remoteHintEl.textContent = t("remote.bootstrapRunning");
     void (async () => {
       try {
-        const doc = await invoke<RemoteHostsDocument>("bootstrap_remote_host_command", {
+        const doc = await bootstrapRemoteHost({
           id,
           hostname,
           user,
@@ -819,7 +817,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
         });
         if (projectPath.startsWith("/")) {
           try {
-            await invoke("add_remote_project_command", {
+            await addRemoteProject({
               host: id,
               name: projectNameFromPath(projectPath),
               path: projectPath,
@@ -867,7 +865,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     remoteBusy = true;
     void (async () => {
       try {
-        await invoke("add_remote_project_command", {
+        await addRemoteProject({
           host,
           name,
           path,

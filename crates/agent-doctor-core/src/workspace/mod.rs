@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 use crate::adapters::util::home_join;
 
 use self::backends::{
-    bind_claude_code, bind_codex_for_project, bind_hermes, bind_openclaw,
     claude_mcp_summary_for_project, codex_home_from_env, hermes_active_profile,
     hermes_gateway_profiles, openclaw_agent_workspace, workspace_paths_match, RuntimeBindReport,
 };
 use self::path::{
     cwd, default_workspace_name, paths_equal, resolve_project_path, sanitize_workspace_name,
 };
+use crate::runtime::{bind_workspace_runtimes, WorkspaceBindInput};
 
 pub mod backends;
 pub mod backup;
@@ -284,12 +284,13 @@ pub fn init_workspace(
     let openclaw_agent_id = workspace_name.clone();
     let openclaw_workspace = data_root.join("openclaw-workspace");
 
-    let bindings = vec![
-        bind_hermes(&hermes_profile, &project_path)?,
-        bind_claude_code(&project_path)?,
-        bind_codex_for_project(&codex_home, Some(&project_path))?,
-        bind_openclaw(&openclaw_agent_id, &openclaw_workspace)?,
-    ];
+    let bindings = bind_workspace_runtimes(&WorkspaceBindInput {
+        project_path: &project_path,
+        hermes_profile: &hermes_profile,
+        codex_home: &codex_home,
+        openclaw_agent_id: &openclaw_agent_id,
+        openclaw_workspace: &openclaw_workspace,
+    })?;
 
     let snapshot = save_workspace_snapshot(
         &WorkspaceEntry {
@@ -376,12 +377,13 @@ pub fn use_workspace_with_options(
     save_workspaces(&doc)?;
 
     let data_root = workspace_data_root(name)?;
-    let bindings = vec![
-        bind_hermes(&entry.hermes_profile, &entry.path)?,
-        bind_claude_code(&entry.path)?,
-        bind_codex_for_project(&entry.codex_home, Some(&entry.path))?,
-        bind_openclaw(&entry.openclaw_agent_id, &entry.openclaw_workspace)?,
-    ];
+    let bindings = bind_workspace_runtimes(&WorkspaceBindInput {
+        project_path: &entry.path,
+        hermes_profile: &entry.hermes_profile,
+        codex_home: &entry.codex_home,
+        openclaw_agent_id: &entry.openclaw_agent_id,
+        openclaw_workspace: &entry.openclaw_workspace,
+    })?;
 
     let snapshot = apply_workspace_snapshot(&entry, &data_root)?;
     save_workspace_snapshot(&entry, &data_root)?;

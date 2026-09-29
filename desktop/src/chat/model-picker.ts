@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { withErrorDetail } from "../friendly-error";
@@ -6,10 +6,9 @@ import { t } from "../i18n";
 import { modelsForProviderUrl } from "../provider-models";
 import type {
   PersonalProviderListItem,
-  PersonalProviderStatus,
-  PersonalProvidersDocument,
 } from "../types";
 import { runtimeDisplayName } from "./runtime";
+import { getPersonalProviderStatus, listPersonalProviders, upsertPersonalProvider } from "../ipc";
 
 export type ModelPickerEls = {
   modelBtnEl: HTMLButtonElement;
@@ -150,8 +149,8 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     }
     try {
       const [status, doc] = await Promise.all([
-        invoke<PersonalProviderStatus>("get_personal_provider_status_command"),
-        invoke<PersonalProvidersDocument>("list_personal_providers_command"),
+        getPersonalProviderStatus(),
+        listPersonalProviders(),
       ]);
       const active =
         doc.providers.find((p) => p.active) ||
@@ -203,7 +202,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     deps.setStatus(t("chat.modelSwitching"), "muted");
     try {
       const current = deps.getWiredProvider()!;
-      await invoke<PersonalProvidersDocument>("upsert_personal_provider_command", {
+      await upsertPersonalProvider({
         id: current.id,
         name: current.name,
         url: current.url,

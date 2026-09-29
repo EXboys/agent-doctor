@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value as JsonValue};
 
-use agent_doctor_mcp::{wire_browser_mcp, WireBrowserMcpOptions};
+use crate::browser_wire::{ensure_chrome_for_wire, wire_browser_mcp, WireBrowserMcpOptions};
 
 use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
@@ -836,7 +836,7 @@ fn rewire_gateway_from_active_mode() -> Result<()> {
 }
 
 fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
-    let discovery = agent_doctor_mcp::discover_chrome().context("discover Chrome")?;
+    ensure_chrome_for_wire().map_err(|error| anyhow::anyhow!("discover Chrome: {error}"))?;
     let resolved = resolve_agent_doctor_binary().context("resolve agent-doctor binary")?;
     let binary = crate::workspace::ensure_stable_agent_doctor_cli(&resolved)?;
     let mut options = WireBrowserMcpOptions::with_binary(binary);
@@ -854,7 +854,7 @@ fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
             }
         }
     }
-    let report = wire_browser_mcp(&discovery, &options);
+    let report = wire_browser_mcp(&options).map_err(anyhow::Error::msg)?;
     let Some(item) = report.results.into_iter().find(|r| r.runtime == runtime_id) else {
         bail!("browser MCP wire returned no result for {runtime_id}");
     };

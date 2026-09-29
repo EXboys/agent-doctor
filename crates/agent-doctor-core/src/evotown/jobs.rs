@@ -177,12 +177,13 @@ pub fn normalize_runtime(raw: &str) -> String {
 }
 
 /// Runtimes Agent Doctor can execute for Evotown job.assign.
-pub fn known_dispatch_runtimes() -> &'static [&'static str] {
-    &["claude-code", "codex", "openclaw", "hermes"]
+pub fn known_dispatch_runtimes() -> Vec<&'static str> {
+    crate::runtime::dispatch_runtime_ids()
 }
 
 pub fn is_known_dispatch_runtime(runtime: &str) -> bool {
-    known_dispatch_runtimes().contains(&normalize_runtime(runtime).as_str())
+    let runtime = normalize_runtime(runtime);
+    known_dispatch_runtimes().iter().any(|id| *id == runtime)
 }
 
 pub fn execute_job(job: &AssignedJob) -> JobResult {
@@ -191,12 +192,9 @@ pub fn execute_job(job: &AssignedJob) -> JobResult {
         "→ executing job_id={} runtime={} timeout={}s",
         job.job_id, runtime, job.timeout_sec
     );
-    let result = match runtime.as_str() {
-        "claude-code" => run_claude_cli(job),
-        "codex" => run_codex_cli(job),
-        "openclaw" => run_openclaw_hook(job),
-        "hermes" => run_hermes_hook(job),
-        other => Err(anyhow::anyhow!("unsupported runtime '{other}'")),
+    let result = match crate::runtime::dispatch_job(&runtime) {
+        Some(run) => run(job),
+        None => Err(anyhow::anyhow!("unsupported runtime '{runtime}'")),
     };
     match result {
         Ok(mut ok) => {
@@ -227,7 +225,7 @@ fn workdir(job: &AssignedJob) -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
+pub(crate) fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
     let env = load_agent_env();
     let bin = env
         .get("AGENT_DOCTOR_CLAUDE_BIN")
@@ -257,7 +255,7 @@ fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
     Ok(command_result(output, "claude-code"))
 }
 
-fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
+pub(crate) fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
     let env = load_agent_env();
     let bin = env
         .get("AGENT_DOCTOR_CODEX_BIN")
@@ -341,7 +339,7 @@ fn run_command_with_timeout(mut cmd: Command, timeout_sec: u64) -> Result<std::p
     }
 }
 
-fn run_openclaw_hook(job: &AssignedJob) -> Result<JobResult> {
+pub(crate) fn run_openclaw_hook(job: &AssignedJob) -> Result<JobResult> {
     let env = load_agent_env();
     let url = env
         .get("OPENCLAW_HOOK_URL")
@@ -386,7 +384,7 @@ fn run_openclaw_hook(job: &AssignedJob) -> Result<JobResult> {
     })
 }
 
-fn run_hermes_hook(job: &AssignedJob) -> Result<JobResult> {
+pub(crate) fn run_hermes_hook(job: &AssignedJob) -> Result<JobResult> {
     let env = load_agent_env();
     let url = env
         .get("HERMES_HOOK_URL")

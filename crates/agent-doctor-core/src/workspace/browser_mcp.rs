@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use agent_doctor_mcp::{
-    discover_chrome, wire_browser_mcp, BrowserMcpWireReport, WireBrowserMcpOptions,
-    BROWSER_MCP_WIRE_RUNTIMES,
-};
 use serde::{Deserialize, Serialize};
 
+use crate::browser_wire::{
+    ensure_chrome_for_wire, wire_browser_mcp, BrowserMcpWireReport, WireBrowserMcpOptions,
+    BROWSER_MCP_WIRE_RUNTIMES,
+};
 use crate::doctor::run_doctor;
 use crate::workspace::{
     browser_configured_runtimes, ensure_stable_agent_doctor_cli, list_mcp_inventory,
@@ -124,10 +124,10 @@ pub fn wire_browser_mcp_installed(
             results: Vec::new(),
         });
     }
-    let discovery = discover_chrome().map_err(|error| error.to_string())?;
+    ensure_chrome_for_wire()?;
     let mut scoped = options.clone();
     scoped.runtimes = installed;
-    Ok(wire_browser_mcp(&discovery, &scoped))
+    wire_browser_mcp(&scoped)
 }
 
 /// Diagnose Chrome / CLI / installed agents, then write Browser MCP into each installed target.
@@ -137,7 +137,7 @@ pub fn diagnose_and_wire_browser_mcp(
     let targets_before = list_browser_mcp_targets();
     let mut issues = Vec::new();
 
-    let chrome = discover_chrome();
+    let chrome = ensure_chrome_for_wire();
     let chrome_ok = chrome.is_ok();
     if let Err(error) = &chrome {
         issues.push(BrowserMcpDiagnoseIssue {
@@ -202,8 +202,16 @@ pub fn diagnose_and_wire_browser_mcp(
             options.binary = path;
         }
         options.runtimes = installed_ids;
-        let discovery = chrome.expect("chrome_ok");
-        let wire = wire_browser_mcp(&discovery, &options);
+        let wire = match wire_browser_mcp(&options) {
+            Ok(report) => report,
+            Err(message) => {
+                issues.push(BrowserMcpDiagnoseIssue {
+                    code: "wire_unavailable".into(),
+                    message,
+                });
+                BrowserMcpWireReport::default()
+            }
+        };
         for result in wire.results {
             let display_name = display_name_for(&result.runtime, &targets_before);
             let configured_before = targets_before

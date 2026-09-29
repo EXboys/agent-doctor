@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { t } from "./i18n";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
-import type { ProfileEntry, ProfilesDocument, UseProfileReport } from "./types";
+import type { ProfileEntry, ProfilesDocument } from "./types";
+import { listProfiles, useProfile } from "./ipc";
 
 export interface AgentsPresetsDeps {
   refresh: () => Promise<void>;
@@ -38,7 +39,7 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
       },
       loadProfiles: async () => {
         try {
-          appState.lastProfiles = await invoke<ProfilesDocument>("list_profiles_command");
+          appState.lastProfiles = await listProfiles();
         } catch {
           appState.lastProfiles = null;
         }
@@ -177,7 +178,7 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
 
   async function loadProfiles() {
     try {
-      const doc = await invoke<ProfilesDocument>("list_profiles_command");
+      const doc = await listProfiles();
       renderProfiles(doc);
     } catch (error) {
       statusEl.textContent = t("presets.failed");
@@ -197,7 +198,7 @@ export function createAgentsPresets(deps: AgentsPresetsDeps) {
     applyEl.disabled = true;
     hintEl.textContent = t("presets.applying", { name });
     try {
-      const report = await invoke<UseProfileReport>("use_profile_command", { name });
+      const report = await useProfile({ name });
       const applied = report.applied.map((item) => item.runtime_id).join(", ");
       hintEl.textContent = applied
         ? t("presets.updated", { list: applied })

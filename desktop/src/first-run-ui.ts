@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { applyStaticI18n, t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
@@ -15,11 +15,10 @@ import { preferredRepairFilter } from "./repair-ui";
 import type {
   DoctorReport,
   InstallRuntimeResponse,
-  PersonalProviderSetupReport,
-  PersonalProviderStatus,
   RepairPreviewResponse,
   RepairStatusFilter,
 } from "./types";
+import { getPersonalProviderStatus, runRepairPreview, runDoctor, installRuntime, runRepairExecute, activatePersonalProvider } from "./ipc";
 
 export interface FirstRunUiDeps {
   panelDiagnoseEl: HTMLElement;
@@ -268,7 +267,7 @@ async function enrichWiringTarget(target: FirstRunTarget): Promise<FirstRunTarge
     return target;
   }
   try {
-    const status = await invoke<PersonalProviderStatus>("get_personal_provider_status_command");
+    const status = await getPersonalProviderStatus();
     if (!status.configured || !status.active_id) {
       return target;
     }
@@ -307,7 +306,7 @@ async function probeInstalledForFirstRun(
         invalidatePreview(runtime.id);
       }
       try {
-        const preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+        const preview = await runRepairPreview({
           runtime: runtime.id,
         });
         deps.repairPreviewByRuntime.set(runtime.id, preview);
@@ -358,7 +357,7 @@ async function runFirstRunScan(opts?: { forceProbe?: boolean }): Promise<void> {
   renderFirstRunUi();
   deps.setLoading(true);
   try {
-    const report = await invoke<DoctorReport>("run_doctor_command");
+    const report = await runDoctor();
     await deps.renderReport(report);
     firstRunBusy = false;
     await evaluateFirstRunFromReport(report, { forceProbe: opts?.forceProbe });
@@ -393,7 +392,7 @@ async function runFirstRunInstall(target: FirstRunTarget): Promise<void> {
   firstRunRetryKind = "install";
   renderFirstRunUi();
   try {
-    const report = await invoke<InstallRuntimeResponse>("install_runtime_command", {
+    const report = await installRuntime({
       runtime: target.runtimeId,
       force: false,
     });
@@ -418,7 +417,7 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
   try {
     let preview = deps.repairPreviewByRuntime.get(target.runtimeId);
     if (!preview) {
-      preview = await invoke<RepairPreviewResponse>("run_repair_preview_command", {
+      preview = await runRepairPreview({
         runtime: target.runtimeId,
       });
       deps.repairPreviewByRuntime.set(target.runtimeId, preview);
@@ -445,7 +444,7 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
       showError(t("firstRun.repairNotAuto"), "repair");
       return;
     }
-    const report = await invoke<RepairPreviewResponse>("run_repair_execute_command", {
+    const report = await runRepairExecute({
       runtime: target.runtimeId,
     });
     deps.repairPreviewByRuntime.set(target.runtimeId, report);
@@ -483,10 +482,7 @@ async function runFirstRunApplyProvider(target: FirstRunTarget): Promise<void> {
     requestAnimationFrame(() => resolve());
   });
   try {
-    const report = await invoke<PersonalProviderSetupReport>(
-      "activate_personal_provider_command",
-      { id: providerId },
-    );
+    const report = await activatePersonalProvider({ id: providerId });
     const hermes = report.runtimes.find((runtime) => runtime.runtime_id === target.runtimeId);
     if (hermes && !hermes.applied) {
       showError(

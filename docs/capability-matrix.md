@@ -4,7 +4,7 @@ Agent Doctor **workspaces** add per-project isolation on top of native runtime b
 Tiers: **L3** = native or near-native isolation; **L2** = overlay / config-level isolation.
 
 Run `agent-doctor workspace matrix` for CLI output (`--json` for automation).  
-Matrix version: **workspace-v1.5**.
+Matrix version: **workspace-v1.6**.
 
 ## Runtime × dimension
 
@@ -26,7 +26,7 @@ Matrix version: **workspace-v1.5**.
 | Cross | Company baseline | None | Doctor vs `profile.env` gateway | — |
 | Cross | Desktop | N/A | Tray + picker + doctor | — |
 
-## Gap status (v1.5)
+## Gap status (v1.6)
 
 | Former gap | Status |
 |------------|--------|
@@ -35,6 +35,7 @@ Matrix version: **workspace-v1.5**.
 | Codex per-repo memory | **Mitigated (L2)** — isolated `CODEX_HOME` + marker + fail on global alias |
 | Team baseline drift | **Partial** — gateway drift checks vs company profile |
 | OpenCode / SkillLite | **Open** — not in workspace v1 |
+| DeepSeek Harness, Qoder, WorkBuddy, Cursor | **Open** — descriptor has no workspace bind; `workspace matrix` lists them as unsupported |
 | Hermes skills | **Closed** — profile skills snapshot |
 
 ## vs CC Switch / manual

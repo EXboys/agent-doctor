@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import { applyStaticI18n, getLocale, t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
@@ -13,8 +13,6 @@ import {
 } from "./diagnose-flow";
 import type {
   DoctorReport,
-  EvotownStatus,
-  PersonalProviderStatus,
   RepairPreviewResponse,
   RuntimeDoctorResult,
 } from "./types";
@@ -29,6 +27,7 @@ import {
   resolveInitialRuntime,
   type CheckFilter,
 } from "./diagnose/session";
+import { runRepairPreview, runDoctor, getPersonalProviderStatus, getEvotownStatus } from "./ipc";
 
 declare global {
   interface Window {
@@ -49,7 +48,7 @@ function runtimeFromDoctor(report: DoctorReport): RuntimeDoctorResult | undefine
 }
 
 async function loadPreview(): Promise<RepairPreviewResponse> {
-  return invoke<RepairPreviewResponse>("run_repair_preview_command", {
+  return runRepairPreview({
     runtime: session.runtimeId,
   });
 }
@@ -59,7 +58,7 @@ async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<voi
   paint.setResult("busy", t("diagnose.flow.scanning"));
   let autoScore = false;
   try {
-    const doctor = await invoke<DoctorReport>("run_doctor_command");
+    const doctor = await runDoctor();
     const runtime = runtimeFromDoctor(doctor);
     session.displayName = runtime?.display_name ?? session.runtimeId;
     session.installed = Boolean(runtime?.installed);
@@ -71,10 +70,10 @@ async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<voi
       session.canAutoFix = session.preview.can_apply_repair;
       const wiringNeeded = needsWiringFromPreview(session.preview);
       if (isPersonalEdition()) {
-        const status = await invoke<PersonalProviderStatus>("get_personal_provider_status_command");
+        const status = await getPersonalProviderStatus();
         session.configured = status.configured && !wiringNeeded;
       } else {
-        const status = await invoke<EvotownStatus>("get_evotown_status_command");
+        const status = await getEvotownStatus();
         session.configured = status.configured && !wiringNeeded;
         dom.teamStatusEl.textContent = status.configured
           ? t("diagnose.flow.teamConfigured", {

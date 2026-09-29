@@ -6,7 +6,7 @@ import {
 } from "./ask-resources";
 import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import type { PersonalProviderListItem } from "./types";
 import {
@@ -60,7 +60,7 @@ import { createBackupUiController, type BackupUiApi } from "./chat/backup-ui";
 import { createVoiceInputController, type VoiceInputApi } from "./chat/voice";
 import { createHostedController, type HostedApi } from "./chat/hosted";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
-
+import { openSession } from "./ipc";
 
 const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
@@ -156,7 +156,6 @@ const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
 let currentRuntime: AskRuntime = "claude-code";
 let wiredProvider: PersonalProviderListItem | null = null;
 let modelMenuOpen = false;
-
 
 let store: SessionStore = (() => {
   try {
@@ -284,7 +283,6 @@ function settleRunRouting(): void {
 
 /** Expire leftover Allow/Deny cards when the ask ends (in place — do not reshuffle the log). */
 
-
 function autoResizePrompt(): void {
   promptEl.style.height = "auto";
   const styles = window.getComputedStyle(promptEl);
@@ -299,7 +297,6 @@ function autoResizePrompt(): void {
 function selectedRuntime(): AskRuntime {
   return currentRuntime;
 }
-
 
 function updateRuntimeLabel(): void {
   modelPicker.updateRuntimeLabel();
@@ -334,9 +331,7 @@ function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }
   void loadAskResources();
 }
 
-
 /** Repair historical “one token = one message” fragmentation from early Codex streaming. */
-
 
 let storePersistTimer = 0;
 let sessionListRenderTimer = 0;
@@ -374,7 +369,6 @@ function scheduleSessionListRender(delayMs = 400): void {
   }, delayMs);
 }
 
-
 function activeSession(): ChatSession {
   let session = store.sessions.find((s) => s.id === store.activeId);
   if (!session) {
@@ -393,7 +387,6 @@ function touchSession(session: ChatSession): void {
     ...store.sessions.filter((s) => s.id !== session.id),
   ].slice(0, MAX_SESSIONS);
 }
-
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
@@ -546,7 +539,6 @@ function setBusy(next: boolean, chatSessionId?: string | null): void {
   flushSessionListRender();
 }
 
-
 function dismissLifecycleActivity(): void {
   activity.dismissLifecycleActivity();
 }
@@ -590,7 +582,6 @@ function appendAssistantChunk(chunk: string): void {
   bubbles.appendAssistantChunk(chunk);
 }
 
-
 function renderPendingAttachments(): void {
   attachments.renderPendingAttachments();
 }
@@ -613,11 +604,9 @@ function updateAssistantMessage(id: string, content: string, opts?: { persist?: 
   bubbles.updateAssistantMessage(id, content, opts);
 }
 
-
 function syncAssistantCopyButton(bubble: HTMLElement): void {
   bubbles.syncAssistantCopyButton(bubble);
 }
-
 
 function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
   bubbles.setAssistantMarkdown(bubble, markdown);
@@ -708,7 +697,6 @@ async function openMainResources(): Promise<void> {
 
 /** Rough token estimate — CJK denser than ASCII. */
 
-
 function closeContextPopover(): void {
   contextMeter.closeContextPopover();
 }
@@ -726,7 +714,6 @@ async function ensureListener(): Promise<void> {
   await stream.ensureListener();
 }
 
-
 function readInitialRuntime(): void {
   const runtime = runtimeFromLocation();
   if (isAskRuntime(runtime)) {
@@ -736,13 +723,11 @@ function readInitialRuntime(): void {
   }
 }
 
-
 /** When true, this Ask turn is a browser MCP pathway verify. */
 let verifyMcpTurn = false;
 let verifySawBrowserNavigate = false;
 let verifyMcpReported = false;
 let verifyTurnText = "";
-
 
 /** OpenClaw often replies with the page title and never streams the tool name. */
 
@@ -823,7 +808,7 @@ function applyVerifyDraftIfAny(): void {
 async function openTerminal(): Promise<void> {
   try {
     await withTimeoutChat(
-      invoke("open_session_command", {
+      openSession({
         runtime: selectedRuntime(),
         cwd: null,
         prompt: null,
@@ -845,7 +830,6 @@ async function cancelAsk(): Promise<void> {
 async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
   await send.sendAsk(opts);
 }
-
 
 function restoreChatFromBackup(): boolean {
   return backupUi!.restoreChatFromBackup();

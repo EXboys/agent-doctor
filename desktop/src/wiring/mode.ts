@@ -1,14 +1,15 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { appState } from "../app-state";
 import { isPersonalEdition, isTeamEdition, productEdition } from "../edition";
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
-import type { ModeStatus, ModeSwitchReport } from "../types";
+import type { ModeStatus } from "../types";
 import {
   formatModeSwitchDetail,
   formatModeSwitchHint,
   wantsBrowserMcp,
 } from "./format";
+import { getModeStatus, rewireCurrentMode as rewireCurrentModeCommand } from "../ipc";
 
 const modeMetaEl = document.querySelector<HTMLElement>("#mode-meta")!;
 const modeHintEl = document.querySelector<HTMLElement>("#mode-hint")!;
@@ -77,7 +78,7 @@ export function createModeController(deps: ModeDeps) {
 
   async function loadModeStatus() {
     try {
-      const status = await invoke<ModeStatus>("get_mode_status_command");
+      const status = await getModeStatus();
       renderModeStatus(status);
     } catch (error) {
       modeMetaEl.textContent = String(error);
@@ -132,7 +133,7 @@ export function createModeController(deps: ModeDeps) {
       hintEl.textContent = t("mode.switching");
     }
     try {
-      const report = await invoke<ModeSwitchReport>("rewire_current_mode_command", {
+      const report = await rewireCurrentModeCommand({
         withBrowserMcp: wantsBrowserMcp(),
       });
       await loadModeStatus();

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type {
@@ -7,18 +7,7 @@ import type {
   VoiceResult,
   VoiceStartOptions,
 } from "./types";
-
-type SpeechCapabilityDto = {
-  available: boolean;
-  backend: string;
-  reason?: string | null;
-};
-
-type SpeechResultDto = {
-  text: string;
-  confidence: number;
-  isFinal: boolean;
-};
+import { speechCapability, speechDictate, speechCancelDictation } from "../../ipc";
 
 type SpeechEventDto =
   | { type: "partial"; text: string }
@@ -45,7 +34,7 @@ export function createNativeVoiceProvider(): VoiceProvider {
   return {
     id: "native",
     async capability() {
-      const cap = await invoke<SpeechCapabilityDto>("speech_capability_command");
+      const cap = await speechCapability();
       return {
         available: !!cap.available,
         backend: cap.backend,
@@ -64,7 +53,7 @@ export function createNativeVoiceProvider(): VoiceProvider {
             }
           });
         }
-        const result = await invoke<SpeechResultDto>("speech_dictate_command", {
+        const result = await speechDictate({
           language: options.language ?? null,
         });
         return {
@@ -83,7 +72,7 @@ export function createNativeVoiceProvider(): VoiceProvider {
       }
     },
     async cancel() {
-      await invoke("speech_cancel_dictation_command");
+      await speechCancelDictation();
     },
   };
 }

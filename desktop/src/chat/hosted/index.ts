@@ -1,7 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { formatPermissionDetail } from "../format";
 import { getLocale, t } from "../../i18n";
+import { voiceHostedReduce, voiceTurnEnd, voiceListenStart, voiceListenStop, voiceSpeak, voiceSpeakStop, resolvePermissionSession, speechCapability } from "../../ipc";
 
 type HostedState = {
   active: boolean;
@@ -220,10 +221,7 @@ export function createHostedController(deps: HostedDeps) {
   }
 
   async function reduce(input: HostedInput): Promise<void> {
-    const step = await invoke<{ state: HostedState; effects: HostedEffect[] }>(
-      "voice_hosted_reduce_command",
-      { state, input },
-    );
+    const step = await voiceHostedReduce<HostedState, HostedEffect>({ state, input });
     state = step.state ?? state;
     if (voicePermission) state = { ...state, awaitingPermission: true };
     render();
@@ -329,10 +327,7 @@ export function createHostedController(deps: HostedDeps) {
       let hold = 0;
       let toSend = text;
       try {
-        const decision = await invoke<{ thinking: boolean; holdMs: number; textToSend: string }>(
-          "voice_turn_end_command",
-          { text },
-        );
+        const decision = await voiceTurnEnd({ text });
         // The microphone stayed open for this pause. The sentence on screen is already the whole listen.
         toSend = decision.textToSend ?? text;
       } catch {
@@ -407,7 +402,7 @@ export function createHostedController(deps: HostedDeps) {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         if (epoch !== listenEpoch) return;
         try {
-          await invoke("voice_listen_start_command", { language: speechLanguage() });
+          await voiceListenStart({ language: speechLanguage() });
           if (epoch === listenEpoch && state.active) {
             islandError = "";
             render();
@@ -451,7 +446,7 @@ export function createHostedController(deps: HostedDeps) {
     const pending = listenPromise;
     listenPromise = null;
     try {
-      await invoke("voice_listen_stop_command");
+      await voiceListenStop();
     } catch {
       /* ignore */
     }
@@ -461,7 +456,7 @@ export function createHostedController(deps: HostedDeps) {
   async function speak(text: string): Promise<void> {
     const epoch = ++speakEpoch;
     try {
-      await invoke("voice_speak_command", { text, language: speechLanguage() });
+      await voiceSpeak({ text, language: speechLanguage() });
     } catch (error) {
       const raw = String(error);
       if (epoch === speakEpoch && !/cancelled/i.test(raw) && state.active && !state.awaitingPermission) {
@@ -480,14 +475,14 @@ export function createHostedController(deps: HostedDeps) {
     asking = false;
     render();
     try {
-      await invoke("voice_speak_stop_command");
+      await voiceSpeakStop();
     } catch {
       /* ignore */
     }
     await stopListen();
     if (!pending) return;
     try {
-      await invoke("resolve_permission_session_command", {
+      await resolvePermissionSession({
         sessionId: pending.sessionId,
         requestId: pending.requestId,
         allow,
@@ -509,12 +504,12 @@ export function createHostedController(deps: HostedDeps) {
     const epoch = ++speakEpoch;
     await stopListen();
     try {
-      await invoke("voice_speak_stop_command");
+      await voiceSpeakStop();
     } catch {
       /* ignore */
     }
     try {
-      await invoke("voice_speak_command", { text: script, language: speechLanguage() });
+      await voiceSpeak({ text: script, language: speechLanguage() });
     } catch (error) {
       console.error("voice confirm failed", error);
     }
@@ -540,7 +535,7 @@ export function createHostedController(deps: HostedDeps) {
       case "stopSpeak":
         speakEpoch += 1;
         try {
-          await invoke("voice_speak_stop_command");
+          await voiceSpeakStop();
         } catch {
           /* ignore */
         }
@@ -605,7 +600,7 @@ export function createHostedController(deps: HostedDeps) {
   async function interruptSpeech(): Promise<void> {
     if (!state.speaking) return;
     try {
-      await invoke("voice_speak_stop_command");
+      await voiceSpeakStop();
     } catch {
       /* ignore */
     }
@@ -613,7 +608,7 @@ export function createHostedController(deps: HostedDeps) {
 
   async function refreshCapability(): Promise<void> {
     try {
-      const cap = await invoke<{ available?: boolean }>("speech_capability_command");
+      const cap = await speechCapability();
       available = !!cap?.available;
     } catch {
       available = false;
