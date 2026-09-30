@@ -105,6 +105,7 @@ pub(crate) use terminal::*;
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    #[cfg(target_os = "macos")]
     use std::fs;
     use std::path::{Path, PathBuf};
 

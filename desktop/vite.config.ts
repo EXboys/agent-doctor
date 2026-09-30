@@ -27,6 +27,9 @@ export default defineConfig(async () => ({
   base: "./",
 
   build: {
+    // The desktop webview is current WebKit / WebView2. es2022 keeps the
+    // module's top-level await instead of failing the production bundle.
+    target: "es2022",
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
