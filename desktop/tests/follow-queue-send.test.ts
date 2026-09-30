@@ -125,6 +125,7 @@ function newController(sessionId: string) {
     attachments: [] as never[],
     refreshed: 0,
     displayedCwd: [] as string[],
+    quickRepliesAllowed: 0,
   };
   const deps = {
     promptEl,
@@ -165,6 +166,9 @@ function newController(sessionId: string) {
     activeSession: () => session as never,
     ensureListener: async () => {},
     clearQuickReplies: () => {},
+    allowQuickRepliesAgain: () => {
+      state.quickRepliesAllowed += 1;
+    },
     setBusy: (next: boolean) => {
       state.busy = next;
     },
@@ -380,6 +384,31 @@ await check("'insert now' wins over an earlier Stop", async () => {
   eq(roundCalls().length, 2, "round count");
   ok(String(roundCalls()[1].args.prompt).includes("inserted note"), "the inserted note should be sent");
   eq(followUpsFor("w-now").length, 0, "queue should be empty after the drain");
+});
+
+console.log("\nfollow-queue wiring: quick replies come back on a real send");
+
+await check("a real send lets quick replies show again", async () => {
+  invokes.length = 0;
+  const { api, state, promptEl } = newController("w-quick");
+  promptEl.value = "a task";
+
+  await api.sendAsk();
+
+  eq(roundCalls().length, 1, "round count");
+  eq(state.quickRepliesAllowed, 1, "allowQuickRepliesAgain calls");
+});
+
+await check("queueing a note is not a send and leaves quick replies alone", async () => {
+  invokes.length = 0;
+  const { api, state, promptEl } = newController("w-quick-busy");
+  state.busy = true;
+  promptEl.value = "next note";
+
+  await api.sendAsk();
+
+  eq(state.quickRepliesAllowed, 0, "allowQuickRepliesAgain calls");
+  takeFollowUps("w-quick-busy");
 });
 
 console.log("");

@@ -529,9 +529,14 @@ export function createPermissionsController(deps: PermissionsDeps) {
   }
 
   function collapseResolvedPermissionsBeforeAssistant(anchor: HTMLElement): void {
-    deps.finishToolGroup(true);
+    deps.finishToolGroup(false);
     const block = assistantMsgWrap(anchor);
     const prev = block.previousElementSibling as HTMLElement | null;
+    // A plain tool chip is the transcript record. Rebuilding it drops the rows.
+    if (prev?.classList.contains("chat-tool-group") && !prev.classList.contains("chat-permission-group")) {
+      prev.classList.remove("is-live");
+      return;
+    }
     if (prev?.classList.contains("chat-turn-tools")) {
       const existing = prev as HTMLDetailsElement;
       existing.open = false;
@@ -541,6 +546,13 @@ export function createPermissionsController(deps: PermissionsDeps) {
     const nodes: HTMLElement[] = [];
     let sibling = prev;
     while (sibling && isTurnToolEphemeral(sibling)) {
+      if (
+        sibling.classList.contains("chat-tool-group") &&
+        !sibling.classList.contains("chat-turn-tools") &&
+        !sibling.classList.contains("chat-permission-group")
+      ) {
+        break;
+      }
       nodes.unshift(sibling);
       sibling = sibling.previousElementSibling as HTMLElement | null;
     }

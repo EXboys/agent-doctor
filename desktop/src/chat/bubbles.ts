@@ -170,7 +170,7 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.scheduleStorePersist();
     if (!deps.isViewingRunningSession()) return;
     if (deps.getActivityEl()?.dataset.kind === "tool") deps.settleActivity();
-    deps.finishToolGroup(true);
+    deps.finishToolGroup(false);
     deps.dismissLifecycleActivity();
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
@@ -218,16 +218,31 @@ export function createBubblesController(deps: BubblesDeps) {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
     const parts = splitToolActivity(text);
     const signature = toolSignature(text);
-    const tail = session.messages[session.messages.length - 1];
-    if (tail?.role === "tool") {
-      const previous = splitToolActivity(tail.content);
-      if (toolSignature(tail.content) === signature) return;
+    const messages = session.messages;
+    const tail = messages[messages.length - 1];
+    const anchor = tail?.role === "assistant" ? messages[messages.length - 2] : tail;
+    if (anchor?.role === "tool") {
+      const previous = splitToolActivity(anchor.content);
+      if (toolSignature(anchor.content) === signature) return;
       if (previous.summary === parts.summary && !previous.detail && parts.detail) {
-        tail.content = text;
+        anchor.content = text;
         deps.touchSession(session);
         deps.scheduleStorePersist();
         return;
       }
+    }
+    const toolMessage: ChatMessage = {
+      id: uid(),
+      role: "tool",
+      content: text,
+      at: Date.now(),
+    };
+    const streamingId = deps.getAssistantMessageId();
+    if (tail?.role === "assistant" && tail.id === streamingId) {
+      messages.splice(messages.length - 1, 0, toolMessage);
+      deps.touchSession(session);
+      deps.scheduleStorePersist();
+      return;
     }
     persistMessage("tool", text);
   }
@@ -348,6 +363,27 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
     return bubble;
   }
+  /** Tools saved after the reply still belong above that reply. */
+  function placeToolsBeforeReply(source: ChatMessage[]): ChatMessage[] {
+    const out: ChatMessage[] = [];
+    for (let i = 0; i < source.length; ) {
+      const message = source[i];
+      if (message.role !== "assistant") {
+        out.push(message);
+        i += 1;
+        continue;
+      }
+      i += 1;
+      const tools: ChatMessage[] = [];
+      while (i < source.length && source[i].role === "tool") {
+        tools.push(source[i]);
+        i += 1;
+      }
+      out.push(...tools, message);
+    }
+    return out;
+  }
+
   function renderActiveMessages(): void {
     const previous = Array.from(deps.logEl.childNodes);
     try {
@@ -367,12 +403,13 @@ export function createBubblesController(deps: BubblesDeps) {
         appendBubble("meta", t("chat.welcome"), { persist: false });
         return;
       }
-      for (let i = 0; i < session.messages.length; ) {
-        const message = session.messages[i];
+      const messages = placeToolsBeforeReply(session.messages);
+      for (let i = 0; i < messages.length; ) {
+        const message = messages[i];
         if (message.role === "tool") {
           const run: ChatMessage[] = [message];
-          while (i + run.length < session.messages.length && session.messages[i + run.length].role === "tool") {
-            run.push(session.messages[i + run.length]);
+          while (i + run.length < messages.length && messages[i + run.length].role === "tool") {
+            run.push(messages[i + run.length]);
           }
           deps.logEl.appendChild(renderToolHistoryGroup(run.map((item) => item.content)));
           i += run.length;
@@ -395,10 +432,10 @@ export function createBubblesController(deps: BubblesDeps) {
           }
           const run: ChatMessage[] = [message];
           while (
-            i + run.length < session.messages.length &&
-            session.messages[i + run.length].role === "permission"
+            i + run.length < messages.length &&
+            messages[i + run.length].role === "permission"
           ) {
-            const next = session.messages[i + run.length];
+            const next = messages[i + run.length];
             if (next.permission?.allowed == null) break;
             const nextPending =
               deps.isViewingRunningSession() &&

@@ -21,6 +21,8 @@ export type ActivityDeps = {
   setToolGroupEl: (el: HTMLDetailsElement | null) => void;
   /** Keep the command on the session so it survives a redraw. */
   rememberTool: (text: string) => void;
+  /** Tool notes saved since the latest user message. */
+  toolRecordsForTurn: () => string[];
 };
 
 export type ActivityApi = ReturnType<typeof createActivityController>;
@@ -94,7 +96,9 @@ export function createActivityController(deps: ActivityDeps) {
   }
 
   function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
-    const count = group.querySelectorAll(".chat-activity.kind-tool").length;
+    const count = group.querySelectorAll(
+      ".chat-tool-list > .chat-tool-row, .chat-permission-stack > .chat-tool-row",
+    ).length;
     const label = group.querySelector<HTMLElement>(".chat-tool-group-label");
     if (!label) return;
     if (getLocale() === "zh") {
@@ -150,13 +154,25 @@ export function createActivityController(deps: ActivityDeps) {
     deps.setToolGroupEl(null);
   }
 
+  function toolTextsInLog(): string[] {
+    const texts: string[] = [];
+    deps.logEl.querySelectorAll<HTMLElement>(".chat-tool-row, .chat-activity.kind-tool").forEach((row) => {
+      const summary = row.dataset.summary || row.querySelector(".chat-tool-name")?.textContent || "";
+      const detail = row.dataset.detail || row.querySelector(".chat-tool-cmd")?.textContent || "";
+      const text = detail.trim() ? `${summary.trim()}\n${detail.trim()}` : summary.trim();
+      if (text) texts.push(text);
+    });
+    return texts;
+  }
+
   /** Drop ephemeral progress rows so they don't litter the transcript. */
   function clearEphemeralActivity(dropStderr = false): void {
+    const keptTools = toolTextsInLog();
     settleActivity();
-    finishToolGroup(true);
+    finishToolGroup(false);
     for (const row of deps.logEl.querySelectorAll<HTMLElement>(".chat-activity")) {
       const kind = row.dataset.kind ?? "";
-      if (kind === "tool") continue;
+      if (kind === "tool" || row.closest(".chat-tool-group")) continue;
       if (kind === "error" && !(dropStderr && row.dataset.stderr === "1")) continue;
       row.remove();
     }
@@ -164,6 +180,43 @@ export function createActivityController(deps: ActivityDeps) {
     const assistants = deps.logEl.querySelectorAll<HTMLElement>(".chat-bubble.assistant");
     const lastAssistant = assistants[assistants.length - 1];
     if (lastAssistant) deps.collapseResolvedPermissionsBeforeAssistant(lastAssistant);
+    ensureTurnToolsVisible(lastAssistant ?? null, keptTools);
+  }
+
+  function isToolGroupEl(el: Element | null): el is HTMLElement {
+    return Boolean(
+      el?.classList.contains("chat-tool-group") || el?.classList.contains("chat-turn-tools"),
+    );
+  }
+
+  /** If the live chip was dropped, put the saved tool list back above the reply. */
+  function ensureTurnToolsVisible(lastAssistant: HTMLElement | null, seen: string[] = []): void {
+    const stored = deps.toolRecordsForTurn().filter((text) => text.trim());
+    const texts = stored.length > 0 ? stored : seen.filter((text) => text.trim());
+    if (!lastAssistant) {
+      if (texts.length === 0 || deps.logEl.querySelector(":scope > .chat-tool-group")) return;
+      deps.logEl.appendChild(renderToolHistoryGroup(texts));
+      return;
+    }
+    const block = lastAssistant.closest(".chat-msg-assistant") ?? lastAssistant;
+    const parent = block.parentElement;
+    if (!parent) return;
+    const previous = block.previousElementSibling;
+    if (isToolGroupEl(previous)) {
+      const hasRows = previous.querySelector(".chat-tool-row, .chat-activity.kind-tool");
+      if (hasRows || texts.length === 0) return;
+      previous.remove();
+    }
+    const stray = [...parent.querySelectorAll<HTMLElement>(":scope > .chat-tool-group, :scope > .chat-turn-tools")].find(
+      (group) => group !== block.previousElementSibling,
+    );
+    if (stray) {
+      parent.insertBefore(stray, block);
+      if (stray instanceof HTMLDetailsElement) stray.open = false;
+      return;
+    }
+    if (texts.length === 0) return;
+    parent.insertBefore(renderToolHistoryGroup(texts), block);
   }
 
   function appendStderrLine(line: string): void {

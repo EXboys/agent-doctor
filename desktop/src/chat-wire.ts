@@ -160,6 +160,18 @@ export function wireChatControllers(): void {
       chatState.toolGroupEl = el;
     },
     rememberTool: (text) => chatState.bubbles.rememberTool(text),
+    toolRecordsForTurn: () => {
+      const session = chatState.busy ? runTargetSession() : activeSession();
+      const messages = session.messages;
+      let start = 0;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i]?.role === "user") {
+          start = i + 1;
+          break;
+        }
+      }
+      return messages.slice(start).filter((message) => message.role === "tool").map((message) => message.content);
+    },
   });
 
   chatState.modelPicker = createModelPickerController({

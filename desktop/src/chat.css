@@ -753,9 +753,10 @@ html, body {
   width: 100%;
   max-width: min(520px, 100%);
   min-width: 0;
+  flex-shrink: 0;
   margin: 2px 0;
   color: var(--muted);
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .chat-tool-group-summary {
@@ -832,7 +833,7 @@ html, body {
   margin: 4px 0 2px 10px;
   padding: 0 0 0 10px;
   border-left: 1px solid rgba(15, 23, 42, 0.08);
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .chat-permission-group .chat-permission-stack,
@@ -861,7 +862,8 @@ html, body {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
+  flex-shrink: 0;
+  overflow-x: hidden;
   margin: 0;
   padding: 0;
   border: 0;

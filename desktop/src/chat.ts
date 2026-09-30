@@ -422,7 +422,7 @@ export function setBusy(next: boolean, chatSessionId?: string | null): void {
   syncComposerUi();
   if (wasViewing) {
     settleActivity();
-    finishToolGroup(true);
+    finishToolGroup(false);
     if (chatState.assistantBubble?.isConnected) {
       chatState.assistantBubble.classList.remove("is-streaming");
       syncAssistantCopyButton(chatState.assistantBubble);
