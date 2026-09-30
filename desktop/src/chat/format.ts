@@ -129,24 +129,25 @@ export function isQuietStderr(line: string): boolean {
   );
 }
 
-/** Only yes/no confirmations — not open greetings like「有什么可以帮你的吗？」. */
+/** A short closing question that is explicitly asking to continue. */
 export function looksLikeChoiceQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
   const plain = trimmed.replace(/\s+/g, " ");
-  const lower = plain.toLowerCase();
+  const match = plain.match(/[^。！？!?]{0,40}[？?]\s*$/);
+  if (!match) return false;
+  const ask = match[0].trim();
   if (
-    /有什么(可以|需要|能)?(帮|帮忙|做)/.test(plain) ||
-    /需要我(做|帮忙|帮你)/.test(plain) ||
-    /随时(找我|叫我|告诉我)/.test(plain) ||
-    /how can i help|anything (i can|you need)|what can i (do|help)/i.test(lower)
+    /有什么(可以|需要|能)?(帮|帮忙|做)/.test(ask) ||
+    /需要我(帮忙|帮你)/.test(ask) ||
+    /随时(找我|叫我|告诉我)/.test(ask)
   ) {
     return false;
   }
-  const tail = plain.slice(-120);
+  const lower = ask.toLowerCase();
   return (
-    /(要不要|要我|是否|继续吗|可以吗|好吗|行吗|确认一下|选一个|选哪|选哪个)/.test(tail) ||
-    /(shall i|should i|want me to|would you like me to|continue\?|proceed\?)/i.test(tail)
+    /(要不要继续|还要继续|继续吗|要我继续|需要我继续|确认继续|接着做吗)/.test(ask) ||
+    /(shall i continue|should i continue|want me to continue|proceed\?)/i.test(lower)
   );
 }
 

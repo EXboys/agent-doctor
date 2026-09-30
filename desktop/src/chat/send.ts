@@ -61,6 +61,7 @@ export type SendDeps = {
   activeSession: () => ChatSession;
   ensureListener: () => Promise<void>;
   clearQuickReplies: () => void;
+  allowQuickRepliesAgain: () => void;
   setBusy: (next: boolean, chatSessionId?: string | null) => void;
   pushActivity: (phase: string, message: string) => void;
   persistMessage: (
@@ -221,6 +222,7 @@ export function createSendController(deps: SendDeps) {
     const promptUserText = constraint ? `${constraint}\n\n${promptBody}` : promptBody;
     const selectedMcps = mentions.filter((m) => m.kind === "mcp").map((m) => m.id);
 
+    deps.allowQuickRepliesAgain();
     await deps.ensureListener();
     deps.clearQuickReplies();
     deps.setAssistantBubble(null);

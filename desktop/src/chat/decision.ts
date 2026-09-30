@@ -21,6 +21,8 @@ export type DecisionDeps = DecisionEls & {
 export type DecisionApi = ReturnType<typeof createDecisionController>;
 
 export function createDecisionController(deps: DecisionDeps) {
+  let suppressQuickUntilSend = false;
+
   function hideDecisionDock(): void {
     deps.decisionDockEl.hidden = true;
     deps.decisionKickerEl.textContent = "";
@@ -82,12 +84,18 @@ export function createDecisionController(deps: DecisionDeps) {
   }
 
   function dismissChoice(): void {
+    suppressQuickUntilSend = true;
     hideDecisionDock();
     deps.setStatus("", "muted");
   }
 
+  function allowQuickRepliesAgain(): void {
+    suppressQuickUntilSend = false;
+  }
+
   function showQuickReplies(sourceText: string): void {
     clearQuickReplies();
+    if (suppressQuickUntilSend) return;
     if (!looksLikeChoiceQuestion(sourceText)) return;
 
     showDecisionDock({
@@ -116,7 +124,6 @@ export function createDecisionController(deps: DecisionDeps) {
         },
       ],
     });
-    deps.setStatus(t("chat.needYourChoiceShort"), "warn");
   }
 
   return {
@@ -124,6 +131,7 @@ export function createDecisionController(deps: DecisionDeps) {
     showDecisionDock,
     clearQuickReplies,
     dismissChoice,
+    allowQuickRepliesAgain,
     showQuickReplies,
   };
 }

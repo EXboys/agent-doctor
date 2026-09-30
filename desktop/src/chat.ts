@@ -471,6 +471,9 @@ export function hideDecisionDock(): void {
 export function clearQuickReplies(): void {
   chatState.decision.clearQuickReplies();
 }
+export function allowQuickRepliesAgain(): void {
+  chatState.decision.allowQuickRepliesAgain();
+}
 export function showQuickReplies(sourceText: string): void {
   chatState.decision.showQuickReplies(sourceText);
 }
