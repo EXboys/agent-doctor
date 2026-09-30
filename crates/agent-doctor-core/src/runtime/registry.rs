@@ -1037,6 +1037,21 @@ mod tests {
         }));
         assert!(find_workspace_repair("workspace.cwd.mismatch").is_none());
         assert!(find_workspace_repair("workspace.codex.home").is_some());
+        for entry in RUNTIME_REGISTRY {
+            let marker = if entry.id == "claude-code" {
+                ".claude.".to_string()
+            } else {
+                format!(".{}.", entry.id)
+            };
+            for repair in entry.workspace_repairs {
+                assert!(
+                    repair.check_id.contains(&marker),
+                    "{} owns a repair for another runtime: {}",
+                    entry.id,
+                    repair.check_id
+                );
+            }
+        }
         assert!(descriptor_by_id("deepseek-harness")
             .unwrap()
             .wiring

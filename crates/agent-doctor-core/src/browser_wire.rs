@@ -97,3 +97,19 @@ fn backend() -> Result<&'static dyn BrowserMcpWireBackend, String> {
         .copied()
         .ok_or_else(|| "Browser wiring is not available in this process".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn missing_backend_refuses_wire() {
+        let message = ensure_chrome_for_wire().expect_err("no backend");
+        assert_eq!(message, "Browser wiring is not available in this process");
+        let options = WireBrowserMcpOptions::with_binary(PathBuf::from("agent-doctor"));
+        let message = wire_browser_mcp(&options).expect_err("no backend");
+        assert_eq!(message, "Browser wiring is not available in this process");
+    }
+}

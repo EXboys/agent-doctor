@@ -55,7 +55,8 @@ run_clippy_desktop() {
 
 run_test_cli() {
   # Avoid macOS Keychain / OS secret prompts during unit tests.
-  AGENT_DOCTOR_SECRETS_BACKEND=memory cargo test "${CLI_PACKAGES[@]}"
+  # mcp has its own tests; the CLI package does not re-export them.
+  AGENT_DOCTOR_SECRETS_BACKEND=memory cargo test "${CLI_PACKAGES[@]}" -p agent-doctor-mcp
 }
 
 run_build_cli() {
@@ -109,6 +110,7 @@ run_desktop_rust() {
     echo "      See docs/development.md if pkg-config fails."
   fi
   run_clippy_desktop
+  cargo test -p agent-doctor-desktop --lib
 }
 
 command="${1:-all}"

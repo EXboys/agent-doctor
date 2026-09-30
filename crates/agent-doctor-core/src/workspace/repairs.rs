@@ -113,3 +113,32 @@ pub(crate) fn repair_claude_project_mcp(
         detail,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn entry() -> WorkspaceEntry {
+        WorkspaceEntry {
+            path: PathBuf::from("/tmp/agent-doctor-repair-test"),
+            hermes_profile: "demo".into(),
+            codex_home: PathBuf::from("/tmp/agent-doctor-repair-test/codex"),
+            openclaw_agent_id: "demo".into(),
+            openclaw_workspace: PathBuf::from("/tmp/agent-doctor-repair-test/openclaw"),
+        }
+    }
+
+    #[test]
+    fn hermes_gateway_repair_waits_until_restart_is_requested() {
+        let workspace = entry();
+        let skipped = repair_hermes_gateway(&WorkspaceRepairInput {
+            active_name: "demo",
+            entry: &workspace,
+            restart_gateways: false,
+        })
+        .unwrap();
+        assert!(skipped.is_none());
+    }
+}

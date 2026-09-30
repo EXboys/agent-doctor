@@ -177,3 +177,73 @@ pub fn remove_workspace(name: &str, purge_data: bool) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::{WorkspaceCheck, WorkspaceCheckStatus, WorkspaceDoctorReport};
+
+    fn check(id: &str, status: WorkspaceCheckStatus, detail: &str) -> WorkspaceCheck {
+        WorkspaceCheck {
+            id: id.to_string(),
+            title: id.to_string(),
+            status,
+            detail: detail.to_string(),
+        }
+    }
+
+    #[test]
+    fn plan_keeps_registered_repairs_and_their_previews() {
+        let doctor = WorkspaceDoctorReport {
+            active: Some("demo".into()),
+            checks: vec![
+                check(
+                    "workspace.hermes.profile",
+                    WorkspaceCheckStatus::Fail,
+                    "profile drifted",
+                ),
+                check("workspace.cwd.mismatch", WorkspaceCheckStatus::Warn, "cwd"),
+                check("workspace.codex.home", WorkspaceCheckStatus::Pass, "ok"),
+                check(
+                    "workspace.claude.project_mcp",
+                    WorkspaceCheckStatus::Warn,
+                    "doctor detail",
+                ),
+                check(
+                    "workspace.hermes.gateway_mismatch",
+                    WorkspaceCheckStatus::Warn,
+                    "doctor detail",
+                ),
+            ],
+        };
+        let actions = plan_fixes(&doctor, &WorkspaceFixOptions::default());
+        let ids: Vec<_> = actions.iter().map(|action| action.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "workspace.hermes.profile",
+                "workspace.claude.project_mcp",
+                "workspace.hermes.gateway_mismatch",
+            ]
+        );
+        assert_eq!(actions[0].detail, "profile drifted");
+        assert!(actions[1].detail.contains(".mcp.json"));
+        assert!(actions[2].detail.contains("--restart-gateways"));
+        assert!(actions.iter().all(|action| !action.applied));
+    }
+
+    #[test]
+    fn plan_says_nothing_when_no_repair_matches() {
+        let doctor = WorkspaceDoctorReport {
+            active: None,
+            checks: vec![check(
+                "workspace.cwd.mismatch",
+                WorkspaceCheckStatus::Warn,
+                "cwd",
+            )],
+        };
+        let actions = plan_fixes(&doctor, &WorkspaceFixOptions::default());
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].id, "workspace.fix.nothing");
+    }
+}

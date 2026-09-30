@@ -33,7 +33,7 @@ jobs:
         # Some unit tests still mutate process env (e.g. AGENT_DOCTOR_*_BIN);
         # serialize to avoid cross-test races. HOME is no longer mutated.
         # Memory secrets backend avoids OS keyring prompts in CI.
-        run: cargo test -p agent-doctor-core -p agent-doctor
+        run: cargo test -p agent-doctor-core -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
         env:
           RUST_TEST_THREADS: "1"
           AGENT_DOCTOR_SECRETS_BACKEND: memory
@@ -157,6 +157,9 @@ jobs:
 
       - name: Clippy desktop crate
         run: cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings
+
+      - name: Test desktop crate
+        run: cargo test -p agent-doctor-desktop --lib
 
   desktop-frontend:
     name: Desktop frontend
