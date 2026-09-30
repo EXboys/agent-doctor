@@ -45,6 +45,10 @@ use crate::setup::{EffectorKind, WriteSemantics};
 use crate::workspace::backends::{
     bind_claude_code, bind_codex_for_project, bind_hermes, bind_openclaw, RuntimeBindReport,
 };
+use crate::workspace::repairs::{
+    repair_claude_project_mcp, repair_codex_home, repair_hermes_gateway, repair_hermes_profile,
+    repair_openclaw_agent_env, repair_openclaw_workspace, WorkspaceRepairFn,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigFormat {
@@ -106,6 +110,101 @@ pub struct WorkspaceBindInput<'a> {
     pub openclaw_workspace: &'a Path,
 }
 
+/// One doctor check that `workspace fix` can repair for this runtime.
+pub struct WorkspaceCheckRepair {
+    pub check_id: &'static str,
+    /// Replaces the doctor detail in the plan. `None` keeps the doctor detail.
+    pub preview: Option<&'static str>,
+    repair: WorkspaceRepairFn,
+}
+
+impl WorkspaceCheckRepair {
+    pub(crate) fn run(
+        &self,
+        input: &crate::workspace::repairs::WorkspaceRepairInput,
+    ) -> Result<Option<crate::workspace::repairs::WorkspaceRepairOutcome>> {
+        (self.repair)(input)
+    }
+}
+
+const CLAUDE_MCP_PREVIEW: &str =
+    "Will restore/scaffold .mcp.json and write .agent-doctor/claude-mcp-isolation.md \
+                 (globals kept — pass --migrate-claude-mcp to merge into project .mcp.json)";
+const HERMES_GATEWAY_PREVIEW: &str =
+    "Will attempt Hermes/OpenClaw gateway restart (pass --restart-gateways)";
+
+const OPENCLAW_REPAIRS: &[WorkspaceCheckRepair] = &[
+    WorkspaceCheckRepair {
+        check_id: "workspace.openclaw.workspace",
+        preview: None,
+        repair: repair_openclaw_workspace,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.openclaw.routing.default",
+        preview: None,
+        repair: repair_openclaw_workspace,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.openclaw.routing.defaults_workspace",
+        preview: None,
+        repair: repair_openclaw_workspace,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.openclaw.agent_env",
+        preview: None,
+        repair: repair_openclaw_agent_env,
+    },
+];
+
+const HERMES_REPAIRS: &[WorkspaceCheckRepair] = &[
+    WorkspaceCheckRepair {
+        check_id: "workspace.hermes.profile",
+        preview: None,
+        repair: repair_hermes_profile,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.hermes.gateway_mismatch",
+        preview: Some(HERMES_GATEWAY_PREVIEW),
+        repair: repair_hermes_gateway,
+    },
+];
+
+const CLAUDE_REPAIRS: &[WorkspaceCheckRepair] = &[
+    WorkspaceCheckRepair {
+        check_id: "workspace.claude.project_mcp",
+        preview: Some(CLAUDE_MCP_PREVIEW),
+        repair: repair_claude_project_mcp,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.claude.global_mcp",
+        preview: Some(CLAUDE_MCP_PREVIEW),
+        repair: repair_claude_project_mcp,
+    },
+];
+
+const CODEX_REPAIRS: &[WorkspaceCheckRepair] = &[
+    WorkspaceCheckRepair {
+        check_id: "workspace.codex.home",
+        preview: None,
+        repair: repair_codex_home,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.codex.global_memory",
+        preview: None,
+        repair: repair_codex_home,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.codex.isolation_marker",
+        preview: None,
+        repair: repair_codex_home,
+    },
+    WorkspaceCheckRepair {
+        check_id: "workspace.codex.shared_global_home",
+        preview: None,
+        repair: repair_codex_home,
+    },
+];
+
 #[derive(Clone, Copy)]
 pub struct RuntimeDescriptor {
     pub id: &'static str,
@@ -123,6 +222,8 @@ pub struct RuntimeDescriptor {
     ask: Option<AskSession>,
     /// `None` means project isolation is not supported.
     workspace_bind: Option<WorkspaceBindFn>,
+    /// Doctor checks this runtime can repair. Empty means workspace fix skips it.
+    workspace_repairs: &'static [WorkspaceCheckRepair],
     /// Short name for desktop chips. Full product name stays on the adapter.
     label: &'static str,
     open_session: Option<OpenSessionFn>,
@@ -410,6 +511,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: Some(WIRE_GATEWAY),
         ask: Some(&OPENCLAW_ASK),
         workspace_bind: Some(bind_openclaw_workspace),
+        workspace_repairs: OPENCLAW_REPAIRS,
         label: "OpenClaw",
         open_session: Some(open_openclaw_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -433,6 +535,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: Some(WIRE_GATEWAY),
         ask: Some(&HERMES_ASK),
         workspace_bind: Some(bind_hermes_workspace),
+        workspace_repairs: HERMES_REPAIRS,
         label: "Hermes",
         open_session: Some(open_hermes_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -456,6 +559,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: None,
         ask: Some(&DEEPSEEK_HARNESS_ASK),
         workspace_bind: None,
+        workspace_repairs: &[],
         label: "DeepSeek",
         open_session: Some(open_deepseek_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -479,6 +583,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: Some(WIRE_CLAUDE),
         ask: Some(&CLAUDE_ASK),
         workspace_bind: Some(bind_claude_workspace),
+        workspace_repairs: CLAUDE_REPAIRS,
         label: "Claude",
         open_session: Some(open_claude_session),
         open_session_kind: Some(OpenSessionKind::DeepLink),
@@ -502,6 +607,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: Some(WIRE_CODEX),
         ask: Some(&CODEX_ASK),
         workspace_bind: Some(bind_codex_workspace),
+        workspace_repairs: CODEX_REPAIRS,
         label: "Codex",
         open_session: Some(open_codex_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -525,6 +631,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: None,
         ask: None,
         workspace_bind: None,
+        workspace_repairs: &[],
         label: "Qoder",
         open_session: Some(open_qoder_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -548,6 +655,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: None,
         ask: None,
         workspace_bind: None,
+        workspace_repairs: &[],
         label: "WorkBuddy",
         open_session: Some(open_workbuddy_session),
         open_session_kind: Some(OpenSessionKind::Terminal),
@@ -571,6 +679,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         wiring: None,
         ask: None,
         workspace_bind: None,
+        workspace_repairs: &[],
         label: "Cursor",
         open_session: Some(open_cursor_session),
         open_session_kind: Some(OpenSessionKind::App),
@@ -678,6 +787,15 @@ pub(crate) fn ask_runtime_ids() -> Vec<&'static str> {
         .filter(|entry| entry.ask.is_some())
         .map(|entry| entry.id)
         .collect()
+}
+
+pub(crate) fn find_workspace_repair(check_id: &str) -> Option<&'static WorkspaceCheckRepair> {
+    RUNTIME_REGISTRY.iter().find_map(|entry| {
+        entry
+            .workspace_repairs
+            .iter()
+            .find(|repair| repair.check_id == check_id)
+    })
 }
 
 pub(crate) fn bind_workspace_runtimes(
@@ -903,6 +1021,22 @@ mod tests {
         assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
         assert!(descriptor_by_id("workbuddy").unwrap().ask.is_none());
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
+        let mut repair_ids: Vec<_> = RUNTIME_REGISTRY
+            .iter()
+            .flat_map(|entry| entry.workspace_repairs.iter().map(|repair| repair.check_id))
+            .collect();
+        repair_ids.sort_unstable();
+        let mut unique = repair_ids.clone();
+        unique.dedup();
+        assert_eq!(
+            repair_ids, unique,
+            "workspace repair check ids must be unique"
+        );
+        assert!(RUNTIME_REGISTRY.iter().all(|entry| {
+            entry.workspace_bind.is_some() == !entry.workspace_repairs.is_empty()
+        }));
+        assert!(find_workspace_repair("workspace.cwd.mismatch").is_none());
+        assert!(find_workspace_repair("workspace.codex.home").is_some());
         assert!(descriptor_by_id("deepseek-harness")
             .unwrap()
             .wiring

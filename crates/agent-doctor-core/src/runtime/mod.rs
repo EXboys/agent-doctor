@@ -5,7 +5,8 @@ pub use bash_allowlist::{bash_command_allowed_for_runtime, runtime_allowed_bash_
 
 pub(crate) use registry::{
     ask_backend, ask_runtime_ids, bind_workspace_runtimes, dispatch_job, dispatch_runtime_ids,
-    open_session, skill_mount_runtime_ids as descriptor_skill_mount_runtime_ids, ConfigFormat,
+    find_workspace_repair, open_session,
+    skill_mount_runtime_ids as descriptor_skill_mount_runtime_ids, ConfigFormat,
     WorkspaceBindInput,
 };
 

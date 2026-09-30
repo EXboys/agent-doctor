@@ -30,6 +30,7 @@ pub mod matrix;
 pub mod mcp_inventory;
 pub mod path;
 pub mod paths_check;
+pub mod repairs;
 pub mod shell;
 pub mod snapshot;
 
