@@ -1,3 +1,39 @@
+import { chatState, initChatStore } from "./chat-state";
+import {
+  elevatedEl,
+  elevatedLabelEl,
+  elevatedWrapEl,
+  readImageWrapEl,
+  modelBtnEl,
+  promptEl,
+  actionEl,
+  attachEl,
+  composerBoxEl,
+  composerEl,
+  contextMeterEl,
+  contextCompactEl,
+  mentionsEl,
+  mentionMenuEl,
+  restoreBackupEl,
+  newSessionEl,
+  sessionListEl,
+  statusEl,
+  cwdEl,
+  titleEl,
+  themeEl,
+  shellEl,
+  resourcesPanelEl,
+  resourcesToggleEl,
+  resourcesLabelEl,
+  resourcesCountEl,
+  resourcesTabsEl,
+  resourcesSearchEl,
+  skillsListEl,
+  skillsEmptyEl,
+  mcpListEl,
+  mcpEmptyEl,
+} from "./chat-dom";
+import { bootChat } from "./chat-boot";
 import {
   AskMentionMenuController,
   AskResourcesController,
@@ -7,8 +43,6 @@ import {
 import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 
-import { listen } from "@tauri-apps/api/event";
-import type { PersonalProviderListItem } from "./types";
 import {
   ASK_VERIFY_DRAFT_KEY,
   MAX_SESSIONS,
@@ -18,19 +52,14 @@ import {
   type ChatSession,
   type ChatTheme,
   type PermissionMeta,
-  type SessionStore,
 } from "./chat/types";
 import {
   applyChatTheme as applyChatThemeBase,
   currentChatTheme,
-  ensureChatThemeButton,
-  readStoredChatTheme,
-  systemChatTheme,
 } from "./chat/theme";
 import { isAskRuntime, runtimeFromLocation } from "./chat/runtime";
 import {
   createEmptySession,
-  loadStore as loadStoreFromDisk,
   persistStore,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
@@ -45,245 +74,115 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
-import { createPermissionsController, type PermissionsApi } from "./chat/permissions";
-import { createSessionsController, type SessionsApi } from "./chat/sessions";
-import { createBubblesController, type BubblesApi } from "./chat/bubbles";
-import { createStreamController, type StreamApi } from "./chat/stream";
-import { createSendController, type SendApi } from "./chat/send";
-import { createActivityController, type ActivityApi } from "./chat/activity";
-import { createModelPickerController, type ModelPickerApi } from "./chat/model-picker";
-import { createDecisionController, type DecisionApi } from "./chat/decision";
-import { createAttachmentsController, type AttachmentsApi } from "./chat/attachments";
-import { createContextMeterController, type ContextMeterApi } from "./chat/context-meter";
-import { createShellUiController, type ShellUiApi } from "./chat/shell-ui";
-import { createBackupUiController, type BackupUiApi } from "./chat/backup-ui";
-import { createVoiceInputController, type VoiceInputApi } from "./chat/voice";
-import { createHostedController, type HostedApi } from "./chat/hosted";
-import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 import { openSession } from "./ipc";
 
-const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
-const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
-const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
-const readImageEl = document.querySelector<HTMLInputElement>("#chat-read-image")!;
-const readImageWrapEl = document.querySelector<HTMLElement>("#chat-read-image-wrap");
-const modelBtnEl = document.querySelector<HTMLButtonElement>("#chat-model-btn")!;
-const modelLabelEl = document.querySelector<HTMLElement>("#chat-model-label")!;
-const modelMenuEl = document.querySelector<HTMLElement>("#chat-model-menu")!;
-const modelWrapEl = modelBtnEl.closest(".chat-model-wrap") as HTMLElement;
-const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
-const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
-const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
-const voiceEl = document.querySelector<HTMLButtonElement>("#chat-voice")!;
-const mainEl = document.querySelector<HTMLElement>("#chat-main")!;
-const dialogModeEl = document.querySelector<HTMLButtonElement>("#chat-mode-dialog")!;
-const voiceModeEl = document.querySelector<HTMLButtonElement>("#chat-mode-voice")!;
-const islandEl = document.querySelector<HTMLButtonElement>("#chat-island")!;
-const islandTitleEl = document.querySelector<HTMLElement>("#chat-island-title")!;
-const islandDetailEl = document.querySelector<HTMLElement>("#chat-island-detail")!;
-const attachmentsEl = document.querySelector<HTMLElement>("#chat-attachments")!;
-const composerBoxEl = document.querySelector<HTMLElement>(".chat-composer-box")!;
-const composerEl = document.querySelector<HTMLElement>(".chat-composer")!;
-const contextMeterEl = document.querySelector<HTMLButtonElement>("#chat-context-meter");
-const contextRingFillEl = document.querySelector<SVGCircleElement>("#chat-context-ring-fill");
-const contextLabelEl = document.querySelector<HTMLElement>("#chat-context-label");
-const contextPopoverEl = document.querySelector<HTMLElement>("#chat-context-popover");
-const contextPopoverTitleEl = document.querySelector<HTMLElement>("#chat-context-popover-title");
-const contextPopoverBodyEl = document.querySelector<HTMLElement>("#chat-context-popover-body");
-const contextCompactEl = document.querySelector<HTMLButtonElement>("#chat-context-compact");
-const mentionsEl = document.querySelector<HTMLElement>("#chat-mentions")!;
-const mentionMenuEl = document.querySelector<HTMLElement>("#chat-mention-menu")!;
-const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!;
-const restoreBackupEl = document.querySelector<HTMLButtonElement>("#chat-restore-backup");
-const newSessionEl = document.querySelector<HTMLButtonElement>("#chat-new")!;
-const terminalEl = document.querySelector<HTMLButtonElement>("#chat-terminal")!;
-const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
-const logEl = document.querySelector<HTMLElement>("#chat-log")!;
-const statusEl = document.querySelector<HTMLElement>("#chat-status")!;
-const decisionDockEl = document.querySelector<HTMLElement>("#chat-decision-dock")!;
-const decisionKickerEl = document.querySelector<HTMLElement>("#chat-decision-kicker")!;
-const decisionTitleEl = document.querySelector<HTMLElement>("#chat-decision-title")!;
-const decisionDetailEl = document.querySelector<HTMLElement>("#chat-decision-detail")!;
-const decisionActionsEl = document.querySelector<HTMLElement>("#chat-decision-actions")!;
-const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
-const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-workspace-select")!;
-const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
-const workspaceHintEl = document.querySelector<HTMLElement>("#chat-workspace-hint")!;
-const titleEl = document.querySelector<HTMLElement>("#chat-title")!;
-const themeEl = ensureChatThemeButton();
-
-function applyChatTheme(theme: ChatTheme, persist = true): void {
+export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
 }
 
-function saveStore(): void {
-  store = persistStore(store);
+export function saveStore(): void {
+  chatState.store = persistStore(chatState.store);
 }
 
-function sessionTitle(session: ChatSession): string {
+export function sessionTitle(session: ChatSession): string {
   return sessionTitleBase(session, t("chat.untitled"));
 }
 
-function buildPromptWithHistory(
+export function buildPromptWithHistory(
   userText: string,
-  attachments: ChatAttachment[],
+  picked: ChatAttachment[],
   sessionId?: string,
   readings?: ImageReading[],
 ): string {
-  const session = sessionById(sessionId) ?? (busy ? runTargetSession() : activeSession());
-  return buildPromptWithHistoryBase(userText, attachments, session, readings);
+  const session = sessionById(sessionId) ?? (chatState.busy ? runTargetSession() : activeSession());
+  return buildPromptWithHistoryBase(userText, picked, session, readings);
 }
 
-function contextUsagePercent(session: ChatSession, draft = ""): number {
-  return contextUsagePercentBase(session, draft, wiredProvider?.model);
+export function contextUsagePercent(session: ChatSession, draft = ""): number {
+  return contextUsagePercentBase(session, draft, chatState.wiredProvider?.model);
 }
 
-const shellEl = document.querySelector<HTMLElement>("#chat-shell")!;
-const resourcesPanelEl = document.querySelector<HTMLElement>("#chat-resources-panel")!;
-const resourcesToggleEl = document.querySelector<HTMLButtonElement>("#chat-resources-toggle")!;
-const resourcesLabelEl = document.querySelector<HTMLElement>("#chat-resources-label")!;
-const resourcesCountEl = document.querySelector<HTMLElement>("#chat-resources-count");
-const resourcesTabsEl = document.querySelector<HTMLElement>("#chat-resources-tabs");
-const resourcesSearchEl = document.querySelector<HTMLInputElement>("#chat-resources-search");
-const resourcesRefreshEl = document.querySelector<HTMLButtonElement>("#chat-resources-refresh")!;
-const openResourcesEl = document.querySelector<HTMLButtonElement>("#chat-open-resources")!;
-const skillsListEl = document.querySelector<HTMLElement>("#chat-skills-list")!;
-const skillsEmptyEl = document.querySelector<HTMLElement>("#chat-skills-empty")!;
-const mcpListEl = document.querySelector<HTMLElement>("#chat-mcp-list")!;
-const mcpEmptyEl = document.querySelector<HTMLElement>("#chat-mcp-empty")!;
-
-/** Locked by main-page Ask entry (`#runtime=` / ask-window-focus). Not switched in-chat. */
-let currentRuntime: AskRuntime = "claude-code";
-let wiredProvider: PersonalProviderListItem | null = null;
-let modelMenuOpen = false;
-
-let store: SessionStore = (() => {
-  try {
-    return loadStoreFromDisk(currentRuntime);
-  } catch (error) {
-    console.error("Ask: failed to load chat store", error);
-    const session = createEmptySession(currentRuntime);
-    return { activeId: session.id, sessions: [session] };
-  }
-})();
-let busy = false;
-let busyGen = 0;
-/** Frontend chat session id for the in-flight ask (null when idle). */
-let runningChatSessionId: string | null = null;
-/** Backend prompt-session id for the in-flight ask. */
-let runningBackendSessionId: string | null = null;
-/** Sessions that finished while the user was looking elsewhere — show 【完成】 until opened. */
-const unseenCompletedSessionIds = new Set<string>();
-let permissions!: PermissionsApi;
-let sessions!: SessionsApi;
-let bubbles!: BubblesApi;
-let stream!: StreamApi;
-let send!: SendApi;
-let activity!: ActivityApi;
-let modelPicker!: ModelPickerApi;
-let decision!: DecisionApi;
-let attachments!: AttachmentsApi;
-let voiceInput!: VoiceInputApi;
-let hosted: HostedApi | null = null;
-let latestActivityText = "";
-let contextMeter!: ContextMeterApi;
-let shellUi!: ShellUiApi;
-let backupUi: BackupUiApi | undefined;
-
-function expireLivePermissionCards(): void {
-  permissions.expireLivePermissionCards();
+export function expireLivePermissionCards(): void {
+  chatState.permissions.expireLivePermissionCards();
 }
-function pushPermissionCard(payload: {
+export function pushPermissionCard(payload: {
   session_id: string;
   request_id: string;
   tool_name: string;
   detail: string;
 }): void {
-  permissions.pushPermissionCard(payload);
+  chatState.permissions.pushPermissionCard(payload);
 }
-function schedulePaintLivePermissionBatch(): void {
-  permissions.schedulePaintLivePermissionBatch();
+export function schedulePaintLivePermissionBatch(): void {
+  chatState.permissions.schedulePaintLivePermissionBatch();
 }
-function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLElement {
-  return permissions.renderPermissionCard(message, interactive);
+export function renderPermissionCard(message: ChatMessage, interactive: boolean): HTMLElement {
+  return chatState.permissions.renderPermissionCard(message, interactive);
 }
-function renderPermissionGroup(messages: ChatMessage[], interactive: boolean): HTMLDetailsElement {
-  return permissions.renderPermissionGroup(messages, interactive);
+export function renderPermissionGroup(messages: ChatMessage[], interactive: boolean): HTMLDetailsElement {
+  return chatState.permissions.renderPermissionGroup(messages, interactive);
 }
-function collapseResolvedPermissionsBeforeAssistant(anchor: HTMLElement): void {
-  permissions.collapseResolvedPermissionsBeforeAssistant(anchor);
+export function collapseResolvedPermissionsBeforeAssistant(anchor: HTMLElement): void {
+  chatState.permissions.collapseResolvedPermissionsBeforeAssistant(anchor);
 }
-function markPermissionResolved(requestId: string, allowed: boolean): void {
-  permissions.markPermissionResolved(requestId, allowed);
+export function markPermissionResolved(requestId: string, allowed: boolean): void {
+  chatState.permissions.markPermissionResolved(requestId, allowed);
 }
-function renderSessionList(): void {
-  sessions.renderSessionList();
+export function renderSessionList(): void {
+  chatState.sessions.renderSessionList();
 }
-function ensureRuntimeSession(runtime: AskRuntime): void {
-  sessions.ensureRuntimeSession(runtime);
+export function ensureRuntimeSession(runtime: AskRuntime): void {
+  chatState.sessions.ensureRuntimeSession(runtime);
 }
-function startNewSession(): void {
-  sessions.startNewSession();
+export function startNewSession(): void {
+  chatState.sessions.startNewSession();
 }
-function clearActiveSession(): void {
-  sessions.clearActiveSession();
+export function clearActiveSession(): void {
+  chatState.sessions.clearActiveSession();
 }
-function compactActiveSession(): void {
-  sessions.compactActiveSession();
+export function compactActiveSession(): void {
+  chatState.sessions.compactActiveSession();
 }
-let assistantBubble: HTMLElement | null = null;
-let assistantMessageId: string | null = null;
-let assistantRaw = "";
-let activityEl: HTMLElement | null = null;
-let lifecycleActivityEl: HTMLElement | null = null;
-let toolGroupEl: HTMLDetailsElement | null = null;
-let pendingText = "";
-let pendingAttachments: ChatAttachment[] = [];
-/** True once any assistant text was rendered this turn (avoids result-fallback duplicates). */
-let turnHadAssistantText = false;
-let workspaceCwd: string | null = null;
-let workspaceDoc: WorkspaceDoc | null = null;
-
 /** True when the open chat owns the in-flight (or just-finishing) run. */
-function isViewingRunningSession(): boolean {
-  return Boolean(runningChatSessionId && store.activeId === runningChatSessionId);
+export function isViewingRunningSession(): boolean {
+  return Boolean(chatState.runningChatSessionId && chatState.store.activeId === chatState.runningChatSessionId);
 }
 
 /** Composer/send locks only while a run is busy and that chat is open. */
-function isComposerLocked(): boolean {
-  return Boolean(busy && isViewingRunningSession());
+export function isComposerLocked(): boolean {
+  return Boolean(chatState.busy && isViewingRunningSession());
 }
 
-function sessionById(id: string | null | undefined): ChatSession | undefined {
+export function sessionById(id: string | null | undefined): ChatSession | undefined {
   if (!id) return undefined;
-  return store.sessions.find((s) => s.id === id);
+  return chatState.store.sessions.find((s) => s.id === id);
 }
 
 /** Session that owns the in-flight run (falls back to the open chat). */
-function runTargetSession(): ChatSession {
-  const running = sessionById(runningChatSessionId);
+export function runTargetSession(): ChatSession {
+  const running = sessionById(chatState.runningChatSessionId);
   if (running) return running;
   return activeSession();
 }
 
 /** Ignore stale events from a previous backend session. */
-function isEventForCurrentRun(sessionId: string | undefined): boolean {
+export function isEventForCurrentRun(sessionId: string | undefined): boolean {
   // Prefer backend session id so late events still apply after invoke()>finally
   // clears `busy` a tick before the matching `completed`/delta is handled.
-  if (runningBackendSessionId) {
-    return !sessionId || sessionId === runningBackendSessionId;
+  if (chatState.runningBackendSessionId) {
+    return !sessionId || sessionId === chatState.runningBackendSessionId;
   }
-  return busy;
+  return chatState.busy;
 }
 
-function settleRunRouting(): void {
-  runningChatSessionId = null;
-  runningBackendSessionId = null;
+export function settleRunRouting(): void {
+  chatState.runningChatSessionId = null;
+  chatState.runningBackendSessionId = null;
 }
 
 /** Expire leftover Allow/Deny cards when the ask ends (in place — do not reshuffle the log). */
 
-function autoResizePrompt(): void {
+export function autoResizePrompt(): void {
   promptEl.style.height = "auto";
   const styles = window.getComputedStyle(promptEl);
   const maxHeight = Number.parseFloat(styles.maxHeight);
@@ -294,31 +193,31 @@ function autoResizePrompt(): void {
   promptEl.style.height = `${next}px`;
 }
 
-function selectedRuntime(): AskRuntime {
-  return currentRuntime;
+export function selectedRuntime(): AskRuntime {
+  return chatState.currentRuntime;
 }
 
-function updateRuntimeLabel(): void {
-  modelPicker.updateRuntimeLabel();
+export function updateRuntimeLabel(): void {
+  chatState.modelPicker.updateRuntimeLabel();
 }
 
-function closeModelMenu(): void {
-  modelPicker.closeModelMenu();
+export function closeModelMenu(): void {
+  chatState.modelPicker.closeModelMenu();
 }
-function positionModelMenu(): void {
-  modelPicker.positionModelMenu();
+export function positionModelMenu(): void {
+  chatState.modelPicker.positionModelMenu();
 }
-function renderModelPickerLabel(): void {
-  modelPicker.renderModelPickerLabel();
+export function renderModelPickerLabel(): void {
+  chatState.modelPicker.renderModelPickerLabel();
 }
-function openModelMenu(): void {
-  modelPicker.openModelMenu();
+export function openModelMenu(): void {
+  chatState.modelPicker.openModelMenu();
 }
-async function refreshWiredProvider(): Promise<void> {
-  await modelPicker.refreshWiredProvider();
+export async function refreshWiredProvider(): Promise<void> {
+  await chatState.modelPicker.refreshWiredProvider();
 }
-function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
-  currentRuntime = runtime;
+export function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
+  chatState.currentRuntime = runtime;
   updateElevatedLabel();
   updateRuntimeLabel();
   if (opts?.syncSession) {
@@ -331,64 +230,61 @@ function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }
   void loadAskResources();
 }
 
-/** Repair historical “one token = one message” fragmentation from early Codex streaming. */
+// Repair historical “one token = one message” fragmentation from early Codex streaming.
 
-let storePersistTimer = 0;
-let sessionListRenderTimer = 0;
-
-function flushStorePersist(): void {
-  if (storePersistTimer) {
-    window.clearTimeout(storePersistTimer);
-    storePersistTimer = 0;
+export function flushStorePersist(): void {
+  if (chatState.storePersistTimer) {
+    window.clearTimeout(chatState.storePersistTimer);
+    chatState.storePersistTimer = 0;
   }
   saveStore();
 }
 
 /** Avoid syncing the full transcript to disk on every streaming token or tool step. */
-function scheduleStorePersist(delayMs = 500): void {
-  if (storePersistTimer) window.clearTimeout(storePersistTimer);
-  storePersistTimer = window.setTimeout(() => {
-    storePersistTimer = 0;
+export function scheduleStorePersist(delayMs = 500): void {
+  if (chatState.storePersistTimer) window.clearTimeout(chatState.storePersistTimer);
+  chatState.storePersistTimer = window.setTimeout(() => {
+    chatState.storePersistTimer = 0;
     saveStore();
   }, delayMs);
 }
 
-function flushSessionListRender(): void {
-  if (sessionListRenderTimer) {
-    window.clearTimeout(sessionListRenderTimer);
-    sessionListRenderTimer = 0;
+export function flushSessionListRender(): void {
+  if (chatState.sessionListRenderTimer) {
+    window.clearTimeout(chatState.sessionListRenderTimer);
+    chatState.sessionListRenderTimer = 0;
   }
   renderSessionList();
 }
 
-function scheduleSessionListRender(delayMs = 400): void {
-  if (sessionListRenderTimer) window.clearTimeout(sessionListRenderTimer);
-  sessionListRenderTimer = window.setTimeout(() => {
-    sessionListRenderTimer = 0;
+export function scheduleSessionListRender(delayMs = 400): void {
+  if (chatState.sessionListRenderTimer) window.clearTimeout(chatState.sessionListRenderTimer);
+  chatState.sessionListRenderTimer = window.setTimeout(() => {
+    chatState.sessionListRenderTimer = 0;
     renderSessionList();
   }, delayMs);
 }
 
-function activeSession(): ChatSession {
-  let session = store.sessions.find((s) => s.id === store.activeId);
+export function activeSession(): ChatSession {
+  let session = chatState.store.sessions.find((s) => s.id === chatState.store.activeId);
   if (!session) {
     session = createEmptySession(selectedRuntime());
-    store.sessions.unshift(session);
-    store.activeId = session.id;
+    chatState.store.sessions.unshift(session);
+    chatState.store.activeId = session.id;
     saveStore();
   }
   return session;
 }
 
-function touchSession(session: ChatSession): void {
+export function touchSession(session: ChatSession): void {
   session.updatedAt = Date.now();
-  store.sessions = [
+  chatState.store.sessions = [
     session,
-    ...store.sessions.filter((s) => s.id !== session.id),
+    ...chatState.store.sessions.filter((s) => s.id !== session.id),
   ].slice(0, MAX_SESSIONS);
 }
 
-function applyI18n(): void {
+export function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     if (el === actionEl || el === themeEl) return;
     const key = el.dataset.i18n as MessageKey | undefined;
@@ -400,8 +296,8 @@ function applyI18n(): void {
   if (readImageWrapEl) {
     readImageWrapEl.title = t("chat.readImageTextHint");
   }
-  voiceInput?.applyI18n();
-  hosted?.applyI18n();
+  chatState.voiceInput?.applyI18n();
+  chatState.hosted?.applyI18n();
   if (resourcesSearchEl) {
     resourcesSearchEl.placeholder = t("chat.resourcesSearch");
   }
@@ -430,13 +326,13 @@ function applyI18n(): void {
   updateContextMeter();
 }
 
-function syncRestoreBackupButton(): void {
+export function syncRestoreBackupButton(): void {
   if (!restoreBackupEl) return;
   // Always show the control; empty backup just no-ops with a status message.
   restoreBackupEl.hidden = false;
 }
 
-function updateElevatedLabel(): void {
+export function updateElevatedLabel(): void {
   const runtime = selectedRuntime();
   // DeepSeek harness has no auto-approve / elevated mode — hide the control.
   if (runtime === "deepseek-harness") {
@@ -459,7 +355,7 @@ function updateElevatedLabel(): void {
   elevatedLabelEl.textContent = detail;
 }
 
-function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {
+export function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {
   statusEl.textContent = text;
   statusEl.classList.remove("is-ok", "is-warn", "is-error");
   if (tone === "ok") statusEl.classList.add("is-ok");
@@ -467,7 +363,7 @@ function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "mute
   if (tone === "error") statusEl.classList.add("is-error");
 }
 
-function syncActionButton(): void {
+export function syncActionButton(): void {
   if (isViewingRunningSession()) {
     actionEl.textContent = t("chat.stop");
     actionEl.classList.remove("btn-primary");
@@ -483,21 +379,21 @@ function syncActionButton(): void {
   }
 }
 
-function syncComposerUi(): void {
+export function syncComposerUi(): void {
   const locked = isComposerLocked();
   promptEl.disabled = locked;
   elevatedEl.disabled = locked || selectedRuntime() === "deepseek-harness";
-  modelBtnEl.disabled = locked || !wiredProvider;
+  modelBtnEl.disabled = locked || !chatState.wiredProvider;
   if (locked) {
     closeModelMenu();
     closeContextPopover();
   }
   newSessionEl.disabled = false;
   attachEl.disabled = locked;
-  if (locked && voiceInput?.isListening()) {
-    void voiceInput.stopListening();
+  if (locked && chatState.voiceInput?.isListening()) {
+    void chatState.voiceInput.stopListening();
   }
-  voiceInput?.syncEnabled();
+  chatState.voiceInput?.syncEnabled();
   sessionListEl.classList.remove("is-busy");
   syncActionButton();
   updateElevatedLabel();
@@ -505,136 +401,136 @@ function syncComposerUi(): void {
   updateContextMeter();
 }
 
-function setBusy(next: boolean, chatSessionId?: string | null): void {
+export function setBusy(next: boolean, chatSessionId?: string | null): void {
   if (next) {
-    busyGen += 1;
-    busy = true;
-    runningChatSessionId = chatSessionId ?? store.activeId;
+    chatState.busyGen += 1;
+    chatState.busy = true;
+    chatState.runningChatSessionId = chatSessionId ?? chatState.store.activeId;
     syncComposerUi();
     flushSessionListRender();
     return;
   }
   const wasViewing = isViewingRunningSession();
-  busy = false;
+  chatState.busy = false;
   // Do not clear runningBackendSessionId here — late prompt-session-event
   // handlers (completed / trailing deltas) must still match the run.
   syncComposerUi();
   if (wasViewing) {
     settleActivity();
     finishToolGroup(true);
-    if (assistantBubble?.isConnected) {
-      assistantBubble.classList.remove("is-streaming");
-      syncAssistantCopyButton(assistantBubble);
+    if (chatState.assistantBubble?.isConnected) {
+      chatState.assistantBubble.classList.remove("is-streaming");
+      syncAssistantCopyButton(chatState.assistantBubble);
     }
   }
-  assistantBubble = null;
-  assistantMessageId = null;
-  assistantRaw = "";
-  pendingText = "";
-  turnHadAssistantText = false;
-  activityEl = null;
-  lifecycleActivityEl = null;
-  toolGroupEl = null;
+  chatState.assistantBubble = null;
+  chatState.assistantMessageId = null;
+  chatState.assistantRaw = "";
+  chatState.pendingText = "";
+  chatState.turnHadAssistantText = false;
+  chatState.activityEl = null;
+  chatState.lifecycleActivityEl = null;
+  chatState.toolGroupEl = null;
   flushStorePersist();
   flushSessionListRender();
 }
 
-function dismissLifecycleActivity(): void {
-  activity.dismissLifecycleActivity();
+export function dismissLifecycleActivity(): void {
+  chatState.activity.dismissLifecycleActivity();
 }
-function finishToolGroup(collapse = true): void {
-  activity.finishToolGroup(collapse);
+export function finishToolGroup(collapse = true): void {
+  chatState.activity.finishToolGroup(collapse);
 }
-function clearEphemeralActivity(dropStderr = false): void {
-  activity.clearEphemeralActivity(dropStderr);
+export function clearEphemeralActivity(dropStderr = false): void {
+  chatState.activity.clearEphemeralActivity(dropStderr);
 }
-function appendStderrLine(line: string): void {
-  activity.appendStderrLine(line);
+export function appendStderrLine(line: string): void {
+  chatState.activity.appendStderrLine(line);
 }
-function pushActivity(phase: string, message: string): void {
-  latestActivityText = message.trim();
-  activity.pushActivity(phase, message);
+export function pushActivity(phase: string, message: string): void {
+  chatState.latestActivityText = message.trim();
+  chatState.activity.pushActivity(phase, message);
 }
-function settleActivity(): void {
-  activity.settleActivity();
+export function settleActivity(): void {
+  chatState.activity.settleActivity();
 }
 
 /** Apply queued assistant text immediately (before inserting later events). */
-function flushPendingTextSync(): void {
-  bubbles.flushPendingTextSync();
+export function flushPendingTextSync(): void {
+  chatState.bubbles.flushPendingTextSync();
 }
 
-function hideDecisionDock(): void {
-  decision.hideDecisionDock();
+export function hideDecisionDock(): void {
+  chatState.decision.hideDecisionDock();
 }
-function clearQuickReplies(): void {
-  decision.clearQuickReplies();
+export function clearQuickReplies(): void {
+  chatState.decision.clearQuickReplies();
 }
-function showQuickReplies(sourceText: string): void {
-  decision.showQuickReplies(sourceText);
-}
-
-function sealAssistantBubble(): void {
-  bubbles.sealAssistantBubble();
+export function showQuickReplies(sourceText: string): void {
+  chatState.decision.showQuickReplies(sourceText);
 }
 
-function appendAssistantChunk(chunk: string): void {
-  bubbles.appendAssistantChunk(chunk);
+export function sealAssistantBubble(): void {
+  chatState.bubbles.sealAssistantBubble();
 }
 
-function renderPendingAttachments(): void {
-  attachments.renderPendingAttachments();
-}
-async function pickAttachments(): Promise<void> {
-  await attachments.pickAttachments();
-}
-async function setupFileDrop(): Promise<void> {
-  await attachments.setupFileDrop();
+export function appendAssistantChunk(chunk: string): void {
+  chatState.bubbles.appendAssistantChunk(chunk);
 }
 
-function persistMessage(
+export function renderPendingAttachments(): void {
+  chatState.attachments.renderPendingAttachments();
+}
+export async function pickAttachments(): Promise<void> {
+  await chatState.attachments.pickAttachments();
+}
+export async function setupFileDrop(): Promise<void> {
+  await chatState.attachments.setupFileDrop();
+}
+
+export function persistMessage(
   role: ChatRole,
   content: string,
   opts?: { id?: string; attachments?: ChatAttachment[]; permission?: PermissionMeta },
 ): ChatMessage {
-  return bubbles.persistMessage(role, content, opts);
+  return chatState.bubbles.persistMessage(role, content, opts);
 }
 
-function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
-  bubbles.updateAssistantMessage(id, content, opts);
+export function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
+  chatState.bubbles.updateAssistantMessage(id, content, opts);
 }
 
-function syncAssistantCopyButton(bubble: HTMLElement): void {
-  bubbles.syncAssistantCopyButton(bubble);
+export function syncAssistantCopyButton(bubble: HTMLElement): void {
+  chatState.bubbles.syncAssistantCopyButton(bubble);
 }
 
-function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
-  bubbles.setAssistantMarkdown(bubble, markdown);
+export function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
+  chatState.bubbles.setAssistantMarkdown(bubble, markdown);
 }
 
-function appendBubble(
+export function appendBubble(
   kind: ChatRole,
   text: string,
   opts?: { id?: string; persist?: boolean; attachments?: ChatAttachment[] },
 ): HTMLElement {
-  return bubbles.appendBubble(kind, text, opts);
+  return chatState.bubbles.appendBubble(kind, text, opts);
 }
 
-function renderActiveMessages(): void {
-  bubbles.renderActiveMessages();
+export function renderActiveMessages(): void {
+  chatState.bubbles.renderActiveMessages();
 }
 
-function queueAssistantText(text: string): void {
-  bubbles.queueAssistantText(text);
+export function queueAssistantText(text: string): void {
+  chatState.bubbles.queueAssistantText(text);
 }
 
-function displayCwd(): string {
+export function displayCwd(): string {
   const live = cwdEl.dataset.cwd?.trim() || cwdEl.textContent?.trim();
   if (live && live !== "—") return live;
-  return workspaceCwd?.trim() || "—";
+  return chatState.workspaceCwd?.trim() || "—";
 }
 
-function setDisplayedCwd(cwd: string): void {
+export function setDisplayedCwd(cwd: string): void {
   const value = cwd.trim() || "—";
   cwdEl.dataset.cwd = value;
   cwdEl.textContent = value;
@@ -642,7 +538,7 @@ function setDisplayedCwd(cwd: string): void {
   askResources.updateResourcesSummary();
 }
 
-const askResources = new AskResourcesController(
+export const askResources = new AskResourcesController(
   {
     shellEl,
     resourcesPanelEl,
@@ -662,7 +558,7 @@ const askResources = new AskResourcesController(
   shortCwdLabel,
 );
 
-const mentionMenu = new AskMentionMenuController(
+export const mentionMenu = new AskMentionMenuController(
   { promptEl, mentionMenuEl },
   () => askResources.mentionCandidates(),
   (mention) => askResources.upsertMention(mention),
@@ -673,48 +569,48 @@ const mentionMenu = new AskMentionMenuController(
   },
 );
 
-function updateResourcesSummary(): void {
-  shellUi.updateResourcesSummary();
+export function updateResourcesSummary(): void {
+  chatState.shellUi.updateResourcesSummary();
 }
-function toggleResourcesPanel(): void {
-  shellUi.toggleResourcesPanel();
+export function toggleResourcesPanel(): void {
+  chatState.shellUi.toggleResourcesPanel();
 }
-async function loadAskResources(): Promise<void> {
-  await shellUi.loadAskResources();
+export async function loadAskResources(): Promise<void> {
+  await chatState.shellUi.loadAskResources();
 }
-function syncWorkspaceActivateButton(doc: WorkspaceDoc | null = workspaceDoc): void {
-  shellUi.syncWorkspaceActivateButton(doc);
+export function syncWorkspaceActivateButton(doc: WorkspaceDoc | null = chatState.workspaceDoc): void {
+  chatState.shellUi.syncWorkspaceActivateButton(doc);
 }
-async function activateSelectedWorkspace(): Promise<void> {
-  await shellUi.activateSelectedWorkspace();
+export async function activateSelectedWorkspace(): Promise<void> {
+  await chatState.shellUi.activateSelectedWorkspace();
 }
-async function openMainWorkspace(): Promise<void> {
-  await shellUi.openMainWorkspace();
+export async function openMainWorkspace(): Promise<void> {
+  await chatState.shellUi.openMainWorkspace();
 }
-async function openMainResources(): Promise<void> {
-  await shellUi.openMainResources();
+export async function openMainResources(): Promise<void> {
+  await chatState.shellUi.openMainResources();
 }
 
 /** Rough token estimate — CJK denser than ASCII. */
 
-function closeContextPopover(): void {
-  contextMeter.closeContextPopover();
+export function closeContextPopover(): void {
+  chatState.contextMeter.closeContextPopover();
 }
-function positionContextPopover(): void {
-  contextMeter.positionContextPopover();
+export function positionContextPopover(): void {
+  chatState.contextMeter.positionContextPopover();
 }
-function toggleContextPopover(): void {
-  contextMeter.toggleContextPopover();
+export function toggleContextPopover(): void {
+  chatState.contextMeter.toggleContextPopover();
 }
-function updateContextMeter(): void {
-  contextMeter.updateContextMeter();
-}
-
-async function ensureListener(): Promise<void> {
-  await stream.ensureListener();
+export function updateContextMeter(): void {
+  chatState.contextMeter.updateContextMeter();
 }
 
-function readInitialRuntime(): void {
+export async function ensureListener(): Promise<void> {
+  await chatState.stream.ensureListener();
+}
+
+export function readInitialRuntime(): void {
   const runtime = runtimeFromLocation();
   if (isAskRuntime(runtime)) {
     ensureRuntimeSession(runtime);
@@ -723,58 +619,54 @@ function readInitialRuntime(): void {
   }
 }
 
-/** When true, this Ask turn is a browser MCP pathway verify. */
-let verifyMcpTurn = false;
-let verifySawBrowserNavigate = false;
-let verifyMcpReported = false;
-let verifyTurnText = "";
-
 /** OpenClaw often replies with the page title and never streams the tool name. */
 
-function noteVerifyBrowserSignal(text: string, source: "status" | "assistant" | "tool"): void {
-  if (!verifyMcpTurn || verifySawBrowserNavigate || !text) return;
+export function noteVerifyBrowserSignal(text: string, source: "status" | "assistant" | "tool"): void {
+  if (!chatState.verifyMcpTurn || chatState.verifySawBrowserNavigate || !text) return;
   if (source === "assistant") {
-    verifyTurnText += `${text}\n`;
+    chatState.verifyTurnText += `${text}\n`;
   }
   if (source === "status") {
     // Wiring notes like "browser MCP ready" are not tool calls.
-    if (looksLikeBrowserToolCall(text)) verifySawBrowserNavigate = true;
+    if (looksLikeBrowserToolCall(text)) chatState.verifySawBrowserNavigate = true;
     return;
   }
   if (looksLikeBrowserToolCall(text) || looksLikeBrowserMcpVerifyEvidence(text)) {
-    verifySawBrowserNavigate = true;
+    chatState.verifySawBrowserNavigate = true;
   }
 }
 
-function applyVerifyEvidenceFromAssistant(): void {
-  if (!verifyMcpTurn || verifySawBrowserNavigate) return;
-  const corpus = [verifyTurnText, assistantRaw, pendingText].filter(Boolean).join("\n");
+export function applyVerifyEvidenceFromAssistant(): void {
+  if (!chatState.verifyMcpTurn || chatState.verifySawBrowserNavigate) return;
+  const corpus = [chatState.verifyTurnText, chatState.assistantRaw, chatState.pendingText]
+    .filter(Boolean)
+    .join("\n");
   if (looksLikeBrowserToolCall(corpus) || looksLikeBrowserMcpVerifyEvidence(corpus)) {
-    verifySawBrowserNavigate = true;
+    chatState.verifySawBrowserNavigate = true;
   }
 }
 
-function reportVerifyMcpIfNeeded(): void {
-  if (!verifyMcpTurn || verifyMcpReported) return;
+export function reportVerifyMcpIfNeeded(): void {
+  if (!chatState.verifyMcpTurn || chatState.verifyMcpReported) return;
   applyVerifyEvidenceFromAssistant();
-  verifyMcpReported = true;
+  chatState.verifyMcpReported = true;
   appendBubble(
     "meta",
-    verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
+    chatState.verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
     { persist: false },
   );
 }
 
-function applyVerifyMcpFooter(): void {
-  if (!verifyMcpTurn) return;
+export function applyVerifyMcpFooter(): void {
+  if (!chatState.verifyMcpTurn) return;
   applyVerifyEvidenceFromAssistant();
   setStatus(
-    verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
-    verifySawBrowserNavigate ? "ok" : "error",
+    chatState.verifySawBrowserNavigate ? t("chat.verifyMcpOk") : t("chat.verifyMcpFail"),
+    chatState.verifySawBrowserNavigate ? "ok" : "error",
   );
 }
 
-function applyVerifyDraftIfAny(): void {
+export function applyVerifyDraftIfAny(): void {
   const raw = localStorage.getItem(ASK_VERIFY_DRAFT_KEY);
   if (!raw?.trim()) {
     return;
@@ -798,14 +690,14 @@ function applyVerifyDraftIfAny(): void {
   setStatus(t("chat.verifyDraftReady"), "ok");
   if (autoSend) {
     window.setTimeout(() => {
-      if (!busy && promptEl.value.trim()) {
+      if (!chatState.busy && promptEl.value.trim()) {
         void sendAsk({ verifyMcp: true });
       }
     }, 450);
   }
 }
 
-async function openTerminal(): Promise<void> {
+export async function openTerminal(): Promise<void> {
   try {
     await withTimeoutChat(
       openSession({
@@ -823,24 +715,24 @@ async function openTerminal(): Promise<void> {
   }
 }
 
-async function cancelAsk(): Promise<void> {
-  await send.cancelAsk();
+export async function cancelAsk(): Promise<void> {
+  await chatState.send.cancelAsk();
 }
 
-async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
-  await send.sendAsk(opts);
+export async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
+  await chatState.send.sendAsk(opts);
 }
 
-function restoreChatFromBackup(): boolean {
-  return backupUi!.restoreChatFromBackup();
+export function restoreChatFromBackup(): boolean {
+  return chatState.backupUi!.restoreChatFromBackup();
 }
-function offerBackupRestoreIfNeeded(): void {
-  backupUi!.offerBackupRestoreIfNeeded();
+export function offerBackupRestoreIfNeeded(): void {
+  chatState.backupUi!.offerBackupRestoreIfNeeded();
 }
-function showBootFailure(error: unknown): void {
+export function showBootFailure(error: unknown): void {
   // backupUi is wired first in wireChatControllers; if boot dies earlier, still surface UI.
-  if (backupUi) {
-    backupUi.showBootFailure(error);
+  if (chatState.backupUi) {
+    chatState.backupUi.showBootFailure(error);
     return;
   }
   console.error("Ask: boot failed before backup UI wired", error);
@@ -851,697 +743,10 @@ function showBootFailure(error: unknown): void {
   }
 }
 
-function wireChatControllers(): void {
-  backupUi = createBackupUiController({
-    logEl,
-    titleEl,
-    getStore: () => store,
-    setStore: (next) => {
-      store = next;
-    },
-    activeSession: () => activeSession(),
-    sessionTitle: (session) => sessionTitle(session),
-    flushStorePersist: () => flushStorePersist(),
-    renderActiveMessages: () => renderActiveMessages(),
-    renderSessionList: () => renderSessionList(),
-    setStatus: (text, tone) => setStatus(text, tone),
-    syncRestoreBackupButton: () => syncRestoreBackupButton(),
-    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
-  });
-
-  activity = createActivityController({
-    logEl,
-    isViewingRunningSession: () => isViewingRunningSession(),
-    flushPendingTextSync: () => flushPendingTextSync(),
-    sealAssistantBubble: () => sealAssistantBubble(),
-    collapseResolvedPermissionsBeforeAssistant: (anchor) =>
-      collapseResolvedPermissionsBeforeAssistant(anchor),
-    getActivityEl: () => activityEl,
-    setActivityEl: (el) => {
-      activityEl = el;
-    },
-    getLifecycleActivityEl: () => lifecycleActivityEl,
-    setLifecycleActivityEl: (el) => {
-      lifecycleActivityEl = el;
-    },
-    getToolGroupEl: () => toolGroupEl,
-    setToolGroupEl: (el) => {
-      toolGroupEl = el;
-    },
-  });
-
-  modelPicker = createModelPickerController({
-    modelBtnEl,
-    modelLabelEl,
-    modelMenuEl,
-    modelWrapEl,
-    composerBoxEl,
-    composerEl,
-    isComposerLocked: () => isComposerLocked(),
-    selectedRuntime: () => selectedRuntime(),
-    getWiredProvider: () => wiredProvider,
-    setWiredProvider: (provider) => {
-      wiredProvider = provider;
-    },
-    getModelMenuOpen: () => modelMenuOpen,
-    setModelMenuOpen: (open) => {
-      modelMenuOpen = open;
-    },
-    setStatus: (text, tone) => setStatus(text, tone),
-    updateContextMeter: () => updateContextMeter(),
-  });
-
-  decision = createDecisionController({
-    decisionDockEl,
-    decisionKickerEl,
-    decisionTitleEl,
-    decisionDetailEl,
-    decisionActionsEl,
-    logEl,
-    promptEl,
-    getBusy: () => busy,
-    setStatus: (text, tone) => setStatus(text, tone),
-    autoResizePrompt: () => autoResizePrompt(),
-    sendAsk: () => sendAsk(),
-  });
-
-  attachments = createAttachmentsController({
-    attachmentsEl,
-    composerBoxEl,
-    isComposerLocked: () => isComposerLocked(),
-    getPendingAttachments: () => pendingAttachments,
-    setPendingAttachments: (items) => {
-      pendingAttachments = items;
-    },
-    setStatus: (text, tone) => setStatus(text, tone),
-  });
-
-  voiceInput = createVoiceInputController({
-    voiceBtnEl: voiceEl,
-    promptEl,
-    isComposerLocked: () => isComposerLocked(),
-    isHostedActive: () => hosted?.isActive() ?? false,
-    setStatus: (text, tone) => setStatus(text, tone),
-    autoResizePrompt: () => autoResizePrompt(),
-  });
-
-  contextMeter = createContextMeterController({
-    contextMeterEl,
-    contextRingFillEl,
-    contextLabelEl,
-    contextPopoverEl,
-    contextPopoverTitleEl,
-    contextPopoverBodyEl,
-    contextCompactEl,
-    composerBoxEl,
-    composerEl,
-    promptEl,
-    activeSession: () => activeSession(),
-    contextUsagePercent: (session, draft) => contextUsagePercent(session, draft),
-    isComposerLocked: () => isComposerLocked(),
-    closeModelMenu: () => closeModelMenu(),
-  });
-
-  shellUi = createShellUiController({
-    shellEl,
-    cwdEl,
-    workspaceSelectEl,
-    workspaceActivateEl,
-    workspaceHintEl,
-    askResources,
-    setStatus: (text, tone) => setStatus(text, tone),
-    autoResizePrompt: () => autoResizePrompt(),
-    setWorkspaceCwd: (cwd) => {
-      workspaceCwd = cwd;
-    },
-    getWorkspaceDoc: () => workspaceDoc,
-    setWorkspaceDoc: (doc) => {
-      workspaceDoc = doc;
-    },
-    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
-  });
-
-  bubbles = createBubblesController({
-    logEl,
-    titleEl,
-    getBusy: () => busy,
-    getStore: () => store,
-    isViewingRunningSession: () => isViewingRunningSession(),
-    runTargetSession: () => runTargetSession(),
-    activeSession: () => activeSession(),
-    selectedRuntime: () => selectedRuntime(),
-    sessionTitle: (session) => sessionTitle(session),
-    touchSession: (session) => touchSession(session),
-    saveStore: () => saveStore(),
-    flushStorePersist: () => flushStorePersist(),
-    scheduleStorePersist: (delayMs) => scheduleStorePersist(delayMs),
-    scheduleSessionListRender: (delayMs) => scheduleSessionListRender(delayMs),
-    renderSessionList: () => renderSessionList(),
-    updateContextMeter: () => updateContextMeter(),
-    pushActivity: (phase, message) => pushActivity(phase, message),
-    settleActivity: () => settleActivity(),
-    finishToolGroup: (collapse) => finishToolGroup(collapse),
-    dismissLifecycleActivity: () => dismissLifecycleActivity(),
-    collapseResolvedPermissionsBeforeAssistant: (anchor) =>
-      collapseResolvedPermissionsBeforeAssistant(anchor),
-    renderPermissionCard: (message, interactive) => renderPermissionCard(message, interactive),
-    renderPermissionGroup: (messages, interactive) => renderPermissionGroup(messages, interactive),
-    getPendingPermissionBatch: () => permissions.pendingPermissionBatch,
-    getAssistantBubble: () => assistantBubble,
-    setAssistantBubble: (el) => {
-      assistantBubble = el;
-    },
-    getAssistantMessageId: () => assistantMessageId,
-    setAssistantMessageId: (id) => {
-      assistantMessageId = id;
-    },
-    getAssistantRaw: () => assistantRaw,
-    setAssistantRaw: (raw) => {
-      assistantRaw = raw;
-    },
-    getPendingText: () => pendingText,
-    setPendingText: (value) => {
-      pendingText = value;
-    },
-    getTurnHadAssistantText: () => turnHadAssistantText,
-    setTurnHadAssistantText: (value) => {
-      turnHadAssistantText = value;
-    },
-    getActivityEl: () => activityEl,
-    setActivityEl: (el) => {
-      activityEl = el;
-    },
-    getToolGroupEl: () => toolGroupEl,
-    setToolGroupEl: (el) => {
-      toolGroupEl = el;
-    },
-    getLifecycleActivityEl: () => lifecycleActivityEl,
-    setLifecycleActivityEl: (el) => {
-      lifecycleActivityEl = el;
-    },
-  });
-
-  permissions = createPermissionsController({
-    logEl,
-    isViewingRunningSession: () => isViewingRunningSession(),
-    runTargetSession: () => runTargetSession(),
-    touchSession: (session) => touchSession(session),
-    saveStore: () => saveStore(),
-    flushSessionListRender: () => flushSessionListRender(),
-    setStatus: (text, tone) => setStatus(text, tone),
-    hideDecisionDock: () => hideDecisionDock(),
-    persistMessage: (role, content, opts) => persistMessage(role, content, opts),
-    flushPendingTextSync: () => flushPendingTextSync(),
-    sealAssistantBubble: () => sealAssistantBubble(),
-    settleActivity: () => settleActivity(),
-    dismissLifecycleActivity: () => dismissLifecycleActivity(),
-    finishToolGroup: (collapse) => finishToolGroup(collapse),
-    getActivityEl: () => activityEl,
-    setActivityEl: (el) => {
-      activityEl = el;
-    },
-    getToolGroupEl: () => toolGroupEl,
-    setToolGroupEl: (el) => {
-      toolGroupEl = el;
-    },
-    getAssistantBubble: () => assistantBubble,
-    setAssistantBubble: (el) => {
-      assistantBubble = el;
-    },
-    getAssistantMessageId: () => assistantMessageId,
-    setAssistantMessageId: (id) => {
-      assistantMessageId = id;
-    },
-    getAssistantRaw: () => assistantRaw,
-    setAssistantRaw: (raw) => {
-      assistantRaw = raw;
-    },
-  });
-
-  sessions = createSessionsController({
-    sessionListEl,
-    titleEl,
-    promptEl,
-    logEl,
-    getStore: () => store,
-    setStore: (next) => {
-      store = next;
-    },
-    getBusy: () => busy,
-    getRunningChatSessionId: () => runningChatSessionId,
-    getPendingPermissionBatch: () => permissions.pendingPermissionBatch,
-    getUnseenCompletedSessionIds: () => unseenCompletedSessionIds,
-    getCurrentRuntime: () => currentRuntime,
-    selectedRuntime: () => selectedRuntime(),
-    sessionTitle: (session) => sessionTitle(session),
-    activeSession: () => activeSession(),
-    saveStore: () => saveStore(),
-    setCurrentRuntime: (runtime, opts) => setCurrentRuntime(runtime, opts),
-    setStatus: (text, tone) => setStatus(text, tone),
-    syncComposerUi: () => syncComposerUi(),
-    updateContextMeter: () => updateContextMeter(),
-    closeContextPopover: () => closeContextPopover(),
-    hideDecisionDock: () => hideDecisionDock(),
-    flushPendingTextSync: () => flushPendingTextSync(),
-    scheduleStorePersist: (delayMs) => scheduleStorePersist(delayMs),
-    updateAssistantMessage: (id, content, opts) => updateAssistantMessage(id, content, opts),
-    setAssistantMarkdown: (bubble, markdown) => setAssistantMarkdown(bubble, markdown),
-    syncAssistantCopyButton: (bubble) => syncAssistantCopyButton(bubble),
-    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
-    pushActivity: (phase, message) => pushActivity(phase, message),
-    schedulePaintLivePermissionBatch: () => schedulePaintLivePermissionBatch(),
-    renderActiveMessages: () => renderActiveMessages(),
-    renderPendingAttachments: () => renderPendingAttachments(),
-    isViewingRunningSession: () => isViewingRunningSession(),
-    getAssistantBubble: () => assistantBubble,
-    setAssistantBubble: (el) => {
-      assistantBubble = el;
-    },
-    getAssistantMessageId: () => assistantMessageId,
-    setAssistantMessageId: (id) => {
-      assistantMessageId = id;
-    },
-    getAssistantRaw: () => assistantRaw,
-    setAssistantRaw: (raw) => {
-      assistantRaw = raw;
-    },
-    getPendingText: () => pendingText,
-    setPendingText: (value) => {
-      pendingText = value;
-    },
-    getTurnHadAssistantText: () => turnHadAssistantText,
-    setTurnHadAssistantText: (value) => {
-      turnHadAssistantText = value;
-    },
-    getActivityEl: () => activityEl,
-    setActivityEl: (el) => {
-      activityEl = el;
-    },
-    getLifecycleActivityEl: () => lifecycleActivityEl,
-    setLifecycleActivityEl: (el) => {
-      lifecycleActivityEl = el;
-    },
-    getToolGroupEl: () => toolGroupEl,
-    setToolGroupEl: (el) => {
-      toolGroupEl = el;
-    },
-    setPendingAttachments: (items) => {
-      pendingAttachments = items;
-    },
-    touchSession: (session) => touchSession(session),
-    isComposerLocked: () => isComposerLocked(),
-  });
-
-  stream = createStreamController({
-    getStore: () => store,
-    getRunningChatSessionId: () => runningChatSessionId,
-    setRunningBackendSessionId: (id) => {
-      runningBackendSessionId = id;
-    },
-    getAssistantBubble: () => assistantBubble,
-    setAssistantBubble: (el) => {
-      assistantBubble = el;
-    },
-    getAssistantMessageId: () => assistantMessageId,
-    setAssistantMessageId: (id) => {
-      assistantMessageId = id;
-    },
-    getAssistantRaw: () => assistantRaw,
-    setAssistantRaw: (raw) => {
-      assistantRaw = raw;
-    },
-    getPendingText: () => pendingText,
-    setPendingText: (value) => {
-      pendingText = value;
-    },
-    getTurnHadAssistantText: () => turnHadAssistantText,
-    setTurnHadAssistantText: (value) => {
-      turnHadAssistantText = value;
-    },
-    getUnseenCompletedSessionIds: () => unseenCompletedSessionIds,
-    isEventForCurrentRun: (sessionId) => isEventForCurrentRun(sessionId),
-    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
-    pushActivity: (phase, message) => pushActivity(phase, message),
-    flushSessionListRender: () => flushSessionListRender(),
-    noteVerifyBrowserSignal: (text, source) => noteVerifyBrowserSignal(text, source),
-    queueAssistantText: (text) => queueAssistantText(text),
-    appendStderrLine: (line) => appendStderrLine(line),
-    pushPermissionCard: (payload) => pushPermissionCard(payload),
-    markPermissionResolved: (requestId, allowed) => markPermissionResolved(requestId, allowed),
-    isViewingRunningSession: () => isViewingRunningSession(),
-    flushPendingTextSync: () => flushPendingTextSync(),
-    appendAssistantChunk: (chunk) => appendAssistantChunk(chunk),
-    clearEphemeralActivity: (dropStderr) => clearEphemeralActivity(dropStderr),
-    sealAssistantBubble: () => sealAssistantBubble(),
-    expireLivePermissionCards: () => expireLivePermissionCards(),
-    hideDecisionDock: () => hideDecisionDock(),
-    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
-    reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
-    applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
-    flushStorePersist: () => flushStorePersist(),
-    setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
-    settleRunRouting: () => settleRunRouting(),
-    setStatus: (text, tone) => setStatus(text, tone),
-    showQuickReplies: (sourceText) => {
-      if (hosted?.isActive()) {
-        hideDecisionDock();
-        return;
-      }
-      showQuickReplies(sourceText);
-    },
-    renderSessionList: () => renderSessionList(),
-    onTurnCompleted: (text, status) => hosted?.noteTurnCompleted(text, status),
-    onPermissionNeeded: (payload) => hosted?.notePermission(payload),
-  });
-
-  send = createSendController({
-    promptEl,
-    elevatedEl,
-    askResources,
-    mentionMenu,
-    getStore: () => store,
-    getBusy: () => busy,
-    getBusyGen: () => busyGen,
-    getRunningChatSessionId: () => runningChatSessionId,
-    getPendingAttachments: () => pendingAttachments,
-    setPendingAttachments: (items) => {
-      pendingAttachments = items;
-    },
-    getWorkspaceCwd: () => workspaceCwd,
-    getVerifyMcpTurn: () => verifyMcpTurn,
-    setVerifyMcpTurn: (v) => {
-      verifyMcpTurn = v;
-    },
-    getVerifySawBrowserNavigate: () => verifySawBrowserNavigate,
-    setVerifySawBrowserNavigate: (v) => {
-      verifySawBrowserNavigate = v;
-    },
-    getVerifyMcpReported: () => verifyMcpReported,
-    setVerifyMcpReported: (v) => {
-      verifyMcpReported = v;
-    },
-    getVerifyTurnText: () => verifyTurnText,
-    setVerifyTurnText: (v) => {
-      verifyTurnText = v;
-    },
-    getAssistantBubble: () => assistantBubble,
-    setAssistantBubble: (el) => {
-      assistantBubble = el;
-    },
-    getAssistantMessageId: () => assistantMessageId,
-    setAssistantMessageId: (id) => {
-      assistantMessageId = id;
-    },
-    getAssistantRaw: () => assistantRaw,
-    setAssistantRaw: (raw) => {
-      assistantRaw = raw;
-    },
-    getPendingText: () => pendingText,
-    setPendingText: (value) => {
-      pendingText = value;
-    },
-    getTurnHadAssistantText: () => turnHadAssistantText,
-    setTurnHadAssistantText: (value) => {
-      turnHadAssistantText = value;
-    },
-    setStatus: (text, tone) => setStatus(text, tone),
-    selectedRuntime: () => selectedRuntime(),
-    activeSession: () => activeSession(),
-    ensureListener: () => ensureListener(),
-    clearQuickReplies: () => clearQuickReplies(),
-    setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
-    pushActivity: (phase, message) => pushActivity(phase, message),
-    persistMessage: (role, content, opts) => persistMessage(role, content, opts),
-    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
-    autoResizePrompt: () => autoResizePrompt(),
-    renderPendingAttachments: () => renderPendingAttachments(),
-    buildPromptWithHistory: (text, attachments, chatSessionId, readings) =>
-      buildPromptWithHistory(text, attachments, chatSessionId, readings),
-    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
-    sessionById: (id) => sessionById(id),
-    runTargetSession: () => runTargetSession(),
-    touchSession: (session) => touchSession(session),
-    saveStore: () => saveStore(),
-    applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
-    applyVerifyEvidenceFromAssistant: () => applyVerifyEvidenceFromAssistant(),
-    reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
-    expireLivePermissionCards: () => expireLivePermissionCards(),
-    settleRunRouting: () => settleRunRouting(),
-    renderSessionList: () => renderSessionList(),
-    readImageTextEnabled: () => readImageTextEnabled(),
-  });
-
-  hosted = createHostedController({
-    mainEl,
-    dialogModeEl,
-    voiceModeEl,
-    islandEl,
-    islandTitleEl,
-    islandDetailEl,
-    promptEl,
-    setStatus: (text, tone) => setStatus(text, tone),
-  latestActivity: () => latestActivityText,
-  sendAsk: (opts) => sendAsk(opts),
-    stopDictation: () => voiceInput.stopListening(),
-    syncDictation: () => voiceInput.syncEnabled(),
-    hideChoice: () => hideDecisionDock(),
-  });
-}
-
-function boot(): void {
-  wireChatControllers();
-  const win = window as Window & {
-    __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
-    __AD_ASK_BOOTED__?: boolean;
-  };
-  applyChatTheme(readStoredChatTheme() ?? systemChatTheme(), false);
-  win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
-    if (isAskRuntime(runtime)) {
-      ensureRuntimeSession(runtime);
-    }
-  };
-  // Paint sessions + transcript first so a hung secondary init never looks like “no history”.
-  try {
-    renderSessionList();
-    renderActiveMessages();
-  } catch (error) {
-    console.error("Ask: early paint failed", error);
-  }
-  applyI18n();
-  readImageEl.checked = readImageTextEnabled();
-  try {
-    readInitialRuntime();
-  } catch (error) {
-    console.error("Ask: runtime session setup failed", error);
-  }
-  applyI18n();
-  renderActiveMessages();
-  offerBackupRestoreIfNeeded();
-  win.__AD_ASK_BOOTED__ = true;
-  try {
-    sessionStorage.removeItem("ad-ask-reload");
-  } catch {
-    /* ignore */
-  }
-  window.addEventListener("beforeunload", () => {
-    flushStorePersist();
-  });
-  void setupFileDrop();
-  void (async () => {
-    await loadAskResources();
-    applyVerifyDraftIfAny();
-  })();
-
-  actionEl.addEventListener("click", () => {
-    if (isViewingRunningSession()) void cancelAsk();
-    else void sendAsk();
-  });
-  attachEl.addEventListener("click", () => void pickAttachments());
-  clearEl.addEventListener("click", clearActiveSession);
-  restoreBackupEl?.addEventListener("click", () => {
-    restoreChatFromBackup();
-  });
-  newSessionEl.addEventListener("click", startNewSession);
-  terminalEl.addEventListener("click", () => void openTerminal());
-  themeEl.addEventListener("click", () => {
-    applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
-  });
-  resourcesToggleEl.addEventListener("click", () => {
-    toggleResourcesPanel();
-  });
-  resourcesRefreshEl.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void loadAskResources();
-  });
-  resourcesTabsEl?.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement | null;
-    const tab = target?.closest<HTMLButtonElement>("[data-res-tab]");
-    if (!tab?.dataset.resTab) return;
-    const next = tab.dataset.resTab;
-    if (next === "all" || next === "skills" || next === "mcp") {
-      askResources.setResourcesTab(next);
-    }
-  });
-  resourcesSearchEl?.addEventListener("input", () => {
-    askResources.setResourcesQuery(resourcesSearchEl.value);
-  });
-  openResourcesEl.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void openMainResources();
-  });
-  workspaceActivateEl.addEventListener("click", () => void activateSelectedWorkspace());
-  workspaceSelectEl.addEventListener("change", () => {
-    const name = workspaceSelectEl.value.trim();
-    if (!name || !workspaceDoc) {
-      syncWorkspaceActivateButton();
-      return;
-    }
-    const path = workspaceDoc.workspaces[name]?.path;
-    if (path) {
-      cwdEl.textContent = path;
-      cwdEl.title = path;
-    }
-    syncWorkspaceActivateButton();
-  });
-  workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());
-  elevatedEl.addEventListener("change", () => {
-    if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
-      elevatedEl.checked = false;
-    }
-  });
-  readImageEl.addEventListener("change", () => {
-    setReadImageTextEnabled(readImageEl.checked);
-  });
-  promptEl.addEventListener("input", () => {
-    autoResizePrompt();
-    mentionMenu.renderMentionMenu();
-    updateContextMeter();
-  });
-  contextMeterEl?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleContextPopover();
-  });
-  contextCompactEl?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    compactActiveSession();
-  });
-  promptEl.addEventListener("keydown", (event) => {
-    if (!mentionMenuEl.hidden) {
-      const options = mentionMenu.filteredMentionOptions();
-      const slashOpen = mentionMenu.isSlashMenuOpen();
-
-      if (slashOpen && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-        event.preventDefault();
-        mentionMenu.cycleSlashTab(event.key === "ArrowRight" ? 1 : -1);
-        return;
-      }
-      if (slashOpen && event.key === "Tab") {
-        event.preventDefault();
-        mentionMenu.cycleSlashTab(event.shiftKey ? -1 : 1);
-        return;
-      }
-      if (event.key === "ArrowDown" && options.length > 0) {
-        event.preventDefault();
-        mentionMenu.mentionMenuIndex = (mentionMenu.mentionMenuIndex + 1) % options.length;
-        mentionMenu.renderMentionMenu();
-        return;
-      }
-      if (event.key === "ArrowUp" && options.length > 0) {
-        event.preventDefault();
-        mentionMenu.mentionMenuIndex =
-          (mentionMenu.mentionMenuIndex - 1 + options.length) % options.length;
-        mentionMenu.renderMentionMenu();
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        mentionMenu.hideMentionMenu();
-        return;
-      }
-      if (event.key === "Enter" && !event.shiftKey && options[mentionMenu.mentionMenuIndex]) {
-        event.preventDefault();
-        mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
-        return;
-      }
-      if (!slashOpen && event.key === "Tab" && options[mentionMenu.mentionMenuIndex]) {
-        event.preventDefault();
-        mentionMenu.applyMentionOption(options[mentionMenu.mentionMenuIndex]);
-        return;
-      }
-    }
-    if (event.key !== "Enter") return;
-    // Shift+Enter keeps a newline for multi-line prompts.
-    if (event.shiftKey) return;
-    // IME candidate confirm (Chinese etc.): Enter commits the composition, not send.
-    if (event.isComposing || event.keyCode === 229 || promptEl.dataset.composing === "1") return;
-    event.preventDefault();
-    if (isComposerLocked()) return;
-    void sendAsk();
-  });
-  promptEl.addEventListener("compositionstart", () => {
-    promptEl.dataset.composing = "1";
-  });
-  promptEl.addEventListener("compositionend", () => {
-    // Defer clear so the Enter that ends composition doesn't also send.
-    window.setTimeout(() => {
-      promptEl.dataset.composing = "0";
-    }, 0);
-  });
-  document.addEventListener("click", (event) => {
-    if (!(event.target instanceof Node)) return;
-    if (mentionMenuEl.contains(event.target) || promptEl.contains(event.target)) return;
-    mentionMenu.hideMentionMenu();
-    if (!modelBtnEl.contains(event.target) && !modelMenuEl.contains(event.target)) {
-      closeModelMenu();
-    }
-    const wrap = contextMeterEl?.closest(".chat-context-wrap");
-    const inMeter = Boolean(wrap?.contains(event.target));
-    const inPopover = Boolean(contextPopoverEl?.contains(event.target));
-    if (!inMeter && !inPopover) {
-      closeContextPopover();
-    }
-  });
-
-  modelBtnEl.addEventListener("click", (event) => {
-    event.stopPropagation();
-    closeContextPopover();
-    if (modelMenuOpen) {
-      closeModelMenu();
-      return;
-    }
-    openModelMenu();
-  });
-
-  window.addEventListener("resize", () => {
-    if (modelMenuOpen) positionModelMenu();
-    if (contextPopoverEl && !contextPopoverEl.hidden) positionContextPopover();
-  });
-
-  void listen<{ runtime?: string }>("ask-window-focus", (event) => {
-    const runtime = event.payload?.runtime;
-    if (isAskRuntime(runtime)) {
-      ensureRuntimeSession(runtime);
-    }
-    void (async () => {
-      await refreshWiredProvider();
-      await loadAskResources();
-      applyVerifyDraftIfAny();
-    })();
-    promptEl.focus();
-  });
-
-  void ensureListener();
-  void refreshWiredProvider();
-  autoResizePrompt();
-  promptEl.focus();
-}
+initChatStore();
 
 try {
-  boot();
+  bootChat();
 } catch (error) {
   showBootFailure(error);
 }

@@ -1,0 +1,579 @@
+import { chatState } from "./chat-state";
+
+import {
+  elevatedEl,
+  modelBtnEl,
+  modelLabelEl,
+  modelMenuEl,
+  modelWrapEl,
+  promptEl,
+  voiceEl,
+  mainEl,
+  dialogModeEl,
+  voiceModeEl,
+  islandEl,
+  islandTitleEl,
+  islandDetailEl,
+  attachmentsEl,
+  composerBoxEl,
+  composerEl,
+  contextMeterEl,
+  contextRingFillEl,
+  contextLabelEl,
+  contextPopoverEl,
+  contextPopoverTitleEl,
+  contextPopoverBodyEl,
+  contextCompactEl,
+  sessionListEl,
+  logEl,
+  decisionDockEl,
+  decisionKickerEl,
+  decisionTitleEl,
+  decisionDetailEl,
+  decisionActionsEl,
+  cwdEl,
+  workspaceSelectEl,
+  workspaceActivateEl,
+  workspaceHintEl,
+  titleEl,
+  shellEl,
+} from "./chat-dom";
+
+import {
+  saveStore,
+  sessionTitle,
+  buildPromptWithHistory,
+  contextUsagePercent,
+  expireLivePermissionCards,
+  pushPermissionCard,
+  schedulePaintLivePermissionBatch,
+  renderPermissionCard,
+  renderPermissionGroup,
+  collapseResolvedPermissionsBeforeAssistant,
+  markPermissionResolved,
+  renderSessionList,
+  isViewingRunningSession,
+  isComposerLocked,
+  sessionById,
+  runTargetSession,
+  isEventForCurrentRun,
+  settleRunRouting,
+  autoResizePrompt,
+  selectedRuntime,
+  closeModelMenu,
+  setCurrentRuntime,
+  flushStorePersist,
+  scheduleStorePersist,
+  flushSessionListRender,
+  scheduleSessionListRender,
+  activeSession,
+  touchSession,
+  syncRestoreBackupButton,
+  setStatus,
+  syncComposerUi,
+  setBusy,
+  dismissLifecycleActivity,
+  finishToolGroup,
+  clearEphemeralActivity,
+  appendStderrLine,
+  pushActivity,
+  settleActivity,
+  flushPendingTextSync,
+  hideDecisionDock,
+  clearQuickReplies,
+  showQuickReplies,
+  sealAssistantBubble,
+  appendAssistantChunk,
+  renderPendingAttachments,
+  persistMessage,
+  updateAssistantMessage,
+  syncAssistantCopyButton,
+  setAssistantMarkdown,
+  appendBubble,
+  renderActiveMessages,
+  queueAssistantText,
+  setDisplayedCwd,
+  closeContextPopover,
+  updateContextMeter,
+  ensureListener,
+  noteVerifyBrowserSignal,
+  applyVerifyEvidenceFromAssistant,
+  reportVerifyMcpIfNeeded,
+  applyVerifyMcpFooter,
+  sendAsk,
+  askResources,
+  mentionMenu,
+} from "./chat";
+
+import { createPermissionsController } from "./chat/permissions";
+import { createSessionsController } from "./chat/sessions";
+import { createBubblesController } from "./chat/bubbles";
+import { createStreamController } from "./chat/stream";
+import { createSendController } from "./chat/send";
+import { createActivityController } from "./chat/activity";
+import { createModelPickerController } from "./chat/model-picker";
+import { createDecisionController } from "./chat/decision";
+import { createAttachmentsController } from "./chat/attachments";
+import { createContextMeterController } from "./chat/context-meter";
+import { createShellUiController } from "./chat/shell-ui";
+import { createBackupUiController } from "./chat/backup-ui";
+import { createVoiceInputController } from "./chat/voice";
+import { createHostedController } from "./chat/hosted";
+import { readImageTextEnabled } from "./chat/image-text";
+
+export function wireChatControllers(): void {
+  chatState.backupUi = createBackupUiController({
+    logEl,
+    titleEl,
+    getStore: () => chatState.store,
+    setStore: (next) => {
+      chatState.store = next;
+    },
+    activeSession: () => activeSession(),
+    sessionTitle: (session) => sessionTitle(session),
+    flushStorePersist: () => flushStorePersist(),
+    renderActiveMessages: () => renderActiveMessages(),
+    renderSessionList: () => renderSessionList(),
+    setStatus: (text, tone) => setStatus(text, tone),
+    syncRestoreBackupButton: () => syncRestoreBackupButton(),
+    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+  });
+
+  chatState.activity = createActivityController({
+    logEl,
+    isViewingRunningSession: () => isViewingRunningSession(),
+    flushPendingTextSync: () => flushPendingTextSync(),
+    sealAssistantBubble: () => sealAssistantBubble(),
+    collapseResolvedPermissionsBeforeAssistant: (anchor) =>
+      collapseResolvedPermissionsBeforeAssistant(anchor),
+    getActivityEl: () => chatState.activityEl,
+    setActivityEl: (el) => {
+      chatState.activityEl = el;
+    },
+    getLifecycleActivityEl: () => chatState.lifecycleActivityEl,
+    setLifecycleActivityEl: (el) => {
+      chatState.lifecycleActivityEl = el;
+    },
+    getToolGroupEl: () => chatState.toolGroupEl,
+    setToolGroupEl: (el) => {
+      chatState.toolGroupEl = el;
+    },
+  });
+
+  chatState.modelPicker = createModelPickerController({
+    modelBtnEl,
+    modelLabelEl,
+    modelMenuEl,
+    modelWrapEl,
+    composerBoxEl,
+    composerEl,
+    isComposerLocked: () => isComposerLocked(),
+    selectedRuntime: () => selectedRuntime(),
+    getWiredProvider: () => chatState.wiredProvider,
+    setWiredProvider: (provider) => {
+      chatState.wiredProvider = provider;
+    },
+    getModelMenuOpen: () => chatState.modelMenuOpen,
+    setModelMenuOpen: (open) => {
+      chatState.modelMenuOpen = open;
+    },
+    setStatus: (text, tone) => setStatus(text, tone),
+    updateContextMeter: () => updateContextMeter(),
+  });
+
+  chatState.decision = createDecisionController({
+    decisionDockEl,
+    decisionKickerEl,
+    decisionTitleEl,
+    decisionDetailEl,
+    decisionActionsEl,
+    logEl,
+    promptEl,
+    getBusy: () => chatState.busy,
+    setStatus: (text, tone) => setStatus(text, tone),
+    autoResizePrompt: () => autoResizePrompt(),
+    sendAsk: () => sendAsk(),
+  });
+
+  chatState.attachments = createAttachmentsController({
+    attachmentsEl,
+    composerBoxEl,
+    isComposerLocked: () => isComposerLocked(),
+    getPendingAttachments: () => chatState.pendingAttachments,
+    setPendingAttachments: (items) => {
+      chatState.pendingAttachments = items;
+    },
+    setStatus: (text, tone) => setStatus(text, tone),
+  });
+
+  chatState.voiceInput = createVoiceInputController({
+    voiceBtnEl: voiceEl,
+    promptEl,
+    isComposerLocked: () => isComposerLocked(),
+    isHostedActive: () => chatState.hosted?.isActive() ?? false,
+    setStatus: (text, tone) => setStatus(text, tone),
+    autoResizePrompt: () => autoResizePrompt(),
+  });
+
+  chatState.contextMeter = createContextMeterController({
+    contextMeterEl,
+    contextRingFillEl,
+    contextLabelEl,
+    contextPopoverEl,
+    contextPopoverTitleEl,
+    contextPopoverBodyEl,
+    contextCompactEl,
+    composerBoxEl,
+    composerEl,
+    promptEl,
+    activeSession: () => activeSession(),
+    contextUsagePercent: (session, draft) => contextUsagePercent(session, draft),
+    isComposerLocked: () => isComposerLocked(),
+    closeModelMenu: () => closeModelMenu(),
+  });
+
+  chatState.shellUi = createShellUiController({
+    shellEl,
+    cwdEl,
+    workspaceSelectEl,
+    workspaceActivateEl,
+    workspaceHintEl,
+    askResources,
+    setStatus: (text, tone) => setStatus(text, tone),
+    autoResizePrompt: () => autoResizePrompt(),
+    setWorkspaceCwd: (cwd) => {
+      chatState.workspaceCwd = cwd;
+    },
+    getWorkspaceDoc: () => chatState.workspaceDoc,
+    setWorkspaceDoc: (doc) => {
+      chatState.workspaceDoc = doc;
+    },
+    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
+  });
+
+  chatState.bubbles = createBubblesController({
+    logEl,
+    titleEl,
+    getBusy: () => chatState.busy,
+    getStore: () => chatState.store,
+    isViewingRunningSession: () => isViewingRunningSession(),
+    runTargetSession: () => runTargetSession(),
+    activeSession: () => activeSession(),
+    selectedRuntime: () => selectedRuntime(),
+    sessionTitle: (session) => sessionTitle(session),
+    touchSession: (session) => touchSession(session),
+    saveStore: () => saveStore(),
+    flushStorePersist: () => flushStorePersist(),
+    scheduleStorePersist: (delayMs) => scheduleStorePersist(delayMs),
+    scheduleSessionListRender: (delayMs) => scheduleSessionListRender(delayMs),
+    renderSessionList: () => renderSessionList(),
+    updateContextMeter: () => updateContextMeter(),
+    pushActivity: (phase, message) => pushActivity(phase, message),
+    settleActivity: () => settleActivity(),
+    finishToolGroup: (collapse) => finishToolGroup(collapse),
+    dismissLifecycleActivity: () => dismissLifecycleActivity(),
+    collapseResolvedPermissionsBeforeAssistant: (anchor) =>
+      collapseResolvedPermissionsBeforeAssistant(anchor),
+    renderPermissionCard: (message, interactive) => renderPermissionCard(message, interactive),
+    renderPermissionGroup: (messages, interactive) => renderPermissionGroup(messages, interactive),
+    getPendingPermissionBatch: () => chatState.permissions.pendingPermissionBatch,
+    getAssistantBubble: () => chatState.assistantBubble,
+    setAssistantBubble: (el) => {
+      chatState.assistantBubble = el;
+    },
+    getAssistantMessageId: () => chatState.assistantMessageId,
+    setAssistantMessageId: (id) => {
+      chatState.assistantMessageId = id;
+    },
+    getAssistantRaw: () => chatState.assistantRaw,
+    setAssistantRaw: (raw) => {
+      chatState.assistantRaw = raw;
+    },
+    getPendingText: () => chatState.pendingText,
+    setPendingText: (value) => {
+      chatState.pendingText = value;
+    },
+    getTurnHadAssistantText: () => chatState.turnHadAssistantText,
+    setTurnHadAssistantText: (value) => {
+      chatState.turnHadAssistantText = value;
+    },
+    getActivityEl: () => chatState.activityEl,
+    setActivityEl: (el) => {
+      chatState.activityEl = el;
+    },
+    getToolGroupEl: () => chatState.toolGroupEl,
+    setToolGroupEl: (el) => {
+      chatState.toolGroupEl = el;
+    },
+    getLifecycleActivityEl: () => chatState.lifecycleActivityEl,
+    setLifecycleActivityEl: (el) => {
+      chatState.lifecycleActivityEl = el;
+    },
+  });
+
+  chatState.permissions = createPermissionsController({
+    logEl,
+    isViewingRunningSession: () => isViewingRunningSession(),
+    runTargetSession: () => runTargetSession(),
+    touchSession: (session) => touchSession(session),
+    saveStore: () => saveStore(),
+    flushSessionListRender: () => flushSessionListRender(),
+    setStatus: (text, tone) => setStatus(text, tone),
+    hideDecisionDock: () => hideDecisionDock(),
+    persistMessage: (role, content, opts) => persistMessage(role, content, opts),
+    flushPendingTextSync: () => flushPendingTextSync(),
+    sealAssistantBubble: () => sealAssistantBubble(),
+    settleActivity: () => settleActivity(),
+    dismissLifecycleActivity: () => dismissLifecycleActivity(),
+    finishToolGroup: (collapse) => finishToolGroup(collapse),
+    getActivityEl: () => chatState.activityEl,
+    setActivityEl: (el) => {
+      chatState.activityEl = el;
+    },
+    getToolGroupEl: () => chatState.toolGroupEl,
+    setToolGroupEl: (el) => {
+      chatState.toolGroupEl = el;
+    },
+    getAssistantBubble: () => chatState.assistantBubble,
+    setAssistantBubble: (el) => {
+      chatState.assistantBubble = el;
+    },
+    getAssistantMessageId: () => chatState.assistantMessageId,
+    setAssistantMessageId: (id) => {
+      chatState.assistantMessageId = id;
+    },
+    getAssistantRaw: () => chatState.assistantRaw,
+    setAssistantRaw: (raw) => {
+      chatState.assistantRaw = raw;
+    },
+  });
+
+  chatState.sessions = createSessionsController({
+    sessionListEl,
+    titleEl,
+    promptEl,
+    logEl,
+    getStore: () => chatState.store,
+    setStore: (next) => {
+      chatState.store = next;
+    },
+    getBusy: () => chatState.busy,
+    getRunningChatSessionId: () => chatState.runningChatSessionId,
+    getPendingPermissionBatch: () => chatState.permissions.pendingPermissionBatch,
+    getUnseenCompletedSessionIds: () => chatState.unseenCompletedSessionIds,
+    getCurrentRuntime: () => chatState.currentRuntime,
+    selectedRuntime: () => selectedRuntime(),
+    sessionTitle: (session) => sessionTitle(session),
+    activeSession: () => activeSession(),
+    saveStore: () => saveStore(),
+    setCurrentRuntime: (runtime, opts) => setCurrentRuntime(runtime, opts),
+    setStatus: (text, tone) => setStatus(text, tone),
+    syncComposerUi: () => syncComposerUi(),
+    updateContextMeter: () => updateContextMeter(),
+    closeContextPopover: () => closeContextPopover(),
+    hideDecisionDock: () => hideDecisionDock(),
+    flushPendingTextSync: () => flushPendingTextSync(),
+    scheduleStorePersist: (delayMs) => scheduleStorePersist(delayMs),
+    updateAssistantMessage: (id, content, opts) => updateAssistantMessage(id, content, opts),
+    setAssistantMarkdown: (bubble, markdown) => setAssistantMarkdown(bubble, markdown),
+    syncAssistantCopyButton: (bubble) => syncAssistantCopyButton(bubble),
+    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    pushActivity: (phase, message) => pushActivity(phase, message),
+    schedulePaintLivePermissionBatch: () => schedulePaintLivePermissionBatch(),
+    renderActiveMessages: () => renderActiveMessages(),
+    renderPendingAttachments: () => renderPendingAttachments(),
+    isViewingRunningSession: () => isViewingRunningSession(),
+    getAssistantBubble: () => chatState.assistantBubble,
+    setAssistantBubble: (el) => {
+      chatState.assistantBubble = el;
+    },
+    getAssistantMessageId: () => chatState.assistantMessageId,
+    setAssistantMessageId: (id) => {
+      chatState.assistantMessageId = id;
+    },
+    getAssistantRaw: () => chatState.assistantRaw,
+    setAssistantRaw: (raw) => {
+      chatState.assistantRaw = raw;
+    },
+    getPendingText: () => chatState.pendingText,
+    setPendingText: (value) => {
+      chatState.pendingText = value;
+    },
+    getTurnHadAssistantText: () => chatState.turnHadAssistantText,
+    setTurnHadAssistantText: (value) => {
+      chatState.turnHadAssistantText = value;
+    },
+    getActivityEl: () => chatState.activityEl,
+    setActivityEl: (el) => {
+      chatState.activityEl = el;
+    },
+    getLifecycleActivityEl: () => chatState.lifecycleActivityEl,
+    setLifecycleActivityEl: (el) => {
+      chatState.lifecycleActivityEl = el;
+    },
+    getToolGroupEl: () => chatState.toolGroupEl,
+    setToolGroupEl: (el) => {
+      chatState.toolGroupEl = el;
+    },
+    setPendingAttachments: (items) => {
+      chatState.pendingAttachments = items;
+    },
+    touchSession: (session) => touchSession(session),
+    isComposerLocked: () => isComposerLocked(),
+  });
+
+  chatState.stream = createStreamController({
+    getStore: () => chatState.store,
+    getRunningChatSessionId: () => chatState.runningChatSessionId,
+    setRunningBackendSessionId: (id) => {
+      chatState.runningBackendSessionId = id;
+    },
+    getAssistantBubble: () => chatState.assistantBubble,
+    setAssistantBubble: (el) => {
+      chatState.assistantBubble = el;
+    },
+    getAssistantMessageId: () => chatState.assistantMessageId,
+    setAssistantMessageId: (id) => {
+      chatState.assistantMessageId = id;
+    },
+    getAssistantRaw: () => chatState.assistantRaw,
+    setAssistantRaw: (raw) => {
+      chatState.assistantRaw = raw;
+    },
+    getPendingText: () => chatState.pendingText,
+    setPendingText: (value) => {
+      chatState.pendingText = value;
+    },
+    getTurnHadAssistantText: () => chatState.turnHadAssistantText,
+    setTurnHadAssistantText: (value) => {
+      chatState.turnHadAssistantText = value;
+    },
+    getUnseenCompletedSessionIds: () => chatState.unseenCompletedSessionIds,
+    isEventForCurrentRun: (sessionId) => isEventForCurrentRun(sessionId),
+    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
+    pushActivity: (phase, message) => pushActivity(phase, message),
+    flushSessionListRender: () => flushSessionListRender(),
+    noteVerifyBrowserSignal: (text, source) => noteVerifyBrowserSignal(text, source),
+    queueAssistantText: (text) => queueAssistantText(text),
+    appendStderrLine: (line) => appendStderrLine(line),
+    pushPermissionCard: (payload) => pushPermissionCard(payload),
+    markPermissionResolved: (requestId, allowed) => markPermissionResolved(requestId, allowed),
+    isViewingRunningSession: () => isViewingRunningSession(),
+    flushPendingTextSync: () => flushPendingTextSync(),
+    appendAssistantChunk: (chunk) => appendAssistantChunk(chunk),
+    clearEphemeralActivity: (dropStderr) => clearEphemeralActivity(dropStderr),
+    sealAssistantBubble: () => sealAssistantBubble(),
+    expireLivePermissionCards: () => expireLivePermissionCards(),
+    hideDecisionDock: () => hideDecisionDock(),
+    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
+    applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
+    flushStorePersist: () => flushStorePersist(),
+    setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
+    settleRunRouting: () => settleRunRouting(),
+    setStatus: (text, tone) => setStatus(text, tone),
+    showQuickReplies: (sourceText) => {
+      if (chatState.hosted?.isActive()) {
+        hideDecisionDock();
+        return;
+      }
+      showQuickReplies(sourceText);
+    },
+    renderSessionList: () => renderSessionList(),
+    onTurnCompleted: (text, status) => chatState.hosted?.noteTurnCompleted(text, status),
+    onPermissionNeeded: (payload) => chatState.hosted?.notePermission(payload),
+  });
+
+  chatState.send = createSendController({
+    promptEl,
+    elevatedEl,
+    askResources,
+    mentionMenu,
+    getStore: () => chatState.store,
+    getBusy: () => chatState.busy,
+    getBusyGen: () => chatState.busyGen,
+    getRunningChatSessionId: () => chatState.runningChatSessionId,
+    getPendingAttachments: () => chatState.pendingAttachments,
+    setPendingAttachments: (items) => {
+      chatState.pendingAttachments = items;
+    },
+    getWorkspaceCwd: () => chatState.workspaceCwd,
+    getVerifyMcpTurn: () => chatState.verifyMcpTurn,
+    setVerifyMcpTurn: (v) => {
+      chatState.verifyMcpTurn = v;
+    },
+    getVerifySawBrowserNavigate: () => chatState.verifySawBrowserNavigate,
+    setVerifySawBrowserNavigate: (v) => {
+      chatState.verifySawBrowserNavigate = v;
+    },
+    getVerifyMcpReported: () => chatState.verifyMcpReported,
+    setVerifyMcpReported: (v) => {
+      chatState.verifyMcpReported = v;
+    },
+    getVerifyTurnText: () => chatState.verifyTurnText,
+    setVerifyTurnText: (v) => {
+      chatState.verifyTurnText = v;
+    },
+    getAssistantBubble: () => chatState.assistantBubble,
+    setAssistantBubble: (el) => {
+      chatState.assistantBubble = el;
+    },
+    getAssistantMessageId: () => chatState.assistantMessageId,
+    setAssistantMessageId: (id) => {
+      chatState.assistantMessageId = id;
+    },
+    getAssistantRaw: () => chatState.assistantRaw,
+    setAssistantRaw: (raw) => {
+      chatState.assistantRaw = raw;
+    },
+    getPendingText: () => chatState.pendingText,
+    setPendingText: (value) => {
+      chatState.pendingText = value;
+    },
+    getTurnHadAssistantText: () => chatState.turnHadAssistantText,
+    setTurnHadAssistantText: (value) => {
+      chatState.turnHadAssistantText = value;
+    },
+    setStatus: (text, tone) => setStatus(text, tone),
+    selectedRuntime: () => selectedRuntime(),
+    activeSession: () => activeSession(),
+    ensureListener: () => ensureListener(),
+    clearQuickReplies: () => clearQuickReplies(),
+    setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
+    pushActivity: (phase, message) => pushActivity(phase, message),
+    persistMessage: (role, content, opts) => persistMessage(role, content, opts),
+    appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    autoResizePrompt: () => autoResizePrompt(),
+    renderPendingAttachments: () => renderPendingAttachments(),
+    buildPromptWithHistory: (text, picked, chatSessionId, readings) =>
+      buildPromptWithHistory(text, picked, chatSessionId, readings),
+    setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
+    sessionById: (id) => sessionById(id),
+    runTargetSession: () => runTargetSession(),
+    touchSession: (session) => touchSession(session),
+    saveStore: () => saveStore(),
+    applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
+    applyVerifyEvidenceFromAssistant: () => applyVerifyEvidenceFromAssistant(),
+    reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
+    expireLivePermissionCards: () => expireLivePermissionCards(),
+    settleRunRouting: () => settleRunRouting(),
+    renderSessionList: () => renderSessionList(),
+    readImageTextEnabled: () => readImageTextEnabled(),
+  });
+
+  chatState.hosted = createHostedController({
+    mainEl,
+    dialogModeEl,
+    voiceModeEl,
+    islandEl,
+    islandTitleEl,
+    islandDetailEl,
+    promptEl,
+    setStatus: (text, tone) => setStatus(text, tone),
+  latestActivity: () => chatState.latestActivityText,
+  sendAsk: (opts) => sendAsk(opts),
+    stopDictation: () => chatState.voiceInput.stopListening(),
+    syncDictation: () => chatState.voiceInput.syncEnabled(),
+    hideChoice: () => hideDecisionDock(),
+  });
+}
