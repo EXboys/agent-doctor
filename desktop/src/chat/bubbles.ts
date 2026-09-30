@@ -4,7 +4,10 @@ import {
   cleanToolLabel,
   formatPermissionDetail,
   looksLikeToolPayloadJson,
+  splitToolActivity,
+  toolSignature,
 } from "./format";
+import { renderToolHistoryGroup } from "./activity";
 import {
   assistantMsgWrap,
   bubblePlainText,
@@ -151,7 +154,10 @@ export function createBubblesController(deps: BubblesDeps) {
     if (looksLikeToolPayloadJson(chunk)) {
       if (deps.isViewingRunningSession()) {
         const formatted = formatPermissionDetail(chunk.trim());
-        deps.pushActivity("tool", formatted.summary || cleanToolLabel(chunk));
+        const summary = formatted.summary || cleanToolLabel(chunk);
+        const detail =
+          formatted.full && formatted.full !== summary ? formatted.full : "";
+        deps.pushActivity("tool", detail ? `${summary}\n${detail}` : summary);
       }
       return;
     }
@@ -207,6 +213,23 @@ export function createBubblesController(deps: BubblesDeps) {
       deps.updateContextMeter();
     }
     return message;
+  }
+  function rememberTool(text: string): void {
+    const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    const parts = splitToolActivity(text);
+    const signature = toolSignature(text);
+    const tail = session.messages[session.messages.length - 1];
+    if (tail?.role === "tool") {
+      const previous = splitToolActivity(tail.content);
+      if (toolSignature(tail.content) === signature) return;
+      if (previous.summary === parts.summary && !previous.detail && parts.detail) {
+        tail.content = text;
+        deps.touchSession(session);
+        deps.scheduleStorePersist();
+        return;
+      }
+    }
+    persistMessage("tool", text);
   }
   function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
@@ -326,6 +349,7 @@ export function createBubblesController(deps: BubblesDeps) {
     return bubble;
   }
   function renderActiveMessages(): void {
+    const previous = Array.from(deps.logEl.childNodes);
     try {
       deps.logEl.replaceChildren();
       deps.setAssistantBubble(null);
@@ -345,6 +369,15 @@ export function createBubblesController(deps: BubblesDeps) {
       }
       for (let i = 0; i < session.messages.length; ) {
         const message = session.messages[i];
+        if (message.role === "tool") {
+          const run: ChatMessage[] = [message];
+          while (i + run.length < session.messages.length && session.messages[i + run.length].role === "tool") {
+            run.push(session.messages[i + run.length]);
+          }
+          deps.logEl.appendChild(renderToolHistoryGroup(run.map((item) => item.content)));
+          i += run.length;
+          continue;
+        }
         if (message.role === "permission") {
           const pendingLive =
             deps.isViewingRunningSession() &&
@@ -421,6 +454,10 @@ export function createBubblesController(deps: BubblesDeps) {
       deps.updateContextMeter();
     } catch (error) {
       console.error("Ask: failed to render messages", error);
+      if (previous.length > 0) {
+        deps.logEl.replaceChildren(...previous);
+        return;
+      }
       deps.logEl.replaceChildren();
       appendBubble("meta", t("chat.welcome"), { persist: false });
     }
@@ -445,6 +482,7 @@ export function createBubblesController(deps: BubblesDeps) {
     ensureAssistantBubble,
     appendAssistantChunk,
     persistMessage,
+    rememberTool,
     updateAssistantMessage,
     assistantMarkdownSource,
     syncAssistantCopyButton,

@@ -21,7 +21,8 @@ use super::env::{
 };
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    tool_input_detail,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -396,10 +397,16 @@ where
                 .unwrap_or("tool")
                 .trim();
             let label = hermes_tool_label(name);
+            let detail = value
+                .get("input")
+                .or_else(|| value.get("arguments"))
+                .or_else(|| value.get("args"))
+                .map(tool_input_detail)
+                .unwrap_or_default();
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.to_string(),
                 phase: "tool".into(),
-                message: format!("调用工具 {label}…"),
+                message: format_tool_status(label, &detail),
             });
         }
         "tool_result" => {
@@ -753,7 +760,7 @@ Session: 20260814223955a98b96
             "fake-hermes",
             r#"#!/bin/bash
 echo '{"type":"system","subtype":"init","session_id":"hermes-sid-1"}'
-echo '{"type":"tool_use","name":"terminal"}'
+echo '{"type":"tool_use","name":"terminal","input":{"command":"git status"}}'
 echo '{"type":"text","text":"hermes-ok"}'
 echo '{"type":"result","session_id":"hermes-sid-1","exit_code":0,"text":"hermes-ok"}'
 echo 'session_id: hermes-sid-1' >&2
@@ -790,7 +797,7 @@ exit 0
         assert!(evs.iter().any(|e| matches!(
             e,
             PromptSessionEvent::Status { phase, message, .. }
-                if phase == "tool" && message.contains("终端")
+                if phase == "tool" && message.contains("终端") && message.contains("git status")
         )));
         assert!(!evs
             .iter()

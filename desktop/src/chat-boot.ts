@@ -1,3 +1,4 @@
+import { setFollowQueueInsertHandler } from "./chat/follow-queue";
 import { chatState } from "./chat-state";
 
 import {
@@ -36,7 +37,6 @@ import {
   clearActiveSession,
   compactActiveSession,
   isViewingRunningSession,
-  isComposerLocked,
   autoResizePrompt,
   closeModelMenu,
   positionModelMenu,
@@ -77,6 +77,9 @@ import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text
 import { wireChatControllers } from "./chat-wire";
 
 export function bootChat(): void {
+  setFollowQueueInsertHandler(() => {
+    void cancelAsk();
+  });
   wireChatControllers();
   const win = window as Window & {
     __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
@@ -247,7 +250,6 @@ export function bootChat(): void {
     // IME candidate confirm (Chinese etc.): Enter commits the composition, not send.
     if (event.isComposing || event.keyCode === 229 || promptEl.dataset.composing === "1") return;
     event.preventDefault();
-    if (isComposerLocked()) return;
     void sendAsk();
   });
   promptEl.addEventListener("compositionstart", () => {

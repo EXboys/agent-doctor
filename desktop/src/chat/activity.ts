@@ -1,9 +1,9 @@
-import { getLocale } from "../i18n";
+import { getLocale, t } from "../i18n";
 import {
   activityKind,
-  cleanToolLabel,
   isQuietPhase,
   isQuietStderr,
+  splitToolActivity,
   toolSignature,
 } from "./format";
 
@@ -19,9 +19,69 @@ export type ActivityDeps = {
   setLifecycleActivityEl: (el: HTMLElement | null) => void;
   getToolGroupEl: () => HTMLDetailsElement | null;
   setToolGroupEl: (el: HTMLDetailsElement | null) => void;
+  /** Keep the command on the session so it survives a redraw. */
+  rememberTool: (text: string) => void;
 };
 
 export type ActivityApi = ReturnType<typeof createActivityController>;
+
+export function applyToolRow(row: HTMLElement, text: string): void {
+  const { summary, detail } = splitToolActivity(text);
+  row.dataset.summary = summary;
+  row.dataset.detail = detail;
+  row.dataset.signature = toolSignature(text);
+  row.dataset.kind = "tool";
+  const name = row.querySelector<HTMLElement>(".chat-tool-name");
+  const preview = row.querySelector<HTMLElement>(".chat-tool-preview");
+  const cmd = row.querySelector<HTMLElement>(".chat-tool-cmd");
+  const chevron = row.querySelector<HTMLElement>(".chat-tool-chevron");
+  if (name) name.textContent = summary;
+  const firstLine = detail.split("\n")[0]?.trim() ?? "";
+  if (preview) {
+    preview.textContent = firstLine;
+    preview.hidden = !firstLine;
+  }
+  if (cmd) {
+    cmd.textContent = detail;
+    cmd.hidden = !detail;
+  }
+  if (chevron) chevron.hidden = !detail;
+  if (!detail && row instanceof HTMLDetailsElement) row.open = false;
+}
+
+export function createToolRowElement(text: string): HTMLDetailsElement {
+  const row = document.createElement("details");
+  row.className = "chat-activity is-done kind-tool chat-tool-row";
+  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-tool-preview" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre>`;
+  row.querySelector("summary")?.addEventListener("click", (event) => {
+    if (!row.dataset.detail) event.preventDefault();
+  });
+  applyToolRow(row, text);
+  return row;
+}
+
+/** Collapsed history of one turn's tool calls. Click a row for the command. */
+export function renderToolHistoryGroup(texts: string[]): HTMLDetailsElement {
+  const group = document.createElement("details");
+  group.className = "chat-tool-group";
+  group.open = false;
+  const count = texts.length;
+  const summary = document.createElement("summary");
+  summary.className = "chat-tool-group-summary";
+  summary.innerHTML = `<span class="chat-tool-group-icon" aria-hidden="true">$</span><span class="chat-tool-group-label"></span><span class="chat-tool-group-chevron" aria-hidden="true"></span>`;
+  const label = summary.querySelector<HTMLElement>(".chat-tool-group-label");
+  if (label) {
+    label.textContent =
+      getLocale() === "zh"
+        ? t("chat.permissionGroupTools", { count: String(count) })
+        : `${count} tool${count === 1 ? "" : "s"} used`;
+  }
+  const list = document.createElement("div");
+  list.className = "chat-tool-list";
+  for (const text of texts) list.appendChild(createToolRowElement(text));
+  group.append(summary, list);
+  return group;
+}
 
 export function createActivityController(deps: ActivityDeps) {
   /** Remove the transient lifecycle row once a more meaningful event replaces it. */
@@ -59,14 +119,13 @@ export function createActivityController(deps: ActivityDeps) {
       !last.classList.contains("chat-turn-tools")
     ) {
       deps.setToolGroupEl(last);
-      last.open = true;
       last.classList.add("is-live");
       updateToolGroupSummary(last, true);
       return last;
     }
     const group = document.createElement("details");
     group.className = "chat-tool-group is-live";
-    group.open = true;
+    group.open = false;
     group.innerHTML = `
     <summary class="chat-tool-group-summary">
       <span class="chat-tool-group-icon" aria-hidden="true">$</span>
@@ -130,7 +189,6 @@ export function createActivityController(deps: ActivityDeps) {
 
   /** Render progress / tool calls inline in the chat stream (not a side panel). */
   function pushActivity(phase: string, message: string): void {
-    if (!deps.isViewingRunningSession()) return;
     const text = message.trim() || phase;
     if (!text) return;
 
@@ -143,15 +201,24 @@ export function createActivityController(deps: ActivityDeps) {
     const kind = activityKind(phase);
 
     if (kind === "tool") {
+      deps.rememberTool(text);
+      if (!deps.isViewingRunningSession()) return;
       dismissLifecycleActivity();
       deps.flushPendingTextSync();
       deps.sealAssistantBubble();
 
       const group = ensureToolGroup();
       const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
+      const parts = splitToolActivity(text);
       const signature = toolSignature(text);
       const last = list.querySelector<HTMLElement>(".chat-activity.kind-tool:last-child");
-      if (last?.dataset.signature === signature) {
+      const canFillDetail =
+        last &&
+        last.dataset.summary === parts.summary &&
+        !last.dataset.detail &&
+        Boolean(parts.detail);
+      if (last && (last.dataset.signature === signature || canFillDetail)) {
+        if (canFillDetail) applyToolRow(last, text);
         last.classList.add("is-live");
         last.classList.remove("is-done");
         deps.setActivityEl(last);
@@ -160,19 +227,18 @@ export function createActivityController(deps: ActivityDeps) {
       }
 
       settleActivity();
-      const row = document.createElement("div");
-      row.className = "chat-activity is-live kind-tool";
+      const row = createToolRowElement(text);
+      row.classList.add("is-live");
+      row.classList.remove("is-done");
       row.dataset.phase = phase;
-      row.dataset.kind = kind;
-      row.dataset.signature = signature;
-      row.innerHTML = `<span class="chat-tool-step" aria-hidden="true"></span><code class="chat-activity-text chat-tool-cmd"></code>`;
-      row.querySelector<HTMLElement>(".chat-activity-text")!.textContent = cleanToolLabel(text);
       list.appendChild(row);
       deps.setActivityEl(row);
       updateToolGroupSummary(group, true);
       deps.logEl.scrollTop = deps.logEl.scrollHeight;
       return;
     }
+
+    if (!deps.isViewingRunningSession()) return;
 
     // Waiting/requesting/thinking are one evolving state, not transcript entries.
     if (kind !== "error") {

@@ -1,7 +1,7 @@
 import type { AskRuntime } from "../ask-resources";
 
 export type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
-export type ChatRole = "user" | "assistant" | "meta" | "permission";
+export type ChatRole = "user" | "assistant" | "meta" | "permission" | "tool";
 export type AttachKind = "file" | "image";
 export type ChatTheme = "light" | "dark";
 export type CopyIdleKind = "text" | "code";

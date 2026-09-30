@@ -2625,6 +2625,8 @@ body.is-diagnose-open .diagnose-detail {
 }
 
 .runtime-tab-label {
+  grid-column: 3;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2633,6 +2635,7 @@ body.is-diagnose-open .diagnose-detail {
 }
 
 .runtime-tab-logo {
+  grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
   width: 22px;
@@ -2640,6 +2643,7 @@ body.is-diagnose-open .diagnose-detail {
   border-radius: 6px;
   overflow: hidden;
   background: #fff;
+  color: #111827;
 }
 
 .runtime-tab-logo .agent-brand-img,
@@ -2663,6 +2667,9 @@ body.is-diagnose-open .diagnose-detail {
 }
 
 .runtime-tab-dot {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -2766,6 +2773,7 @@ body.is-diagnose-open .diagnose-detail {
   border-radius: 14px;
   overflow: hidden;
   background: #fff;
+  color: #111827;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
 }
 

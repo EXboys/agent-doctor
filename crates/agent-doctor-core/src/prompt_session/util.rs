@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +36,114 @@ pub(crate) fn combine_output(stdout: &str, stderr: &str) -> String {
         (true, false) => stderr.to_string(),
         (false, false) => format!("{stdout}\n{stderr}"),
     }
+}
+
+/// Status line for a tool chip: a short label, then the command or path on the next line.
+pub(crate) fn format_tool_status(label: &str, detail: &str) -> String {
+    let label = label.trim();
+    let detail = detail.trim();
+    if detail.is_empty() {
+        format!("调用工具 {label}…")
+    } else {
+        format!("调用工具 {label}…\n{detail}")
+    }
+}
+
+fn first_tool_str(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> String {
+    for key in keys {
+        if let Some(text) = obj.get(*key).and_then(|v| v.as_str()) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return text.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Pull a readable command, search, or path out of a tool `input` object.
+pub(crate) fn tool_input_detail(input: &Value) -> String {
+    if let Some(text) = input.as_str() {
+        let text = text.trim();
+        if text.starts_with('{') {
+            if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                return tool_input_detail(&parsed);
+            }
+        }
+        return clip_tool_detail(text);
+    }
+    let Some(obj) = input.as_object() else {
+        return String::new();
+    };
+    if obj.is_empty() {
+        return String::new();
+    }
+    let command = first_tool_str(obj, &["command", "cmd", "script"]);
+    if !command.is_empty() {
+        return clip_tool_detail(&command);
+    }
+    let pattern = first_tool_str(obj, &["pattern", "query"]);
+    let mut path = first_tool_str(obj, &["path", "file_path", "file"]);
+    if path == "." || path == "./" {
+        path.clear();
+    }
+    let url = first_tool_str(obj, &["url"]);
+    let mut lines = Vec::new();
+    if !pattern.is_empty() {
+        lines.push(pattern);
+    }
+    if !path.is_empty() {
+        lines.push(path);
+    }
+    if !url.is_empty() {
+        lines.push(url);
+    }
+    if lines.is_empty() {
+        const SKIP: &[&str] = &[
+            "content",
+            "old_string",
+            "new_string",
+            "patch",
+            "diff",
+            "timeout",
+            "limit",
+            "offset",
+        ];
+        for (key, value) in obj {
+            if SKIP.contains(&key.as_str()) {
+                continue;
+            }
+            let Some(text) = value.as_str() else {
+                continue;
+            };
+            let text = text.trim();
+            if text.is_empty() || text.chars().count() > 180 {
+                continue;
+            }
+            lines.push(format!("{key}: {text}"));
+            if lines.len() == 4 {
+                break;
+            }
+        }
+    }
+    if lines.is_empty() {
+        let patch = first_tool_str(obj, &["patch", "diff"]);
+        if !patch.is_empty() {
+            lines.push(patch);
+        }
+    }
+    clip_tool_detail(&lines.join("\n"))
+}
+
+fn clip_tool_detail(text: &str) -> String {
+    const MAX: usize = 480;
+    let text = text.trim();
+    let count = text.chars().count();
+    if count <= MAX {
+        return text.to_string();
+    }
+    let clipped: String = text.chars().take(MAX).collect();
+    format!("{clipped}…")
 }
 
 pub(crate) fn summarize(combined: &str, status: &PromptSessionStatus, runtime: &str) -> String {
@@ -130,6 +240,19 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     // `~/.codex` is rediscovered as project-local while CODEX_HOME is isolated —
     // the warning is expected noise; Ask must not surface it as an error toast.
     if lower.contains("ignored unsupported project-local config") {
+        return true;
+    }
+    // cua-driver prints a TCC auto-launch note and an update banner on stderr.
+    // The tool still starts; this is not a failed reply.
+    if lower.contains("cua-driver")
+        && (lower.contains("is available")
+            || lower.contains("update with")
+            || lower.contains("release notes")
+            || lower.contains("mcp launched")
+            || lower.contains("tcc")
+            || lower.contains("auto-launching")
+            || lower.contains("proxying mcp"))
+    {
         return true;
     }
     // A tool whose program file is gone is removed before send. If one still
@@ -231,6 +354,15 @@ mod tests {
         ));
         assert!(!is_runtime_stderr_noise("provider rejected the key"));
         assert!(is_runtime_stderr_noise(
+            "cua-driver: mcp launched without CuaDriver.app's TCC grants; auto-launching the daemon"
+        ));
+        assert!(is_runtime_stderr_noise(
+            "cua-driver v0.30.4 is available (you have v0.28.2)."
+        ));
+        assert!(!is_runtime_stderr_noise(
+            "cua-driver failed: permission denied"
+        ));
+        assert!(is_runtime_stderr_noise(
             "2026-09-28T09:19:04.710092Z ERROR codex_app_server_transport::transport::stdio: Failed to write to stdout: Broken pipe (os error 32)"
         ));
         assert!(is_runtime_stderr_noise(
@@ -256,6 +388,29 @@ mod tests {
         );
         assert!(msg.contains("UnlessTrusted") || msg.contains("提升权限"));
         assert!(!msg.starts_with("approval policy is"));
+    }
+
+    #[test]
+    fn tool_status_keeps_command_on_its_own_line() {
+        let input = serde_json::json!({"command": "git status", "timeout": 30});
+        let detail = tool_input_detail(&input);
+        assert_eq!(detail, "git status");
+        assert_eq!(
+            format_tool_status("终端", &detail),
+            "调用工具 终端…\ngit status"
+        );
+        assert_eq!(
+            tool_input_detail(&serde_json::json!({"path": "src/chat.css"})),
+            "src/chat.css"
+        );
+        assert_eq!(
+            tool_input_detail(&serde_json::json!({
+                "pattern": "fn main",
+                "path": ".",
+                "target": "content"
+            })),
+            "fn main"
+        );
     }
 
     #[test]

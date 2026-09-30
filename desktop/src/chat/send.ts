@@ -17,6 +17,14 @@ import type {
   SessionStore,
 } from "./types";
 import { cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import {
+  consumeDrainIntent,
+  enqueueFollowUp,
+  holdFollowUps,
+  mergedFollowUp,
+  takeFollowUps,
+  type FollowDraft,
+} from "./follow-queue";
 
 export type SendDeps = {
   promptEl: HTMLTextAreaElement;
@@ -85,12 +93,14 @@ export type SendDeps = {
   settleRunRouting: () => void;
   renderSessionList: () => void;
   readImageTextEnabled: () => boolean;
+  refreshComposer: () => void;
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
 
 export function createSendController(deps: SendDeps) {
   async function cancelAsk(): Promise<void> {
+    holdFollowUps();
     const gen = deps.getBusyGen();
     deps.clearQuickReplies();
     try {
@@ -119,28 +129,72 @@ export function createSendController(deps: SendDeps) {
       deps.setStatus(withErrorDetail(t("chat.cancelFailed"), error), "error");
     }
   }
-  async function sendAsk(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): Promise<void> {
-    if (deps.getBusy()) {
-      if (deps.getRunningChatSessionId() && deps.getRunningChatSessionId() !== deps.getStore().activeId) {
+  function draftFromComposer(opts?: { verifyMcp?: boolean; fromVoice?: boolean }): FollowDraft {
+    return {
+      id: crypto.randomUUID(),
+      sessionId: deps.getStore().activeId,
+      text: deps.promptEl.value.trim(),
+      attachments: [...deps.getPendingAttachments()],
+      mentions: [...deps.askResources.selectedMentions],
+      fromVoice: opts?.fromVoice,
+      verifyMcp: opts?.verifyMcp,
+    };
+  }
+
+  function clearComposer(): void {
+    deps.promptEl.value = "";
+    deps.mentionMenu.hideMentionMenu();
+    deps.askResources.clearMentions();
+    deps.autoResizePrompt();
+    deps.setPendingAttachments([]);
+    deps.renderPendingAttachments();
+  }
+
+  async function sendAsk(opts?: {
+    verifyMcp?: boolean;
+    fromVoice?: boolean;
+    draft?: FollowDraft;
+  }): Promise<void> {
+    const sameRunningChat =
+      !deps.getRunningChatSessionId() || deps.getRunningChatSessionId() === deps.getStore().activeId;
+    if (deps.getBusy() && !opts?.draft) {
+      if (!sameRunningChat) {
         deps.setStatus(t("chat.otherSessionRunning"), "warn");
+        return;
       }
+      const queued = draftFromComposer(opts);
+      if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
+        deps.setStatus(t("chat.emptyPrompt"), "warn");
+        return;
+      }
+      enqueueFollowUp(deps.getStore().activeId, queued);
+      clearComposer();
+      deps.setStatus(t("chat.queuedStatus"), "muted");
+      deps.refreshComposer();
       return;
     }
-    const text = deps.promptEl.value.trim();
-    const attachments = [...deps.getPendingAttachments()];
-    if (!text && attachments.length === 0 && deps.askResources.selectedMentions.length === 0) {
+    if (deps.getBusy()) {
+      if (opts?.draft) enqueueFollowUp(opts.draft.sessionId, opts.draft);
+      return;
+    }
+
+    const draft = opts?.draft ?? draftFromComposer(opts);
+    const text = draft.text;
+    const attachments = draft.attachments;
+    if (!text && attachments.length === 0 && draft.mentions.length === 0) {
       deps.setStatus(t("chat.emptyPrompt"), "warn");
       return;
     }
 
     const runtime = deps.selectedRuntime();
     const elevated = deps.selectedRuntime() !== "deepseek-harness" && deps.elevatedEl.checked;
-    if (elevated && !opts?.fromVoice && !window.confirm(t("chat.elevatedConfirm"))) return;
+    if (elevated && !draft.fromVoice && !opts?.draft && !window.confirm(t("chat.elevatedConfirm"))) return;
 
-    const chatSessionId = deps.getStore().activeId;
-    const resumeThreadId = deps.activeSession().runtimeThreadId?.trim() || null;
+    const chatSessionId = draft.sessionId || deps.getStore().activeId;
+    const resumeThreadId =
+      (deps.sessionById(chatSessionId) ?? deps.activeSession()).runtimeThreadId?.trim() || null;
 
-    deps.setVerifyMcpTurn(Boolean(opts?.verifyMcp));
+    deps.setVerifyMcpTurn(Boolean(draft.verifyMcp));
     deps.setVerifySawBrowserNavigate(false);
     deps.setVerifyMcpReported(false);
     deps.setVerifyTurnText("");
@@ -148,7 +202,7 @@ export function createSendController(deps: SendDeps) {
     const mentions = ensureBrowserMention(
       mergeMentionsForSend(
         text,
-        deps.askResources.selectedMentions,
+        draft.mentions,
         deps.askResources.mountedSkills,
         deps.askResources.enabledMcps,
       ),
@@ -158,7 +212,7 @@ export function createSendController(deps: SendDeps) {
     const cleaned = stripMentionTokens(text);
     const userText = cleaned || text || t("chat.attachOnlyPrompt");
     const constraint = buildMentionConstraint(mentions);
-    const voiceNote = opts?.fromVoice
+    const voiceNote = draft.fromVoice
       ? getLocale() === "zh"
         ? "这是对方用语音说的、再转成文字发过来的，不是键盘打的。请直接回答这句话。不要说你听不到声音，也不要提醒对方只能打字。转写可能少几个字，按能看懂的意思回。\n\n"
         : "This message was spoken and turned into text. It was not typed. Answer it directly. Do not say you cannot hear them, and do not tell them to type. A few words may be missing; reply to the meaning you can follow.\n\n"
@@ -182,12 +236,7 @@ export function createSendController(deps: SendDeps) {
     if (deps.getStore().activeId === chatSessionId) {
       deps.appendBubble("user", userText, { id: userMessage.id, persist: false, attachments });
     }
-    deps.promptEl.value = "";
-    deps.mentionMenu.hideMentionMenu();
-    deps.askResources.clearMentions();
-    deps.autoResizePrompt();
-    deps.setPendingAttachments([]);
-    deps.renderPendingAttachments();
+    if (!opts?.draft) clearComposer();
     deps.setStatus(t("chat.running", { runtime }), "muted");
     deps.pushActivity("think", t("chat.waitingModel"));
 
@@ -301,6 +350,14 @@ export function createSendController(deps: SendDeps) {
       } else {
         deps.setVerifyMcpTurn(false);
       }
+      const intent = consumeDrainIntent();
+      if (intent !== "hold") {
+        const merged = mergedFollowUp(takeFollowUps(chatSessionId));
+        if (merged) {
+          await sendAsk({ draft: merged, fromVoice: merged.fromVoice, verifyMcp: merged.verifyMcp });
+        }
+      }
+      deps.refreshComposer();
     }
   }
 

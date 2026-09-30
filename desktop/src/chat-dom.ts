@@ -10,6 +10,7 @@ export const modelLabelEl = document.querySelector<HTMLElement>("#chat-model-lab
 export const modelMenuEl = document.querySelector<HTMLElement>("#chat-model-menu")!;
 export const modelWrapEl = modelBtnEl.closest(".chat-model-wrap") as HTMLElement;
 export const promptEl = document.querySelector<HTMLTextAreaElement>("#chat-prompt")!;
+export const followQueueEl = document.querySelector<HTMLElement>("#chat-follow-queue");
 export const actionEl = document.querySelector<HTMLButtonElement>("#chat-action")!;
 export const attachEl = document.querySelector<HTMLButtonElement>("#chat-attach")!;
 export const voiceEl = document.querySelector<HTMLButtonElement>("#chat-voice")!;

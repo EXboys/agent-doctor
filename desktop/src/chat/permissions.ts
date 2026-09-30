@@ -451,7 +451,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       if (name) names.push(name);
     });
     if (names.length > 0) return names;
-    node.querySelectorAll<HTMLElement>(".chat-tool-cmd, .chat-activity-text").forEach((el) => {
+    node.querySelectorAll<HTMLElement>(".chat-tool-name, .chat-activity-text").forEach((el) => {
       const label = cleanToolLabel(el.textContent ?? "");
       if (label) names.push(label.split(/\s+/)[0] || label);
     });

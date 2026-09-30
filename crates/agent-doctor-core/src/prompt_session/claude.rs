@@ -16,8 +16,8 @@ use super::env::{
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
-    combine_output, command_from_cli, force_stop_child, is_runtime_stderr_noise, join_reader,
-    push_capped, summarize,
+    combine_output, command_from_cli, force_stop_child, format_tool_status,
+    is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_input_detail,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -606,10 +606,14 @@ fn parse_claude_stream_line(
                     }
                     "tool_use" => {
                         let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                        let detail = block
+                            .get("input")
+                            .map(tool_input_detail)
+                            .unwrap_or_default();
                         out.push(PromptSessionEvent::Status {
                             session_id: session_id.to_string(),
                             phase: "tool".into(),
-                            message: format!("调用工具 {name}…"),
+                            message: format_tool_status(name, &detail),
                         });
                     }
                     _ => {}
@@ -646,10 +650,14 @@ fn parse_claude_stream_line(
                         .pointer("/event/content_block/name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool");
+                    let detail = value
+                        .pointer("/event/content_block/input")
+                        .map(tool_input_detail)
+                        .unwrap_or_default();
                     out.push(PromptSessionEvent::Status {
                         session_id: session_id.to_string(),
                         phase: "tool".into(),
-                        message: format!("调用工具 {name}…"),
+                        message: format_tool_status(name, &detail),
                     });
                 }
             }

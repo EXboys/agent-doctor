@@ -1,3 +1,4 @@
+import { renderFollowQueue } from "./chat/follow-queue";
 import { chatState, initChatStore } from "./chat-state";
 import {
   elevatedEl,
@@ -6,6 +7,7 @@ import {
   readImageWrapEl,
   modelBtnEl,
   promptEl,
+  followQueueEl,
   actionEl,
   attachEl,
   composerBoxEl,
@@ -290,7 +292,7 @@ export function applyI18n(): void {
     const key = el.dataset.i18n as MessageKey | undefined;
     if (key) el.textContent = t(key);
   });
-  promptEl.placeholder = t("chat.placeholder");
+  promptEl.placeholder = t(isComposerLocked() ? "chat.placeholderBusy" : "chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
   if (readImageWrapEl) {
@@ -381,7 +383,9 @@ export function syncActionButton(): void {
 
 export function syncComposerUi(): void {
   const locked = isComposerLocked();
-  promptEl.disabled = locked;
+  promptEl.disabled = false;
+  promptEl.readOnly = false;
+  promptEl.placeholder = t(locked ? "chat.placeholderBusy" : "chat.placeholder");
   elevatedEl.disabled = locked || selectedRuntime() === "deepseek-harness";
   modelBtnEl.disabled = locked || !chatState.wiredProvider;
   if (locked) {
@@ -389,7 +393,8 @@ export function syncComposerUi(): void {
     closeContextPopover();
   }
   newSessionEl.disabled = false;
-  attachEl.disabled = locked;
+  attachEl.disabled = false;
+  renderFollowQueue(followQueueEl, chatState.store.activeId, locked);
   if (locked && chatState.voiceInput?.isListening()) {
     void chatState.voiceInput.stopListening();
   }

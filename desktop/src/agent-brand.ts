@@ -1,28 +1,29 @@
 /** Official brand marks. Filename (without .svg) is the runtime id. */
 const iconModules = import.meta.glob("./assets/agent-icons/*.svg", {
-  query: "?url",
+  query: "?raw",
   import: "default",
   eager: true,
 }) as Record<string, string>;
 
-function iconUrl(runtimeId: string): string | undefined {
-  return iconModules[`./assets/agent-icons/${runtimeId}.svg`];
-}
-
-function iconImg(src: string): string {
-  return `<img class="agent-brand-img" src="${src}" alt="" draggable="false" />`;
+function iconSvg(runtimeId: string): string | undefined {
+  const raw = iconModules[`./assets/agent-icons/${runtimeId}.svg`];
+  if (!raw) return undefined;
+  // Inline so fill="currentColor" follows the tile, not a broken <img>.
+  return raw.replace(
+    "<svg",
+    '<svg class="agent-brand-img" focusable="false" aria-hidden="true"',
+  );
 }
 
 export function agentBrandIconHtml(runtimeId: string): string {
-  const src = iconUrl(runtimeId);
-  return src ? iconImg(src) : "";
+  return iconSvg(runtimeId) ?? "";
 }
 
 export function setAgentBrandIcon(el: HTMLElement, runtimeId: string): void {
-  const src = iconUrl(runtimeId);
   el.classList.add("agent-brand-icon");
-  if (src) {
-    el.innerHTML = iconImg(src);
+  const svg = iconSvg(runtimeId);
+  if (svg) {
+    el.innerHTML = svg;
     return;
   }
   el.textContent = (runtimeId.charAt(0) || "?").toUpperCase();

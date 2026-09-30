@@ -73,17 +73,27 @@ export function isQuietPhase(phase: string): boolean {
   return phase === "writing" || phase === "streaming" || phase === "info" || phase === "done";
 }
 
-export function cleanToolLabel(text: string): string {
-  const cleaned = text
+/** Short name on the first line; command or path on the following lines. */
+export function splitToolActivity(text: string): { summary: string; detail: string } {
+  const stripped = text
     .replace(/^(?:调用工具|call(?:ing)? tool)\s*/i, "")
     .replace(/[….\s]+$/g, "")
     .trim();
-  const aliases = cleaned.split("__").filter(Boolean);
-  return aliases.length > 1 ? aliases[aliases.length - 1] : cleaned || text;
+  const breakAt = stripped.indexOf("\n");
+  const head = (breakAt === -1 ? stripped : stripped.slice(0, breakAt)).trim();
+  const detail = breakAt === -1 ? "" : stripped.slice(breakAt + 1).trim();
+  const aliases = head.split("__").filter(Boolean);
+  const summary = (aliases.length > 1 ? aliases[aliases.length - 1] : head) || text.trim();
+  return { summary, detail };
+}
+
+export function cleanToolLabel(text: string): string {
+  return splitToolActivity(text).summary;
 }
 
 export function toolSignature(text: string): string {
-  return cleanToolLabel(text).toLocaleLowerCase();
+  const { summary, detail } = splitToolActivity(text);
+  return `${summary}\n${detail}`.toLocaleLowerCase();
 }
 
 export function isQuietStderr(line: string): boolean {
@@ -102,6 +112,14 @@ export function isQuietStderr(line: string): boolean {
     lower.startsWith("[secrets]") ||
     lower.includes("secrets.resolve unavailable") ||
     lower.includes("resolved command secrets locally") ||
+    (lower.includes("cua-driver") &&
+      (lower.includes("is available") ||
+        lower.includes("update with") ||
+        lower.includes("release notes") ||
+        lower.includes("mcp launched") ||
+        lower.includes("tcc") ||
+        lower.includes("auto-launching") ||
+        lower.includes("proxying mcp"))) ||
     lower.includes("openclaw gateway run") ||
     lower.includes("openclaw gateway status") ||
     lower.startsWith("gateway target:") ||

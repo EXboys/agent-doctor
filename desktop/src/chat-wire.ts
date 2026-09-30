@@ -158,6 +158,7 @@ export function wireChatControllers(): void {
     setToolGroupEl: (el) => {
       chatState.toolGroupEl = el;
     },
+    rememberTool: (text) => chatState.bubbles.rememberTool(text),
   });
 
   chatState.modelPicker = createModelPickerController({
@@ -559,6 +560,7 @@ export function wireChatControllers(): void {
     settleRunRouting: () => settleRunRouting(),
     renderSessionList: () => renderSessionList(),
     readImageTextEnabled: () => readImageTextEnabled(),
+    refreshComposer: () => syncComposerUi(),
   });
 
   chatState.hosted = createHostedController({
