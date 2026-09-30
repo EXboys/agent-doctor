@@ -8,6 +8,7 @@ import { catalogAgents, countAgentMatches, loadDoctor, renderAgentCatalog } from
 import { filteredMallItems, filteredMallToolItems, loadMall, mallToolPool, renderMallAccount, renderToolsList, signOutMallAccount, startMallLogin } from "./resources-mall";
 import { buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpStatus, persistProfileDirectory, persistShowBrowserUi, persistUserDataDir, refreshMcpSnippet, selectedProfileDirectory, selectedUserDataDir, syncProfileModeButtons } from "./resources-browser";
 import { buildLocalSkillEntries, entryMatchesQuery, isStoreScope, loadSkills, onSkillsPanelScroll, renderSkillsList } from "./resources-skills";
+import { loadRuntimeCatalog } from "./runtime-catalog";
 
 export function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
@@ -413,6 +414,7 @@ void listen<{ section?: string }>("resources-window-focus", (event) => {
   else if (section === "skills" || section === "catalog") setSection("skills");
   void refreshAll();
 });
-window.setTimeout(() => {
+void (async () => {
+  await loadRuntimeCatalog();
   if (resourcesState.lastRefreshAt === 0 && !resourcesState.refreshInFlight) void refreshAll(true);
-}, 80);
+})();

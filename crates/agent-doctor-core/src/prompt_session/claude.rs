@@ -252,17 +252,19 @@ fn build_claude_command(
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // `--mcp-config` is variadic. A separate path argument makes Claude treat
+    // every later positional (the user prompt) as another config file, then
+    // `open()` that text. `ENAMETOOLONG` is that failure when the prompt is long.
+    // `=` keeps the path attached to the flag.
     let mcp_config = cwd.join(".mcp.json");
     if mcp_config.is_file() {
-        cmd.arg("--mcp-config").arg(&mcp_config);
+        cmd.arg(format!("--mcp-config={}", mcp_config.display()));
     }
     if let Some(sid) = resume_session_id {
         cmd.arg("--resume").arg(sid);
     }
     if skip_permissions {
-        cmd.arg(prompt)
-            .arg("--dangerously-skip-permissions")
-            .stdin(Stdio::null());
+        cmd.arg("--dangerously-skip-permissions");
     } else if interactive_permissions {
         let ask_settings = serde_json::json!({
             "permissions": {
@@ -283,10 +285,12 @@ fn build_claude_command(
             .arg("--permission-prompt-tool")
             .arg("stdio")
             .arg("--settings")
-            .arg(ask_settings.to_string())
-            .stdin(Stdio::piped());
+            .arg(ask_settings.to_string());
+    }
+    if interactive_permissions {
+        cmd.stdin(Stdio::piped());
     } else {
-        cmd.arg(prompt).stdin(Stdio::null());
+        cmd.arg("--").arg(prompt).stdin(Stdio::null());
     }
     apply_overlay_env(&mut cmd, overlay);
     apply_claude_env(&mut cmd, overlay);
@@ -862,6 +866,42 @@ mod tests {
                 && tool_name == "Bash"
                 && detail.contains("ls -la")
         )));
+    }
+
+    #[test]
+    fn mcp_config_flag_does_not_swallow_prompt() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{}}"#).unwrap();
+        let prompt = "Response style: answer the user directly and concisely.";
+        let cmd = build_claude_command(
+            prompt,
+            dir.path(),
+            true,
+            false,
+            None,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter().any(|arg| arg.starts_with("--mcp-config=")),
+            "mcp config must be one argv: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "--mcp-config"),
+            "bare --mcp-config slurps the prompt: {args:?}"
+        );
+        let dash = args
+            .iter()
+            .position(|arg| arg == "--")
+            .expect("prompt separator");
+        assert_eq!(args.get(dash + 1).map(String::as_str), Some(prompt));
+        assert!(args[..dash]
+            .iter()
+            .any(|arg| arg == "--dangerously-skip-permissions"));
     }
 
     #[cfg(unix)]

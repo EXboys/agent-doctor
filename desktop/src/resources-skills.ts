@@ -22,9 +22,16 @@ export function entryMountedOn(entry: UnifiedSkillEntry, runtime: string): boole
   return Boolean(entry.agents?.some((agent) => agent.runtime === runtime && agent.mounted));
 }
 
+/** Agents on this computer that can receive a skill. Inventory is install-filtered. */
+export function mountTargetRuntimeIds(): string[] {
+  const installed = resourcesState.lastSkillsInventory?.available_mount_runtimes;
+  if (installed) return installed;
+  return skillMountRuntimeIds();
+}
+
 export function mergeSkillAgents(skill: SkillInventoryItem): SkillAgentUsage[] {
   const fromApi = new Map(skill.agents.map((agent) => [agent.runtime, agent]));
-  return skillMountRuntimeIds().map(
+  return mountTargetRuntimeIds().map(
     (runtime) =>
       fromApi.get(runtime) ?? {
         runtime,
@@ -39,12 +46,29 @@ export function localSkillById(skillId: string) {
   return resourcesState.lastSkillsInventory?.skills.find((s) => s.skill_id === skillId);
 }
 
+export function joinedAgentNames(agents: SkillAgentUsage[]): string {
+  return agents.map((agent) => runtimeLabel(agent.runtime)).join("、");
+}
+
+export function skillAgentStatus(agents: SkillAgentUsage[]): string {
+  if (agents.length === 0) return t("resources.noAgentsOnDevice");
+  const on = agents.filter((agent) => agent.mounted);
+  const off = agents.filter((agent) => !agent.mounted);
+  if (on.length === 0) return t("resources.skillNotOnAgents", { list: joinedAgentNames(off) });
+  if (off.length === 0) return t("resources.skillOnAgents", { list: joinedAgentNames(on) });
+  return t("resources.skillOnSomeAgents", {
+    list: joinedAgentNames(on),
+    missing: joinedAgentNames(off),
+  });
+}
+
 export function entryFromLocalSkill(skill: NonNullable<SkillsInventoryReport["skills"][number]>): UnifiedSkillEntry {
   const agents = mergeSkillAgents(skill);
   const mounted = agents.filter((a) => a.mounted).length;
   const totalAgents = agents.length;
   const needsMount = totalAgents > 0 && mounted === 0;
   const anyUnmounted = totalAgents > 0 && mounted < totalAgents;
+  const status = skillAgentStatus(agents);
   const category = classifySkillCategory({
     id: skill.skill_id,
     name: skill.name,
@@ -59,19 +83,8 @@ export function entryFromLocalSkill(skill: NonNullable<SkillsInventoryReport["sk
     description: skill.description?.trim() || "",
     category,
     badgeLabel: t(skillCategoryLabelKey(category) as MessageKey),
-    sub: t("resources.skillMountStatus", {
-      mounted: String(mounted),
-      total: String(totalAgents),
-    }),
-    meta:
-      totalAgents === 0
-        ? t("resources.noAgentsOnDevice")
-        : mounted === totalAgents
-          ? t("resources.allAgentsMounted")
-          : t("resources.skillMountStatus", {
-              mounted: String(mounted),
-              total: String(totalAgents),
-            }),
+    sub: status,
+    meta: status,
     tone: needsMount ? "warn" : anyUnmounted ? "warn" : "ok",
     issue: needsMount,
     skillId: skill.skill_id,
@@ -549,6 +562,7 @@ export function onSkillsPanelScroll(): void {
 export function appendSkillAgentChips(body: HTMLElement, entry: UnifiedSkillEntry): void {
   if (entry.storeOnly || !entry.skillId) return;
   const agents = entry.agents ?? [];
+  if (agents.length === 0) return;
   const row = document.createElement("div");
   row.className = "res-skill-agents";
   const label = document.createElement("span");
@@ -558,13 +572,7 @@ export function appendSkillAgentChips(body: HTMLElement, entry: UnifiedSkillEntr
 
   const chips = document.createElement("div");
   chips.className = "res-skill-agents-chips";
-  if (agents.length === 0) {
-    const none = document.createElement("span");
-    none.className = "res-skill-agents-empty";
-    none.textContent = t("resources.noAgentsOnDevice");
-    chips.appendChild(none);
-  } else {
-    for (const agent of agents) {
+  for (const agent of agents) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = agent.mounted ? "skills-runtime is-on" : "skills-runtime";
@@ -585,7 +593,6 @@ export function appendSkillAgentChips(body: HTMLElement, entry: UnifiedSkillEntr
         void toggleSkillRuntimeMount(chip, skillId, runtime, chip.classList.contains("is-on"));
       });
       chips.appendChild(chip);
-    }
   }
   row.append(chips);
   body.appendChild(row);
@@ -635,13 +642,18 @@ export function appendUnifiedSkillActions(metaWrap: HTMLElement, entry: UnifiedS
   if (entry.skillId && entry.agents && entry.agents.length > 0) {
     const skillId = entry.skillId;
     if (entry.needsMount) {
+      const missing = entry.agents.filter((agent) => !agent.mounted);
+      const list = joinedAgentNames(missing);
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-primary btn-compact";
-      btn.textContent = t("resources.mountAllAgents");
-      btn.title = t("resources.mountAllAgentsHint");
+      btn.textContent = t("resources.mountNamedAgents", { list });
+      btn.title = t("resources.mountAllAgentsHint", { list });
       btn.addEventListener("click", () => {
-        void mountSkill(skillId);
+        void mountSkill(
+          skillId,
+          missing.map((agent) => agent.runtime),
+        );
       });
       metaWrap.appendChild(btn);
     }
@@ -656,6 +668,18 @@ export function appendUnifiedSkillActions(metaWrap: HTMLElement, entry: UnifiedS
       });
       metaWrap.appendChild(removeBtn);
     }
+    return;
+  }
+
+  if (entry.skillId && !entry.storeOnly) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary btn-compact";
+    btn.textContent = t("resources.goInstallAgent");
+    btn.addEventListener("click", () => {
+      setSection("agents");
+    });
+    metaWrap.appendChild(btn);
     return;
   }
 
@@ -858,18 +882,23 @@ export function renderSkillsList(): void {
   syncSkillsFootnote();
 }
 
-export async function mountSkill(skillId: string): Promise<void> {
-  setSkillsFootnote(t("resources.installingToAgents"));
+export async function mountSkill(skillId: string, runtimes?: string[]): Promise<void> {
+  const names = (runtimes ?? []).map((runtime) => runtimeLabel(runtime)).join("、");
+  setSkillsFootnote(names ? t("resources.mountingNamed", { list: names }) : t("resources.installingToAgents"));
   try {
     const report = await mountSyncedSkills({
       skillIds: [skillId],
-      runtimes: null,
+      runtimes: runtimes && runtimes.length > 0 ? runtimes : null,
     });
-    setSkillsFootnote(t("resources.installToAgentsOk", {
-      mounted: String(report.mounted),
-      skipped: String(report.skipped),
-      failed: String(report.failed),
-    }));
+    setSkillsFootnote(
+      report.failed === 0 && names
+        ? t("resources.skillOnAgents", { list: names })
+        : t("resources.installToAgentsOk", {
+            mounted: String(report.mounted),
+            skipped: String(report.skipped),
+            failed: String(report.failed),
+          }),
+    );
     await loadSkills();
   } catch (error) {
     setSkillsFootnote(withErrorDetail(t("resources.installToAgentsFailed"), error));
