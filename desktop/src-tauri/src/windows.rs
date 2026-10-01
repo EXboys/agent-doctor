@@ -592,7 +592,7 @@ fn create_resources_window(
         RESOURCES_WINDOW_LABEL,
         WebviewUrl::App("resources.html".into()),
     )
-    .initialization_script(&resources_section_bootstrap_script(section))
+    .initialization_script(resources_section_bootstrap_script(section))
     .title("Agent Doctor — Resources")
     .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
     .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
