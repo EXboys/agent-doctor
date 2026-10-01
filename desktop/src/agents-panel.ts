@@ -31,7 +31,7 @@ import type {
   WindowSizeReport,
   WorkspacesDocument,
 } from "./types";
-import { getHermesModel, runDoctor, checkRuntimeVersions, runRepairPreview, openResourcesWindow } from "./ipc";
+import { getHermesModel, runDoctor, checkRuntimeVersions, openResourcesWindow } from "./ipc";
 
 export interface AgentsPanelDeps {
   setMainTab: (tab: MainTabId) => void;
@@ -351,6 +351,22 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     }
   }
 
+  /** Swap the visible agent from the last scan. No probe, no version fetch. */
+  function showInstalledRuntime(runtimeId: string): void {
+    const report = appState.lastReport;
+    if (!report) {
+      return;
+    }
+    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const selected = installedRuntimes.find((runtime) => runtime.id === runtimeId);
+    if (!selected) {
+      return;
+    }
+    appState.activeRuntimeId = runtimeId;
+    paintRuntimeTabs(installedRuntimes, runtimeId);
+    runtimesEl.innerHTML = buildRuntimeCardHtml(selected);
+  }
+
   async function refreshRuntimeVersions(report: DoctorReport): Promise<void> {
     const installed = report.runtimes
       .filter((runtime) => runtime.installed)
@@ -397,14 +413,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
           }
         }
         if (preview && !diagnose.hasDismissed(selectedId)) {
-          try {
-            const next = await runRepairPreview({
-              runtime: selectedId,
-            });
-            diagnose.mountRepairPreview(next);
-          } catch {
-            diagnose.mountRepairPreview(preview);
-          }
+          diagnose.mountRepairPreview(preview);
         }
       }
     } catch {
@@ -429,10 +438,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     if (!runtimeId || runtimeId === appState.activeRuntimeId) {
       return;
     }
-    appState.activeRuntimeId = runtimeId;
-    if (appState.lastReport) {
-      void renderReport(appState.lastReport);
-    }
+    showInstalledRuntime(runtimeId);
   });
 
   runtimesEl.addEventListener("click", (event) => {

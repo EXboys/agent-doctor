@@ -8,8 +8,10 @@ const iconModules = import.meta.glob("./assets/agent-icons/*.svg", {
 function iconSvg(runtimeId: string): string | undefined {
   const raw = iconModules[`./assets/agent-icons/${runtimeId}.svg`];
   if (!raw) return undefined;
+  // Drop <title> so hovering a tab does not raise a native tooltip.
+  const withoutTitle = raw.replace(/<title>[\s\S]*?<\/title>/g, "");
   // Inline so fill="currentColor" follows the tile, not a broken <img>.
-  return raw.replace(
+  return withoutTitle.replace(
     "<svg",
     '<svg class="agent-brand-img" focusable="false" aria-hidden="true"',
   );
