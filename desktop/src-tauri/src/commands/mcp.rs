@@ -71,7 +71,21 @@ pub fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
 }
 
 #[tauri::command]
-pub fn mcp_status_command(
+pub async fn mcp_status_command(
+    port: Option<u16>,
+    probe_chrome: Option<bool>,
+    discover_chrome: Option<bool>,
+) -> Result<McpModuleStatus, String> {
+    // Chrome discovery and CLI resolution are slow. A sync command runs on the
+    // UI thread and freezes tab switches until it returns.
+    tauri::async_runtime::spawn_blocking(move || {
+        mcp_status_blocking(port, probe_chrome, discover_chrome)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn mcp_status_blocking(
     port: Option<u16>,
     probe_chrome: Option<bool>,
     discover_chrome: Option<bool>,

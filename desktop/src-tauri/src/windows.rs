@@ -552,12 +552,47 @@ fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
     });
 }
 
-fn create_resources_window(app: &AppHandle, visible: bool) -> Result<tauri::WebviewWindow, String> {
+fn resources_section_token(section: Option<&str>) -> String {
+    match section.map(str::trim) {
+        Some(
+            value @ ("agents" | "skills" | "mall" | "tools" | "browser" | "catalog" | "store"
+            | "mcp"),
+        ) => value.to_string(),
+        _ => "catalog".to_string(),
+    }
+}
+
+fn resources_section_bootstrap_script(section: &str) -> String {
+    let section_json = serde_json::Value::String(section.to_string()).to_string();
+    // A later open writes the real section into sessionStorage before reload.
+    // Do not let a startup fallback overwrite that stored section.
+    format!(
+        "(function(){{\
+            var fallback = {section};\
+            var stored = null;\
+            try {{ stored = sessionStorage.getItem('ad.resources.pendingSection'); }} catch (e) {{}}\
+            if (stored && stored.trim()) {{\
+                window.__AD_RESOURCES_SECTION__ = stored.trim();\
+                try {{ sessionStorage.removeItem('ad.resources.pendingSection'); }} catch (e) {{}}\
+            }} else {{\
+                window.__AD_RESOURCES_SECTION__ = fallback;\
+            }}\
+        }})();",
+        section = section_json
+    )
+}
+
+fn create_resources_window(
+    app: &AppHandle,
+    visible: bool,
+    section: &str,
+) -> Result<tauri::WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(
         app,
         RESOURCES_WINDOW_LABEL,
         WebviewUrl::App("resources.html".into()),
     )
+    .initialization_script(&resources_section_bootstrap_script(section))
     .title("Agent Doctor — Resources")
     .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
     .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
@@ -573,11 +608,14 @@ fn create_resources_window(app: &AppHandle, visible: bool) -> Result<tauri::Webv
     Ok(window)
 }
 
-pub(crate) fn ensure_resources_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+pub(crate) fn ensure_resources_window(
+    app: &AppHandle,
+    section: &str,
+) -> Result<tauri::WebviewWindow, String> {
     if let Some(existing) = app.get_webview_window(RESOURCES_WINDOW_LABEL) {
         return Ok(existing);
     }
-    create_resources_window(app, false)
+    create_resources_window(app, false, section)
 }
 
 fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
@@ -722,7 +760,9 @@ pub(crate) fn open_or_focus_resources_window(
     app: &AppHandle,
     section: Option<&str>,
 ) -> Result<(), String> {
-    let window = ensure_resources_window(app)?;
+    let section = resources_section_token(section);
+    let already_exists = app.get_webview_window(RESOURCES_WINDOW_LABEL).is_some();
+    let window = ensure_resources_window(app, &section)?;
     // Ask / Resources / Diagnose can stay open together.
     show_secondary_window(
         app,
@@ -730,10 +770,22 @@ pub(crate) fn open_or_focus_resources_window(
         &window,
         layout_main_and_resources_side_by_side,
     );
-    let section = section
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("catalog");
+    if already_exists {
+        let section_json = serde_json::Value::String(section.clone()).to_string();
+        let script = format!(
+            "(function(){{\
+                try {{ sessionStorage.setItem('ad.resources.pendingSection', {section}); }} catch (e) {{}}\
+                window.__AD_RESOURCES_SECTION__ = {section};\
+                if (typeof window.__AD_RESOURCES_APPLY_SECTION__ === 'function') {{\
+                    window.__AD_RESOURCES_APPLY_SECTION__({section});\
+                }} else {{\
+                    location.reload();\
+                }}\
+            }})();",
+            section = section_json
+        );
+        let _ = window.eval(&script);
+    }
     let _ = window.emit(
         "resources-window-focus",
         serde_json::json!({ "section": section }),

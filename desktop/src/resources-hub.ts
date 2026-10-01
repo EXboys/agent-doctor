@@ -210,9 +210,9 @@ function updateResourcesHubSummary(): void {
     return;
   }
   if (appState.lastMcpStatus.browser_deferred) {
-    hubMcpBadgeEl.textContent = "—";
+    hubMcpBadgeEl.textContent = t("resources.hubBrowserChecking");
     hubMcpBadgeEl.classList.add("muted");
-    hubBrowserStatusEl.textContent = "—";
+    hubBrowserStatusEl.textContent = t("resources.hubBrowserChecking");
     return;
   }
   if (!chrome.chrome_found) {
@@ -230,13 +230,22 @@ function updateResourcesHubSummary(): void {
   }
 }
 
-async function loadMcpStatus() {
+async function loadMcpStatus(options?: { discoverChrome?: boolean }) {
+  const discoverChrome = options?.discoverChrome === true;
   try {
     const status = await mcpStatus({
       port: null,
       probeChrome: false,
-      discoverChrome: false,
+      discoverChrome,
     });
+    if (
+      status.browser_deferred &&
+      appState.lastMcpStatus &&
+      !appState.lastMcpStatus.browser_deferred
+    ) {
+      updateResourcesHubSummary();
+      return;
+    }
     appState.lastMcpStatus = status;
     updateResourcesHubSummary();
   } catch {
@@ -253,14 +262,17 @@ async function loadResourcesHub() {
   // Cards only need counts already in memory. Scanning 100+ skills here freezes the tab.
   updateResourcesHubSummary();
   const now = Date.now();
-  const mcpFresh = appState.lastMcpStatus != null && now - hubRefreshedAt < 60_000;
+  const mcpFresh =
+    appState.lastMcpStatus != null &&
+    !appState.lastMcpStatus.browser_deferred &&
+    now - hubRefreshedAt < 60_000;
   if (mcpFresh) {
     return;
   }
   if (hubRefresh) {
     return hubRefresh;
   }
-  hubRefresh = loadMcpStatus()
+  hubRefresh = loadMcpStatus({ discoverChrome: true })
     .then(() => {
       hubRefreshedAt = Date.now();
     })

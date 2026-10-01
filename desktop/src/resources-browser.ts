@@ -178,6 +178,7 @@ export function renderMcpTargets(
 
 export function renderMcpBrowserStatus(status: McpModuleStatus): void {
   resourcesState.lastMcpStatus = status;
+  if (!status.browser_deferred) browserStatusLoadedAt = Date.now();
   const chrome = status.browser;
   mcpChromeEl.textContent = chrome.chrome_found
     ? t("mcp.chromeOk", { version: chrome.version || chrome.binary || "OK" })
@@ -302,16 +303,48 @@ export function buildMcpRows(): ResourceRow[] {
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function loadMcpStatus(): Promise<void> {
+let mcpStatusSeq = 0;
+let browserStatusLoadedAt = 0;
+const BROWSER_STATUS_FRESH_MS = 60_000;
+
+export function browserStatusIsFresh(): boolean {
+  const status = resourcesState.lastMcpStatus;
+  return Boolean(
+    status && !status.browser_deferred && Date.now() - browserStatusLoadedAt < BROWSER_STATUS_FRESH_MS,
+  );
+}
+
+export async function loadMcpStatus(options?: { discoverChrome?: boolean }): Promise<void> {
+  const seq = ++mcpStatusSeq;
+  const discoverChrome =
+    options?.discoverChrome ??
+    (resourcesState.activeSection === "browser" || resourcesState.activeSection === "tools");
   try {
     const status = await mcpStatus({
       port: null,
       probeChrome: false,
-      discoverChrome: resourcesState.activeSection === "browser" || resourcesState.activeSection === "tools",
+      discoverChrome,
     });
+    if (seq !== mcpStatusSeq) return;
+    if (
+      !discoverChrome &&
+      status.browser_deferred &&
+      (resourcesState.activeSection === "browser" || resourcesState.activeSection === "tools")
+    ) {
+      return loadMcpStatus({ discoverChrome: true });
+    }
+    if (
+      status.browser_deferred &&
+      resourcesState.lastMcpStatus &&
+      !resourcesState.lastMcpStatus.browser_deferred
+    ) {
+      renderMcpBrowserStatus(resourcesState.lastMcpStatus);
+      return;
+    }
     renderMcpBrowserStatus(status);
     renderResourcesList();
   } catch (error) {
+    if (seq !== mcpStatusSeq) return;
     resourcesState.lastMcpStatus = null;
     mcpBrowserBadgeEl.textContent = "—";
     mcpBrowserBadgeEl.className = "badge muted";

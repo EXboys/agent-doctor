@@ -6,7 +6,7 @@ import { resourcesState, subtitleEl, sectionTabsEl, mainHeadEl, skillsPanelEl, s
 import type { ResourcesSection, SkillScope, ToolFilter } from "./resources-state";
 import { catalogAgents, countAgentMatches, loadDoctor, renderAgentCatalog } from "./resources-agents";
 import { filteredMallItems, filteredMallToolItems, loadMall, mallToolPool, renderMallAccount, renderToolsList, signOutMallAccount, startMallLogin } from "./resources-mall";
-import { buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpStatus, persistProfileDirectory, persistShowBrowserUi, persistUserDataDir, refreshMcpSnippet, selectedProfileDirectory, selectedUserDataDir, syncProfileModeButtons } from "./resources-browser";
+import { browserStatusIsFresh, buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpStatus, persistProfileDirectory, persistShowBrowserUi, persistUserDataDir, refreshMcpSnippet, renderMcpBrowserStatus, selectedProfileDirectory, selectedUserDataDir, syncProfileModeButtons } from "./resources-browser";
 import { buildLocalSkillEntries, entryMatchesQuery, isStoreScope, loadSkills, onSkillsPanelScroll, renderSkillsList } from "./resources-skills";
 import { loadRuntimeCatalog } from "./runtime-catalog";
 
@@ -133,6 +133,13 @@ export function setSection(section: ResourcesSection | "mall"): void {
     return;
   }
   paintSection(section);
+  if (section === "browser") {
+    if (resourcesState.lastMcpStatus && !resourcesState.lastMcpStatus.browser_deferred) {
+      renderMcpBrowserStatus(resourcesState.lastMcpStatus);
+    }
+    if (!browserStatusIsFresh()) void loadMcpStatus({ discoverChrome: true });
+    return;
+  }
   if ((section === "agents" || section === "skills") && !resourcesState.lastDoctorReport) {
     void loadDoctor();
   }
@@ -270,6 +277,10 @@ export function paintVisibleSection(): void {
     return;
   }
   if (resourcesState.activeSection === "browser") {
+    if (resourcesState.lastMcpStatus && !resourcesState.lastMcpStatus.browser_deferred) {
+      renderMcpBrowserStatus(resourcesState.lastMcpStatus);
+    }
+    if (!browserStatusIsFresh()) void loadMcpStatus({ discoverChrome: true });
     return;
   }
   renderResourcesList();
@@ -295,9 +306,21 @@ export async function refreshVisible(): Promise<void> {
   void loadMcpStatus();
 }
 
+function browserStatusReady(): boolean {
+  return Boolean(resourcesState.lastMcpStatus && !resourcesState.lastMcpStatus.browser_deferred);
+}
+
 export async function refreshAll(force = false): Promise<void> {
-  if (resourcesState.refreshInFlight) return resourcesState.refreshInFlight;
+  const browserOpen = resourcesState.activeSection === "browser";
+  if (resourcesState.refreshInFlight) {
+    if (browserOpen && !browserStatusReady()) void loadMcpStatus({ discoverChrome: true });
+    return resourcesState.refreshInFlight;
+  }
   if (!force && resourcesState.lastRefreshAt > 0 && Date.now() - resourcesState.lastRefreshAt < 12_000) {
+    if (browserOpen && !browserStatusReady()) {
+      void loadMcpStatus({ discoverChrome: true });
+      return;
+    }
     paintVisibleSection();
     return;
   }
@@ -404,14 +427,35 @@ mcpDiagnoseWireEl.addEventListener("click", () => {
   void diagnoseAndWireBrowserMcp();
 });
 
-applyI18n();
-void listen<{ section?: string }>("resources-window-focus", (event) => {
-  const section = event.payload?.section;
+function resourcesLaunchSection(): string | null {
+  const injected = (window as Window & { __AD_RESOURCES_SECTION__?: string }).__AD_RESOURCES_SECTION__;
+  if (typeof injected === "string" && injected.trim()) return injected.trim();
+  try {
+    const pending = sessionStorage.getItem("ad.resources.pendingSection");
+    if (!pending) return null;
+    sessionStorage.removeItem("ad.resources.pendingSection");
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+function openFocusedSection(section?: string | null): void {
   if (section === "agents") setSection("agents");
   else if (section === "browser") setSection("browser");
   else if (section === "tools" || section === "mcp") setSection("tools");
   else if (section === "mall" || section === "store") setSection("mall");
   else if (section === "skills" || section === "catalog") setSection("skills");
+}
+
+applyI18n();
+(window as Window & { __AD_RESOURCES_APPLY_SECTION__?: (section: string) => void }).__AD_RESOURCES_APPLY_SECTION__ =
+  (section) => {
+    openFocusedSection(section);
+  };
+openFocusedSection(resourcesLaunchSection());
+void listen<{ section?: string }>("resources-window-focus", (event) => {
+  openFocusedSection(event.payload?.section);
   void refreshAll();
 });
 void (async () => {

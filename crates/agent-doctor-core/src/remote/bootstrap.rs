@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 use anyhow::{bail, Context, Result};
 use tempfile::TempDir;
 
+use super::openssh_config::{sync_managed_host, user_ssh_config_path};
 use super::registry::{
     remote_key_path_for, remote_keys_dir, upsert_managed_host, validate_id, RemoteHostsDocument,
 };
@@ -86,14 +87,26 @@ pub fn bootstrap_and_add_host(opts: BootstrapHostOptions) -> Result<RemoteHostsD
         );
     }
 
-    upsert_managed_host(
+    let doc = upsert_managed_host(
         &opts.id,
         opts.hostname.trim(),
         opts.user.trim(),
         opts.port,
         &key_path,
         opts.label.as_deref(),
-    )
+    )?;
+    if let Some(config_path) = user_ssh_config_path() {
+        sync_managed_host(
+            &config_path,
+            &opts.id,
+            opts.hostname.trim(),
+            opts.user.trim(),
+            opts.port,
+            &key_path,
+        )
+        .context("saved the VPS login, but could not make this computer use the same key")?;
+    }
+    Ok(doc)
 }
 
 /// `ssh-keygen -t ed25519 -N "" -f <path> -C agent-doctor-<id>`
@@ -147,7 +160,7 @@ pub fn install_pubkey_with_password(
 pub fn build_install_pubkey_remote_script(pubkey: &str) -> String {
     let quoted = shell_quote(pubkey.trim());
     format!(
-        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+        "chmod go-w \"$HOME\" && mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
          touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
          grep -qxF {quoted} ~/.ssh/authorized_keys || echo {quoted} >> ~/.ssh/authorized_keys"
     )

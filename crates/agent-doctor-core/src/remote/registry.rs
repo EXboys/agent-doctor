@@ -208,6 +208,9 @@ pub fn remove_host(id: &str) -> Result<RemoteHostsDocument> {
         bail!("unknown host '{id}'");
     }
     save_remote_hosts(&doc)?;
+    if let Some(config_path) = super::openssh_config::user_ssh_config_path() {
+        let _ = super::openssh_config::forget_managed_host(&config_path, id);
+    }
     // Best-effort cleanup of managed key material.
     if let Some(key) = remote_key_path_for(id) {
         let _ = fs::remove_file(&key);
@@ -215,6 +218,47 @@ pub fn remove_host(id: &str) -> Result<RemoteHostsDocument> {
         let _ = fs::remove_file(pub_path);
     }
     Ok(doc)
+}
+
+/// Make already-saved VPS logins work for a normal `ssh user@host` on this computer.
+pub fn publish_managed_logins() -> Result<()> {
+    let doc = load_remote_hosts()?;
+    let Some(config_path) = super::openssh_config::user_ssh_config_path() else {
+        return Ok(());
+    };
+    for (id, entry) in &doc.hosts {
+        if !entry.is_managed() {
+            continue;
+        }
+        let Some(hostname) = entry
+            .hostname
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let Some(identity) = entry
+            .identity_file
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        if !Path::new(identity).is_file() {
+            continue;
+        }
+        super::openssh_config::sync_managed_host(
+            &config_path,
+            id,
+            hostname,
+            entry.managed_user(),
+            entry.managed_port(),
+            Path::new(identity),
+        )?;
+    }
+    Ok(())
 }
 
 pub fn list_hosts() -> Result<Vec<(String, RemoteHostEntry)>> {

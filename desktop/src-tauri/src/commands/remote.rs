@@ -1,7 +1,7 @@
 use agent_doctor_core::{
     add_host, add_project, bootstrap_and_add_host, load_remote_hosts, probe_remote_host,
-    remove_host, remove_project, run_remote_doctor, BootstrapHostOptions, RemoteDoctorOptions,
-    RemoteDoctorReport, RemoteHostProbeReport, RemoteHostsDocument,
+    publish_managed_logins, remove_host, remove_project, run_remote_doctor, BootstrapHostOptions,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostProbeReport, RemoteHostsDocument,
 };
 use serde::Serialize;
 
@@ -26,11 +26,13 @@ pub struct RemoteProjectRow {
 
 #[tauri::command]
 pub fn list_remote_hosts_command() -> Result<RemoteHostsDocument, String> {
+    let _ = publish_managed_logins();
     load_remote_hosts().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn list_remote_host_rows_command() -> Result<Vec<RemoteHostRow>, String> {
+    let _ = publish_managed_logins();
     let doc = load_remote_hosts().map_err(|error| error.to_string())?;
     let mut rows: Vec<RemoteHostRow> = doc
         .hosts

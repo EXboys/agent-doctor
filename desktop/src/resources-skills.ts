@@ -50,25 +50,12 @@ export function joinedAgentNames(agents: SkillAgentUsage[]): string {
   return agents.map((agent) => runtimeLabel(agent.runtime)).join("、");
 }
 
-export function skillAgentStatus(agents: SkillAgentUsage[]): string {
-  if (agents.length === 0) return t("resources.noAgentsOnDevice");
-  const on = agents.filter((agent) => agent.mounted);
-  const off = agents.filter((agent) => !agent.mounted);
-  if (on.length === 0) return t("resources.skillNotOnAgents", { list: joinedAgentNames(off) });
-  if (off.length === 0) return t("resources.skillOnAgents", { list: joinedAgentNames(on) });
-  return t("resources.skillOnSomeAgents", {
-    list: joinedAgentNames(on),
-    missing: joinedAgentNames(off),
-  });
-}
-
 export function entryFromLocalSkill(skill: NonNullable<SkillsInventoryReport["skills"][number]>): UnifiedSkillEntry {
   const agents = mergeSkillAgents(skill);
   const mounted = agents.filter((a) => a.mounted).length;
   const totalAgents = agents.length;
   const needsMount = totalAgents > 0 && mounted === 0;
   const anyUnmounted = totalAgents > 0 && mounted < totalAgents;
-  const status = skillAgentStatus(agents);
   const category = classifySkillCategory({
     id: skill.skill_id,
     name: skill.name,
@@ -83,8 +70,8 @@ export function entryFromLocalSkill(skill: NonNullable<SkillsInventoryReport["sk
     description: skill.description?.trim() || "",
     category,
     badgeLabel: t(skillCategoryLabelKey(category) as MessageKey),
-    sub: status,
-    meta: status,
+    sub: "",
+    meta: "",
     tone: needsMount ? "warn" : anyUnmounted ? "warn" : "ok",
     issue: needsMount,
     skillId: skill.skill_id,
@@ -647,7 +634,7 @@ export function appendUnifiedSkillActions(metaWrap: HTMLElement, entry: UnifiedS
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-primary btn-compact";
-      btn.textContent = t("resources.mountNamedAgents", { list });
+      btn.textContent = t("resources.mountAllAgents");
       btn.title = t("resources.mountAllAgentsHint", { list });
       btn.addEventListener("click", () => {
         void mountSkill(
@@ -748,7 +735,8 @@ export function appendUnifiedSkillRow(parent: HTMLElement, entry: UnifiedSkillEn
   titleRow.append(strong, badge);
   const desc = document.createElement("div");
   desc.className = "res-catalog-desc";
-  desc.textContent = entry.description || entry.sub;
+  desc.textContent = entry.description;
+  if (!entry.description) desc.hidden = true;
   body.append(titleRow, desc);
   appendSkillAgentChips(body, entry);
 
@@ -758,6 +746,7 @@ export function appendUnifiedSkillRow(parent: HTMLElement, entry: UnifiedSkillEn
     const meta = document.createElement("span");
     meta.className = entry.storeOnly ? "res-catalog-store-price" : `tone-${entry.tone}`;
     meta.textContent = entry.meta;
+    meta.title = entry.meta;
     metaWrap.appendChild(meta);
   }
   appendUnifiedSkillActions(metaWrap, entry);
@@ -782,7 +771,8 @@ export function bindCollapsibleRow(li: HTMLElement, desc: HTMLElement): void {
       more.hidden = false;
       return;
     }
-    more.hidden = desc.scrollHeight <= desc.clientHeight + 2;
+    const hasAgents = Boolean(li.querySelector(".res-skill-agents"));
+    more.hidden = !hasAgents && desc.scrollHeight <= desc.clientHeight + 2;
   };
 
   const toggle = () => {

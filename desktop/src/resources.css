@@ -594,6 +594,17 @@
   align-items: center;
   gap: 6px;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 22rem;
+  flex-wrap: nowrap;
+}
+
+.res-catalog-meta.mall-actions > span {
+  min-width: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .res-catalog-meta.mall-actions .btn-compact {
@@ -609,6 +620,8 @@
   font-weight: 650;
   line-height: 1;
   border-radius: 999px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .res-catalog-meta.mall-actions .btn-secondary {
@@ -690,6 +703,10 @@
 
 .res-catalog-item.is-collapsible {
   cursor: pointer;
+}
+
+.res-catalog-item.is-collapsible:not(.is-expanded) .res-skill-agents {
+  display: none;
 }
 
 .res-catalog-item.is-collapsible:not(.is-expanded) .res-catalog-desc {

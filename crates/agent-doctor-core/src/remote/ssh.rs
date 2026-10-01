@@ -273,7 +273,7 @@ fn format_ssh_failure(output: &ExecOutput) -> String {
 fn classify_ssh_error(stderr: &str) -> &'static str {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("permission denied") {
-        "authentication failed — use key auth (BatchMode; no password)"
+        "这台服务器不认这次用的钥匙。请在程序里重新连接这台 VPS。"
     } else if lower.contains("could not resolve hostname")
         || lower.contains("name or service not known")
     {
@@ -303,9 +303,7 @@ mod tests {
 
     #[test]
     fn classifies_permission_denied() {
-        assert!(
-            classify_ssh_error("Permission denied (publickey).").contains("authentication failed")
-        );
+        assert!(classify_ssh_error("Permission denied (publickey).").contains("不认这次用的钥匙"));
     }
 
     #[test]

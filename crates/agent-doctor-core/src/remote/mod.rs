@@ -2,6 +2,7 @@
 
 mod bootstrap;
 mod doctor;
+mod openssh_config;
 mod registry;
 mod ssh;
 
@@ -15,9 +16,9 @@ pub use doctor::{
     RemoteRuntimeDoctorResult,
 };
 pub use registry::{
-    add_host, add_project, list_hosts, list_projects, load_remote_hosts, remote_hosts_path,
-    remote_key_path_for, remote_keys_dir, remote_root_dir, remove_host, remove_project,
-    save_remote_hosts, upsert_managed_host, RemoteHostEntry, RemoteHostsDocument,
+    add_host, add_project, list_hosts, list_projects, load_remote_hosts, publish_managed_logins,
+    remote_hosts_path, remote_key_path_for, remote_keys_dir, remote_root_dir, remove_host,
+    remove_project, save_remote_hosts, upsert_managed_host, RemoteHostEntry, RemoteHostsDocument,
     RemoteProjectEntry,
 };
 pub use ssh::{SshBackend, SshTarget};
