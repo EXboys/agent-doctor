@@ -1,6 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { ask, message } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -16,6 +15,79 @@ export const UPDATE_GITHUB_URL =
   "https://github.com/EXboys/agent-doctor/releases/latest";
 
 let checking = false;
+const appIconUrl = new URL("./app-icon.png", import.meta.url).href;
+
+function showUpdateDialog(opts: {
+  title: string;
+  body: string;
+  ok: string;
+  cancel?: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    const root = document.createElement("div");
+    root.className = "update-sheet";
+    const card = document.createElement("div");
+    card.className = "update-sheet-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", "update-sheet-title");
+
+    const icon = document.createElement("img");
+    icon.className = "update-sheet-icon";
+    icon.src = appIconUrl;
+    icon.alt = "";
+
+    const title = document.createElement("h2");
+    title.id = "update-sheet-title";
+    title.className = "update-sheet-title";
+    title.textContent = opts.title;
+
+    const body = document.createElement("p");
+    body.className = "update-sheet-body";
+    body.textContent = opts.body;
+
+    const actions = document.createElement("div");
+    actions.className = "update-sheet-actions";
+
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      root.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(ok);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finish(opts.cancel ? false : true);
+    };
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "btn-primary";
+    okBtn.textContent = opts.ok;
+    okBtn.addEventListener("click", () => finish(true));
+
+    if (opts.cancel) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn-secondary";
+      cancelBtn.textContent = opts.cancel;
+      cancelBtn.addEventListener("click", () => finish(false));
+      actions.append(cancelBtn, okBtn);
+    } else {
+      actions.append(okBtn);
+    }
+
+    card.append(icon, title, body, actions);
+    root.append(card);
+    root.addEventListener("click", (event) => {
+      if (event.target === root) finish(opts.cancel ? false : true);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.append(root);
+    okBtn.focus();
+  });
+}
 
 /** True when updater rejects the running binary (tauri:dev / /var symlink path). */
 function isDevUpdaterPathError(raw: string): boolean {
@@ -59,9 +131,10 @@ export async function checkForAppUpdates(opts?: {
     const update = await check();
     if (!update) {
       if (interactive && !silent) {
-        await message(t("update.upToDate"), {
+        await showUpdateDialog({
           title: t("update.title"),
-          kind: "info",
+          body: t("update.upToDate"),
+          ok: t("update.ok"),
         });
       }
       return;
@@ -75,20 +148,20 @@ export async function checkForAppUpdates(opts?: {
         })
       : t("update.available", { version: update.version });
 
-    const shouldInstall = await ask(detail, {
+    const shouldInstall = await showUpdateDialog({
       title: t("update.title"),
-      kind: "info",
-      okLabel: t("update.install"),
-      cancelLabel: t("update.later"),
+      body: detail,
+      ok: t("update.install"),
+      cancel: t("update.later"),
     });
     if (!shouldInstall) return;
 
     await update.downloadAndInstall();
-    const restart = await ask(t("update.restartPrompt"), {
+    const restart = await showUpdateDialog({
       title: t("update.title"),
-      kind: "info",
-      okLabel: t("update.restart"),
-      cancelLabel: t("update.later"),
+      body: t("update.restartPrompt"),
+      ok: t("update.restart"),
+      cancel: t("update.later"),
     });
     if (restart) {
       await relaunch();
@@ -105,15 +178,12 @@ export async function checkForAppUpdates(opts?: {
       return;
     }
     if (interactive || !silent) {
-      const openManual = await ask(
-        devPath ? t("update.devUnsupported") : t("update.failed", { error: raw.slice(0, 240) }),
-        {
-          title: t("update.title"),
-          kind: "error",
-          okLabel: t("update.openManual"),
-          cancelLabel: t("update.later"),
-        },
-      );
+      const openManual = await showUpdateDialog({
+        title: t("update.title"),
+        body: devPath ? t("update.devUnsupported") : t("update.failed", { error: raw.slice(0, 240) }),
+        ok: t("update.openManual"),
+        cancel: t("update.later"),
+      });
       if (openManual) {
         await openManualDownload();
       }

@@ -1217,6 +1217,7 @@ export const en = {
     "update.available": "Version {version} is available. Download and install now?",
     "update.availableWithNotes": "Version {version} is available.\n\n{notes}\n\nDownload and install now?",
     "update.install": "Install",
+    "update.ok": "OK",
     "update.later": "Later",
     "update.restartPrompt": "Update installed. Restart Agent Doctor to finish?",
     "update.restart": "Restart",

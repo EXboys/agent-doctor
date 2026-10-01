@@ -1219,6 +1219,7 @@ export const zh = {
     "update.available": "发现新版本 {version}，是否下载并安装？",
     "update.availableWithNotes": "发现新版本 {version}。\n\n{notes}\n\n是否下载并安装？",
     "update.install": "安装",
+    "update.ok": "好",
     "update.later": "稍后",
     "update.restartPrompt": "更新已安装，是否重启 Agent Doctor 以生效？",
     "update.restart": "重启",
