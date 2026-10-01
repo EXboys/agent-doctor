@@ -173,6 +173,7 @@ export function createActivityController(deps: ActivityDeps) {
     for (const row of deps.logEl.querySelectorAll<HTMLElement>(".chat-activity")) {
       const kind = row.dataset.kind ?? "";
       if (kind === "tool" || row.closest(".chat-tool-group")) continue;
+      if (kind === "log" && row.dataset.stderr === "1") continue;
       if (kind === "error" && !(dropStderr && row.dataset.stderr === "1")) continue;
       row.remove();
     }
@@ -224,7 +225,7 @@ export function createActivityController(deps: ActivityDeps) {
     const text = line.trim();
     if (!text || isQuietStderr(text)) return;
     const last = deps.logEl.lastElementChild as HTMLElement | null;
-    if (last?.dataset.kind === "error" && last.dataset.stderr === "1") {
+    if (last?.dataset.kind === "log" && last.dataset.stderr === "1") {
       const label = last.querySelector<HTMLElement>(".chat-activity-text");
       if (label) {
         label.textContent = `${label.textContent}\n${text}`;
@@ -232,12 +233,16 @@ export function createActivityController(deps: ActivityDeps) {
         return;
       }
     }
-    pushActivity("error", text);
-    settleActivity();
-    const row = deps.logEl.lastElementChild as HTMLElement | null;
-    if (row?.dataset.kind === "error") {
-      row.dataset.stderr = "1";
-    }
+    const row = document.createElement("div");
+    row.className = "chat-activity kind-log";
+    row.dataset.kind = "log";
+    row.dataset.stderr = "1";
+    const label = document.createElement("span");
+    label.className = "chat-activity-text";
+    label.textContent = text;
+    row.appendChild(label);
+    deps.logEl.appendChild(row);
+    deps.logEl.scrollTop = deps.logEl.scrollHeight;
   }
 
   /** Render progress / tool calls inline in the chat stream (not a side panel). */

@@ -94,7 +94,9 @@ fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
          +line two\n\
          *** End Patch\n\
          Prefer apply_patch for file writes; if apply_patch fails validation, fix the hunk headers and retry \
-         (or fall back to a simple shell write of the file contents).",
+         (or fall back to a simple shell write of the file contents). \
+         When request_user_input is available and you need a secret, token, password, or a decision only the user can make, call that tool. \
+         Do not ask the user to paste a secret into the chat.",
     );
     if browser_mcp {
         text.push_str("\n\n");
@@ -360,7 +362,9 @@ fn build_app_server_command(
 ) -> Result<Command> {
     let bin = std::env::var("AGENT_DOCTOR_CODEX_BIN").unwrap_or_else(|_| "codex".into());
     let mut cmd = command_from_cli(&bin);
-    cmd.arg("app-server");
+    cmd.arg("app-server")
+        .arg("-c")
+        .arg("features.default_mode_request_user_input=true");
     for arg in codex_provider_config_args(resolve_codex_overlay(overlay).as_ref()) {
         cmd.arg(arg);
     }
@@ -580,11 +584,30 @@ mod tests {
             .as_deref(),
             Some("hello from turn")
         );
-        assert!(codex_reply_kind(
-            "item/tool/requestUserInput",
-            &json!({"tool": "browser_navigate"})
-        )
-        .is_some());
+        assert!(matches!(
+            codex_reply_kind(
+                "item/tool/requestUserInput",
+                &json!({"questions": [{"id": "token", "question": "Paste token"}]})
+            ),
+            Some(CodexReplyKind::UserLine {
+                elicitation: false,
+                ..
+            })
+        ));
+        assert_eq!(
+            permission_input_mode(
+                "item/tool/requestUserInput",
+                &json!({"questions": [{"id": "token", "question": "Paste token"}]})
+            ),
+            "secret"
+        );
+        assert_eq!(
+            permission_input_mode(
+                "item/tool/requestUserInput",
+                &json!({"questions": [{"id": "go", "question": "Continue? (y/n)"}]})
+            ),
+            "line"
+        );
         assert!(matches!(
             codex_reply_kind("mcpServer/elicitation/request", &json!({})),
             Some(CodexReplyKind::Elicitation)

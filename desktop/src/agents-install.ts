@@ -6,6 +6,7 @@ import { withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import type { DoctorReport, InstallProgressEvent } from "./types";
 import { installRuntime, uninstallRuntime as uninstallRuntimeCommand } from "./ipc";
+import { mountInstallReply } from "./install-reply";
 
 export interface AgentsInstallDeps {
   refresh: () => Promise<void>;
@@ -20,6 +21,7 @@ type LiveInstall = {
   percent: number;
   indeterminate: boolean;
   logLines: string[];
+  inputKind: string;
 };
 
 /** In-flight installs. Switching agent tabs rebuilds the card, so progress lives here. */
@@ -83,6 +85,10 @@ function paintLiveInstall(runtime: string): void {
         logEl.textContent = live.logLines.join("\n");
         logEl.scrollTop = logEl.scrollHeight;
       }
+    }
+    const current = hint.querySelector<HTMLElement>("[data-install-progress]");
+    if (current) {
+      mountInstallReply(current, live.inputKind);
     }
   }
   for (const action of ["install-runtime", "force-reinstall-runtime", "diagnose-runtime"]) {
@@ -162,6 +168,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       percent: 0,
       indeterminate: true,
       logLines: [],
+      inputKind: "",
     });
     paintLiveInstall(runtime);
 
@@ -174,6 +181,17 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
         return;
       }
       const { phase, message, percent } = event.payload;
+      if (phase === "needs_input") {
+        live.inputKind =
+          event.payload.input_kind === "secret" || event.payload.input_kind === "session"
+            ? event.payload.input_kind
+            : "line";
+        paintLiveInstall(runtime);
+        return;
+      }
+      if (phase === "verifying" || phase === "done") {
+        live.inputKind = "";
+      }
       const clamped = Math.min(100, Math.max(0, percent));
       const text = message.trim();
       live.status =

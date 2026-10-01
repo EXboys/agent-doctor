@@ -35,7 +35,8 @@ pub use openclaw::{
 };
 pub use qoder::{qoder_install_shell_command, run_qoder_lifecycle, QoderLifecycleAction};
 pub use runner::{
-    run_shell_command_capturing, run_shell_command_streaming, write_install_log, ShellCapture,
+    run_shell_command_capturing, run_shell_command_streaming, submit_install_line,
+    waiting_input_kind, write_install_log, ShellCapture,
 };
 pub use workbuddy::{
     run_workbuddy_lifecycle, workbuddy_install_shell_command, WorkbuddyLifecycleAction,

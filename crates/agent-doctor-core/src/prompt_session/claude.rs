@@ -479,6 +479,54 @@ fn permission_detail(
     }
 }
 
+fn is_ask_user_question(name: &str) -> bool {
+    name.eq_ignore_ascii_case("AskUserQuestion")
+}
+
+fn claude_question_detail(input: &serde_json::Value) -> String {
+    input
+        .pointer("/questions/0/question")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("需要你回答")
+        .to_string()
+}
+
+fn claude_question_mode(input: &serde_json::Value) -> String {
+    let has_options = input
+        .get("questions")
+        .and_then(|v| v.as_array())
+        .is_some_and(|questions| {
+            questions.iter().any(|question| {
+                question
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|options| !options.is_empty())
+            })
+        });
+    if has_options {
+        return "options".to_string();
+    }
+    let blob = input.to_string().to_ascii_lowercase();
+    if [
+        "password",
+        "passphrase",
+        "token",
+        "api key",
+        "apikey",
+        "secret",
+        "密钥",
+        "口令",
+    ]
+    .iter()
+    .any(|needle| blob.contains(needle))
+    {
+        return "secret".to_string();
+    }
+    "line".to_string()
+}
+
 fn parse_claude_stream_line(
     session_id: &str,
     line: &str,
@@ -542,15 +590,34 @@ fn parse_claude_stream_line(
                     .get("input")
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
-                let detail = permission_detail(&tool_name, &request, &input);
+                let asking = is_ask_user_question(&tool_name);
+                let detail = if asking {
+                    claude_question_detail(&input)
+                } else {
+                    permission_detail(&tool_name, &request, &input)
+                };
+                let input_mode = if asking {
+                    claude_question_mode(&input)
+                } else {
+                    "choice".to_string()
+                };
                 if let Some(control) = control {
-                    control.remember_claude_tool_input(&request_id, input.clone());
+                    if asking {
+                        control.remember_claude_question(&request_id, input.clone());
+                    } else {
+                        control.remember_claude_tool_input(&request_id, input.clone());
+                    }
                 }
+                let status = if asking {
+                    "需要你回答".to_string()
+                } else {
+                    format!("等待确认：{tool_name}")
+                };
                 vec![
                     PromptSessionEvent::Status {
                         session_id: session_id.to_string(),
                         phase: "permission".into(),
-                        message: format!("等待确认：{tool_name}"),
+                        message: status,
                     },
                     PromptSessionEvent::PermissionRequest {
                         session_id: session_id.to_string(),
@@ -558,6 +625,7 @@ fn parse_claude_stream_line(
                         tool_name,
                         detail,
                         input_json: input.to_string(),
+                        input_mode,
                     },
                 ]
             } else if !request_id.is_empty() {
@@ -869,10 +937,29 @@ mod tests {
                 request_id,
                 tool_name,
                 detail,
+                input_mode,
                 ..
             } if request_id == "req-1"
                 && tool_name == "Bash"
                 && detail.contains("ls -la")
+                && input_mode == "choice"
+        )));
+    }
+
+    #[test]
+    fn ask_user_question_is_an_option_prompt() {
+        let line = r#"{"type":"control_request","request_id":"req-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"用哪种登录？","options":[{"label":"浏览器"},{"label":"密钥"}]}]}}}"#;
+        let events = parse_claude_stream_line("s1", line, None, None);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::PermissionRequest {
+                tool_name,
+                detail,
+                input_mode,
+                ..
+            } if tool_name == "AskUserQuestion"
+                && detail == "用哪种登录？"
+                && input_mode == "options"
         )));
     }
 

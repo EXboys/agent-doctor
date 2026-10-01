@@ -1002,6 +1002,17 @@ html, body {
   color: var(--muted);
 }
 
+.chat-activity.kind-log {
+  display: block;
+  width: min(640px, 92%);
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .chat-activity.kind-error {
   display: block;
   width: min(640px, 92%);
@@ -1191,6 +1202,62 @@ html, body {
   gap: 6px;
   align-items: center;
   justify-content: flex-end;
+}
+
+.chat-permission.is-reply .chat-permission-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.chat-permission.is-reply .chat-permission-actions {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.chat-permission-question {
+  margin: 0;
+  width: 100%;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.chat-permission-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.chat-permission-option {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--fill);
+  color: var(--text);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.chat-permission-option.is-selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+
+.chat-permission-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 8px 10px;
 }
 
 .chat-permission-allow,

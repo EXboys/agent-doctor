@@ -554,8 +554,13 @@ export function resolvePermissionSession(args: {
   sessionId: string;
   requestId: string;
   allow: boolean;
+  text?: string | null;
 }): Promise<boolean> {
   return invoke("resolve_permission_session_command", args);
+}
+
+export function submitInstallInput(line: string): Promise<void> {
+  return invoke("submit_install_input_command", { line });
 }
 
 export function speechCapability(): Promise<SpeechCapability> {

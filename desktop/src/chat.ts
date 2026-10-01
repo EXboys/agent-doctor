@@ -112,6 +112,8 @@ export function pushPermissionCard(payload: {
   request_id: string;
   tool_name: string;
   detail: string;
+  input_mode?: string;
+  input_json?: string;
 }): void {
   chatState.permissions.pushPermissionCard(payload);
 }

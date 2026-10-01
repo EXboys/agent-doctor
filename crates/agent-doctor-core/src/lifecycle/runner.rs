@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -29,12 +29,83 @@ impl ShellCapture {
     }
 }
 
+struct InstallStdinGuard;
+
+impl Drop for InstallStdinGuard {
+    fn drop(&mut self) {
+        clear_install_stdin();
+    }
+}
+
 pub(crate) fn run_shell_command(command_line: &str) -> Result<()> {
     match run_shell_command_capturing(command_line) {
         Ok(capture) if capture.success => Ok(()),
         Ok(capture) => Err(finish_lifecycle_error(&capture)),
         Err(error) => Err(error),
     }
+}
+
+fn install_stdin_slot() -> &'static Mutex<Option<ChildStdin>> {
+    static SLOT: OnceLock<Mutex<Option<ChildStdin>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+/// Write one line to the install process that is waiting for input.
+pub fn submit_install_line(line: &str) -> Result<()> {
+    let line = line.trim();
+    if line.is_empty() {
+        anyhow::bail!("reply text is required");
+    }
+    let mut guard = install_stdin_slot()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("install input lock poisoned"))?;
+    let stdin = guard.as_mut().context("nothing is waiting for input")?;
+    writeln!(stdin, "{line}").context("write install reply")?;
+    stdin.flush().context("flush install reply")?;
+    Ok(())
+}
+
+fn clear_install_stdin() {
+    if let Ok(mut guard) = install_stdin_slot().lock() {
+        *guard = None;
+    }
+}
+
+/// `secret` = one hidden line, `line` = yes/continue, `session` = back-and-forth typing.
+pub fn waiting_input_kind(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('$') {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if [
+        "password",
+        "passphrase",
+        "token",
+        "api key",
+        "apikey",
+        "secret",
+        "密钥",
+        "口令",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        return Some("secret");
+    }
+    if ["(y/n)", "[y/n]", "yes/no", "是否继续", "[y/N]", "[Y/n]"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        return Some("line");
+    }
+    if ["press enter", "press any key", "按回车"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        return Some("session");
+    }
+    None
 }
 
 pub fn run_shell_command_capturing(command_line: &str) -> Result<ShellCapture> {
@@ -67,11 +138,17 @@ where
     apply_china_download_env(&mut command);
     prepare_npm_install_env(command_line, &mut command);
     let mut child = command
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to start install shell")?;
+    if let Some(stdin) = child.stdin.take() {
+        if let Ok(mut slot) = install_stdin_slot().lock() {
+            *slot = Some(stdin);
+        }
+    }
+    let _clear_stdin = InstallStdinGuard;
 
     let stdout = child.stdout.take().context("missing stdout pipe")?;
     let stderr = child.stderr.take().context("missing stderr pipe")?;
@@ -257,4 +334,46 @@ pub fn write_install_log(runtime_id: &str, capture: &ShellCapture) -> Result<Pat
     write!(file, "{}", capture.stderr)?;
 
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{submit_install_line, waiting_input_kind};
+
+    #[test]
+    fn classifies_prompts_that_need_a_reply() {
+        assert_eq!(waiting_input_kind("Paste token:"), Some("secret"));
+        assert_eq!(waiting_input_kind("API key:"), Some("secret"));
+        assert_eq!(waiting_input_kind("Continue? (y/n)"), Some("line"));
+        assert_eq!(
+            waiting_input_kind("Press enter to continue"),
+            Some("session")
+        );
+        assert_eq!(waiting_input_kind("$ npm install"), None);
+        assert_eq!(waiting_input_kind("Downloading Node.js 1/2"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn typed_line_reaches_the_waiting_process_only() {
+        let capture = super::run_shell_command_streaming(
+            "printf 'Paste token:\\n'; IFS= read -r -t 3 line; printf 'got:%s\\n' \"$line\"",
+            |line| {
+                if waiting_input_kind(line) == Some("secret") {
+                    submit_install_line("s3cret-value").expect("stdin open");
+                }
+            },
+        )
+        .expect("script");
+        assert!(capture.success, "{}", capture.combined_output());
+        assert!(
+            capture.stdout.contains("got:s3cret-value"),
+            "{}",
+            capture.stdout
+        );
+        assert!(
+            submit_install_line("late").is_err(),
+            "stdin must close when the process ends"
+        );
+    }
 }

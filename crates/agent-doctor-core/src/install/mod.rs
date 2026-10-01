@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::lifecycle::{
     claude_code_install_shell_command, codex_install_shell_command,
     deepseek_harness_install_shell_command, hermes_install_shell_command,
-    openclaw_install_shell_command, run_shell_command_streaming, write_install_log,
+    openclaw_install_shell_command, run_shell_command_streaming, waiting_input_kind,
+    write_install_log,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
@@ -51,10 +52,13 @@ pub struct InstallReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallProgressEvent {
     pub runtime_id: String,
-    /// probing | installing | output | verifying | done
+    /// probing | installing | output | needs_input | verifying | done
     pub phase: String,
     pub message: String,
     pub percent: u8,
+    /// `secret`, `line`, or `session` when `phase` is `needs_input`.
+    #[serde(default)]
+    pub input_kind: String,
 }
 
 pub fn execute_install(runtime_id: &str, options: &InstallOptions) -> Result<InstallReport> {
@@ -81,6 +85,7 @@ where
         phase: phase.to_string(),
         message: message.to_string(),
         percent,
+        input_kind: String::new(),
     };
 
     on_progress(emit(
@@ -269,6 +274,7 @@ where
             phase: "installing".to_string(),
             message: "Checking Node.js / npm…".to_string(),
             percent: 12,
+            input_kind: String::new(),
         });
         if let Err(error) = crate::lifecycle::nodejs::ensure_npm_with_progress(|line, node_pct| {
             let percent = (10 + u16::from(node_pct) * 40 / 100) as u8;
@@ -277,6 +283,7 @@ where
                 phase: "output".to_string(),
                 message: line.to_string(),
                 percent,
+                input_kind: String::new(),
             });
         }) {
             return Err(InstallRunError {
@@ -291,6 +298,7 @@ where
         phase: "installing".to_string(),
         message: format!("$ {command}"),
         percent: 52,
+        input_kind: String::new(),
     });
 
     let mut line_count = 0u32;
@@ -304,9 +312,19 @@ where
         on_progress(InstallProgressEvent {
             runtime_id: runtime_id.to_string(),
             phase: "output".to_string(),
-            message,
+            message: message.clone(),
             percent,
+            input_kind: String::new(),
         });
+        if let Some(kind) = waiting_input_kind(line) {
+            on_progress(InstallProgressEvent {
+                runtime_id: runtime_id.to_string(),
+                phase: "needs_input".to_string(),
+                message,
+                percent,
+                input_kind: kind.to_string(),
+            });
+        }
     })
     .map_err(|error| InstallRunError {
         reason: error.to_string(),

@@ -42,6 +42,214 @@ export type PermissionsDeps = {
 
 export type PermissionsApi = ReturnType<typeof createPermissionsController>;
 
+const replyDrafts = new Map<string, string>();
+
+type AskOption = { label: string; description?: string };
+type AskQuestion = {
+  question: string;
+  options: AskOption[];
+  multiSelect: boolean;
+  isOther: boolean;
+  isSecret: boolean;
+};
+
+function parseAskQuestions(raw: string | undefined): AskQuestion[] {
+  if (!raw?.trim()) return [];
+  try {
+    const value = JSON.parse(raw) as { questions?: unknown };
+    if (!Array.isArray(value.questions)) return [];
+    const questions: AskQuestion[] = [];
+    for (const item of value.questions) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as {
+        question?: unknown;
+        options?: unknown;
+        multiSelect?: unknown;
+        isOther?: unknown;
+        isSecret?: unknown;
+      };
+      const question = typeof record.question === "string" ? record.question.trim() : "";
+      if (!question) continue;
+      const options: AskOption[] = [];
+      if (Array.isArray(record.options)) {
+        for (const option of record.options) {
+          if (!option || typeof option !== "object") continue;
+          const label = typeof (option as { label?: unknown }).label === "string"
+            ? (option as { label: string }).label.trim()
+            : "";
+          if (!label) continue;
+          const description = typeof (option as { description?: unknown }).description === "string"
+            ? (option as { description: string }).description.trim()
+            : "";
+          options.push(description ? { label, description } : { label });
+        }
+      }
+      questions.push({
+        question,
+        options,
+        multiSelect: record.multiSelect === true,
+        isOther: record.isOther === true,
+        isSecret: record.isSecret === true,
+      });
+    }
+    return questions;
+  } catch {
+    return [];
+  }
+}
+
+function renderStructuredQuestion(
+  actions: HTMLElement,
+  meta: PermissionMeta,
+  card: HTMLElement,
+  setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void,
+): void {
+  const questions = parseAskQuestions(meta.inputJson);
+  const picks = new Map<string, string[]>();
+  const otherFields = new Map<string, HTMLInputElement>();
+
+  const submitAnswers = async (answers: Record<string, string>) => {
+    if (card.dataset.resolved === "1") return;
+    card.dataset.resolved = "1";
+    actions.querySelectorAll("button, input").forEach((el) => {
+      (el as HTMLButtonElement | HTMLInputElement).disabled = true;
+    });
+    try {
+      await resolvePermissionSession({
+        sessionId: meta.backendSessionId ?? "",
+        requestId: meta.requestId,
+        allow: true,
+        text: JSON.stringify({ answers }),
+      });
+      replyDrafts.delete(meta.requestId);
+    } catch (error) {
+      delete card.dataset.resolved;
+      actions.querySelectorAll("button, input").forEach((el) => {
+        (el as HTMLButtonElement | HTMLInputElement).disabled = false;
+      });
+      const raw = String(error);
+      setStatus(
+        /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
+        "warn",
+      );
+    }
+  };
+
+  const currentAnswers = (): Record<string, string> | null => {
+    const answers: Record<string, string> = {};
+    for (const question of questions) {
+      const other = otherFields.get(question.question)?.value.trim() ?? "";
+      const picked = picks.get(question.question) ?? [];
+      const value = other || picked.join(", ");
+      if (!value) return null;
+      answers[question.question] = value;
+    }
+    return answers;
+  };
+
+  if (questions.length === 0) {
+    const field = document.createElement("input");
+    field.type = "text";
+    field.className = "chat-permission-input";
+    field.placeholder = t("chat.replyHere");
+    field.value = replyDrafts.get(meta.requestId) ?? "";
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.className = "chat-permission-allow";
+    sendBtn.textContent = t("chat.inputSubmit");
+    const send = () => {
+      const text = field.value.trim();
+      if (!text) return;
+      void submitAnswers({ [meta.detail || "value"]: text });
+    };
+    sendBtn.addEventListener("click", send);
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        send();
+      }
+    });
+    actions.append(field, sendBtn);
+    return;
+  }
+
+  for (const question of questions) {
+    if (questions.length > 1) {
+      const label = document.createElement("p");
+      label.className = "chat-permission-question";
+      label.textContent = question.question;
+      actions.appendChild(label);
+    }
+    const optionRow = document.createElement("div");
+    optionRow.className = "chat-permission-options";
+    for (const option of question.options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chat-permission-option";
+      btn.textContent = option.label;
+      if (option.description) btn.title = option.description;
+      btn.addEventListener("click", () => {
+        const current = picks.get(question.question) ?? [];
+        const next = question.multiSelect
+          ? current.includes(option.label)
+            ? current.filter((item) => item !== option.label)
+            : [...current, option.label]
+          : [option.label];
+        picks.set(question.question, next);
+        optionRow.querySelectorAll<HTMLButtonElement>(".chat-permission-option").forEach((el) => {
+          el.classList.toggle("is-selected", next.includes(el.textContent ?? ""));
+        });
+        const field = otherFields.get(question.question);
+        if (field && !question.multiSelect) field.value = "";
+        if (!question.multiSelect && !question.isOther && questions.length === 1) {
+          void submitAnswers({ [question.question]: option.label });
+        }
+      });
+      optionRow.appendChild(btn);
+    }
+    actions.appendChild(optionRow);
+
+    const other = document.createElement("input");
+    const secret =
+      question.isSecret || /密钥|口令|token|password|api key/i.test(question.question);
+    other.type = secret ? "password" : "text";
+    other.className = "chat-permission-input";
+    other.placeholder = secret ? t("chat.pasteSecret") : t("chat.answerOther");
+    other.setAttribute("aria-label", t("chat.answerOther"));
+    otherFields.set(question.question, other);
+    actions.appendChild(other);
+  }
+
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.className = "chat-permission-allow";
+  sendBtn.textContent = t("chat.inputSubmit");
+  sendBtn.addEventListener("click", () => {
+    const answers = currentAnswers();
+    if (!answers) return;
+    void submitAnswers(answers);
+  });
+  const skipBtn = document.createElement("button");
+  skipBtn.type = "button";
+  skipBtn.className = "chat-permission-deny";
+  skipBtn.textContent = t("chat.answerSkip");
+  skipBtn.addEventListener("click", () => {
+    if (card.dataset.resolved === "1") return;
+    void resolvePermissionSession({
+      sessionId: meta.backendSessionId ?? "",
+      requestId: meta.requestId,
+      allow: false,
+    }).catch((error: unknown) => {
+      const raw = String(error);
+      setStatus(
+        /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
+        "warn",
+      );
+    });
+  });
+  actions.append(sendBtn, skipBtn);
+}
+
 export function createPermissionsController(deps: PermissionsDeps) {
   let pendingPermissionBatch: PendingPermission[] = [];
   let permissionPaintTimer = 0;
@@ -72,6 +280,8 @@ export function createPermissionsController(deps: PermissionsDeps) {
     request_id: string;
     tool_name: string;
     detail: string;
+    input_mode?: string;
+    input_json?: string;
   }): void {
     deps.flushPendingTextSync();
     deps.sealAssistantBubble();
@@ -90,6 +300,10 @@ export function createPermissionsController(deps: PermissionsDeps) {
       return;
     }
 
+    const inputMode =
+      payload.input_mode === "secret" || payload.input_mode === "line" || payload.input_mode === "options"
+        ? payload.input_mode
+        : "choice";
     const persisted = deps.persistMessage("permission", payload.detail.trim() || payload.tool_name, {
       permission: {
         requestId: payload.request_id,
@@ -97,6 +311,8 @@ export function createPermissionsController(deps: PermissionsDeps) {
         detail: payload.detail.trim() || payload.tool_name,
         backendSessionId: payload.session_id,
         allowed: null,
+        inputMode,
+        inputJson: payload.input_json,
       },
     });
 
@@ -313,6 +529,8 @@ export function createPermissionsController(deps: PermissionsDeps) {
     const meta = message.permission;
     const card = document.createElement("div");
     const allowed = meta?.allowed;
+    const needsReply =
+      meta?.inputMode === "line" || meta?.inputMode === "secret" || meta?.inputMode === "options";
     card.className =
       allowed === true
         ? "chat-permission is-allowed"
@@ -321,6 +539,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
           : interactive
             ? "chat-permission is-pending"
             : "chat-permission is-expired";
+    if (needsReply) card.classList.add("is-reply");
     card.dataset.requestId = meta?.requestId ?? "";
     card.dataset.messageId = message.id;
     if (allowed != null) card.dataset.resolved = "1";
@@ -343,7 +562,58 @@ export function createPermissionsController(deps: PermissionsDeps) {
     const actions = document.createElement("div");
     actions.className = "chat-permission-actions";
 
-    if (interactive && allowed == null && meta) {
+    if (interactive && allowed == null && meta?.inputMode === "options") {
+      renderStructuredQuestion(actions, meta, card, deps.setStatus);
+    } else if (interactive && allowed == null && meta && (meta.inputMode === "line" || meta.inputMode === "secret")) {
+      const secret = meta.inputMode === "secret";
+      const field = document.createElement("input");
+      field.type = secret ? "password" : "text";
+      field.className = "chat-permission-input";
+      field.autocomplete = "off";
+      field.spellcheck = false;
+      field.placeholder = secret ? t("chat.pasteSecret") : t("chat.replyHere");
+      field.setAttribute("aria-label", field.placeholder);
+      field.value = replyDrafts.get(meta.requestId) ?? "";
+      field.addEventListener("input", () => {
+        replyDrafts.set(meta.requestId, field.value);
+      });
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.className = "chat-permission-allow";
+      sendBtn.textContent = t("chat.inputSubmit");
+      const submit = async () => {
+        const text = field.value.trim();
+        if (!text || card.dataset.resolved === "1") return;
+        field.disabled = true;
+        sendBtn.disabled = true;
+        try {
+          await resolvePermissionSession({
+            sessionId: meta.backendSessionId ?? "",
+            requestId: meta.requestId,
+            allow: true,
+            text,
+          });
+          field.value = "";
+          replyDrafts.delete(meta.requestId);
+        } catch (error) {
+          field.disabled = false;
+          sendBtn.disabled = false;
+          const raw = String(error);
+          deps.setStatus(
+            /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
+            "warn",
+          );
+        }
+      };
+      sendBtn.addEventListener("click", () => void submit());
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void submit();
+        }
+      });
+      actions.append(field, sendBtn);
+    } else if (interactive && allowed == null && meta) {
       const allowBtn = document.createElement("button");
       allowBtn.type = "button";
       allowBtn.className = "chat-permission-allow";
@@ -396,7 +666,8 @@ export function createPermissionsController(deps: PermissionsDeps) {
     row.append(tool, summary, actions);
     card.appendChild(row);
 
-    if (formatted.full) {
+    const sameAsQuestion = formatted.full === formatted.summary;
+    if (formatted.full && !(needsReply && sameAsQuestion)) {
       const showOpen =
         allowed == null &&
         (formatted.full !== formatted.summary || /[\n|&;]/.test(formatted.full));
@@ -600,7 +871,12 @@ export function createPermissionsController(deps: PermissionsDeps) {
         actions.replaceChildren();
         const badge = document.createElement("span");
         badge.className = "chat-permission-result";
-        badge.textContent = allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied");
+        const typed = message?.permission?.inputMode === "line" || message?.permission?.inputMode === "secret" || message?.permission?.inputMode === "options";
+        badge.textContent = typed
+          ? t("chat.inputSubmitted")
+          : allowed
+            ? t("chat.permissionAllowed")
+            : t("chat.permissionDenied");
         actions.appendChild(badge);
       }
     }
@@ -633,7 +909,11 @@ export function createPermissionsController(deps: PermissionsDeps) {
     if (stillPending) {
       deps.setStatus(t("chat.needYourChoice"), "warn");
     } else {
-      deps.setStatus(allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
+      const typed = message?.permission?.inputMode === "line" || message?.permission?.inputMode === "secret" || message?.permission?.inputMode === "options";
+      deps.setStatus(
+        typed ? t("chat.inputSubmitted") : allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"),
+        "ok",
+      );
     }
     deps.flushSessionListRender();
   }

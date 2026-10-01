@@ -3202,6 +3202,44 @@ body.is-diagnose-open .diagnose-detail {
   overflow-wrap: anywhere;
 }
 
+.install-reply {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.install-reply-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.install-reply-label {
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.install-reply-form input {
+  flex: 1 1 8rem;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+}
+
+.install-reply-note {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--danger, #b42318);
+}
+
 .install-progress-done {
   display: grid;
   gap: 6px;

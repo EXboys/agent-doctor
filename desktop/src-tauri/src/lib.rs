@@ -360,14 +360,23 @@ fn resolve_permission_session_command(
     session_id: String,
     request_id: String,
     allow: bool,
+    text: Option<String>,
 ) -> Result<bool, String> {
     let guard = state.control.lock().map_err(|e| e.to_string())?;
     let Some(control) = guard.as_ref() else {
         return Err("no active ask session for permission reply".into());
     };
-    control
-        .respond_permission(&request_id, allow)
-        .map_err(|e| format!("{e:#}"))?;
+    let sent_text = text.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let Some(text) = sent_text {
+        control
+            .respond_line(&request_id, text)
+            .map_err(|e| format!("{e:#}"))?;
+    } else {
+        control
+            .respond_permission(&request_id, allow)
+            .map_err(|e| format!("{e:#}"))?;
+    }
+    let allowed = sent_text.is_some() || allow;
     let owner = state
         .owner
         .lock()
@@ -380,7 +389,7 @@ fn resolve_permission_session_command(
         &PromptSessionEvent::PermissionResolved {
             session_id,
             request_id,
-            allowed: allow,
+            allowed,
         },
     );
     Ok(true)
@@ -493,6 +502,7 @@ pub fn run() {
             run_browser_smoke_command,
             run_repair_rollback_command,
             install_runtime_command,
+            submit_install_input_command,
             uninstall_runtime_command,
             open_path_command,
             runtime_catalog_command,

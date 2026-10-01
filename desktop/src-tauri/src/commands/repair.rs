@@ -316,6 +316,11 @@ pub async fn uninstall_runtime_command(app: AppHandle, runtime: String) -> Resul
 }
 
 #[tauri::command]
+pub fn submit_install_input_command(line: String) -> Result<(), String> {
+    agent_doctor_core::submit_install_line(&line).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn install_runtime_command(
     app: AppHandle,
     runtime: String,

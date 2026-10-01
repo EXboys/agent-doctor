@@ -31,6 +31,8 @@ export type StreamDeps = {
     request_id: string;
     tool_name: string;
     detail: string;
+    input_mode?: string;
+    input_json?: string;
   }) => void;
   markPermissionResolved: (requestId: string, allowed: boolean) => void;
   isViewingRunningSession: () => boolean;
@@ -59,6 +61,8 @@ export type StreamDeps = {
     request_id: string;
     tool_name: string;
     detail: string;
+    input_mode?: string;
+    input_json?: string;
   }) => void;
 };
 

@@ -131,6 +131,7 @@ export type InstallProgressEvent = {
   phase: string;
   message: string;
   percent: number;
+  input_kind?: string;
 };
 
 export interface EvotownStatus {

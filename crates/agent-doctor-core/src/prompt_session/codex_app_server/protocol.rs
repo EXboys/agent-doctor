@@ -147,10 +147,16 @@ where
         }
         let (tool_name, detail, input_json) = permission_from_codex(method, &params);
         control.remember_codex_reply(&request_id, kind);
+        let input_mode = permission_input_mode(method, &params);
+        let waiting = if input_mode == "choice" {
+            format!("等待确认：{tool_name}")
+        } else {
+            "需要你输入".to_string()
+        };
         on_event(PromptSessionEvent::Status {
             session_id: state.session_id.clone(),
             phase: "permission".into(),
-            message: format!("等待确认：{tool_name}"),
+            message: waiting,
         });
         on_event(PromptSessionEvent::PermissionRequest {
             session_id: state.session_id.clone(),
@@ -158,6 +164,7 @@ where
             tool_name,
             detail,
             input_json,
+            input_mode,
         });
         return Ok(());
     }
@@ -410,7 +417,27 @@ pub(crate) fn turn_completed_agent_text(params: &Value) -> Option<String> {
 pub(crate) fn codex_reply_kind(method: &str, params: &Value) -> Option<CodexReplyKind> {
     let lower = method.to_ascii_lowercase();
     if lower.contains("elicitation") {
+        if elicitation_wants_text(params) {
+            return Some(CodexReplyKind::UserLine {
+                question_id: first_question_id(params),
+                elicitation: true,
+                questions: params
+                    .get("questions")
+                    .cloned()
+                    .unwrap_or(Value::Array(Vec::new())),
+            });
+        }
         return Some(CodexReplyKind::Elicitation);
+    }
+    if lower.contains("requestuserinput") {
+        return Some(CodexReplyKind::UserLine {
+            question_id: first_question_id(params),
+            elicitation: false,
+            questions: params
+                .get("questions")
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new())),
+        });
     }
     if lower.contains("permissions") && lower.contains("requestapproval") {
         let requested = params
@@ -419,13 +446,65 @@ pub(crate) fn codex_reply_kind(method: &str, params: &Value) -> Option<CodexRepl
             .unwrap_or(Value::Object(Default::default()));
         return Some(CodexReplyKind::Permissions { requested });
     }
-    if lower.contains("requestapproval")
-        || lower.ends_with("requestuserinput")
-        || lower.contains("requestuserinput")
-    {
+    if lower.contains("requestapproval") {
         return Some(CodexReplyKind::Decision);
     }
     None
+}
+
+pub(crate) fn permission_input_mode(method: &str, params: &Value) -> String {
+    match codex_reply_kind(method, params) {
+        Some(CodexReplyKind::UserLine { .. }) if request_has_options(params) => "options".into(),
+        Some(CodexReplyKind::UserLine { .. }) if prompt_looks_secret(params) => "secret".into(),
+        Some(CodexReplyKind::UserLine { .. }) => "line".into(),
+        _ => "choice".into(),
+    }
+}
+
+fn request_has_options(params: &Value) -> bool {
+    params
+        .get("questions")
+        .and_then(|v| v.as_array())
+        .is_some_and(|questions| {
+            questions.iter().any(|question| {
+                question
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|options| !options.is_empty())
+            })
+        })
+}
+
+fn first_question_id(params: &Value) -> String {
+    params
+        .pointer("/questions/0/id")
+        .or_else(|| params.get("id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("value")
+        .to_string()
+}
+
+fn elicitation_wants_text(params: &Value) -> bool {
+    params.get("requestedSchema").is_some()
+        || params.get("questions").is_some()
+        || prompt_looks_secret(params)
+}
+
+fn prompt_looks_secret(params: &Value) -> bool {
+    let blob = params.to_string().to_ascii_lowercase();
+    [
+        "password",
+        "passphrase",
+        "token",
+        "api key",
+        "apikey",
+        "secret",
+        "密钥",
+        "口令",
+    ]
+    .iter()
+    .any(|needle| blob.contains(needle))
 }
 
 pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, String, String) {
@@ -451,43 +530,53 @@ pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, St
         "Bash".to_string()
     };
 
-    let detail = params
-        .get("reason")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            params
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            params.get("command").and_then(|v| {
-                if let Some(s) = v.as_str() {
-                    Some(s.to_string())
-                } else if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    )
-                } else {
-                    None
-                }
+    let detail = if method.to_ascii_lowercase().contains("requestuserinput") {
+        params
+            .pointer("/questions/0/question")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| "需要你回答".to_string())
+    } else {
+        params
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
             })
-        })
-        .or_else(|| {
-            params
-                .get("cwd")
-                .and_then(|v| v.as_str())
-                .map(|c| format!("cwd: {c}"))
-        })
-        .unwrap_or_else(|| params.to_string());
+            .or_else(|| {
+                params.get("command").and_then(|v| {
+                    if let Some(s) = v.as_str() {
+                        Some(s.to_string())
+                    } else if let Some(arr) = v.as_array() {
+                        Some(
+                            arr.iter()
+                                .filter_map(|x| x.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        )
+                    } else {
+                        None
+                    }
+                })
+            })
+            .or_else(|| {
+                params
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(|c| format!("cwd: {c}"))
+            })
+            .unwrap_or_else(|| params.to_string())
+    };
 
     (tool_name, detail, params.to_string())
 }

@@ -426,7 +426,11 @@ export function createBubblesController(deps: BubblesDeps) {
           }
           // Unanswered asks stay as standalone cards — never fold into "$ N tools".
           if (message.permission?.allowed == null) {
-            deps.logEl.appendChild(deps.renderPermissionCard(message, false));
+            const needsReply =
+              message.permission?.inputMode === "line" ||
+              message.permission?.inputMode === "secret" ||
+              message.permission?.inputMode === "options";
+            deps.logEl.appendChild(deps.renderPermissionCard(message, needsReply));
             i += 1;
             continue;
           }

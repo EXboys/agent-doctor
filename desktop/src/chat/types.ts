@@ -30,6 +30,7 @@ export type PromptSessionEvent =
       tool_name: string;
       detail: string;
       input_json: string;
+      input_mode?: string;
     }
   | {
       type: "permission_resolved";
@@ -60,6 +61,10 @@ export interface PermissionMeta {
   backendSessionId?: string;
   /** null = pending/expired without decision */
   allowed: boolean | null;
+  /** choice = allow/deny, options = structured question, line = one reply, secret = hidden reply */
+  inputMode?: "choice" | "options" | "line" | "secret";
+  /** Original tool input, used to render structured questions. */
+  inputJson?: string;
 }
 
 export interface ChatMessage {

@@ -142,9 +142,27 @@ export function createEmptySession(runtime: AskRuntime): ChatSession {
   };
 }
 
+function dropPreviewPrompts(store: SessionStore): SessionStore {
+  let changed = false;
+  const sessions = store.sessions.map((session) => {
+    const messages = session.messages.filter((message) => {
+      const requestId = message.permission?.requestId ?? "";
+      if (!requestId.startsWith("preview-")) return true;
+      changed = true;
+      return false;
+    });
+    return messages.length === session.messages.length ? session : { ...session, messages };
+  });
+  return changed ? { ...store, sessions } : store;
+}
+
 export function loadStore(fallbackRuntime: AskRuntime): SessionStore {
   const loaded = loadStoreFromLocalKeys();
-  if (loaded) return loaded;
+  if (loaded) {
+    const cleaned = dropPreviewPrompts(loaded);
+    if (cleaned !== loaded) persistStore(cleaned);
+    return cleaned;
+  }
   const session = createEmptySession(fallbackRuntime);
   return { activeId: session.id, sessions: [session] };
 }

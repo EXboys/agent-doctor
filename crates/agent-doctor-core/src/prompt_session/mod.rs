@@ -74,6 +74,10 @@ pub enum PromptSessionStatus {
     TimedOut,
 }
 
+fn default_input_mode() -> String {
+    "choice".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PromptSessionEvent {
@@ -109,6 +113,9 @@ pub enum PromptSessionEvent {
         tool_name: String,
         detail: String,
         input_json: String,
+        /// `choice` (allow/deny), `line` (one reply), or `secret` (one hidden reply).
+        #[serde(default = "default_input_mode")]
+        input_mode: String,
     },
     /// User (or host) resolved a permission prompt.
     PermissionResolved {

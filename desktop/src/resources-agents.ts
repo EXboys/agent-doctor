@@ -9,6 +9,7 @@ import { resourcesState, agentsListEl, agentsEmptyEl, agentInstallInFlight, agen
 import { agentChipLabel } from "./resources-skills";
 import { renderResourcesList, syncPanelLead } from "./resources";
 import { installRuntime, openSession, runDoctor } from "./ipc";
+import { mountInstallReply } from "./install-reply";
 
 export function agentCatalogBlurb(runtime: string): string {
   return tRuntimeBlurb(runtime);
@@ -167,6 +168,19 @@ export async function installCatalogAgent(runtime: string): Promise<void> {
   setAgentInstallHint(runtime, t("runtime.installing"), "busy");
   const unlisten = await listen<InstallProgressEvent>("install-progress", (event) => {
     if (event.payload.runtime_id !== runtime) return;
+    const row = agentsListEl.querySelector<HTMLElement>(`[data-runtime="${CSS.escape(runtime)}"]`);
+    if (event.payload.phase === "needs_input" && row) {
+      mountInstallReply(
+        row,
+        event.payload.input_kind === "secret" || event.payload.input_kind === "session"
+          ? event.payload.input_kind
+          : "line",
+      );
+      return;
+    }
+    if (event.payload.phase === "verifying" || event.payload.phase === "done") {
+      if (row) mountInstallReply(row, "");
+    }
     const text = event.payload.message.trim();
     const status =
       event.payload.phase === "verifying"
