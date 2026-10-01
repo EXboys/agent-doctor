@@ -22,7 +22,7 @@ use super::env::{
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
     format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
-    tool_input_detail,
+    tool_input_detail, SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -284,11 +284,12 @@ where
         stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
-    let drain = |on_event: &mut F| {
+    let drain = |on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
         };
+        let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
                 handle_hermes_stream_line(session_id, &line, on_event);
@@ -302,17 +303,20 @@ where
                 line,
             });
         }
+        saw
     };
 
-    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut clock = SessionClock::new(timeout_sec);
     let mut pipes_closed_at: Option<Instant> = None;
     let (status, exit_code) = loop {
-        drain(on_event);
+        if drain(on_event) {
+            clock.touch();
+        }
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if Instant::now() >= deadline {
+        if clock.expired() {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }

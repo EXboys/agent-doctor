@@ -158,6 +158,13 @@ impl PromptSessionControl {
         }
     }
 
+    pub(crate) fn has_pending(&self) -> bool {
+        self.pending
+            .lock()
+            .map(|guard| !guard.is_empty())
+            .unwrap_or(false)
+    }
+
     fn take_pending(&self, request_id: &str) -> Option<PendingReply> {
         self.pending
             .lock()

@@ -133,7 +133,7 @@ export function createStreamController(deps: StreamDeps) {
           deps.expireLivePermissionCards();
           if (viewing) {
             deps.hideDecisionDock();
-            if (!hadAssistantText) {
+            if (!hadAssistantText && payload.status === "succeeded") {
               deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
             }
           }
@@ -147,6 +147,11 @@ export function createStreamController(deps: StreamDeps) {
           }
           if (payload.status === "cancelled") {
             deps.setStatus(t("chat.forceStopped"), "warn");
+          } else if (payload.status === "timed_out") {
+            if (viewing) {
+              deps.appendBubble("meta", t("chat.timedOut"), { persist: false });
+            }
+            deps.setStatus(t("chat.timedOut"), "warn");
           } else if (payload.status !== "succeeded") {
             if (viewing) {
               deps.appendBubble(

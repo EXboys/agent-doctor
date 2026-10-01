@@ -356,6 +356,7 @@ export const zh = {
     "chat.quickNoSend": "不用了，到这里就行。",
     "chat.waitingModel": "正在等待模型回复…",
     "chat.emptyReply": "没有返回文本内容。可重试，或用「打开原生」查看完整界面。",
+    "chat.timedOut": "这一轮有一阵没有新进展，已经停下来。再发一条，可以接着做。",
     "chat.completed": "结束 · {status}",
     "chat.done": "完成 · {status} · {ms}ms",
     "chat.failed": "问答没有完成，请再试一次。",

@@ -14,7 +14,7 @@ use super::env::{
 };
 use super::util::{
     command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child, join_reader,
-    push_capped, summarize,
+    push_capped, summarize, SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -171,14 +171,21 @@ fn collect_final_output(
         stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
-    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut clock = SessionClock::new(timeout_sec);
+    let mut seen_output = 0usize;
     let mut pipes_closed_at: Option<Instant> = None;
     let (status, exit_code) = loop {
+        let output_len = stdout_acc.lock().map(|g| g.len()).unwrap_or(0)
+            + stderr_acc.lock().map(|g| g.len()).unwrap_or(0);
+        if output_len != seen_output {
+            seen_output = output_len;
+            clock.touch();
+        }
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if Instant::now() >= deadline {
+        if clock.expired() {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }

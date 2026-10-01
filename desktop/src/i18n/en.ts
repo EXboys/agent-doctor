@@ -352,6 +352,7 @@ export const en = {
     "chat.quickNoSend": "No, thanks — stop here.",
     "chat.waitingModel": "Waiting for the model…",
     "chat.emptyReply": "No text reply was returned. Try again, or open Native for the full UI.",
+    "chat.timedOut": "This turn was still working, then went quiet and stopped. Send another message to continue.",
     "chat.completed": "Ended · {status}",
     "chat.done": "Done · {status} · {ms}ms",
     "chat.failed": "Ask did not finish. Try again.",

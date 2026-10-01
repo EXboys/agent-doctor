@@ -12,6 +12,43 @@ use crate::exec::{command_for_path, kill_process_tree};
 
 use super::{PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 
+/// Wall clock for one ask turn.
+///
+/// `idle` is how long a silent turn may sit. Each new line of output starts
+/// that window again, so a turn that keeps calling tools is not cut off at the
+/// first 10 minutes. `absolute` is the hard stop from the start of the turn.
+pub(crate) struct SessionClock {
+    started: Instant,
+    deadline: Instant,
+    idle: Duration,
+    absolute: Duration,
+}
+
+impl SessionClock {
+    pub(crate) fn new(idle_sec: u64) -> Self {
+        let now = Instant::now();
+        let idle = Duration::from_secs(idle_sec.max(1));
+        let absolute = Duration::from_secs(super::MAX_TIMEOUT_SEC);
+        Self {
+            started: now,
+            deadline: now + idle.min(absolute),
+            idle,
+            absolute,
+        }
+    }
+
+    /// The turn produced output, or is waiting on the user. Keep it alive.
+    pub(crate) fn touch(&mut self) {
+        let now = Instant::now();
+        let cap = self.started + self.absolute;
+        self.deadline = (now + self.idle).min(cap);
+    }
+
+    pub(crate) fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+}
+
 pub(crate) fn push_capped(acc: &Arc<Mutex<String>>, line: &str) {
     if let Ok(mut guard) = acc.lock() {
         if guard.len() >= MAX_CAPTURE_CHARS {
@@ -388,6 +425,14 @@ mod tests {
         );
         assert!(msg.contains("UnlessTrusted") || msg.contains("提升权限"));
         assert!(!msg.starts_with("approval policy is"));
+    }
+
+    #[test]
+    fn activity_extends_the_turn_past_the_idle_window() {
+        let mut clock = SessionClock::new(30);
+        assert!(!clock.expired());
+        clock.touch();
+        assert!(!clock.expired());
     }
 
     #[test]

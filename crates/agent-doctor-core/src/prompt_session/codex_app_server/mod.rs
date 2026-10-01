@@ -19,6 +19,7 @@ use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
     is_runtime_stderr_noise, join_reader, push_capped, strip_runtime_stderr_noise, summarize,
+    SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -443,7 +444,7 @@ where
         }
     });
 
-    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut clock = SessionClock::new(timeout_sec);
     let status;
     let exit_code;
     let mut shutdown_started: Option<Instant> = None;
@@ -453,6 +454,9 @@ where
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
         };
+        if !drained.is_empty() || control.has_pending() {
+            clock.touch();
+        }
         for (is_stdout, line) in drained {
             if is_stdout {
                 handle_rpc_line(line, control, state, on_event)?;
@@ -470,7 +474,7 @@ where
             exit_code = None;
             break;
         }
-        if Instant::now() >= deadline {
+        if clock.expired() {
             force_stop_child(child, pid);
             status = PromptSessionStatus::TimedOut;
             exit_code = None;

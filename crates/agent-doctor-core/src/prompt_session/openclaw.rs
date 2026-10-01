@@ -19,7 +19,7 @@ use super::control::PromptSessionControl;
 use super::env::{apply_overlay_env, collect_overlay_env, format_command_display};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    is_runtime_stderr_noise, join_reader, push_capped, summarize, SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -323,7 +323,7 @@ fn build_openclaw_command(
     prompt: &str,
     cwd: &Path,
     session_id: &str,
-    timeout_sec: u64,
+    _timeout_sec: u64,
 ) -> Result<Command> {
     let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_OPENCLAW_BIN").unwrap_or_else(|_| "openclaw".into());
@@ -339,7 +339,7 @@ fn build_openclaw_command(
         .arg(prompt)
         .arg("--json")
         .arg("--timeout")
-        .arg(timeout_sec.to_string())
+        .arg(super::MAX_TIMEOUT_SEC.to_string())
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -405,11 +405,12 @@ where
         stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
-    let drain = |on_event: &mut F| {
+    let drain = |on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
         };
+        let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
                 // JSON is parsed at completion; never stream fragments into the chat bubble.
@@ -423,13 +424,15 @@ where
                 line,
             });
         }
+        saw
     };
 
-    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut clock = SessionClock::new(timeout_sec);
     let mut next_tool_poll = Instant::now();
     let mut pipes_closed_at: Option<Instant> = None;
     let (status, exit_code) = loop {
-        drain(on_event);
+        let saw_output = drain(on_event);
+        let trace_before = *tool_trace.trace_len;
         if Instant::now() >= next_tool_poll {
             if let Some(path) = tool_trace.path {
                 emit_openclaw_tools_from_path(
@@ -442,11 +445,14 @@ where
             }
             next_tool_poll = Instant::now() + Duration::from_millis(120);
         }
+        if saw_output || *tool_trace.trace_len != trace_before {
+            clock.touch();
+        }
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if Instant::now() >= deadline {
+        if clock.expired() {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }

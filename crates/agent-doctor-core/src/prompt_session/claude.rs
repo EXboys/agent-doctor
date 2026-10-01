@@ -17,7 +17,7 @@ use super::env::{
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, format_tool_status,
-    is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_input_detail,
+    is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_input_detail, SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -276,6 +276,7 @@ fn build_claude_command(
                     "NotebookEdit",
                     "WebFetch",
                     "WebSearch",
+                    "AskUserQuestion",
                     "mcp__browser__*"
                 ]
             }
@@ -285,7 +286,9 @@ fn build_claude_command(
             .arg("--permission-prompt-tool")
             .arg("stdio")
             .arg("--settings")
-            .arg(ask_settings.to_string());
+            .arg(ask_settings.to_string())
+            .arg("--append-system-prompt")
+            .arg(CLAUDE_ASK_INSTRUCTIONS);
     }
     if interactive_permissions {
         cmd.stdin(Stdio::piped());
@@ -343,11 +346,12 @@ where
     });
 
     let turn_done = Arc::new(AtomicBool::new(false));
-    let drain = |on_event: &mut F| {
+    let drain = |on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
         };
+        let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
                 for event in
@@ -362,17 +366,21 @@ where
                 });
             }
         }
+        saw
     };
 
-    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+    let mut clock = SessionClock::new(timeout_sec);
     let mut closed_after_result = false;
     let (status, exit_code) = loop {
-        drain(on_event);
+        let saw_output = drain(on_event);
+        if saw_output || control.is_some_and(PromptSessionControl::has_pending) {
+            clock.touch();
+        }
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if Instant::now() >= deadline {
+        if clock.expired() {
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
@@ -493,19 +501,36 @@ fn claude_question_detail(input: &serde_json::Value) -> String {
         .to_string()
 }
 
+/// Open questions (`kind: text|number`) and choice questions with fewer than
+/// two options never reach the user: Claude rejects them before the prompt.
+/// Tell the model to use an open question for a secret or free-text reply.
+const CLAUDE_ASK_INSTRUCTIONS: &str = "When you need a secret, token, password, or any value only the user knows, call AskUserQuestion with one question, \"kind\": \"text\", and no options. A choice question with fewer than 2 options is rejected before the user can answer. Do not add a filler option. Do not ask the user to paste the secret into the chat, export an environment variable, or write it to a file. Wait for the tool result.";
+
+fn question_is_open(question: &serde_json::Value) -> bool {
+    question
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .is_some_and(|kind| {
+            kind.eq_ignore_ascii_case("text") || kind.eq_ignore_ascii_case("number")
+        })
+}
+
+fn question_has_choice(question: &serde_json::Value) -> bool {
+    if question_is_open(question) {
+        return false;
+    }
+    question
+        .get("options")
+        .and_then(|v| v.as_array())
+        .is_some_and(|options| options.len() >= 2)
+}
+
 fn claude_question_mode(input: &serde_json::Value) -> String {
-    let has_options = input
+    let has_choice = input
         .get("questions")
         .and_then(|v| v.as_array())
-        .is_some_and(|questions| {
-            questions.iter().any(|question| {
-                question
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|options| !options.is_empty())
-            })
-        });
-    if has_options {
+        .is_some_and(|questions| questions.iter().any(question_has_choice));
+    if has_choice {
         return "options".to_string();
     }
     let blob = input.to_string().to_ascii_lowercase();
@@ -944,6 +969,42 @@ mod tests {
                 && detail.contains("ls -la")
                 && input_mode == "choice"
         )));
+    }
+
+    #[test]
+    fn open_secret_question_is_a_hidden_field() {
+        let line = r#"{"type":"control_request","request_id":"req-s","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"把密钥贴在这里","kind":"text"}]}}}"#;
+        let events = parse_claude_stream_line("s1", line, None, None);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::PermissionRequest {
+                detail,
+                input_mode,
+                ..
+            } if detail == "把密钥贴在这里" && input_mode == "secret"
+        )));
+    }
+
+    #[test]
+    fn interactive_claude_routes_open_questions() {
+        let dir = tempdir().unwrap();
+        let cmd = build_claude_command(
+            "hi",
+            dir.path(),
+            false,
+            true,
+            None,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let joined = args.join("\n");
+        assert!(joined.contains("\"AskUserQuestion\""));
+        assert!(joined.contains("kind"));
+        assert!(joined.contains("fewer than 2 options"));
     }
 
     #[test]
