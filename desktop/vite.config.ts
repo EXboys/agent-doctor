@@ -36,6 +36,7 @@ export default defineConfig(async () => ({
         chat: resolve(__dirname, "chat.html"),
         resources: resolve(__dirname, "resources.html"),
         diagnose: resolve(__dirname, "diagnose.html"),
+        island: resolve(__dirname, "island.html"),
       },
     },
   },

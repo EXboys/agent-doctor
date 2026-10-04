@@ -607,3 +607,39 @@ export function voiceTurnEnd(args: {
 export function readImageTexts(args: { paths: string[] }): Promise<ImageTextReport> {
   return invoke("read_image_texts_command", args);
 }
+
+export function publishIslandSnapshot(snapshot: import("./island/track").IslandSnapshot): Promise<void> {
+  return invoke("publish_island_snapshot_command", { snapshot });
+}
+
+export function islandSetHover(hovering: boolean, sticky = false): Promise<void> {
+  return invoke("island_set_hover_command", { hovering, sticky });
+}
+
+export function islandRestore(): Promise<void> {
+  return invoke("island_restore_command");
+}
+
+export function islandPin(): Promise<void> {
+  return invoke("island_pin_command");
+}
+
+export function islandOpenSession(sessionId: string): Promise<void> {
+  return invoke("island_open_session_command", { sessionId });
+}
+
+export function islandSendText(sessionId: string, text: string): Promise<void> {
+  return invoke("island_send_text_command", { sessionId, text });
+}
+
+export function islandSetReading(reading: boolean): Promise<void> {
+  return invoke("island_set_reading_command", { reading });
+}
+
+export function islandClaimKeyboard(): Promise<void> {
+  return invoke("island_claim_keyboard_command");
+}
+
+export function currentIslandView(): Promise<import("./island/track").IslandView> {
+  return invoke("current_island_view_command");
+}

@@ -22,6 +22,7 @@ use tauri_plugin_opener::OpenerExt;
 const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod commands;
+mod island;
 mod speech;
 mod state;
 mod tray;
@@ -30,6 +31,11 @@ mod windows;
 pub(crate) use tray::{rebuild_tray_menu, remember_tray_health, update_tray_tooltip};
 
 use commands::*;
+use island::{
+    current_island_view_command, island_claim_keyboard_command, island_open_session_command,
+    island_pin_command, island_restore_command, island_send_text_command, island_set_hover_command,
+    island_set_reading_command, publish_island_snapshot_command, IslandHost,
+};
 use state::PromptSessionState;
 use windows::{
     close_ask_window_command, close_diagnose_window_command, close_resources_window_command,
@@ -418,6 +424,7 @@ pub fn run() {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
             app.manage(DeepDiagnoseState::default());
+            app.manage(IslandHost::default());
             // Paint the main window first. Seeding a workspace can hit macOS
             // Files-and-Folders prompts (Documents / Desktop) and must not
             // block the first frame on a blank chrome.
@@ -527,7 +534,16 @@ pub fn run() {
             voice_speak_stop_command,
             voice_hosted_reduce_command,
             voice_turn_end_command,
-            read_image_texts_command
+            read_image_texts_command,
+            publish_island_snapshot_command,
+            island_set_hover_command,
+            island_restore_command,
+            island_pin_command,
+            island_open_session_command,
+            island_send_text_command,
+            island_claim_keyboard_command,
+            island_set_reading_command,
+            current_island_view_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,15 @@ import {
   shouldShowPersonalFirstRun,
   writeFirstRunStorage,
 } from "../src/first-run";
+import {
+  emptyIslandTrack,
+  islandSnapshot,
+  islandTitle,
+  latestExchange,
+  rememberIslandSent,
+  reduceIslandTrack,
+} from "../src/island/track";
+import type { PromptSessionEvent } from "../src/chat/types";
 import type {
   DoctorReport,
   McpInventoryItem,
@@ -367,6 +376,87 @@ const allGoodTarget = pickBiggestFirstRunTarget(
   firstRunCopy,
 );
 assert(allGoodTarget.kind === "none", "healthy installed runtimes → none");
+
+const labels = {
+  idle: "就绪",
+  browser: "正在看网页",
+  working: "还在进行",
+  needsConfirm: "要你确认",
+  needsReply: "要你回一句",
+  needsAnswer: "要你回答",
+};
+let island = rememberIslandSent(emptyIslandTrack(), "你好，你今天怎么样");
+assert(
+  islandSnapshot(island, labels, false).detail.includes("你好，你今天怎么样"),
+  "the island shows the sentence just sent",
+);
+const started: PromptSessionEvent = {
+  type: "started",
+  session_id: "s1",
+  runtime: "claude-code",
+  cwd: "/tmp",
+  command: "ask",
+};
+island = reduceIslandTrack(island, started);
+assert(island.active && !island.browser, "a new turn is active and not browsing yet");
+assert(islandTitle(island, labels) === "还在进行", "working title");
+island = reduceIslandTrack(island, {
+  type: "delta",
+  session_id: "s1",
+  text: "你好，我在看这个问题。",
+});
+assert(
+  islandSnapshot(island, labels, false).detail.includes("你好，我在看这个问题"),
+  "a running turn shows what was just said",
+);
+island = reduceIslandTrack(island, {
+  type: "status",
+  session_id: "s1",
+  phase: "tool",
+  message: "调用工具 browser_navigate …",
+});
+assert(island.browser, "browser tool marks the turn");
+assert(islandTitle(island, labels) === "正在看网页", "browser title");
+assert(island.detail === "", "tool name is not the status line");
+island = reduceIslandTrack(island, {
+  type: "permission_request",
+  session_id: "s1",
+  request_id: "r1",
+  tool_name: "Bash",
+  detail: "list files",
+  input_json: "",
+  input_mode: "choice",
+});
+assert(island.pending?.kind === "choice", "allow/deny stays on the island");
+assert(islandTitle(island, labels) === "要你确认", "confirm title wins over browser");
+const snap = islandSnapshot(island, labels, true);
+assert(snap.composing && snap.pending?.title === "要你确认", "snapshot keeps the sentence");
+island = reduceIslandTrack(island, {
+  type: "permission_resolved",
+  session_id: "s1",
+  request_id: "r1",
+  allowed: true,
+});
+assert(island.pending == null, "resolved confirm leaves the island");
+island = reduceIslandTrack(island, {
+  type: "completed",
+  session_id: "s1",
+  status: "succeeded",
+  exit_code: 0,
+  summary: "",
+});
+assert(!island.active && !island.browser, "a finished turn goes idle");
+assert(islandTitle(island, labels) === "就绪", "idle title stays on the island");
+assert(
+  islandSnapshot(island, labels, false).detail.includes("你好，你今天怎么样"),
+  "a finished turn still shows what was sent",
+);
+const exchanged = latestExchange([
+  { role: "user", content: "你好，你今天怎么样" },
+  { role: "assistant", content: "我挺好，一切正常。" },
+]);
+assert(exchanged.sent.includes("你好，你今天怎么样"), "recent sent text is kept");
+assert(exchanged.spoken.includes("我挺好"), "the reply after that send is kept");
 
 console.log("smoke-ui-modules: OK");
 console.log(

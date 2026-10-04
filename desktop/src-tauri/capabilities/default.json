@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main, ask, resources, and diagnose windows",
-  "windows": ["main", "ask", "resources", "diagnose"],
+  "description": "Capability for the main, ask, resources, diagnose, and island windows",
+  "windows": ["main", "ask", "resources", "diagnose", "island*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

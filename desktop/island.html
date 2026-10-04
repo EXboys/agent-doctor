@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Agent Doctor</title>
+    <link rel="stylesheet" href="/src/island.css" />
+  </head>
+  <body>
+    <div id="island" class="island" hidden>
+      <div class="island-pill">
+        <span class="island-mark" aria-hidden="true"></span>
+        <span id="island-title" class="island-title"></span>
+      </div>
+      <div class="island-body">
+        <div id="island-detail" class="island-read" hidden></div>
+        <div id="island-actions" class="island-actions"></div>
+        <p id="island-error" class="island-error" hidden></p>
+      </div>
+    </div>
+    <script type="module" src="/src/island/page.ts"></script>
+  </body>
+</html>

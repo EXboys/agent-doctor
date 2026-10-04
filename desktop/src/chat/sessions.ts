@@ -182,7 +182,7 @@ export function createSessionsController(deps: SessionsDeps) {
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
   }
 
-  function switchSession(id: string): void {
+  function switchSession(id: string, focus = true): void {
     if (id === deps.getStore().activeId) return;
     const session = deps.getStore().sessions.find((s) => s.id === id);
     if (!session) return;
@@ -227,7 +227,7 @@ export function createSessionsController(deps: SessionsDeps) {
     renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(session);
     deps.updateContextMeter();
-    deps.promptEl.focus();
+    if (focus) deps.promptEl.focus();
   }
 
   function deleteSession(id: string): void {

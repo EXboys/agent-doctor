@@ -16,6 +16,7 @@ import type {
   ChatSession,
   SessionStore,
 } from "./types";
+import { noteIslandUserText } from "../island/publish";
 import { cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
 import {
   consumeDrainIntent,
@@ -212,6 +213,7 @@ export function createSendController(deps: SendDeps) {
     );
     const cleaned = stripMentionTokens(text);
     const userText = cleaned || text || t("chat.attachOnlyPrompt");
+    noteIslandUserText(userText);
     const constraint = buildMentionConstraint(mentions);
     const voiceNote = draft.fromVoice
       ? getLocale() === "zh"

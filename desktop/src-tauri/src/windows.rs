@@ -422,11 +422,14 @@ fn dismiss_secondary_window(window: &tauri::WebviewWindow, destroy: bool) {
 
 fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
     let win = window.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
+    let app = window.app_handle().clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             dismiss_secondary_window(&win, false);
         }
+        WindowEvent::Destroyed => crate::island::on_ask_closed(&app),
+        _ => {}
     });
 }
 
@@ -539,6 +542,7 @@ pub(crate) fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), Str
         return Ok(());
     };
     dismiss_secondary_window(&window, destroy);
+    crate::island::on_ask_closed(app);
     Ok(())
 }
 

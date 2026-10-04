@@ -69,7 +69,8 @@ import {
   mentionMenu,
 } from "./chat";
 
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
+import { startIslandPublisher } from "./island/publish";
 import { isAskRuntime } from "./chat/runtime";
 import { t } from "./i18n";
 import { currentChatTheme, readStoredChatTheme, systemChatTheme } from "./chat/theme";
@@ -308,4 +309,58 @@ export function bootChat(): void {
   void refreshWiredProvider();
   autoResizePrompt();
   promptEl.focus();
+  startIslandPublisher(promptEl, () => ({
+    activeId: chatState.store?.activeId ?? "",
+    attentionId: chatState.runningChatSessionId || chatState.store?.activeId || "",
+    sessions: (chatState.store?.sessions ?? []).map((session) => ({
+      id: session.id,
+      runtime: session.runtime,
+      title: session.title,
+      updatedAt: session.updatedAt,
+      messages: session.messages ?? [],
+    })),
+  }));
+  void listen<string>("island-open-session", (event) => {
+    const id = event.payload;
+    if (!id || !chatState.sessions?.switchSession) return;
+    chatState.sessions.switchSession(id);
+  });
+  void listen<{ sessionId?: string; text?: string }>("island-send-text", (event) => {
+    const text = event.payload?.text?.trim() ?? "";
+    const sessionId = event.payload?.sessionId || chatState.store?.activeId || "";
+    const report = (status: "sent" | "queued" | "busy" | "failed") => {
+      void emit("island-send-result", { sessionId, status }).catch(() => {});
+    };
+    if (!text || !chatState.send || !sessionId) {
+      report("failed");
+      return;
+    }
+    const draft = { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] };
+    if (chatState.busy) {
+      if (chatState.runningChatSessionId && chatState.runningChatSessionId !== sessionId) {
+        report("busy");
+        return;
+      }
+      void chatState.send.sendAsk({ draft });
+      report("queued");
+      return;
+    }
+    // The run takes the session's own assistant, so it has to be the active one
+    // when it starts. Put the person's view back once it is running.
+    const viewing = chatState.store?.activeId ?? "";
+    chatState.sessions?.switchSession(sessionId, false);
+    void chatState.send.sendAsk({ draft });
+    report("sent");
+    if (viewing && viewing !== sessionId) {
+      const started = Date.now();
+      const restore = () => {
+        if (chatState.runningChatSessionId === sessionId) {
+          chatState.sessions?.switchSession(viewing, false);
+          return;
+        }
+        if (Date.now() - started < 3000) window.setTimeout(restore, 50);
+      };
+      window.setTimeout(restore, 50);
+    }
+  });
 }
