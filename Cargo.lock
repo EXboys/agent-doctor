@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-core"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-desktop"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-mcp"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-ocr"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "objc2",
  "objc2-foundation",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "agent-doctor-voice"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "block2",
  "objc2",
