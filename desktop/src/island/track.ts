@@ -231,6 +231,8 @@ export type IslandRow = {
   at: number;
   current: boolean;
   needsYou: boolean;
+  /** This conversation is the one turn that is running. */
+  working: boolean;
 };
 
 function agentOf(runtime: string): { name: string; badge: string } {
@@ -265,10 +267,11 @@ export function buildIslandRows(
   sessions: IslandSessionSource[],
   activeId: string,
   live: { sent: string; spoken: string } = { sent: "", spoken: "" },
-  opts: { now?: number; needsYouId?: string } = {},
+  opts: { now?: number; needsYouId?: string; workingId?: string } = {},
 ): IslandRow[] {
   const now = opts.now ?? Date.now();
   const needsYouId = opts.needsYouId ?? "";
+  const workingId = opts.workingId ?? "";
   return [...sessions]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 12)
@@ -285,6 +288,7 @@ export function buildIslandRows(
       }
       const agent = agentOf(session.runtime);
       const needsYou = Boolean(needsYouId) && session.id === needsYouId;
+      const working = !needsYou && Boolean(workingId) && session.id === workingId;
       const done = needsYou ? "" : leadSentence(spoken);
       return {
         id: session.id,
@@ -297,14 +301,21 @@ export function buildIslandRows(
         at: session.updatedAt,
         current,
         needsYou,
+        working,
       };
     })
     .filter((row) => {
-      if (row.current || row.needsYou) return true;
+      if (row.current || row.needsYou || row.working) return true;
       if (!row.sent && !row.spoken) return false;
       return now - row.at < QUIET_MS;
     })
-    .sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.at - a.at);
+    .sort((a, b) => rowRank(b) - rowRank(a) || b.at - a.at);
+}
+
+function rowRank(row: IslandRow): number {
+  if (row.needsYou) return 2;
+  if (row.working) return 1;
+  return 0;
 }
 
 function chipTitle(track: IslandTrack, status: string, current: IslandRow | undefined): string {

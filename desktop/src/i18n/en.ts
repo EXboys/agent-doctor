@@ -1227,6 +1227,8 @@ export const en = {
     "island.browser": "Looking at a page",
     "island.idle": "Ready",
     "island.working": "Still going",
+    "island.stateWorking": "Working",
+    "island.stateWaiting": "Waiting for you",
     "island.needsConfirm": "Needs your OK",
     "island.needsReply": "Needs a short reply",
     "island.needsAnswer": "Needs an answer",

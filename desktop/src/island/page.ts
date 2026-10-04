@@ -382,6 +382,15 @@ async function sendFollowUp(sessionId: string, text: string): Promise<void> {
   }
 }
 
+function appendState(meta: HTMLElement, row: IslandFeedRow): void {
+  if (!row.needsYou && !row.working) return;
+  const pill = document.createElement("span");
+  pill.className = "island-state";
+  pill.dataset.state = row.needsYou ? "waiting" : "working";
+  pill.textContent = row.needsYou ? t("island.stateWaiting") : t("island.stateWorking");
+  meta.prepend(pill);
+}
+
 function ago(at: number): string {
   const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
   if (minutes < 1) return t("island.justNow");
@@ -565,6 +574,7 @@ function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPen
   badge.dataset.runtime = row.runtime;
   badge.textContent = row.badge;
   meta.append(when, badge);
+  appendState(meta, row);
   head.append(avatar, copy, meta);
 
   const { kicker, title } = askCopy(pending);
@@ -623,6 +633,7 @@ function renderFeed(rows: IslandFeedRow[]): void {
     const item = document.createElement("article");
     item.className = "island-row";
     if (row.needsYou) item.classList.add("is-needs-you");
+    if (row.working) item.classList.add("is-working");
     if (row.current) item.classList.add("is-current");
     if (row.id === openRowId) item.classList.add("is-open");
     item.dataset.id = row.id;
@@ -676,6 +687,7 @@ function renderFeed(rows: IslandFeedRow[]): void {
     badge.dataset.runtime = row.runtime;
     badge.textContent = row.badge;
     meta.append(when, badge);
+    appendState(meta, row);
     head.append(avatar, copy, meta);
     head.addEventListener("click", () => openRow(row.id));
     hoverRow(item, row.id);
@@ -772,7 +784,11 @@ function boot(): void {
   root?.addEventListener("mousemove", () => setHover(true));
   root?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("input, .island-row-body")) event.preventDefault();
+    // Cancelling mousedown also cancels the click, so buttons such as
+    // 「查看更多」 would never run.
+    if (!target?.closest("input, textarea, button, a, .island-row-body")) {
+      event.preventDefault();
+    }
     setHover(true, true);
   });
   root?.addEventListener("mouseleave", () => setHover(false));

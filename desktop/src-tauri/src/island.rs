@@ -1056,7 +1056,7 @@ fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
 
 fn restore_conversation(app: &AppHandle, pin: bool) {
     release_island_keyboard(app);
-    let show_main = {
+    {
         let host = app.state::<IslandHost>();
         let mut guard = host.inner.lock().expect("island");
         if pin {
@@ -1065,16 +1065,36 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
             guard.hold_open = true;
         }
         guard.hovering = false;
-        let show_main = guard.parked_main;
+        guard.opened = false;
+        guard.reading = false;
+        guard.folded = true;
         guard.parked_ask = false;
         guard.parked_main = false;
-        show_main
-    };
-    if show_main {
-        reveal_window(app, "main", false);
     }
-    reveal_window(app, "ask", true);
+    // The notch sits above every window and does not activate the app, so the
+    // conversation has to be brought forward on purpose. Use the same placement
+    // as a normal open; a plain show keeps the smaller size from first create.
+    activate_app();
+    crate::windows::present_ask_window(app);
     apply(app);
+}
+
+fn activate_app() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
+
+        let Some(cls) = AnyClass::get(c"NSApplication") else {
+            return;
+        };
+        unsafe {
+            let app: *mut AnyObject = msg_send![cls, sharedApplication];
+            if !app.is_null() {
+                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+            }
+        }
+    }
 }
 
 #[tauri::command]

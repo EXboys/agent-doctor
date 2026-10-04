@@ -492,6 +492,25 @@ fn apply_ask_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
     let _ = window.eval(&script);
 }
 
+/// Show Ask beside the main window at the usual size, without reloading the page.
+/// Always places it, including when it is already visible at the smaller create size.
+pub(crate) fn present_ask_window(app: &AppHandle) {
+    let Ok(window) = ensure_ask_window(app, "claude-code") else {
+        return;
+    };
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+    }
+    let _ = window.set_skip_taskbar(false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    layout_main_and_ask_side_by_side(app);
+    // Second pass after the title bar height is known.
+    layout_main_and_ask_side_by_side(app);
+    let _ = window.set_focus();
+}
+
 pub(crate) fn open_or_focus_ask_window(
     app: &AppHandle,
     runtime: Option<&str>,

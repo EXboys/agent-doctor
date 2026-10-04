@@ -51,11 +51,15 @@ export function startIslandPublisher(
   const publishNow = () => {
     const composing = Date.now() < typingUntil;
     const feed = readFeed?.() ?? { activeId: "", attentionId: "", sessions: [] };
+    const runningId = feed.attentionId || feed.activeId;
     const rows = buildIslandRows(
       feed.sessions,
       feed.activeId,
       { sent: track.sent, spoken: track.spoken },
-      { needsYouId: track.pending ? feed.attentionId || feed.activeId : "" },
+      {
+        needsYouId: track.pending ? track.pending.sessionId || runningId : "",
+        workingId: track.active && !track.pending ? runningId : "",
+      },
     );
     void publishIslandSnapshot(islandSnapshot(track, labels(), composing, rows)).catch(() => {});
     window.clearTimeout(typingTimer);

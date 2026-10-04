@@ -251,6 +251,24 @@ body {
 .island-badge[data-runtime="hermes"] { background: #243028; color: #b7e0b4; }
 .island-badge[data-runtime="openclaw"] { background: #243038; color: #9fd4ea; }
 
+.island-state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.island-state[data-state="working"] {
+  background: rgba(127, 168, 255, 0.18);
+  color: #b9d0ff;
+}
+
+.island-state[data-state="waiting"] {
+  background: rgba(255, 186, 92, 0.2);
+  color: #ffd59a;
+}
+
 .island-when {
   flex: none;
   padding: 2px 8px;

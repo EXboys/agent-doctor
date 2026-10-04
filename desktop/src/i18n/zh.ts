@@ -1229,6 +1229,8 @@ export const zh = {
     "island.browser": "正在看网页",
     "island.idle": "就绪",
     "island.working": "还在进行",
+    "island.stateWorking": "正在做",
+    "island.stateWaiting": "在等你",
     "island.needsConfirm": "要你确认",
     "island.needsReply": "要你回一句",
     "island.needsAnswer": "要你回答",
