@@ -432,13 +432,16 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
             continue;
         };
         let anchor = top_anchor(monitor);
-        let (width, height, x, y) = if chrome == Chrome::Pill {
+        // The camera housing cannot show anything. The black fills that band so
+        // the card looks like the notch grew; the inset keeps words below it.
+        let (width, height, x, y, notch_inset) = if chrome == Chrome::Pill {
             if let Some(anchor) = anchor {
                 (
                     anchor.notch_w,
                     anchor.menu_h - 8.0 + CHIP_HEIGHT,
                     screen_x + anchor.notch_x,
                     screen_y,
+                    0.0,
                 )
             } else {
                 (
@@ -446,16 +449,23 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
                     CHIP_HEIGHT,
                     screen_x + (screen_w - CHIP_WIDTH) / 2.0,
                     screen_y + 22.0,
+                    0.0,
                 )
             }
         } else {
             let width = PEEK_WIDTH.min((screen_w - 32.0).max(320.0));
-            (
-                width,
-                peek_height,
-                screen_x + (screen_w - width) / 2.0,
-                screen_y,
-            )
+            let x = screen_x + (screen_w - width) / 2.0;
+            if let Some(anchor) = anchor {
+                (
+                    width,
+                    peek_height + anchor.menu_h,
+                    x,
+                    screen_y,
+                    anchor.menu_h,
+                )
+            } else {
+                (width, peek_height, x, screen_y + 22.0, 0.0)
+            }
         };
         let place_key = (
             x.round() as i32,
@@ -478,6 +488,7 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
             let mut guard = host.inner.lock().expect("island");
             guard.placed.insert(label, place_key);
         }
+        set_notch_inset(&window, notch_inset);
     }
     for window in island_windows(app) {
         if !keep.iter().any(|label| label == window.label()) {
@@ -692,6 +703,13 @@ fn ensure_island_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWi
         })
         .ok()?;
     Some(window)
+}
+
+fn set_notch_inset(window: &tauri::WebviewWindow, inset: f64) {
+    let px = inset.round().max(0.0) as i32;
+    let _ = window.eval(&format!(
+        "document.documentElement.style.setProperty('--island-notch','{px}px')"
+    ));
 }
 
 fn place_island_frame(window: &tauri::WebviewWindow, x: f64, y: f64, width: f64, height: f64) {
