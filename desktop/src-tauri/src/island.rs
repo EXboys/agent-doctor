@@ -548,7 +548,7 @@ struct TopAnchor {
 fn top_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
     #[cfg(target_os = "macos")]
     {
-        return menu_anchor(monitor);
+        menu_anchor(monitor)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -618,9 +618,9 @@ fn screen_top(monitor: &tauri::Monitor) -> Option<(f64, f64, f64)> {
 fn screen_signature(app: &AppHandle) -> Vec<(i32, i32)> {
     monitors_for_island(app)
         .iter()
-        .filter_map(|monitor| {
+        .map(|monitor| {
             let work = monitor.work_area();
-            Some((work.position.x, work.position.y))
+            (work.position.x, work.position.y)
         })
         .collect()
 }
@@ -707,7 +707,7 @@ fn ensure_island_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWi
 
 fn set_notch_inset(window: &tauri::WebviewWindow, inset: f64) {
     let px = inset.round().max(0.0) as i32;
-    let _ = window.eval(&format!(
+    let _ = window.eval(format!(
         "document.documentElement.style.setProperty('--island-notch','{px}px')"
     ));
 }
