@@ -41,7 +41,9 @@ function setHover(hovering: boolean, sticky = false): void {
   }
   hoverTimer = window.setTimeout(() => {
     const field = document.activeElement;
-    const typing = field instanceof HTMLInputElement && field.value.trim() !== "";
+    const typing =
+      (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+      field.value.trim() !== "";
     if (!typing && field instanceof HTMLElement) field.blur();
     pointerInside = false;
     window.clearTimeout(rowHoverTimer);
@@ -50,10 +52,11 @@ function setHover(hovering: boolean, sticky = false): void {
 }
 
 function showSendResult(status: string): void {
-  const field = actionsEl?.querySelector<HTMLInputElement>(".island-reply");
+  const field = actionsEl?.querySelector<HTMLInputElement | HTMLTextAreaElement>(".island-reply");
   if (status === "sent" || status === "queued") {
     if (field) {
       field.value = "";
+      if (field instanceof HTMLTextAreaElement) fitReplyField(field);
       field.closest(".island-compose")?.classList.remove("is-ready");
     }
   }
@@ -86,7 +89,11 @@ async function resolve(pending: IslandPending, allow: boolean, text?: string): P
   if (sending || !actionsEl) return;
   sending = true;
   if (errorEl) errorEl.hidden = true;
-  const controls = [...actionsEl.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button, input")];
+  const controls = [
+    ...actionsEl.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>(
+      "button, input, textarea",
+    ),
+  ];
   controls.forEach((el) => {
     el.disabled = true;
   });
@@ -146,16 +153,26 @@ function questionsOf(pending: IslandPending): IslandQuestion[] {
   }
 }
 
+const REPLY_MAX_HEIGHT = 120;
+
+function fitReplyField(field: HTMLTextAreaElement): void {
+  field.style.height = "auto";
+  const next = Math.min(field.scrollHeight, REPLY_MAX_HEIGHT);
+  field.style.height = `${next}px`;
+  field.closest(".island-compose")?.classList.toggle("is-multiline", next > 40);
+}
+
 function appendReplyField(
   parent: HTMLElement,
   placeholder: string,
   secret: boolean,
   onSend: (text: string) => void,
-): HTMLInputElement {
+): HTMLInputElement | HTMLTextAreaElement {
   const compose = document.createElement("div");
   compose.className = "island-compose";
-  const field = document.createElement("input");
-  field.type = secret ? "password" : "text";
+  const field = secret ? document.createElement("input") : document.createElement("textarea");
+  if (field instanceof HTMLInputElement) field.type = "password";
+  else field.rows = 1;
   field.className = "island-reply";
   field.placeholder = placeholder;
   field.autocomplete = "off";
@@ -165,6 +182,7 @@ function appendReplyField(
     void islandClaimKeyboard().finally(() => field.focus());
   });
   field.addEventListener("input", () => {
+    if (field instanceof HTMLTextAreaElement) fitReplyField(field);
     compose.classList.toggle("is-ready", field.value.trim().length > 0);
   });
   const send = () => {
@@ -173,7 +191,8 @@ function appendReplyField(
     onSend(text);
   };
   field.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.isComposing) return;
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key !== "Enter" || event.isComposing || event.shiftKey) return;
     event.preventDefault();
     send();
   });
@@ -366,7 +385,11 @@ async function sendFollowUp(sessionId: string, text: string): Promise<void> {
   if (sending || !actionsEl) return;
   sending = true;
   if (errorEl) errorEl.hidden = true;
-  const controls = [...actionsEl.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button, input")];
+  const controls = [
+    ...actionsEl.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>(
+      "button, input, textarea",
+    ),
+  ];
   controls.forEach((el) => {
     el.disabled = true;
   });
