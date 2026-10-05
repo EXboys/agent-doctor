@@ -1,9 +1,10 @@
 
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { formatProviderFailure, withProviderFailure } from "../friendly-error";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
 import type {
@@ -11,9 +12,18 @@ import type {
   PersonalProvidersDocument,
   PersonalProviderStatus,
   ProviderProtocol,
+  TeamupsAccountStatus,
 } from "../types";
 import type { PresetsApi } from "./presets";
-import { getPersonalProviderStatus, listPersonalProviders, verifyPersonalProvider as verifyPersonalProviderCommand, upsertPersonalProvider as upsertPersonalProviderCommand, activatePersonalProvider, deletePersonalProvider } from "../ipc";
+import {
+  activatePersonalProvider,
+  deletePersonalProvider,
+  getPersonalProviderStatus,
+  listPersonalProviders,
+  teamupsAccountStatus,
+  upsertPersonalProvider as upsertPersonalProviderCommand,
+  verifyPersonalProvider as verifyPersonalProviderCommand,
+} from "../ipc";
 
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -49,6 +59,32 @@ const RUNTIME_FOOTNOTE_LABELS: Record<string, string> = {
   codex: "Codex",
   "deepseek-harness": "DeepSeek",
 };
+
+const OFFICIAL_PROVIDER_ID = "teamups-official";
+let officialAccount: TeamupsAccountStatus | null = null;
+
+function formatOfficialTokens(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  return new Intl.NumberFormat(getLocale() === "zh" ? "zh-CN" : "en", {
+    notation: tokens >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(Math.floor(tokens));
+}
+
+function officialDescription(): string {
+  const official = officialAccount?.official;
+  if (official?.via === "member") {
+    return t("personal.officialMember", {
+      remaining: formatOfficialTokens(official.tokens_remaining),
+      date: official.member_until?.slice(0, 10) || t("personal.officialUnknownDate"),
+    });
+  }
+  if (official?.via === "trial") {
+    return t("personal.officialTrial", { count: String(official.trial_calls_left) });
+  }
+  if (officialAccount?.signed_in) return t("personal.officialNeedsMembership");
+  return t("personal.officialNeedsLogin");
+}
 
 export type PersonalDeps = {
   presets: PresetsApi;
@@ -109,13 +145,16 @@ export function createPersonalController(deps: PersonalDeps) {
     const personalModeActive =
       isPersonalEdition() || appState.lastModeStatus?.mode === "personal";
     for (const item of doc.providers) {
+      const officialProvider = item.id === OFFICIAL_PROVIDER_ID;
       const routingActive = item.active && personalModeActive;
       const presetId = presets.matchPresetId(item.name, item.url, item.protocol);
       const brand =
-        presetId !== "custom"
+        officialProvider
+          ? t("personal.officialName")
+          : presetId !== "custom"
           ? PROVIDER_PRESETS[presetId]?.chip ?? PROVIDER_PRESETS[presetId]?.name ?? item.name
           : item.name.trim() || t("personal.presetCustom");
-      const titleText = item.name.trim() || brand;
+      const titleText = officialProvider ? t("personal.officialName") : item.name.trim() || brand;
 
       const li = document.createElement("li");
       li.className = `provider-item${routingActive ? " is-active" : ""}`;
@@ -145,9 +184,14 @@ export function createPersonalController(deps: PersonalDeps) {
       const showUse = !item.active;
       const desc = document.createElement("p");
       desc.className = "provider-item-desc";
-      desc.textContent = showUse ? t("personal.itemIdleDesc") : t("personal.itemActiveDesc");
+      desc.textContent = officialProvider
+        ? officialDescription()
+        : showUse
+          ? t("personal.itemIdleDesc")
+          : t("personal.itemActiveDesc");
 
-      main.append(kicker, title, meta, desc);
+      if (officialProvider) main.append(title, meta, desc);
+      else main.append(kicker, title, meta, desc);
 
       const actions = document.createElement("div");
       actions.className = "provider-item-actions";
@@ -162,21 +206,34 @@ export function createPersonalController(deps: PersonalDeps) {
         actions.appendChild(activateBtn);
       }
 
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "btn-secondary btn-compact";
-      editBtn.dataset.action = "edit-provider";
-      editBtn.dataset.providerId = item.id;
-      editBtn.textContent = t("personal.edit");
-      actions.appendChild(editBtn);
+      if (officialProvider) {
+        const membershipBtn = document.createElement("button");
+        membershipBtn.type = "button";
+        membershipBtn.className = "btn-secondary btn-compact";
+        membershipBtn.dataset.action = "official-membership";
+        membershipBtn.dataset.providerId = item.id;
+        membershipBtn.textContent =
+          officialAccount?.official?.via === "member"
+            ? t("personal.officialManage")
+            : t("personal.officialOpen");
+        actions.appendChild(membershipBtn);
+      } else {
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "btn-secondary btn-compact";
+        editBtn.dataset.action = "edit-provider";
+        editBtn.dataset.providerId = item.id;
+        editBtn.textContent = t("personal.edit");
+        actions.appendChild(editBtn);
 
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "btn-ghost btn-compact";
-      deleteBtn.dataset.action = "delete-provider";
-      deleteBtn.dataset.providerId = item.id;
-      deleteBtn.textContent = t("personal.delete");
-      actions.appendChild(deleteBtn);
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "btn-ghost btn-compact";
+        deleteBtn.dataset.action = "delete-provider";
+        deleteBtn.dataset.providerId = item.id;
+        deleteBtn.textContent = t("personal.delete");
+        actions.appendChild(deleteBtn);
+      }
 
       li.append(main, actions);
       personalListEl.appendChild(li);
@@ -185,10 +242,12 @@ export function createPersonalController(deps: PersonalDeps) {
 
   async function loadPersonalProviderStatus() {
     try {
-      const [status, doc] = await Promise.all([
+      const [status, doc, account] = await Promise.all([
         getPersonalProviderStatus(),
         listPersonalProviders(),
+        teamupsAccountStatus().catch(() => null),
       ]);
+      officialAccount = account;
       appState.personalProvidersDoc = doc;
       renderPersonalProviderStatus(status);
       renderPersonalProviderList(doc);
@@ -506,6 +565,11 @@ export function createPersonalController(deps: PersonalDeps) {
       }
       if (action === "activate-provider") {
         void activateProviderById(id);
+        return;
+      }
+      if (action === "official-membership") {
+        const base = officialAccount?.base_url?.replace(/\/+$/, "") || "https://teamups.vip";
+        void openUrl(`${base}/membership`);
         return;
       }
       if (action === "edit-provider") {

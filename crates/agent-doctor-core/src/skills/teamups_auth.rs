@@ -40,6 +40,25 @@ pub struct TeamupsAccountStatus {
     pub pack_count: u32,
     #[serde(default)]
     pub packs: Vec<String>,
+    #[serde(default)]
+    pub official: Option<TeamupsOfficialStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamupsOfficialStatus {
+    pub active: bool,
+    pub via: String,
+    #[serde(default, alias = "trialCallsLeft")]
+    pub trial_calls_left: u32,
+    #[serde(alias = "memberUntil")]
+    pub member_until: Option<String>,
+    #[serde(default, alias = "tokenCap")]
+    pub token_cap: u64,
+    #[serde(default, alias = "tokensUsed")]
+    pub tokens_used: u64,
+    #[serde(default, alias = "tokensRemaining")]
+    pub tokens_remaining: u64,
+    pub period: Option<String>,
 }
 
 fn mall_base_url() -> Result<String> {
@@ -57,6 +76,22 @@ fn mall_base_url() -> Result<String> {
         }
     }
     Ok(default_teamups_base_url())
+}
+
+/// Local credentials used to keep the built-in TeamUps model service present
+/// for people who signed in before that service was introduced.
+pub(crate) fn saved_teamups_provider_credentials() -> Result<Option<(String, String)>> {
+    let store = open_settings_store()?;
+    let license = store
+        .get_teamups_license()?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    Ok(license.map(|license| {
+        (
+            mall_base_url().unwrap_or_else(|_| default_teamups_base_url()),
+            license,
+        )
+    }))
 }
 
 /// Error bodies from the site's HTML 404 page are useless to show; keep JSON/text short.
@@ -211,6 +246,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
             signed_in: false,
             pack_count: 0,
             packs: Vec::new(),
+            official: None,
         });
     };
 
@@ -230,6 +266,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
             signed_in: false,
             pack_count: 0,
             packs: Vec::new(),
+            official: None,
         });
     }
     if !status.is_success() {
@@ -248,11 +285,16 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let official = body
+        .get("official")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok());
     Ok(TeamupsAccountStatus {
         base_url,
         signed_in: true,
         pack_count: packs.len() as u32,
         packs,
+        official,
     })
 }
 
@@ -260,4 +302,29 @@ pub fn sign_out_teamups() -> Result<TeamupsAccountStatus> {
     let store = open_settings_store()?;
     store.clear_teamups_license()?;
     teamups_account_status()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TeamupsOfficialStatus;
+
+    #[test]
+    fn official_status_reads_api_camel_case_and_serializes_for_desktop() {
+        let status: TeamupsOfficialStatus = serde_json::from_value(serde_json::json!({
+            "active": true,
+            "via": "member",
+            "trialCallsLeft": 2,
+            "memberUntil": "2026-11-05T00:00:00.000Z",
+            "tokenCap": 6_000_000,
+            "tokensUsed": 125,
+            "tokensRemaining": 5_999_875,
+            "period": "2026-10"
+        }))
+        .expect("official status should deserialize");
+        assert_eq!(status.token_cap, 6_000_000);
+
+        let desktop = serde_json::to_value(status).expect("official status should serialize");
+        assert_eq!(desktop["tokens_remaining"], 5_999_875);
+        assert!(desktop.get("tokensRemaining").is_none());
+    }
 }

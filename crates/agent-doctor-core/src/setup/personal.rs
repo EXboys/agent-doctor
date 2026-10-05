@@ -27,6 +27,8 @@ pub const ACTIVE_PROVIDER_ID_ENV: &str = "AGENT_DOCTOR_PROVIDER_ID";
 pub const PROVIDER_PROTOCOL_ENV: &str = "AGENT_DOCTOR_PROVIDER_PROTOCOL";
 pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
+pub const TEAMUPS_OFFICIAL_PROVIDER_ID: &str = "teamups-official";
+const TEAMUPS_OFFICIAL_PROVIDER_NAME: &str = "官方";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalProviderOptions {
@@ -141,6 +143,9 @@ pub fn normalize_personal_gateway_url(url: &str) -> Result<String> {
 }
 
 pub fn list_personal_providers() -> Result<PersonalProvidersDocument> {
+    if let Ok(Some((base_url, license))) = crate::skills::saved_teamups_provider_credentials() {
+        let _ = ensure_teamups_official_provider(&base_url, &license);
+    }
     let path = personal_providers_path().context("could not resolve config directory")?;
     let mut store = load_store(&path)?;
     migrate_from_profile_if_empty(&mut store, &path)?;
@@ -214,9 +219,7 @@ pub fn upsert_personal_provider(
     Ok(document_from_store(&store, &path))
 }
 
-pub const TEAMUPS_OFFICIAL_PROVIDER_ID: &str = "teamups-official";
-
-/// 登录后写入「TeamUps 官方」。已有其他服务商时不抢当前选中项。
+/// 登录后写入「官方」。已有其他服务商时不抢当前选中项。
 pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result<()> {
     if crate::edition::product_edition() != crate::edition::ProductEdition::Personal {
         return Ok(());
@@ -238,7 +241,7 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
         .iter_mut()
         .find(|p| p.id == TEAMUPS_OFFICIAL_PROVIDER_ID)
     {
-        entry.name = "TeamUps 官方".to_string();
+        entry.name = TEAMUPS_OFFICIAL_PROVIDER_NAME.to_string();
         entry.url = url;
         entry.api_key = license.to_string();
         entry.model = "deepseek-chat".to_string();
@@ -248,7 +251,7 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
             0,
             PersonalProviderEntry {
                 id: TEAMUPS_OFFICIAL_PROVIDER_ID.to_string(),
-                name: "TeamUps 官方".to_string(),
+                name: TEAMUPS_OFFICIAL_PROVIDER_NAME.to_string(),
                 url,
                 api_key: license.to_string(),
                 model: "deepseek-chat".to_string(),

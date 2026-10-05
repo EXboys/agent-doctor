@@ -31,7 +31,8 @@ Design and copy are for that person.
 | **Entry** | TeamUps / consumer desktop + CLI |
 | **Wiring** | Personal provider only (no Evotown / team tab) |
 | **Value** | When agents break: diagnose, repair, keep projects isolated |
-| **Do not** | Become a personal proxy marketplace / usage dashboard product |
+| **Built-in service** | “Official” membership may show the remaining included tokens and expiry date needed to understand whether the service is available |
+| **Do not** | Become a multi-provider proxy marketplace or a general-purpose usage analytics dashboard |
 
 Personal provider means: wire an endpoint + key + model, verify, write runtime configs, and repair schema/gateway wiring. **URL/model templates** (DeepSeek, OpenRouter, …) are fine as fill-in helpers.
 

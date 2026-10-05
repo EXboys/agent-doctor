@@ -219,6 +219,16 @@ export interface TeamupsAccountStatus {
   signed_in: boolean;
   pack_count: number;
   packs: string[];
+  official?: {
+    active: boolean;
+    via: "trial" | "member" | "none";
+    trial_calls_left: number;
+    member_until: string | null;
+    token_cap: number;
+    tokens_used: number;
+    tokens_remaining: number;
+    period: string | null;
+  } | null;
 }
 
 export interface TeamupsLoginStart {

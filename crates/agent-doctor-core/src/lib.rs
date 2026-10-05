@@ -145,7 +145,7 @@ pub use skills::{
     save_skills_source_override, sign_out_teamups, start_teamups_login, teamups_account_status,
     LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsAccountStatus,
     TeamupsCatalogItem, TeamupsClient, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
-    TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,
+    TeamupsMallCatalog, TeamupsOfficialStatus, TeamupsPackManifest, TeamupsSkillEntry,
 };
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,

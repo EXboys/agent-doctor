@@ -18,9 +18,11 @@ pub use sync_router::{execute_skills_sync, SkillsSyncOptions};
 pub use teamups::{
     TeamupsCatalogItem, TeamupsClient, TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,
 };
+pub(crate) use teamups_auth::saved_teamups_provider_credentials;
 pub use teamups_auth::{
     poll_teamups_login, sign_out_teamups, start_teamups_login, teamups_account_status,
     TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
+    TeamupsOfficialStatus,
 };
 
 use anyhow::Result;
