@@ -16,14 +16,14 @@ pub use mode::{
     MODE_TEAM, MODE_UNSET,
 };
 pub use personal::{
-    activate_personal_provider, delete_personal_provider, execute_personal_provider_setup,
-    list_personal_providers, load_active_personal_provider, load_personal_provider_status,
-    normalize_personal_gateway_url, normalize_protocol, upsert_personal_provider,
-    verify_personal_provider, verify_personal_provider_with_protocol, PersonalProviderEntry,
-    PersonalProviderListItem, PersonalProviderOptions, PersonalProviderSetupReport,
-    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument,
-    UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
-    PROVIDER_PROTOCOL_ENV,
+    activate_personal_provider, delete_personal_provider, ensure_teamups_official_provider,
+    execute_personal_provider_setup, list_personal_providers, load_active_personal_provider,
+    load_personal_provider_status, normalize_personal_gateway_url, normalize_protocol,
+    upsert_personal_provider, verify_personal_provider, verify_personal_provider_with_protocol,
+    PersonalProviderEntry, PersonalProviderListItem, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
+    PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
+    PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
 };
 pub use pipeline::{
     anthropic_gateway_for_provider_url, apply_mode_switch, effector_label, probe_endpoint_bundle,

@@ -188,6 +188,7 @@ pub fn poll_teamups_login(device_code: &str) -> Result<TeamupsLoginPoll> {
                 .unwrap_or_default();
             let store = open_settings_store()?;
             store.set_teamups_license(license)?;
+            let _ = crate::setup::ensure_teamups_official_provider(&base, license);
             Ok(TeamupsLoginPoll {
                 status: TeamupsLoginPollStatus::Approved,
                 packs,

@@ -214,6 +214,58 @@ pub fn upsert_personal_provider(
     Ok(document_from_store(&store, &path))
 }
 
+pub const TEAMUPS_OFFICIAL_PROVIDER_ID: &str = "teamups-official";
+
+/// 登录后写入「TeamUps 官方」。已有其他服务商时不抢当前选中项。
+pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result<()> {
+    if crate::edition::product_edition() != crate::edition::ProductEdition::Personal {
+        return Ok(());
+    }
+    let license = license.trim();
+    if license.is_empty() {
+        bail!("license must not be empty");
+    }
+    let url = normalize_personal_gateway_url(&format!(
+        "{}/api/v1/official",
+        base_url.trim().trim_end_matches('/')
+    ))?;
+    let path = personal_providers_path().context("could not resolve config directory")?;
+    let mut store = load_store(&path)?;
+    migrate_from_profile_if_empty(&mut store, &path)?;
+    let make_active = store.active_id.is_none();
+    if let Some(entry) = store
+        .providers
+        .iter_mut()
+        .find(|p| p.id == TEAMUPS_OFFICIAL_PROVIDER_ID)
+    {
+        entry.name = "TeamUps 官方".to_string();
+        entry.url = url;
+        entry.api_key = license.to_string();
+        entry.model = "deepseek-chat".to_string();
+        entry.protocol = PROTOCOL_OPENAI.to_string();
+    } else {
+        store.providers.insert(
+            0,
+            PersonalProviderEntry {
+                id: TEAMUPS_OFFICIAL_PROVIDER_ID.to_string(),
+                name: "TeamUps 官方".to_string(),
+                url,
+                api_key: license.to_string(),
+                model: "deepseek-chat".to_string(),
+                protocol: PROTOCOL_OPENAI.to_string(),
+            },
+        );
+    }
+    if make_active {
+        store.active_id = Some(TEAMUPS_OFFICIAL_PROVIDER_ID.to_string());
+    }
+    save_store(&path, &store)?;
+    if make_active {
+        let _ = activate_personal_provider(TEAMUPS_OFFICIAL_PROVIDER_ID);
+    }
+    Ok(())
+}
+
 pub fn delete_personal_provider(id: &str) -> Result<PersonalProvidersDocument> {
     let path = personal_providers_path().context("could not resolve config directory")?;
     let mut store = load_store(&path)?;
