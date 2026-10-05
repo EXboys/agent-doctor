@@ -815,21 +815,30 @@ fn is_openclaw_stderr_noise(line: &str) -> bool {
 }
 
 fn value_to_text(value: &Value) -> Option<String> {
+    value_to_text_depth(value, 0)
+}
+
+fn value_to_text_depth(value: &Value, depth: usize) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(s.to_string());
+    }
+    if depth >= 4 {
+        return None;
+    }
+    if let Some(obj) = value.as_object() {
+        for key in ["text", "content", "reply"] {
+            if let Some(text) = obj.get(key).and_then(|v| value_to_text_depth(v, depth + 1)) {
+                if !text.trim().is_empty() {
+                    return Some(text);
+                }
+            }
+        }
     }
     if let Some(arr) = value.as_array() {
         let parts: Vec<String> = arr
             .iter()
-            .filter_map(|item| {
-                if let Some(s) = item.as_str() {
-                    Some(s.to_string())
-                } else {
-                    item.get("text")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                }
-            })
+            .filter_map(|item| value_to_text_depth(item, depth + 1))
+            .filter(|text| !text.trim().is_empty())
             .collect();
         if !parts.is_empty() {
             return Some(parts.join("\n"));
@@ -869,6 +878,12 @@ Bind: loopback); resolved command secrets locally.";
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         path
+    }
+
+    #[test]
+    fn reads_reply_nested_in_a_message_object() {
+        let value = serde_json::json!({"message": {"content": [{"text": "嵌套回复"}]}});
+        assert_eq!(extract_openclaw_reply(&value).as_deref(), Some("嵌套回复"));
     }
 
     #[test]

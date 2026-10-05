@@ -39,6 +39,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ inputs.release_tag }}"
+          case "$TAG" in
+            *-beta.*)
+              echo "::error::$TAG is a beta tag. latest.json is stable-only; beta installs update to the next stable release."
+              exit 1
+              ;;
+          esac
           LATEST="${{ steps.edition.outputs.latest_json }}"
           gh release download "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \

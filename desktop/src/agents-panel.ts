@@ -459,12 +459,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
 
-    if (action === "open-agent-catalog") {
-      void openResourcesWindow({ section: "agents" });
-      return;
-    }
-    if (action === "open-resources-skills") {
-      void openResourcesWindow({ section: "skills" });
+    if (action === "open-agent-catalog" || action === "open-resources-skills") {
+      const section = action === "open-agent-catalog" ? "agents" : "skills";
+      void openResourcesWindow({ section }).catch((error) => {
+        setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
+      });
       return;
     }
 

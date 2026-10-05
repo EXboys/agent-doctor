@@ -1,6 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { PromptSessionEvent } from "../chat/types";
 import { t } from "../i18n";
+import { normalizePlanItems, type PlanStep } from "../plan";
 import { publishIslandSnapshot } from "../ipc";
 import {
   buildIslandRows,
@@ -42,6 +43,7 @@ export function startIslandPublisher(
   let typingUntil = 0;
   let publishTimer = 0;
   let typingTimer = 0;
+  let livePlan: PlanStep[] | null = null;
 
   rememberSent = (text) => {
     track = rememberIslandSent(track, text);
@@ -57,10 +59,15 @@ export function startIslandPublisher(
       feed.activeId,
       { sent: track.sent, spoken: track.spoken },
       {
-        needsYouId: track.pending ? track.pending.sessionId || runningId : "",
+        // pending.sessionId is the agent's own id, not the conversation id the rows use.
+        needsYouId: track.pending ? runningId || track.pending.sessionId : "",
         workingId: track.active && !track.pending ? runningId : "",
       },
     );
+    if (livePlan && runningId) {
+      const row = rows.find((item) => item.id === runningId);
+      if (row) row.plan = livePlan.length ? livePlan : undefined;
+    }
     void publishIslandSnapshot(islandSnapshot(track, labels(), composing, rows)).catch(() => {});
     window.clearTimeout(typingTimer);
     if (!composing) return;
@@ -83,6 +90,11 @@ export function startIslandPublisher(
 
   void getCurrentWebviewWindow()
     .listen<PromptSessionEvent>("prompt-session-event", (event) => {
+      if (event.payload.type === "plan") {
+        livePlan = normalizePlanItems(event.payload.items);
+      } else if (event.payload.type === "started") {
+        livePlan = null;
+      }
       track = reduceIslandTrack(track, event.payload);
       schedule();
     })

@@ -1,6 +1,7 @@
-import { formatPermissionDetail } from "../chat/format";
+import { formatPermissionDetail, preferPlainSummary } from "../chat/format";
 import type { PromptSessionEvent } from "../chat/types";
 import { looksLikeBrowserToolCall } from "../chat/verify";
+import { planShort, type PlanStep } from "../plan";
 
 export type IslandPendingKind = "choice" | "line" | "secret" | "options";
 
@@ -181,12 +182,14 @@ export function reduceIslandTrack(track: IslandTrack, event: PromptSessionEvent)
     case "permission_resolved":
       if (track.pending?.requestId !== event.request_id) return track;
       return { ...track, pending: null };
+    case "plan":
+      return track;
     case "completed":
       return {
         active: false,
         browser: false,
         detail: "",
-        spoken: track.spoken || clipStart(event.summary),
+        spoken: track.spoken || clipStart(preferPlainSummary(event.summary ?? "")),
         sent: track.sent,
         pending: null,
       };
@@ -218,6 +221,7 @@ export type IslandSessionSource = {
   title: string;
   updatedAt: number;
   messages: { role: string; content: string }[];
+  plan?: PlanStep[];
 };
 
 export type IslandRow = {
@@ -233,6 +237,7 @@ export type IslandRow = {
   needsYou: boolean;
   /** This conversation is the one turn that is running. */
   working: boolean;
+  plan?: PlanStep[];
 };
 
 function agentOf(runtime: string): { name: string; badge: string } {
@@ -302,6 +307,7 @@ export function buildIslandRows(
         current,
         needsYou,
         working,
+        plan: session.plan?.length ? session.plan.slice(0, 24) : undefined,
       };
     })
     .filter((row) => {
@@ -347,11 +353,14 @@ export function islandSnapshot(
   const pending = track.pending ? { ...track.pending, title: status } : null;
   const current = rows.find((row) => row.needsYou) ?? rows.find((row) => row.current);
   const title = chipTitle(track, status, current);
+  const planned = rows.find((row) => row.working) ?? rows.find((row) => row.needsYou);
+  const withPlan =
+    track.active && planned?.plan?.length ? `${title} ${planShort(planned.plan)}` : title;
   return {
     active: track.active,
     browser: track.browser,
     composing,
-    title,
+    title: withPlan,
     detail: rows.length > 0 ? JSON.stringify({ v: 1, rows }) : visibleDetail(track),
     rows: Math.max(1, rows.length),
     pending,

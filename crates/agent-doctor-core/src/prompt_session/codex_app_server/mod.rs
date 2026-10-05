@@ -565,6 +565,64 @@ mod tests {
     }
 
     #[test]
+    fn older_and_newer_codex_events_still_surface() {
+        let mut state = PumpState {
+            session_id: "s1".into(),
+            waiting_thread: None,
+            waiting_turn: None,
+            thread_id: None,
+            turn_done: false,
+            interactive: false,
+            cwd: "/tmp".into(),
+            prompt: "hi".into(),
+            approval_policy: json!("on-request"),
+            saw_agent_delta: false,
+        };
+        let mut events = Vec::new();
+        handle_notification(
+            "item/agent_message/delta",
+            Some(&json!({"delta": "旧版回复"})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        handle_notification(
+            "error",
+            Some(&json!({"error": {"message": "配额用完了"}})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        handle_notification(
+            "item/started",
+            Some(&json!({"item": {"type": "webSearch", "query": "登录按钮"}})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        handle_notification(
+            "turn/completed",
+            Some(&json!({"turn": {"status": "failed", "error": {"message": "这一轮失败了"}}})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Delta { text, .. } if text == "旧版回复"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::StderrLine { line, .. } if line.contains("配额用完了")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Status { message, .. } if message.contains("登录按钮")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::StderrLine { line, .. } if line.contains("这一轮失败了")
+        )));
+        assert!(state.turn_done);
+    }
+
+    #[test]
     fn reads_camel_case_agent_message_without_deltas() {
         assert!(is_agent_message_type("agentMessage"));
         assert!(is_agent_message_type("agent_message"));

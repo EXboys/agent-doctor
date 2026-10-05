@@ -33,8 +33,9 @@ pub(crate) use tray::{rebuild_tray_menu, remember_tray_health, update_tray_toolt
 use commands::*;
 use island::{
     current_island_view_command, island_claim_keyboard_command, island_open_session_command,
-    island_pin_command, island_restore_command, island_send_text_command, island_set_hover_command,
-    island_set_reading_command, publish_island_snapshot_command, IslandHost,
+    island_pin_command, island_restore_command, island_send_text_command,
+    island_set_content_height_command, island_set_hover_command, island_set_reading_command,
+    publish_island_snapshot_command, IslandHost,
 };
 use state::PromptSessionState;
 use windows::{
@@ -438,8 +439,15 @@ pub fn run() {
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
             let _ = windows::ensure_ask_window(app.handle(), "claude-code");
-            // Do not pre-create Resources / Diagnose: their pages scan Chrome and
-            // the project folder and would re-raise the same macOS Files prompt.
+            // Windows: creating Resources or Diagnose on the first click can hang
+            // WebView2, so those buttons look dead. Build the hidden windows now.
+            // macOS still waits for the click; those pages scan folders and would
+            // raise the Files-and-Folders prompt during startup.
+            #[cfg(target_os = "windows")]
+            {
+                let _ = windows::ensure_resources_window(app.handle(), "skills");
+                let _ = windows::ensure_diagnose_window(app.handle(), "openclaw");
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -543,6 +551,7 @@ pub fn run() {
             island_send_text_command,
             island_claim_keyboard_command,
             island_set_reading_command,
+            island_set_content_height_command,
             current_island_view_command
         ])
         .run(tauri::generate_context!())

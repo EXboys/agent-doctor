@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { paintChatPlan } from "../plan";
 import { renderMarkdown } from "../markdown";
 import {
   cleanToolLabel,
@@ -401,6 +402,7 @@ export function createBubblesController(deps: BubblesDeps) {
       const session = deps.activeSession();
       if (session.messages.length === 0) {
         appendBubble("meta", t("chat.welcome"), { persist: false });
+        paintChatPlan(deps.logEl, session.plan);
         return;
       }
       const messages = placeToolsBeforeReply(session.messages);
@@ -491,6 +493,7 @@ export function createBubblesController(deps: BubblesDeps) {
         }
         i += 1;
       }
+      paintChatPlan(deps.logEl, session.plan);
       deps.logEl.scrollTop = deps.logEl.scrollHeight;
       deps.updateContextMeter();
     } catch (error) {

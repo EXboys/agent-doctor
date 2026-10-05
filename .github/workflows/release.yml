@@ -10,6 +10,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # vX.Y.Z-beta.N → beta (GitHub prerelease, OSS <prefix>/beta/ only).
+  # Beta never writes latest.json / download.json, so stable users are untouched.
+  RELEASE_CHANNEL: ${{ contains(github.ref_name, '-beta.') && 'beta' || 'stable' }}
 
 jobs:
   # Same fmt/clippy gate as CI. Tag pushes do not run ci.yml, so Release must
@@ -164,10 +167,13 @@ jobs:
           )
           # Strip leading indentation from the heredoc.
           NOTES=$(printf '%s\n' "$NOTES" | sed -e 's/^          //')
+          PRERELEASE=()
+          if [ "$RELEASE_CHANNEL" = beta ]; then PRERELEASE=(--prerelease); fi
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" || \
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Agent Doctor ${GITHUB_REF_NAME}" \
+            "${PRERELEASE[@]}" \
             --notes "$NOTES"
 
       - name: Upload CLI archives to release
@@ -324,6 +330,13 @@ jobs:
             # Fail fast if codesign waits on a keychain dialog (common hang symptom).
             perl -e 'alarm shift; exec @ARGV' 2700 \
               bash scripts/tauri-with-edition.sh "$EDITION" build --bundles app
+          elif [ "$RELEASE_CHANNEL" = beta ]; then
+            # MSI (WiX) and RPM reject "-beta.N" versions; ship setup.exe / AppImage / deb.
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              bash scripts/tauri-with-edition.sh "$EDITION" build --bundles nsis
+            else
+              bash scripts/tauri-with-edition.sh "$EDITION" build --bundles appimage,deb
+            fi
           else
             bash scripts/tauri-with-edition.sh "$EDITION" build
           fi
@@ -529,10 +542,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PRERELEASE=()
+          if [ "$RELEASE_CHANNEL" = beta ]; then PRERELEASE=(--prerelease); fi
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" || \
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Agent Doctor ${GITHUB_REF_NAME}" \
+            "${PRERELEASE[@]}" \
             --notes "Release assets are uploading."
 
       - name: Upload desktop files to Release
@@ -589,6 +605,7 @@ jobs:
 
       - name: Build updater manifests
         id: manifest
+        if: env.RELEASE_CHANNEL == 'stable'
         env:
           UPDATE_CDN_BASE_URL: ${{ secrets.UPDATE_CDN_BASE_URL }}
         run: |
@@ -644,7 +661,7 @@ jobs:
             --clobber
 
       - name: Sync updater assets to Aliyun OSS (China CDN)
-        if: steps.manifest.outputs.built == '1'
+        if: steps.manifest.outputs.built == '1' || env.RELEASE_CHANNEL == 'beta'
         env:
           OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
@@ -674,8 +691,16 @@ jobs:
             -L CH \
             --config-file .ossutilconfig
           # Clients always fetch <prefix>/latest.json (team package points at desktop-team/).
-          "$OSSUTIL" cp "updater-manifest/${LATEST}" "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
-          "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
+          # Beta never moves latest.json: beta installs pick up the next stable release.
+          # Beta lives under <prefix>/beta/ (manifest + installers) so an OSS lifecycle
+          # rule on that subdir can expire old betas without touching stable.
+          if [ "$RELEASE_CHANNEL" = stable ]; then
+            "$OSSUTIL" cp "updater-manifest/${LATEST}" "oss://${OSS_BUCKET}/${PREFIX}/latest.json" -f --config-file .ossutilconfig
+            "$OSSUTIL" cp updater-manifest/packages/ "oss://${OSS_BUCKET}/${PREFIX}/" -r -f --config-file .ossutilconfig
+            DEST="${PREFIX}"
+          else
+            DEST="${PREFIX}/beta"
+          fi
           # TeamUps /download 用人装包（.dmg / setup.exe）；updater 仍用 .app.tar.gz
           EDITION="${{ matrix.edition }}"
           mkdir -p ./download-manifest-src
@@ -684,26 +709,41 @@ jobs:
           else
             find desktop-artifacts -type f \( -name 'Agent.Doctor_*.dmg' -o -name 'Agent.Doctor_*-setup.exe' \) ! -name 'Agent.Doctor.Team_*' -exec cp {} ./download-manifest-src/ \;
           fi
-          # 先写 download.json，再传大包
+          # 先写下载清单，再传大包；正式版 <prefix>/download.json，测试版 <prefix>/beta/download.json
           if [ "$(find ./download-manifest-src -type f | wc -l)" -gt 0 ]; then
-            CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX}"
+            CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${DEST}"
             python3 scripts/build-download-manifest.py \
               --installers ./download-manifest-src \
               --version "${GITHUB_REF_NAME}" \
               --cdn-base "${CDN_BASE}" \
               --edition "${EDITION}" \
+              --channel "${RELEASE_CHANNEL}" \
               --out ./download.json
-            "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${PREFIX}/download.json" -f --config-file .ossutilconfig
-            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/download.json" public-read -f --config-file .ossutilconfig || true
-            echo "Uploaded download.json"
+            "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${DEST}/download.json" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/download.json" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded ${DEST}/download.json"
             for f in ./download-manifest-src/*; do
               [ -f "$f" ] || continue
               base="$(basename "$f" | tr ' ' '.')"
-              "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
-              "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
+              "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${DEST}/${base}" -f --config-file .ossutilconfig
+              "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/${base}" public-read -f --config-file .ossutilconfig || true
               echo "Uploaded installer ${base}"
             done
           else
             echo "::warning::No .dmg/.exe installers — skipped download.json"
           fi
-          echo "Synced updater + installers to oss://${OSS_BUCKET}/${PREFIX}/"
+          echo "Synced installers to oss://${OSS_BUCKET}/${DEST}/"
+
+          # 正式版：OSS 上只留最近 3 个版本的安装包；GitHub Release 不动，旧版仍可从那里下载
+          if [ "$RELEASE_CHANNEL" = stable ]; then
+            "$OSSUTIL" ls "oss://${OSS_BUCKET}/${PREFIX}/" --config-file .ossutilconfig > ./oss-ls.txt
+            python3 scripts/prune-oss-installers.py \
+              --prefix "oss://${OSS_BUCKET}/${PREFIX}/" \
+              --keep 3 < ./oss-ls.txt > ./oss-prune.txt
+            while read -r url; do
+              [ -n "$url" ] || continue
+              "$OSSUTIL" rm "$url" -f --config-file .ossutilconfig
+              echo "Pruned ${url}"
+            done < ./oss-prune.txt
+            echo "Pruned $(grep -c . ./oss-prune.txt || true) old installer file(s) from oss://${OSS_BUCKET}/${PREFIX}/"
+          fi

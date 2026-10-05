@@ -318,6 +318,7 @@ export function bootChat(): void {
       title: session.title,
       updatedAt: session.updatedAt,
       messages: session.messages ?? [],
+      plan: session.plan?.items,
     })),
   }));
   void listen<string>("island-open-session", (event) => {

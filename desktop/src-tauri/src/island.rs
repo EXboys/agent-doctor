@@ -120,6 +120,8 @@ struct Inner {
     opened: bool,
     /// One conversation is open inside the card, so it takes the full fixed height.
     reading: bool,
+    /// Height the card's rows need, measured by the page. Zero until it reports.
+    content_height: f64,
     /// User asked to see the full conversation during this browser turn.
     hold_open: bool,
     /// User asked to keep the conversation window open until the turn ends.
@@ -145,6 +147,7 @@ impl Default for Inner {
             folded: false,
             opened: false,
             reading: false,
+            content_height: 0.0,
             hold_open: false,
             pinned: false,
             parked_ask: false,
@@ -175,6 +178,12 @@ impl Default for IslandHost {
             inner: Mutex::new(Inner::default()),
         }
     }
+}
+
+/// A tool asking for Allow should stay on the chip. The conversation window
+/// already has the buttons; opening the card only covers them.
+fn pending_opens_card(pending: Option<&IslandPending>) -> bool {
+    pending.is_some_and(|item| item.kind != "choice")
 }
 
 /// The island stays up on macOS. Hover peeks. A click on the bar keeps it open.
@@ -216,7 +225,7 @@ pub(crate) fn peek_height(rows: u32, pending: bool) -> f64 {
     let count = rows.clamp(1, 6) as f64;
     // Room for the reply field or allow / deny under the row that is waiting.
     let actions = if pending { 72.0 } else { 0.0 };
-    (28.0 + count * 84.0 + actions + 12.0).clamp(120.0, PEEK_HEIGHT)
+    (28.0 + count * 104.0 + actions + 12.0).clamp(120.0, PEEK_HEIGHT)
 }
 
 fn chrome_size(chrome: Chrome, rows: u32, pending: bool) -> (f64, f64) {
@@ -288,7 +297,7 @@ fn apply_once(app: &AppHandle) {
         let chrome = island_chrome(
             cfg!(target_os = "macos"),
             guard.hovering,
-            guard.snapshot.pending.is_some(),
+            pending_opens_card(guard.snapshot.pending.as_ref()),
             guard.snapshot.composing,
             guard.folded,
             guard.opened,
@@ -408,17 +417,22 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
     if monitors.is_empty() {
         return;
     }
-    let (rows, pending, reading) = {
+    let (rows, pending, reading, measured) = {
         let host = app.state::<IslandHost>();
         let guard = host.inner.lock().expect("island");
         (
             guard.snapshot.rows,
-            guard.snapshot.pending.is_some(),
+            pending_opens_card(guard.snapshot.pending.as_ref()),
             guard.reading,
+            guard.content_height,
         )
     };
     let (_, mut peek_height) = chrome_size(chrome, rows, pending);
-    if reading || pending {
+    if reading {
+        peek_height = PEEK_HEIGHT;
+    } else if measured > 0.0 {
+        peek_height = measured.clamp(120.0, PEEK_HEIGHT);
+    } else if pending {
         peek_height = PEEK_HEIGHT;
     }
     let mut keep = Vec::new();
@@ -1066,7 +1080,7 @@ fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
         .as_ref()
         .map(|item| item.request_id.clone());
     let next_request = next.pending.as_ref().map(|item| item.request_id.clone());
-    if prev_request != next_request {
+    if prev_request != next_request && pending_opens_card(next.pending.as_ref()) {
         guard.folded = false;
     }
     guard.snapshot = next;
@@ -1176,6 +1190,25 @@ pub fn island_set_reading_command(app: AppHandle, reading: bool) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn island_set_content_height_command(app: AppHandle, height: f64) -> Result<(), String> {
+    if !height.is_finite() || height < 0.0 {
+        return Ok(());
+    }
+    hop(&app, move |app| {
+        {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            if (guard.content_height - height).abs() < 2.0 {
+                return;
+            }
+            guard.content_height = height;
+        }
+        apply(app);
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub fn island_restore_command(app: AppHandle) -> Result<(), String> {
     hop(&app, move |app| restore_conversation(app, false));
     Ok(())
@@ -1253,7 +1286,29 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 
 #[cfg(test)]
 mod tests {
-    use super::{island_chrome, peek_height, should_park_windows, Chrome};
+    use super::{
+        island_chrome, peek_height, pending_opens_card, should_park_windows, Chrome, IslandPending,
+    };
+
+    #[test]
+    fn an_allow_request_stays_on_the_chip() {
+        let allow = IslandPending {
+            kind: "choice".into(),
+            request_id: "1".into(),
+            session_id: "s".into(),
+            title: "要你确认".into(),
+            detail: "改文件".into(),
+            input_json: String::new(),
+            tool: "Edit".into(),
+        };
+        assert!(!pending_opens_card(Some(&allow)));
+        let question = IslandPending {
+            kind: "line".into(),
+            ..allow
+        };
+        assert!(pending_opens_card(Some(&question)));
+        assert!(!pending_opens_card(None));
+    }
 
     #[test]
     fn one_conversation_does_not_leave_a_tall_gap() {

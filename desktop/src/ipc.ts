@@ -636,6 +636,10 @@ export function islandSetReading(reading: boolean): Promise<void> {
   return invoke("island_set_reading_command", { reading });
 }
 
+export function islandSetContentHeight(height: number): Promise<void> {
+  return invoke("island_set_content_height_command", { height });
+}
+
 export function islandClaimKeyboard(): Promise<void> {
   return invoke("island_claim_keyboard_command");
 }

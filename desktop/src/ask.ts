@@ -34,6 +34,7 @@ type PromptSessionEvent =
       request_id: string;
       allowed: boolean;
     }
+  | { type: "plan"; session_id: string; items: { text: string; state: string }[] }
   | {
       type: "completed";
       session_id: string;
@@ -169,6 +170,8 @@ async function ensureListener(): Promise<void> {
       case "permission_request":
         appendLog(`[permission] ${payload.tool_name}: ${payload.detail}`, "meta");
         appendLog("(use the chat window Allow/Deny buttons)", "meta");
+        break;
+      case "plan":
         break;
       case "permission_resolved":
         appendLog(

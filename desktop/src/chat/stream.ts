@@ -1,6 +1,7 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { t } from "../i18n";
+import type { PlanStep } from "../plan";
 import { preferPlainSummary } from "./format";
 import type { PromptSessionEvent, SessionStore } from "./types";
 
@@ -55,6 +56,7 @@ export type StreamDeps = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
+  onPlan: (items: PlanStep[]) => void;
   onTurnCompleted: (text: string, status: string) => void;
   onPermissionNeeded: (payload: {
     session_id: string;
@@ -113,6 +115,9 @@ export function createStreamController(deps: StreamDeps) {
           break;
         case "permission_resolved":
           deps.markPermissionResolved(payload.request_id, payload.allowed);
+          break;
+        case "plan":
+          deps.onPlan(payload.items);
           break;
         case "completed": {
           const completedSessionId = deps.getRunningChatSessionId();

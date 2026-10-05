@@ -1,4 +1,5 @@
 import type { AskRuntime } from "../ask-resources";
+import type { AgentPlan, PlanStep } from "../plan";
 
 export type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 export type ChatRole = "user" | "assistant" | "meta" | "permission" | "tool";
@@ -38,6 +39,7 @@ export type PromptSessionEvent =
       request_id: string;
       allowed: boolean;
     }
+  | { type: "plan"; session_id: string; items: PlanStep[] }
   | {
       type: "completed";
       session_id: string;
@@ -85,6 +87,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Codex thread id / Claude session id for native resume */
   runtimeThreadId?: string | null;
+  /** Latest checklist from the agent. Replaced as items move. */
+  plan?: AgentPlan;
 }
 
 export interface SessionStore {

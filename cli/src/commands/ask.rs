@@ -1,6 +1,6 @@
 use agent_doctor_core::{
-    run_prompt_session_with_cancel, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionStatus,
+    run_prompt_session_with_cancel, PlanStepState, PromptSessionCancel, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionStatus,
 };
 use anyhow::Result;
 use std::io::{self, Write};
@@ -67,6 +67,17 @@ pub fn run(
             } => {
                 eprintln!("[permission] {tool_name}: {detail}");
                 eprintln!("(inline allow/deny is available in the desktop chat window)");
+            }
+            PromptSessionEvent::Plan { items, .. } => {
+                eprintln!("… plan");
+                for step in items {
+                    let mark = match step.state {
+                        PlanStepState::Done => "x",
+                        PlanStepState::Doing => ">",
+                        PlanStepState::Pending => " ",
+                    };
+                    eprintln!("[{mark}] {}", step.text);
+                }
             }
             PromptSessionEvent::PermissionResolved { .. }
             | PromptSessionEvent::Completed { .. } => {}

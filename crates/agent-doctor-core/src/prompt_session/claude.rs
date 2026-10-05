@@ -15,6 +15,7 @@ use super::env::{
     apply_claude_env, apply_overlay_env, collect_overlay_env, format_command_display,
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
+use super::plan::{tool_carries_plan, PlanBoard};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, format_tool_status,
     is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_input_detail, SessionClock,
@@ -187,9 +188,14 @@ fn run_claude(
             let combined = if display.trim().is_empty() {
                 combine_output(&stdout, &stderr)
             } else {
+                display.clone()
+            };
+            let readable = if display.trim().is_empty() {
+                combine_output(&without_stream_json(&stdout), &stderr)
+            } else {
                 display
             };
-            let summary = summarize(&combined, &status, &runtime);
+            let summary = summarize(&readable, &status, &runtime);
             let runtime_thread_id = extract_claude_session_id(&stdout)
                 .or_else(|| resume_session_id.map(str::to_string));
             emit(PromptSessionEvent::Completed {
@@ -346,7 +352,8 @@ where
     });
 
     let turn_done = Arc::new(AtomicBool::new(false));
-    let drain = |on_event: &mut F| -> bool {
+    let mut plan_board = PlanBoard::default();
+    let mut drain = |on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
@@ -354,9 +361,13 @@ where
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
-                for event in
-                    parse_claude_stream_line(session_id, &line, control, Some(turn_done.as_ref()))
-                {
+                for event in parse_claude_stream_line(
+                    session_id,
+                    &line,
+                    control,
+                    Some(turn_done.as_ref()),
+                    &mut plan_board,
+                ) {
                     on_event(event);
                 }
             } else if !is_runtime_stderr_noise(&line) {
@@ -557,6 +568,7 @@ fn parse_claude_stream_line(
     line: &str,
     control: Option<&PromptSessionControl>,
     turn_done: Option<&AtomicBool>,
+    plan_board: &mut PlanBoard,
 ) -> Vec<PromptSessionEvent> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         if line.trim().is_empty() {
@@ -699,15 +711,24 @@ fn parse_claude_stream_line(
                     }
                     "tool_use" => {
                         let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-                        let detail = block
+                        let tool_use_id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let input = block
                             .get("input")
-                            .map(tool_input_detail)
-                            .unwrap_or_default();
-                        out.push(PromptSessionEvent::Status {
-                            session_id: session_id.to_string(),
-                            phase: "tool".into(),
-                            message: format_tool_status(name, &detail),
-                        });
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        if let Some(items) = plan_board.observe_tool(name, tool_use_id, &input) {
+                            out.push(PromptSessionEvent::Plan {
+                                session_id: session_id.to_string(),
+                                items,
+                            });
+                        } else if !tool_carries_plan(name) {
+                            let detail = tool_input_detail(&input);
+                            out.push(PromptSessionEvent::Status {
+                                session_id: session_id.to_string(),
+                                phase: "tool".into(),
+                                message: format_tool_status(name, &detail),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -743,19 +764,29 @@ fn parse_claude_stream_line(
                         .pointer("/event/content_block/name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool");
-                    let detail = value
-                        .pointer("/event/content_block/input")
-                        .map(tool_input_detail)
-                        .unwrap_or_default();
-                    out.push(PromptSessionEvent::Status {
-                        session_id: session_id.to_string(),
-                        phase: "tool".into(),
-                        message: format_tool_status(name, &detail),
-                    });
+                    // The full checklist arrives on the assistant message. Starting
+                    // the block here would record a plan tool twice.
+                    if !tool_carries_plan(name) {
+                        let detail = value
+                            .pointer("/event/content_block/input")
+                            .map(tool_input_detail)
+                            .unwrap_or_default();
+                        out.push(PromptSessionEvent::Status {
+                            session_id: session_id.to_string(),
+                            phase: "tool".into(),
+                            message: format_tool_status(name, &detail),
+                        });
+                    }
                 }
             }
             out
         }
+        "user" => plan_board.observe_user(&value).map_or(Vec::new(), |items| {
+            vec![PromptSessionEvent::Plan {
+                session_id: session_id.to_string(),
+                items,
+            }]
+        }),
         // Final envelope — surface errors immediately; successful `result` text is
         // applied after pump when live deltas were missing (avoids duplicating
         // assistant text that already streamed).
@@ -794,6 +825,23 @@ fn parse_claude_stream_line(
         }
         _ => Vec::new(),
     }
+}
+
+/// Stream-json event lines are protocol, not something to show the user.
+fn without_stream_json(stdout: &str) -> String {
+    stdout
+        .lines()
+        .filter(|line| {
+            // The capped capture can cut an event line in half, so it no longer parses.
+            if line.trim_start().starts_with("{\"type\"") {
+                return false;
+            }
+            serde_json::from_str::<serde_json::Value>(line)
+                .map(|value| !value.is_object())
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Pull the final answer out of Claude Code stream-json when live deltas were empty.
@@ -881,6 +929,14 @@ mod tests {
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
 
+    #[test]
+    fn readable_output_drops_stream_json_lines() {
+        let stdout = "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/tmp\"}\n\
+                      {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"te\n\
+                      plain note";
+        assert_eq!(without_stream_json(stdout), "plain note");
+    }
+
     #[cfg(unix)]
     fn write_fake_bin(dir: &Path, name: &str, script: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -899,6 +955,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello once"}]}}"#,
             None,
             None,
+            &mut PlanBoard::default(),
         );
         assert!(
             !events
@@ -920,6 +977,7 @@ mod tests {
             r#"{"type":"result","is_error":false,"result":"ok"}"#,
             None,
             Some(&flag),
+            &mut PlanBoard::default(),
         );
         assert!(flag.load(Ordering::SeqCst));
     }
@@ -944,6 +1002,7 @@ mod tests {
             r#"{"type":"result","is_error":true,"result":"boom"}"#,
             None,
             None,
+            &mut PlanBoard::default(),
         );
         assert!(events.iter().any(|e| matches!(
             e,
@@ -952,10 +1011,27 @@ mod tests {
     }
 
     #[test]
+    fn todo_write_emits_a_plan_instead_of_a_tool_chip() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"改按钮","status":"in_progress"},{"content":"再试一次","status":"pending"}]}}]}}"#;
+        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Plan { items, .. }
+                if items.len() == 2
+                    && items[0].text == "改按钮"
+                    && items[0].state == crate::PlanStepState::Doing
+        )));
+        assert!(!events.iter().any(
+            |event| matches!(event, PromptSessionEvent::Status { phase, .. } if phase == "tool")
+        ));
+    }
+
+    #[test]
     fn parse_control_request_emits_permission() {
         let control = PromptSessionControl::new();
         let line = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls -la"}}}"#;
-        let events = parse_claude_stream_line("s1", line, Some(&control), None);
+        let events =
+            parse_claude_stream_line("s1", line, Some(&control), None, &mut PlanBoard::default());
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {
@@ -974,7 +1050,7 @@ mod tests {
     #[test]
     fn open_secret_question_is_a_hidden_field() {
         let line = r#"{"type":"control_request","request_id":"req-s","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"把密钥贴在这里","kind":"text"}]}}}"#;
-        let events = parse_claude_stream_line("s1", line, None, None);
+        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {
@@ -1010,7 +1086,7 @@ mod tests {
     #[test]
     fn ask_user_question_is_an_option_prompt() {
         let line = r#"{"type":"control_request","request_id":"req-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"用哪种登录？","options":[{"label":"浏览器"},{"label":"密钥"}]}]}}}"#;
-        let events = parse_claude_stream_line("s1", line, None, None);
+        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {

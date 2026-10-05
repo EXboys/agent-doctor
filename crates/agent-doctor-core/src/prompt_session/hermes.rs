@@ -19,6 +19,7 @@ use super::env::{
     apply_hermes_env, apply_overlay_env, collect_overlay_env, format_command_display,
     prepare_hermes_home,
 };
+use super::plan::{tool_carries_plan, PlanBoard};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
     format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
@@ -284,7 +285,8 @@ where
         stderr_eof_flag.store(true, Ordering::SeqCst);
     });
 
-    let drain = |on_event: &mut F| -> bool {
+    let mut plan_board = PlanBoard::default();
+    let mut drain = |on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
@@ -292,7 +294,7 @@ where
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
-                handle_hermes_stream_line(session_id, &line, on_event);
+                handle_hermes_stream_line(session_id, &line, &mut plan_board, on_event);
                 continue;
             }
             if is_hermes_stderr_noise(&line) || is_runtime_stderr_noise(&line) {
@@ -361,8 +363,12 @@ struct HermesStreamFinal {
 }
 
 /// Map one Hermes `stream-json` stdout line into Ask events (live text + tool chips).
-fn handle_hermes_stream_line<F>(session_id: &str, line: &str, on_event: &mut F)
-where
+fn handle_hermes_stream_line<F>(
+    session_id: &str,
+    line: &str,
+    plan_board: &mut PlanBoard,
+    on_event: &mut F,
+) where
     F: FnMut(PromptSessionEvent),
 {
     let trimmed = line.trim();
@@ -384,34 +390,42 @@ where
                 message: "正在准备…".into(),
             });
         }
-        "text" => {
-            if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-                if !text.is_empty() {
-                    on_event(PromptSessionEvent::Delta {
-                        session_id: session_id.to_string(),
-                        text: text.to_string(),
-                    });
-                }
+        "text" | "delta" | "assistant" | "message" => {
+            if let Some(text) = hermes_text(&value) {
+                on_event(PromptSessionEvent::Delta {
+                    session_id: session_id.to_string(),
+                    text,
+                });
             }
         }
-        "tool_use" => {
+        "tool_use" | "tool_call" => {
             let name = value
                 .get("name")
+                .or_else(|| value.get("tool"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("tool")
                 .trim();
-            let label = hermes_tool_label(name);
-            let detail = value
+            let tool_use_id = value.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let input = value
                 .get("input")
                 .or_else(|| value.get("arguments"))
                 .or_else(|| value.get("args"))
-                .map(tool_input_detail)
-                .unwrap_or_default();
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.to_string(),
-                phase: "tool".into(),
-                message: format_tool_status(label, &detail),
-            });
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if let Some(items) = plan_board.observe_tool(name, tool_use_id, &input) {
+                on_event(PromptSessionEvent::Plan {
+                    session_id: session_id.to_string(),
+                    items,
+                });
+            } else if !tool_carries_plan(name) {
+                let label = hermes_tool_label(name);
+                let detail = tool_input_detail(&input);
+                on_event(PromptSessionEvent::Status {
+                    session_id: session_id.to_string(),
+                    phase: "tool".into(),
+                    message: format_tool_status(label, &detail),
+                });
+            }
         }
         "tool_result" => {
             // Keep the last tool chip live until the next status/text; no extra row needed.
@@ -421,6 +435,25 @@ where
         }
         _ => {}
     }
+}
+
+fn hermes_text(value: &serde_json::Value) -> Option<String> {
+    ["text", "delta", "content", "message"]
+        .iter()
+        .find_map(|key| value.get(*key).and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn hermes_session_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("session_id")
+        .or_else(|| value.get("sessionId"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn hermes_tool_label(name: &str) -> &str {
@@ -450,31 +483,21 @@ fn extract_hermes_stream_final(stdout: &str) -> HermesStreamFinal {
         match value.get("type").and_then(|v| v.as_str()) {
             Some("system") => {
                 if out.session_id.is_none() {
-                    out.session_id = value
-                        .get("session_id")
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string);
+                    out.session_id = hermes_session_id(&value);
                 }
             }
-            Some("text") => {
-                if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-                    acc.push_str(text);
+            Some("text" | "delta" | "assistant" | "message") => {
+                if let Some(text) = hermes_text(&value) {
+                    acc.push_str(&text);
                 }
             }
             Some("result") => {
-                if let Some(sid) = value
-                    .get("session_id")
-                    .and_then(|v| v.as_str())
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    out.session_id = Some(sid.to_string());
+                if let Some(sid) = hermes_session_id(&value) {
+                    out.session_id = Some(sid);
                 }
-                if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                if let Some(text) = hermes_text(&value) {
                     if !text.trim().is_empty() {
-                        out.text = Some(text.to_string());
+                        out.text = Some(text);
                     }
                 }
                 if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
@@ -806,6 +829,39 @@ exit 0
         assert!(!evs
             .iter()
             .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
+    }
+
+    #[test]
+    fn accepts_plan_tools_and_alternate_text_fields() {
+        let mut board = PlanBoard::default();
+        let mut events = Vec::new();
+        let mut emit = |event| events.push(event);
+        handle_hermes_stream_line(
+            "s1",
+            r#"{"type":"delta","content":"半句"}"#,
+            &mut board,
+            &mut emit,
+        );
+        handle_hermes_stream_line(
+            "s1",
+            r#"{"type":"tool_call","name":"update_plan","arguments":{"plan":[{"step":"改按钮","status":"in_progress"}]}}"#,
+            &mut board,
+            &mut emit,
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Delta { text, .. } if text == "半句"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Plan { items, .. } if items.len() == 1 && items[0].text == "改按钮"
+        )));
+        let got = extract_hermes_stream_final(
+            r#"{"type":"system","sessionId":"sid-new"}
+{"type":"result","sessionId":"sid-new","message":"做完了"}"#,
+        );
+        assert_eq!(got.session_id.as_deref(), Some("sid-new"));
+        assert_eq!(got.text.as_deref(), Some("做完了"));
     }
 
     #[test]

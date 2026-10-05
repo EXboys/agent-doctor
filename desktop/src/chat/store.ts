@@ -1,4 +1,5 @@
 import type { AskRuntime } from "../ask-resources";
+import { normalizePlan } from "../plan";
 import type { ChatMessage, ChatSession, SessionStore } from "./types";
 import {
   CHAT_STORE_MAX_BYTES,
@@ -68,6 +69,7 @@ export function finalizeSessionStore(parsed: SessionStore): SessionStore {
   const sessions = parsed.sessions.map((session) => ({
     ...session,
     messages: normalizeSessionMessages((session.messages ?? []) as ChatMessage[]),
+    plan: normalizePlan(session.plan),
   }));
   const activeId =
     parsed.activeId && sessions.some((s) => s.id === parsed.activeId)

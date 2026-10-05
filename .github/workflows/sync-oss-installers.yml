@@ -33,7 +33,11 @@ jobs:
         id: edition
         run: |
           eval "$(bash desktop/scripts/edition-meta.sh "${{ inputs.edition }}")"
-          echo "oss_prefix=$OSS_PREFIX" >> "$GITHUB_OUTPUT"
+          # 测试版 tag（vX.Y.Z-beta.N）写到 <prefix>/beta/，不碰正式版清单和安装包
+          case "${{ inputs.release_tag }}" in
+            *-beta.*) echo "dest=$OSS_PREFIX/beta" >> "$GITHUB_OUTPUT"; echo "channel=beta" >> "$GITHUB_OUTPUT" ;;
+            *) echo "dest=$OSS_PREFIX" >> "$GITHUB_OUTPUT"; echo "channel=stable" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Download installers from release
         env:
@@ -74,7 +78,7 @@ jobs:
             echo "::error::OSS secrets missing"
             exit 1
           fi
-          PREFIX="${{ steps.edition.outputs.oss_prefix }}"
+          DEST="${{ steps.edition.outputs.dest }}"
           curl -fsSL -o ossutil.zip \
             "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
           unzip -qo ossutil.zip -d ossutil-bin
@@ -86,21 +90,22 @@ jobs:
             -k "${OSS_ACCESS_KEY_SECRET}" \
             -L CH \
             --config-file .ossutilconfig
-          CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${PREFIX}"
-          # 先写 download.json，避免大包上传慢时 TeamUps 一直读不到清单
+          CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${DEST}"
+          # 先写下载清单，避免大包上传慢时 TeamUps 一直读不到清单
           python3 scripts/build-download-manifest.py \
             --installers ./oss-installers \
             --version "${{ inputs.release_tag }}" \
             --cdn-base "${CDN_BASE}" \
             --edition "${{ inputs.edition }}" \
+            --channel "${{ steps.edition.outputs.channel }}" \
             --out ./download.json
-          "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${PREFIX}/download.json" -f --config-file .ossutilconfig
-          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/download.json" public-read -f --config-file .ossutilconfig || true
-          echo "Uploaded download.json"
+          "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${DEST}/download.json" -f --config-file .ossutilconfig
+          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/download.json" public-read -f --config-file .ossutilconfig || true
+          echo "Uploaded ${DEST}/download.json"
           for f in ./oss-installers/*; do
             [ -f "$f" ] || continue
             base="$(basename "$f" | tr ' ' '.')"
-            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${PREFIX}/${base}" -f --config-file .ossutilconfig
-            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${PREFIX}/${base}" public-read -f --config-file .ossutilconfig || true
-            echo "Uploaded oss://${OSS_BUCKET}/${PREFIX}/${base}"
+            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${DEST}/${base}" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/${base}" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded oss://${OSS_BUCKET}/${DEST}/${base}"
           done

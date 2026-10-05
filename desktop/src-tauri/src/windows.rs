@@ -18,6 +18,27 @@ const DIAGNOSE_WINDOW_LABEL: &str = "diagnose";
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
+/// Designed height from the window config. Windows keeps this instead of
+/// stretching the main window to the work area.
+#[cfg(target_os = "windows")]
+const MAIN_WINDOW_HEIGHT: f64 = 720.0;
+
+fn main_inner_height(work_h: f64) -> f64 {
+    let available = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
+    #[cfg(target_os = "windows")]
+    {
+        // 150% scaling on a 1080p screen makes 720 logical pixels almost the
+        // whole work area, so also stay under about three quarters of it.
+        let cap = MAIN_WINDOW_HEIGHT
+            .min(work_h * 0.72)
+            .max(MAIN_WINDOW_MIN_HEIGHT);
+        available.min(cap)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        available
+    }
+}
 
 fn monitor_work_area(window: &tauri::WebviewWindow) -> Option<(f64, f64, f64, f64, f64)> {
     let monitor = window
@@ -69,6 +90,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
     let gap = ASK_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
     let outer_h = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
+    let main_h = main_inner_height(work_h);
 
     let (current_main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
     let main_outer_w = current_main_w.clamp(
@@ -80,14 +102,31 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
     let secondary_deco_h = window_decoration_height(&secondary, scale);
     let main_deco_h = window_decoration_height(&main, scale);
 
-    let secondary_outer_w =
-        (work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w).max(ASK_WINDOW_MIN_WIDTH);
-    let secondary_inner_w = (secondary_outer_w - secondary_deco_w).max(ASK_WINDOW_MIN_WIDTH);
-    let main_inner_h = (outer_h - main_deco_h).max(MAIN_WINDOW_MIN_HEIGHT);
+    let room = work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w;
+    let max_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
+    // A 720-wide window beside the main window runs off a narrow Windows screen
+    // and looks like the click did nothing. Shrink to the work area instead.
+    let secondary_outer_w = if room >= ASK_WINDOW_MIN_WIDTH {
+        room.min(max_outer_w)
+    } else {
+        room.max(360.0).min(max_outer_w)
+    };
+    let secondary_inner_w = (secondary_outer_w - secondary_deco_w).max(360.0);
+    let main_inner_h = (main_h - main_deco_h).max(MAIN_WINDOW_MIN_HEIGHT);
     let secondary_inner_h = (outer_h - secondary_deco_h).max(ASK_WINDOW_MIN_HEIGHT);
 
     let main_x = work_x + MAIN_WINDOW_MARGIN;
-    let secondary_x = main_x + main_outer_w + gap;
+    let mut secondary_x = main_x + main_outer_w + gap;
+    let max_x = work_x + work_w - MAIN_WINDOW_MARGIN - secondary_outer_w;
+    if secondary_x > max_x {
+        secondary_x = max_x.max(work_x + MAIN_WINDOW_MARGIN);
+    }
+    if secondary_inner_w < ASK_WINDOW_MIN_WIDTH {
+        let _ = secondary.set_min_size(Some(LogicalSize::new(
+            secondary_inner_w,
+            ASK_WINDOW_MIN_HEIGHT,
+        )));
+    }
 
     let _ = main.set_size(LogicalSize::new(main_outer_w, main_inner_h));
     let _ = main.set_position(LogicalPosition::new(main_x, y));
@@ -184,6 +223,13 @@ fn show_secondary_window(
         }
     }
     let _ = window.set_focus();
+    // A new WebView2 window often stays behind the main window, so the click
+    // looks like it did nothing.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_always_on_top(false);
+    }
 }
 
 fn position_main_window_left(window: &tauri::WebviewWindow) {
@@ -195,7 +241,7 @@ fn position_main_window_left(window: &tauri::WebviewWindow) {
         MAIN_WINDOW_MIN_WIDTH,
         (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
-    let height = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
+    let height = main_inner_height(work_h);
     let x = work_x + MAIN_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
     let _ = window.set_size(LogicalSize::new(width, height));
@@ -492,8 +538,18 @@ fn apply_ask_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
     let _ = window.eval(&script);
 }
 
-/// Show Ask beside the main window at the usual size, without reloading the page.
-/// Always places it, including when it is already visible at the smaller create size.
+fn ask_still_at_create_size(window: &tauri::WebviewWindow) -> bool {
+    let Ok((width, height)) = main_window_logical_size(window) else {
+        return true;
+    };
+    if width < 1.0 || height < 1.0 {
+        return true;
+    }
+    (width - ASK_WINDOW_WIDTH).abs() < 8.0 && (height - ASK_WINDOW_HEIGHT).abs() < 8.0
+}
+
+/// Show Ask beside the main window without reloading the page.
+/// The first open uses the usual size. A size the person dragged is kept.
 pub(crate) fn present_ask_window(app: &AppHandle) {
     let Ok(window) = ensure_ask_window(app, "claude-code") else {
         return;
@@ -504,10 +560,18 @@ pub(crate) fn present_ask_window(app: &AppHandle) {
     }
     let _ = window.set_skip_taskbar(false);
     let _ = window.unminimize();
+    let place = ask_still_at_create_size(&window);
     let _ = window.show();
-    layout_main_and_ask_side_by_side(app);
-    // Second pass after the title bar height is known.
-    layout_main_and_ask_side_by_side(app);
+    if place {
+        layout_main_and_ask_side_by_side(app);
+        // Second pass after the title bar height is known.
+        layout_main_and_ask_side_by_side(app);
+    } else if let Ok((width, height)) = main_window_logical_size(&window) {
+        // The page keeps the width it had while hidden and its right edge gets cut off.
+        // A real size change makes it lay out again at the window width.
+        let _ = window.set_size(LogicalSize::new(width + 1.0, height));
+        let _ = window.set_size(LogicalSize::new(width, height));
+    }
     let _ = window.set_focus();
 }
 

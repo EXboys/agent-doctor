@@ -83,6 +83,8 @@ On `v*` tags, Release CI:
 4. Uploads those JSON files to GitHub Release
 5. Syncs `latest.json` + packages to the edition OSS prefix (`desktop/` or `desktop-team/`)
 
+Beta tags (`vX.Y.Z-beta.N`) skip steps 3–5: `latest.json` stays on stable, and only `<prefix>/beta/download.json` + installers are synced. Stable releases also prune OSS installers to the newest 3 versions. See [release.md](release.md#stable-and-beta-channels).
+
 Tag releases currently build **personal** only. To also ship team, add matching `edition: team` rows in `.github/workflows/release.yml` (desktop matrix + publish matrix).
 
 ## Local verify

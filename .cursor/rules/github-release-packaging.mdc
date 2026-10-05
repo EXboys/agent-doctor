@@ -1,0 +1,14 @@
+---
+description: 「打包」means push a version tag so GitHub builds the installer
+alwaysApply: true
+---
+
+# 打包 means GitHub Release
+
+When the user says 打包, 打包最新的版本, or asks to package a release, push a version tag to GitHub so the Release workflow builds the installer. Do not run a local `tauri build` or produce a local DMG.
+
+- The version tag must match the workspace version (`vX.Y.Z` from `Cargo.toml`).
+- 打测试包 / beta means a beta release: set the version to `X.Y.Z-beta.N` (N counts up per beta). It goes to the beta channel only (OSS `desktop/beta/`) and never changes stable downloads or auto-update. See `docs/release.md`.
+- If that tag already exists, bump the version first, then tag and push.
+- Use `./scripts/release.sh`. It runs the preflight, creates the tag, and pushes `main` plus the tag.
+- Leave local-only files out of the commit: `.agent-doctor/`, `.claude/`, `.dsh/`, `.mcp.json`.

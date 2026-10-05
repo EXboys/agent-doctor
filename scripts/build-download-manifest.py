@@ -7,7 +7,11 @@ Usage:
     --version 0.1.44 \\
     --cdn-base https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop \\
     --out ./download.json \\
-    --edition personal
+    --edition personal \\
+    --channel stable
+
+Stable is uploaded as <prefix>/download.json; beta as <prefix>/beta/download.json
+(with --cdn-base pointing at <prefix>/beta).
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ def build(
     version: str,
     cdn_base: str,
     edition: str,
+    channel: str,
     notes: str | None,
 ) -> dict:
     ver = version.lstrip("v")
@@ -75,6 +80,7 @@ def build(
     assets.sort(key=lambda a: (order.get(a["platform"], 9), a["fileName"]))
     return {
         "version": ver,
+        "channel": channel,
         "notes": (notes or f"Agent Doctor v{ver}").strip(),
         "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "assets": assets,
@@ -88,6 +94,7 @@ def main() -> None:
     p.add_argument("--cdn-base", required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--edition", choices=("personal", "team"), default="personal")
+    p.add_argument("--channel", choices=("stable", "beta"), default="stable")
     p.add_argument("--notes", default="")
     args = p.parse_args()
     data = build(
@@ -95,6 +102,7 @@ def main() -> None:
         version=args.version,
         cdn_base=args.cdn_base,
         edition=args.edition,
+        channel=args.channel,
         notes=args.notes or None,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)

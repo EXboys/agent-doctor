@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::prompt_session::control::{CodexReplyKind, PromptSessionControl};
+use crate::prompt_session::plan::{plan_from_item, plan_from_tool};
 use crate::prompt_session::util::humanize_runtime_error;
 use crate::prompt_session::PromptSessionEvent;
 
@@ -197,20 +198,42 @@ pub(crate) fn handle_notification<F>(
         }
         "turn/completed" | "turn/finished" => {
             state.turn_done = true;
-            if !state.saw_agent_delta {
-                if let Some(text) = turn_completed_agent_text(&params) {
+            let status = params
+                .pointer("/turn/status")
+                .or_else(|| params.get("status"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if status == "failed" {
+                let msg =
+                    codex_error_message(&params).unwrap_or_else(|| "Codex turn failed".into());
+                on_event(PromptSessionEvent::Status {
+                    session_id: state.session_id.clone(),
+                    phase: "error".into(),
+                    message: msg.clone(),
+                });
+                on_event(PromptSessionEvent::StderrLine {
+                    session_id: state.session_id.clone(),
+                    line: humanize_runtime_error(&msg),
+                });
+            } else {
+                let fallback = if state.saw_agent_delta {
+                    None
+                } else {
+                    turn_completed_agent_text(&params)
+                };
+                if let Some(text) = fallback {
                     state.saw_agent_delta = true;
                     on_event(PromptSessionEvent::Delta {
                         session_id: state.session_id.clone(),
                         text,
                     });
                 }
+                on_event(PromptSessionEvent::Status {
+                    session_id: state.session_id.clone(),
+                    phase: "writing".into(),
+                    message: "本轮完成".into(),
+                });
             }
-            on_event(PromptSessionEvent::Status {
-                session_id: state.session_id.clone(),
-                phase: "writing".into(),
-                message: "本轮完成".into(),
-            });
         }
         "turn/failed" => {
             state.turn_done = true;
@@ -224,7 +247,8 @@ pub(crate) fn handle_notification<F>(
                 line: humanize_runtime_error(msg),
             });
         }
-        "item/agentMessage/delta" => {
+        // Current app-server uses camelCase. Older builds used snake_case.
+        "item/agentMessage/delta" | "item/agent_message/delta" => {
             if let Some(text) = json_delta_text(&params) {
                 // Do NOT emit Status on every delta — the chat UI seals the
                 // assistant bubble on phase changes, which otherwise stores
@@ -260,8 +284,23 @@ pub(crate) fn handle_notification<F>(
                 message,
             });
         }
+        "turn/plan/updated" => {
+            if let Some(items) = plan_from_tool("update_plan", &params) {
+                on_event(PromptSessionEvent::Plan {
+                    session_id: state.session_id.clone(),
+                    items,
+                });
+            }
+        }
         "item/completed" | "item/started" => {
             let item = params.get("item").cloned().unwrap_or(Value::Null);
+            if let Some(items) = plan_from_item(&item) {
+                on_event(PromptSessionEvent::Plan {
+                    session_id: state.session_id.clone(),
+                    items,
+                });
+                return;
+            }
             let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
             match item_type {
                 // Prefer streamed deltas; only fall back to the completed payload
@@ -279,45 +318,41 @@ pub(crate) fn handle_notification<F>(
                     }
                 }
                 t if is_agent_message_type(t) => {}
-                "commandExecution" | "command_execution" | "fileChange" | "file_change"
-                | "mcpToolCall" | "mcp_tool_call" => {
+                t if is_tool_activity(t) => {
                     // Emit once on start — completed would duplicate the same chip in UI.
                     if method == "item/started" {
-                        let label = item
-                            .get("command")
-                            .and_then(|v| {
-                                if let Some(s) = v.as_str() {
-                                    Some(s.to_string())
-                                } else if let Some(arr) = v.as_array() {
-                                    Some(
-                                        arr.iter()
-                                            .filter_map(|x| x.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(" "),
-                                    )
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| {
-                                item.get("tool")
-                                    .and_then(|v| v.as_str())
-                                    .map(str::to_string)
-                            })
-                            .or_else(|| {
-                                let server = item.get("server").and_then(|v| v.as_str());
-                                let tool = item.get("tool").and_then(|v| v.as_str());
-                                match (server, tool) {
-                                    (Some(s), Some(t)) => Some(format!("{s}/{t}")),
-                                    _ => None,
-                                }
-                            })
-                            .unwrap_or_else(|| item_type.to_string());
-                        let label = shorten_tool_label(&label);
+                        let label = shorten_tool_label(&tool_activity_label(&item, item_type));
                         on_event(PromptSessionEvent::Status {
                             session_id: state.session_id.clone(),
                             phase: "tool".into(),
                             message: label,
+                        });
+                    }
+                }
+                "reasoning" => {
+                    if method == "item/started" {
+                        on_event(PromptSessionEvent::Status {
+                            session_id: state.session_id.clone(),
+                            phase: "thinking".into(),
+                            message: "正在思考…".into(),
+                        });
+                    }
+                }
+                "contextCompaction" | "context_compaction" | "compacted" => {
+                    if method == "item/started" {
+                        on_event(PromptSessionEvent::Status {
+                            session_id: state.session_id.clone(),
+                            phase: "session".into(),
+                            message: "正在整理这段对话…".into(),
+                        });
+                    }
+                }
+                "enteredReviewMode" | "entered_review_mode" => {
+                    if method == "item/started" {
+                        on_event(PromptSessionEvent::Status {
+                            session_id: state.session_id.clone(),
+                            phase: "tool".into(),
+                            message: "正在检查改动…".into(),
                         });
                     }
                 }
@@ -333,10 +368,10 @@ pub(crate) fn handle_notification<F>(
             }
         }
         "error" => {
-            if let Some(msg) = params.get("message").and_then(|v| v.as_str()) {
+            if let Some(msg) = codex_error_message(&params) {
                 on_event(PromptSessionEvent::StderrLine {
                     session_id: state.session_id.clone(),
-                    line: humanize_runtime_error(msg),
+                    line: humanize_runtime_error(&msg),
                 });
             }
         }
@@ -351,6 +386,84 @@ pub(crate) fn mcp_startup_is_missing_program(error: &str) -> bool {
 
 pub(crate) fn is_agent_message_type(item_type: &str) -> bool {
     item_type == "agentMessage" || item_type == "agent_message"
+}
+
+fn codex_key(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn is_tool_activity(item_type: &str) -> bool {
+    matches!(
+        codex_key(item_type).as_str(),
+        "commandexecution"
+            | "filechange"
+            | "mcptoolcall"
+            | "collabtoolcall"
+            | "dynamictoolcall"
+            | "websearch"
+            | "imageview"
+    )
+}
+
+fn tool_activity_label(item: &Value, item_type: &str) -> String {
+    item.get("command")
+        .and_then(|v| {
+            if let Some(text) = v.as_str() {
+                Some(text.to_string())
+            } else if let Some(arr) = v.as_array() {
+                Some(
+                    arr.iter()
+                        .filter_map(|part| part.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            item.get("query")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            let server = item.get("server").and_then(|v| v.as_str());
+            let tool = item.get("tool").and_then(|v| v.as_str());
+            match (server, tool) {
+                (Some(server), Some(tool)) => Some(format!("{server}/{tool}")),
+                _ => tool.map(str::to_string),
+            }
+        })
+        .or_else(|| {
+            item.get("path")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| item_type.to_string())
+}
+
+/// Official failures use `{ error: { message } }`. Some builds put `message` on the params.
+pub(crate) fn codex_error_message(params: &Value) -> Option<String> {
+    params
+        .pointer("/error/message")
+        .or_else(|| params.pointer("/turn/error/message"))
+        .or_else(|| params.get("message"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            params
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        })
 }
 
 pub(crate) fn json_text(value: &Value) -> Option<String> {

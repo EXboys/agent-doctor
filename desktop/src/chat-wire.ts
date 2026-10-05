@@ -1,4 +1,5 @@
 import { chatState } from "./chat-state";
+import { normalizePlanItems, paintChatPlan } from "./plan";
 
 import {
   elevatedEl,
@@ -360,6 +361,29 @@ export function wireChatControllers(): void {
     setAssistantRaw: (raw) => {
       chatState.assistantRaw = raw;
     },
+    resendBefore: (messageId) => {
+      const session = chatState.store?.sessions.find((item) =>
+        item.messages.some((message) => message.id === messageId),
+      );
+      if (!session) return null;
+      const index = session.messages.findIndex((message) => message.id === messageId);
+      const asked = session.messages
+        .slice(0, index)
+        .reverse()
+        .find((message) => message.role === "user" && message.content.trim());
+      if (!asked) return null;
+      return () => {
+        void chatState.send?.sendAsk({
+          draft: {
+            id: crypto.randomUUID(),
+            sessionId: session.id,
+            text: asked.content,
+            attachments: asked.attachments ?? [],
+            mentions: [],
+          },
+        });
+      };
+    },
   });
 
   chatState.sessions = createSessionsController({
@@ -494,6 +518,17 @@ export function wireChatControllers(): void {
       showQuickReplies(sourceText);
     },
     renderSessionList: () => renderSessionList(),
+    onPlan: (items) => {
+      const steps = normalizePlanItems(items);
+      const id = chatState.runningChatSessionId;
+      if (!id) return;
+      const session = chatState.store.sessions.find((item) => item.id === id);
+      if (!session) return;
+      session.plan = steps.length ? { items: steps, at: Date.now() } : undefined;
+      touchSession(session);
+      flushStorePersist();
+      if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
+    },
     onTurnCompleted: (text, status) => chatState.hosted?.noteTurnCompleted(text, status),
     onPermissionNeeded: (payload) => chatState.hosted?.notePermission(payload),
   });

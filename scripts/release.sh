@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Cut a release locally: preflight → annotated tag → push (main + tag).
-# Usage: ./scripts/release.sh [vX.Y.Z]
+# Usage: ./scripts/release.sh [vX.Y.Z | vX.Y.Z-beta.N]
 # If omitted, reads version from Cargo.toml workspace.
+# X.Y.Z → stable channel; X.Y.Z-beta.N → beta channel (GitHub prerelease,
+# OSS <prefix>/beta/ only — never touches stable download.json / latest.json).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,6 +43,15 @@ else
   tag="v$workspace_version"
 fi
 
+if [[ "$workspace_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  channel="stable"
+elif [[ "$workspace_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+  channel="beta"
+else
+  echo "Version $workspace_version is neither X.Y.Z (stable) nor X.Y.Z-beta.N (beta)." >&2
+  exit 1
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree is dirty. Commit or stash before releasing." >&2
   git status --short >&2
@@ -58,7 +69,7 @@ if git rev-parse "$tag" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> release $tag"
+echo "==> release $tag (channel: $channel)"
 ./scripts/check.sh release-preflight
 
 echo "==> creating annotated tag $tag"

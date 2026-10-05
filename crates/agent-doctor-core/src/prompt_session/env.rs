@@ -177,6 +177,11 @@ pub(crate) fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, Str
 }
 
 pub(crate) fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    // Claude Code only offers the checklist tools on some of its own models.
+    // DeepSeek and other providers need this or the plan card never appears.
+    if !overlay.contains_key("CLAUDE_CODE_ENABLE_TODO_TOOLS") {
+        cmd.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
+    }
     if let Some((url, key)) = resolve_claude_overlay(overlay) {
         cmd.env("ANTHROPIC_BASE_URL", &url);
         cmd.env("ANTHROPIC_API_KEY", &key);
@@ -600,6 +605,25 @@ pub(crate) fn format_command_display(cmd: &Command) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn claude_ask_enables_plan_tools_by_default() {
+        let mut cmd = Command::new("claude");
+        apply_claude_env(&mut cmd, &HashMap::new());
+        let enabled = cmd.get_envs().any(|(key, value)| {
+            key == "CLAUDE_CODE_ENABLE_TODO_TOOLS" && value.and_then(|v| v.to_str()) == Some("1")
+        });
+        assert!(enabled);
+
+        let mut overlay = HashMap::new();
+        overlay.insert("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "0".into());
+        let mut cmd = Command::new("claude");
+        apply_claude_env(&mut cmd, &overlay);
+        let overridden = cmd
+            .get_envs()
+            .any(|(key, _)| key == "CLAUDE_CODE_ENABLE_TODO_TOOLS");
+        assert!(!overridden);
+    }
 
     #[test]
     fn resolve_claude_personal_deepseek_openai_maps_to_anthropic() {

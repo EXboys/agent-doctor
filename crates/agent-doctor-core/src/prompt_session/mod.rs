@@ -13,6 +13,7 @@ pub(crate) mod env;
 mod hermes;
 mod mcp_ensure;
 mod openclaw;
+mod plan;
 mod util;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,6 +25,7 @@ use crate::evotown::normalize_runtime;
 
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
+pub use plan::{PlanStep, PlanStepState};
 
 pub(crate) use claude::ClaudeAskBackend;
 pub(crate) use codex_app_server::CodexAskBackend;
@@ -122,6 +124,11 @@ pub enum PromptSessionEvent {
         session_id: String,
         request_id: String,
         allowed: bool,
+    },
+    /// Latest checklist from a plan tool. Replaces the previous list.
+    Plan {
+        session_id: String,
+        items: Vec<PlanStep>,
     },
     Completed {
         session_id: String,

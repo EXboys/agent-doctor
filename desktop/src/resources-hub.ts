@@ -291,7 +291,11 @@ async function openResourcesWindow(
       : section === "store"
         ? "mall"
         : section;
-  await openResourcesWindowCommand({ section: normalized });
+  try {
+    await openResourcesWindowCommand({ section: normalized });
+  } catch (error) {
+    hubConfiguredEl.textContent = withErrorDetail(t("runtime.openFailed"), error);
+  }
 }
 
 function setSkillsBusy(busy: boolean) {

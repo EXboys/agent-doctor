@@ -2,15 +2,18 @@ import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
 import { renderMarkdown } from "../markdown";
+import { doingText, planProgress, renderPlanCard } from "../plan";
 import {
   currentIslandView,
   islandClaimKeyboard,
   islandOpenSession,
   islandSendText,
   islandSetHover,
+  islandSetContentHeight,
   islandSetReading,
   resolvePermissionSession,
 } from "../ipc";
+import { permissionView } from "./permission";
 import { buildIslandRows, type IslandPending, type IslandRow, type IslandView } from "./track";
 
 const root = document.querySelector<HTMLElement>("#island");
@@ -85,6 +88,50 @@ function showError(error: unknown): void {
     : t("island.failed");
 }
 
+const RESULT_MS = 2500;
+let lastResult: { rowId: string; text: string; short: string; ok: boolean; until: number } | null = null;
+let resultTimer = 0;
+
+function resultText(pending: IslandPending, allow: boolean): { text: string; short: string } {
+  if (pending.kind === "choice") {
+    return allow
+      ? { text: t("island.allowedResult"), short: t("island.allowedShort") }
+      : { text: t("island.deniedResult"), short: t("island.deniedShort") };
+  }
+  return allow
+    ? { text: t("island.answeredResult"), short: t("island.answeredShort") }
+    : { text: t("island.skippedResult"), short: t("island.skippedShort") };
+}
+
+function resultLine(): HTMLElement | null {
+  if (!lastResult) return null;
+  const line = document.createElement("p");
+  line.className = "island-result";
+  line.dataset.ok = String(lastResult.ok);
+  line.setAttribute("role", "status");
+  line.textContent = lastResult.text;
+  return line;
+}
+
+function showResult(pending: IslandPending, allow: boolean): void {
+  const rowId = lastRows.find((row) => row.needsYou)?.id ?? "";
+  lastResult = { rowId, ...resultText(pending, allow), ok: allow, until: Date.now() + RESULT_MS };
+  const line = resultLine();
+  if (actionsEl && line) actionsEl.replaceChildren(line);
+  window.clearTimeout(resultTimer);
+  resultTimer = window.setTimeout(() => {
+    lastResult = null;
+    feedSig = "";
+    if (lastView) render(lastView);
+  }, RESULT_MS);
+}
+
+function appendResult(parent: HTMLElement, row: IslandFeedRow): void {
+  if (!lastResult || lastResult.rowId !== row.id || Date.now() > lastResult.until) return;
+  const line = resultLine();
+  if (line) parent.append(line);
+}
+
 async function resolve(pending: IslandPending, allow: boolean, text?: string): Promise<void> {
   if (sending || !actionsEl) return;
   sending = true;
@@ -104,6 +151,7 @@ async function resolve(pending: IslandPending, allow: boolean, text?: string): P
       allow,
       text: text ?? null,
     });
+    showResult(pending, allow);
   } catch (error) {
     sending = false;
     controls.forEach((el) => {
@@ -209,8 +257,8 @@ function appendReplyField(
 /** The question in the card goes with the row that asked it. A reply only goes to the row that is open. */
 function replyPlan(pending: IslandPending | null): { pending: IslandPending | null; target: IslandFeedRow | null } {
   const asking = lastRows.find((row) => row.needsYou) ?? null;
+  if (pending) return { pending, target: asking };
   const open = openRowId ? lastRows.find((row) => row.id === openRowId) ?? null : null;
-  if (pending && (!open || open.id === asking?.id)) return { pending, target: asking };
   return { pending: null, target: open };
 }
 
@@ -305,20 +353,26 @@ function renderOptions(parent: HTMLElement, pending: IslandPending): void {
     }
     const grid = document.createElement("div");
     grid.className = "island-choices";
-    for (const option of question.options) {
+    question.options.forEach((option, optionIndex) => {
       const card = document.createElement("button");
       card.type = "button";
       card.className = "island-choice";
+      const num = document.createElement("span");
+      num.className = "island-choice-num";
+      num.textContent = String(optionIndex + 1);
+      const copy = document.createElement("span");
+      copy.className = "island-choice-copy";
       const label = document.createElement("span");
       label.className = "island-choice-label";
       label.textContent = option.label;
-      card.append(label);
+      copy.append(label);
       if (option.description) {
         const note = document.createElement("span");
         note.className = "island-choice-note";
         note.textContent = option.description;
-        card.append(note);
+        copy.append(note);
       }
+      card.append(num, copy);
       card.addEventListener("click", () => {
         const current = picks.get(question.question) ?? [];
         const next = question.multiSelect
@@ -336,7 +390,7 @@ function renderOptions(parent: HTMLElement, pending: IslandPending): void {
         refresh();
       });
       grid.append(card);
-    }
+    });
     parent.append(grid);
     const other = document.createElement("input");
     other.type = "text";
@@ -474,6 +528,7 @@ function rowsFromChat(): IslandFeedRow[] {
       title: session.title,
       updatedAt: session.updatedAt,
       messages: session.messages ?? [],
+      plan: session.plan?.items,
     })),
     store.activeId,
   );
@@ -526,6 +581,7 @@ function renderConversation(row: IslandFeedRow): HTMLElement {
 }
 
 let rowHoverTimer: number | undefined;
+let snappedRowId = "";
 
 function openRow(id: string): void {
   window.clearTimeout(rowHoverTimer);
@@ -533,11 +589,20 @@ function openRow(id: string): void {
   toggleRow(id);
 }
 
+const SCROLL_QUIET_MS = 600;
+let lastWheelAt = 0;
+
+function scrolling(): boolean {
+  return Date.now() - lastWheelAt < SCROLL_QUIET_MS;
+}
+
 function hoverRow(item: HTMLElement, id: string): void {
   item.addEventListener("mouseenter", () => {
     window.clearTimeout(rowHoverTimer);
-    if (openRowId === id) return;
-    rowHoverTimer = window.setTimeout(() => openRow(id), 260);
+    if (openRowId === id || scrolling() || activePending) return;
+    rowHoverTimer = window.setTimeout(() => {
+      if (!scrolling() && !activePending) openRow(id);
+    }, 260);
   });
   item.addEventListener("mouseleave", () => window.clearTimeout(rowHoverTimer));
 }
@@ -552,9 +617,7 @@ function toggleRow(id: string): void {
 }
 
 function askCopy(pending: IslandPending): { kicker: string; title: string } {
-  if (pending.kind === "choice") {
-    return { kicker: t("island.askChoice"), title: pending.detail || pending.tool || "" };
-  }
+  if (pending.kind === "choice") return { kicker: t("island.needsConfirm"), title: "" };
   if (pending.kind === "options") {
     const questions = questionsOf(pending);
     const title = questions.length === 1 ? questions[0].question : pending.detail;
@@ -562,6 +625,90 @@ function askCopy(pending: IslandPending): { kicker: string; title: string } {
   }
   if (pending.kind === "secret") return { kicker: t("island.askSecret"), title: pending.detail };
   return { kicker: t("island.askLine"), title: pending.detail };
+}
+
+function showPlanList(row: IslandFeedRow): boolean {
+  return Boolean(row.plan?.length) && (row.working || row.needsYou || row.id === openRowId);
+}
+
+function appendPlanProgress(copy: HTMLElement, row: IslandFeedRow): void {
+  if (showPlanList(row) || !row.plan?.length) return;
+  const line = document.createElement("span");
+  line.className = "island-sub";
+  const doing = oneLine(doingText(row.plan), 36);
+  line.textContent = doing
+    ? `${planProgress(row.plan)} · ${t("plan.doingNow", { item: doing })}`
+    : planProgress(row.plan);
+  copy.append(line);
+}
+
+function appendPlanList(parent: HTMLElement, row: IslandFeedRow): void {
+  if (!showPlanList(row) || !row.plan?.length) return;
+  parent.append(renderPlanCard(row.plan, "island-plan"));
+}
+
+function appendPermission(ask: HTMLElement, pending: IslandPending): void {
+  const view = permissionView(pending);
+  const what = document.createElement("div");
+  what.className = "island-ask-what";
+  const verb = document.createElement("span");
+  verb.className = "island-ask-verb";
+  verb.textContent = view.verb;
+  what.append(verb);
+  if (view.target) {
+    const target = document.createElement("span");
+    target.className = "island-ask-target";
+    target.textContent = view.target;
+    target.title = view.target;
+    what.append(target);
+  }
+  ask.append(what);
+  if (view.note) {
+    const note = document.createElement("p");
+    note.className = "island-ask-note";
+    note.textContent = view.note;
+    ask.append(note);
+  }
+  if (view.lines.length === 0) return;
+  const code = document.createElement("div");
+  code.className = "island-ask-code";
+  for (const line of view.lines) {
+    const el = document.createElement("div");
+    el.className = "island-code-line";
+    el.dataset.kind = line.kind;
+    el.textContent = `${line.kind === "add" ? "+ " : line.kind === "del" ? "- " : ""}${line.text || " "}`;
+    code.append(el);
+  }
+  if (view.more > 0) {
+    const more = document.createElement("div");
+    more.className = "island-code-more";
+    more.textContent = t("island.moreLines", { n: String(view.more) });
+    code.append(more);
+  }
+  ask.append(code);
+}
+
+function fieldCaret(): { el: HTMLInputElement | HTMLTextAreaElement; start: number; end: number } | null {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
+  if (!actionsEl?.contains(el)) return null;
+  return {
+    el,
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.value.length,
+  };
+}
+
+function restoreCaret(
+  saved: { el: HTMLInputElement | HTMLTextAreaElement; start: number; end: number } | null,
+): void {
+  if (!saved?.el.isConnected) return;
+  saved.el.focus();
+  try {
+    saved.el.setSelectionRange(saved.start, saved.end);
+  } catch {
+    // A hidden key field can reject a selection range.
+  }
 }
 
 function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPending): void {
@@ -579,14 +726,24 @@ function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPen
   const name = document.createElement("span");
   name.className = "island-agent";
   name.textContent = row.agent;
-  const status = document.createElement("span");
-  status.className = "island-ask-status";
-  status.textContent = pending.title;
-  headline.append(name, status);
+  const title = document.createElement("span");
+  title.className = "island-preview";
+  title.textContent = row.preview || row.agent;
+  headline.append(name, title);
   const sub = document.createElement("span");
   sub.className = "island-sub";
   sub.textContent = t("island.waitingFor", { agent: row.agent });
   copy.append(headline, sub);
+  const open = row.id === openRowId;
+  if (!open && row.plan?.length) {
+    const progress = document.createElement("span");
+    progress.className = "island-sub island-sub-quiet";
+    const doing = oneLine(doingText(row.plan), 36);
+    progress.textContent = doing
+      ? `${planProgress(row.plan)} · ${t("plan.doingNow", { item: doing })}`
+      : planProgress(row.plan);
+    copy.append(progress);
+  }
   const meta = document.createElement("span");
   meta.className = "island-meta";
   const when = document.createElement("span");
@@ -600,23 +757,23 @@ function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPen
   appendState(meta, row);
   head.append(avatar, copy, meta);
 
-  const { kicker, title } = askCopy(pending);
   const ask = document.createElement("div");
   ask.className = "island-ask";
+  ask.dataset.kind = pending.kind === "choice" ? "confirm" : "question";
+  const copyText = askCopy(pending);
   const top = document.createElement("div");
   top.className = "island-ask-kicker";
-  top.textContent = kicker;
-  if (pending.kind === "choice" && pending.tool) {
-    const tool = document.createElement("span");
-    tool.className = "island-ask-tool";
-    tool.textContent = pending.tool;
-    top.append(tool);
-  }
+  const dot = document.createElement("span");
+  dot.className = "island-ask-dot";
+  dot.setAttribute("aria-hidden", "true");
+  top.append(dot, copyText.kicker);
   ask.append(top);
-  if (title) {
+  if (pending.kind === "choice") {
+    appendPermission(ask, pending);
+  } else if (copyText.title) {
     const heading = document.createElement("h3");
     heading.className = "island-ask-title";
-    heading.textContent = title;
+    heading.textContent = copyText.title;
     ask.append(heading);
   }
   const slot = document.createElement("div");
@@ -626,11 +783,14 @@ function renderAskCard(item: HTMLElement, row: IslandFeedRow, pending: IslandPen
   const context = document.createElement("button");
   context.type = "button";
   context.className = "island-ask-context";
-  const open = row.id === openRowId;
+  context.setAttribute("aria-expanded", String(open));
   context.textContent = open ? t("island.hideContext") : t("island.showContext");
   context.addEventListener("click", () => toggleRow(row.id));
   item.append(head, ask, context);
-  if (open) item.append(renderConversation(row));
+  if (open) {
+    item.append(renderConversation(row));
+    appendPlanList(item, row);
+  }
 }
 
 function renderFeed(rows: IslandFeedRow[]): void {
@@ -642,7 +802,8 @@ function renderFeed(rows: IslandFeedRow[]): void {
   const askSig = activePending
     ? `${activePending.requestId}\u0001${activePending.kind}\u0001${activePending.detail}`
     : "";
-  const sig = `${openRowId}\u0001${askSig}\u0001${JSON.stringify(shown)}`;
+  const resultSig = lastResult ? `${lastResult.rowId}\u0001${lastResult.text}` : "";
+  const sig = `${openRowId}\u0001${askSig}\u0001${resultSig}\u0001${JSON.stringify(shown)}`;
   if (sig === feedSig && detailEl.querySelector(".island-row")) return;
   feedSig = sig;
   detailEl.dataset.shown = `feed\u0001${sig}`;
@@ -700,6 +861,7 @@ function renderFeed(rows: IslandFeedRow[]): void {
       reply.textContent = replyLine;
       copy.append(reply);
     }
+    appendPlanProgress(copy, row);
     const meta = document.createElement("span");
     meta.className = "island-meta";
     const when = document.createElement("span");
@@ -715,8 +877,11 @@ function renderFeed(rows: IslandFeedRow[]): void {
     head.addEventListener("click", () => openRow(row.id));
     hoverRow(item, row.id);
     item.append(head);
-    if (row.id === openRowId) {
-      const body = renderConversation(row);
+    appendResult(item, row);
+    const body = row.id === openRowId ? renderConversation(row) : null;
+    if (body) item.append(body);
+    appendPlanList(item, row);
+    if (body) {
       const more = document.createElement("button");
       more.type = "button";
       more.className = "island-more";
@@ -726,22 +891,25 @@ function renderFeed(rows: IslandFeedRow[]): void {
         void islandSetReading(false).catch(() => {});
         void islandOpenSession(row.id).catch(() => {});
       });
-      item.append(body, more);
+      item.append(more);
       body.scrollTop = stick ? body.scrollHeight : bodyScroll;
     }
     detailEl.append(item);
   }
   detailEl.scrollTop = scroll;
-  const opened = openRowId
-    ? detailEl.querySelector<HTMLElement>(`.island-row[data-id="${CSS.escape(openRowId)}"]`)
-    : null;
-  if (opened && !opened.classList.contains("is-ask")) {
-    const top = opened.offsetTop - detailEl.offsetTop;
-    const bottom = top + opened.offsetHeight;
-    if (bottom > detailEl.scrollTop + detailEl.clientHeight) {
-      detailEl.scrollTop = Math.min(top, bottom - detailEl.clientHeight);
-    } else if (top < detailEl.scrollTop) {
-      detailEl.scrollTop = top;
+  if (openRowId && openRowId !== snappedRowId) {
+    snappedRowId = openRowId;
+    const opened = detailEl.querySelector<HTMLElement>(
+      `.island-row[data-id="${CSS.escape(openRowId)}"]`,
+    );
+    if (opened && !opened.classList.contains("is-ask")) {
+      const top = opened.offsetTop - detailEl.offsetTop;
+      const bottom = top + opened.offsetHeight;
+      if (top < detailEl.scrollTop) {
+        detailEl.scrollTop = top;
+      } else if (bottom > detailEl.scrollTop + detailEl.clientHeight) {
+        detailEl.scrollTop = Math.min(top, bottom - detailEl.clientHeight);
+      }
     }
   }
 }
@@ -775,8 +943,35 @@ function placeActions(view: IslandView): void {
 }
 
 let lastView: IslandView | null = null;
+let reportedHeight = 0;
+
+function marginsOf(el: Element): number {
+  const style = getComputedStyle(el);
+  return (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+}
+
+/** The window is sized from this, so the rows fit without a scrollbar. */
+function reportHeight(): void {
+  if (!root?.classList.contains("is-expanded")) return;
+  const body = root.querySelector<HTMLElement>(".island-body");
+  if (!body) return;
+  let height = parseFloat(getComputedStyle(root).paddingBottom) || 0;
+  const pill = root.querySelector<HTMLElement>(".island-pill");
+  if (pill && pill.getClientRects().length > 0) {
+    height += pill.offsetHeight + (parseFloat(getComputedStyle(body).marginTop) || 0);
+  }
+  for (const child of body.children) {
+    if (!(child instanceof HTMLElement) || child.getClientRects().length === 0) continue;
+    height += marginsOf(child) + (child === detailEl ? child.scrollHeight : child.offsetHeight);
+  }
+  height = Math.ceil(height);
+  if (Math.abs(height - reportedHeight) < 2) return;
+  reportedHeight = height;
+  void islandSetContentHeight(height).catch(() => {});
+}
 
 function render(view: IslandView): void {
+  const caret = fieldCaret();
   lastView = view;
   if (!root || !titleEl || !detailEl) return;
   root.hidden = !view.shown;
@@ -786,6 +981,7 @@ function render(view: IslandView): void {
   if (!view.expanded) {
     pointerInside = false;
     window.clearTimeout(rowHoverTimer);
+    snappedRowId = "";
     if (openRowId) {
       openRowId = "";
       feedSig = "";
@@ -793,16 +989,47 @@ function render(view: IslandView): void {
   }
   root.classList.toggle("is-expanded", view.expanded);
   root.classList.toggle("is-attention", view.attention);
-  titleEl.textContent = view.title || t("island.idle");
+  const toast = !view.expanded && lastResult && Date.now() < lastResult.until ? lastResult : null;
+  root.classList.toggle("is-done", Boolean(toast?.ok));
+  titleEl.textContent = toast ? toast.short : view.title || t("island.idle");
   activePending = view.expanded ? view.pending : null;
   renderDetail(view.detail);
   renderActions(view);
   placeActions(view);
+  restoreCaret(caret);
+  if (view.expanded) requestAnimationFrame(reportHeight);
   if (!view.pending && errorEl) errorEl.hidden = true;
 }
 
 function boot(): void {
   applyStaticI18n();
+  detailEl?.addEventListener(
+    "wheel",
+    (event) => {
+      if (!detailEl || !event.deltaY) return;
+      lastWheelAt = Date.now();
+      window.clearTimeout(rowHoverTimer);
+      let node = event.target instanceof Element ? event.target : null;
+      let blocked = false;
+      while (node && node !== detailEl) {
+        if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight + 1) {
+          const overflowY = getComputedStyle(node).overflowY;
+          if (overflowY === "auto" || overflowY === "scroll") {
+            const atTop = node.scrollTop <= 0;
+            const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+            if ((event.deltaY < 0 && !atTop) || (event.deltaY > 0 && !atBottom)) return;
+            blocked = true;
+          }
+        }
+        node = node.parentElement;
+      }
+      if (!blocked) return;
+      const before = detailEl.scrollTop;
+      detailEl.scrollTop += event.deltaY;
+      if (detailEl.scrollTop !== before) event.preventDefault();
+    },
+    { passive: false },
+  );
   root?.addEventListener("mouseenter", () => setHover(true));
   root?.addEventListener("mousemove", () => setHover(true));
   root?.addEventListener("mousedown", (event) => {

@@ -38,6 +38,8 @@ export type PermissionsDeps = {
   setAssistantMessageId: (id: string | null) => void;
   getAssistantRaw: () => string;
   setAssistantRaw: (raw: string) => void;
+  /** Sends again the message that led to this card, or null when there is none. */
+  resendBefore: (messageId: string) => (() => void) | null;
 };
 
 export type PermissionsApi = ReturnType<typeof createPermissionsController>;
@@ -657,14 +659,31 @@ export function createPermissionsController(deps: PermissionsDeps) {
           ? t("chat.permissionAllowed")
           : allowed === false
             ? t("chat.permissionDenied")
-            : interactive
-              ? t("chat.permissionExpired")
-              : t("chat.permissionWaiting");
+            : t("chat.permissionExpired");
       actions.appendChild(badge);
     }
 
     row.append(tool, summary, actions);
     card.appendChild(row);
+    if (!interactive && allowed == null) {
+      const resend = deps.resendBefore(message.id);
+      const hint = document.createElement("p");
+      hint.className = "chat-permission-hint";
+      hint.textContent = resend ? t("chat.permissionExpiredHint") : t("chat.permissionSessionGone");
+      card.appendChild(hint);
+      if (resend) {
+        const again = document.createElement("button");
+        again.type = "button";
+        again.className = "chat-permission-resend";
+        again.textContent = t("chat.permissionResend");
+        again.addEventListener("click", () => {
+          again.disabled = true;
+          again.textContent = t("chat.permissionResent");
+          resend();
+        });
+        card.appendChild(again);
+      }
+    }
 
     const sameAsQuestion = formatted.full === formatted.summary;
     if (formatted.full && !(needsReply && sameAsQuestion)) {
