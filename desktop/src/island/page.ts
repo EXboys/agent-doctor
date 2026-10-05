@@ -24,6 +24,8 @@ const errorEl = document.querySelector<HTMLElement>("#island-error");
 
 let hoverTimer = 0;
 let pointerInside = false;
+let pointerX = 0;
+let pointerY = 0;
 let renderedRequest = "";
 let sending = false;
 let feedSig = "";
@@ -43,6 +45,8 @@ function setHover(hovering: boolean, sticky = false): void {
     return;
   }
   hoverTimer = window.setTimeout(() => {
+    // A shrinking card can slip out from under the pointer. That is not a leave.
+    if (pointerOverIsland()) return;
     const field = document.activeElement;
     const typing =
       (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
@@ -52,6 +56,17 @@ function setHover(hovering: boolean, sticky = false): void {
     window.clearTimeout(rowHoverTimer);
     void islandSetHover(false, typing).catch(() => {});
   }, 180);
+}
+
+function notePointer(event: MouseEvent): void {
+  pointerX = event.clientX;
+  pointerY = event.clientY;
+}
+
+function pointerOverIsland(): boolean {
+  if (!root) return false;
+  const hit = document.elementFromPoint(pointerX, pointerY);
+  return hit === root || Boolean(hit && root.contains(hit));
 }
 
 function showSendResult(status: string): void {
@@ -555,33 +570,65 @@ function messagesFor(id: string): { role: string; content: string }[] {
     .map((m) => ({ role: m.role, content: m.content.trim() }));
 }
 
+/** The latest thing you said, and the latest reply after it. The rest stays in the chat. */
+function latestExchange(row: IslandFeedRow): { you: string; reply: string } {
+  const messages = messagesFor(row.id);
+  let you = row.sent.trim();
+  let reply = row.spoken.trim();
+  for (const message of messages) {
+    if (message.role === "user") {
+      you = message.content.trim();
+      reply = "";
+    } else {
+      reply = message.content.trim();
+    }
+  }
+  return { you, reply };
+}
+
 function renderConversation(row: IslandFeedRow): HTMLElement {
   const body = document.createElement("div");
   body.className = "island-row-body";
-  const messages = messagesFor(row.id);
-  if (messages.length === 0) {
-    if (row.sent) messages.push({ role: "user", content: row.sent });
-    if (row.spoken) messages.push({ role: "assistant", content: row.spoken });
+  const { you, reply } = latestExchange(row);
+  if (you) {
+    const said = document.createElement("div");
+    said.className = "island-msg-you";
+    said.textContent = you;
+    body.append(said);
   }
-  for (const message of messages) {
-    if (message.role === "user") {
-      const you = document.createElement("div");
-      you.className = "island-msg-you";
-      you.textContent = message.content;
-      body.append(you);
-      continue;
+  if (reply) {
+    const longReply = reply.length > 320 || reply.split(/\r?\n/).length > 6;
+    const replyWrap = document.createElement("div");
+    replyWrap.className = "island-reply-scroll";
+    const expanded = longReply && expandedReplyId === row.id;
+    replyWrap.classList.toggle("is-expanded", expanded);
+    const answer = document.createElement("div");
+    answer.className = "island-msg-reply island-md";
+    answer.innerHTML = renderMarkdown(reply);
+    for (const link of answer.querySelectorAll("a")) link.removeAttribute("href");
+    replyWrap.append(answer);
+    body.append(replyWrap);
+    if (longReply) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "island-reply-toggle";
+      toggle.textContent = expanded ? t("island.collapseReply") : t("island.expandReply");
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        expandedReplyId = expanded ? "" : row.id;
+        feedSig = "";
+        if (lastView) render(lastView);
+      });
+      body.append(toggle);
     }
-    const reply = document.createElement("div");
-    reply.className = "island-msg-reply island-md";
-    reply.innerHTML = renderMarkdown(message.content);
-    for (const link of reply.querySelectorAll("a")) link.removeAttribute("href");
-    body.append(reply);
   }
   return body;
 }
 
 let rowHoverTimer: number | undefined;
+let scrollSettleTimer = 0;
 let snappedRowId = "";
+let expandedReplyId = "";
 
 function openRow(id: string): void {
   window.clearTimeout(rowHoverTimer);
@@ -596,19 +643,47 @@ function scrolling(): boolean {
   return Date.now() - lastWheelAt < SCROLL_QUIET_MS;
 }
 
+function rowUnderPointer(): string {
+  return detailEl?.querySelector<HTMLElement>(".island-row:hover")?.dataset.id ?? "";
+}
+
+/** A reply already typed in this row stays put when the pointer leaves. */
+function rowHasDraft(id: string): boolean {
+  const row = detailEl?.querySelector<HTMLElement>(`.island-row[data-id="${CSS.escape(id)}"]`);
+  const field = row?.querySelector("input, textarea");
+  return (
+    (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+    field.value.trim() !== ""
+  );
+}
+
 function hoverRow(item: HTMLElement, id: string): void {
   item.addEventListener("mouseenter", () => {
     window.clearTimeout(rowHoverTimer);
     if (openRowId === id || scrolling() || activePending) return;
     rowHoverTimer = window.setTimeout(() => {
-      if (!scrolling() && !activePending) openRow(id);
-    }, 260);
+      if (!scrolling() && !activePending && rowUnderPointer() === id) openRow(id);
+    }, 180);
   });
-  item.addEventListener("mouseleave", () => window.clearTimeout(rowHoverTimer));
+  item.addEventListener("mouseleave", () => {
+    window.clearTimeout(rowHoverTimer);
+    if (openRowId !== id) return;
+    rowHoverTimer = window.setTimeout(() => {
+      if (scrolling() || activePending) return;
+      const hovered = rowUnderPointer();
+      if (hovered && hovered !== openRowId) {
+        openRow(hovered);
+        return;
+      }
+      if (openRowId === id && !hovered && !rowHasDraft(id)) toggleRow(id);
+    }, 140);
+  });
 }
 
 function toggleRow(id: string): void {
-  openRowId = openRowId === id ? "" : id;
+  const closing = openRowId === id;
+  if (closing || openRowId !== id) expandedReplyId = "";
+  openRowId = closing ? "" : id;
   void islandSetReading(openRowId !== "").catch(() => {});
   feedSig = "";
   if (errorEl) errorEl.hidden = true;
@@ -842,25 +917,29 @@ function renderFeed(rows: IslandFeedRow[]): void {
     const name = document.createElement("span");
     name.className = "island-agent";
     name.textContent = row.agent;
-    const title = document.createElement("span");
-    title.className = "island-preview";
-    title.textContent = row.preview || row.agent;
-    headline.append(name, title);
-    copy.append(headline);
-    const youLine = oneLine(row.sent, 88);
-    if (youLine) {
-      const you = document.createElement("span");
-      you.className = "island-sub";
-      you.textContent = `${t("island.you")}：${youLine}`;
-      copy.append(you);
+    const open = row.id === openRowId;
+    if (!open) {
+      const title = document.createElement("span");
+      title.className = "island-preview";
+      title.textContent = row.preview || row.agent;
+      headline.append(title);
+      const youLine = oneLine(row.sent, 88);
+      if (youLine) {
+        const you = document.createElement("span");
+        you.className = "island-sub";
+        you.textContent = `${t("island.you")}：${youLine}`;
+        copy.append(you);
+      }
+      const replyLine = oneLine(row.spoken, 88);
+      if (replyLine && replyLine !== row.preview) {
+        const reply = document.createElement("span");
+        reply.className = "island-sub island-sub-quiet";
+        reply.textContent = replyLine;
+        copy.append(reply);
+      }
     }
-    const replyLine = oneLine(row.spoken, 88);
-    if (replyLine && replyLine !== row.preview) {
-      const reply = document.createElement("span");
-      reply.className = "island-sub island-sub-quiet";
-      reply.textContent = replyLine;
-      copy.append(reply);
-    }
+    headline.prepend(name);
+    copy.prepend(headline);
     appendPlanProgress(copy, row);
     const meta = document.createElement("span");
     meta.className = "island-meta";
@@ -877,11 +956,13 @@ function renderFeed(rows: IslandFeedRow[]): void {
     head.addEventListener("click", () => openRow(row.id));
     hoverRow(item, row.id);
     item.append(head);
-    appendResult(item, row);
-    const body = row.id === openRowId ? renderConversation(row) : null;
-    if (body) item.append(body);
-    appendPlanList(item, row);
-    if (body) {
+    if (row.id === openRowId) {
+      const panel = document.createElement("div");
+      panel.className = "island-row-panel";
+      appendResult(panel, row);
+      const body = renderConversation(row);
+      panel.append(body);
+      appendPlanList(panel, row);
       const more = document.createElement("button");
       more.type = "button";
       more.className = "island-more";
@@ -891,8 +972,11 @@ function renderFeed(rows: IslandFeedRow[]): void {
         void islandSetReading(false).catch(() => {});
         void islandOpenSession(row.id).catch(() => {});
       });
-      item.append(more);
+      panel.append(more);
+      item.append(panel);
       body.scrollTop = stick ? body.scrollHeight : bodyScroll;
+    } else {
+      appendResult(item, row);
     }
     detailEl.append(item);
   }
@@ -944,6 +1028,8 @@ function placeActions(view: IslandView): void {
 
 let lastView: IslandView | null = null;
 let reportedHeight = 0;
+/** Tallest size this hover has needed. It does not shrink until the island closes. */
+let heightLock = 0;
 
 function marginsOf(el: Element): number {
   const style = getComputedStyle(el);
@@ -965,6 +1051,8 @@ function reportHeight(): void {
     height += marginsOf(child) + (child === detailEl ? child.scrollHeight : child.offsetHeight);
   }
   height = Math.ceil(height);
+  if (height > heightLock) heightLock = height;
+  else height = heightLock;
   if (Math.abs(height - reportedHeight) < 2) return;
   reportedHeight = height;
   void islandSetContentHeight(height).catch(() => {});
@@ -981,7 +1069,11 @@ function render(view: IslandView): void {
   if (!view.expanded) {
     pointerInside = false;
     window.clearTimeout(rowHoverTimer);
+    window.clearTimeout(scrollSettleTimer);
     snappedRowId = "";
+    heightLock = 0;
+    reportedHeight = 0;
+    expandedReplyId = "";
     if (openRowId) {
       openRowId = "";
       feedSig = "";
@@ -1009,6 +1101,14 @@ function boot(): void {
       if (!detailEl || !event.deltaY) return;
       lastWheelAt = Date.now();
       window.clearTimeout(rowHoverTimer);
+      window.clearTimeout(scrollSettleTimer);
+      scrollSettleTimer = window.setTimeout(() => {
+        if (scrolling() || activePending) return;
+        const hovered = rowUnderPointer();
+        if (hovered === openRowId) return;
+        if (!hovered && openRowId && !rowHasDraft(openRowId)) toggleRow(openRowId);
+        else if (hovered) openRow(hovered);
+      }, SCROLL_QUIET_MS);
       let node = event.target instanceof Element ? event.target : null;
       let blocked = false;
       while (node && node !== detailEl) {
@@ -1030,8 +1130,14 @@ function boot(): void {
     },
     { passive: false },
   );
-  root?.addEventListener("mouseenter", () => setHover(true));
-  root?.addEventListener("mousemove", () => setHover(true));
+  root?.addEventListener("mouseenter", (event) => {
+    notePointer(event);
+    setHover(true);
+  });
+  root?.addEventListener("mousemove", (event) => {
+    notePointer(event);
+    setHover(true);
+  });
   root?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     // Cancelling mousedown also cancels the click, so buttons such as

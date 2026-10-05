@@ -265,7 +265,8 @@ function leadSentence(text: string): string {
   return cut || line;
 }
 
-const QUIET_MS = 30 * 60 * 1000;
+const QUIET_MS = 7 * 24 * 60 * 60 * 1000;
+const ROW_CAP = 8;
 
 /** Recent conversations for the expanded island. Live text wins for the open one. */
 export function buildIslandRows(
@@ -279,7 +280,7 @@ export function buildIslandRows(
   const workingId = opts.workingId ?? "";
   return [...sessions]
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 12)
+    .slice(0, ROW_CAP)
     .map((session) => {
       const exchange = latestExchange(session.messages ?? []);
       const current = session.id === activeId;

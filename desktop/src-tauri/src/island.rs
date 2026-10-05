@@ -428,11 +428,11 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         )
     };
     let (_, mut peek_height) = chrome_size(chrome, rows, pending);
-    if reading {
-        peek_height = PEEK_HEIGHT;
-    } else if measured > 0.0 {
+    // The page measures the card and then keeps that height until the pointer
+    // leaves. Reading a conversation must not resize it again.
+    if measured > 0.0 {
         peek_height = measured.clamp(120.0, PEEK_HEIGHT);
-    } else if pending {
+    } else if reading || pending {
         peek_height = PEEK_HEIGHT;
     }
     let mut keep = Vec::new();
