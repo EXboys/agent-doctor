@@ -227,6 +227,8 @@ export interface TeamupsAccountStatus {
     token_cap: number;
     tokens_used: number;
     tokens_remaining: number;
+    tokens_saved?: number;
+    tokens_before?: number;
     period: string | null;
   } | null;
 }

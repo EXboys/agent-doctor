@@ -58,6 +58,10 @@ pub struct TeamupsOfficialStatus {
     pub tokens_used: u64,
     #[serde(default, alias = "tokensRemaining")]
     pub tokens_remaining: u64,
+    #[serde(default, alias = "tokensSaved")]
+    pub tokens_saved: u64,
+    #[serde(default, alias = "tokensBefore")]
+    pub tokens_before: u64,
     pub period: Option<String>,
 }
 

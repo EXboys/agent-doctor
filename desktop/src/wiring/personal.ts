@@ -74,10 +74,14 @@ function formatOfficialTokens(tokens: number): string {
 function officialDescription(): string {
   const official = officialAccount?.official;
   if (official?.via === "member") {
-    return t("personal.officialMember", {
+    const status = t("personal.officialMember", {
       remaining: formatOfficialTokens(official.tokens_remaining),
       date: official.member_until?.slice(0, 10) || t("personal.officialUnknownDate"),
     });
+    const before = official.tokens_before ?? 0;
+    if (before <= 0) return status;
+    const rate = Math.round(((official.tokens_saved ?? 0) / before) * 100);
+    return `${status}${t("personal.officialSaved", { rate: String(rate) })}`;
   }
   if (official?.via === "trial") {
     return t("personal.officialTrial", { count: String(official.trial_calls_left) });

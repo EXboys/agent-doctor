@@ -1061,6 +1061,7 @@ export const zh = {
     "personal.delete": "删除",
     "personal.officialName": "官方",
     "personal.officialMember": "剩余 {remaining} Token · 有效至 {date}",
+    "personal.officialSaved": " · 已省 {rate}%",
     "personal.officialTrial": "可免费试用 {count} 次",
     "personal.officialNeedsMembership": "体验已用完，开通会员后继续使用",
     "personal.officialNeedsLogin": "登录后即可使用官方模型服务",
