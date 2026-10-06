@@ -1,4 +1,6 @@
-//! macOS-only notch: a small window at the top of every screen.
+//! macOS-only top bar: a small window at the top of every screen.
+//! Screens with a camera housing fill that housing. Others hang the same bar
+//! just under the menu bar.
 //!
 //! The Ask page publishes what the session is doing. The normal windows stay
 //! put until a browser tool is running; then this module hides them so the page
@@ -55,6 +57,16 @@ pub struct IslandSnapshotInput {
     pub rows: u32,
     #[serde(default)]
     pub pending: Option<IslandPending>,
+    /// When true, the bar is absent until a turn is running or has just finished.
+    #[serde(default = "default_true")]
+    pub hide_when_idle: bool,
+    /// The turn just ended. Keep the bar up briefly, then let idle hiding apply.
+    #[serde(default)]
+    pub lingering: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn one_row() -> u32 {
@@ -81,6 +93,8 @@ struct Snapshot {
     detail: String,
     rows: u32,
     pending: Option<IslandPending>,
+    hide_when_idle: bool,
+    lingering: bool,
 }
 
 impl Default for Snapshot {
@@ -93,6 +107,8 @@ impl Default for Snapshot {
             detail: String::new(),
             rows: 1,
             pending: None,
+            hide_when_idle: false,
+            lingering: false,
         }
     }
 }
@@ -107,6 +123,8 @@ impl From<IslandSnapshotInput> for Snapshot {
             detail: input.detail,
             rows: input.rows.max(1),
             pending: input.pending,
+            hide_when_idle: input.hide_when_idle,
+            lingering: input.lingering,
         }
     }
 }
@@ -132,6 +150,8 @@ struct Inner {
     parked_main: bool,
     applying: bool,
     dirty: bool,
+    /// Whether the saved idle-hide choice has been read.
+    pref_loaded: bool,
     /// Last placed size and screen origin, so status text can update without resizing.
     placed: HashMap<String, (i32, i32, i32, i32)>,
     /// Monitor work-area origins, so a new screen gets its own notch.
@@ -154,6 +174,7 @@ impl Default for Inner {
             parked_main: false,
             applying: false,
             dirty: false,
+            pref_loaded: false,
             placed: HashMap::new(),
             screen_sig: Vec::new(),
             last_view: IslandView {
@@ -186,7 +207,8 @@ fn pending_opens_card(pending: Option<&IslandPending>) -> bool {
     pending.is_some_and(|item| item.kind != "choice")
 }
 
-/// The island stays up on macOS. Hover peeks. A click on the bar keeps it open.
+/// On macOS the bar can stay up, or hide until a turn is running.
+/// Hover peeks. A click on the bar keeps it open.
 /// A question opens it unless the person is typing or they just clicked somewhere else.
 pub(crate) fn island_chrome(
     macos: bool,
@@ -195,8 +217,13 @@ pub(crate) fn island_chrome(
     composing: bool,
     folded: bool,
     opened: bool,
+    hide_when_idle: bool,
+    awake: bool,
 ) -> Chrome {
     if !macos {
+        return Chrome::Hidden;
+    }
+    if hide_when_idle && !awake && !hovering && !opened {
         return Chrome::Hidden;
     }
     if hovering || opened || (attention && !composing && !folded) {
@@ -204,6 +231,48 @@ pub(crate) fn island_chrome(
     } else {
         Chrome::Pill
     }
+}
+
+fn hide_pref_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("island-hide"))
+}
+
+fn read_hide_pref(app: &AppHandle) -> Option<bool> {
+    let raw = std::fs::read_to_string(hide_pref_path(app)?).ok()?;
+    match raw.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn write_hide_pref(app: &AppHandle, hide: bool) {
+    let Some(path) = hide_pref_path(app) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, if hide { "1" } else { "0" });
+}
+
+fn ensure_hide_pref_loaded(app: &AppHandle) {
+    let host = app.state::<IslandHost>();
+    let mut guard = host.inner.lock().expect("island");
+    if guard.pref_loaded {
+        return;
+    }
+    guard.pref_loaded = true;
+    if let Some(hide) = read_hide_pref(app) {
+        guard.snapshot.hide_when_idle = hide;
+    }
+}
+
+fn island_awake(snapshot: &Snapshot) -> bool {
+    snapshot.active || snapshot.pending.is_some() || snapshot.lingering
 }
 
 /// Only a running browser tool hides the normal windows. The island does not.
@@ -255,7 +324,9 @@ pub(crate) fn on_ask_closed(app: &AppHandle) {
     {
         let host = app.state::<IslandHost>();
         let mut guard = host.inner.lock().expect("island");
+        let hide_when_idle = guard.snapshot.hide_when_idle;
         guard.snapshot = Snapshot::default();
+        guard.snapshot.hide_when_idle = hide_when_idle;
         guard.pinned = false;
         guard.hold_open = false;
         guard.hovering = false;
@@ -291,6 +362,7 @@ fn apply(app: &AppHandle) {
 }
 
 fn apply_once(app: &AppHandle) {
+    ensure_hide_pref_loaded(app);
     let (chrome, snapshot, park, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
         let guard = host.inner.lock().expect("island");
@@ -301,6 +373,8 @@ fn apply_once(app: &AppHandle) {
             guard.snapshot.composing,
             guard.folded,
             guard.opened,
+            guard.snapshot.hide_when_idle,
+            island_awake(&guard.snapshot),
         );
         let park = should_park_windows(
             guard.snapshot.active,
@@ -401,6 +475,8 @@ fn reveal_window(app: &AppHandle, label: &str, focus: bool) {
 
 fn hide_island(app: &AppHandle) {
     for window in island_windows(app) {
+        #[cfg(target_os = "macos")]
+        order_out_overlay(&window);
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         }
@@ -448,39 +524,15 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         let anchor = top_anchor(monitor);
         // The camera housing cannot show anything. The black fills that band so
         // the card looks like the notch grew; the inset keeps words below it.
-        let (width, height, x, y, notch_inset) = if chrome == Chrome::Pill {
-            if let Some(anchor) = anchor {
-                (
-                    anchor.notch_w,
-                    anchor.menu_h - 8.0 + CHIP_HEIGHT,
-                    screen_x + anchor.notch_x,
-                    screen_y,
-                    0.0,
-                )
-            } else {
-                (
-                    CHIP_WIDTH,
-                    CHIP_HEIGHT,
-                    screen_x + (screen_w - CHIP_WIDTH) / 2.0,
-                    screen_y + 22.0,
-                    0.0,
-                )
-            }
-        } else {
-            let width = PEEK_WIDTH.min((screen_w - 32.0).max(320.0));
-            let x = screen_x + (screen_w - width) / 2.0;
-            if let Some(anchor) = anchor {
-                (
-                    width,
-                    peek_height + anchor.menu_h,
-                    x,
-                    screen_y,
-                    anchor.menu_h,
-                )
-            } else {
-                (width, peek_height, x, screen_y + 22.0, 0.0)
-            }
-        };
+        // A screen without that housing still gets the bar, under the menu bar.
+        let (width, height, x, y, notch_inset) = island_frame(
+            chrome,
+            screen_x,
+            screen_y,
+            screen_w,
+            peek_height,
+            anchor.as_ref(),
+        );
         let place_key = (
             x.round() as i32,
             y.round() as i32,
@@ -506,6 +558,8 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
     }
     for window in island_windows(app) {
         if !keep.iter().any(|label| label == window.label()) {
+            #[cfg(target_os = "macos")]
+            order_out_overlay(&window);
             let _ = window.hide();
         }
     }
@@ -553,10 +607,56 @@ fn monitors_for_island(app: &AppHandle) -> Vec<tauri::Monitor> {
         .collect()
 }
 
+const MENU_BAR_FALLBACK: f64 = 24.0;
+
 struct TopAnchor {
     notch_x: f64,
     notch_w: f64,
     menu_h: f64,
+    has_notch: bool,
+}
+
+/// Width, height, x, y, and the top inset that keeps words out of the menu bar.
+fn island_frame(
+    chrome: Chrome,
+    screen_x: f64,
+    screen_y: f64,
+    screen_w: f64,
+    peek_height: f64,
+    anchor: Option<&TopAnchor>,
+) -> (f64, f64, f64, f64, f64) {
+    let menu_h = anchor
+        .map(|item| item.menu_h)
+        .filter(|height| (20.0..80.0).contains(height))
+        .unwrap_or(MENU_BAR_FALLBACK);
+    let notch = anchor.filter(|item| item.has_notch);
+    if chrome == Chrome::Pill {
+        if let Some(anchor) = notch {
+            (
+                anchor.notch_w,
+                menu_h - 8.0 + CHIP_HEIGHT,
+                screen_x + anchor.notch_x,
+                screen_y,
+                0.0,
+            )
+        } else {
+            (
+                CHIP_WIDTH,
+                CHIP_HEIGHT,
+                screen_x + (screen_w - CHIP_WIDTH) / 2.0,
+                screen_y + menu_h,
+                0.0,
+            )
+        }
+    } else {
+        let width = PEEK_WIDTH.min((screen_w - 32.0).max(320.0));
+        let x = screen_x + (screen_w - width) / 2.0;
+        if notch.is_some() {
+            (width, peek_height + menu_h, x, screen_y, menu_h)
+        } else {
+            (width, peek_height, x, screen_y + menu_h, 0.0)
+        }
+    }
 }
 
 fn top_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
@@ -589,27 +689,28 @@ fn menu_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
         if (frame.size.width - want_w).abs() > 2.0 || (frame.size.height - want_h).abs() > 2.0 {
             continue;
         }
+        let visible = screen.visibleFrame();
+        let menu_h =
+            (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
         let left_area = screen.auxiliaryTopLeftArea();
         let right_area = screen.auxiliaryTopRightArea();
         let left = left_area.size.width;
         let right = right_area.size.width;
-        if left < 1.0 || right < 1.0 {
-            return None;
-        }
         let notch = frame.size.width - left - right;
-        if !(80.0..400.0).contains(&notch) {
-            return None;
-        }
-        let visible = screen.visibleFrame();
-        let menu_h =
-            (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
-        if !(20.0..80.0).contains(&menu_h) {
-            return None;
-        }
+        let has_notch = left >= 1.0
+            && right >= 1.0
+            && (80.0..400.0).contains(&notch)
+            && (20.0..80.0).contains(&menu_h);
+        let menu_h = if (20.0..80.0).contains(&menu_h) {
+            menu_h
+        } else {
+            MENU_BAR_FALLBACK
+        };
         return Some(TopAnchor {
             notch_x: left,
             notch_w: notch,
             menu_h,
+            has_notch,
         });
     }
     None
@@ -882,6 +983,22 @@ fn ensure_overlay_panel(host: &objc2_app_kit::NSWindow) -> *mut objc2_app_kit::N
     ptr
 }
 
+/// The visible bar is the overlay panel. Hiding the Tauri window alone leaves it on screen.
+#[cfg(target_os = "macos")]
+fn order_out_overlay(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::NSWindow;
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let host: &NSWindow = &*ptr.cast();
+        overlay_target(host).orderOut(None);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn order_front_without_activating(window: &tauri::WebviewWindow) -> bool {
     use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
@@ -1026,6 +1143,9 @@ fn panel_at(point: objc2_foundation::NSPoint) -> Option<*mut objc2_app_kit::NSWi
             continue;
         }
         let ns = unsafe { &*item.panel.cast::<NSWindow>() };
+        if !ns.isVisible() {
+            continue;
+        }
         let frame = ns.frame();
         let inside = point.x >= frame.origin.x
             && point.x < frame.origin.x + frame.size.width
@@ -1047,7 +1167,11 @@ fn click_lands_on_island(point: objc2_foundation::NSPoint) -> bool {
         if item.panel.is_null() {
             continue;
         }
-        let frame = unsafe { &*item.panel.cast::<NSWindow>() }.frame();
+        let ns = unsafe { &*item.panel.cast::<NSWindow>() };
+        if !ns.isVisible() {
+            continue;
+        }
+        let frame = ns.frame();
         let origin = frame.origin;
         let size = frame.size;
         let inside = point.x >= origin.x
@@ -1069,7 +1193,8 @@ fn hop(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
 fn store_snapshot(app: &AppHandle, input: IslandSnapshotInput) {
     let host = app.state::<IslandHost>();
     let mut guard = host.inner.lock().expect("island");
-    let next = Snapshot::from(input);
+    let mut next = Snapshot::from(input);
+    next.hide_when_idle = guard.snapshot.hide_when_idle;
     if !next.active {
         guard.pinned = false;
         guard.hold_open = false;
@@ -1275,6 +1400,32 @@ pub fn island_open_session_command(app: AppHandle, session_id: String) -> Result
 }
 
 #[tauri::command]
+pub fn island_hide_when_idle_command(app: AppHandle) -> bool {
+    ensure_hide_pref_loaded(&app);
+    app.state::<IslandHost>()
+        .inner
+        .lock()
+        .expect("island")
+        .snapshot
+        .hide_when_idle
+}
+
+#[tauri::command]
+pub fn island_set_hide_when_idle_command(app: AppHandle, hide: bool) -> Result<(), String> {
+    hop(&app, move |app| {
+        {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            guard.pref_loaded = true;
+            guard.snapshot.hide_when_idle = hide;
+        }
+        write_hide_pref(app, hide);
+        apply(app);
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub fn current_island_view_command(app: AppHandle) -> IslandView {
     app.state::<IslandHost>()
         .inner
@@ -1287,7 +1438,8 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 #[cfg(test)]
 mod tests {
     use super::{
-        island_chrome, peek_height, pending_opens_card, should_park_windows, Chrome, IslandPending,
+        island_chrome, island_frame, peek_height, pending_opens_card, should_park_windows, Chrome,
+        IslandPending, TopAnchor,
     };
 
     #[test]
@@ -1320,13 +1472,73 @@ mod tests {
     }
 
     #[test]
-    fn the_island_stays_up_while_idle() {
+    fn a_screen_without_a_notch_hangs_below_the_menu_bar() {
+        let anchor = TopAnchor {
+            notch_x: 0.0,
+            notch_w: 0.0,
+            menu_h: 24.0,
+            has_notch: false,
+        };
+        let (width, height, x, y, inset) =
+            island_frame(Chrome::Pill, 0.0, 0.0, 1440.0, 200.0, Some(&anchor));
+        assert_eq!(width, 156.0);
+        assert_eq!(height, 28.0);
+        assert_eq!(y, 24.0);
+        assert_eq!(inset, 0.0);
+        assert!((x - (1440.0 - 156.0) / 2.0).abs() < 0.1);
+
+        let (_, card_h, _, card_y, card_inset) =
+            island_frame(Chrome::Peek, 0.0, 0.0, 1440.0, 200.0, Some(&anchor));
+        assert_eq!(card_y, 24.0);
+        assert_eq!(card_h, 200.0);
+        assert_eq!(card_inset, 0.0);
+    }
+
+    #[test]
+    fn a_notch_still_fills_the_camera_housing() {
+        let anchor = TopAnchor {
+            notch_x: 656.0,
+            notch_w: 200.0,
+            menu_h: 37.0,
+            has_notch: true,
+        };
+        let (width, height, x, y, inset) =
+            island_frame(Chrome::Pill, 0.0, 0.0, 1512.0, 200.0, Some(&anchor));
+        assert_eq!(width, 200.0);
+        assert_eq!(x, 656.0);
+        assert_eq!(y, 0.0);
+        assert_eq!(inset, 0.0);
+        assert!(height > 37.0);
+    }
+
+    #[test]
+    fn an_idle_bar_hides_until_a_turn_is_running() {
         assert_eq!(
-            island_chrome(true, false, false, false, false, false),
+            island_chrome(true, false, false, false, false, false, true, false),
+            Chrome::Hidden
+        );
+        assert_eq!(
+            island_chrome(true, false, false, false, false, false, true, true),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, false, false, false, false),
+            island_chrome(true, false, true, false, false, false, true, true),
+            Chrome::Peek
+        );
+        assert_eq!(
+            island_chrome(true, false, false, false, false, true, true, false),
+            Chrome::Peek
+        );
+    }
+
+    #[test]
+    fn the_island_stays_up_while_idle_when_hiding_is_off() {
+        assert_eq!(
+            island_chrome(true, false, false, false, false, false, false, false),
+            Chrome::Pill
+        );
+        assert_eq!(
+            island_chrome(true, true, false, false, false, false, false, false),
             Chrome::Peek
         );
     }
@@ -1334,15 +1546,15 @@ mod tests {
     #[test]
     fn a_question_opens_the_island_unless_typing() {
         assert_eq!(
-            island_chrome(true, false, true, false, false, false),
+            island_chrome(true, false, true, false, false, false, false, false),
             Chrome::Peek
         );
         assert_eq!(
-            island_chrome(true, false, true, true, false, false),
+            island_chrome(true, false, true, true, false, false, false, false),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, true, true, true, false),
+            island_chrome(true, true, true, true, true, false, false, false),
             Chrome::Peek
         );
     }
@@ -1350,11 +1562,11 @@ mod tests {
     #[test]
     fn a_click_outside_folds_the_card() {
         assert_eq!(
-            island_chrome(true, false, true, false, true, false),
+            island_chrome(true, false, true, false, true, false, false, false),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, true, false, true, false),
+            island_chrome(true, true, true, false, true, false, false, false),
             Chrome::Peek
         );
     }
@@ -1362,11 +1574,11 @@ mod tests {
     #[test]
     fn a_click_on_the_bar_opens_it_again() {
         assert_eq!(
-            island_chrome(true, false, true, false, true, true),
+            island_chrome(true, false, true, false, true, true, false, false),
             Chrome::Peek
         );
         assert_eq!(
-            island_chrome(true, false, false, false, true, true),
+            island_chrome(true, false, false, false, true, true, false, false),
             Chrome::Peek
         );
     }
@@ -1374,7 +1586,7 @@ mod tests {
     #[test]
     fn other_platforms_have_no_island() {
         assert_eq!(
-            island_chrome(false, true, false, false, false, false),
+            island_chrome(false, true, false, false, false, false, true, false),
             Chrome::Hidden
         );
     }

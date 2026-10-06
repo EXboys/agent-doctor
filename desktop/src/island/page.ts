@@ -10,6 +10,8 @@ import {
   islandSendText,
   islandSetHover,
   islandSetContentHeight,
+  islandSetHideWhenIdle,
+  islandHideWhenIdle,
   islandSetReading,
   resolvePermissionSession,
 } from "../ipc";
@@ -21,6 +23,7 @@ const titleEl = document.querySelector<HTMLElement>("#island-title");
 const detailEl = document.querySelector<HTMLElement>("#island-detail");
 const actionsEl = document.querySelector<HTMLElement>("#island-actions");
 const errorEl = document.querySelector<HTMLElement>("#island-error");
+const hideIdleEl = document.querySelector<HTMLInputElement>("#island-hide");
 
 let hoverTimer = 0;
 let pointerInside = false;
@@ -1041,7 +1044,10 @@ function reportHeight(): void {
   if (!root?.classList.contains("is-expanded")) return;
   const body = root.querySelector<HTMLElement>(".island-body");
   if (!body) return;
-  let height = parseFloat(getComputedStyle(root).paddingBottom) || 0;
+  const style = getComputedStyle(root);
+  const notch = parseFloat(style.getPropertyValue("--island-notch")) || 0;
+  const topBand = Math.max(0, (parseFloat(style.paddingTop) || 0) - notch);
+  let height = (parseFloat(style.paddingBottom) || 0) + topBand;
   const pill = root.querySelector<HTMLElement>(".island-pill");
   if (pill && pill.getClientRects().length > 0) {
     height += pill.offsetHeight + (parseFloat(getComputedStyle(body).marginTop) || 0);
@@ -1148,6 +1154,14 @@ function boot(): void {
     setHover(true, true);
   });
   root?.addEventListener("mouseleave", () => setHover(false));
+  hideIdleEl?.addEventListener("change", () => {
+    void islandSetHideWhenIdle(hideIdleEl.checked).catch(() => {});
+  });
+  void islandHideWhenIdle()
+    .then((hide) => {
+      if (hideIdleEl) hideIdleEl.checked = hide;
+    })
+    .catch(() => {});
   void currentIslandView()
     .then(render)
     .catch(() => {});

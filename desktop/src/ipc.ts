@@ -640,6 +640,14 @@ export function islandSetContentHeight(height: number): Promise<void> {
   return invoke("island_set_content_height_command", { height });
 }
 
+export function islandHideWhenIdle(): Promise<boolean> {
+  return invoke("island_hide_when_idle_command");
+}
+
+export function islandSetHideWhenIdle(hide: boolean): Promise<void> {
+  return invoke("island_set_hide_when_idle_command", { hide });
+}
+
 export function islandClaimKeyboard(): Promise<void> {
   return invoke("island_claim_keyboard_command");
 }

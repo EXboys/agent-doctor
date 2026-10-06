@@ -32,10 +32,11 @@ pub(crate) use tray::{rebuild_tray_menu, remember_tray_health, update_tray_toolt
 
 use commands::*;
 use island::{
-    current_island_view_command, island_claim_keyboard_command, island_open_session_command,
-    island_pin_command, island_restore_command, island_send_text_command,
-    island_set_content_height_command, island_set_hover_command, island_set_reading_command,
-    publish_island_snapshot_command, IslandHost,
+    current_island_view_command, island_claim_keyboard_command, island_hide_when_idle_command,
+    island_open_session_command, island_pin_command, island_restore_command,
+    island_send_text_command, island_set_content_height_command, island_set_hide_when_idle_command,
+    island_set_hover_command, island_set_reading_command, publish_island_snapshot_command,
+    IslandHost,
 };
 use state::PromptSessionState;
 use windows::{
@@ -559,6 +560,8 @@ pub fn run() {
             island_claim_keyboard_command,
             island_set_reading_command,
             island_set_content_height_command,
+            island_set_hide_when_idle_command,
+            island_hide_when_idle_command,
             current_island_view_command
         ])
         .run(tauri::generate_context!())

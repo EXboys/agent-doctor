@@ -15,6 +15,7 @@ import {
 } from "./track";
 
 const TYPING_MS = 1200;
+const LINGER_MS = 6000;
 
 function labels(): IslandLabels {
   return {
@@ -43,6 +44,9 @@ export function startIslandPublisher(
   let typingUntil = 0;
   let publishTimer = 0;
   let typingTimer = 0;
+  let lingerTimer = 0;
+  let lingerUntil = 0;
+  let sawWork = false;
   let livePlan: PlanStep[] | null = null;
 
   rememberSent = (text) => {
@@ -52,6 +56,15 @@ export function startIslandPublisher(
 
   const publishNow = () => {
     const composing = Date.now() < typingUntil;
+    const working = track.active || Boolean(track.pending);
+    if (working) {
+      sawWork = true;
+      lingerUntil = 0;
+    } else if (sawWork) {
+      sawWork = false;
+      lingerUntil = Date.now() + LINGER_MS;
+    }
+    const lingering = Date.now() < lingerUntil;
     const feed = readFeed?.() ?? { activeId: "", attentionId: "", sessions: [] };
     const runningId = feed.attentionId || feed.activeId;
     const rows = buildIslandRows(
@@ -68,10 +81,18 @@ export function startIslandPublisher(
       const row = rows.find((item) => item.id === runningId);
       if (row) row.plan = livePlan.length ? livePlan : undefined;
     }
-    void publishIslandSnapshot(islandSnapshot(track, labels(), composing, rows)).catch(() => {});
+    const snap = islandSnapshot(track, labels(), composing, rows);
+    if (lingering && !working) snap.title = t("island.done");
+    snap.lingering = lingering;
+    void publishIslandSnapshot(snap).catch(() => {});
     window.clearTimeout(typingTimer);
-    if (!composing) return;
-    typingTimer = window.setTimeout(publishNow, Math.max(0, typingUntil - Date.now()) + 30);
+    window.clearTimeout(lingerTimer);
+    if (composing) {
+      typingTimer = window.setTimeout(publishNow, Math.max(0, typingUntil - Date.now()) + 30);
+    }
+    if (lingering) {
+      lingerTimer = window.setTimeout(publishNow, Math.max(0, lingerUntil - Date.now()) + 30);
+    }
   };
 
   const schedule = () => {

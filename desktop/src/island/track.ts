@@ -45,6 +45,10 @@ export type IslandSnapshot = {
   /** How many conversations the expanded card should make room for. */
   rows: number;
   pending: IslandPending | null;
+  /** Absent until a turn is running. Default on. */
+  hideWhenIdle: boolean;
+  /** The turn just finished, so the bar stays a moment longer. */
+  lingering: boolean;
 };
 
 export type IslandView = {
@@ -365,5 +369,7 @@ export function islandSnapshot(
     detail: rows.length > 0 ? JSON.stringify({ v: 1, rows }) : visibleDetail(track),
     rows: Math.max(1, rows.length),
     pending,
+    hideWhenIdle: false,
+    lingering: false,
   };
 }
