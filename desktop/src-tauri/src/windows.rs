@@ -18,24 +18,23 @@ const DIAGNOSE_WINDOW_LABEL: &str = "diagnose";
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
-/// Designed height from the window config. Windows keeps this instead of
-/// stretching the main window to the work area.
-#[cfg(target_os = "windows")]
+/// Designed height of the agent home. Taller screens stay here; shorter
+/// logical work areas (125–150% on 1080p) use the work area itself.
 const MAIN_WINDOW_HEIGHT: f64 = 720.0;
 
 fn main_inner_height(work_h: f64) -> f64 {
+    // macOS stretches with the screen. Windows keeps the designed height so a
+    // large monitor does not turn the home into a full-height column.
+    fit_main_inner_height(work_h, cfg!(target_os = "windows"))
+}
+
+fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
     let available = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
-    #[cfg(target_os = "windows")]
-    {
-        // 150% scaling on a 1080p screen makes 720 logical pixels almost the
-        // whole work area, so also stay under about three quarters of it.
-        let cap = MAIN_WINDOW_HEIGHT
-            .min(work_h * 0.72)
-            .max(MAIN_WINDOW_MIN_HEIGHT);
-        available.min(cap)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
+    if limit_to_design {
+        // Do not apply a second fraction. 72% of a scaled 1080p work area is
+        // shorter than the agent home, so the main page had to scroll.
+        available.min(MAIN_WINDOW_HEIGHT)
+    } else {
         available
     }
 }
@@ -100,7 +99,6 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let secondary_deco_w = window_decoration_width(&secondary, scale);
     let secondary_deco_h = window_decoration_height(&secondary, scale);
-    let main_deco_h = window_decoration_height(&main, scale);
 
     let room = work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w;
     let max_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
@@ -112,7 +110,8 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
         room.max(360.0).min(max_outer_w)
     };
     let secondary_inner_w = (secondary_outer_w - secondary_deco_w).max(360.0);
-    let main_inner_h = (main_h - main_deco_h).max(MAIN_WINDOW_MIN_HEIGHT);
+    // set_size is the webview size. main_h is already that height; subtracting
+    // the title bar again made the home shorter than the window beside it.
     let secondary_inner_h = (outer_h - secondary_deco_h).max(ASK_WINDOW_MIN_HEIGHT);
 
     let main_x = work_x + MAIN_WINDOW_MARGIN;
@@ -128,7 +127,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
         )));
     }
 
-    let _ = main.set_size(LogicalSize::new(main_outer_w, main_inner_h));
+    let _ = main.set_size(LogicalSize::new(main_outer_w, main_h));
     let _ = main.set_position(LogicalPosition::new(main_x, y));
     let _ = secondary.set_size(LogicalSize::new(secondary_inner_w, secondary_inner_h));
     let _ = secondary.set_position(LogicalPosition::new(secondary_x, y));
@@ -952,4 +951,20 @@ pub fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(),
         let _ = window.emit("main-navigate", serde_json::json!({ "tab": tab }));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_main_inner_height;
+
+    #[test]
+    fn windows_home_keeps_design_height_and_does_not_shrink_further() {
+        // Tall screen: stay at the designed 720 instead of filling the monitor.
+        assert_eq!(fit_main_inner_height(1040.0, true), 720.0);
+        // 125% on 1080p still has room for 720.
+        assert_eq!(fit_main_inner_height(832.0, true), 720.0);
+        // 150% on 1080p: logical work area is under 720. Use it all.
+        // The old 72% cap landed near 495 and forced the home to scroll.
+        assert_eq!(fit_main_inner_height(688.0, true), 656.0);
+    }
 }

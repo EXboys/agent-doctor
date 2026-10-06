@@ -82,6 +82,41 @@ pub(crate) fn turn_sandbox_policy(cwd: &str) -> Value {
     })
 }
 
+/// How long to wait for `thread/start` or `thread/resume` before giving up.
+/// A stuck resume used to sit on “正在恢复 Codex 会话…” until the whole turn timed out.
+const THREAD_OPEN_BUDGET: Duration = Duration::from_secs(15);
+
+fn thread_open_request(
+    resume_thread_id: Option<&str>,
+    cwd: &str,
+    approval_policy: &Value,
+    developer_instructions: Option<&str>,
+) -> (&'static str, Value) {
+    let mut params = json!({
+        "cwd": cwd,
+        "approvalPolicy": approval_policy,
+        "sandbox": thread_sandbox_mode(),
+        "approvalsReviewer": "user",
+    });
+    if let Some(instructions) = developer_instructions {
+        params["developerInstructions"] = Value::String(instructions.to_string());
+    }
+    if let Some(thread_id) = resume_thread_id {
+        params["threadId"] = json!(thread_id);
+        // Rebuilding every past turn into the response can block the reply.
+        // Ask only needs the thread id; the next turn appends to it.
+        params["excludeTurns"] = json!(true);
+        ("thread/resume", params)
+    } else {
+        params["serviceName"] = json!("agent_doctor_ask");
+        ("thread/start", params)
+    }
+}
+
+fn is_thread_open_failure(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("codex thread did not open")
+}
+
 fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
     let mut text = String::from(
         "Do not use require_escalated or ask for elevated permissions. \
@@ -144,7 +179,7 @@ fn run_codex_app_server(
         }
     }
 
-    let mut cmd = build_app_server_command(&cwd, &overlay)?;
+    let cmd = build_app_server_command(&cwd, &overlay)?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -155,15 +190,9 @@ fn run_codex_app_server(
     });
 
     let started = Instant::now();
-    let mut child = cmd.spawn().context("failed to spawn codex app-server")?;
 
     let has_ui_control = control.is_some();
     let control = control.unwrap_or_default();
-    if let Some(stdin) = child.stdin.take() {
-        control.attach_stdin(stdin);
-    } else {
-        bail!("codex app-server missing stdin pipe");
-    }
 
     let interactive = !options.full_auto && has_ui_control;
     let approval_policy = if interactive {
@@ -206,100 +235,120 @@ fn run_codex_app_server(
         on_event(event);
     };
 
-    let result = (|| -> Result<CodexPumpOutcome> {
-        // initialize
-        let init_id = next_rpc_id();
-        control.write_line(
-            &json!({
-                "method": "initialize",
-                "id": init_id,
-                "params": {
-                    "clientInfo": {
-                        "name": "agent_doctor",
-                        "title": "Agent Doctor",
-                        "version": env!("CARGO_PKG_VERSION")
+    let mut resume_attempt = resume_thread_id.clone();
+    let mut allow_fresh_start = resume_thread_id.is_some();
+    let mut dropped_resume = false;
+    let (result, mut child) = loop {
+        control.close();
+        let mut attempt_cmd = build_app_server_command(&cwd, &overlay)?;
+        let mut child = attempt_cmd
+            .spawn()
+            .context("failed to spawn codex app-server")?;
+        if let Some(stdin) = child.stdin.take() {
+            control.attach_stdin(stdin);
+        } else {
+            let _ = child.kill();
+            bail!("codex app-server missing stdin pipe");
+        }
+
+        let resume_for_attempt = resume_attempt.clone();
+        let attempt = (|| -> Result<CodexPumpOutcome> {
+            // Read stdout before any request. On Windows a full pipe blocks
+            // the server, and a blocked server never reads the next line.
+            let pipes = attach_server_pipes(&mut child)?;
+
+            let init_id = next_rpc_id();
+            control.write_line(
+                &json!({
+                    "method": "initialize",
+                    "id": init_id,
+                    "params": {
+                        "clientInfo": {
+                            "name": "agent_doctor",
+                            "title": "Agent Doctor",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
                     }
-                }
-            })
-            .to_string(),
-        )?;
-        control.write_line(&json!({ "method": "initialized", "params": {} }).to_string())?;
+                })
+                .to_string(),
+            )?;
+            control.write_line(&json!({ "method": "initialized", "params": {} }).to_string())?;
 
-        // thread/start or thread/resume
-        let thread_id_rpc = next_rpc_id();
-        let thread_params = if let Some(ref tid) = resume_thread_id {
-            json!({
-                "threadId": tid,
-                "cwd": cwd.display().to_string(),
-                "approvalPolicy": approval_policy.clone(),
-                "sandbox": thread_sandbox_mode(),
-                "approvalsReviewer": "user",
-                "developerInstructions": developer_instructions.clone(),
-            })
-        } else {
-            json!({
-                "cwd": cwd.display().to_string(),
-                "approvalPolicy": approval_policy.clone(),
-                "sandbox": thread_sandbox_mode(),
-                "serviceName": "agent_doctor_ask",
-                "approvalsReviewer": "user",
-                "developerInstructions": developer_instructions.clone(),
-            })
-        };
-        let thread_method = if resume_thread_id.is_some() {
-            "thread/resume"
-        } else {
-            "thread/start"
-        };
-        emit(PromptSessionEvent::Status {
-            session_id: session_id.clone(),
-            phase: "starting".into(),
-            message: if resume_thread_id.is_some() {
-                "正在恢复 Codex 会话…".into()
-            } else {
-                "正在启动 Codex 会话…".into()
-            },
-        });
-        control.write_line(
-            &json!({
-                "method": thread_method,
-                "id": thread_id_rpc,
-                "params": thread_params
-            })
-            .to_string(),
-        )?;
+            let thread_id_rpc = next_rpc_id();
+            let (thread_method, thread_params) = thread_open_request(
+                resume_for_attempt.as_deref(),
+                &cwd.display().to_string(),
+                &approval_policy,
+                developer_instructions.as_deref(),
+            );
+            emit(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "starting".into(),
+                message: if resume_for_attempt.is_some() {
+                    "正在恢复 Codex 会话…".into()
+                } else if dropped_resume {
+                    "上次会话接不上，正在新开一轮…".into()
+                } else {
+                    "正在启动 Codex 会话…".into()
+                },
+            });
+            control.write_line(
+                &json!({
+                    "method": thread_method,
+                    "id": thread_id_rpc,
+                    "params": thread_params
+                })
+                .to_string(),
+            )?;
 
-        let mut state = PumpState {
-            session_id: session_id.clone(),
-            waiting_thread: Some(thread_id_rpc),
-            waiting_turn: None,
-            thread_id: resume_thread_id.clone(),
-            turn_done: false,
-            interactive,
-            cwd: cwd.display().to_string(),
-            prompt: if browser_mcp {
-                format!(
-                    "{}\n\n{}",
-                    super::mcp_ensure::browser_mcp_tool_instructions(),
-                    prompt
-                )
-            } else {
-                prompt.to_string()
-            },
-            approval_policy,
-            saw_agent_delta: false,
-        };
+            let mut state = PumpState {
+                session_id: session_id.clone(),
+                waiting_thread: Some(thread_id_rpc),
+                waiting_turn: None,
+                thread_id: resume_for_attempt.clone(),
+                thread_open_error: None,
+                thread_wait_started: Instant::now(),
+                turn_done: false,
+                interactive,
+                cwd: cwd.display().to_string(),
+                prompt: if browser_mcp {
+                    format!(
+                        "{}\n\n{}",
+                        super::mcp_ensure::browser_mcp_tool_instructions(),
+                        prompt
+                    )
+                } else {
+                    prompt.to_string()
+                },
+                approval_policy: approval_policy.clone(),
+                saw_agent_delta: false,
+            };
 
-        let outcome = pump_app_server(
-            &mut child,
-            timeout_sec,
-            cancel.handle(),
-            &control,
-            &mut state,
-            &mut emit,
-        )?;
-        Ok((outcome, state.thread_id))
-    })();
+            let outcome = pump_app_server(
+                &mut child,
+                pipes,
+                timeout_sec,
+                cancel.handle(),
+                &control,
+                &mut state,
+                &mut emit,
+            )?;
+            Ok((outcome, state.thread_id))
+        })();
+
+        match attempt {
+            Err(err) if allow_fresh_start && is_thread_open_failure(&err) => {
+                control.close();
+                let _ = child.kill();
+                let _ = child.wait();
+                allow_fresh_start = false;
+                dropped_resume = true;
+                resume_attempt = None;
+                continue;
+            }
+            other => break (other, child),
+        }
+    };
 
     control.close();
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -350,7 +399,11 @@ fn run_codex_app_server(
                 summary: summary.clone(),
                 log_excerpt: summary,
                 duration_ms,
-                runtime_thread_id: resume_thread_id,
+                runtime_thread_id: if dropped_resume {
+                    None
+                } else {
+                    resume_thread_id
+                },
             }
         }
     };
@@ -391,6 +444,8 @@ pub(crate) struct PumpState {
     waiting_thread: Option<u64>,
     waiting_turn: Option<u64>,
     thread_id: Option<String>,
+    thread_open_error: Option<String>,
+    thread_wait_started: Instant,
     turn_done: bool,
     interactive: bool,
     cwd: String,
@@ -399,18 +454,15 @@ pub(crate) struct PumpState {
     saw_agent_delta: bool,
 }
 
-fn pump_app_server<F>(
-    child: &mut Child,
-    timeout_sec: u64,
-    cancel: Arc<AtomicBool>,
-    control: &PromptSessionControl,
-    state: &mut PumpState,
-    on_event: &mut F,
-) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let pid = child.id();
+struct ServerPipes {
+    queue: Arc<Mutex<Vec<(bool, String)>>>,
+    stdout_acc: Arc<Mutex<String>>,
+    stderr_acc: Arc<Mutex<String>>,
+    stdout_handle: thread::JoinHandle<()>,
+    stderr_handle: thread::JoinHandle<()>,
+}
+
+fn attach_server_pipes(child: &mut Child) -> Result<ServerPipes> {
     let queue = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
     let stdout_acc = Arc::new(Mutex::new(String::new()));
     let stderr_acc = Arc::new(Mutex::new(String::new()));
@@ -444,6 +496,36 @@ where
         }
     });
 
+    Ok(ServerPipes {
+        queue,
+        stdout_acc,
+        stderr_acc,
+        stdout_handle,
+        stderr_handle,
+    })
+}
+
+fn pump_app_server<F>(
+    child: &mut Child,
+    pipes: ServerPipes,
+    timeout_sec: u64,
+    cancel: Arc<AtomicBool>,
+    control: &PromptSessionControl,
+    state: &mut PumpState,
+    on_event: &mut F,
+) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let pid = child.id();
+    let ServerPipes {
+        queue,
+        stdout_acc,
+        stderr_acc,
+        stdout_handle,
+        stderr_handle,
+    } = pipes;
+
     let mut clock = SessionClock::new(timeout_sec);
     let status;
     let exit_code;
@@ -466,6 +548,21 @@ where
                     line: humanize_runtime_error(&line),
                 });
             }
+        }
+
+        if let Some(message) = state.thread_open_error.clone() {
+            force_stop_child(child, pid);
+            join_reader(stdout_handle, Duration::from_millis(500));
+            join_reader(stderr_handle, Duration::from_millis(500));
+            bail!("codex thread did not open: {message}");
+        }
+        if state.waiting_thread.is_some()
+            && state.thread_wait_started.elapsed() >= THREAD_OPEN_BUDGET
+        {
+            force_stop_child(child, pid);
+            join_reader(stdout_handle, Duration::from_millis(500));
+            join_reader(stderr_handle, Duration::from_millis(500));
+            bail!("codex thread did not open: timed out");
         }
 
         if cancel.load(Ordering::SeqCst) {
@@ -565,12 +662,66 @@ mod tests {
     }
 
     #[test]
+    fn resume_asks_for_metadata_only_and_start_does_not() {
+        let (_method, resume) =
+            thread_open_request(Some("thr_1"), "/tmp", &json!("on-request"), None);
+        assert_eq!(resume["threadId"], "thr_1");
+        assert_eq!(resume["excludeTurns"], true);
+        assert!(resume.get("developerInstructions").is_none());
+        assert!(resume.get("serviceName").is_none());
+
+        let (method, start) =
+            thread_open_request(None, "/tmp", &json!("on-request"), Some("be brief"));
+        assert_eq!(method, "thread/start");
+        assert!(start.get("excludeTurns").is_none());
+        assert!(start.get("threadId").is_none());
+        assert_eq!(start["developerInstructions"], "be brief");
+        assert_eq!(start["serviceName"], "agent_doctor_ask");
+    }
+
+    #[test]
+    fn thread_open_error_does_not_pretend_the_turn_finished() {
+        let mut state = PumpState {
+            session_id: "s1".into(),
+            waiting_thread: Some(7),
+            waiting_turn: None,
+            thread_id: Some("thr_old".into()),
+            thread_open_error: None,
+            thread_wait_started: Instant::now(),
+            turn_done: false,
+            interactive: true,
+            cwd: "/tmp".into(),
+            prompt: "hi".into(),
+            approval_policy: json!("on-request"),
+            saw_agent_delta: false,
+        };
+        let control = PromptSessionControl::new();
+        handle_rpc_response(
+            &json!({"id": 7, "error": {"message": "no rollout found for thread id"}}),
+            &json!(7),
+            &control,
+            &mut state,
+            &mut |_| {},
+        )
+        .expect("response");
+        assert!(!state.turn_done);
+        assert!(state.waiting_thread.is_none());
+        assert!(state
+            .thread_open_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("no rollout"));
+    }
+
+    #[test]
     fn older_and_newer_codex_events_still_surface() {
         let mut state = PumpState {
             session_id: "s1".into(),
             waiting_thread: None,
             waiting_turn: None,
             thread_id: None,
+            thread_open_error: None,
+            thread_wait_started: Instant::now(),
             turn_done: false,
             interactive: false,
             cwd: "/tmp".into(),

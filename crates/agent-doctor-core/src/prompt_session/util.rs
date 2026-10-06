@@ -374,6 +374,9 @@ pub(crate) fn humanize_runtime_error(raw: &str) -> String {
     if lower.contains("invalid request") {
         return format!("Codex 请求无效（多为协议字段与 CLI 版本不一致）。详情：{t}");
     }
+    if lower.contains("codex thread did not open") {
+        return "Codex 没能开始这一轮。请再发一次。".into();
+    }
     t.to_string()
 }
 

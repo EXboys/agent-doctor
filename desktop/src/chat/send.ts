@@ -285,9 +285,15 @@ export function createSendController(deps: SendDeps) {
         selectedMcps,
       });
       deps.setDisplayedCwd(report.cwd);
+      const session = deps.sessionById(chatSessionId) ?? deps.runTargetSession();
       if (report.runtime_thread_id?.trim()) {
-        const session = deps.sessionById(chatSessionId) ?? deps.runTargetSession();
         session.runtimeThreadId = report.runtime_thread_id.trim();
+        deps.touchSession(session);
+        deps.saveStore();
+      } else if (resumeThreadId && report.status === "failed") {
+        // The saved session could not be restored. Drop it so the next send
+        // starts clean instead of sitting on “正在恢复 Codex 会话…”.
+        session.runtimeThreadId = null;
         deps.touchSession(session);
         deps.saveStore();
       }

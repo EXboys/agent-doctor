@@ -67,11 +67,18 @@ where
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("codex app-server error");
+        // Opening the thread failed. Leave the turn unfinished so the caller
+        // can start a fresh thread instead of ending with an empty reply.
+        if state.waiting_thread == id_num {
+            state.waiting_thread = None;
+            state.thread_open_error = Some(msg.to_string());
+            return Ok(());
+        }
         on_event(PromptSessionEvent::StderrLine {
             session_id: state.session_id.clone(),
             line: humanize_runtime_error(msg),
         });
-        if state.waiting_thread == id_num || state.waiting_turn == id_num {
+        if state.waiting_turn == id_num {
             state.turn_done = true;
         }
         return Ok(());
