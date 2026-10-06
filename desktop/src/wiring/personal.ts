@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
-import { formatProviderFailure, withProviderFailure } from "../friendly-error";
+import { formatProviderFailure, teamupsLoginFailure, withProviderFailure } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
@@ -20,6 +20,8 @@ import {
   deletePersonalProvider,
   getPersonalProviderStatus,
   listPersonalProviders,
+  pollTeamupsLogin,
+  startTeamupsLogin,
   teamupsAccountStatus,
   upsertPersonalProvider as upsertPersonalProviderCommand,
   verifyPersonalProvider as verifyPersonalProviderCommand,
@@ -62,6 +64,31 @@ const RUNTIME_FOOTNOTE_LABELS: Record<string, string> = {
 
 const OFFICIAL_PROVIDER_ID = "teamups-official";
 let officialAccount: TeamupsAccountStatus | null = null;
+let officialLoginTimer: ReturnType<typeof setTimeout> | null = null;
+
+function stopOfficialLoginPoll(): void {
+  if (officialLoginTimer != null) {
+    clearTimeout(officialLoginTimer);
+    officialLoginTimer = null;
+  }
+}
+
+/** Personal edition always shows 官方, even before sign-in creates the saved row. */
+function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderListItem[] {
+  if (!isPersonalEdition() || doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {
+    return doc.providers;
+  }
+  const placeholder: PersonalProviderListItem = {
+    id: OFFICIAL_PROVIDER_ID,
+    name: t("personal.officialName"),
+    url: officialAccount?.base_url || "https://teamups.vip",
+    model: "",
+    protocol: "openai",
+    api_key_hint: "",
+    active: false,
+  };
+  return [placeholder, ...doc.providers];
+}
 
 function formatOfficialTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens <= 0) return "0";
@@ -131,7 +158,9 @@ export function createPersonalController(deps: PersonalDeps) {
   function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     personalListEl.innerHTML = "";
     updatePersonalAgentsFootnote();
-    if (doc.providers.length === 0) {
+    const providers = providersForDisplay(doc);
+    const officialSaved = doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID);
+    if (providers.length === 0) {
       const empty = document.createElement("li");
       empty.className = "provider-item provider-item-empty";
       empty.innerHTML = `
@@ -147,8 +176,9 @@ export function createPersonalController(deps: PersonalDeps) {
 
     const personalModeActive =
       isPersonalEdition() || appState.lastModeStatus?.mode === "personal";
-    for (const item of doc.providers) {
+    for (const item of providers) {
       const officialProvider = item.id === OFFICIAL_PROVIDER_ID;
+      const officialNeedsLogin = officialProvider && !officialSaved;
       const routingActive = item.active && personalModeActive;
       const presetId = presets.matchPresetId(item.name, item.url, item.protocol);
       const brand =
@@ -183,6 +213,7 @@ export function createPersonalController(deps: PersonalDeps) {
       const meta = document.createElement("p");
       meta.className = "provider-item-meta";
       meta.textContent = item.model;
+      if (!item.model.trim()) meta.hidden = true;
 
       const showUse = !item.active;
       const desc = document.createElement("p");
@@ -199,7 +230,15 @@ export function createPersonalController(deps: PersonalDeps) {
       const actions = document.createElement("div");
       actions.className = "provider-item-actions";
 
-      if (!item.active) {
+      if (officialNeedsLogin) {
+        const loginBtn = document.createElement("button");
+        loginBtn.type = "button";
+        loginBtn.className = "btn-primary btn-compact";
+        loginBtn.dataset.action = "official-login";
+        loginBtn.dataset.providerId = item.id;
+        loginBtn.textContent = t("personal.officialLogin");
+        actions.appendChild(loginBtn);
+      } else if (!item.active) {
         const activateBtn = document.createElement("button");
         activateBtn.type = "button";
         activateBtn.className = "btn-primary btn-compact";
@@ -269,6 +308,56 @@ export function createPersonalController(deps: PersonalDeps) {
       await refreshOfficialAccount();
     } catch (error) {
       personalStatusEl.textContent = withProviderFailure("personal.applyFailed", error);
+    }
+  }
+
+  async function pollOfficialLogin(
+    deviceCode: string,
+    intervalSec: number,
+    expiresAt: number,
+  ): Promise<void> {
+    if (Date.now() >= expiresAt) {
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = t("resources.mallLoginExpired");
+      return;
+    }
+    try {
+      const poll = await pollTeamupsLogin({ deviceCode });
+      if (poll.status === "pending") {
+        officialLoginTimer = setTimeout(() => {
+          void pollOfficialLogin(deviceCode, intervalSec, expiresAt);
+        }, Math.max(1, intervalSec) * 1000);
+        return;
+      }
+      if (poll.status === "approved") {
+        personalListHintEl.hidden = false;
+        personalListHintEl.textContent = t("resources.mallLoginOk");
+        await loadPersonalProviderStatus();
+        return;
+      }
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = t("resources.mallLoginExpired");
+    } catch (error) {
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = teamupsLoginFailure(error);
+    }
+  }
+
+  async function startOfficialLogin(): Promise<void> {
+    stopOfficialLoginPoll();
+    personalListHintEl.hidden = false;
+    personalListHintEl.textContent = t("resources.mallLoggingIn");
+    try {
+      const started = await startTeamupsLogin();
+      await openUrl(started.verification_url);
+      await pollOfficialLogin(
+        started.device_code,
+        started.interval_sec,
+        Date.now() + Math.max(30, started.expires_in_sec) * 1000,
+      );
+    } catch (error) {
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = teamupsLoginFailure(error);
     }
   }
 
@@ -590,6 +679,10 @@ export function createPersonalController(deps: PersonalDeps) {
       }
       if (action === "activate-provider") {
         void activateProviderById(id);
+        return;
+      }
+      if (action === "official-login") {
+        void startOfficialLogin();
         return;
       }
       if (action === "official-membership") {

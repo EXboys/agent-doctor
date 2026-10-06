@@ -19,8 +19,8 @@ const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 /// Designed height of the agent home. Taller screens stay here; shorter
-/// logical work areas (125–150% on 1080p) use the work area itself.
-const MAIN_WINDOW_HEIGHT: f64 = 720.0;
+/// logical work areas (150% on 1080p) use the work area itself.
+const MAIN_WINDOW_HEIGHT: f64 = 800.0;
 
 fn main_inner_height(work_h: f64) -> f64 {
     // macOS stretches with the screen. Windows keeps the designed height so a
@@ -37,6 +37,17 @@ fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
     } else {
         available
     }
+}
+
+/// Outer height shared by the home and the window beside it.
+fn docked_outer_height(work_h: f64) -> f64 {
+    (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT)
+}
+
+/// `set_size` is the webview. Subtract only this window's title bar so both
+/// outer edges land on `docked_outer_height`.
+fn docked_inner_height(work_h: f64, decoration_h: f64, min_inner: f64) -> f64 {
+    (docked_outer_height(work_h) - decoration_h.max(0.0)).max(min_inner)
 }
 
 fn monitor_work_area(window: &tauri::WebviewWindow) -> Option<(f64, f64, f64, f64, f64)> {
@@ -88,8 +99,8 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let gap = ASK_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
-    let outer_h = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
-    let main_h = main_inner_height(work_h);
+    // Alone, the home stays at the designed height. Beside Ask / Resources /
+    // Diagnose it grows to that window so the two bottoms line up.
 
     let (current_main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
     let main_outer_w = current_main_w.clamp(
@@ -99,6 +110,8 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let secondary_deco_w = window_decoration_width(&secondary, scale);
     let secondary_deco_h = window_decoration_height(&secondary, scale);
+    let main_deco_h = window_decoration_height(&main, scale);
+    let main_h = docked_inner_height(work_h, main_deco_h, MAIN_WINDOW_MIN_HEIGHT);
 
     let room = work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w;
     let max_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
@@ -110,9 +123,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
         room.max(360.0).min(max_outer_w)
     };
     let secondary_inner_w = (secondary_outer_w - secondary_deco_w).max(360.0);
-    // set_size is the webview size. main_h is already that height; subtracting
-    // the title bar again made the home shorter than the window beside it.
-    let secondary_inner_h = (outer_h - secondary_deco_h).max(ASK_WINDOW_MIN_HEIGHT);
+    let secondary_inner_h = docked_inner_height(work_h, secondary_deco_h, ASK_WINDOW_MIN_HEIGHT);
 
     let main_x = work_x + MAIN_WINDOW_MARGIN;
     let mut secondary_x = main_x + main_outer_w + gap;
@@ -302,7 +313,7 @@ fn ensure_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
 
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Agent Doctor")
-        .inner_size(420.0, 720.0)
+        .inner_size(420.0, 800.0)
         .min_inner_size(360.0, 520.0)
         .decorations(true)
         .transparent(false)
@@ -955,16 +966,29 @@ pub fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::fit_main_inner_height;
+    use super::{docked_inner_height, fit_main_inner_height};
 
     #[test]
     fn windows_home_keeps_design_height_and_does_not_shrink_further() {
-        // Tall screen: stay at the designed 720 instead of filling the monitor.
-        assert_eq!(fit_main_inner_height(1040.0, true), 720.0);
-        // 125% on 1080p still has room for 720.
-        assert_eq!(fit_main_inner_height(832.0, true), 720.0);
-        // 150% on 1080p: logical work area is under 720. Use it all.
+        // Tall screen: stay at the designed height instead of filling the monitor.
+        assert_eq!(fit_main_inner_height(1040.0, true), 800.0);
+        // 125% on 1080p still has room for the designed height.
+        assert_eq!(fit_main_inner_height(832.0, true), 800.0);
+        // 150% on 1080p: logical work area is under the design height. Use it all.
         // The old 72% cap landed near 495 and forced the home to scroll.
         assert_eq!(fit_main_inner_height(688.0, true), 656.0);
+    }
+
+    #[test]
+    fn docked_windows_share_one_outer_height() {
+        let work_h = 1040.0;
+        let main = docked_inner_height(work_h, 32.0, 480.0);
+        let ask = docked_inner_height(work_h, 32.0, 480.0);
+        assert_eq!(main, ask);
+        assert_eq!(main + 32.0, 1040.0 - 32.0);
+
+        let main_title = docked_inner_height(work_h, 40.0, 480.0);
+        let ask_title = docked_inner_height(work_h, 28.0, 480.0);
+        assert_eq!(main_title + 40.0, ask_title + 28.0);
     }
 }

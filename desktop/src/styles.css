@@ -735,7 +735,6 @@ body::before {
   overflow: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
-  scrollbar-gutter: stable;
 }
 
 .widget-body {
@@ -4120,4 +4119,106 @@ body.is-diagnose-open .diagnose-detail {
 .update-sheet-actions .btn-primary,
 .update-sheet-actions .btn-secondary {
   flex: 1;
+}
+
+/* Windows laptops at 125–150% are often under 820px tall. Keep the agent
+   home inside that height so the page itself does not scroll. */
+@media (max-height: 820px) {
+  .widget {
+    padding: 8px 10px;
+  }
+
+  .widget-toolbar {
+    margin-bottom: 4px;
+  }
+
+  .status-bar,
+  .health-strip {
+    margin-bottom: 4px;
+  }
+
+  .main-tabs {
+    margin-bottom: 6px;
+  }
+
+  .widget-footer {
+    margin-top: 6px;
+    padding-top: 4px;
+  }
+
+  .ws-chip {
+    margin-bottom: 6px;
+    padding: 4px 8px;
+  }
+
+  .health-card,
+  .agents-security-overview {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+  }
+
+  .health-card-ring,
+  .agents-readiness-ring {
+    width: 52px;
+    height: 52px;
+  }
+
+  .runtime-section {
+    padding: 6px 8px;
+  }
+
+  .runtime-section.is-solo {
+    padding: 0;
+  }
+
+  .runtime.is-solo {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .runtime-solo-hero {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .runtime-solo-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .runtime-solo-blurb {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .runtime.is-solo .card-actions {
+    margin-top: 0;
+  }
+
+  .meta-row {
+    padding: 3px 8px;
+  }
+
+  .meta-version-hint {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .runtime-solo-next {
+    padding-top: 2px;
+  }
+
+  .runtime-solo-next p {
+    margin-bottom: 6px;
+  }
 }
