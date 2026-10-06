@@ -76,7 +76,6 @@ function officialDescription(): string {
   if (official?.via === "member") {
     const status = t("personal.officialMember", {
       remaining: formatOfficialTokens(official.tokens_remaining),
-      date: official.member_until?.slice(0, 10) || t("personal.officialUnknownDate"),
     });
     const before = official.tokens_before ?? 0;
     if (before <= 0) return status;

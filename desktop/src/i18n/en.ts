@@ -1058,7 +1058,7 @@ export const en = {
     "personal.edit": "Edit",
     "personal.delete": "Delete",
     "personal.officialName": "Official",
-    "personal.officialMember": "{remaining} tokens left · valid until {date}",
+    "personal.officialMember": "{remaining} tokens left · no expiry",
     "personal.officialSaved": " · saved {rate}%",
     "personal.officialTrial": "{count} free tries left",
     "personal.officialNeedsMembership": "Trial finished. Start a membership to keep using it.",

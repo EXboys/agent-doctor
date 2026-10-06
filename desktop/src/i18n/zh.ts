@@ -1060,7 +1060,7 @@ export const zh = {
     "personal.edit": "编辑",
     "personal.delete": "删除",
     "personal.officialName": "官方",
-    "personal.officialMember": "剩余 {remaining} Token · 有效至 {date}",
+    "personal.officialMember": "剩余 {remaining} Token · 永久有效",
     "personal.officialSaved": " · 已省 {rate}%",
     "personal.officialTrial": "可免费试用 {count} 次",
     "personal.officialNeedsMembership": "体验已用完，开通会员后继续使用",
