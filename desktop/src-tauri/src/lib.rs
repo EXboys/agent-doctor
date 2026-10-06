@@ -143,6 +143,11 @@ async fn run_doctor_command(app: tauri::AppHandle) -> Result<DoctorReport, Strin
         .map_err(|error| error.to_string())?;
     tray::remember_tray_health(&app, &report);
     tray::update_tray_tooltip(&app);
+    // The resources window scans on its own. Push that result to the home so a
+    // newly installed agent shows up without another click on 扫描.
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("doctor-report", &report);
+    }
     Ok(report)
 }
 

@@ -610,9 +610,47 @@ fn first_question_id(params: &Value) -> String {
 }
 
 fn elicitation_wants_text(params: &Value) -> bool {
-    params.get("requestedSchema").is_some()
-        || params.get("questions").is_some()
-        || prompt_looks_secret(params)
+    if mcp_tool_approval(params) {
+        return false;
+    }
+    if params.get("questions").is_some() || prompt_looks_secret(params) {
+        return true;
+    }
+    schema_needs_typed_answer(params.get("requestedSchema"))
+}
+
+/// Codex asks "Allow the … MCP server to run tool …?" as an elicitation.
+/// An empty schema still means yes/no, not a sentence to type.
+fn mcp_tool_approval(params: &Value) -> bool {
+    let meta = params.get("meta").or_else(|| params.get("_meta"));
+    if meta
+        .and_then(|value| value.get("codex_approval_kind"))
+        .and_then(|value| value.as_str())
+        == Some("mcp_tool_call")
+    {
+        return true;
+    }
+    params
+        .get("message")
+        .and_then(|value| value.as_str())
+        .is_some_and(|message| message.contains("MCP server to run tool"))
+}
+
+fn schema_needs_typed_answer(schema: Option<&Value>) -> bool {
+    let Some(schema) = schema.filter(|value| !value.is_null()) else {
+        return false;
+    };
+    let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) else {
+        return false;
+    };
+    properties.values().any(|property| {
+        let kind = property.get("type").and_then(|value| value.as_str());
+        let enumerated = property
+            .get("enum")
+            .and_then(|value| value.as_array())
+            .is_some_and(|items| !items.is_empty());
+        kind == Some("string") && !enumerated
+    })
 }
 
 fn prompt_looks_secret(params: &Value) -> bool {

@@ -828,6 +828,34 @@ mod tests {
             codex_reply_kind("mcpServer/elicitation/request", &json!({})),
             Some(CodexReplyKind::Elicitation)
         ));
+        let approval = json!({
+            "serverName": "browser",
+            "message": "Allow the browser MCP server to run tool \"browser_navigate\"?",
+            "requestedSchema": { "type": "object", "properties": {} }
+        });
+        assert!(matches!(
+            codex_reply_kind("mcpServer/elicitation/request", &approval),
+            Some(CodexReplyKind::Elicitation)
+        ));
+        assert_eq!(
+            permission_input_mode("mcpServer/elicitation/request", &approval),
+            "choice"
+        );
+        let (tool, detail, _) = permission_from_codex("mcpServer/elicitation/request", &approval);
+        assert_eq!(tool, "MCP browser");
+        assert!(detail.contains("browser_navigate"));
+        let form = json!({
+            "serverName": "browser",
+            "message": "Which page should be opened?",
+            "requestedSchema": {
+                "type": "object",
+                "properties": { "url": { "type": "string" } }
+            }
+        });
+        assert_eq!(
+            permission_input_mode("mcpServer/elicitation/request", &form),
+            "line"
+        );
     }
 
     #[test]

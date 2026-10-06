@@ -162,6 +162,7 @@ widgetToolbarEl.addEventListener("dblclick", (event) => {
 void listen<DoctorReport>("doctor-report", (event) => {
   void (async () => {
     await refs.agents!.renderReport(event.payload);
+    refs.resources?.updateResourcesHubSummary();
     if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && !refs.firstRun.isBusy()) {
       await refs.firstRun.evaluateFirstRunFromReport(event.payload);
     }
