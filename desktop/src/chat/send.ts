@@ -273,6 +273,9 @@ export function createSendController(deps: SendDeps) {
     );
 
     try {
+      // Stop during picture reading clears busy before a session exists.
+      // Starting anyway would ignore that click.
+      if (!deps.getBusy()) return;
       const report = await startPromptSession({
         runtime,
         prompt,

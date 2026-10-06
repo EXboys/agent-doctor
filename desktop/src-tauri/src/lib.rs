@@ -137,11 +137,13 @@ fn run_engine_register_command(
 }
 
 #[tauri::command]
-fn run_doctor_command(app: tauri::AppHandle) -> DoctorReport {
-    let report = run_doctor();
+async fn run_doctor_command(app: tauri::AppHandle) -> Result<DoctorReport, String> {
+    let report = tauri::async_runtime::spawn_blocking(run_doctor)
+        .await
+        .map_err(|error| error.to_string())?;
     tray::remember_tray_health(&app, &report);
     tray::update_tray_tooltip(&app);
-    report
+    Ok(report)
 }
 
 #[tauri::command]

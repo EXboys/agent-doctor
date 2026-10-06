@@ -1,4 +1,7 @@
-//! Unified mode-switch pipeline: resolve → project → effector metadata → probe.
+//! Unified mode-switch pipeline: resolve → project → effector metadata.
+//!
+//! The live chat probe stays available as [`probe_endpoint_bundle`], but a switch
+//! does not wait on it. That wait used to freeze the desktop provider click.
 //!
 //! All personal/team LLM wiring should enter through [`apply_mode_switch`].
 
@@ -15,7 +18,7 @@ use crate::setup::merge::{self, clear_codex_placeholder_auth, COMPANY_DEFAULT_MO
 use crate::setup::personal::{
     list_personal_providers, load_personal_provider_entry, normalize_personal_gateway_url,
     normalize_protocol, set_active_personal_provider_id, write_personal_profile,
-    PersonalProviderSetupReport, PersonalProviderVerifyReport, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
+    PersonalProviderSetupReport, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 use crate::setup::{
     anthropic_gateway_url_from_evotown_base, evotown_agent_env_path, evotown_base_from_gateway,
@@ -126,23 +129,16 @@ pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
         ModeSwitchTarget::Team => resolve_team_bundle()?,
     };
 
-    // Skip pre-verify here — it can take ~20s and freezes mode switch UX.
-    // Post-apply `probe_endpoint_bundle` covers connectivity; first-time add
-    // still verifies via personal provider setup.
-    let verify_report = None;
-
+    // Skip the live model check. Pre-verify can take ~20s, and the chat probe
+    // waits up to 8s. The desktop "使用" click cannot finish until this returns.
+    // Adding a provider still has its own check.
     write_overlay_for_bundle(&bundle)?;
     let _ = clear_codex_placeholder_auth();
 
-    let mut runtimes = project_bundle(&bundle)?;
-    let probe = probe_endpoint_bundle(&bundle);
-    annotate_runtimes_with_strategy_and_probe(&mut runtimes, &probe);
+    let runtimes = project_bundle(&bundle)?;
 
     let applied = runtimes.iter().filter(|r| r.applied).count();
     let mut warnings = Vec::new();
-    if !probe.ok {
-        warnings.push(format!("llm_probe_failed: {}", probe.detail));
-    }
     for runtime in &runtimes {
         if runtime.applied {
             if let Some(false) = runtime.effector_ok {
@@ -155,17 +151,14 @@ pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
 
     let message = match bundle.mode.as_str() {
         MODE_PERSONAL => format!(
-            "personal mode — {applied} runtime(s) wired to {} (model {}); probe={}",
-            bundle.label,
-            bundle.model,
-            if probe.ok { "ok" } else { "fail" }
+            "personal mode — {applied} runtime(s) wired to {} (model {})",
+            bundle.label, bundle.model,
         ),
         MODE_TEAM => format!(
-            "team mode — {applied} runtime(s) wired to Evotown (model {}); probe={}",
+            "team mode — {applied} runtime(s) wired to Evotown (model {})",
             bundle.model,
-            if probe.ok { "ok" } else { "fail" }
         ),
-        other => format!("mode {other} — {applied} runtime(s); probe={}", probe.ok),
+        other => format!("mode {other} — {applied} runtime(s)"),
     };
 
     let personal = if bundle.mode == MODE_PERSONAL {
@@ -178,13 +171,7 @@ pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
             gateway_url: bundle.gateway_url.clone(),
             model: bundle.model.clone(),
             runtimes: runtimes.clone(),
-            verify: verify_report.or(Some(PersonalProviderVerifyReport {
-                ok: probe.ok,
-                status_code: probe.status_code,
-                checked_url: probe.checked_url.clone(),
-                message: probe.detail.clone(),
-                models_sample: Vec::new(),
-            })),
+            verify: None,
         })
     } else {
         None
@@ -214,8 +201,8 @@ pub fn apply_mode_switch(target: ModeSwitchTarget) -> Result<ModeSwitchReport> {
         team_setup,
         model: Some(bundle.model),
         source_id: Some(bundle.source_id),
-        probe_ok: Some(probe.ok),
-        probe_detail: Some(probe.detail),
+        probe_ok: None,
+        probe_detail: None,
         warnings,
     })
 }
@@ -357,18 +344,6 @@ fn project_claude_code(bundle: &EndpointBundle, display_name: &str) -> Result<Ru
         });
     };
     merge::apply_claude_code_with_model(url, &bundle.api_key, Some(&bundle.model))
-}
-
-fn annotate_runtimes_with_strategy_and_probe(
-    runtimes: &mut [RuntimeSetupResult],
-    probe: &BundleProbeReport,
-) {
-    for runtime in runtimes.iter_mut() {
-        if runtime.applied {
-            runtime.probe_ok = Some(probe.ok);
-            runtime.probe_detail = Some(probe.detail.clone());
-        }
-    }
 }
 
 pub fn probe_endpoint_bundle(bundle: &EndpointBundle) -> BundleProbeReport {

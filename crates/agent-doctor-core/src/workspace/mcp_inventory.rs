@@ -542,6 +542,12 @@ fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
     };
 
     let path = PathBuf::from(command);
+    if command.starts_with(r"\\?\") {
+        return (
+            false,
+            Some("command uses a Windows \\\\?\\ path Codex cannot start".into()),
+        );
+    }
     if path.is_absolute() {
         if path.exists() {
             return (true, None);
@@ -559,6 +565,18 @@ fn assess_command(command: Option<&str>) -> (bool, Option<String>) {
     }
 
     (true, None)
+}
+
+/// Drop the Windows verbatim prefix so other programs can start this path.
+fn launchable_path(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
 }
 
 /// Resolve the real `agent-doctor` CLI binary used as the MCP server command.
@@ -634,7 +652,9 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     for path in candidates {
         match classify_agent_doctor_cli(&path) {
             CliProbe::Real => {
-                let canonical = path.canonicalize().unwrap_or(path);
+                // `canonicalize` on Windows adds `\\?\`, which Codex cannot spawn
+                // ("program not found") even though the file exists.
+                let canonical = launchable_path(&path.canonicalize().unwrap_or(path));
                 if !real.iter().any(|p: &PathBuf| p == &canonical) {
                     real.push(canonical);
                 }
@@ -808,6 +828,15 @@ mod tests {
     fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
         let temp = tempdir().unwrap();
         crate::adapters::util::with_test_home(temp.path(), || f(temp.path()))
+    }
+
+    #[test]
+    fn windows_verbatim_prefix_is_not_a_launchable_command() {
+        let path = launchable_path(Path::new(r"\\?\D:\Agent Doctor\agent-doctor.exe"));
+        assert_eq!(path, PathBuf::from(r"D:\Agent Doctor\agent-doctor.exe"));
+        let (healthy, issue) = assess_command(Some(r"\\?\D:\Agent Doctor\agent-doctor.exe"));
+        assert!(!healthy);
+        assert!(issue.is_some());
     }
 
     #[test]

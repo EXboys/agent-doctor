@@ -37,6 +37,24 @@ pub struct McpConfigureOptions {
 }
 
 /// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
+/// Path string another program can pass to CreateProcess.
+///
+/// Windows `canonicalize` / `current_exe` often return `\\?\D:\...`. That form
+/// exists for our own checks, but Codex reports `program not found` when it
+/// tries to start it. Strip the prefix at the write boundary so no caller can
+/// persist it. Paths that truly need the prefix (longer than MAX_PATH) cannot
+/// be started by Codex either way.
+pub(crate) fn command_path_for_runtime(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    raw.into_owned()
+}
+
 pub fn browser_mcp_args(
     port: u16,
     headless: bool,
@@ -55,7 +73,7 @@ pub fn browser_mcp_args(
     if let Some(dir) = user_data_dir {
         if !dir.as_os_str().is_empty() {
             args.push("--user-data-dir".to_string());
-            args.push(dir.display().to_string());
+            args.push(command_path_for_runtime(dir));
         }
     }
     if let Some(profile) = profile_directory {
@@ -322,7 +340,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
         options.hermes_home.as_deref(),
         options.openclaw_workspace.as_deref(),
     )?;
-    let command = options.binary.to_string_lossy().to_string();
+    let command = command_path_for_runtime(&options.binary);
     let args = browser_mcp_args(
         options.port,
         options.headless,
@@ -609,6 +627,22 @@ pub fn generate_config_snippet(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn runtime_command_drops_windows_verbatim_prefix() {
+        assert_eq!(
+            command_path_for_runtime(Path::new(r"\\?\D:\Agent Doctor\agent-doctor.exe")),
+            r"D:\Agent Doctor\agent-doctor.exe"
+        );
+        assert_eq!(
+            command_path_for_runtime(Path::new(r"\\?\UNC\server\share\agent-doctor.exe")),
+            r"\\server\share\agent-doctor.exe"
+        );
+        assert_eq!(
+            command_path_for_runtime(Path::new(r"D:\Agent Doctor\agent-doctor.exe")),
+            r"D:\Agent Doctor\agent-doctor.exe"
+        );
+    }
 
     #[test]
     fn claude_with_project_uses_mcp_json() {

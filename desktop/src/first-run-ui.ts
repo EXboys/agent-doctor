@@ -441,7 +441,7 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
         deps.setStatusBanner("warn", t("firstRun.repairNotAuto"));
         return;
       }
-      showError(t("firstRun.repairNotAuto"), "repair");
+      showError(t("firstRun.repairStays"), "repair");
       return;
     }
     const report = await runRepairExecute({
@@ -449,6 +449,10 @@ async function runFirstRunRepair(target: FirstRunTarget): Promise<void> {
     });
     deps.repairPreviewByRuntime.set(target.runtimeId, report);
     firstRunBusy = false;
+    if (target.fail > 0 && report.summary.fail >= target.fail) {
+      showError(t("firstRun.repairStays"), "repair");
+      return;
+    }
     if (supportsBrowserMcp(target.runtimeId)) {
       firstRunTarget = {
         ...target,

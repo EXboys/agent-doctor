@@ -114,6 +114,16 @@ fn http_client() -> Result<reqwest::blocking::Client> {
         .context("failed to build TeamUps auth HTTP client")
 }
 
+/// Account status is read while the provider list is on screen. A hung mall
+/// must not hold that refresh for the login client's 30s budget.
+fn status_http_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("failed to build TeamUps status HTTP client")
+}
+
 /// Start device login; caller opens `verification_url` in the system browser.
 pub fn start_teamups_login() -> Result<TeamupsLoginStart> {
     let base = mall_base_url()?;
@@ -255,7 +265,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
     };
 
     let url = format!("{base_url}/api/v1/doctor/me");
-    let resp = http_client()?
+    let resp = status_http_client()?
         .get(&url)
         .header("Accept", "application/json")
         .header("Authorization", format!("Bearer {license}"))

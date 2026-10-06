@@ -48,6 +48,7 @@ Object.defineProperty(globalThis, "document", {
 type InvokeCall = { cmd: string; args: Record<string, unknown> };
 const invokes: InvokeCall[] = [];
 let onRoundStart: (() => Promise<void> | void) | null = null;
+let onReadImages: (() => Promise<void> | void) | null = null;
 let cancelReply = false;
 const timers: number[] = [];
 
@@ -68,6 +69,10 @@ Object.defineProperty(globalThis, "window", {
       invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
         invokes.push({ cmd, args });
         if (cmd === "cancel_prompt_session_command") return cancelReply;
+        if (cmd === "read_image_texts_command") {
+          if (onReadImages) await onReadImages();
+          return { readings: [], available: true };
+        }
         if (cmd === "start_prompt_session_command") {
           const first = invokes.filter((call) => call.cmd === cmd).length === 1;
           if (first && onRoundStart) await onRoundStart();
@@ -113,7 +118,7 @@ function ok(condition: boolean, what: string): void {
 const roundCalls = () => invokes.filter((call) => call.cmd === "start_prompt_session_command");
 const cancelCalls = () => invokes.filter((call) => call.cmd === "cancel_prompt_session_command");
 
-function newController(sessionId: string) {
+function newController(sessionId: string, opts?: { readImages?: boolean }) {
   const session = { id: sessionId, runtimeThreadId: null as string | null };
   const store = { activeId: sessionId } as never;
   const promptEl = { value: "" } as HTMLTextAreaElement;
@@ -191,7 +196,7 @@ function newController(sessionId: string) {
     expireLivePermissionCards: () => {},
     settleRunRouting: () => {},
     renderSessionList: () => {},
-    readImageTextEnabled: () => false,
+    readImageTextEnabled: () => opts?.readImages === true,
     refreshComposer: () => {
       state.refreshed += 1;
     },
@@ -336,6 +341,27 @@ await check("Stop during a round leaves the queue unsent", async () => {
   eq(consumeDrainIntent(), "when-ready", "the hold must be consumed by the round");
   state.statuses.length = 0;
   takeFollowUps("w-hold");
+});
+
+await check("Stop while pictures are being read does not start the round", async () => {
+  invokes.length = 0;
+  const { api, state, promptEl } = newController("w-ocr-stop", { readImages: true });
+  promptEl.value = "what is this";
+  state.attachments = [{ id: "img", name: "shot.png", path: "/tmp/shot.png", kind: "image" }] as never[];
+  onReadImages = () => {
+    state.busy = false;
+  };
+
+  await api.sendAsk();
+  onReadImages = null;
+
+  eq(roundCalls().length, 0, "round should not start after Stop");
+  eq(state.busy, false, "busy stays released");
+  eq(
+    invokes.some((call) => call.cmd === "read_image_texts_command"),
+    true,
+    "picture text should be requested",
+  );
 });
 
 await check("Stop asks the engine to cancel and holds the queue", async () => {

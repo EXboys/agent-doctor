@@ -243,20 +243,40 @@ export function createPersonalController(deps: PersonalDeps) {
     }
   }
 
+  let switchInFlight = false;
+
+  async function loadPersonalProviderList() {
+    const [status, doc] = await Promise.all([
+      getPersonalProviderStatus(),
+      listPersonalProviders(),
+    ]);
+    appState.personalProvidersDoc = doc;
+    renderPersonalProviderStatus(status);
+    renderPersonalProviderList(doc);
+  }
+
+  async function refreshOfficialAccount() {
+    const account = await teamupsAccountStatus().catch(() => null);
+    if (!account) return;
+    officialAccount = account;
+    const doc = appState.personalProvidersDoc;
+    if (doc) renderPersonalProviderList(doc);
+  }
+
   async function loadPersonalProviderStatus() {
     try {
-      const [status, doc, account] = await Promise.all([
-        getPersonalProviderStatus(),
-        listPersonalProviders(),
-        teamupsAccountStatus().catch(() => null),
-      ]);
-      officialAccount = account;
-      appState.personalProvidersDoc = doc;
-      renderPersonalProviderStatus(status);
-      renderPersonalProviderList(doc);
+      await loadPersonalProviderList();
+      await refreshOfficialAccount();
     } catch (error) {
       personalStatusEl.textContent = withProviderFailure("personal.applyFailed", error);
     }
+  }
+
+  function settleAfterProviderSwitch() {
+    void refreshOfficialAccount().finally(() => {
+      void deps.loadModeStatus();
+      void deps.refresh();
+    });
   }
 
   function showPersonalListView() {
@@ -436,9 +456,7 @@ export function createPersonalController(deps: PersonalDeps) {
         }
         const report = await activatePersonalProvider({ id: targetId });
         personalKeyEl.value = "";
-        await loadPersonalProviderStatus();
-        await deps.loadModeStatus();
-        await deps.refresh();
+        await loadPersonalProviderList();
         personalListHintEl.hidden = false;
         personalListHintEl.textContent = t("personal.applyOk", {
           name: report.provider_name ?? values.name,
@@ -446,6 +464,7 @@ export function createPersonalController(deps: PersonalDeps) {
         resetPersonalForm();
         setPersonalHint("hide");
         showPersonalListView();
+        settleAfterProviderSwitch();
       } else {
         await upsertPersonalProviderCommand({
           id: values.id,
@@ -473,21 +492,24 @@ export function createPersonalController(deps: PersonalDeps) {
   }
 
   async function activateProviderById(id: string) {
+    if (switchInFlight) return;
+    switchInFlight = true;
     setPersonalBusy(true);
+    personalListHintEl.hidden = false;
     personalListHintEl.textContent = t("personal.applying");
     try {
       const report = await activatePersonalProvider({
         id,
       });
-      await loadPersonalProviderStatus();
-      await deps.loadModeStatus();
-      await deps.refresh();
+      await loadPersonalProviderList();
       personalListHintEl.textContent = t("personal.applyOk", {
         name: report.provider_name ?? id,
       });
+      settleAfterProviderSwitch();
     } catch (error) {
       personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
     } finally {
+      switchInFlight = false;
       setPersonalBusy(false);
     }
   }

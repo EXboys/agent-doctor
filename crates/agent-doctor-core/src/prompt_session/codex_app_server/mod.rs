@@ -651,6 +651,9 @@ mod tests {
         assert!(mcp_startup_is_missing_program(
             "系统找不到指定的路径。 (os error 3)"
         ));
+        assert!(mcp_startup_is_missing_program(
+            "MCP startup failed: program not found"
+        ));
         assert!(!mcp_startup_is_missing_program("connection refused"));
     }
 

@@ -57,6 +57,7 @@ export const zh = {
     "firstRun.scanFailed": "扫描没有完成，请再试一次。",
     "firstRun.fixFailed": "没能按建议改好。",
     "firstRun.repairNotAuto": "这项不能自动改。下一步：去填服务商地址和密钥。",
+    "firstRun.repairStays": "这项还在，没能自动改掉。点「稍后再说」，到下面的卡片里看。",
     "firstRun.installFailed": "安装没有完成，请再试一次。",
     "firstRun.installIncomplete": "安装没有干净完成。可打开安装日志查看详情。",
     "firstRun.targetMetaRepair": "{fail} 失败 · {warn} 警告",

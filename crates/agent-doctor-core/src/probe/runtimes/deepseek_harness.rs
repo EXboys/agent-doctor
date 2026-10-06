@@ -18,6 +18,21 @@ pub(crate) fn probe_schema(
     let ParsedConfig::Yaml(value) = parsed else {
         return;
     };
+    // cordis.patch.yml is a plugin list. A sequence is the normal file, not a broken config.
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "cordis.patch.yml" || name == "cordis.patch.yaml")
+    {
+        if value.is_sequence() || value.is_mapping() || value.is_null() {
+            return;
+        }
+        checks.push(schema_error(
+            path,
+            "DeepSeek Harness cordis.patch.yml must be a list or a mapping",
+        ));
+        return;
+    }
     if !value.is_mapping() {
         checks.push(schema_error(
             path,
@@ -189,5 +204,36 @@ mod tests {
         probe_pinned_version(&mut checks, &mut facts);
         assert_eq!(checks[0].status, ProbeStatus::Warn);
         assert_eq!(checks[0].severity, ProbeSeverity::Warning);
+    }
+
+    #[test]
+    fn cordis_plugin_list_is_not_a_schema_failure() {
+        let raw = "- id: mcp-browser\n  name: plugin\n";
+        let value: serde_yaml::Value = serde_yaml::from_str(raw).unwrap();
+        let mut checks = Vec::new();
+        let mut facts = Vec::new();
+        probe_schema(
+            Path::new("/tmp/.dsh/cordis.patch.yml"),
+            &ParsedConfig::Yaml(value),
+            &mut checks,
+            &mut facts,
+        );
+        assert!(checks.iter().all(|check| check.status != ProbeStatus::Fail));
+    }
+
+    #[test]
+    fn settings_yaml_list_is_a_schema_failure() {
+        let value: serde_yaml::Value = serde_yaml::from_str("- just-a-list\n").unwrap();
+        let mut checks = Vec::new();
+        let mut facts = Vec::new();
+        probe_schema(
+            Path::new("/tmp/.dsh/settings.yaml"),
+            &ParsedConfig::Yaml(value),
+            &mut checks,
+            &mut facts,
+        );
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, ProbeStatus::Fail);
+        assert_eq!(checks[0].title, "Config schema");
     }
 }

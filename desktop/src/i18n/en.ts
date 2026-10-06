@@ -55,6 +55,7 @@ export const en = {
     "firstRun.scanFailed": "Scan did not finish. Try again.",
     "firstRun.fixFailed": "Could not apply the suggested changes.",
     "firstRun.repairNotAuto": "This one cannot auto-fix. Next: open Provider and fill address + key.",
+    "firstRun.repairStays": "This one is still here. Choose “Not now”, then look at the card below.",
     "firstRun.installFailed": "Install did not finish. Try again.",
     "firstRun.installIncomplete": "Install did not finish cleanly. Open the install log for details.",
     "firstRun.targetMetaRepair": "{fail} failed · {warn} warnings",

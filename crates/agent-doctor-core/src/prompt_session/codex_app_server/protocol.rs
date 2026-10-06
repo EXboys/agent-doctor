@@ -285,9 +285,10 @@ pub(crate) fn handle_notification<F>(
             } else {
                 format!("MCP {name}: {status} ({error})")
             };
+            // Tool startup is not the reply failing. Keep it out of the red error chip.
             on_event(PromptSessionEvent::Status {
                 session_id: state.session_id.clone(),
-                phase: if status == "failed" { "error" } else { "mcp" }.into(),
+                phase: if status == "failed" { "warn" } else { "mcp" }.into(),
                 message,
             });
         }
@@ -388,7 +389,10 @@ pub(crate) fn handle_notification<F>(
 
 pub(crate) fn mcp_startup_is_missing_program(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("os error 2") || lower.contains("no such file") || lower.contains("系统找不到")
+    lower.contains("os error 2")
+        || lower.contains("no such file")
+        || lower.contains("program not found")
+        || lower.contains("系统找不到")
 }
 
 pub(crate) fn is_agent_message_type(item_type: &str) -> bool {
