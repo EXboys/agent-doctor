@@ -3,9 +3,7 @@ use anyhow::{anyhow, bail, Result};
 use crate::adapters::util::{ensure_managed_runtime_path, find_all_binaries, home_join};
 use crate::adapters::DEEPSEEK_HARNESS_NPM_PACKAGE;
 
-use super::npm_target::{
-    leftover_npm_cli_binaries, npm_uninstall_global_command, resolve_active_npm_prefix,
-};
+use super::npm_target::{leftover_npm_cli_binaries, resolve_active_npm_prefix};
 use super::runner::run_shell_command;
 
 /// Human-facing CLI name used when probing leftover installs.
@@ -105,8 +103,11 @@ fn uninstall_npm_package(package: &str, binary_name: &str) -> Result<()> {
     crate::lifecycle::nodejs::ensure_npm().map_err(|_| anyhow!("卸掉需要本机已安装 npm。"))?;
 
     let active = resolve_active_npm_prefix(binary_name)?;
+    if active.prefix.as_os_str().is_empty() {
+        bail!("这个程序不是从这里装上去的，所以卸不掉。请用当时安装它的方式卸掉。");
+    }
     let removed_path = active.detected_binary.clone();
-    run_shell_command(&npm_uninstall_global_command(package, &active.prefix))?;
+    super::npm_target::run_npm_global("uninstall", package, &active.prefix)?;
 
     ensure_managed_runtime_path();
     let leftovers = leftover_npm_cli_binaries(binary_name);

@@ -262,6 +262,10 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     let Some(window) = ensure_main_window(app) else {
         return;
     };
+    // Show first. A hidden window often has no monitor, so sizing it before
+    // show left the restored window short and the home had to scroll.
+    let _ = window.unminimize();
+    let _ = window.show();
     let ask_visible = app
         .get_webview_window(ASK_WINDOW_LABEL)
         .and_then(|ask| ask.is_visible().ok())

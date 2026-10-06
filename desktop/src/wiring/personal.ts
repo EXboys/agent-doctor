@@ -1,4 +1,5 @@
 
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
@@ -668,6 +669,10 @@ export function createPersonalController(deps: PersonalDeps) {
 
     personalUrlEl.addEventListener("change", () => {
       presets.maybePromoteToCustomFromUrl();
+    });
+
+    void listen("teamups-account-changed", () => {
+      void refreshOfficialAccount();
     });
 
     personalListEl.addEventListener("click", (event) => {

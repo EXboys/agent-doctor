@@ -2,8 +2,7 @@ use anyhow::{Context, Result};
 
 use crate::adapters::{DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_VERSION};
 
-use super::npm_target::{npm_install_global_command, resolve_active_npm_prefix};
-use super::runner::run_shell_command;
+use super::npm_target::resolve_active_npm_prefix;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeepSeekHarnessLifecycleAction {
@@ -28,8 +27,12 @@ pub fn run_deepseek_harness_lifecycle(action: DeepSeekHarnessLifecycleAction) ->
         .context("Node.js / npm is required to install DeepSeek Harness")?;
     let active = resolve_active_npm_prefix("dsh")?;
     let package = format!("{DEEPSEEK_HARNESS_NPM_PACKAGE}@{DEEPSEEK_HARNESS_VERSION}");
-    let command = npm_install_global_command(&package, &active.prefix);
-    run_shell_command(&command).with_context(|| {
+    let prefix = if active.prefix.as_os_str().is_empty() {
+        super::npm_target::default_npm_global_prefix().context("无法确定 npm 安装目录。")?
+    } else {
+        active.prefix
+    };
+    super::npm_target::run_npm_global("install", &package, &prefix).with_context(|| {
         format!(
             "DeepSeek Harness {} failed",
             match action {

@@ -8,8 +8,8 @@ use agent_doctor_core::{
     sign_out_teamups, skill_mount_runtime_ids, start_teamups_login, teamups_account_status,
     unmount_synced_skills, BrowserMcpDiagnoseWireReport, BrowserMcpTargetStatus,
     McpInventoryReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncReport, TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginStart,
-    TeamupsMallCatalog,
+    SkillsInventoryReport, SyncReport, TeamupsAccountStatus, TeamupsLoginPoll,
+    TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -373,11 +373,18 @@ pub async fn start_teamups_login_command() -> Result<TeamupsLoginStart, String> 
 }
 
 #[tauri::command]
-pub async fn poll_teamups_login_command(device_code: String) -> Result<TeamupsLoginPoll, String> {
-    tauri::async_runtime::spawn_blocking(move || poll_teamups_login(&device_code))
+pub async fn poll_teamups_login_command(
+    app: AppHandle,
+    device_code: String,
+) -> Result<TeamupsLoginPoll, String> {
+    let poll = tauri::async_runtime::spawn_blocking(move || poll_teamups_login(&device_code))
         .await
         .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if matches!(poll.status, TeamupsLoginPollStatus::Approved) {
+        let _ = app.emit("teamups-account-changed", ());
+    }
+    Ok(poll)
 }
 
 #[tauri::command]
@@ -389,11 +396,13 @@ pub async fn teamups_account_status_command() -> Result<TeamupsAccountStatus, St
 }
 
 #[tauri::command]
-pub async fn sign_out_teamups_command() -> Result<TeamupsAccountStatus, String> {
-    tauri::async_runtime::spawn_blocking(sign_out_teamups)
+pub async fn sign_out_teamups_command(app: AppHandle) -> Result<TeamupsAccountStatus, String> {
+    let status = tauri::async_runtime::spawn_blocking(sign_out_teamups)
         .await
         .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("teamups-account-changed", ());
+    Ok(status)
 }
 
 #[tauri::command]

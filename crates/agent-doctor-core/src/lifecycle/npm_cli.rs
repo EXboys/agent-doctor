@@ -2,8 +2,7 @@
 
 use anyhow::{Context, Result};
 
-use super::npm_target::{npm_install_global_command, resolve_active_npm_prefix};
-use super::runner::run_shell_command;
+use super::npm_target::resolve_active_npm_prefix;
 
 const CLAUDE_NPM_PACKAGE: &str = "@anthropic-ai/claude-code";
 const CODEX_NPM_PACKAGE: &str = "@openai/codex";
@@ -48,8 +47,12 @@ fn run_npm_cli_lifecycle(
         NpmCliLifecycleAction::Install => package,
         NpmCliLifecycleAction::Update => package_update,
     };
-    let command = npm_install_global_command(package_spec, &active.prefix);
-    run_shell_command(&command).with_context(|| {
+    let prefix = if active.prefix.as_os_str().is_empty() {
+        super::npm_target::default_npm_global_prefix().context("无法确定 npm 安装目录。")?
+    } else {
+        active.prefix
+    };
+    super::npm_target::run_npm_global("install", package_spec, &prefix).with_context(|| {
         format!(
             "{label} {} failed",
             match action {

@@ -179,6 +179,18 @@ export function renderMallAccount(): void {
   }
 }
 
+/** Re-read the saved TeamUps login. The provider page and this window share one account. */
+export async function refreshMallAccount(): Promise<void> {
+  const account = await teamupsAccountStatus().catch(() => null);
+  if (!account) return;
+  resourcesState.lastTeamupsAccount = account;
+  applyAccountOwnership();
+  renderMallAccount();
+  if (!isStoreScope()) return;
+  if (resourcesState.activeSection === "tools") renderToolsList();
+  else if (skillsPanelActive()) renderResourcesList();
+}
+
 export async function loadMall(): Promise<void> {
   try {
     const [catalog, account] = await Promise.all([

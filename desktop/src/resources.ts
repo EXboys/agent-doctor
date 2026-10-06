@@ -5,7 +5,7 @@ import type { ResourceRow } from "./types";
 import { resourcesState, subtitleEl, sectionTabsEl, mainHeadEl, skillsPanelEl, skillScopeEl, skillScopeHintEl, panelLeadEl, skillsStickyEl, toolFiltersEl, searchEl, footnoteEl, toolsFootnoteEl, mallAccountEl, mallLoginEl, mallLogoutEl, mcpShowUiEl, mcpUserDataDirEl, mcpProfileDirectoryEl, mcpProfileSystemEl, mcpProfileIsolatedEl, mcpRefreshEl, mcpDiagnoseWireEl, personalEdition } from "./resources-state";
 import type { ResourcesSection, SkillScope, ToolFilter } from "./resources-state";
 import { catalogAgents, countAgentMatches, loadDoctor, renderAgentCatalog } from "./resources-agents";
-import { filteredMallItems, filteredMallToolItems, loadMall, mallToolPool, renderMallAccount, renderToolsList, signOutMallAccount, startMallLogin } from "./resources-mall";
+import { filteredMallItems, filteredMallToolItems, loadMall, mallToolPool, refreshMallAccount, renderMallAccount, renderToolsList, signOutMallAccount, startMallLogin } from "./resources-mall";
 import { browserStatusIsFresh, buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpStatus, persistProfileDirectory, persistShowBrowserUi, persistUserDataDir, refreshMcpSnippet, renderMcpBrowserStatus, selectedProfileDirectory, selectedUserDataDir, syncProfileModeButtons } from "./resources-browser";
 import { buildLocalSkillEntries, entryMatchesQuery, isStoreScope, loadSkills, onSkillsPanelScroll, renderSkillsList } from "./resources-skills";
 import { loadRuntimeCatalog } from "./runtime-catalog";
@@ -105,8 +105,12 @@ export function setSkillScope(scope: SkillScope): void {
   syncSkillScopeChrome();
   if (resourcesState.activeSection === "tools") {
     if (scope === "store") {
-      if (resourcesState.lastMallCatalog) renderToolsList();
-      else void loadMall();
+      if (resourcesState.lastMallCatalog) {
+        renderToolsList();
+        void refreshMallAccount();
+      } else {
+        void loadMall();
+      }
     } else if (resourcesState.lastMcpStatus) {
       renderToolsList();
     } else {
@@ -115,8 +119,12 @@ export function setSkillScope(scope: SkillScope): void {
     return;
   }
   if (scope === "store") {
-    if (resourcesState.lastMallCatalog) renderResourcesList();
-    else void loadMall();
+    if (resourcesState.lastMallCatalog) {
+      renderResourcesList();
+      void refreshMallAccount();
+    } else {
+      void loadMall();
+    }
     return;
   }
   if (resourcesState.lastSkillsInventory || resourcesState.lastMallCatalog) renderResourcesList();
@@ -457,6 +465,9 @@ openFocusedSection(resourcesLaunchSection());
 void listen<{ section?: string }>("resources-window-focus", (event) => {
   openFocusedSection(event.payload?.section);
   void refreshAll();
+});
+void listen("teamups-account-changed", () => {
+  void refreshMallAccount();
 });
 void (async () => {
   await loadRuntimeCatalog();

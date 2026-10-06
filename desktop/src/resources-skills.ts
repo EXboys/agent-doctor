@@ -160,29 +160,11 @@ export function buildUnifiedSkillEntries(): UnifiedSkillEntry[] {
   if (resourcesState.skillFilter === "store" && personalEdition) {
     return buildStoreSkillEntries();
   }
-  if (resourcesState.skillFilter === "issue" && personalEdition) {
-    const localIssues = buildLocalSkillEntries().filter((entry) => entry.issue);
-    const storeIssues: UnifiedSkillEntry[] = [];
-    for (const item of resourcesState.lastMallCatalog?.items ?? []) {
-      if (!storeIssue(item)) continue;
-      const entry = entryFromMallItem(item);
-      if (entry?.storeOnly) storeIssues.push(entry);
-    }
-    return [...localIssues, ...storeIssues];
-  }
   const local = buildLocalSkillEntries();
-  if (!personalEdition || resourcesState.skillFilter !== "all" || resourcesState.resourceQuery) {
-    return local;
+  if (resourcesState.skillFilter === "issue") {
+    return local.filter((entry) => entry.issue);
   }
-  const localIds = new Set(local.map((row) => row.skillId).filter(Boolean));
-  const storeOnly: UnifiedSkillEntry[] = [];
-  for (const item of resourcesState.lastMallCatalog?.items ?? []) {
-    if (item.kind === "skill" && (item.installed || localIds.has(item.id))) continue;
-    if (item.kind === "pack" && item.installed) continue;
-    const entry = entryFromMallItem(item);
-    if (entry?.storeOnly) storeOnly.push(entry);
-  }
-  return [...local, ...storeOnly];
+  return local;
 }
 
 export function entryMatchesQuery(entry: UnifiedSkillEntry): boolean {
@@ -308,10 +290,7 @@ export function installedSkillAgents(): string[] {
 
 export function renderSkillFilters(): void {
   const local = buildLocalSkillEntries();
-  const storeItems = resourcesState.lastMallCatalog?.items ?? [];
-  const issueCount =
-    local.filter((row) => row.issue).length +
-    (personalEdition ? storeItems.filter((item) => storeIssue(item)).length : 0);
+  const issueCount = local.filter((row) => row.issue).length;
 
   if (
     !isStoreScope() &&
@@ -822,7 +801,6 @@ export function renderSkillsList(): void {
 
   if (resourcesState.skillFilter === "all" && !resourcesState.resourceQuery) {
     const localEntries = entries.filter((entry) => !entry.storeOnly);
-    const storeEntries = entries.filter((entry) => entry.storeOnly);
     for (const category of SKILL_CATEGORY_ORDER) {
       const group = localEntries.filter((entry) => entry.category === category);
       if (group.length === 0) continue;
@@ -835,20 +813,6 @@ export function renderSkillsList(): void {
       const ul = document.createElement("ul");
       ul.className = "res-catalog-list";
       for (const entry of group) {
-        appendUnifiedSkillRow(ul, entry);
-      }
-      listEl.appendChild(ul);
-    }
-    if (storeEntries.length > 0 && personalEdition) {
-      const heading = document.createElement("h3");
-      heading.className = "res-catalog-group";
-      heading.dataset.skillGroup = "store";
-      heading.id = "skill-group-store";
-      heading.textContent = `${t("resources.groupStore")} · ${storeEntries.length}`;
-      listEl.appendChild(heading);
-      const ul = document.createElement("ul");
-      ul.className = "res-catalog-list";
-      for (const entry of storeEntries) {
         appendUnifiedSkillRow(ul, entry);
       }
       listEl.appendChild(ul);

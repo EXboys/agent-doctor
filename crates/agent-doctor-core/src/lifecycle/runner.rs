@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -38,7 +38,13 @@ impl Drop for InstallStdinGuard {
 }
 
 pub(crate) fn run_shell_command(command_line: &str) -> Result<()> {
-    match run_shell_command_capturing(command_line) {
+    run_shell_command_in(command_line, None)
+}
+
+/// `cwd` is the directory this command should run in. Callers pass the install
+/// directory they just discovered, never a fixed path.
+pub(crate) fn run_shell_command_in(command_line: &str, cwd: Option<&Path>) -> Result<()> {
+    match run_shell_command_streaming_in(command_line, cwd, |_| {}) {
         Ok(capture) if capture.success => Ok(()),
         Ok(capture) => Err(finish_lifecycle_error(&capture)),
         Err(error) => Err(error),
@@ -117,6 +123,17 @@ pub fn run_shell_command_streaming<F>(command_line: &str, on_line: F) -> Result<
 where
     F: FnMut(&str),
 {
+    run_shell_command_streaming_in(command_line, None, on_line)
+}
+
+fn run_shell_command_streaming_in<F>(
+    command_line: &str,
+    cwd: Option<&Path>,
+    on_line: F,
+) -> Result<ShellCapture>
+where
+    F: FnMut(&str),
+{
     crate::adapters::util::ensure_managed_runtime_path();
 
     #[cfg(unix)]
@@ -135,6 +152,9 @@ where
         command
     };
 
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
     apply_china_download_env(&mut command);
     prepare_npm_install_env(command_line, &mut command);
     let mut child = command
@@ -241,6 +261,12 @@ fn prepare_npm_install_env(command_line: &str, command: &mut Command) {
     }
     command.env_remove("npm_config_devdir");
     command.env_remove("NPM_CONFIG_DEVDIR");
+    // An inherited absolute prefix is joined onto the launch folder on Windows.
+    // `.` means "the directory this command was started in".
+    if command_line.contains("--prefix .") {
+        command.env("npm_config_prefix", ".");
+        command.env("NPM_CONFIG_PREFIX", ".");
+    }
     // Default npm loglevel hides hundreds of DeepSeek dependency fetches.
     command.env("npm_config_loglevel", "info");
     command.env("npm_config_progress", "true");
