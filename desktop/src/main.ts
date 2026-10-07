@@ -64,6 +64,9 @@ function setMainTab(tab: MainTabId) {
   if (tab === "resources") {
     void refs.resources?.loadResourcesHub();
   }
+  if (tab === "provider") {
+    void refs.wiring?.loadPersonalProviderStatus();
+  }
   if (tab === "diagnose") {
     refs.firstRun?.onDiagnoseTabVisible();
   }

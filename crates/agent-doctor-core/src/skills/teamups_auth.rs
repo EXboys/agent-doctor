@@ -36,6 +36,9 @@ pub struct TeamupsLoginPoll {
 pub struct TeamupsAccountStatus {
     pub base_url: String,
     pub signed_in: bool,
+    /// Website account name (WeChat nickname, email, or phone).
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub pack_count: u32,
     #[serde(default)]
@@ -258,6 +261,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
+            name: None,
             pack_count: 0,
             packs: Vec::new(),
             official: None,
@@ -278,6 +282,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
+            name: None,
             pack_count: 0,
             packs: Vec::new(),
             official: None,
@@ -303,9 +308,16 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         .get("official")
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok());
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     Ok(TeamupsAccountStatus {
         base_url,
         signed_in: true,
+        name,
         pack_count: packs.len() as u32,
         packs,
         official,

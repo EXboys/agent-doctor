@@ -217,6 +217,7 @@ export interface TeamupsMallCatalog {
 export interface TeamupsAccountStatus {
   base_url: string;
   signed_in: boolean;
+  name?: string | null;
   pack_count: number;
   packs: string[];
   official?: {

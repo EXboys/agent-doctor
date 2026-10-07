@@ -309,6 +309,10 @@ export function bootChat(): void {
     promptEl.focus();
   });
 
+  void listen("personal-provider-changed", () => {
+    void refreshWiredProvider();
+  });
+
   void ensureListener();
   void refreshWiredProvider();
   autoResizePrompt();

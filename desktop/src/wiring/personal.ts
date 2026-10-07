@@ -22,6 +22,7 @@ import {
   getPersonalProviderStatus,
   listPersonalProviders,
   pollTeamupsLogin,
+  signOutTeamups,
   startTeamupsLogin,
   teamupsAccountStatus,
   upsertPersonalProvider as upsertPersonalProviderCommand,
@@ -35,7 +36,6 @@ const personalStatusEl = document.querySelector<HTMLElement>("#personal-status")
 const personalConnectedEl = document.querySelector<HTMLElement>("#personal-connected")!;
 const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-connected-url");
 const personalConnectedMetaEl = document.querySelector<HTMLElement>("#personal-connected-meta");
-const personalAgentsFootnoteEl = document.querySelector<HTMLElement>("#personal-agents-footnote");
 const personalListEl = document.querySelector<HTMLUListElement>("#personal-list")!;
 const personalListHintEl = document.querySelector<HTMLElement>("#personal-list-hint")!;
 const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
@@ -55,17 +55,11 @@ const personalSaveEl = document.querySelector<HTMLButtonElement>("#personal-save
 const personalApplyEl = document.querySelector<HTMLButtonElement>("#personal-apply")!;
 const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 
-const RUNTIME_FOOTNOTE_LABELS: Record<string, string> = {
-  hermes: "Hermes",
-  openclaw: "OpenClaw",
-  "claude-code": "Claude",
-  codex: "Codex",
-  "deepseek-harness": "DeepSeek",
-};
-
 const OFFICIAL_PROVIDER_ID = "teamups-official";
 let officialAccount: TeamupsAccountStatus | null = null;
 let officialLoginTimer: ReturnType<typeof setTimeout> | null = null;
+let officialBalanceTimer: ReturnType<typeof setTimeout> | null = null;
+let officialBalanceWatch: { until: number; leftApp: boolean; baseline: string } | null = null;
 
 function stopOfficialLoginPoll(): void {
   if (officialLoginTimer != null) {
@@ -101,20 +95,24 @@ function formatOfficialTokens(tokens: number): string {
 
 function officialDescription(): string {
   const official = officialAccount?.official;
-  if (official?.via === "member") {
-    const status = t("personal.officialMember", {
-      remaining: formatOfficialTokens(official.tokens_remaining),
-    });
-    const before = official.tokens_before ?? 0;
-    if (before <= 0) return status;
-    const rate = Math.round(((official.tokens_saved ?? 0) / before) * 100);
-    return `${status}${t("personal.officialSaved", { rate: String(rate) })}`;
+  if (!officialAccount?.signed_in) return t("personal.officialNeedsLogin");
+  if (!official) return t("personal.officialNeedsMembership");
+
+  const trials = Math.max(0, official.trial_calls_left ?? 0);
+  const tokens = Math.max(0, official.tokens_remaining ?? 0);
+  const hasTokenBalance = official.via === "member" || (official.token_cap ?? 0) > 0 || tokens > 0;
+  const onTrial = official.via === "trial";
+  const usable = official.active && (onTrial ? trials > 0 || tokens > 0 : hasTokenBalance && tokens > 0);
+  if (!onTrial && !hasTokenBalance) return t("personal.officialNeedsMembership");
+
+  const parts = [usable ? t("personal.officialUsable") : t("personal.officialUnusable")];
+  if (onTrial && (trials > 0 || !hasTokenBalance)) {
+    parts.push(t("personal.officialTrialLeft", { count: String(trials) }));
   }
-  if (official?.via === "trial") {
-    return t("personal.officialTrial", { count: String(official.trial_calls_left) });
+  if (hasTokenBalance) {
+    parts.push(t("personal.officialTokensLeft", { remaining: formatOfficialTokens(tokens) }));
   }
-  if (officialAccount?.signed_in) return t("personal.officialNeedsMembership");
-  return t("personal.officialNeedsLogin");
+  return parts.join(" · ");
 }
 
 export type PersonalDeps = {
@@ -139,26 +137,8 @@ export function createPersonalController(deps: PersonalDeps) {
     if (personalConnectedMetaEl) personalConnectedMetaEl.textContent = "";
   }
 
-  function updatePersonalAgentsFootnote(): void {
-    if (!personalAgentsFootnoteEl) return;
-    const report = appState.lastReport;
-    if (!report) {
-      personalAgentsFootnoteEl.textContent = "";
-      return;
-    }
-    const installed = report.runtimes
-      .filter((runtime) => runtime.installed)
-      .map((runtime) => RUNTIME_FOOTNOTE_LABELS[runtime.id] ?? runtime.display_name)
-      .filter(Boolean);
-    personalAgentsFootnoteEl.textContent =
-      installed.length > 0
-        ? t("personal.agentsOk", { list: installed.join("、") })
-        : t("personal.agentsNone");
-  }
-
   function renderPersonalProviderList(doc: PersonalProvidersDocument) {
     personalListEl.innerHTML = "";
-    updatePersonalAgentsFootnote();
     const providers = providersForDisplay(doc);
     const officialSaved = doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID);
     if (providers.length === 0) {
@@ -179,7 +159,10 @@ export function createPersonalController(deps: PersonalDeps) {
       isPersonalEdition() || appState.lastModeStatus?.mode === "personal";
     for (const item of providers) {
       const officialProvider = item.id === OFFICIAL_PROVIDER_ID;
-      const officialNeedsLogin = officialProvider && !officialSaved;
+      const officialSignedIn = officialProvider && officialAccount?.signed_in === true;
+      const officialNeedsLogin =
+        officialProvider && (!officialSaved || officialAccount?.signed_in === false);
+      const officialName = officialAccount?.name?.trim() || "";
       const routingActive = item.active && personalModeActive;
       const presetId = presets.matchPresetId(item.name, item.url, item.protocol);
       const brand =
@@ -216,6 +199,11 @@ export function createPersonalController(deps: PersonalDeps) {
       meta.textContent = item.model;
       if (!item.model.trim()) meta.hidden = true;
 
+      const account = document.createElement("p");
+      account.className = "provider-item-account";
+      account.textContent = officialName;
+      if (!officialSignedIn || !officialName) account.hidden = true;
+
       const showUse = !item.active;
       const desc = document.createElement("p");
       desc.className = "provider-item-desc";
@@ -225,7 +213,7 @@ export function createPersonalController(deps: PersonalDeps) {
           ? t("personal.itemIdleDesc")
           : t("personal.itemActiveDesc");
 
-      if (officialProvider) main.append(title, meta, desc);
+      if (officialProvider) main.append(title, account, meta, desc);
       else main.append(kicker, title, meta, desc);
 
       const actions = document.createElement("div");
@@ -247,6 +235,16 @@ export function createPersonalController(deps: PersonalDeps) {
         activateBtn.dataset.providerId = item.id;
         activateBtn.textContent = t("personal.activate");
         actions.appendChild(activateBtn);
+      }
+
+      if (officialProvider && officialSignedIn) {
+        const switchBtn = document.createElement("button");
+        switchBtn.type = "button";
+        switchBtn.className = "btn-ghost btn-compact";
+        switchBtn.dataset.action = "official-switch";
+        switchBtn.dataset.providerId = item.id;
+        switchBtn.textContent = t("personal.officialSwitch");
+        actions.appendChild(switchBtn);
       }
 
       if (officialProvider) {
@@ -295,12 +293,88 @@ export function createPersonalController(deps: PersonalDeps) {
     renderPersonalProviderList(doc);
   }
 
+  function officialBalanceKey(): string {
+    const official = officialAccount?.official;
+    if (!official) return "";
+    return `${official.via}:${official.trial_calls_left}:${official.tokens_remaining}:${official.token_cap}`;
+  }
+
+  function stopOfficialBalanceWatch(): void {
+    officialBalanceWatch = null;
+    if (officialBalanceTimer != null) {
+      clearTimeout(officialBalanceTimer);
+      officialBalanceTimer = null;
+    }
+  }
+
+  function noteOfficialBalanceRefresh(): void {
+    const watch = officialBalanceWatch;
+    if (!watch) return;
+    const official = officialAccount?.official;
+    const credited =
+      official?.via === "member" ||
+      (official?.tokens_remaining ?? 0) > 0 ||
+      (official?.token_cap ?? 0) > 0;
+    if (credited || officialBalanceKey() !== watch.baseline) {
+      if (
+        personalListHintEl.textContent === t("personal.officialBalancePending") ||
+        personalListHintEl.textContent === t("personal.officialBalanceWatch")
+      ) {
+        personalListHintEl.hidden = true;
+        personalListHintEl.textContent = "";
+      }
+      stopOfficialBalanceWatch();
+      return;
+    }
+    if (Date.now() >= watch.until) {
+      stopOfficialBalanceWatch();
+    }
+    if (watch.leftApp && officialAccount?.signed_in) {
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = t("personal.officialBalancePending");
+    }
+  }
+
+  function scheduleOfficialBalancePoll(): void {
+    if (officialBalanceTimer != null) clearTimeout(officialBalanceTimer);
+    const watch = officialBalanceWatch;
+    if (!watch || Date.now() >= watch.until) {
+      officialBalanceTimer = null;
+      return;
+    }
+    officialBalanceTimer = setTimeout(() => {
+      officialBalanceTimer = null;
+      void refreshOfficialAccount();
+    }, 4000);
+  }
+
+  function startOfficialBalanceWatch(): void {
+    officialBalanceWatch = {
+      until: Date.now() + 3 * 60 * 1000,
+      leftApp: document.visibilityState === "hidden",
+      baseline: officialBalanceKey(),
+    };
+    personalListHintEl.hidden = false;
+    personalListHintEl.textContent = t("personal.officialBalanceWatch");
+    scheduleOfficialBalancePoll();
+  }
+
+  let officialRefreshInFlight = false;
+
   async function refreshOfficialAccount() {
-    const account = await teamupsAccountStatus().catch(() => null);
-    if (!account) return;
-    officialAccount = account;
-    const doc = appState.personalProvidersDoc;
-    if (doc) renderPersonalProviderList(doc);
+    if (officialRefreshInFlight) return;
+    officialRefreshInFlight = true;
+    try {
+      const account = await teamupsAccountStatus().catch(() => null);
+      if (!account) return;
+      officialAccount = account;
+      const doc = appState.personalProvidersDoc;
+      if (doc) renderPersonalProviderList(doc);
+      noteOfficialBalanceRefresh();
+      if (officialBalanceWatch) scheduleOfficialBalancePoll();
+    } finally {
+      officialRefreshInFlight = false;
+    }
   }
 
   async function loadPersonalProviderStatus() {
@@ -338,6 +412,22 @@ export function createPersonalController(deps: PersonalDeps) {
       }
       personalListHintEl.hidden = false;
       personalListHintEl.textContent = t("resources.mallLoginExpired");
+    } catch (error) {
+      personalListHintEl.hidden = false;
+      personalListHintEl.textContent = teamupsLoginFailure(error);
+    }
+  }
+
+  async function switchOfficialAccount(): Promise<void> {
+    stopOfficialLoginPoll();
+    stopOfficialBalanceWatch();
+    personalListHintEl.hidden = false;
+    personalListHintEl.textContent = t("personal.officialSwitching");
+    try {
+      officialAccount = await signOutTeamups();
+      const doc = appState.personalProvidersDoc;
+      if (doc) renderPersonalProviderList(doc);
+      await startOfficialLogin();
     } catch (error) {
       personalListHintEl.hidden = false;
       personalListHintEl.textContent = teamupsLoginFailure(error);
@@ -675,6 +765,17 @@ export function createPersonalController(deps: PersonalDeps) {
       void refreshOfficialAccount();
     });
 
+    document.addEventListener("visibilitychange", () => {
+      if (officialBalanceWatch && document.visibilityState === "hidden") {
+        officialBalanceWatch.leftApp = true;
+        return;
+      }
+      if (document.visibilityState === "visible") void refreshOfficialAccount();
+    });
+    window.addEventListener("focus", () => {
+      void refreshOfficialAccount();
+    });
+
     personalListEl.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
       const action = button?.dataset.action;
@@ -690,8 +791,13 @@ export function createPersonalController(deps: PersonalDeps) {
         void startOfficialLogin();
         return;
       }
+      if (action === "official-switch") {
+        void switchOfficialAccount();
+        return;
+      }
       if (action === "official-membership") {
         const base = officialAccount?.base_url?.replace(/\/+$/, "") || "https://teamups.vip";
+        startOfficialBalanceWatch();
         void openUrl(`${base}/membership`);
         return;
       }

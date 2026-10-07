@@ -11,6 +11,11 @@ use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::Serialize;
 
 use crate::update_tray_tooltip;
+use tauri::Emitter;
+
+fn notify_provider_changed(app: &tauri::AppHandle) {
+    let _ = app.emit("personal-provider-changed", ());
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModeSwitchDesktopReport {
@@ -87,6 +92,7 @@ pub async fn activate_personal_provider_command(
     .await
     .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
+    notify_provider_changed(&app);
     Ok(report)
 }
 
@@ -119,6 +125,7 @@ pub async fn apply_personal_provider_command(
     .await
     .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
+    notify_provider_changed(&app);
     Ok(report)
 }
 
@@ -165,6 +172,7 @@ pub async fn switch_to_personal_mode_command(
     .await
     .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
+    notify_provider_changed(&app);
     Ok(report)
 }
 
@@ -188,6 +196,7 @@ pub async fn switch_to_team_mode_command(
     .await
     .map_err(|error| error.to_string())??;
     update_tray_tooltip(&app);
+    notify_provider_changed(&app);
     Ok(report)
 }
 
