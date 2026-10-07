@@ -301,12 +301,14 @@ async fn start_prompt_session_command(
             .collect(),
     };
 
-    // Interactive Allow/Deny when Claude skip is off, or Codex full-auto is off.
+    // The window's Allow button writes through this control. DeepSeek always
+    // needs it: auto-approve can be turned on after the reply has started.
     let control_for_run = {
         let runtime = options.runtime.as_str();
         let claude_ask = runtime == "claude-code" && !options.dangerously_skip_permissions;
         let codex_ask = runtime == "codex" && !options.full_auto;
-        if claude_ask || codex_ask {
+        let deepseek_ask = runtime == "deepseek-harness";
+        if claude_ask || codex_ask || deepseek_ask {
             Some(control)
         } else {
             None

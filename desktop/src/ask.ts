@@ -98,7 +98,7 @@ function setBusy(next: boolean): void {
     runtime.disabled = next;
   }
   if (elevated) {
-    elevated.disabled = next || !supportsElevatedMode(selectedRuntime());
+    elevated.disabled = next;
   }
 }
 
@@ -134,18 +134,15 @@ function selectedRuntime(): AskRuntime {
   return "claude-code";
 }
 
-function supportsElevatedMode(runtime: AskRuntime): boolean {
-  return runtime !== "deepseek-harness";
-}
-
 function elevatedFlags(runtime: AskRuntime): {
   dangerously_skip_permissions: boolean;
   full_auto: boolean;
 } {
   const { elevated } = els();
-  const on = supportsElevatedMode(runtime) && Boolean(elevated?.checked);
+  const on = Boolean(elevated?.checked);
   return {
-    dangerously_skip_permissions: (runtime === "claude-code" || runtime === "hermes") && on,
+    dangerously_skip_permissions:
+      (runtime === "claude-code" || runtime === "hermes" || runtime === "deepseek-harness") && on,
     full_auto: (runtime === "codex" || runtime === "openclaw") && on,
   };
 }
@@ -209,16 +206,6 @@ function updateElevatedLabel(): void {
   const { elevated } = els();
   const wrap = elevated?.closest<HTMLElement>("label, .ask-elevated") ?? null;
   const runtime = selectedRuntime();
-  if (runtime === "deepseek-harness") {
-    if (elevated) {
-      elevated.checked = false;
-      elevated.disabled = true;
-    }
-    if (wrap) {
-      wrap.hidden = true;
-    }
-    return;
-  }
   if (wrap) {
     wrap.hidden = false;
   }
@@ -234,6 +221,8 @@ function updateElevatedLabel(): void {
     label.textContent = t("ask.elevatedHermes");
   } else if (runtime === "openclaw") {
     label.textContent = t("ask.elevatedOpenclaw");
+  } else if (runtime === "deepseek-harness") {
+    label.textContent = t("ask.elevatedDeepseekHarness");
   } else {
     label.textContent = t("ask.elevatedClaude");
   }

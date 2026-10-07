@@ -1,6 +1,7 @@
 import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
+import { stripMarkdown } from "../chat/format";
 import { renderMarkdown } from "../markdown";
 import { doingText, planProgress, renderPlanCard } from "../plan";
 import {
@@ -554,10 +555,12 @@ function rowsFromChat(): IslandFeedRow[] {
 }
 
 function oneLine(text: string, max = 78): string {
-  const line = text
-    .split("\n")
-    .map((part) => part.trim())
-    .find(Boolean);
+  const line = stripMarkdown(
+    text
+      .split("\n")
+      .map((part) => part.trim())
+      .find(Boolean) ?? "",
+  );
   if (!line) return "";
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
@@ -600,33 +603,63 @@ function renderConversation(row: IslandFeedRow): HTMLElement {
     said.textContent = you;
     body.append(said);
   }
-  if (reply) {
-    const longReply = reply.length > 320 || reply.split(/\r?\n/).length > 6;
-    const replyWrap = document.createElement("div");
-    replyWrap.className = "island-reply-scroll";
-    const expanded = longReply && expandedReplyId === row.id;
-    replyWrap.classList.toggle("is-expanded", expanded);
-    const answer = document.createElement("div");
-    answer.className = "island-msg-reply island-md";
-    answer.innerHTML = renderMarkdown(reply);
-    for (const link of answer.querySelectorAll("a")) link.removeAttribute("href");
-    replyWrap.append(answer);
-    body.append(replyWrap);
-    if (longReply) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "island-reply-toggle";
-      toggle.textContent = expanded ? t("island.collapseReply") : t("island.expandReply");
-      toggle.addEventListener("click", (event) => {
-        event.stopPropagation();
-        expandedReplyId = expanded ? "" : row.id;
-        feedSig = "";
-        if (lastView) render(lastView);
-      });
-      body.append(toggle);
-    }
-  }
+  if (reply) appendReply(body, row.id, reply);
   return body;
+}
+
+function replyNeedsFold(reply: string): boolean {
+  const plain = stripMarkdown(reply);
+  const lines = plain
+    .split("\n")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return lines.length > 3 || plain.length > 80;
+}
+
+function appendReply(body: HTMLElement, rowId: string, reply: string): void {
+  const fold = replyNeedsFold(reply);
+  const open = fold && expandedReplyId === rowId;
+  if (fold && !open) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "island-reply-fold";
+    const preview = document.createElement("span");
+    preview.className = "island-reply-preview";
+    preview.textContent = stripMarkdown(reply);
+    const label = document.createElement("span");
+    label.className = "island-reply-toggle";
+    label.textContent = t("island.expandReply");
+    button.append(preview, label);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setReplyOpen(rowId);
+    });
+    body.append(button);
+    return;
+  }
+  const answer = document.createElement("div");
+  answer.className = "island-msg-reply island-md";
+  answer.innerHTML = renderMarkdown(reply);
+  for (const link of answer.querySelectorAll("a")) link.removeAttribute("href");
+  body.append(answer);
+  if (!fold) return;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "island-reply-toggle";
+  toggle.textContent = t("island.collapseReply");
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setReplyOpen("");
+  });
+  body.append(toggle);
+}
+
+function setReplyOpen(rowId: string): void {
+  expandedReplyId = rowId;
+  heightLock = 0;
+  feedSig = "";
+  if (lastView) render(lastView);
+  else renderFeed(lastRows);
 }
 
 let rowHoverTimer: number | undefined;
@@ -1122,6 +1155,10 @@ function syncScrollHint(): void {
 
 function boot(): void {
   applyStaticI18n();
+  scrollHintEl?.addEventListener("click", () => {
+    if (!detailEl) return;
+    detailEl.scrollTo({ top: detailEl.scrollHeight, behavior: "smooth" });
+  });
   detailEl?.addEventListener("scroll", syncScrollHint, { passive: true });
   if (detailEl) new ResizeObserver(syncScrollHint).observe(detailEl);
   detailEl?.addEventListener(

@@ -338,13 +338,6 @@ export function syncRestoreBackupButton(): void {
 
 export function updateElevatedLabel(): void {
   const runtime = selectedRuntime();
-  // DeepSeek harness has no auto-approve / elevated mode — hide the control.
-  if (runtime === "deepseek-harness") {
-    elevatedWrapEl.hidden = true;
-    elevatedEl.checked = false;
-    elevatedEl.disabled = true;
-    return;
-  }
   elevatedWrapEl.hidden = false;
   const detail =
     runtime === "codex"
@@ -353,7 +346,9 @@ export function updateElevatedLabel(): void {
         ? t("chat.elevatedHermes")
         : runtime === "openclaw"
           ? t("chat.elevatedOpenclaw")
-          : t("chat.elevatedClaude");
+          : runtime === "deepseek-harness"
+            ? t("chat.elevatedDeepseekHarness")
+            : t("chat.elevatedClaude");
   elevatedWrapEl.title = `${detail} — ${t("chat.permissionHint")}`;
   elevatedEl.disabled = false;
   elevatedLabelEl.textContent = detail;
@@ -388,7 +383,7 @@ export function syncComposerUi(): void {
   promptEl.disabled = false;
   promptEl.readOnly = false;
   promptEl.placeholder = t(locked ? "chat.placeholderBusy" : "chat.placeholder");
-  elevatedEl.disabled = selectedRuntime() === "deepseek-harness";
+  elevatedEl.disabled = false;
   modelBtnEl.disabled = locked || !chatState.wiredProvider;
   if (locked) {
     closeModelMenu();

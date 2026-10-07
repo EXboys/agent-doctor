@@ -15,6 +15,8 @@ enum PendingReply {
     ClaudeAsk { input: Value },
     /// Codex app-server JSON-RPC result (shape depends on the request method).
     CodexRpc { kind: CodexReplyKind },
+    /// DeepSeek ACP `session/request_permission`: allow-once or reject-once.
+    DshPermission,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +154,12 @@ impl PromptSessionControl {
         }
     }
 
+    pub(crate) fn remember_dsh_permission(&self, request_id: &str) {
+        if let Ok(mut guard) = self.pending.lock() {
+            guard.insert(request_id.to_string(), PendingReply::DshPermission);
+        }
+    }
+
     pub(crate) fn remember_codex_reply(&self, request_id: &str, kind: CodexReplyKind) {
         if let Ok(mut guard) = self.pending.lock() {
             guard.insert(request_id.to_string(), PendingReply::CodexRpc { kind });
@@ -252,6 +260,25 @@ impl PromptSessionControl {
         serde_json::json!({ "id": id, "result": result })
     }
 
+    pub(crate) fn dsh_permission_line(request_id: &str, allow: bool) -> String {
+        Self::dsh_permission_payload(request_id, allow).to_string()
+    }
+
+    fn dsh_permission_payload(request_id: &str, allow: bool) -> Value {
+        let id: Value = request_id
+            .parse::<i64>()
+            .map(Value::from)
+            .unwrap_or_else(|_| Value::String(request_id.to_string()));
+        let option_id = if allow { "allow-once" } else { "reject-once" };
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "outcome": { "outcome": "selected", "optionId": option_id }
+            }
+        })
+    }
+
     /// Allow or deny a pending permission request (Claude control or Codex RPC).
     pub fn respond_permission(&self, request_id: &str, allow: bool) -> Result<()> {
         let request_id = request_id.trim();
@@ -267,6 +294,7 @@ impl PromptSessionControl {
             Some(PendingReply::ClaudeAsk { .. }) => {
                 Self::claude_payload(request_id, false, Value::Null)
             }
+            Some(PendingReply::DshPermission) => Self::dsh_permission_payload(request_id, allow),
             None => {
                 // No remembered pending yet (race / stale id). Prefer Claude shape for
                 // non-numeric ids; for numeric ids wait until remember_codex_reply.

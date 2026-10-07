@@ -364,7 +364,7 @@ pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
     let _ = child.wait();
 }
 
-/// One-shot CLIs (Hermes / OpenClaw / DeepSeek) use `stdin = null` and should exit
+/// One-shot CLIs (Hermes / OpenClaw) use `stdin = null` and should exit
 /// when both pipes close. If a helper process keeps the parent alive, Ask stays on
 /// 「停止」forever — force-stop after a short grace so the UI can accept input again.
 pub(crate) fn finish_oneshot_after_pipes_closed(

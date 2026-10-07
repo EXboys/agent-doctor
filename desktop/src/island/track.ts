@@ -1,4 +1,4 @@
-import { formatPermissionDetail, preferPlainSummary } from "../chat/format";
+import { formatPermissionDetail, preferPlainSummary, stripMarkdown } from "../chat/format";
 import type { PromptSessionEvent } from "../chat/types";
 import { looksLikeBrowserToolCall } from "../chat/verify";
 import { planShort, type PlanStep } from "../plan";
@@ -265,8 +265,9 @@ function leadSentence(text: string): string {
     .map((part) => part.trim())
     .find(Boolean);
   if (!line) return "";
-  const cut = line.split(/[。！？!?（(]/)[0]?.trim() ?? "";
-  return cut || line;
+  const plain = stripMarkdown(line);
+  const cut = plain.split(/[。！？!?（(]/)[0]?.trim() ?? "";
+  return cut || plain;
 }
 
 const QUIET_MS = 7 * 24 * 60 * 60 * 1000;

@@ -151,6 +151,24 @@ export function looksLikeChoiceQuestion(text: string): boolean {
   );
 }
 
+/** One-line surfaces (the island list) show the words, not the marks. */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(^|[\s])\*([^*\n]+)\*(?=$|[\s])/g, "$1$2")
+    .replace(/`/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function preferPlainSummary(summary: string): string {
   const trimmed = summary.trim();
   if (!trimmed) return "";

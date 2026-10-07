@@ -189,7 +189,7 @@ export function createSendController(deps: SendDeps) {
     }
 
     const runtime = deps.selectedRuntime();
-    const elevated = deps.selectedRuntime() !== "deepseek-harness" && deps.elevatedEl.checked;
+    const elevated = deps.elevatedEl.checked;
     if (elevated && !draft.fromVoice && !opts?.draft && !window.confirm(t("chat.elevatedConfirm"))) return;
 
     const chatSessionId = draft.sessionId || deps.getStore().activeId;
@@ -282,7 +282,8 @@ export function createSendController(deps: SendDeps) {
         cwd: deps.getWorkspaceCwd()?.trim() || null,
         timeoutSec: 86_400,
         dangerouslySkipPermissions:
-          (runtime === "claude-code" || runtime === "hermes") && elevated,
+          (runtime === "claude-code" || runtime === "hermes" || runtime === "deepseek-harness") &&
+          elevated,
         fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
         resumeThreadId,
         selectedMcps,
