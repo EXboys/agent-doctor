@@ -21,6 +21,7 @@ import { buildIslandRows, type IslandPending, type IslandRow, type IslandView } 
 const root = document.querySelector<HTMLElement>("#island");
 const titleEl = document.querySelector<HTMLElement>("#island-title");
 const detailEl = document.querySelector<HTMLElement>("#island-detail");
+const scrollHintEl = document.querySelector<HTMLElement>("#island-scroll-hint");
 const actionsEl = document.querySelector<HTMLElement>("#island-actions");
 const errorEl = document.querySelector<HTMLElement>("#island-error");
 const hideIdleEl = document.querySelector<HTMLInputElement>("#island-hide");
@@ -1054,7 +1055,10 @@ function reportHeight(): void {
   }
   for (const child of body.children) {
     if (!(child instanceof HTMLElement) || child.getClientRects().length === 0) continue;
-    height += marginsOf(child) + (child === detailEl ? child.scrollHeight : child.offsetHeight);
+    const list = child.classList.contains("island-read-frame")
+      ? child.querySelector<HTMLElement>(".island-read")
+      : null;
+    height += marginsOf(child) + (list && !list.hidden ? list.scrollHeight : child.offsetHeight);
   }
   height = Math.ceil(height);
   if (height > heightLock) heightLock = height;
@@ -1095,12 +1099,31 @@ function render(view: IslandView): void {
   renderActions(view);
   placeActions(view);
   restoreCaret(caret);
-  if (view.expanded) requestAnimationFrame(reportHeight);
+  if (view.expanded) {
+    requestAnimationFrame(() => {
+      reportHeight();
+      syncScrollHint();
+    });
+  } else if (scrollHintEl) {
+    scrollHintEl.hidden = true;
+  }
   if (!view.pending && errorEl) errorEl.hidden = true;
+}
+
+/** Shown only while more conversations sit below the visible edge. */
+function syncScrollHint(): void {
+  if (!scrollHintEl || !detailEl) return;
+  const moreBelow =
+    !detailEl.hidden &&
+    detailEl.scrollHeight > detailEl.clientHeight + 8 &&
+    detailEl.scrollTop + detailEl.clientHeight < detailEl.scrollHeight - 8;
+  scrollHintEl.hidden = !moreBelow;
 }
 
 function boot(): void {
   applyStaticI18n();
+  detailEl?.addEventListener("scroll", syncScrollHint, { passive: true });
+  if (detailEl) new ResizeObserver(syncScrollHint).observe(detailEl);
   detailEl?.addEventListener(
     "wheel",
     (event) => {

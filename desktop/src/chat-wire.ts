@@ -385,6 +385,7 @@ export function wireChatControllers(): void {
     setAssistantRaw: (raw) => {
       chatState.assistantRaw = raw;
     },
+    autoApprove: () => elevatedEl.checked && selectedRuntime() !== "deepseek-harness",
     resendBefore: (messageId) => {
       const session = chatState.store?.sessions.find((item) =>
         item.messages.some((message) => message.id === messageId),

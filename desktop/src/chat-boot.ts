@@ -181,6 +181,10 @@ export function bootChat(): void {
   elevatedEl.addEventListener("change", () => {
     if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
       elevatedEl.checked = false;
+      return;
+    }
+    if (elevatedEl.checked) {
+      void chatState.permissions?.approvePendingChoices();
     }
   });
   readImageEl.addEventListener("change", () => {

@@ -355,7 +355,7 @@ export function updateElevatedLabel(): void {
           ? t("chat.elevatedOpenclaw")
           : t("chat.elevatedClaude");
   elevatedWrapEl.title = `${detail} — ${t("chat.permissionHint")}`;
-  elevatedEl.disabled = isComposerLocked();
+  elevatedEl.disabled = false;
   elevatedLabelEl.textContent = detail;
 }
 
@@ -388,7 +388,7 @@ export function syncComposerUi(): void {
   promptEl.disabled = false;
   promptEl.readOnly = false;
   promptEl.placeholder = t(locked ? "chat.placeholderBusy" : "chat.placeholder");
-  elevatedEl.disabled = locked || selectedRuntime() === "deepseek-harness";
+  elevatedEl.disabled = selectedRuntime() === "deepseek-harness";
   modelBtnEl.disabled = locked || !chatState.wiredProvider;
   if (locked) {
     closeModelMenu();

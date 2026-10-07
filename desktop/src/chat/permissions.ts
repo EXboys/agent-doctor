@@ -40,11 +40,17 @@ export type PermissionsDeps = {
   setAssistantRaw: (raw: string) => void;
   /** Sends again the message that led to this card, or null when there is none. */
   resendBefore: (messageId: string) => (() => void) | null;
+  /** Tool approvals can be allowed without a card while this is on. Questions still wait. */
+  autoApprove: () => boolean;
 };
 
 export type PermissionsApi = ReturnType<typeof createPermissionsController>;
 
 const replyDrafts = new Map<string, string>();
+
+function needsTypedReply(mode: string | undefined): boolean {
+  return mode === "line" || mode === "secret" || mode === "options";
+}
 
 type AskOption = { label: string; description?: string };
 type AskQuestion = {
@@ -285,19 +291,6 @@ export function createPermissionsController(deps: PermissionsDeps) {
     input_mode?: string;
     input_json?: string;
   }): void {
-    deps.flushPendingTextSync();
-    deps.sealAssistantBubble();
-    if (deps.isViewingRunningSession()) {
-      deps.settleActivity();
-      deps.dismissLifecycleActivity();
-      scrubToolFragmentsBeforePermission(payload.detail);
-    }
-    if (deps.isViewingRunningSession()) {
-      deps.setStatus(t("chat.needYourChoice"), "warn");
-    } else {
-      deps.setStatus(t("chat.waitingPermissionElsewhere"), "warn");
-    }
-
     if (pendingPermissionBatch.some((item) => item.requestId === payload.request_id)) {
       return;
     }
@@ -306,6 +299,48 @@ export function createPermissionsController(deps: PermissionsDeps) {
       payload.input_mode === "secret" || payload.input_mode === "line" || payload.input_mode === "options"
         ? payload.input_mode
         : "choice";
+    // A running turn was started before the switch was on, so each tool still asks.
+    // Allow those here. A question still needs an answer.
+    if (!needsTypedReply(inputMode) && deps.autoApprove()) {
+      void resolvePermissionSession({
+        sessionId: payload.session_id,
+        requestId: payload.request_id,
+        allow: true,
+      }).catch((error) => {
+        const raw = String(error);
+        if (/no active ask session/i.test(raw)) {
+          deps.setStatus(t("chat.permissionSessionGone"), "warn");
+          return;
+        }
+        deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
+        presentPermission(payload, inputMode);
+      });
+      return;
+    }
+
+    presentPermission(payload, inputMode);
+  }
+
+  function presentPermission(
+    payload: {
+      session_id: string;
+      request_id: string;
+      tool_name: string;
+      detail: string;
+      input_json?: string;
+    },
+    inputMode: "choice" | "line" | "secret" | "options",
+  ): void {
+    deps.flushPendingTextSync();
+    deps.sealAssistantBubble();
+    if (deps.isViewingRunningSession()) {
+      deps.settleActivity();
+      deps.dismissLifecycleActivity();
+      scrubToolFragmentsBeforePermission(payload.detail);
+      deps.setStatus(t("chat.needYourChoice"), "warn");
+    } else {
+      deps.setStatus(t("chat.waitingPermissionElsewhere"), "warn");
+    }
     const persisted = deps.persistMessage("permission", payload.detail.trim() || payload.tool_name, {
       permission: {
         requestId: payload.request_id,
@@ -317,7 +352,43 @@ export function createPermissionsController(deps: PermissionsDeps) {
         inputJson: payload.input_json,
       },
     });
+    showPendingPermission(payload, persisted);
+  }
 
+  async function approvePendingChoices(): Promise<void> {
+    const session = deps.runTargetSession();
+    const items = pendingPermissionBatch.filter((item) => {
+      const message = session.messages.find((entry) => entry.id === item.messageId);
+      return !needsTypedReply(message?.permission?.inputMode);
+    });
+    for (const item of items) {
+      try {
+        await resolvePermissionSession({
+          sessionId: item.sessionId,
+          requestId: item.requestId,
+          allow: true,
+        });
+      } catch (error) {
+        const raw = String(error);
+        if (/no active ask session/i.test(raw)) {
+          deps.setStatus(t("chat.permissionSessionGone"), "warn");
+          expireLivePermissionCards();
+          return;
+        }
+        deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
+      }
+    }
+  }
+
+  function showPendingPermission(
+    payload: {
+      session_id: string;
+      request_id: string;
+      tool_name: string;
+      detail: string;
+    },
+    persisted: ChatMessage,
+  ): void {
     pendingPermissionBatch.push({
       sessionId: payload.session_id,
       requestId: payload.request_id,
@@ -961,5 +1032,6 @@ export function createPermissionsController(deps: PermissionsDeps) {
     collapseResolvedPermissionsBeforeAssistant,
     renderPermissionGroup,
     markPermissionResolved,
+    approvePendingChoices,
   };
 }
