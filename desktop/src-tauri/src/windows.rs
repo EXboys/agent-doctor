@@ -608,21 +608,30 @@ pub(crate) fn open_or_focus_ask_window(
         &window,
         layout_main_and_ask_side_by_side,
     );
-    // A previously crashed Ask webview can stay titled+blank forever while we only
-    // hide/show it. Always soft-reload existing Ask windows so history paints again.
-    // Persist runtime before reload: create-time init script still injects the first
-    // runtime (usually claude-code) and would otherwise win over `__AD_ASK_RUNTIME__`.
+    // Recover crashed Ask (blank/titled, never booted) with one soft reload. A healthy
+    // page must not reload on every Agents click — dev builds load from Vite
+    // (127.0.0.1:1420) and reload whitescreens when `npm run dev` is not running.
     if already_exists {
         let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
-        let reload = format!(
+        let recover_or_switch = format!(
             "(function(){{\
                 window.__AD_ASK_RUNTIME__ = {runtime};\
                 try {{ localStorage.setItem('ad.ask.pendingRuntime', {runtime}); }} catch (e) {{}}\
+                var shell = document.getElementById('chat-shell');\
+                if (window.__AD_ASK_BOOTED__ && shell) {{\
+                    if (typeof window.__AD_ASK_APPLY_RUNTIME__ === 'function') {{\
+                        window.__AD_ASK_APPLY_RUNTIME__({runtime});\
+                    }}\
+                    return;\
+                }}\
                 location.reload();\
             }})();",
             runtime = runtime_json
         );
-        let _ = window.eval(&reload);
+        let _ = window.eval(&recover_or_switch);
+        let payload = serde_json::json!({ "runtime": runtime });
+        let _ = window.emit("ask-window-focus", &payload);
+        let _ = app.emit("ask-window-focus", &payload);
     } else {
         // Fresh window: still push runtime + focus event after show.
         apply_ask_runtime_in_webview(&window, runtime);

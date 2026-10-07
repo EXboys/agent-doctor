@@ -3,6 +3,14 @@
 !macro NSIS_HOOK_PREINSTALL
   nsExec::ExecToLog 'taskkill /F /IM "agent-doctor-cli.exe" /T'
   Sleep 800
+  ; Tauri copies resources into $INSTDIR (the directory the user picked,
+  ; including a custom one). Older builds used $INSTDIR\resources. Clear both
+  ; so a locked CLI is replaced instead of leaving MCP on a stale binary.
+  IfFileExists "$INSTDIR\agent-doctor-cli.exe" 0 ad_cli_root_done
+    Delete "$INSTDIR\agent-doctor-cli.exe"
+    IfFileExists "$INSTDIR\agent-doctor-cli.exe" 0 ad_cli_root_done
+      Delete /REBOOTOK "$INSTDIR\agent-doctor-cli.exe"
+  ad_cli_root_done:
   IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_preinstall_done
     Delete "$INSTDIR\resources\agent-doctor-cli.exe"
     IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_preinstall_done

@@ -11,6 +11,10 @@ thread_local! {
     /// Per-test home override so unit tests never mutate the process `HOME`.
     static TEST_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
+    /// Per-test config-root override so unit tests never rewrite the real
+    /// `~/Library/Application Support/agent-doctor/workspaces.yaml`.
+    static TEST_CONFIG_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Resolve the user home directory (tests may override via [`with_test_home`]).
@@ -28,17 +32,37 @@ pub fn home_join(relative: &str) -> PathBuf {
     home_dir().join(relative)
 }
 
-/// Run `f` with [`home_dir`] / [`home_join`] rooted at `home` for this thread only.
+/// Platform config directory (`~/Library/Application Support` on macOS).
+///
+/// Tests may override via [`with_test_home`], which also redirects this so
+/// workspace registry writes stay inside the temp home.
+pub fn config_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_CONFIG_OVERRIDE.with(|cell| cell.borrow().clone()) {
+            return Some(path);
+        }
+    }
+    dirs::config_dir()
+}
+
+/// Run `f` with [`home_dir`] / [`home_join`] / [`config_dir`] rooted at `home`
+/// for this thread only.
 #[cfg(test)]
 pub(crate) fn with_test_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
-    TEST_HOME_OVERRIDE.with(|cell| {
-        let previous = cell.replace(Some(home.to_path_buf()));
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        *cell.borrow_mut() = previous;
-        match result {
-            Ok(value) => value,
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
+    let config = home.join("Library/Application Support");
+    TEST_HOME_OVERRIDE.with(|home_cell| {
+        TEST_CONFIG_OVERRIDE.with(|config_cell| {
+            let previous_home = home_cell.replace(Some(home.to_path_buf()));
+            let previous_config = config_cell.replace(Some(config));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+            *home_cell.borrow_mut() = previous_home;
+            *config_cell.borrow_mut() = previous_config;
+            match result {
+                Ok(value) => value,
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        })
     })
 }
 

@@ -331,6 +331,37 @@ fn write_mcp_servers_toml(
     Ok(())
 }
 
+/// Codex configs that must list the browser command.
+///
+/// `primary` is the workspace `CODEX_HOME/config.toml` Ask launches. The
+/// installed Codex app still reads `~/.codex/config.toml` unless that variable
+/// is set, so a custom install path has to be written there too.
+pub(crate) fn codex_browser_config_paths(primary: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![primary.to_path_buf()];
+    if let Some(global) = home_dir().map(|home| home.join(".codex").join("config.toml")) {
+        if !same_config_path(&global, primary) {
+            paths.push(global);
+        }
+    }
+    paths
+}
+
+fn same_config_path(left: &Path, right: &Path) -> bool {
+    dir_key(&left.to_string_lossy()) == dir_key(&right.to_string_lossy())
+}
+
+fn dir_key(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches('"').trim();
+    let stripped = trimmed
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .unwrap_or_else(|| trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed).to_string());
+    stripped
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
 /// Configure the browser MCP server for a given runtime.
 pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOptions) -> Result<()> {
     let config_path = mcp_servers_path_with_openclaw(
@@ -349,7 +380,14 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
     );
 
     match options.runtime.as_str() {
-        "codex" => write_mcp_servers_toml(&config_path, "browser", &command, &args)?,
+        "codex" => {
+            // Workspace CODEX_HOME is what Ask launches. The Codex app the
+            // person opens themselves reads ~/.codex. Write both, with the
+            // CLI from the install directory they actually chose.
+            for path in codex_browser_config_paths(&config_path) {
+                write_mcp_servers_toml(&path, "browser", &command, &args)?;
+            }
+        }
         "claude-code" | "claude" => {
             let mut servers = read_mcp_servers(&config_path)?;
             let entry = json!({ "command": command, "args": args });
@@ -744,6 +782,24 @@ foo = true
         assert!(rendered.contains("foo = true"));
         assert!(rendered.contains("[mcp_servers.browser]"));
         assert!(rendered.contains("command = \"/bin/agent-doctor\""));
+    }
+
+    #[test]
+    fn codex_write_includes_user_config_outside_workspace_home() {
+        let workspace = PathBuf::from(
+            r"C:\Users\Admin\AppData\Roaming\agent-doctor\workspaces\default\codex-home\config.toml",
+        );
+        let paths = codex_browser_config_paths(&workspace);
+        assert!(paths.iter().any(|path| same_config_path(path, &workspace)));
+        if home_dir().is_some() {
+            assert!(
+                paths.iter().any(|path| {
+                    let key = dir_key(&path.to_string_lossy());
+                    key.ends_with(r"\.codex\config.toml") && !key.contains("workspaces")
+                }),
+                "standalone Codex reads ~/.codex, not only the workspace home: {paths:?}"
+            );
+        }
     }
 
     #[test]

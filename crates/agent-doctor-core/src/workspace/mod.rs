@@ -170,19 +170,19 @@ pub enum WorkspaceCheckStatus {
 }
 
 pub fn workspaces_path() -> Result<PathBuf> {
-    dirs::config_dir()
+    crate::adapters::util::config_dir()
         .map(|dir| dir.join("agent-doctor").join(WORKSPACES_FILE))
         .context("could not resolve config directory")
 }
 
 pub fn active_env_path() -> Result<PathBuf> {
-    dirs::config_dir()
+    crate::adapters::util::config_dir()
         .map(|dir| dir.join("agent-doctor").join(ACTIVE_ENV_FILE))
         .context("could not resolve config directory")
 }
 
 pub fn workspace_data_root(name: &str) -> Result<PathBuf> {
-    dirs::config_dir()
+    crate::adapters::util::config_dir()
         .map(|dir| dir.join("agent-doctor").join("workspaces").join(name))
         .context("could not resolve config directory")
 }

@@ -1,5 +1,6 @@
 //! Local MCP server inventory: project + Claude configs, path health, browser entry.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -587,8 +588,17 @@ fn launchable_path(path: &Path) -> PathBuf {
 /// Prefers a stable, non-ephemeral path (and the current `agent-doctor` binary
 /// name) over leftover `agent-doctor-cli` copies under Cursor sandbox caches —
 /// those can be months old and break tools like `browser_screenshot`.
+///
+/// On an installed app, the CLI next to the running executable wins, then the
+/// directory recorded by the Windows installer. A newer copy under the default
+/// `%LOCALAPPDATA%\Agent Doctor` must not replace a custom directory such as
+/// `D:\Agent Doctor`.
 pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     let mut candidates = Vec::new();
+    let current_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let registered_dirs = registered_install_dirs();
 
     // Dev / Cursor sandbox: honor CARGO_TARGET_DIR before PATH or stale siblings.
     if let Ok(target) = std::env::var("CARGO_TARGET_DIR") {
@@ -603,26 +613,14 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
         }
     }
 
-    // Bundled CLI next to the running exe. Prefer `agent-doctor` (current package
-    // bin name) ahead of legacy `agent-doctor-cli` so an old sibling cannot win.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            #[cfg(windows)]
-            {
-                candidates.push(dir.join("resources/agent-doctor.exe"));
-                candidates.push(dir.join("agent-doctor.exe"));
-                candidates.push(dir.join("../Resources/agent-doctor.exe"));
-                candidates.push(dir.join("resources/agent-doctor-cli.exe"));
-                candidates.push(dir.join("agent-doctor-cli.exe"));
-                candidates.push(dir.join("../Resources/agent-doctor-cli.exe"));
-            }
-            candidates.push(dir.join("resources/agent-doctor"));
-            candidates.push(dir.join("../Resources/agent-doctor"));
-            candidates.push(dir.join("agent-doctor"));
-            candidates.push(dir.join("resources/agent-doctor-cli"));
-            candidates.push(dir.join("../Resources/agent-doctor-cli"));
-            candidates.push(dir.join("agent-doctor-cli"));
-        }
+    // Bundled CLI next to the running exe, then the installer-recorded directory.
+    // `agent-doctor-cli` is listed after `agent-doctor` only as a probe order;
+    // installed builds prefer whichever of these actually sits in the install dir.
+    if let Some(dir) = current_dir.as_deref() {
+        candidates.extend(bundled_cli_candidates(dir, true));
+    }
+    for dir in &registered_dirs {
+        candidates.extend(bundled_cli_candidates(dir, false));
     }
 
     // Prefer an in-tree release/debug build when developing from source.
@@ -668,6 +666,16 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
         }
     }
 
+    // Installed apps must follow the directory the user chose. A newer CLI
+    // left in the default location or on PATH is the wrong program.
+    let dev = std::env::var_os("CARGO_MANIFEST_DIR").is_some()
+        || std::env::var_os("CARGO_TARGET_DIR").is_some();
+    if !dev {
+        if let Some(best) = pick_cli_for_install(&real, current_dir.as_deref(), &registered_dirs) {
+            return Ok(best);
+        }
+    }
+
     if let Some(best) = pick_best_agent_doctor_cli(&real) {
         return Ok(best);
     }
@@ -698,6 +706,232 @@ pub fn resolve_agent_doctor_binary() -> Result<PathBuf> {
     )
 }
 
+fn bundled_cli_candidates(dir: &Path, allow_parent_resources: bool) -> Vec<PathBuf> {
+    let mut rels = if cfg!(windows) {
+        vec![
+            "agent-doctor-cli.exe",
+            "agent-doctor.exe",
+            "resources/agent-doctor-cli.exe",
+            "resources/agent-doctor.exe",
+        ]
+    } else {
+        vec![
+            "agent-doctor-cli",
+            "agent-doctor",
+            "resources/agent-doctor-cli",
+            "resources/agent-doctor",
+        ]
+    };
+    if allow_parent_resources {
+        if cfg!(windows) {
+            rels.push("../Resources/agent-doctor-cli.exe");
+            rels.push("../Resources/agent-doctor.exe");
+        } else {
+            rels.push("../Resources/agent-doctor-cli");
+            rels.push("../Resources/agent-doctor");
+        }
+    }
+    rels.into_iter().map(|rel| dir.join(rel)).collect()
+}
+
+fn registered_install_dirs() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        return windows_registered_install_dirs();
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// Installer `InstallLocation` is stored with quotes (`"D:\Agent Doctor"`).
+#[cfg(any(windows, test))]
+pub(crate) fn normalize_registered_install_dir(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim().trim_matches('"').trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+fn dir_key(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches('"').trim();
+    let stripped = trimmed
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .unwrap_or_else(|| trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed).to_string());
+    stripped
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn parent_dir_key(key: &str) -> Option<&str> {
+    key.rfind('\\')
+        .filter(|index| *index > 0)
+        .map(|index| &key[..index])
+}
+
+/// True when `cli` is the bundled binary for `install_dir` (beside the app, or
+/// under its `resources` folder).
+pub(crate) fn cli_lives_in_install(cli: &Path, install_dir: &Path) -> bool {
+    let cli_key = dir_key(&cli.to_string_lossy());
+    let install_key = dir_key(&install_dir.to_string_lossy());
+    let Some(parent) = parent_dir_key(&cli_key) else {
+        return false;
+    };
+    if parent == install_key {
+        return true;
+    }
+    parent
+        .strip_suffix("\\resources")
+        .is_some_and(|grand| grand == install_key)
+}
+
+/// Prefer the CLI in the running app's directory, then the directory the
+/// installer recorded. Ignores newer copies elsewhere.
+pub(crate) fn pick_cli_for_install(
+    real: &[PathBuf],
+    current_exe_dir: Option<&Path>,
+    registered_dirs: &[PathBuf],
+) -> Option<PathBuf> {
+    let best_in = |dir: &Path| {
+        let hits: Vec<PathBuf> = real
+            .iter()
+            .filter(|path| cli_lives_in_install(path, dir))
+            .cloned()
+            .collect();
+        pick_best_agent_doctor_cli(&hits)
+    };
+
+    if let Some(dir) = current_exe_dir {
+        if let Some(best) = best_in(dir) {
+            return Some(best);
+        }
+        let key = dir_key(&dir.to_string_lossy());
+        if let Some(parent) = key.strip_suffix("\\resources") {
+            if let Some(best) = best_in(Path::new(parent)) {
+                return Some(best);
+            }
+        }
+    }
+    for dir in registered_dirs {
+        if let Some(best) = best_in(dir) {
+            return Some(best);
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn windows_registered_install_dirs() -> Vec<PathBuf> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    let mut dirs = Vec::new();
+    for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        push_registered_dir(
+            &mut dirs,
+            root,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Agent Doctor",
+            Some("InstallLocation"),
+        );
+        push_registered_dir(&mut dirs, root, r"Software\agentdoctor\Agent Doctor", None);
+    }
+    dirs
+}
+
+#[cfg(windows)]
+fn push_registered_dir(
+    dirs: &mut Vec<PathBuf>,
+    root: windows::Win32::System::Registry::HKEY,
+    subkey: &str,
+    value: Option<&str>,
+) {
+    let Some(raw) = reg_sz(root, subkey, value) else {
+        return;
+    };
+    let Some(dir) = normalize_registered_install_dir(&raw) else {
+        return;
+    };
+    if dirs
+        .iter()
+        .any(|existing| dir_key(&existing.to_string_lossy()) == dir_key(&dir.to_string_lossy()))
+    {
+        return;
+    }
+    dirs.push(dir);
+}
+
+#[cfg(windows)]
+fn reg_sz(
+    root: windows::Win32::System::Registry::HKEY,
+    subkey: &str,
+    value: Option<&str>,
+) -> Option<String> {
+    use std::ffi::c_void;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+
+    let sub: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+    let owned: Vec<u16> = value
+        .unwrap_or("")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let value_ptr = if value.is_some() {
+        PCWSTR(owned.as_ptr())
+    } else {
+        PCWSTR::null()
+    };
+
+    let mut size = 0u32;
+    // SAFETY: size query with a null buffer. advapi32 writes the byte count.
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            PCWSTR(sub.as_ptr()),
+            value_ptr,
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&mut size),
+        )
+    };
+    // ERROR_SUCCESS or ERROR_MORE_DATA.
+    let sized = status.0 == 0 || status.0 == 234;
+    if !sized || size < 2 {
+        return None;
+    }
+    let mut buf = vec![0u16; (size as usize / 2) + 1];
+    let mut size = (buf.len() * 2) as u32;
+    // SAFETY: buf is writable and sized from the previous query.
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            PCWSTR(sub.as_ptr()),
+            value_ptr,
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut c_void),
+            Some(&mut size),
+        )
+    };
+    if status.0 != 0 {
+        return None;
+    }
+    let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
+    let text = String::from_utf16_lossy(&buf[..chars]);
+    let trimmed = text.trim_matches('\0').trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn is_ephemeral_cli_path(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.contains("cursor-sandbox-cache")
@@ -706,39 +940,121 @@ fn is_ephemeral_cli_path(path: &Path) -> bool {
         || s.contains("\\AppData\\Local\\Temp\\")
 }
 
+fn cli_version_label(path: &Path) -> Option<String> {
+    let output = run_output(path, &["--version"], SHORT_PROBE_TIMEOUT).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    crate::version_check::extract_version(&text)
+}
+
+fn cmp_version_labels(a: &str, b: &str) -> Ordering {
+    let parts = |raw: &str| -> Vec<u64> {
+        raw.trim()
+            .trim_start_matches(['v', 'V'])
+            .split(['.', '-', '+'])
+            .map_while(|part| part.parse::<u64>().ok())
+            .collect()
+    };
+    let (left, right) = (parts(a), parts(b));
+    for index in 0..left.len().max(right.len()) {
+        let l = left.get(index).copied().unwrap_or(0);
+        let r = right.get(index).copied().unwrap_or(0);
+        match l.cmp(&r) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    Ordering::Equal
+}
+
+fn mtime_or_epoch(path: &Path) -> std::time::SystemTime {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 fn pick_best_agent_doctor_cli(candidates: &[PathBuf]) -> Option<PathBuf> {
     if candidates.is_empty() {
         return None;
     }
-    // Newest mtime wins so a just-built `agent-doctor` beats a months-old
-    // `agent-doctor-cli` left on PATH or beside a desktop debug binary.
+    // Prefer the highest `--version`, then newest mtime. A months-old
+    // `~/.local/bin/agent-doctor-cli` must not beat a bundled 0.1.60+ that
+    // Codex needs for resources/list (empty list → tools stay in session).
     candidates
         .iter()
-        .max_by_key(|p| {
-            fs::metadata(p)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        .max_by(|a, b| {
+            match (cli_version_label(a), cli_version_label(b)) {
+                (Some(va), Some(vb)) => {
+                    let ord = cmp_version_labels(&va, &vb);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                (Some(_), None) => return Ordering::Greater,
+                (None, Some(_)) => return Ordering::Less,
+                (None, None) => {}
+            }
+            mtime_or_epoch(a).cmp(&mtime_or_epoch(b))
         })
         .cloned()
 }
 
-/// When the resolved CLI lives in a Cursor/cargo temp dir, copy it into the
-/// user config bin so `.mcp.json` does not keep pointing at a cache that
-/// disappears or stays stuck on an August build.
-pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
-    if !is_ephemeral_cli_path(resolved) {
-        return Ok(resolved.to_path_buf());
-    }
-    let Some(config) = dirs::config_dir() else {
-        return Ok(resolved.to_path_buf());
-    };
+fn managed_cli_dest() -> Option<PathBuf> {
+    let config = crate::adapters::util::config_dir()?;
     let bin_dir = config.join("agent-doctor").join("bin");
-    fs::create_dir_all(&bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
     #[cfg(windows)]
     let dest = bin_dir.join("agent-doctor.exe");
     #[cfg(not(windows))]
     let dest = bin_dir.join("agent-doctor");
+    Some(dest)
+}
 
+fn same_launchable_file(left: &Path, right: &Path) -> bool {
+    let l = launchable_path(&left.canonicalize().unwrap_or_else(|_| left.to_path_buf()));
+    let r = launchable_path(&right.canonicalize().unwrap_or_else(|_| right.to_path_buf()));
+    dir_key(&l.to_string_lossy()) == dir_key(&r.to_string_lossy())
+}
+
+fn should_refresh_managed_cli(source: &Path, dest: &Path) -> bool {
+    if !dest.is_file() || is_ephemeral_cli_path(source) {
+        return true;
+    }
+    match (cli_version_label(source), cli_version_label(dest)) {
+        (Some(src), Some(dst)) => cmp_version_labels(&src, &dst) == Ordering::Greater,
+        (Some(_), None) => true,
+        _ => mtime_or_epoch(source) > mtime_or_epoch(dest),
+    }
+}
+
+/// Keep a stable MCP command path under the user config bin.
+///
+/// Ephemeral Cursor/cargo builds are always copied. A newer resolved CLI also
+/// refreshes the managed copy so `~/.codex` does not stay stuck on an old
+/// `~/.local/bin/agent-doctor-cli` that rejects Codex resource probes.
+pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
+    let Some(dest) = managed_cli_dest() else {
+        return Ok(resolved.to_path_buf());
+    };
+    if same_launchable_file(resolved, &dest) {
+        return Ok(dest);
+    }
+    if !should_refresh_managed_cli(resolved, &dest) {
+        // Prefer the managed path when it already tracks the same-or-newer CLI,
+        // so runtime configs converge on one refreshable command.
+        if dest.is_file() {
+            return Ok(dest);
+        }
+        return Ok(resolved.to_path_buf());
+    }
+
+    let bin_dir = dest.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
     fs::copy(resolved, &dest).with_context(|| {
         format!(
             "copy {} → {} for stable MCP command",
@@ -831,12 +1147,53 @@ mod tests {
     }
 
     #[test]
+    fn version_labels_prefer_newer_cli() {
+        assert_eq!(cmp_version_labels("0.1.61", "0.1.44"), Ordering::Greater);
+        assert_eq!(cmp_version_labels("0.1.44", "0.1.61"), Ordering::Less);
+        assert_eq!(cmp_version_labels("0.1.60", "0.1.60"), Ordering::Equal);
+    }
+
+    #[test]
     fn windows_verbatim_prefix_is_not_a_launchable_command() {
         let path = launchable_path(Path::new(r"\\?\D:\Agent Doctor\agent-doctor.exe"));
         assert_eq!(path, PathBuf::from(r"D:\Agent Doctor\agent-doctor.exe"));
         let (healthy, issue) = assess_command(Some(r"\\?\D:\Agent Doctor\agent-doctor.exe"));
         assert!(!healthy);
         assert!(issue.is_some());
+    }
+
+    #[test]
+    fn installer_location_strips_quotes() {
+        let dir = normalize_registered_install_dir(r#""D:\Agent Doctor""#).unwrap();
+        assert_eq!(dir, PathBuf::from(r"D:\Agent Doctor"));
+        assert!(normalize_registered_install_dir("  ").is_none());
+    }
+
+    #[test]
+    fn custom_install_dir_beats_default_location() {
+        let custom = PathBuf::from(r"D:\Agent Doctor\agent-doctor-cli.exe");
+        let default_loc =
+            PathBuf::from(r"C:\Users\Admin\AppData\Local\Agent Doctor\agent-doctor-cli.exe");
+        let picked = pick_cli_for_install(
+            &[default_loc, custom.clone()],
+            Some(Path::new(r"D:\Agent Doctor")),
+            &[PathBuf::from(r"C:\Users\Admin\AppData\Local\Agent Doctor")],
+        );
+        assert_eq!(picked, Some(custom));
+    }
+
+    #[test]
+    fn registered_custom_dir_used_when_process_is_elsewhere() {
+        let custom = PathBuf::from(r"D:\Agent Doctor\resources\agent-doctor-cli.exe");
+        let picked = pick_cli_for_install(
+            &[
+                PathBuf::from(r"C:\Users\Admin\AppData\Roaming\npm\agent-doctor.exe"),
+                custom.clone(),
+            ],
+            Some(Path::new(r"C:\Windows\System32")),
+            &[PathBuf::from(r"D:\Agent Doctor")],
+        );
+        assert_eq!(picked, Some(custom));
     }
 
     #[test]
@@ -1013,7 +1370,9 @@ args = ["mcp", "browser", "--port", "9222"]
     fn list_mcp_inventory_reuses_cache_without_rereading_project() {
         with_temp_home(|home| {
             invalidate_mcp_inventory_cache();
-            let config = dirs::config_dir().expect("config dir");
+            // Must go through `config_dir()` (test-home redirected). Never write
+            // the real ~/Library/Application Support/agent-doctor/workspaces.yaml.
+            let config = crate::adapters::util::config_dir().expect("config dir");
             let ws_dir = config.join("agent-doctor");
             fs::create_dir_all(&ws_dir).unwrap();
             let project = home.join("proj");
