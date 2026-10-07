@@ -1,6 +1,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ask } from "@tauri-apps/plugin-dialog";
 import {
   computeDiagnoseScore,
   needsWiringFromPreview,
@@ -20,7 +21,9 @@ import type {
 import * as dom from "./dom";
 import type { DiagnosePaintApi } from "./paint";
 import type { DiagnoseSession } from "./session";
-import { installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, getEvotownStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
+import { friendlyDeepError } from "./deep-chat";
+import { describeRepairSummary } from "./repair-summary";
+import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, getEvotownStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
 
 export type DiagnoseActionsDeps = {
   session: DiagnoseSession;
@@ -84,6 +87,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
   async function runAutoFix(): Promise<void> {
     paint.setBusy(true);
     paint.setResult("busy", t("diagnose.flow.autoFixing"));
+    session.autoFixTried = true;
     try {
       session.preview = await runRepairExecute({
         runtime: session.runtimeId,
@@ -94,6 +98,34 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       paint.setResult("error", withErrorDetail(t("diagnose.flow.autoFixFailed"), error));
     } finally {
       paint.setBusy(false);
+    }
+  }
+
+  async function runDeepRepair(): Promise<void> {
+    const ok = await ask(t("diagnose.flow.deepRepairConfirm"), {
+      title: t("repair.oneClick"),
+      kind: "info",
+      okLabel: t("diagnose.flow.deepRepairOk"),
+      cancelLabel: t("diagnose.flow.deepRepairCancel"),
+    });
+    if (!ok) {
+      return;
+    }
+    paint.setBusy(true);
+    paint.setResult("busy", t("diagnose.flow.deepRepairing"));
+    let repaired = false;
+    try {
+      const summary = await deepRepair({ runtime: session.runtimeId });
+      session.repairTried = summary.issue_score_after >= summary.issue_score_before;
+      session.repairNotice = describeRepairSummary(summary);
+      repaired = true;
+    } catch (error) {
+      paint.setResult("error", friendlyDeepError(error));
+    } finally {
+      paint.setBusy(false);
+    }
+    if (repaired) {
+      await deps.refreshState({ preferStep: "test" });
     }
   }
 
@@ -232,22 +264,32 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       paint.hideScanMeter();
       dom.scoreRingEl.classList.remove("is-scanning");
       dom.testHintEl.hidden = false;
+      // paintAll resets the ring to 0 while busy; scoring is done here.
+      paint.setBusy(false);
+
+      const notice = session.repairNotice;
+      session.repairNotice = null;
+      const withNotice = (text: string) => (notice ? `${notice} ${text}` : text);
 
       if (session.testedOk) {
         session.guideFillConfig = false;
+        session.repairTried = false;
+        session.autoFixTried = false;
         paint.setResult(
           "ok",
-          t("diagnose.flow.scoreOk", {
-            score: String(session.lastScore!.percent),
-            pass: String(session.lastScore!.pass),
-            total: String(session.lastScore!.total || session.lastScore!.pass),
-          }),
+          withNotice(
+            t("diagnose.flow.scoreOk", {
+              score: String(session.lastScore!.percent),
+              pass: String(session.lastScore!.pass),
+              total: String(session.lastScore!.total || session.lastScore!.pass),
+            }),
+          ),
         );
         session.activeStep = "test";
         paint.paintAll();
       } else {
         const needsFill = !providerOk || needsWiringFromPreview(session.preview!);
-        const canFixHere = Boolean(session.preview!.can_apply_repair);
+        const canFixHere = Boolean(session.preview!.can_apply_repair) && !session.autoFixTried;
         session.canAutoFix = canFixHere;
         if (needsFill || canFixHere) {
           session.guideFillConfig = needsFill;
@@ -255,24 +297,35 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           session.activeStep = "config";
           paint.setResult(
             "error",
-            needsFill
-              ? t("diagnose.flow.scoreNeedsConfig", {
-                  score: String(session.lastScore!.percent),
-                })
-              : t("diagnose.flow.scoreNeedsAutoFix", {
-                  score: String(session.lastScore!.percent),
-                }),
+            withNotice(
+              needsFill
+                ? t("diagnose.flow.scoreNeedsConfig", {
+                    score: String(session.lastScore!.percent),
+                  })
+                : t("diagnose.flow.scoreNeedsAutoFix", {
+                    score: String(session.lastScore!.percent),
+                  }),
+            ),
           );
         } else {
           session.guideFillConfig = false;
+          const score = String(session.lastScore!.percent);
+          const fail = session.preview!.summary.fail;
           paint.setResult(
             "error",
-            t("diagnose.flow.scoreNeedsFix", { score: String(session.lastScore!.percent) }),
+            withNotice(
+              fail === 0
+                ? t("diagnose.flow.scoreNeedsFix", { score })
+                : session.repairTried
+                  ? t("diagnose.flow.scoreNeedsAskFix", { score, fail: String(fail) })
+                  : t("diagnose.flow.scoreNeedsRepair", { score, fail: String(fail) }),
+            ),
           );
         }
         paint.paintAll();
       }
     } catch (error) {
+      session.repairNotice = null;
       paint.hideScanMeter();
       paint.setResult("error", withErrorDetail(t("diagnose.flow.scoreFailed"), error));
     } finally {
@@ -365,6 +418,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
   return {
     runInstall,
     runAutoFix,
+    runDeepRepair,
     runVerifyAndSave,
     runScoreTest,
     openAskYourself,

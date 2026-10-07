@@ -34,6 +34,9 @@ pub use planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
     PlannerOptions, PlannerResult, RepairPlanner,
 };
+pub(crate) use playbooks::json_config::{
+    apply_config_syntax_repair, suggest_config_syntax_repairs,
+};
 pub use playbooks::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
     apply_codex_playbook_filtered, apply_cursor_playbook, apply_cursor_playbook_filtered,
@@ -45,7 +48,10 @@ pub use playbooks::{
     suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
     suggest_workbuddy_repairs, PlaybookApplyResult,
 };
-pub use repair_loop::{execute_repair_loop, RepairLoopOptions, RepairLoopReport, RepairLoopRound};
+pub use repair_loop::{
+    diff_probe_checks, execute_repair_loop, CheckChange, CheckDiff, RepairLoopOptions,
+    RepairLoopReport, RepairLoopRound,
+};
 pub use restore::{
     list_runtime_backup_ids, load_backup_snapshot, restore_backup_snapshot, restore_runtime_backup,
     RestoreReport,

@@ -183,6 +183,9 @@ function applyRuntime(next: string): void {
     return;
   }
   session.runtimeId = trimmed;
+  session.repairTried = false;
+  session.autoFixTried = false;
+  session.repairNotice = null;
   void refreshState();
 }
 
@@ -224,6 +227,13 @@ dom.primaryEl.addEventListener("click", () => {
       break;
     case "auto-fix":
       void actions.runAutoFix();
+      break;
+    case "deep-repair":
+      void actions.runDeepRepair();
+      break;
+    case "ask-fix":
+      actions.toggleDeep(true);
+      void deepChat.usePreset("fix");
       break;
     case "ask-verify":
       void actions.openAskForVerify();

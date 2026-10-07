@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::execute::probe_issue_score;
 use super::llm::{chat_with_tool_set, max_agent_turns, read_only_tool_definitions, LlmConfig};
 use super::planner::{build_masked_repair_context, MaskedRepairContext};
-use super::repair_loop::{execute_repair_loop, RepairLoopOptions};
+use super::repair_loop::{diff_probe_checks, execute_repair_loop, CheckChange, RepairLoopOptions};
 use super::tools::{parse_tool_call, RepairToolExecutor, RepairToolKind};
 use super::SkippedRepairAction;
 use crate::probe::{probe_runtime, ProbeStatus};
@@ -75,9 +75,15 @@ pub struct DeepRepairSummary {
     pub backup_id: String,
     pub issue_score_before: u32,
     pub issue_score_after: u32,
-    /// Fix actions that actually ran (excludes the backup step).
+    /// Fix actions that actually ran and were kept (excludes the backup step).
     pub executed: Vec<String>,
     pub skipped: Vec<SkippedRepairAction>,
+    /// Checks that were warn/fail before the repair and pass now.
+    pub fixed: Vec<CheckChange>,
+    /// Checks the kept changes made worse.
+    pub new_issues: Vec<CheckChange>,
+    /// New problems from changes that were undone.
+    pub rolled_back_issues: Vec<CheckChange>,
 }
 
 /// Model for deep diagnose: the provider the user already wired in Agent Doctor.
@@ -215,6 +221,13 @@ pub fn run_deep_repair(runtime_id: &str, config: &LlmConfig) -> Result<DeepRepai
             llm: Some(config.clone()),
         },
     )?;
+    let diff = diff_probe_checks(&report.before_probe, &report.after_probe);
+    let rolled_back_issues = report
+        .rounds
+        .iter()
+        .filter(|round| round.rolled_back)
+        .flat_map(|round| round.new_issues.iter().cloned())
+        .collect();
     Ok(DeepRepairSummary {
         runtime_id: report.runtime_id,
         backup_id: report.backup.id,
@@ -226,6 +239,9 @@ pub fn run_deep_repair(runtime_id: &str, config: &LlmConfig) -> Result<DeepRepai
             .filter(|id| id != "backup-runtime-configs")
             .collect(),
         skipped: report.skipped_actions,
+        fixed: diff.fixed,
+        new_issues: diff.new_issues,
+        rolled_back_issues,
     })
 }
 

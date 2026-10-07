@@ -1,6 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -10,140 +9,135 @@ use crate::lifecycle::{run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClaw
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::profile::read_company_profile;
 use crate::repair::playbooks::hermes::dedupe_env_key_lines;
-use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use crate::repair::SuggestedRepair;
 
-use super::should_run;
+use super::json_config::{load_json_config, write_json_config};
+use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
 use super::PlaybookApplyResult;
 
 const DEFAULT_TOOL_PROFILE: &str = "coding";
 const OPENCLAW_API_KEY_VARS: &[&str] = &["OPENAI_API_KEY", "ANTHROPIC_API_KEY"];
 
+/// OpenClaw repair rules, in the order they run.
+/// When OpenClaw drops or renames a setting, give the old-format rule a `before` version
+/// instead of deleting it, so people on older installs keep getting the fix.
+pub(crate) const OPENCLAW_RULES: &[Rule] = &[
+    Rule {
+        id: "fix-openclaw-install",
+        title: "Install OpenClaw",
+        description: "Run the official OpenClaw installer (openclaw.ai/install.sh) \
+            with --no-onboard. Requires network access.",
+        check: CheckMatch::Is("binary.exists", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| run_openclaw_lifecycle(OpenClawLifecycleAction::Install).map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-create-config",
+        title: "Create OpenClaw config",
+        description: "Create ~/.openclaw/openclaw.json with models.providers from \
+            company profile when available.",
+        check: CheckMatch::Custom(|check| {
+            check.id.starts_with("config.exists:")
+                && check.status == ProbeStatus::Warn
+                && check.id.contains("openclaw.json")
+        }),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| create_openclaw_config().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-gateway-from-profile",
+        title: "Apply company gateway to OpenClaw",
+        description: "Set models.providers.evotown|personal.baseUrl from profile.env.",
+        check: CheckMatch::Is("gateway.configured", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |_| company_gateway_url().is_ok(),
+            blocked: "Run `agent-doctor setup --url ... --key ...` first.",
+            run: |_| apply_gateway_from_company_profile().map(|_| None),
+        },
+    },
+    Rule {
+        id: "fix-openclaw-legacy-gateway-url",
+        title: "Migrate OpenClaw LLM URL to models.providers",
+        description: "Remove invalid gateway.url / evotown.url and write \
+            models.providers.evotown|personal.baseUrl.",
+        check: CheckMatch::Is("openclaw.schema.legacy_gateway_url", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| migrate_legacy_gateway_url().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-env-permissions",
+        title: "Tighten ~/.openclaw/.env permissions",
+        description: "Set .env to mode 600.",
+        check: CheckMatch::StartsWith("openclaw.env.permissions:", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |_| cfg!(unix),
+            blocked: "Permission tightening is only supported on macOS and Linux.",
+            run: |_| tighten_env_permissions().map(|_| None),
+        },
+    },
+    Rule {
+        id: "fix-openclaw-api-key-duplicates",
+        title: "Deduplicate OpenClaw .env API keys",
+        description: "Keep the last non-empty API key assignment.",
+        check: CheckMatch::Is("openclaw.api_key.duplicates", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|probe| dedupe_openclaw_dotenv(probe).map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-legacy-agents-list",
+        title: "Update OpenClaw config format",
+        description: "agents.list is no longer accepted. Run openclaw doctor --fix.",
+        check: CheckMatch::Is("openclaw.schema.legacy_agents_list", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| run_openclaw_doctor_fix().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-legacy-timeout",
+        title: "Migrate agent timeout field",
+        description: "Rename agents.defaults.timeout to timeoutSeconds.",
+        check: CheckMatch::Is("openclaw.schema.legacy_timeout", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| fix_legacy_timeout_field().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-env-object",
+        title: "Fix env.vars / env.shellEnv shape",
+        description: "Parse string env sections into JSON objects.",
+        check: CheckMatch::StartsWith("openclaw.schema.env_string:", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| fix_env_string_sections().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-tools-profile",
+        title: "Reset tools.profile",
+        description: "Set tools.profile to 'coding'.",
+        check: CheckMatch::Is("openclaw.schema.tools_profile", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| fix_tools_profile().map(|_| None)),
+    },
+    Rule {
+        id: "fix-openclaw-api-key-scaffold",
+        title: "Prepare OpenClaw API key placeholders",
+        description: "Add empty key slots and a short guide.",
+        check: CheckMatch::Is("openclaw.api_key.configured", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Prep(|_| prepare_api_key_scaffold().map(Some)),
+    },
+    Rule {
+        id: "configure-openclaw-api-key",
+        title: "Configure an OpenClaw API key",
+        description: "Add the key in Agent Doctor wiring or OpenClaw configuration; \
+            secrets are never auto-filled.",
+        check: CheckMatch::Is("openclaw.api_key.configured", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Manual,
+    },
+];
+
 pub fn suggest_openclaw_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    let mut items = Vec::new();
-    let company_gateway = read_company_profile()
-        .ok()
-        .flatten()
-        .and_then(|profile| profile.gateway_url)
-        .is_some();
-
-    for check in &probe.checks {
-        if check.id == "binary.exists" && check.status == ProbeStatus::Fail {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-install".to_string(),
-                title: "Install OpenClaw".to_string(),
-                description: "Run the official OpenClaw installer (openclaw.ai/install.sh) \
-                    with --no-onboard. Requires network access."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id.starts_with("config.exists:")
-            && check.status == ProbeStatus::Warn
-            && check.id.contains("openclaw.json")
-        {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-create-config".to_string(),
-                title: "Create OpenClaw config".to_string(),
-                description: "Create ~/.openclaw/openclaw.json with models.providers from \
-                    company profile when available."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "gateway.configured" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-gateway-from-profile".to_string(),
-                title: "Apply company gateway to OpenClaw".to_string(),
-                description: if company_gateway {
-                    "Set models.providers.evotown|personal.baseUrl from profile.env.".to_string()
-                } else {
-                    "Run `agent-doctor setup --url ... --key ...` first.".to_string()
-                },
-                auto_fixable: company_gateway,
-            });
-        }
-
-        if check.id == "openclaw.schema.legacy_gateway_url" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-legacy-gateway-url".to_string(),
-                title: "Migrate OpenClaw LLM URL to models.providers".to_string(),
-                description: "Remove invalid gateway.url / evotown.url and write \
-                    models.providers.evotown|personal.baseUrl."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "openclaw.schema.legacy_agents_list" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-legacy-agents-list".to_string(),
-                title: "Update OpenClaw config format".to_string(),
-                description: "agents.list is no longer accepted. Run openclaw doctor --fix."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "openclaw.schema.legacy_timeout" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-legacy-timeout".to_string(),
-                title: "Migrate agent timeout field".to_string(),
-                description: "Rename agents.defaults.timeout to timeoutSeconds.".to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id.starts_with("openclaw.schema.env_string:") && check.status == ProbeStatus::Warn
-        {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-env-object".to_string(),
-                title: "Fix env.vars / env.shellEnv shape".to_string(),
-                description: "Parse string env sections into JSON objects.".to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "openclaw.schema.tools_profile" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-tools-profile".to_string(),
-                title: "Reset tools.profile".to_string(),
-                description: format!("Set tools.profile to '{DEFAULT_TOOL_PROFILE}'."),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id.starts_with("openclaw.env.permissions:") && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-env-permissions".to_string(),
-                title: "Tighten ~/.openclaw/.env permissions".to_string(),
-                description: "Set .env to mode 600.".to_string(),
-                auto_fixable: cfg!(unix),
-            });
-        }
-
-        if check.id == "openclaw.api_key.duplicates" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-openclaw-api-key-duplicates".to_string(),
-                title: "Deduplicate OpenClaw .env API keys".to_string(),
-                description: "Keep the last non-empty API key assignment.".to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "openclaw.api_key.configured" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "configure-openclaw-api-key".to_string(),
-                title: "Configure an OpenClaw API key".to_string(),
-                description:
-                    "Add the key in Agent Doctor wiring or OpenClaw configuration; secrets are never auto-filled."
-                        .to_string(),
-                auto_fixable: false,
-            });
-        }
-    }
-
+    let mut items = suggest_rules(OPENCLAW_RULES, probe);
     items.extend(super::npm_cli::suggest_browser_mcp_repairs(
         "openclaw", "OpenClaw", probe,
     ));
@@ -158,210 +152,11 @@ pub fn apply_openclaw_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let mut result = PlaybookApplyResult::default();
-
-    if should_run("fix-openclaw-install", only_ids) && openclaw_needs_install(probe) {
-        match run_openclaw_lifecycle(OpenClawLifecycleAction::Install) {
-            Ok(()) => result.executed.push("fix-openclaw-install".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-install".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-create-config", only_ids) && openclaw_config_missing(probe) {
-        match create_openclaw_config() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-create-config".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-create-config".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-gateway-from-profile", only_ids) && openclaw_gateway_missing(probe)
-    {
-        match apply_gateway_from_company_profile() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-gateway-from-profile".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-gateway-from-profile".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-legacy-gateway-url", only_ids)
-        && probe_has_check(
-            probe,
-            "openclaw.schema.legacy_gateway_url",
-            ProbeStatus::Warn,
-        )
-    {
-        match migrate_legacy_gateway_url() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-legacy-gateway-url".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-legacy-gateway-url".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    for check in &probe.checks {
-        if should_run("fix-openclaw-env-permissions", only_ids)
-            && check.id.starts_with("openclaw.env.permissions:")
-            && check.status == ProbeStatus::Warn
-        {
-            match tighten_env_permissions() {
-                Ok(()) => result
-                    .executed
-                    .push("fix-openclaw-env-permissions".to_string()),
-                Err(error) => result.skipped.push(SkippedRepairAction {
-                    id: "fix-openclaw-env-permissions".to_string(),
-                    reason: error.to_string(),
-                }),
-            }
-        }
-
-        if should_run("fix-openclaw-api-key-duplicates", only_ids)
-            && check.id == "openclaw.api_key.duplicates"
-            && check.status == ProbeStatus::Warn
-        {
-            match dedupe_openclaw_dotenv(probe) {
-                Ok(()) => result
-                    .executed
-                    .push("fix-openclaw-api-key-duplicates".to_string()),
-                Err(error) => result.skipped.push(SkippedRepairAction {
-                    id: "fix-openclaw-api-key-duplicates".to_string(),
-                    reason: error.to_string(),
-                }),
-            }
-        }
-    }
-
-    if should_run("fix-openclaw-legacy-agents-list", only_ids)
-        && probe_has_check(
-            probe,
-            "openclaw.schema.legacy_agents_list",
-            ProbeStatus::Warn,
-        )
-    {
-        match run_openclaw_doctor_fix() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-legacy-agents-list".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-legacy-agents-list".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-legacy-timeout", only_ids)
-        && probe_has_check(probe, "openclaw.schema.legacy_timeout", ProbeStatus::Warn)
-    {
-        match fix_legacy_timeout_field() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-legacy-timeout".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-legacy-timeout".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-env-object", only_ids)
-        && probe
-            .checks
-            .iter()
-            .any(|check| check.id.starts_with("openclaw.schema.env_string:"))
-    {
-        match fix_env_string_sections() {
-            Ok(()) => result.executed.push("fix-openclaw-env-object".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-env-object".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-tools-profile", only_ids)
-        && probe_has_check(probe, "openclaw.schema.tools_profile", ProbeStatus::Warn)
-    {
-        match fix_tools_profile() {
-            Ok(()) => result
-                .executed
-                .push("fix-openclaw-tools-profile".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-tools-profile".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-openclaw-api-key-scaffold", only_ids) && needs_api_key_scaffold(probe) {
-        match prepare_api_key_scaffold() {
-            Ok(guide_path) => {
-                result
-                    .executed
-                    .push("fix-openclaw-api-key-scaffold".to_string());
-                result.guide_path = Some(guide_path);
-            }
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-openclaw-api-key-scaffold".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
+    let mut result = apply_rules(OPENCLAW_RULES, probe, only_ids);
     let browser = super::npm_cli::apply_browser_mcp_repair("openclaw", probe, only_ids)?;
     result.executed.extend(browser.executed);
     result.skipped.extend(browser.skipped);
-
     Ok(result)
-}
-
-fn openclaw_needs_install(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
-}
-
-fn openclaw_config_missing(probe: &RuntimeProbeReport) -> bool {
-    probe.checks.iter().any(|check| {
-        check.id.starts_with("config.exists:")
-            && check.status == ProbeStatus::Warn
-            && check.id.contains("openclaw.json")
-    })
-}
-
-fn openclaw_gateway_missing(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "gateway.configured" && check.status == ProbeStatus::Warn)
-}
-
-fn needs_api_key_scaffold(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "openclaw.api_key.configured" && check.status == ProbeStatus::Warn)
-}
-
-fn probe_has_check(probe: &RuntimeProbeReport, id: &str, status: ProbeStatus) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == id && check.status == status)
 }
 
 fn openclaw_config_path() -> PathBuf {
@@ -580,39 +375,9 @@ fn api_key_guide_path() -> Result<PathBuf> {
     Ok(root.join("openclaw-api-key.md"))
 }
 
-fn load_json_config(path: &Path) -> Result<Value> {
-    if path.exists() {
-        let raw = fs::read_to_string(path)?;
-        serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
-    } else {
-        Ok(json!({}))
-    }
-}
-
-fn write_json_config(path: &Path, root: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if path.exists() {
-        backup_config(path)?;
-    }
-    fs::write(path, serde_json::to_string_pretty(root)?)
-        .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn backup_config(path: &Path) -> Result<()> {
-    let original = fs::read_to_string(path)?;
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let backup_path = path.with_extension(format!("json.bak.{ts}"));
-    fs::write(&backup_path, original)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::rule;
     use super::*;
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
@@ -679,6 +444,38 @@ mod tests {
         assert!(items
             .iter()
             .any(|item| item.id == "fix-openclaw-legacy-agents-list" && item.auto_fixable));
+    }
+
+    #[test]
+    fn rules_have_unique_ids_and_desktop_labels() {
+        rule::assert_unique_ids(OPENCLAW_RULES);
+        rule::assert_desktop_labels(&rule::fix_ids(OPENCLAW_RULES));
+    }
+
+    #[test]
+    fn tools_profile_rule_names_the_default() {
+        let rule = OPENCLAW_RULES
+            .iter()
+            .find(|rule| rule.id == "fix-openclaw-tools-profile")
+            .unwrap();
+        assert!(rule.description.contains(DEFAULT_TOOL_PROFILE));
+    }
+
+    #[test]
+    fn api_key_warning_suggests_manual_step_only() {
+        let probe = sample_probe(vec![ProbeCheck::new(
+            "openclaw.api_key.configured",
+            "OpenClaw API key configured",
+            ProbeStatus::Warn,
+            ProbeSeverity::Warning,
+            "missing",
+            SensitivityLevel::Public,
+        )]);
+        let ids: Vec<_> = suggest_openclaw_repairs(&probe)
+            .into_iter()
+            .map(|item| (item.id, item.auto_fixable))
+            .collect();
+        assert_eq!(ids, vec![("configure-openclaw-api-key".to_string(), false)]);
     }
 
     #[test]

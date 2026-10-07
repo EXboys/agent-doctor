@@ -8,9 +8,10 @@ use super::planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
     PlannerOptions, RepairPlanner,
 };
+use super::restore::restore_backup_snapshot;
 use super::tools::RepairToolResult;
 use super::{AuditReport, BackupSnapshot, RepairPlan, SkippedRepairAction};
-use crate::probe::{probe_runtime, RuntimeProbeReport};
+use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::runtime::{
     apply_runtime_playbook_filtered, runtime_supports_playbook, suggest_runtime_repairs,
 };
@@ -27,6 +28,80 @@ pub struct RepairLoopRound {
     pub skipped_actions: Vec<SkippedRepairAction>,
     pub tool_trace: Vec<RepairToolResult>,
     pub masked_context: MaskedRepairContext,
+    /// Checks this round made worse; non-empty with `rolled_back` means its edits were undone.
+    #[serde(default)]
+    pub new_issues: Vec<CheckChange>,
+    #[serde(default)]
+    pub rolled_back: bool,
+}
+
+/// One check whose state differs between two probes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckChange {
+    pub id: String,
+    pub title: String,
+    pub status: ProbeStatus,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckDiff {
+    /// Was warn/fail before, now passes (or no longer reported).
+    pub fixed: Vec<CheckChange>,
+    /// New warn/fail, or a check that got worse.
+    pub new_issues: Vec<CheckChange>,
+}
+
+fn status_rank(status: ProbeStatus) -> u8 {
+    match status {
+        ProbeStatus::Pass | ProbeStatus::NotApplicable => 0,
+        ProbeStatus::NotChecked => 1,
+        ProbeStatus::Warn => 2,
+        ProbeStatus::Fail => 3,
+    }
+}
+
+fn is_problem(status: ProbeStatus) -> bool {
+    status_rank(status) >= 2
+}
+
+pub fn diff_probe_checks(before: &RuntimeProbeReport, after: &RuntimeProbeReport) -> CheckDiff {
+    let mut diff = CheckDiff::default();
+    for old in before
+        .checks
+        .iter()
+        .filter(|check| is_problem(check.status))
+    {
+        let still_bad = after
+            .checks
+            .iter()
+            .any(|check| check.id == old.id && is_problem(check.status));
+        if !still_bad {
+            diff.fixed.push(CheckChange {
+                id: old.id.clone(),
+                title: old.title.clone(),
+                status: ProbeStatus::Pass,
+                message: old.message.clone(),
+            });
+        }
+    }
+    for new in after.checks.iter().filter(|check| is_problem(check.status)) {
+        let before_rank = before
+            .checks
+            .iter()
+            .find(|check| check.id == new.id)
+            .map(|check| status_rank(check.status))
+            .unwrap_or(0);
+        if status_rank(new.status) > before_rank {
+            diff.new_issues.push(CheckChange {
+                id: new.id.clone(),
+                title: new.title.clone(),
+                status: new.status,
+                message: new.message.clone(),
+            });
+        }
+    }
+    diff
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -92,9 +167,18 @@ pub fn execute_repair_loop(
                 }],
                 tool_trace: Vec::new(),
                 masked_context: context,
+                new_issues: Vec::new(),
+                rolled_back: false,
             });
             break;
         }
+
+        // The AI planner writes while planning, so snapshot before it runs.
+        let round_backup = if options.apply_confirmed_writes && round > 1 {
+            create_runtime_backup_snapshot(runtime_id)?
+        } else {
+            backup.clone()
+        };
 
         let mut context = build_masked_repair_context(runtime_id, &current_probe, suggested);
         let plan_result = if options.use_ai_planner {
@@ -125,6 +209,8 @@ pub fn execute_repair_loop(
                 skipped_actions: round_skipped,
                 tool_trace,
                 masked_context: context,
+                new_issues: Vec::new(),
+                rolled_back: false,
             });
             break;
         }
@@ -155,11 +241,12 @@ pub fn execute_repair_loop(
                 skipped_actions: round_skipped,
                 tool_trace,
                 masked_context: context,
+                new_issues: Vec::new(),
+                rolled_back: false,
             });
             break;
         }
 
-        executed_action_ids.extend(round_executed.clone());
         skipped_actions.extend(round_skipped.clone());
 
         if round_executed.is_empty() {
@@ -172,27 +259,45 @@ pub fn execute_repair_loop(
                 skipped_actions: round_skipped,
                 tool_trace,
                 masked_context: context,
+                new_issues: Vec::new(),
+                rolled_back: false,
             });
             break;
         }
 
-        current_probe = probe_runtime(runtime_id)?;
-        let new_score = probe_issue_score(&current_probe);
+        let round_probe = probe_runtime(runtime_id)?;
+        let new_score = probe_issue_score(&round_probe);
+        let new_issues = diff_probe_checks(&current_probe, &round_probe).new_issues;
+        let rolled_back = should_roll_back(previous_score, new_score, &new_issues);
+        if rolled_back {
+            restore_backup_snapshot(&round_backup)?;
+            current_probe = probe_runtime(runtime_id)?;
+            skipped_actions.push(SkippedRepairAction {
+                id: format!("repair-loop-round-{round}"),
+                reason: "changes made new problems, so they were undone".to_string(),
+            });
+        } else {
+            executed_action_ids.extend(round_executed.clone());
+            current_probe = round_probe;
+        }
+        let round_score = probe_issue_score(&current_probe);
         rounds.push(RepairLoopRound {
             round,
             probe_summary: probe_health_summary(&current_probe),
-            issue_score: new_score,
+            issue_score: round_score,
             planned_action_ids,
             executed_action_ids: round_executed,
             skipped_actions: round_skipped,
             tool_trace,
             masked_context: context,
+            new_issues,
+            rolled_back,
         });
 
-        if new_score >= previous_score {
+        if rolled_back || round_score >= previous_score {
             break;
         }
-        previous_score = new_score;
+        previous_score = round_score;
     }
 
     let after_probe = if options.apply_confirmed_writes {
@@ -224,10 +329,105 @@ pub fn execute_repair_loop(
     })
 }
 
+/// Keep a round that lowers the score even if it adds a smaller problem;
+/// undo one that trades a fix for a new problem or makes things worse.
+fn should_roll_back(previous_score: u32, new_score: u32, new_issues: &[CheckChange]) -> bool {
+    new_score > previous_score || (new_score == previous_score && !new_issues.is_empty())
+}
+
 fn tool_applied_ids(trace: &[RepairToolResult]) -> Vec<String> {
     trace
         .iter()
         .filter(|item| item.applied && item.success)
         .map(|item| format!("tool:{:?}", item.kind).to_ascii_lowercase())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::probe::{ProbeCheck, ProbeSeverity};
+    use crate::repair::SensitivityLevel;
+
+    fn probe(checks: &[(&str, ProbeStatus)]) -> RuntimeProbeReport {
+        RuntimeProbeReport {
+            runtime_id: "openclaw".to_string(),
+            display_name: "OpenClaw".to_string(),
+            binary_name: "openclaw".to_string(),
+            checks: checks
+                .iter()
+                .map(|(id, status)| {
+                    ProbeCheck::new(
+                        *id,
+                        *id,
+                        *status,
+                        ProbeSeverity::Warning,
+                        "msg",
+                        SensitivityLevel::Public,
+                    )
+                })
+                .collect(),
+            facts: vec![],
+        }
+    }
+
+    fn ids(changes: &[CheckChange]) -> Vec<&str> {
+        changes.iter().map(|change| change.id.as_str()).collect()
+    }
+
+    #[test]
+    fn diff_reports_swap_of_one_problem_for_another() {
+        let before = probe(&[
+            ("gateway.connectivity", ProbeStatus::Warn),
+            ("openclaw.schema.legacy_gateway_url", ProbeStatus::Pass),
+            ("binary.upstream_version", ProbeStatus::Warn),
+        ]);
+        let after = probe(&[
+            ("gateway.connectivity", ProbeStatus::Pass),
+            ("openclaw.schema.legacy_gateway_url", ProbeStatus::Warn),
+            ("binary.upstream_version", ProbeStatus::Warn),
+        ]);
+        let diff = diff_probe_checks(&before, &after);
+        assert_eq!(ids(&diff.fixed), vec!["gateway.connectivity"]);
+        assert_eq!(
+            ids(&diff.new_issues),
+            vec!["openclaw.schema.legacy_gateway_url"]
+        );
+    }
+
+    #[test]
+    fn diff_counts_vanished_problem_as_fixed_and_new_check_as_issue() {
+        let before = probe(&[("gateway.profile", ProbeStatus::Warn)]);
+        let after = probe(&[("mcp.browser.configured", ProbeStatus::Fail)]);
+        let diff = diff_probe_checks(&before, &after);
+        assert_eq!(ids(&diff.fixed), vec!["gateway.profile"]);
+        assert_eq!(ids(&diff.new_issues), vec!["mcp.browser.configured"]);
+    }
+
+    #[test]
+    fn diff_counts_warn_to_fail_as_new_issue_not_fixed() {
+        let before = probe(&[("config.schema", ProbeStatus::Warn)]);
+        let after = probe(&[("config.schema", ProbeStatus::Fail)]);
+        let diff = diff_probe_checks(&before, &after);
+        assert!(diff.fixed.is_empty());
+        assert_eq!(ids(&diff.new_issues), vec!["config.schema"]);
+    }
+
+    #[test]
+    fn roll_back_only_when_round_does_not_pay_off() {
+        let issue = vec![CheckChange {
+            id: "x".to_string(),
+            title: "x".to_string(),
+            status: ProbeStatus::Warn,
+            message: String::new(),
+        }];
+        // Fixed a warn, added a warn: same score, undo.
+        assert!(should_roll_back(20, 20, &issue));
+        // Worse overall: undo.
+        assert!(should_roll_back(20, 30, &[]));
+        // Fixed a fail, added a warn: clearly better, keep.
+        assert!(!should_roll_back(130, 40, &issue));
+        // Nothing changed: nothing to undo.
+        assert!(!should_roll_back(20, 20, &[]));
+    }
 }

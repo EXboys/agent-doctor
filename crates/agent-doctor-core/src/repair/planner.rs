@@ -98,7 +98,18 @@ impl RepairPlanner for AiRepairPlanner {
             return DeterministicPlanner.plan(context, options);
         };
 
-        run_agent_loop(context, options, &config)
+        // Rule fixes are safe and known; do not depend on the model picking them.
+        let mut result = run_agent_loop(context, options, &config)?;
+        for item in context
+            .suggested_repairs
+            .iter()
+            .filter(|item| item.auto_fixable)
+        {
+            if !result.action_ids.contains(&item.id) {
+                result.action_ids.push(item.id.clone());
+            }
+        }
+        Ok(result)
     }
 }
 

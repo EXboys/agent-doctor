@@ -1,8 +1,8 @@
 use agent_doctor_core::{
-    build_explain_input, build_repair_preview_from_bundle, execute_repair, execute_repair_loop,
-    explain_runtime, list_runtime_backup_ids, probe_health_summary, probe_issue_score,
-    probe_runtime, restore_runtime_backup, runtime_supports_playbook, suggest_runtime_repairs,
-    ProbeStatus, RepairExecuteOptions, RepairLoopOptions, RepairRisk,
+    build_explain_input, build_repair_preview_from_bundle, diff_probe_checks, execute_repair,
+    execute_repair_loop, explain_runtime, list_runtime_backup_ids, probe_health_summary,
+    probe_issue_score, probe_runtime, restore_runtime_backup, runtime_supports_playbook,
+    suggest_runtime_repairs, ProbeStatus, RepairExecuteOptions, RepairLoopOptions, RepairRisk,
 };
 use anyhow::{bail, Result};
 
@@ -180,6 +180,17 @@ fn run_loop(runtime: &str, apply: bool, plan: &str, json: bool) -> Result<()> {
         for item in &round.skipped_actions {
             println!("  skipped {}: {}", item.id, item.reason);
         }
+        if !round.new_issues.is_empty() {
+            let label = if round.rolled_back {
+                "new problems (round undone)"
+            } else {
+                "new problems"
+            };
+            println!("  {label}:");
+            for check in &round.new_issues {
+                println!("    - {}: {}", check.title, check.message);
+            }
+        }
         if !round.tool_trace.is_empty() {
             println!("  agent tools: {} call(s)", round.tool_trace.len());
             for tool in &round.tool_trace {
@@ -195,6 +206,18 @@ fn run_loop(runtime: &str, apply: bool, plan: &str, json: bool) -> Result<()> {
                 );
                 if let Some(diff) = &tool.preview_diff {
                     println!("      diff:\n{diff}");
+                }
+            }
+        }
+    }
+
+    if apply {
+        let diff = diff_probe_checks(&report.before_probe, &report.after_probe);
+        for (label, checks) in [("Fixed", &diff.fixed), ("New problems", &diff.new_issues)] {
+            if !checks.is_empty() {
+                println!("\n{label}:");
+                for check in checks {
+                    println!("  - {}", check.title);
                 }
             }
         }
@@ -259,9 +282,14 @@ fn run_execute(runtime: &str, json: bool) -> Result<()> {
         }
     }
 
-    if report.skipped_actions.is_empty() {
+    let fixes_ran = report
+        .executed_action_ids
+        .iter()
+        .any(|id| id != "backup-runtime-configs");
+    if !fixes_ran && report.skipped_actions.is_empty() {
         println!("\nNo rule fixes were required (config backup completed).");
-    } else {
+    }
+    if !report.skipped_actions.is_empty() {
         println!("\nSkipped actions:");
         for item in &report.skipped_actions {
             println!("  - {}: {}", item.id, item.reason);

@@ -11,7 +11,7 @@ use crate::presets::{load_profiles, HermesProfilePreset};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::{SkippedRepairAction, SuggestedRepair};
 
-use super::should_run;
+use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
 
 #[derive(Debug, Default)]
 pub struct PlaybookApplyResult {
@@ -21,74 +21,71 @@ pub struct PlaybookApplyResult {
     pub guide_path: Option<PathBuf>,
 }
 
+/// Hermes repair rules, in the order they run.
+pub(crate) const HERMES_RULES: &[Rule] = &[
+    Rule {
+        id: "fix-hermes-install",
+        title: "Install Hermes Agent",
+        description: "Run the official Hermes installer (same approach as CC Switch). \
+            Requires network access.",
+        check: CheckMatch::Is("binary.exists", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| run_hermes_lifecycle(HermesLifecycleAction::Install).map(|_| None)),
+    },
+    Rule {
+        id: "fix-hermes-env-permissions",
+        title: "Tighten ~/.hermes/.env permissions",
+        description: "Set .env to mode 600.",
+        check: CheckMatch::StartsWith("hermes.env.permissions:", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |_| cfg!(unix),
+            blocked: "Set .env to mode 600.",
+            run: |_| tighten_env_permissions().map(|_| None),
+        },
+    },
+    Rule {
+        id: "fix-hermes-api-key-duplicates",
+        title: "Deduplicate API key env entries",
+        description: "Keep the last non-empty API key assignment.",
+        check: CheckMatch::Is("hermes.api_key.duplicates", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|probe| dedupe_api_key_env(probe).map(|_| None)),
+    },
+    Rule {
+        id: "fix-hermes-config-from-profile",
+        title: "Fill Hermes model fields from active profile",
+        description: "Apply provider, model, and base_url from the active Agent Doctor preset.",
+        check: CheckMatch::Custom(|check| {
+            check.id.starts_with("config.schema:")
+                && check.status == ProbeStatus::Warn
+                && check.message.contains("model.")
+        }),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |_| active_hermes_preset().is_ok(),
+            blocked: "Run `agent-doctor profile init` and `profile use <name>` first.",
+            run: |_| apply_hermes_config_from_profile().map(|_| None),
+        },
+    },
+    Rule {
+        id: "fix-hermes-api-key-scaffold",
+        title: "Prepare ~/.hermes/.env for API key",
+        description:
+            "Create .env placeholder and open a local setup guide (secret is not auto-filled).",
+        check: CheckMatch::Is("hermes.api_key.configured", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |probe| hermes_api_key_env_var(probe).is_some(),
+            blocked:
+                "Set model.provider in config.yaml so Agent Doctor knows which env var to use.",
+            run: |probe| prepare_api_key_env_scaffold(probe).map(Some),
+        },
+    },
+];
+
 pub fn suggest_hermes_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    let mut items = Vec::new();
-    let has_profile = active_hermes_preset().is_ok();
-
-    for check in &probe.checks {
-        if check.id == "binary.exists" && check.status == ProbeStatus::Fail {
-            items.push(SuggestedRepair {
-                id: "fix-hermes-install".to_string(),
-                title: "Install Hermes Agent".to_string(),
-                description: "Run the official Hermes installer (same approach as CC Switch). \
-                    Requires network access."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id.starts_with("hermes.env.permissions:") && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-hermes-env-permissions".to_string(),
-                title: "Tighten ~/.hermes/.env permissions".to_string(),
-                description: "Set .env to mode 600.".to_string(),
-                auto_fixable: cfg!(unix),
-            });
-        }
-
-        if check.id == "hermes.api_key.duplicates" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-hermes-api-key-duplicates".to_string(),
-                title: "Deduplicate API key env entries".to_string(),
-                description: "Keep the last non-empty API key assignment.".to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id.starts_with("config.schema:")
-            && check.status == ProbeStatus::Warn
-            && check.message.contains("model.")
-        {
-            items.push(SuggestedRepair {
-                id: "fix-hermes-config-from-profile".to_string(),
-                title: "Fill Hermes model fields from active profile".to_string(),
-                description: if has_profile {
-                    "Apply provider, model, and base_url from the active Agent Doctor preset."
-                        .to_string()
-                } else {
-                    "Run `agent-doctor profile init` and `profile use <name>` first.".to_string()
-                },
-                auto_fixable: has_profile,
-            });
-        }
-
-        if check.id == "hermes.api_key.configured" && check.status == ProbeStatus::Warn {
-            let can_scaffold = hermes_api_key_env_var(probe).is_some();
-            items.push(SuggestedRepair {
-                id: "fix-hermes-api-key-scaffold".to_string(),
-                title: "Prepare ~/.hermes/.env for API key".to_string(),
-                description: if can_scaffold {
-                    "Create .env placeholder and open a local setup guide (secret is not auto-filled)."
-                        .to_string()
-                } else {
-                    "Set model.provider in config.yaml so Agent Doctor knows which env var to use."
-                        .to_string()
-                },
-                auto_fixable: can_scaffold,
-            });
-        }
-    }
-
+    let mut items = suggest_rules(HERMES_RULES, probe);
     items.extend(super::npm_cli::suggest_browser_mcp_repairs(
         "hermes", "Hermes", probe,
     ));
@@ -103,102 +100,11 @@ pub fn apply_hermes_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let mut result = PlaybookApplyResult::default();
-
-    if should_run("fix-hermes-install", only_ids) && hermes_needs_install(probe) {
-        match run_hermes_lifecycle(HermesLifecycleAction::Install) {
-            Ok(()) => result.executed.push("fix-hermes-install".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-hermes-install".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    for check in &probe.checks {
-        if should_run("fix-hermes-env-permissions", only_ids)
-            && check.id.starts_with("hermes.env.permissions:")
-            && check.status == ProbeStatus::Warn
-        {
-            match tighten_env_permissions() {
-                Ok(()) => result
-                    .executed
-                    .push("fix-hermes-env-permissions".to_string()),
-                Err(error) => result.skipped.push(SkippedRepairAction {
-                    id: "fix-hermes-env-permissions".to_string(),
-                    reason: error.to_string(),
-                }),
-            }
-        }
-
-        if should_run("fix-hermes-api-key-duplicates", only_ids)
-            && check.id == "hermes.api_key.duplicates"
-            && check.status == ProbeStatus::Warn
-        {
-            match dedupe_api_key_env(probe) {
-                Ok(()) => result
-                    .executed
-                    .push("fix-hermes-api-key-duplicates".to_string()),
-                Err(error) => result.skipped.push(SkippedRepairAction {
-                    id: "fix-hermes-api-key-duplicates".to_string(),
-                    reason: error.to_string(),
-                }),
-            }
-        }
-    }
-
-    if should_run("fix-hermes-config-from-profile", only_ids)
-        && probe.checks.iter().any(|check| {
-            check.id.starts_with("config.schema:")
-                && check.status == ProbeStatus::Warn
-                && check.message.contains("model.")
-        })
-    {
-        match apply_hermes_config_from_profile() {
-            Ok(()) => result
-                .executed
-                .push("fix-hermes-config-from-profile".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-hermes-config-from-profile".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-hermes-api-key-scaffold", only_ids) && needs_api_key_scaffold(probe) {
-        match prepare_api_key_env_scaffold(probe) {
-            Ok(guide_path) => {
-                result
-                    .executed
-                    .push("fix-hermes-api-key-scaffold".to_string());
-                result.guide_path = Some(guide_path);
-            }
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-hermes-api-key-scaffold".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
+    let mut result = apply_rules(HERMES_RULES, probe, only_ids);
     let browser = super::npm_cli::apply_browser_mcp_repair("hermes", probe, only_ids)?;
     result.executed.extend(browser.executed);
     result.skipped.extend(browser.skipped);
-
     Ok(result)
-}
-
-fn hermes_needs_install(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
-}
-
-fn needs_api_key_scaffold(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "hermes.api_key.configured" && check.status == ProbeStatus::Warn)
 }
 
 fn hermes_api_key_env_var(probe: &RuntimeProbeReport) -> Option<String> {
@@ -537,5 +443,11 @@ mod tests {
         };
         let items = suggest_hermes_repairs(&probe);
         assert!(items.iter().any(|item| item.id == "fix-hermes-install"));
+    }
+
+    #[test]
+    fn rules_have_unique_ids_and_desktop_labels() {
+        super::super::rule::assert_unique_ids(HERMES_RULES);
+        super::super::rule::assert_desktop_labels(&super::super::rule::fix_ids(HERMES_RULES));
     }
 }

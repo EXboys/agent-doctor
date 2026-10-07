@@ -30,13 +30,13 @@ use crate::prompt_session::{
     OpenClawAskBackend,
 };
 use crate::repair::{
-    apply_claude_code_playbook_filtered, apply_codex_playbook_filtered,
+    apply_claude_code_playbook_filtered, apply_codex_playbook_filtered, apply_config_syntax_repair,
     apply_cursor_playbook_filtered, apply_deepseek_harness_playbook_filtered,
     apply_hermes_playbook_filtered, apply_openclaw_playbook_filtered,
     apply_qoder_playbook_filtered, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
-    suggest_codex_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
-    suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
+    suggest_codex_repairs, suggest_config_syntax_repairs, suggest_cursor_repairs,
+    suggest_deepseek_harness_repairs, suggest_hermes_repairs, suggest_openclaw_repairs,
+    suggest_qoder_repairs, suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
 };
 use crate::session_launch::{
     open_claude_code, open_codex, open_cursor_app, open_in_terminal, OpenSessionReport,
@@ -717,10 +717,13 @@ pub fn suggest_runtime_repairs(
     runtime_id: &str,
     probe: &RuntimeProbeReport,
 ) -> Vec<SuggestedRepair> {
-    let mut items = descriptor_by_id(runtime_id)
-        .and_then(|entry| entry.suggest_repairs)
-        .map(|suggest| suggest(probe))
-        .unwrap_or_default();
+    let mut items = suggest_config_syntax_repairs(probe);
+    items.extend(
+        descriptor_by_id(runtime_id)
+            .and_then(|entry| entry.suggest_repairs)
+            .map(|suggest| suggest(probe))
+            .unwrap_or_default(),
+    );
 
     if probe_needs_binary_install(probe) && !items.iter().any(|item| item.id.ends_with("-install"))
     {
@@ -774,7 +777,12 @@ pub fn apply_runtime_playbook_filtered(
     let apply = descriptor
         .and_then(|entry| entry.apply_playbook)
         .with_context(|| format!("runtime '{runtime_id}' has no repair playbook"))?;
-    apply(probe, only_ids)
+    let mut result = apply_config_syntax_repair(probe, only_ids);
+    let runtime = apply(probe, only_ids)?;
+    result.executed.extend(runtime.executed);
+    result.skipped.extend(runtime.skipped);
+    result.guide_path = runtime.guide_path;
+    Ok(result)
 }
 
 pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
@@ -968,6 +976,52 @@ mod tests {
         assert!(items
             .iter()
             .any(|item| item.id == "fix-claude-code-install"));
+    }
+
+    fn json_parse_fail_probe(runtime_id: &str, path: &Path) -> RuntimeProbeReport {
+        RuntimeProbeReport {
+            runtime_id: runtime_id.to_string(),
+            display_name: runtime_id.to_string(),
+            binary_name: runtime_id.to_string(),
+            checks: vec![ProbeCheck::new(
+                format!("config.parse:{}", path.display()),
+                "Config parse",
+                ProbeStatus::Fail,
+                ProbeSeverity::Error,
+                "invalid JSON: trailing comma",
+                crate::repair::SensitivityLevel::SensitiveLog,
+            )],
+            facts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn every_runtime_suggests_shared_config_syntax_fix() {
+        for entry in RUNTIME_REGISTRY {
+            let probe = json_parse_fail_probe(entry.id, Path::new("/x/settings.json"));
+            let items = suggest_runtime_repairs(entry.id, &probe);
+            assert!(
+                items
+                    .iter()
+                    .any(|item| item.id == "fix-config-syntax" && item.auto_fixable),
+                "{} missing fix-config-syntax",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn registry_apply_runs_shared_config_syntax_fix() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("settings.json");
+        std::fs::write(&path, "{\"model\": \"x\",}").unwrap();
+        let probe = json_parse_fail_probe("claude-code", &path);
+        let only = vec!["fix-config-syntax".to_string()];
+        let result = apply_runtime_playbook_filtered("claude-code", &probe, Some(&only)).unwrap();
+        assert!(result.executed.iter().any(|id| id == "fix-config-syntax"));
+        let fixed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(fixed, serde_json::json!({"model": "x"}));
     }
 
     #[test]

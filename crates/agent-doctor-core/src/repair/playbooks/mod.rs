@@ -1,7 +1,9 @@
 pub mod deepseek_harness;
 pub mod hermes;
+pub(crate) mod json_config;
 pub mod npm_cli;
 pub mod openclaw;
+pub(crate) mod rule;
 
 pub use deepseek_harness::{
     apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,

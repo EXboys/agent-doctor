@@ -94,6 +94,16 @@ export type DeepRepairSummary = {
   issue_score_after: number;
   executed: string[];
   skipped: { id: string; reason: string }[];
+  fixed: RepairCheckChange[];
+  new_issues: RepairCheckChange[];
+  rolled_back_issues: RepairCheckChange[];
+};
+
+export type RepairCheckChange = {
+  id: string;
+  title: string;
+  status: string;
+  message: string;
 };
 
 export type WorkspaceStatusReport = {

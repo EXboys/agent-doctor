@@ -22,6 +22,7 @@ import { withErrorDetail } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { renderMarkdown } from "../markdown";
 import * as dom from "./dom";
+import { describeRepairSummary } from "./repair-summary";
 import type { DiagnoseSession } from "./session";
 
 export type DeepPresetId = "explain" | "fix" | "browser" | "health";
@@ -109,7 +110,7 @@ function fileLabel(target: string | null): string {
   return parts[parts.length - 1] ?? target;
 }
 
-function friendlyDeepError(error: unknown): string {
+export function friendlyDeepError(error: unknown): string {
   const message = String(error);
   if (message.includes("deep_diagnose_no_provider")) {
     return t("diagnose.flow.deepNoProvider");
@@ -605,16 +606,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
       const summary = await deepRepair({
         runtime: session.runtimeId,
       });
-      if (summary.executed.length > 0) {
-        pushBubble(
-          "assistant",
-          summary.issue_score_after < summary.issue_score_before
-            ? t("diagnose.flow.deepRepairDone", { count: String(summary.executed.length) })
-            : t("diagnose.flow.deepRepairNoGain", { count: String(summary.executed.length) }),
-        );
-      } else {
-        pushBubble("assistant", t("diagnose.flow.deepRepairNothing"));
-      }
+      pushBubble("assistant", describeRepairSummary(summary));
       await hooks.onRepaired?.();
     } catch (error) {
       pushBubble("meta", friendlyDeepError(error));

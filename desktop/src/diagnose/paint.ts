@@ -438,7 +438,8 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       session.activeStep === "config" && session.guideFillConfig && !session.configured,
     );
     dom.panelTestEl.hidden = true;
-    dom.testHintEl.hidden = session.activeStep !== "test";
+    const hasFail = Boolean(session.preview && session.preview.summary.fail > 0);
+    dom.testHintEl.hidden = session.activeStep !== "test" || (hasFail && !session.testedOk);
     if (session.activeStep === "test") {
       dom.testHintEl.textContent = isDesktopAppRuntimeId(session.runtimeId)
         ? t("diagnose.flow.testHintDesktop", { name: session.displayName })
@@ -546,6 +547,15 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
             : t("diagnose.flow.openAskYourself");
         }
         dom.primaryEl.hidden = false;
+        dom.secondaryEl.hidden = false;
+        dom.secondaryEl.textContent = t("diagnose.flow.rescan");
+        dom.secondaryEl.dataset.fallback = "rescan";
+      } else if (session.preview && session.preview.summary.fail > 0) {
+        session.primaryAction = session.repairTried ? "ask-fix" : "deep-repair";
+        dom.primaryEl.hidden = false;
+        dom.primaryEl.textContent = session.repairTried
+          ? t("diagnose.flow.askFixCta")
+          : t("repair.oneClick");
         dom.secondaryEl.hidden = false;
         dom.secondaryEl.textContent = t("diagnose.flow.rescan");
         dom.secondaryEl.dataset.fallback = "rescan";

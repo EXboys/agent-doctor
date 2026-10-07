@@ -10,6 +10,8 @@ export type PrimaryAction =
   | "open-team-wiring"
   | "run-score"
   | "auto-fix"
+  | "deep-repair"
+  | "ask-fix"
   | "ask-verify"
   | "open-ask"
   | "rescan"
@@ -29,6 +31,12 @@ export type DiagnoseSession = {
   lastScore: DiagnoseScore | null;
   primaryAction: PrimaryAction;
   canAutoFix: boolean;
+  /** Rule auto-fix already ran; failures left after it go to one-click repair, not back to config. */
+  autoFixTried: boolean;
+  /** Set after a repair that changed nothing useful, so the button stops offering it again. */
+  repairTried: boolean;
+  /** Result of the last repair, shown in front of the next score line. */
+  repairNotice: string | null;
   checkFilter: CheckFilter;
   guideFillConfig: boolean;
   /** Full repair panel (one-click / rollback / Chrome check). */
@@ -82,6 +90,9 @@ export function createDiagnoseSession(runtimeId: string): DiagnoseSession {
     lastScore: null,
     primaryAction: "none",
     canAutoFix: false,
+    autoFixTried: false,
+    repairTried: false,
+    repairNotice: null,
     checkFilter: "all",
     guideFillConfig: false,
     deepOpen: false,

@@ -3,43 +3,56 @@ use anyhow::Result;
 use crate::adapters::DEEPSEEK_HARNESS_VERSION;
 use crate::lifecycle::{run_deepseek_harness_lifecycle, DeepSeekHarnessLifecycleAction};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
-use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use crate::repair::SuggestedRepair;
 
-use super::{should_run, PlaybookApplyResult};
+use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
+use super::PlaybookApplyResult;
+
+/// DeepSeek Harness repair rules. `{pinned}` in text becomes the pinned package version.
+/// The version check only exists when the binary is installed, so install and pin never both run.
+pub(crate) const DEEPSEEK_HARNESS_RULES: &[Rule] = &[
+    Rule {
+        id: "fix-deepseek-harness-install",
+        title: "Install DeepSeek Harness",
+        description: "Install the official npm package pinned to {pinned}.",
+        check: CheckMatch::Is("binary.exists", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| {
+            run_deepseek_harness_lifecycle(DeepSeekHarnessLifecycleAction::Install).map(|_| None)
+        }),
+    },
+    Rule {
+        id: "fix-deepseek-harness-version",
+        title: "Pin DeepSeek Harness to {pinned}",
+        description: "Install the required official npm package version exactly.",
+        check: CheckMatch::Is("deepseek-harness.version.pinned", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| {
+            run_deepseek_harness_lifecycle(DeepSeekHarnessLifecycleAction::Update).map(|_| None)
+        }),
+    },
+    Rule {
+        id: "configure-deepseek-harness-credentials",
+        title: "Configure DeepSeek credentials",
+        description: "Add the API key in Agent Doctor wiring or the dsh web Models page; \
+            secrets are never auto-filled.",
+        check: CheckMatch::Is("deepseek-harness.api_key.configured", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Manual,
+    },
+];
 
 pub fn suggest_deepseek_harness_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    let mut items = Vec::new();
-    for check in &probe.checks {
-        if check.id == "binary.exists" && check.status == ProbeStatus::Fail {
-            items.push(SuggestedRepair {
-                id: "fix-deepseek-harness-install".to_string(),
-                title: "Install DeepSeek Harness".to_string(),
-                description: format!(
-                    "Install the official npm package pinned to {DEEPSEEK_HARNESS_VERSION}."
-                ),
-                auto_fixable: true,
-            });
-        }
-        if check.id == "deepseek-harness.version.pinned" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-deepseek-harness-version".to_string(),
-                title: format!("Pin DeepSeek Harness to {DEEPSEEK_HARNESS_VERSION}"),
-                description: "Install the required official npm package version exactly."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-        if check.id == "deepseek-harness.api_key.configured" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "configure-deepseek-harness-credentials".to_string(),
-                title: "Configure DeepSeek credentials".to_string(),
-                description:
-                    "Add the API key in Agent Doctor wiring or the dsh web Models page; secrets are never auto-filled."
-                        .to_string(),
-                auto_fixable: false,
-            });
-        }
-    }
+    let mut items: Vec<_> = suggest_rules(DEEPSEEK_HARNESS_RULES, probe)
+        .into_iter()
+        .map(|mut item| {
+            item.title = item.title.replace("{pinned}", DEEPSEEK_HARNESS_VERSION);
+            item.description = item
+                .description
+                .replace("{pinned}", DEEPSEEK_HARNESS_VERSION);
+            item
+        })
+        .collect();
     items.extend(super::npm_cli::suggest_browser_mcp_repairs(
         "deepseek-harness",
         "DeepSeek Harness",
@@ -56,38 +69,7 @@ pub fn apply_deepseek_harness_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let mut result = PlaybookApplyResult::default();
-    let missing = probe
-        .checks
-        .iter()
-        .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail);
-    let mismatch = probe.checks.iter().any(|check| {
-        check.id == "deepseek-harness.version.pinned" && check.status == ProbeStatus::Warn
-    });
-
-    let action = if missing && should_run("fix-deepseek-harness-install", only_ids) {
-        Some((
-            "fix-deepseek-harness-install",
-            DeepSeekHarnessLifecycleAction::Install,
-        ))
-    } else if mismatch && should_run("fix-deepseek-harness-version", only_ids) {
-        Some((
-            "fix-deepseek-harness-version",
-            DeepSeekHarnessLifecycleAction::Update,
-        ))
-    } else {
-        None
-    };
-
-    if let Some((id, lifecycle_action)) = action {
-        match run_deepseek_harness_lifecycle(lifecycle_action) {
-            Ok(()) => result.executed.push(id.to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: id.to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
+    let mut result = apply_rules(DEEPSEEK_HARNESS_RULES, probe, only_ids);
     let browser = super::npm_cli::apply_browser_mcp_repair("deepseek-harness", probe, only_ids)?;
     result.executed.extend(browser.executed);
     result.skipped.extend(browser.skipped);
@@ -118,6 +100,15 @@ mod tests {
         };
         assert!(suggest_deepseek_harness_repairs(&probe)
             .iter()
-            .any(|item| item.id == "fix-deepseek-harness-version"));
+            .any(|item| item.id == "fix-deepseek-harness-version"
+                && item.title.ends_with(DEEPSEEK_HARNESS_VERSION)));
+    }
+
+    #[test]
+    fn rules_have_unique_ids_and_desktop_labels() {
+        super::super::rule::assert_unique_ids(DEEPSEEK_HARNESS_RULES);
+        super::super::rule::assert_desktop_labels(&super::super::rule::fix_ids(
+            DEEPSEEK_HARNESS_RULES,
+        ));
     }
 }

@@ -40,8 +40,103 @@ use crate::setup::{
 };
 use crate::workspace::resolve_agent_doctor_binary;
 
+use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
 use super::should_run;
 use super::PlaybookApplyResult;
+
+const APP_INSTALL_TEXT: &str = "Install the official app. Needs a network connection.";
+const NPM_INSTALL_TEXT: &str =
+    "Install via `npm install -g` (official package). Requires Node.js/npm and network.";
+
+macro_rules! install_rule {
+    ($id:literal, $title:literal, $text:expr, $runtime:literal) => {
+        Rule {
+            id: $id,
+            title: $title,
+            description: $text,
+            check: CheckMatch::Is("binary.exists", ProbeStatus::Fail),
+            versions: Versions::ANY,
+            fix: Fix::Auto(|_| run_install($runtime).map(|_| None)),
+        }
+    };
+}
+
+pub(crate) const QODER_RULES: &[Rule] = &[install_rule!(
+    "fix-qoder-install",
+    "Install Qoder",
+    APP_INSTALL_TEXT,
+    "qoder"
+)];
+pub(crate) const WORKBUDDY_RULES: &[Rule] = &[install_rule!(
+    "fix-workbuddy-install",
+    "Install WorkBuddy",
+    APP_INSTALL_TEXT,
+    "workbuddy"
+)];
+pub(crate) const CURSOR_RULES: &[Rule] = &[install_rule!(
+    "fix-cursor-install",
+    "Install Cursor",
+    APP_INSTALL_TEXT,
+    "cursor"
+)];
+
+/// Run before the mode rewire.
+pub(crate) const CLAUDE_CODE_SETUP_RULES: &[Rule] = &[install_rule!(
+    "fix-claude-code-install",
+    "Install Claude Code",
+    NPM_INSTALL_TEXT,
+    "claude-code"
+)];
+pub(crate) const CODEX_SETUP_RULES: &[Rule] = &[install_rule!(
+    "fix-codex-install",
+    "Install Codex",
+    NPM_INSTALL_TEXT,
+    "codex"
+)];
+
+/// Run after the mode rewire, so the rewire cannot undo them.
+pub(crate) const CLAUDE_CODE_RULES: &[Rule] = &[Rule {
+    id: "fix-claude-code-settings-permissions",
+    title: "Tighten ~/.claude/settings.json permissions",
+    description: "Set settings.json to mode 600 (contains API key).",
+    check: CheckMatch::StartsWith("claude.settings.permissions:", ProbeStatus::Warn),
+    versions: Versions::ANY,
+    fix: Fix::AutoWhen {
+        ready: |_| cfg!(unix),
+        blocked: "Set settings.json to mode 600 (contains API key).",
+        run: |_| tighten_claude_settings_permissions().map(|_| None),
+    },
+}];
+pub(crate) const CODEX_RULES: &[Rule] = &[
+    Rule {
+        id: "fix-codex-wire-api",
+        title: "Set Codex wire_api to responses",
+        description: "Patch active model_providers.*.wire_api = \"responses\".",
+        check: CheckMatch::Custom(|check| {
+            (check.id == "codex.schema.wire_api_missing" || check.id == "codex.schema.wire_api")
+                && check.status == ProbeStatus::Warn
+        }),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| patch_codex_wire_api().map(|_| None)),
+    },
+    Rule {
+        id: "fix-codex-clear-placeholder-auth",
+        title: "Remove placeholder Codex auth.json",
+        description: "Delete empty/placeholder auth.json so env_key auth can work.",
+        check: CheckMatch::Is("codex.auth.placeholder", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| clear_codex_placeholder_auth().map(|_| None)),
+    },
+];
+
+/// Rule tables for a mode-wired CLI: (before the mode rewire, after it).
+fn npm_cli_rules(runtime_id: &str) -> (&'static [Rule], &'static [Rule]) {
+    match runtime_id {
+        "claude-code" => (CLAUDE_CODE_SETUP_RULES, CLAUDE_CODE_RULES),
+        "codex" => (CODEX_SETUP_RULES, CODEX_RULES),
+        _ => (&[], &[]),
+    }
+}
 
 pub fn suggest_claude_code_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
     suggest_npm_cli_repairs("claude-code", "Claude Code", probe)
@@ -52,33 +147,15 @@ pub fn suggest_codex_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair>
 }
 
 pub fn suggest_qoder_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    suggest_install_only("qoder", "Qoder", probe)
+    suggest_rules(QODER_RULES, probe)
 }
 
 pub fn suggest_workbuddy_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    suggest_install_only("workbuddy", "WorkBuddy", probe)
+    suggest_rules(WORKBUDDY_RULES, probe)
 }
 
 pub fn suggest_cursor_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
-    suggest_install_only("cursor", "Cursor", probe)
-}
-
-fn suggest_install_only(
-    runtime_id: &str,
-    display: &str,
-    probe: &RuntimeProbeReport,
-) -> Vec<SuggestedRepair> {
-    probe
-        .checks
-        .iter()
-        .filter(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
-        .map(|_| SuggestedRepair {
-            id: format!("fix-{runtime_id}-install"),
-            title: format!("Install {display}"),
-            description: "Install the official app. Needs a network connection.".to_string(),
-            auto_fixable: true,
-        })
-        .collect()
+    suggest_rules(CURSOR_RULES, probe)
 }
 
 fn suggest_npm_cli_repairs(
@@ -86,22 +163,12 @@ fn suggest_npm_cli_repairs(
     display: &str,
     probe: &RuntimeProbeReport,
 ) -> Vec<SuggestedRepair> {
-    let mut items = Vec::new();
+    let (setup_rules, rules) = npm_cli_rules(runtime_id);
+    let mut items = suggest_rules(setup_rules, probe);
     // Prefer profile.env so suggest/preview does not open the OS keychain.
     let mode_ready = mode_overlay_ready_from_profile();
 
     for check in &probe.checks {
-        if check.id == "binary.exists" && check.status == ProbeStatus::Fail {
-            items.push(SuggestedRepair {
-                id: format!("fix-{runtime_id}-install"),
-                title: format!("Install {display}"),
-                description:
-                    "Install via `npm install -g` (official package). Requires Node.js/npm and network."
-                        .to_string(),
-                auto_fixable: true,
-            });
-        }
-
         if check.id.starts_with("config.exists:")
             && check.status == ProbeStatus::Warn
             && (check.id.contains("settings.json") || check.id.contains("config.toml"))
@@ -215,18 +282,22 @@ fn suggest_npm_cli_repairs(
     }
 
     if runtime_id == "claude-code" {
-        items.extend(suggest_claude_specific(probe, mode_ready));
-        items.extend(suggest_claude_global_mcp_bleed());
+        items.extend(suggest_claude_api_key(probe, mode_ready));
     }
     if runtime_id == "codex" {
-        items.extend(suggest_codex_specific(probe, mode_ready));
+        items.extend(suggest_codex_api_key(probe, mode_ready));
+    }
+    items.extend(suggest_rules(rules, probe));
+    if runtime_id == "claude-code" {
+        items.extend(suggest_claude_global_mcp_bleed());
     }
 
     items.extend(suggest_browser_mcp_repairs(runtime_id, display, probe));
     dedupe_repairs(items)
 }
 
-fn suggest_claude_specific(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<SuggestedRepair> {
+/// The API key fix is either a mode rewire or a placeholder, so it stays outside the rule table.
+fn suggest_claude_api_key(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<SuggestedRepair> {
     let mut items = Vec::new();
     for check in &probe.checks {
         if check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn {
@@ -251,16 +322,6 @@ fn suggest_claude_specific(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<
                 auto_fixable: true,
             });
         }
-
-        if check.id.starts_with("claude.settings.permissions:") && check.status == ProbeStatus::Warn
-        {
-            items.push(SuggestedRepair {
-                id: "fix-claude-code-settings-permissions".to_string(),
-                title: "Tighten ~/.claude/settings.json permissions".to_string(),
-                description: "Set settings.json to mode 600 (contains API key).".to_string(),
-                auto_fixable: cfg!(unix),
-            });
-        }
     }
     items
 }
@@ -283,30 +344,10 @@ fn suggest_claude_global_mcp_bleed() -> Vec<SuggestedRepair> {
     }]
 }
 
-fn suggest_codex_specific(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<SuggestedRepair> {
+/// The API key fix is either a mode rewire or a guide, so it stays outside the rule table.
+fn suggest_codex_api_key(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<SuggestedRepair> {
     let mut items = Vec::new();
     for check in &probe.checks {
-        if (check.id == "codex.schema.wire_api_missing" || check.id == "codex.schema.wire_api")
-            && check.status == ProbeStatus::Warn
-        {
-            items.push(SuggestedRepair {
-                id: "fix-codex-wire-api".to_string(),
-                title: "Set Codex wire_api to responses".to_string(),
-                description: "Patch active model_providers.*.wire_api = \"responses\".".to_string(),
-                auto_fixable: true,
-            });
-        }
-
-        if check.id == "codex.auth.placeholder" && check.status == ProbeStatus::Warn {
-            items.push(SuggestedRepair {
-                id: "fix-codex-clear-placeholder-auth".to_string(),
-                title: "Remove placeholder Codex auth.json".to_string(),
-                description: "Delete empty/placeholder auth.json so env_key auth can work."
-                    .to_string(),
-                auto_fixable: true,
-            });
-        }
-
         if check.id == "codex.api_key.configured" && check.status == ProbeStatus::Warn {
             items.push(SuggestedRepair {
                 id: if mode_ready {
@@ -435,18 +476,13 @@ fn apply_install_only_playbook(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let mut result = PlaybookApplyResult::default();
-    let install_id = format!("fix-{runtime_id}-install");
-    if should_run(&install_id, only_ids) && needs_install(probe) {
-        match run_install(runtime_id) {
-            Ok(()) => result.executed.push(install_id),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: install_id,
-                reason: error.to_string(),
-            }),
-        }
-    }
-    Ok(result)
+    let rules = match runtime_id {
+        "qoder" => QODER_RULES,
+        "workbuddy" => WORKBUDDY_RULES,
+        "cursor" => CURSOR_RULES,
+        other => bail!("no install playbook for {other}"),
+    };
+    Ok(apply_rules(rules, probe, only_ids))
 }
 
 fn apply_npm_cli_playbook(
@@ -454,24 +490,14 @@ fn apply_npm_cli_playbook(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let mut result = PlaybookApplyResult::default();
-    let install_id = format!("fix-{runtime_id}-install");
+    let (setup_rules, rules) = npm_cli_rules(runtime_id);
+    let mut result = apply_rules(setup_rules, probe, only_ids);
     let create_id = format!("fix-{runtime_id}-create-config");
     let gateway_id = format!("fix-{runtime_id}-gateway-from-mode");
     let adopt_id = format!("fix-{runtime_id}-adopt-live-gateway");
     let model_id = format!("fix-{runtime_id}-model-from-mode");
     let config_id = format!("fix-{runtime_id}-config-from-mode");
     let browser_id = format!("fix-{runtime_id}-browser-mcp");
-
-    if should_run(&install_id, only_ids) && needs_install(probe) {
-        match run_install(runtime_id) {
-            Ok(()) => result.executed.push(install_id),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: install_id,
-                reason: error.to_string(),
-            }),
-        }
-    }
 
     // Mode drift is 二选一: align runtime→overlay vs keep live→update overlay.
     let adopt_selected = only_ids.is_some_and(|ids| ids.iter().any(|id| id == &adopt_id));
@@ -560,10 +586,16 @@ fn apply_npm_cli_playbook(
     }
 
     if runtime_id == "claude-code" {
-        apply_claude_specific(probe, only_ids, &mut result)?;
+        apply_claude_api_key_scaffold(probe, only_ids, &mut result);
+    }
+    let rule_result = apply_rules(rules, probe, only_ids);
+    result.executed.extend(rule_result.executed);
+    result.skipped.extend(rule_result.skipped);
+    if rule_result.guide_path.is_some() {
+        result.guide_path = rule_result.guide_path;
     }
     if runtime_id == "codex" {
-        apply_codex_specific(probe, only_ids, &mut result)?;
+        apply_codex_api_key_scaffold(probe, only_ids, &mut result);
     }
 
     if should_run(&browser_id, only_ids) && needs_browser_mcp_rewire(probe) {
@@ -579,11 +611,11 @@ fn apply_npm_cli_playbook(
     Ok(result)
 }
 
-fn apply_claude_specific(
+fn apply_claude_api_key_scaffold(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
     result: &mut PlaybookApplyResult,
-) -> Result<()> {
+) {
     if should_run("fix-claude-code-api-key-scaffold", only_ids)
         && needs_claude_api_key_scaffold(probe)
     {
@@ -600,52 +632,13 @@ fn apply_claude_specific(
             }),
         }
     }
-
-    if should_run("fix-claude-code-settings-permissions", only_ids)
-        && needs_claude_permissions(probe)
-    {
-        match tighten_claude_settings_permissions() {
-            Ok(()) => result
-                .executed
-                .push("fix-claude-code-settings-permissions".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-claude-code-settings-permissions".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-    Ok(())
 }
 
-fn apply_codex_specific(
+fn apply_codex_api_key_scaffold(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
     result: &mut PlaybookApplyResult,
-) -> Result<()> {
-    if should_run("fix-codex-wire-api", only_ids) && needs_codex_wire_api(probe) {
-        match patch_codex_wire_api() {
-            Ok(()) => result.executed.push("fix-codex-wire-api".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-codex-wire-api".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
-    if should_run("fix-codex-clear-placeholder-auth", only_ids)
-        && needs_codex_placeholder_auth(probe)
-    {
-        match clear_codex_placeholder_auth() {
-            Ok(()) => result
-                .executed
-                .push("fix-codex-clear-placeholder-auth".to_string()),
-            Err(error) => result.skipped.push(SkippedRepairAction {
-                id: "fix-codex-clear-placeholder-auth".to_string(),
-                reason: error.to_string(),
-            }),
-        }
-    }
-
+) {
     if should_run("fix-codex-api-key-scaffold", only_ids) && needs_codex_api_key_scaffold(probe) {
         match scaffold_codex_api_key_guide(probe) {
             Ok(guide_path) => {
@@ -660,7 +653,6 @@ fn apply_codex_specific(
             }),
         }
     }
-    Ok(())
 }
 
 /// Apply Browser MCP wire when probe says configured/healthy is bad.
@@ -681,13 +673,6 @@ pub(crate) fn apply_browser_mcp_repair(
         }
     }
     Ok(result)
-}
-
-fn needs_install(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
 }
 
 fn needs_create_config(probe: &RuntimeProbeReport) -> bool {
@@ -746,26 +731,6 @@ fn needs_claude_api_key_scaffold(probe: &RuntimeProbeReport) -> bool {
         && probe.checks.iter().any(|check| {
             check.id == "claude.api_key.configured" && check.status == ProbeStatus::Warn
         })
-}
-
-fn needs_claude_permissions(probe: &RuntimeProbeReport) -> bool {
-    probe.checks.iter().any(|check| {
-        check.id.starts_with("claude.settings.permissions:") && check.status == ProbeStatus::Warn
-    })
-}
-
-fn needs_codex_wire_api(probe: &RuntimeProbeReport) -> bool {
-    probe.checks.iter().any(|check| {
-        (check.id == "codex.schema.wire_api_missing" || check.id == "codex.schema.wire_api")
-            && check.status == ProbeStatus::Warn
-    })
-}
-
-fn needs_codex_placeholder_auth(probe: &RuntimeProbeReport) -> bool {
-    probe
-        .checks
-        .iter()
-        .any(|check| check.id == "codex.auth.placeholder" && check.status == ProbeStatus::Warn)
 }
 
 fn needs_codex_key_from_mode(probe: &RuntimeProbeReport) -> bool {
@@ -1012,6 +977,58 @@ mod tests {
             checks,
             facts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn rules_have_unique_ids_and_desktop_labels() {
+        use super::super::rule::{assert_desktop_labels, assert_unique_ids, fix_ids};
+        for rules in [
+            QODER_RULES,
+            WORKBUDDY_RULES,
+            CURSOR_RULES,
+            CLAUDE_CODE_SETUP_RULES,
+            CLAUDE_CODE_RULES,
+            CODEX_SETUP_RULES,
+            CODEX_RULES,
+        ] {
+            assert_unique_ids(rules);
+            assert_desktop_labels(&fix_ids(rules));
+        }
+        let mut mode_ids = Vec::new();
+        for runtime in ["claude-code", "codex"] {
+            for action in [
+                "create-config",
+                "gateway-from-mode",
+                "adopt-live-gateway",
+                "model-from-mode",
+                "config-from-mode",
+                "api-key-scaffold",
+                "browser-mcp",
+            ] {
+                mode_ids.push(format!("fix-{runtime}-{action}"));
+            }
+        }
+        let mode_ids: Vec<&str> = mode_ids.iter().map(String::as_str).collect();
+        assert_desktop_labels(&mode_ids);
+    }
+
+    #[test]
+    fn install_only_apps_keep_their_install_text() {
+        let probe = probe_with(
+            "qoder",
+            vec![ProbeCheck::new(
+                "binary.exists",
+                "Binary exists",
+                ProbeStatus::Fail,
+                ProbeSeverity::Error,
+                "missing",
+                SensitivityLevel::Public,
+            )],
+        );
+        let items = suggest_qoder_repairs(&probe);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "fix-qoder-install");
+        assert_eq!(items[0].title, "Install Qoder");
     }
 
     #[test]
