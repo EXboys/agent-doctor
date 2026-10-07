@@ -543,6 +543,13 @@ fn handle_request(request: &McpRequest, browser: &SharedBrowser) -> Result<Handl
             let tools = tool_definitions();
             ok_response(id, json!({ "tools": tools }))
         }
+        // This server has tools only. Newer Codex still probes resource and
+        // prompt lists while loading the server; a -32601 here makes it drop
+        // the tools, so browser_navigate never appears in the session.
+        "resources/list" => ok_response(id, json!({ "resources": [] })),
+        "resources/templates/list" => ok_response(id, json!({ "resourceTemplates": [] })),
+        "prompts/list" => ok_response(id, json!({ "prompts": [] })),
+        "ping" => ok_response(id, json!({})),
         "tools/call" => {
             let tool_name = request
                 .params
@@ -579,6 +586,9 @@ fn handle_request(request: &McpRequest, browser: &SharedBrowser) -> Result<Handl
         }
         "shutdown" | "exit" => {
             return Ok(HandleResult::Shutdown);
+        }
+        _ if request.method.starts_with("notifications/") => {
+            return Ok(HandleResult::NoResponse);
         }
         _ => err_response(id, -32601, format!("Method not found: {}", request.method)),
     };
@@ -754,4 +764,47 @@ fn write_response(response: &McpResponse, framing: Framing) -> Result<()> {
     out.flush()?;
     debug_log(format!("wrote ({framing:?}): {body}"));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::LazyBrowser;
+
+    fn request(method: &str) -> McpRequest {
+        McpRequest {
+            id: Some(json!(1)),
+            method: method.to_string(),
+            params: None,
+        }
+    }
+
+    fn result_of(method: &str) -> Value {
+        let browser = SharedBrowser::new(LazyBrowser::new(0, true));
+        match handle_request(&request(method), &browser).unwrap() {
+            HandleResult::Respond(response) => response.result.expect("result"),
+            HandleResult::Shutdown => panic!("{method} shut down"),
+            HandleResult::NoResponse => panic!("{method} returned no response"),
+        }
+    }
+
+    #[test]
+    fn codex_resource_probes_are_empty_lists() {
+        assert_eq!(result_of("resources/list")["resources"], json!([]));
+        assert_eq!(
+            result_of("resources/templates/list")["resourceTemplates"],
+            json!([])
+        );
+        assert_eq!(result_of("prompts/list")["prompts"], json!([]));
+        assert_eq!(result_of("ping"), json!({}));
+    }
+
+    #[test]
+    fn tools_list_includes_navigate() {
+        let tools = result_of("tools/list")["tools"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(tools.iter().any(|tool| tool["name"] == "browser_navigate"));
+    }
 }

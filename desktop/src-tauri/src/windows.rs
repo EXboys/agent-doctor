@@ -663,12 +663,15 @@ fn resources_section_token(section: Option<&str>) -> String {
     }
 }
 
-fn resources_section_bootstrap_script(section: &str) -> String {
+fn resources_section_bootstrap_script(section: &str, defer_boot_scan: bool) -> String {
     let section_json = serde_json::Value::String(section.to_string()).to_string();
+    let defer = if defer_boot_scan { "true" } else { "false" };
     // A later open writes the real section into sessionStorage before reload.
     // Do not let a startup fallback overwrite that stored section.
+    // Hidden pre-create sets defer so the page does not probe CLIs until shown.
     format!(
         "(function(){{\
+            window.__AD_DEFER_BOOT_SCAN__ = {defer};\
             var fallback = {section};\
             var stored = null;\
             try {{ stored = sessionStorage.getItem('ad.resources.pendingSection'); }} catch (e) {{}}\
@@ -679,6 +682,7 @@ fn resources_section_bootstrap_script(section: &str) -> String {
                 window.__AD_RESOURCES_SECTION__ = fallback;\
             }}\
         }})();",
+        defer = defer,
         section = section_json
     )
 }
@@ -687,13 +691,14 @@ fn create_resources_window(
     app: &AppHandle,
     visible: bool,
     section: &str,
+    defer_boot_scan: bool,
 ) -> Result<tauri::WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(
         app,
         RESOURCES_WINDOW_LABEL,
         WebviewUrl::App("resources.html".into()),
     )
-    .initialization_script(resources_section_bootstrap_script(section))
+    .initialization_script(resources_section_bootstrap_script(section, defer_boot_scan))
     .title("Agent Doctor — Resources")
     .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
     .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
@@ -712,11 +717,12 @@ fn create_resources_window(
 pub(crate) fn ensure_resources_window(
     app: &AppHandle,
     section: &str,
+    defer_boot_scan: bool,
 ) -> Result<tauri::WebviewWindow, String> {
     if let Some(existing) = app.get_webview_window(RESOURCES_WINDOW_LABEL) {
         return Ok(existing);
     }
-    create_resources_window(app, false, section)
+    create_resources_window(app, false, section, defer_boot_scan)
 }
 
 fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
@@ -729,13 +735,15 @@ fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
     });
 }
 
-fn diagnose_runtime_bootstrap_script(runtime: &str) -> String {
+fn diagnose_runtime_bootstrap_script(runtime: &str, defer_boot_scan: bool) -> String {
     let runtime_json = serde_json::Value::String(runtime.to_string()).to_string();
+    let defer = if defer_boot_scan { "true" } else { "false" };
     // Do not overwrite sessionStorage: the window is pre-created at startup with a
     // default runtime, and location.reload() re-runs this script. A later open
     // writes the real runtime into sessionStorage before reload.
     format!(
         "(function(){{\
+            window.__AD_DEFER_BOOT_SCAN__ = {defer};\
             var fallback = {runtime};\
             var stored = null;\
             try {{ stored = sessionStorage.getItem('ad-diagnose-runtime'); }} catch (e) {{}}\
@@ -746,6 +754,7 @@ fn diagnose_runtime_bootstrap_script(runtime: &str) -> String {
                 try {{ sessionStorage.setItem('ad-diagnose-runtime', fallback); }} catch (e) {{}}\
             }}\
         }})();",
+        defer = defer,
         runtime = runtime_json
     )
 }
@@ -754,8 +763,9 @@ fn create_diagnose_window(
     app: &AppHandle,
     runtime: &str,
     visible: bool,
+    defer_boot_scan: bool,
 ) -> Result<tauri::WebviewWindow, String> {
-    let init_script = diagnose_runtime_bootstrap_script(runtime);
+    let init_script = diagnose_runtime_bootstrap_script(runtime, defer_boot_scan);
     // Same soft defaults as Ask / Resources; live size follows right-dock layout.
     let window = WebviewWindowBuilder::new(
         app,
@@ -781,11 +791,12 @@ fn create_diagnose_window(
 pub(crate) fn ensure_diagnose_window(
     app: &AppHandle,
     runtime: &str,
+    defer_boot_scan: bool,
 ) -> Result<tauri::WebviewWindow, String> {
     if let Some(existing) = app.get_webview_window(DIAGNOSE_WINDOW_LABEL) {
         return Ok(existing);
     }
-    create_diagnose_window(app, runtime, false)
+    create_diagnose_window(app, runtime, false, defer_boot_scan)
 }
 
 fn apply_diagnose_runtime_in_webview(window: &tauri::WebviewWindow, runtime: &str) {
@@ -813,7 +824,7 @@ pub(crate) fn open_or_focus_diagnose_window(
         .unwrap_or("openclaw");
 
     let already_exists = app.get_webview_window(DIAGNOSE_WINDOW_LABEL).is_some();
-    let window = ensure_diagnose_window(app, runtime)?;
+    let window = ensure_diagnose_window(app, runtime, false)?;
     // Ask / Resources / Diagnose can stay open together.
     show_secondary_window(
         app,
@@ -845,6 +856,9 @@ pub(crate) fn open_or_focus_diagnose_window(
         let _ = window.emit("diagnose-window-focus", &payload);
         let _ = app.emit("diagnose-window-focus", &payload);
     }
+    // Pre-created hidden windows skip the boot scan. Ask them to scan once shown.
+    let _ = window
+        .eval("window.__AD_DIAGNOSE_ENSURE_LOADED__ && window.__AD_DIAGNOSE_ENSURE_LOADED__()");
 
     Ok(())
 }
@@ -863,7 +877,7 @@ pub(crate) fn open_or_focus_resources_window(
 ) -> Result<(), String> {
     let section = resources_section_token(section);
     let already_exists = app.get_webview_window(RESOURCES_WINDOW_LABEL).is_some();
-    let window = ensure_resources_window(app, &section)?;
+    let window = ensure_resources_window(app, &section, false)?;
     // Ask / Resources / Diagnose can stay open together.
     show_secondary_window(
         app,

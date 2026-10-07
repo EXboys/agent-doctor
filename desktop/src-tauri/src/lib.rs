@@ -456,8 +456,8 @@ pub fn run() {
             // raise the Files-and-Folders prompt during startup.
             #[cfg(target_os = "windows")]
             {
-                let _ = windows::ensure_resources_window(app.handle(), "skills");
-                let _ = windows::ensure_diagnose_window(app.handle(), "openclaw");
+                let _ = windows::ensure_resources_window(app.handle(), "skills", true);
+                let _ = windows::ensure_diagnose_window(app.handle(), "openclaw", true);
             }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();

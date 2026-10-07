@@ -10,6 +10,12 @@ import { browserStatusIsFresh, buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpS
 import { buildLocalSkillEntries, entryMatchesQuery, isStoreScope, loadSkills, onSkillsPanelScroll, renderSkillsList } from "./resources-skills";
 import { loadRuntimeCatalog } from "./runtime-catalog";
 
+declare global {
+  interface Window {
+    __AD_DEFER_BOOT_SCAN__?: boolean;
+  }
+}
+
 export function applyI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n as MessageKey | undefined;
@@ -131,10 +137,25 @@ export function setSkillScope(scope: SkillScope): void {
   else void loadSkills();
 }
 
+function resourcesBootDeferred(): boolean {
+  if (window.__AD_DEFER_BOOT_SCAN__ !== true) return false;
+  try {
+    return sessionStorage.getItem("ad.resources.shown") !== "1";
+  } catch {
+    return true;
+  }
+}
+
+let resourcesBootScanDeferred = resourcesBootDeferred();
+
 export function setSection(section: ResourcesSection | "mall"): void {
   if (section === "mall") {
     paintSection("skills");
-    if ((resourcesState.activeSection === "skills" || section === "mall") && !resourcesState.lastDoctorReport) {
+    if (
+      !resourcesBootScanDeferred &&
+      (resourcesState.activeSection === "skills" || section === "mall") &&
+      !resourcesState.lastDoctorReport
+    ) {
       void loadDoctor();
     }
     setSkillScope(personalEdition ? "store" : "local");
@@ -148,7 +169,11 @@ export function setSection(section: ResourcesSection | "mall"): void {
     if (!browserStatusIsFresh()) void loadMcpStatus({ discoverChrome: true });
     return;
   }
-  if ((section === "agents" || section === "skills") && !resourcesState.lastDoctorReport) {
+  if (
+    !resourcesBootScanDeferred &&
+    (section === "agents" || section === "skills") &&
+    !resourcesState.lastDoctorReport
+  ) {
     void loadDoctor();
   }
   if (section === "skills" || section === "tools") {
@@ -464,6 +489,12 @@ applyI18n();
 openFocusedSection(resourcesLaunchSection());
 void listen<{ section?: string }>("resources-window-focus", (event) => {
   openFocusedSection(event.payload?.section);
+  resourcesBootScanDeferred = false;
+  try {
+    sessionStorage.setItem("ad.resources.shown", "1");
+  } catch {
+    // The in-memory flag is enough for this document.
+  }
   void refreshAll();
 });
 void listen("teamups-account-changed", () => {
@@ -471,5 +502,6 @@ void listen("teamups-account-changed", () => {
 });
 void (async () => {
   await loadRuntimeCatalog();
+  if (resourcesBootScanDeferred) return;
   if (resourcesState.lastRefreshAt === 0 && !resourcesState.refreshInFlight) void refreshAll(true);
 })();

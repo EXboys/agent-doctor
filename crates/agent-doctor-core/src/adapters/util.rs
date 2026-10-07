@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::adapter::AdapterDiscovery;
-use crate::exec::{run_output, VERSION_PROBE_TIMEOUT};
+use crate::exec::{run_output, skips_version_probe, VERSION_PROBE_TIMEOUT};
 
 #[cfg(test)]
 thread_local! {
@@ -518,6 +518,11 @@ fn read_version_result_with_flags(
     binary: &PathBuf,
     flags: &[&str],
 ) -> Result<Option<String>, String> {
+    // Cursor.exe and similar desktop apps stay open after a version check.
+    // The file on disk is enough to know they are installed.
+    if skips_version_probe(binary) {
+        return Ok(None);
+    }
     let mut last_error = None;
     for flag in flags {
         match run_output(binary, &[flag], VERSION_PROBE_TIMEOUT) {

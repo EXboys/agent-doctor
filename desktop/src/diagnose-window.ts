@@ -33,6 +33,8 @@ declare global {
   interface Window {
     __AD_DIAGNOSE_RUNTIME__?: string;
     __AD_DIAGNOSE_APPLY_RUNTIME__?: (runtime: string) => void;
+    __AD_DEFER_BOOT_SCAN__?: boolean;
+    __AD_DIAGNOSE_ENSURE_LOADED__?: () => void;
   }
 }
 
@@ -53,7 +55,29 @@ async function loadPreview(): Promise<RepairPreviewResponse> {
   });
 }
 
+let diagnoseScanned = false;
+
+function diagnoseBootDeferred(): boolean {
+  if (window.__AD_DEFER_BOOT_SCAN__ !== true) return false;
+  try {
+    return sessionStorage.getItem("ad.diagnose.shown") !== "1";
+  } catch {
+    return true;
+  }
+}
+
+function ensureDiagnoseLoaded(): void {
+  try {
+    sessionStorage.setItem("ad.diagnose.shown", "1");
+  } catch {
+    // sessionStorage can be blocked; the in-memory flag still gates the scan.
+  }
+  if (diagnoseScanned) return;
+  void refreshState();
+}
+
 async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<void> {
+  diagnoseScanned = true;
   paint.setBusy(true);
   paint.setResult("busy", t("diagnose.flow.scanning"));
   let autoScore = false;
@@ -163,6 +187,7 @@ function applyRuntime(next: string): void {
 }
 
 window.__AD_DIAGNOSE_APPLY_RUNTIME__ = applyRuntime;
+window.__AD_DIAGNOSE_ENSURE_LOADED__ = ensureDiagnoseLoaded;
 
 dom.checkTabsEl.addEventListener("click", (event) => {
   const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-check-filter]");
@@ -289,7 +314,9 @@ document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
 applyStaticI18n(document);
 renderPresetChips();
 paint.paintBootShell();
-void refreshState();
+if (!diagnoseBootDeferred()) {
+  void refreshState();
+}
 
 void listen<{ runtime?: string }>("diagnose-window-focus", (event) => {
   const next = event.payload?.runtime?.trim();
