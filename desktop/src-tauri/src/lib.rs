@@ -432,6 +432,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
+            agent_doctor_core::enable_warm_sessions();
             app.manage(DeepDiagnoseState::default());
             app.manage(IslandHost::default());
             // Paint the main window first. Seeding a workspace can hit macOS
@@ -564,8 +565,13 @@ pub fn run() {
             island_hide_when_idle_command,
             current_island_view_command
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                agent_doctor_core::shutdown_warm_sessions();
+            }
+        });
 }
 
 fn seed_default_workspace_in_background() {

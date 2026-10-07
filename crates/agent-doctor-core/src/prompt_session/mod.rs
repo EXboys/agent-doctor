@@ -15,6 +15,7 @@ mod mcp_ensure;
 mod openclaw;
 mod plan;
 mod util;
+mod warm;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -26,6 +27,7 @@ use crate::evotown::normalize_runtime;
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
 pub use plan::{PlanStep, PlanStepState};
+pub use warm::{enable_warm_sessions, shutdown_warm_sessions};
 
 pub(crate) use claude::ClaudeAskBackend;
 pub(crate) use codex_app_server::CodexAskBackend;
@@ -36,7 +38,7 @@ pub(crate) use openclaw::OpenClawAskBackend;
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) const DEFAULT_TIMEOUT_SEC: u64 = 600;
-pub(crate) const MAX_TIMEOUT_SEC: u64 = 3600;
+pub(crate) const MAX_TIMEOUT_SEC: u64 = 86_400;
 pub(crate) const MIN_TIMEOUT_SEC: u64 = 1;
 /// Cap retained combined output for the final report (UI still streams live).
 pub(crate) const MAX_CAPTURE_CHARS: usize = 200_000;
@@ -80,6 +82,29 @@ fn default_input_mode() -> String {
     "choice".to_string()
 }
 
+/// Why this process stopped a turn. The runtime's own tool and API timeouts
+/// do not set this — they come back as tool errors or a failed turn.
+/// What a runtime's read loop hands back: status, exit code, stdout, stderr,
+/// and the timeout note when this process stopped the turn.
+pub(crate) type PumpResult = (
+    PromptSessionStatus,
+    Option<i32>,
+    String,
+    String,
+    Option<TimeoutNote>,
+);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeoutNote {
+    /// `idle`: nothing was running. `tool`: a tool was still running.
+    /// `absolute`: the turn hit the hard stop.
+    pub kind: String,
+    pub quiet_sec: u64,
+    pub elapsed_sec: u64,
+    #[serde(default)]
+    pub last_tool: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PromptSessionEvent {
@@ -97,6 +122,11 @@ pub enum PromptSessionEvent {
     },
     /// Incremental assistant text (may be partial; not necessarily a full line).
     Delta {
+        session_id: String,
+        text: String,
+    },
+    /// Incremental reasoning text: Claude thinking, or Codex reasoning summary.
+    Thinking {
         session_id: String,
         text: String,
     },
@@ -135,6 +165,9 @@ pub enum PromptSessionEvent {
         status: PromptSessionStatus,
         exit_code: Option<i32>,
         summary: String,
+        /// Set only when this process stopped the turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout: Option<TimeoutNote>,
     },
 }
 

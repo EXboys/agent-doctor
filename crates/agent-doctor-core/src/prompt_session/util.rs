@@ -14,38 +14,184 @@ use super::{PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 
 /// Wall clock for one ask turn.
 ///
-/// `idle` is how long a silent turn may sit. Each new line of output starts
-/// that window again, so a turn that keeps calling tools is not cut off at the
-/// first 10 minutes. `absolute` is the hard stop from the start of the turn.
+/// Quiet time does not stop the turn. A build that prints nothing keeps
+/// running, the same as the agent's own window. `limit` is only the hard stop
+/// from the start of the turn, so a stuck process does not run forever.
 pub(crate) struct SessionClock {
     started: Instant,
-    deadline: Instant,
-    idle: Duration,
+    last_activity: Instant,
     absolute: Duration,
+    tool_running: bool,
 }
 
 impl SessionClock {
-    pub(crate) fn new(idle_sec: u64) -> Self {
+    pub(crate) fn new(limit_sec: u64) -> Self {
         let now = Instant::now();
-        let idle = Duration::from_secs(idle_sec.max(1));
-        let absolute = Duration::from_secs(super::MAX_TIMEOUT_SEC);
         Self {
             started: now,
-            deadline: now + idle.min(absolute),
-            idle,
-            absolute,
+            last_activity: now,
+            absolute: Duration::from_secs(limit_sec.max(1)),
+            tool_running: false,
         }
     }
 
     /// The turn produced output, or is waiting on the user. Keep it alive.
     pub(crate) fn touch(&mut self) {
-        let now = Instant::now();
-        let cap = self.started + self.absolute;
-        self.deadline = (now + self.idle).min(cap);
+        self.last_activity = Instant::now();
+    }
+
+    pub(crate) fn set_tool_running(&mut self, running: bool) {
+        self.tool_running = running;
     }
 
     pub(crate) fn expired(&self) -> bool {
-        Instant::now() >= self.deadline
+        Instant::now() >= self.started + self.absolute
+    }
+
+    pub(crate) fn timeout_note(&self, last_tool: &str) -> super::TimeoutNote {
+        let now = Instant::now();
+        let kind = if now >= self.started + self.absolute {
+            "absolute"
+        } else if self.tool_running {
+            "tool"
+        } else {
+            "idle"
+        };
+        super::TimeoutNote {
+            kind: kind.to_string(),
+            quiet_sec: self.last_activity.elapsed().as_secs(),
+            elapsed_sec: self.started.elapsed().as_secs(),
+            last_tool: last_tool.trim().to_string(),
+        }
+    }
+}
+
+/// Tool calls that have started and not reported back yet.
+#[derive(Default)]
+pub(crate) struct ToolWatch {
+    open: Vec<String>,
+    last_label: String,
+}
+
+impl ToolWatch {
+    pub(crate) fn start(&mut self, id: &str) {
+        if !id.is_empty() && self.open.iter().any(|open| open == id) {
+            return;
+        }
+        self.open.push(id.to_string());
+    }
+
+    /// Ends the call with this id. An unknown or empty id ends the oldest one.
+    pub(crate) fn finish(&mut self, id: &str) {
+        if let Some(pos) = self
+            .open
+            .iter()
+            .position(|open| !id.is_empty() && open == id)
+        {
+            self.open.remove(pos);
+        } else if !self.open.is_empty() {
+            self.open.remove(0);
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.open.clear();
+    }
+
+    pub(crate) fn running(&self) -> bool {
+        !self.open.is_empty()
+    }
+
+    pub(crate) fn remember(&mut self, label: &str) {
+        let line = label.lines().next().unwrap_or("").trim();
+        if line.is_empty() {
+            return;
+        }
+        const MAX: usize = 80;
+        let count = line.chars().count();
+        self.last_label = if count <= MAX {
+            line.to_string()
+        } else {
+            format!("{}…", line.chars().take(MAX).collect::<String>())
+        };
+    }
+
+    pub(crate) fn last_label(&self) -> &str {
+        &self.last_label
+    }
+}
+
+/// Shown while the model works out its next step and nothing else is live.
+pub(crate) const THINKING_AFTER_TOOL: &str = "正在看结果，想下一步…";
+
+/// Streamed reasoning text, turned into the one line the live row shows.
+#[derive(Default)]
+pub(crate) struct ThinkingLine {
+    text: String,
+    shown: String,
+}
+
+impl ThinkingLine {
+    pub(crate) fn reset(&mut self) {
+        self.text.clear();
+        self.shown.clear();
+    }
+
+    /// Returns a new line to show, only when it changed.
+    pub(crate) fn push(&mut self, delta: &str) -> Option<String> {
+        self.text.push_str(delta);
+        let line = thinking_headline(&self.text);
+        if line.is_empty() || line == self.shown {
+            return None;
+        }
+        self.shown = line.clone();
+        Some(format!("正在思考：{line}"))
+    }
+}
+
+/// The latest finished `**heading**`, else the latest finished line. A line
+/// still being written is skipped so the row does not change on every token.
+pub(crate) fn thinking_headline(text: &str) -> String {
+    const MAX: usize = 80;
+    let mut heading = "";
+    let mut rest = text;
+    while let Some(open) = rest.find("**") {
+        let after = &rest[open + 2..];
+        let Some(close) = after.find("**") else { break };
+        let inner = after[..close].trim();
+        if !inner.is_empty() {
+            heading = inner;
+        }
+        rest = &after[close + 2..];
+    }
+    let line = if heading.is_empty() {
+        let finished = text.rfind('\n').map_or("", |end| &text[..end]);
+        finished
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or("")
+    } else {
+        heading
+    };
+    if line.chars().count() <= MAX {
+        line.to_string()
+    } else {
+        format!("{}…", line.chars().take(MAX).collect::<String>())
+    }
+}
+
+/// One line for the timeout notice: tool name, plus the command or path.
+pub(crate) fn tool_chip(name: &str, detail: &str) -> String {
+    let name = name.trim();
+    let detail = detail.lines().next().unwrap_or("").trim();
+    if name.is_empty() {
+        detail.to_string()
+    } else if detail.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}: {detail}")
     }
 }
 
@@ -431,11 +577,69 @@ mod tests {
     }
 
     #[test]
-    fn activity_extends_the_turn_past_the_idle_window() {
-        let mut clock = SessionClock::new(30);
+    fn silence_does_not_stop_the_turn() {
+        let mut clock = SessionClock::new(600);
+        clock.last_activity -= Duration::from_secs(10_000);
+        clock.set_tool_running(true);
         assert!(!clock.expired());
+    }
+
+    #[test]
+    fn the_turn_stops_at_its_time_limit() {
+        let mut clock = SessionClock::new(600);
+        clock.started -= Duration::from_secs(600);
+        clock.set_tool_running(true);
         clock.touch();
-        assert!(!clock.expired());
+        assert!(clock.expired());
+        assert_eq!(clock.timeout_note("npm test").kind, "absolute");
+    }
+
+    #[test]
+    fn timeout_note_names_the_open_tool_or_the_last_one() {
+        let mut clock = SessionClock::new(600);
+        clock.last_activity -= Duration::from_secs(700);
+        let idle = clock.timeout_note("Read: src/login.ts");
+        assert_eq!(idle.kind, "idle");
+        assert!(idle.quiet_sec >= 700);
+        assert_eq!(idle.last_tool, "Read: src/login.ts");
+
+        clock.set_tool_running(true);
+        assert_eq!(clock.timeout_note("Bash: npm test").kind, "tool");
+    }
+
+    #[test]
+    fn thinking_line_shows_finished_headings_only() {
+        let mut line = ThinkingLine::default();
+        assert_eq!(line.push("**Listing fi"), None);
+        assert_eq!(
+            line.push("les**\n\nI will run"),
+            Some("正在思考：Listing files".into())
+        );
+        assert_eq!(line.push(" ls next."), None);
+        assert_eq!(
+            line.push("\n\n**Reading notes**"),
+            Some("正在思考：Reading notes".into())
+        );
+
+        let mut plain = ThinkingLine::default();
+        assert_eq!(plain.push("Check the folder"), None);
+        assert_eq!(
+            plain.push(" first.\nThen"),
+            Some("正在思考：Check the folder first.".into())
+        );
+    }
+
+    #[test]
+    fn tool_watch_pairs_results_by_id() {
+        let mut watch = ToolWatch::default();
+        watch.start("a");
+        watch.start("b");
+        watch.finish("b");
+        assert!(watch.running());
+        watch.finish("");
+        assert!(!watch.running());
+        watch.finish("missing");
+        assert!(!watch.running());
     }
 
     #[test]

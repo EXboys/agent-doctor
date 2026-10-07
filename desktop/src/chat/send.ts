@@ -280,7 +280,7 @@ export function createSendController(deps: SendDeps) {
         runtime,
         prompt,
         cwd: deps.getWorkspaceCwd()?.trim() || null,
-        timeoutSec: 600,
+        timeoutSec: 86_400,
         dangerouslySkipPermissions:
           (runtime === "claude-code" || runtime === "hermes") && elevated,
         fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
@@ -289,6 +289,10 @@ export function createSendController(deps: SendDeps) {
       });
       deps.setDisplayedCwd(report.cwd);
       const session = deps.sessionById(chatSessionId) ?? deps.runTargetSession();
+      session.interrupted =
+        report.status === "succeeded" ? null : { status: report.status, at: Date.now() };
+      deps.touchSession(session);
+      deps.saveStore();
       if (report.runtime_thread_id?.trim()) {
         session.runtimeThreadId = report.runtime_thread_id.trim();
         deps.touchSession(session);

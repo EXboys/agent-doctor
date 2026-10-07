@@ -27,6 +27,28 @@ export type ActivityDeps = {
 
 export type ActivityApi = ReturnType<typeof createActivityController>;
 
+let turnStartedAt = 0;
+
+/** The live row counts from here, the way the agent's own window does. */
+export function markTurnStarted(): void {
+  turnStartedAt = Date.now();
+}
+
+export function elapsedLabel(): string {
+  if (!turnStartedAt) return "";
+  return durationLabel(Date.now() - turnStartedAt);
+}
+
+export function durationLabel(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 1) return "";
+  const zh = getLocale() === "zh";
+  if (sec < 60) return zh ? `${sec} 秒` : `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const rest = sec % 60;
+  return zh ? `${min} 分 ${rest} 秒` : `${min}m ${rest}s`;
+}
+
 export function applyToolRow(row: HTMLElement, text: string): void {
   const { summary, detail } = splitToolActivity(text);
   row.dataset.summary = summary;
@@ -86,6 +108,15 @@ export function renderToolHistoryGroup(texts: string[]): HTMLDetailsElement {
 }
 
 export function createActivityController(deps: ActivityDeps) {
+  window.setInterval(() => {
+    const label = elapsedLabel();
+    for (const el of deps.logEl.querySelectorAll<HTMLElement>(
+      ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed",
+    )) {
+      el.textContent = label;
+    }
+  }, 1000);
+
   /** Remove the transient lifecycle row once a more meaningful event replaces it. */
   function dismissLifecycleActivity(): void {
     const lifecycle = deps.getLifecycleActivityEl();
@@ -328,7 +359,8 @@ export function createActivityController(deps: ActivityDeps) {
       row.className = `chat-activity is-live kind-${kind}`;
       row.dataset.phase = phase;
       row.dataset.kind = kind;
-      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
+      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span><span class="chat-activity-elapsed"></span>`;
+      row.querySelector<HTMLElement>(".chat-activity-elapsed")!.textContent = elapsedLabel();
       const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
       label.textContent = text;
       deps.logEl.appendChild(row);

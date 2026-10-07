@@ -75,7 +75,7 @@ fn run_deepseek_harness(
     let started = Instant::now();
     let mut child = command.spawn().context("failed to spawn dsh")?;
     let timeout = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
-    let (status, exit_code, stdout, stderr) =
+    let (status, exit_code, stdout, stderr, timeout) =
         collect_final_output(&mut child, timeout, cancel.handle())?;
     let duration_ms = started.elapsed().as_millis() as u64;
     let final_stdout = stdout.trim().to_string();
@@ -101,6 +101,7 @@ fn run_deepseek_harness(
         status: status.clone(),
         exit_code,
         summary: summary.clone(),
+        timeout,
     });
     Ok(PromptSessionReport {
         session_id,
@@ -138,7 +139,7 @@ fn collect_final_output(
     child: &mut Child,
     timeout_sec: u64,
     cancel: Arc<AtomicBool>,
-) -> Result<(PromptSessionStatus, Option<i32>, String, String)> {
+) -> Result<super::PumpResult> {
     let pid = child.id();
     let stdout_acc = Arc::new(Mutex::new(String::new()));
     let stderr_acc = Arc::new(Mutex::new(String::new()));
@@ -174,6 +175,7 @@ fn collect_final_output(
     let mut clock = SessionClock::new(timeout_sec);
     let mut seen_output = 0usize;
     let mut pipes_closed_at: Option<Instant> = None;
+    let mut timeout_note = None;
     let (status, exit_code) = loop {
         let output_len = stdout_acc.lock().map(|g| g.len()).unwrap_or(0)
             + stderr_acc.lock().map(|g| g.len()).unwrap_or(0);
@@ -186,6 +188,7 @@ fn collect_final_output(
             break (PromptSessionStatus::Cancelled, None);
         }
         if clock.expired() {
+            timeout_note = Some(clock.timeout_note(""));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
@@ -223,7 +226,7 @@ fn collect_final_output(
         .lock()
         .map(|value| value.clone())
         .unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr))
+    Ok((status, exit_code, stdout, stderr, timeout_note))
 }
 
 #[cfg(test)]

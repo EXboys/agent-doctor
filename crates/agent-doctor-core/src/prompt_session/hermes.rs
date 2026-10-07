@@ -22,8 +22,8 @@ use super::env::{
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
-    tool_input_detail, SessionClock,
+    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_chip,
+    tool_input_detail, SessionClock, ToolWatch,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -123,7 +123,7 @@ fn run_hermes(
 
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
-        Ok((status, exit_code, stdout, stderr)) => {
+        Ok((status, exit_code, stdout, stderr, timeout)) => {
             let stream = extract_hermes_stream_final(&stdout);
             let reply = stream
                 .text
@@ -165,6 +165,7 @@ fn run_hermes(
                 status: status.clone(),
                 exit_code,
                 summary: summary.clone(),
+                timeout,
             });
             PromptSessionReport {
                 session_id,
@@ -187,6 +188,7 @@ fn run_hermes(
                 status: PromptSessionStatus::Failed,
                 exit_code: None,
                 summary: summary.clone(),
+                timeout: None,
             });
             PromptSessionReport {
                 session_id,
@@ -241,7 +243,7 @@ fn pump_lines<F>(
     timeout_sec: u64,
     cancel: Arc<AtomicBool>,
     on_event: &mut F,
-) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
+) -> Result<super::PumpResult>
 where
     F: FnMut(PromptSessionEvent),
 {
@@ -286,7 +288,8 @@ where
     });
 
     let mut plan_board = PlanBoard::default();
-    let mut drain = |on_event: &mut F| -> bool {
+    let mut tools = ToolWatch::default();
+    let mut drain = |on_event: &mut F, tools: &mut ToolWatch| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
             guard.drain(..).collect::<Vec<_>>()
@@ -294,6 +297,7 @@ where
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
+                observe_hermes_tools(&line, tools);
                 handle_hermes_stream_line(session_id, &line, &mut plan_board, on_event);
                 continue;
             }
@@ -310,15 +314,18 @@ where
 
     let mut clock = SessionClock::new(timeout_sec);
     let mut pipes_closed_at: Option<Instant> = None;
+    let mut timeout_note = None;
     let (status, exit_code) = loop {
-        if drain(on_event) {
+        if drain(on_event, &mut tools) {
             clock.touch();
         }
+        clock.set_tool_running(tools.running());
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
         if clock.expired() {
+            timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
@@ -348,11 +355,45 @@ where
 
     join_reader(stdout_handle, Duration::from_millis(500));
     join_reader(stderr_handle, Duration::from_millis(500));
-    drain(on_event);
+    drain(on_event, &mut tools);
 
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
     let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr))
+    Ok((status, exit_code, stdout, stderr, timeout_note))
+}
+
+fn observe_hermes_tools(line: &str, tools: &mut ToolWatch) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    let id = |key: &str| value.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    match value.get("type").and_then(|v| v.as_str()) {
+        Some("tool_use" | "tool_call") => {
+            tools.start(id("id"));
+            let name = value
+                .get("name")
+                .or_else(|| value.get("tool"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("tool");
+            let detail = value
+                .get("input")
+                .or_else(|| value.get("arguments"))
+                .or_else(|| value.get("args"))
+                .map(tool_input_detail)
+                .unwrap_or_default();
+            tools.remember(&tool_chip(hermes_tool_label(name), &detail));
+        }
+        Some("tool_result") => {
+            let tool_id = id("tool_use_id");
+            tools.finish(if tool_id.is_empty() {
+                id("id")
+            } else {
+                tool_id
+            });
+        }
+        Some("result") => tools.clear(),
+        _ => {}
+    }
 }
 
 #[derive(Default)]

@@ -80,6 +80,7 @@ pub fn run(
                 }
             }
             PromptSessionEvent::PermissionResolved { .. }
+            | PromptSessionEvent::Thinking { .. }
             | PromptSessionEvent::Completed { .. } => {}
         }
         let _ = io::stdout().flush();

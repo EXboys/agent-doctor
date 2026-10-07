@@ -402,6 +402,7 @@ export function syncComposerUi(): void {
   }
   chatState.voiceInput?.syncEnabled();
   sessionListEl.classList.remove("is-busy");
+  chatState.running?.setRunning(locked);
   syncActionButton();
   updateElevatedLabel();
   renderModelPickerLabel();
@@ -456,6 +457,7 @@ export function appendStderrLine(line: string): void {
 }
 export function pushActivity(phase: string, message: string): void {
   chatState.latestActivityText = message.trim();
+  chatState.running?.setText(message);
   chatState.activity.pushActivity(phase, message);
 }
 export function settleActivity(): void {

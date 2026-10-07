@@ -211,7 +211,6 @@ fn pending_opens_card(pending: Option<&IslandPending>) -> bool {
 /// Hover peeks. A click on the bar keeps it open.
 /// A question opens it unless the person is typing or they just clicked somewhere else.
 pub(crate) fn island_chrome(
-    macos: bool,
     hovering: bool,
     attention: bool,
     composing: bool,
@@ -220,9 +219,6 @@ pub(crate) fn island_chrome(
     hide_when_idle: bool,
     awake: bool,
 ) -> Chrome {
-    if !macos {
-        return Chrome::Hidden;
-    }
     if hide_when_idle && !awake && !hovering && !opened {
         return Chrome::Hidden;
     }
@@ -367,7 +363,6 @@ fn apply_once(app: &AppHandle) {
         let host = app.state::<IslandHost>();
         let guard = host.inner.lock().expect("island");
         let chrome = island_chrome(
-            cfg!(target_os = "macos"),
             guard.hovering,
             pending_opens_card(guard.snapshot.pending.as_ref()),
             guard.snapshot.composing,
@@ -1514,19 +1509,19 @@ mod tests {
     #[test]
     fn an_idle_bar_hides_until_a_turn_is_running() {
         assert_eq!(
-            island_chrome(true, false, false, false, false, false, true, false),
+            island_chrome(false, false, false, false, false, true, false),
             Chrome::Hidden
         );
         assert_eq!(
-            island_chrome(true, false, false, false, false, false, true, true),
+            island_chrome(false, false, false, false, false, true, true),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, false, true, false, false, false, true, true),
+            island_chrome(false, true, false, false, false, true, true),
             Chrome::Peek
         );
         assert_eq!(
-            island_chrome(true, false, false, false, false, true, true, false),
+            island_chrome(false, false, false, false, true, true, false),
             Chrome::Peek
         );
     }
@@ -1534,11 +1529,11 @@ mod tests {
     #[test]
     fn the_island_stays_up_while_idle_when_hiding_is_off() {
         assert_eq!(
-            island_chrome(true, false, false, false, false, false, false, false),
+            island_chrome(false, false, false, false, false, false, false),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, false, false, false, false, false, false),
+            island_chrome(true, false, false, false, false, false, false),
             Chrome::Peek
         );
     }
@@ -1546,15 +1541,15 @@ mod tests {
     #[test]
     fn a_question_opens_the_island_unless_typing() {
         assert_eq!(
-            island_chrome(true, false, true, false, false, false, false, false),
+            island_chrome(false, true, false, false, false, false, false),
             Chrome::Peek
         );
         assert_eq!(
-            island_chrome(true, false, true, true, false, false, false, false),
+            island_chrome(false, true, true, false, false, false, false),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, true, true, true, false, false, false),
+            island_chrome(true, true, true, true, false, false, false),
             Chrome::Peek
         );
     }
@@ -1562,11 +1557,11 @@ mod tests {
     #[test]
     fn a_click_outside_folds_the_card() {
         assert_eq!(
-            island_chrome(true, false, true, false, true, false, false, false),
+            island_chrome(false, true, false, true, false, false, false),
             Chrome::Pill
         );
         assert_eq!(
-            island_chrome(true, true, true, false, true, false, false, false),
+            island_chrome(true, true, false, true, false, false, false),
             Chrome::Peek
         );
     }
@@ -1574,20 +1569,12 @@ mod tests {
     #[test]
     fn a_click_on_the_bar_opens_it_again() {
         assert_eq!(
-            island_chrome(true, false, true, false, true, true, false, false),
+            island_chrome(false, true, false, true, true, false, false),
             Chrome::Peek
         );
         assert_eq!(
-            island_chrome(true, false, false, false, true, true, false, false),
+            island_chrome(false, false, false, true, true, false, false),
             Chrome::Peek
-        );
-    }
-
-    #[test]
-    fn other_platforms_have_no_island() {
-        assert_eq!(
-            island_chrome(false, true, false, false, false, false, true, false),
-            Chrome::Hidden
         );
     }
 

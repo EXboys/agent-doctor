@@ -212,6 +212,16 @@ while IFS= read -r var; do
   esac
 done < <(compgen -e)
 
+# `open` only brings an already-running copy forward, so a rebuild would keep
+# serving the old backend. Stop it first.
+if pkill -f "$bundle_executable" 2>/dev/null; then
+  for _ in $(seq 1 50); do
+    pgrep -f "$bundle_executable" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  pkill -9 -f "$bundle_executable" 2>/dev/null || true
+fi
+
 echo "▸ Launching $bundle_dir via Launch Services (TCC-safe)"
 open_cmd=(open -W -a "$bundle_dir" --stdout "$stdout_fifo" --stderr "$stderr_fifo")
 if [ "${#env_args[@]}" -gt 0 ]; then

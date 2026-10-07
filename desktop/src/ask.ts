@@ -324,7 +324,7 @@ async function startAsk(hooks: AskPanelHooks): Promise<void> {
       runtime,
       prompt: text,
       cwd: null, // backend resolves active workspace when null
-      timeoutSec: 600,
+      timeoutSec: 86_400,
       dangerouslySkipPermissions: flags.dangerously_skip_permissions,
       fullAuto: flags.full_auto,
     });

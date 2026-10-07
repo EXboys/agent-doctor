@@ -77,9 +77,9 @@ pub use profile::{
     read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
 };
 pub use prompt_session::{
-    run_prompt_session, run_prompt_session_with_cancel, PlanStep, PlanStepState,
-    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionReport, PromptSessionStatus,
+    enable_warm_sessions, run_prompt_session, run_prompt_session_with_cancel,
+    shutdown_warm_sessions, PlanStep, PlanStepState, PromptSessionCancel, PromptSessionControl,
+    PromptSessionEvent, PromptSessionOptions, PromptSessionReport, PromptSessionStatus,
 };
 pub use remote::{
     add_host, add_project, bootstrap_and_add_host, list_hosts, list_projects, load_remote_hosts,

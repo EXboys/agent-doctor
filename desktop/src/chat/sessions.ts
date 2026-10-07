@@ -126,6 +126,22 @@ export function createSessionsController(deps: SessionsDeps) {
     }
   }
 
+  /** The conversation just opened from an agent card belongs at the top of the list. */
+  function bringSessionToFront(id: string): void {
+    const sessions = deps.getStore().sessions;
+    const index = sessions.findIndex((session) => session.id === id);
+    if (index > 0) {
+      const [session] = sessions.splice(index, 1);
+      sessions.unshift(session);
+      deps.saveStore();
+      renderSessionList();
+    }
+    const row = deps.sessionListEl.querySelector<HTMLElement>(
+      `.chat-session[data-session-id="${CSS.escape(id)}"]`,
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }
+
   function detachLiveDom(): void {
     deps.flushPendingTextSync();
     if (deps.getAssistantMessageId() && deps.getAssistantRaw()) {
@@ -279,7 +295,7 @@ export function createSessionsController(deps: SessionsDeps) {
     deps.setCurrentRuntime(runtime);
     const active = deps.activeSession();
     if (active.runtime === runtime) {
-      renderSessionList();
+      bringSessionToFront(active.id);
       return;
     }
     // Prefer the most recently updated session for this agent.
@@ -288,6 +304,7 @@ export function createSessionsController(deps: SessionsDeps) {
       .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (existing) {
       switchSession(existing.id);
+      bringSessionToFront(existing.id);
       return;
     }
     startNewSession();
@@ -338,6 +355,7 @@ export function createSessionsController(deps: SessionsDeps) {
     session.messages = [];
     session.title = "";
     session.runtimeThreadId = null;
+    session.interrupted = null;
     session.updatedAt = Date.now();
     deps.saveStore();
     if (!deps.getBusy()) {
@@ -393,6 +411,7 @@ export function createSessionsController(deps: SessionsDeps) {
     );
     session.messages = [...pendingPermissions, summary, ...keep];
     session.runtimeThreadId = null;
+    session.interrupted = null;
     deps.touchSession(session);
     deps.saveStore();
     deps.closeContextPopover();

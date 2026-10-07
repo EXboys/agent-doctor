@@ -147,7 +147,7 @@ fn run_openclaw(
 
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
-        Ok((status, exit_code, stdout, stderr)) => {
+        Ok((status, exit_code, stdout, stderr, timeout)) => {
             let parsed = parse_openclaw_json_output(&stdout);
             let reply = parsed
                 .as_ref()
@@ -200,6 +200,7 @@ fn run_openclaw(
                 status: status.clone(),
                 exit_code,
                 summary: summary.clone(),
+                timeout,
             });
             PromptSessionReport {
                 session_id,
@@ -222,6 +223,7 @@ fn run_openclaw(
                 status: PromptSessionStatus::Failed,
                 exit_code: None,
                 summary: summary.clone(),
+                timeout: None,
             });
             PromptSessionReport {
                 session_id,
@@ -361,7 +363,7 @@ fn pump_lines<F>(
     cancel: Arc<AtomicBool>,
     tool_trace: ToolTraceState<'_>,
     on_event: &mut F,
-) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
+) -> Result<super::PumpResult>
 where
     F: FnMut(PromptSessionEvent),
 {
@@ -430,6 +432,7 @@ where
     let mut clock = SessionClock::new(timeout_sec);
     let mut next_tool_poll = Instant::now();
     let mut pipes_closed_at: Option<Instant> = None;
+    let mut timeout_note = None;
     let (status, exit_code) = loop {
         let saw_output = drain(on_event);
         let trace_before = *tool_trace.trace_len;
@@ -453,6 +456,12 @@ where
             break (PromptSessionStatus::Cancelled, None);
         }
         if clock.expired() {
+            let last_tool = tool_trace
+                .path
+                .map(collect_last_turn_openclaw_tools)
+                .and_then(|names| names.into_iter().next_back())
+                .unwrap_or_default();
+            timeout_note = Some(clock.timeout_note(&last_tool));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
@@ -495,7 +504,7 @@ where
 
     let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
     let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr))
+    Ok((status, exit_code, stdout, stderr, timeout_note))
 }
 
 fn emit_openclaw_turn_tools<F>(

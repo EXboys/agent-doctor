@@ -7,6 +7,8 @@ import type { BubblesApi } from "./chat/bubbles";
 import type { StreamApi } from "./chat/stream";
 import type { SendApi } from "./chat/send";
 import type { ActivityApi } from "./chat/activity";
+import type { ThinkingApi } from "./chat/thinking";
+import type { RunningApi } from "./chat/running";
 import type { ModelPickerApi } from "./chat/model-picker";
 import type { DecisionApi } from "./chat/decision";
 import type { AttachmentsApi } from "./chat/attachments";
@@ -38,6 +40,8 @@ export const chatState = {
   stream: undefined as unknown as StreamApi,
   send: undefined as unknown as SendApi,
   activity: undefined as unknown as ActivityApi,
+  thinking: undefined as unknown as ThinkingApi,
+  running: null as RunningApi | null,
   modelPicker: undefined as unknown as ModelPickerApi,
   decision: undefined as unknown as DecisionApi,
   attachments: undefined as unknown as AttachmentsApi,

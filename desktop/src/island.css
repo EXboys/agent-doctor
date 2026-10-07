@@ -1040,67 +1040,91 @@ textarea.island-reply {
 .island-choices {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
+/* Beats `.island-actions button` (fixed 34px pills): option cards grow with their text. */
+.island-actions button.island-choice,
 .island-choice {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  flex: none;
+  align-items: start;
+  gap: 12px;
+  box-sizing: border-box;
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: rgba(6, 182, 212, 0.1);
+  height: auto;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
   color: inherit;
   font: inherit;
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.island-choice:hover {
-  background: rgba(6, 182, 212, 0.18);
+.island-actions .island-choice:hover {
+  border-color: rgba(6, 182, 212, 0.35);
+  background: rgba(6, 182, 212, 0.1);
 }
 
-.island-choice.is-selected {
-  border-color: rgba(6, 182, 212, 0.7);
-  background: rgba(6, 182, 212, 0.24);
+.island-actions .island-choice.is-selected {
+  border-color: rgba(6, 182, 212, 0.8);
+  background: rgba(6, 182, 212, 0.16);
+  box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.25) inset;
 }
 
 .island-choice-num {
   flex: none;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
-  border-radius: 4px;
-  background: rgba(6, 182, 212, 0.55);
-  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.78);
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
   font-size: 11px;
   font-weight: 700;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.island-choice:hover .island-choice-num {
+  background: rgba(6, 182, 212, 0.35);
+  color: #fff;
+}
+
+.island-choice.is-selected .island-choice-num {
+  background: #06b6d4;
+  color: #04252b;
 }
 
 .island-choice-copy {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .island-choice-label {
   font-size: 13px;
   font-weight: 650;
+  line-height: 1.35;
   color: #fff;
+  overflow-wrap: anywhere;
 }
 
 .island-choice-note {
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
   color: rgba(255, 255, 255, 0.55);
+  overflow-wrap: anywhere;
 }
 
 .island-choice-other {

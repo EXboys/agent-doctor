@@ -2,7 +2,7 @@ import type { AskRuntime } from "../ask-resources";
 import type { AgentPlan, PlanStep } from "../plan";
 
 export type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
-export type ChatRole = "user" | "assistant" | "meta" | "permission" | "tool";
+export type ChatRole = "user" | "assistant" | "meta" | "permission" | "tool" | "thinking";
 export type AttachKind = "file" | "image";
 export type ChatTheme = "light" | "dark";
 export type CopyIdleKind = "text" | "code";
@@ -22,6 +22,7 @@ export type PromptSessionEvent =
   | { type: "started"; session_id: string; runtime: string; cwd: string; command: string }
   | { type: "status"; session_id: string; phase: string; message: string }
   | { type: "delta"; session_id: string; text: string }
+  | { type: "thinking"; session_id: string; text: string }
   | { type: "stdout_line"; session_id: string; line: string }
   | { type: "stderr_line"; session_id: string; line: string }
   | {
@@ -46,6 +47,13 @@ export type PromptSessionEvent =
       status: PromptSessionStatus;
       exit_code: number | null;
       summary: string;
+      /** Set when this app stopped the turn. Absent when the runtime stopped it. */
+      timeout?: {
+        kind: "idle" | "tool" | "absolute" | string;
+        quiet_sec: number;
+        elapsed_sec: number;
+        last_tool: string;
+      } | null;
     };
 
 export interface ChatAttachment {
@@ -89,6 +97,8 @@ export interface ChatSession {
   runtimeThreadId?: string | null;
   /** Latest checklist from the agent. Replaced as items move. */
   plan?: AgentPlan;
+  /** Set when the last turn stopped before it finished. The next turn hears what it already did. */
+  interrupted?: { status: Exclude<PromptSessionStatus, "succeeded">; at: number } | null;
 }
 
 export interface SessionStore {

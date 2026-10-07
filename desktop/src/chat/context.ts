@@ -1,5 +1,70 @@
+import { splitToolActivity } from "./format";
 import type { ChatAttachment, ChatSession } from "./types";
 import { MAX_CONTEXT_MESSAGES } from "./types";
+
+const STOPPED_STEP_CHARS = 160;
+const STOPPED_MAX_STEPS = 20;
+const STOPPED_REPLY_CHARS = 1200;
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * What the stopped turn already did. Without it a follow-up like “continue”
+ * reaches a model that never saw the tool work, so it starts over.
+ */
+export function stoppedTurnNote(session: ChatSession, withReply: boolean): string {
+  const status = session.interrupted?.status;
+  if (!status) return "";
+  const userAt = session.messages.flatMap((m, i) => (m.role === "user" ? [i] : []));
+  if (userAt.length < 2) return "";
+  const turn = session.messages.slice(userAt[userAt.length - 2] + 1, userAt[userAt.length - 1]);
+
+  const steps = turn
+    .filter((m) => m.role === "tool" && m.content.trim())
+    .map((m) => {
+      const { summary, detail } = splitToolActivity(m.content);
+      const name = summary.replace(/[….\s]+$/, "");
+      const firstDetail = detail.split("\n")[0]?.trim() ?? "";
+      return clip(firstDetail ? `${name}: ${firstDetail}` : name, STOPPED_STEP_CHARS);
+    });
+  const reply = withReply
+    ? turn
+        .filter((m) => m.role === "assistant")
+        .map((m) => m.content.trim())
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
+  if (steps.length === 0 && !reply) return "";
+
+  const why =
+    status === "timed_out"
+      ? "it went too long without any progress and was stopped"
+      : status === "cancelled"
+        ? "the user stopped it"
+        : "it hit an error";
+  const parts = [`The previous turn did not finish: ${why}.`];
+  if (steps.length > 0) {
+    const kept = steps.slice(-STOPPED_MAX_STEPS);
+    const skipped = steps.length - kept.length;
+    const lines = kept.map((step) => `- ${step}`).join("\n");
+    parts.push(
+      `Steps it already took${skipped > 0 ? ` (last ${kept.length} of ${steps.length})` : ""}:\n${lines}`,
+    );
+  }
+  if (reply) {
+    const tail = reply.length > STOPPED_REPLY_CHARS ? `…${reply.slice(-STOPPED_REPLY_CHARS)}` : reply;
+    parts.push(`What it had written before it stopped:\n${tail}`);
+  }
+  parts.push(
+    "If the user asks to continue, pick up where it stopped. Check the current state first, " +
+      "keep the work already done, and do not start the task over. " +
+      "If a step was cut off mid-way, redo only that step. " +
+      "If a long command caused the stop, run it in a way that prints progress or finishes sooner.",
+  );
+  return parts.join("\n\n");
+}
 
 export type ImageReading = {
   name: string;
@@ -37,6 +102,9 @@ export function buildPromptWithHistory(
   // Native resume already carries thread history — only send this turn.
   if (session.runtimeThreadId?.trim()) {
     const parts: string[] = [responseStyle];
+    // A killed turn may not have saved its last words in the native thread.
+    const stopped = stoppedTurnNote(session, true);
+    if (stopped) parts.push(stopped);
     const pictureText = imageReadingBlock(readings);
     if (pictureText) {
       parts.push(pictureText);
@@ -68,6 +136,8 @@ export function buildPromptWithHistory(
       .join("\n\n");
     parts.push(`Conversation so far:\n\n${transcript}`);
   }
+  const stopped = stoppedTurnNote(session, false);
+  if (stopped) parts.push(stopped);
 
   const pictureText = imageReadingBlock(readings);
   if (pictureText) {

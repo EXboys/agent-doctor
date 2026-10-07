@@ -9,6 +9,7 @@ import {
   toolSignature,
 } from "./format";
 import { renderToolHistoryGroup } from "./activity";
+import { renderThinkingBlock } from "./thinking";
 import {
   assistantMsgWrap,
   bubblePlainText,
@@ -463,7 +464,11 @@ export function createBubblesController(deps: BubblesDeps) {
           i += run.length;
           continue;
         }
-        if (message.role === "assistant") {
+        if (message.role === "thinking") {
+          if (message.content.trim()) {
+            deps.logEl.appendChild(renderThinkingBlock(message.content, { id: message.id }));
+          }
+        } else if (message.role === "assistant") {
           const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
           const liveContent =
             deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()

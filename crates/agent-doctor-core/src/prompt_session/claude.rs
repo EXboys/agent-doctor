@@ -18,8 +18,10 @@ use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, format_tool_status,
-    is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_input_detail, SessionClock,
+    is_runtime_stderr_noise, summarize, tool_chip, tool_input_detail, SessionClock, ThinkingLine,
+    ToolWatch, THINKING_AFTER_TOOL,
 };
+use super::warm::{self, LivePipes};
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
@@ -89,15 +91,24 @@ fn run_claude(
         prompt.to_string()
     };
 
-    let mut cmd = build_claude_command(
-        &effective_prompt,
-        &cwd,
-        options.dangerously_skip_permissions,
+    // A process that reads messages on stdin can take the next one too.
+    let stream_input = interactive || warm::enabled();
+    let launch = ClaudeLaunch {
+        cwd: &cwd,
+        skip_permissions: options.dangerously_skip_permissions,
         interactive,
-        resume_session_id,
-        &overlay,
-    )?;
+        stream_input,
+        overlay: &overlay,
+    };
+    let mut cmd = build_claude_command(&effective_prompt, &launch, resume_session_id)?;
     let command_display = format_command_display(&cmd);
+    let fingerprint = if warm::enabled() {
+        build_claude_command("", &launch, None)
+            .ok()
+            .map(|base| warm::fingerprint(&base, &claude_config_files(&cwd)))
+    } else {
+        None
+    };
 
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),
@@ -107,26 +118,61 @@ fn run_claude(
     });
 
     let started = Instant::now();
-    let mut child = cmd.spawn().context("failed to spawn claude-code")?;
+    let writer = control.clone().unwrap_or_default();
+    let user_msg = serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{ "type": "text", "text": effective_prompt }]
+        }
+    })
+    .to_string();
 
-    if interactive {
-        if let Some(stdin) = child.stdin.take() {
-            if let Some(control) = control.as_ref() {
-                control.attach_stdin(stdin);
-                let user_msg = serde_json::json!({
-                    "type": "user",
-                    "message": {
-                        "role": "user",
-                        "content": [{ "type": "text", "text": effective_prompt }]
-                    }
-                });
-                if let Err(err) = control.write_line(&user_msg.to_string()) {
-                    control.close();
-                    return Err(err).context("failed to send Claude ask prompt on stdin");
-                }
+    let mut reused = None;
+    if let (Some(fp), Some(sid)) = (fingerprint, resume_session_id) {
+        if let Some(parked) = warm::take("claude-code", sid, fp) {
+            let warm::WarmProcess {
+                child,
+                stdin,
+                pipes,
+                ..
+            } = parked;
+            writer.close();
+            writer.attach_stdin(stdin);
+            if writer.write_line(&user_msg).is_ok() {
+                reused = Some((child, pipes));
+            } else {
+                writer.close();
+                warm::retire_without_stdin(child, pipes);
             }
         }
     }
+    let (mut child, mut pipes) = match reused {
+        Some(live) => live,
+        None => {
+            let mut child = cmd.spawn().context("failed to spawn claude-code")?;
+            let pipes = match LivePipes::attach(&mut child) {
+                Ok(pipes) => pipes,
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(err);
+                }
+            };
+            if stream_input {
+                if let Some(stdin) = child.stdin.take() {
+                    writer.close();
+                    writer.attach_stdin(stdin);
+                    if let Err(err) = writer.write_line(&user_msg) {
+                        writer.close();
+                        warm::retire_without_stdin(child, pipes);
+                        return Err(err).context("failed to send Claude ask prompt on stdin");
+                    }
+                }
+            }
+            (child, pipes)
+        }
+    };
 
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
@@ -153,19 +199,27 @@ fn run_claude(
     let result = pump_claude(
         &session_id,
         &mut child,
+        &mut pipes,
         timeout_sec,
         cancel.handle(),
-        control.as_ref(),
+        stream_input.then_some(&writer),
+        fingerprint.is_some(),
         &mut emit,
     );
 
-    if let Some(control) = control.as_ref() {
-        control.close();
-    }
+    let park_as = match (&result, fingerprint) {
+        (Ok((PromptSessionStatus::Succeeded, _, stdout, _, _)), Some(fp)) => {
+            extract_claude_session_id(stdout)
+                .or_else(|| resume_session_id.map(str::to_string))
+                .map(|sid| (sid, fp))
+        }
+        _ => None,
+    };
+    warm::keep_or_close("claude-code", park_as, child, pipes, &writer);
 
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
-        Ok((status, exit_code, stdout, stderr)) => {
+        Ok((status, exit_code, stdout, stderr, timeout)) => {
             let recovered = if display_text
                 .lock()
                 .map(|g| g.trim().is_empty())
@@ -203,6 +257,7 @@ fn run_claude(
                 status: status.clone(),
                 exit_code,
                 summary: summary.clone(),
+                timeout,
             });
             PromptSessionReport {
                 session_id,
@@ -223,6 +278,7 @@ fn run_claude(
                 status: PromptSessionStatus::Failed,
                 exit_code: None,
                 summary: summary.clone(),
+                timeout: None,
             });
             PromptSessionReport {
                 session_id,
@@ -240,14 +296,37 @@ fn run_claude(
     Ok(report)
 }
 
+struct ClaudeLaunch<'a> {
+    cwd: &'a Path,
+    skip_permissions: bool,
+    interactive: bool,
+    /// Messages go in on stdin as stream-json instead of as an argument.
+    stream_input: bool,
+    overlay: &'a std::collections::HashMap<String, String>,
+}
+
+fn claude_config_files(cwd: &Path) -> Vec<std::path::PathBuf> {
+    let home = crate::adapters::util::home_join(".claude");
+    vec![
+        home.join("settings.json"),
+        cwd.join(".mcp.json"),
+        cwd.join(".claude").join("settings.json"),
+        cwd.join(".claude").join("settings.local.json"),
+    ]
+}
+
 fn build_claude_command(
     prompt: &str,
-    cwd: &Path,
-    skip_permissions: bool,
-    interactive_permissions: bool,
+    launch: &ClaudeLaunch<'_>,
     resume_session_id: Option<&str>,
-    overlay: &std::collections::HashMap<String, String>,
 ) -> Result<Command> {
+    let ClaudeLaunch {
+        cwd,
+        skip_permissions,
+        interactive: interactive_permissions,
+        stream_input,
+        overlay,
+    } = *launch;
     let bin = std::env::var("AGENT_DOCTOR_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
     let mut cmd = command_from_cli(&bin);
     cmd.arg("-p")
@@ -287,16 +366,15 @@ fn build_claude_command(
                 ]
             }
         });
-        cmd.arg("--input-format")
-            .arg("stream-json")
-            .arg("--permission-prompt-tool")
+        cmd.arg("--permission-prompt-tool")
             .arg("stdio")
             .arg("--settings")
             .arg(ask_settings.to_string())
             .arg("--append-system-prompt")
             .arg(CLAUDE_ASK_INSTRUCTIONS);
     }
-    if interactive_permissions {
+    if stream_input || interactive_permissions {
+        cmd.arg("--input-format").arg("stream-json");
         cmd.stdin(Stdio::piped());
     } else {
         cmd.arg("--").arg(prompt).stdin(Stdio::null());
@@ -306,61 +384,49 @@ fn build_claude_command(
     Ok(cmd)
 }
 
+/// Read one turn. With `keep_alive` Claude stays up after `result` so it can be
+/// parked; otherwise stdin closes and the process is reaped.
+#[allow(clippy::too_many_arguments)]
 fn pump_claude<F>(
     session_id: &str,
     child: &mut Child,
+    pipes: &mut LivePipes,
     timeout_sec: u64,
     cancel: Arc<AtomicBool>,
     control: Option<&PromptSessionControl>,
+    keep_alive: bool,
     on_event: &mut F,
-) -> Result<(PromptSessionStatus, Option<i32>, String, String)>
+) -> Result<super::PumpResult>
 where
     F: FnMut(PromptSessionEvent),
 {
     let pid = child.id();
-    let queue = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
-    let stdout_acc = Arc::new(Mutex::new(String::new()));
-    let stderr_acc = Arc::new(Mutex::new(String::new()));
-
-    let stdout = child.stdout.take().context("missing stdout pipe")?;
-    let stderr = child.stderr.take().context("missing stderr pipe")?;
-
-    let q_out = Arc::clone(&queue);
-    let acc_out = Arc::clone(&stdout_acc);
-    let stdout_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_out, &line);
-            if let Ok(mut guard) = q_out.lock() {
-                guard.push((true, line));
-            }
-        }
-    });
-
-    let q_err = Arc::clone(&queue);
-    let acc_err = Arc::clone(&stderr_acc);
-    let stderr_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_err, &line);
-            if let Ok(mut guard) = q_err.lock() {
-                guard.push((false, line));
-            }
-        }
-    });
-
     let turn_done = Arc::new(AtomicBool::new(false));
     let mut plan_board = PlanBoard::default();
-    let mut drain = |on_event: &mut F| -> bool {
-        let drained = {
-            let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
-            guard.drain(..).collect::<Vec<_>>()
-        };
+    let mut tools = ToolWatch::default();
+    let mut thinking = ThinkingLine::default();
+    let mut drain = |on_event: &mut F, tools: &mut ToolWatch, pipes: &LivePipes| -> bool {
+        let drained = pipes.drain();
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
+                let value = serde_json::from_str::<serde_json::Value>(&line).ok();
+                if let Some(text) = value.as_ref().and_then(claude_thinking_delta) {
+                    on_event(PromptSessionEvent::Thinking {
+                        session_id: session_id.to_string(),
+                        text: text.to_string(),
+                    });
+                }
+                let status = value
+                    .as_ref()
+                    .and_then(|value| claude_thinking_status(value, tools, &mut thinking));
+                if let Some(message) = status {
+                    on_event(PromptSessionEvent::Status {
+                        session_id: session_id.to_string(),
+                        phase: "thinking".into(),
+                        message,
+                    });
+                }
                 for event in parse_claude_stream_line(
                     session_id,
                     &line,
@@ -382,21 +448,29 @@ where
 
     let mut clock = SessionClock::new(timeout_sec);
     let mut closed_after_result = false;
+    let mut timeout_note = None;
+    let mut still_running = false;
     let (status, exit_code) = loop {
-        let saw_output = drain(on_event);
+        let saw_output = drain(on_event, &mut tools, pipes);
         if saw_output || control.is_some_and(PromptSessionControl::has_pending) {
             clock.touch();
         }
+        clock.set_tool_running(tools.running());
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
         if clock.expired() {
+            timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
         }
+        if turn_done.load(Ordering::SeqCst) && keep_alive && matches!(child.try_wait(), Ok(None)) {
+            still_running = true;
+            break (PromptSessionStatus::Succeeded, None);
+        }
         // stream-json keeps Claude alive for another stdin turn after `result`.
-        // Ask is one shot — close stdin so the process can exit and the UI unblocks.
+        // Without keep_alive, close stdin so the process can exit and the UI unblocks.
         if turn_done.load(Ordering::SeqCst) && !closed_after_result {
             closed_after_result = true;
             if let Some(control) = control {
@@ -429,13 +503,85 @@ where
         }
     };
 
-    join_reader(stdout_handle, Duration::from_millis(500));
-    join_reader(stderr_handle, Duration::from_millis(500));
-    drain(on_event);
+    if !still_running {
+        pipes.join(Duration::from_millis(500));
+    }
+    drain(on_event, &mut tools, pipes);
 
-    let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr))
+    let (stdout, stderr) = pipes.take_output();
+    Ok((status, exit_code, stdout, stderr, timeout_note))
+}
+
+fn claude_thinking_delta(value: &serde_json::Value) -> Option<&str> {
+    if value.get("type").and_then(|v| v.as_str()) != Some("stream_event") {
+        return None;
+    }
+    value
+        .pointer("/event/delta/thinking")
+        .and_then(|v| v.as_str())
+        .filter(|text| !text.is_empty())
+}
+
+/// Live row text while Claude thinks, or once every open tool has returned.
+fn claude_thinking_status(
+    value: &serde_json::Value,
+    tools: &mut ToolWatch,
+    thinking: &mut ThinkingLine,
+) -> Option<String> {
+    if value.get("type").and_then(|v| v.as_str()) == Some("stream_event") {
+        let event = value.get("event")?;
+        match event.get("type").and_then(|v| v.as_str()) {
+            Some("content_block_start")
+                if event
+                    .pointer("/content_block/type")
+                    .and_then(|v| v.as_str())
+                    == Some("thinking") =>
+            {
+                thinking.reset();
+                None
+            }
+            Some("content_block_delta") => thinking.push(claude_thinking_delta(value)?),
+            _ => None,
+        }
+    } else {
+        let was_running = tools.running();
+        observe_claude_tools(value, tools);
+        (was_running && !tools.running()).then(|| THINKING_AFTER_TOOL.to_string())
+    }
+}
+
+/// `tool_use` arrives on an assistant message; its `tool_result` comes back on
+/// the next user message with the same id.
+fn observe_claude_tools(value: &serde_json::Value, tools: &mut ToolWatch) {
+    let (wanted, id_key) = match value.get("type").and_then(|v| v.as_str()) {
+        Some("assistant") => ("tool_use", "id"),
+        Some("user") => ("tool_result", "tool_use_id"),
+        Some("result") => {
+            tools.clear();
+            return;
+        }
+        _ => return,
+    };
+    let Some(blocks) = value.pointer("/message/content").and_then(|v| v.as_array()) else {
+        return;
+    };
+    for block in blocks {
+        if block.get("type").and_then(|v| v.as_str()) != Some(wanted) {
+            continue;
+        }
+        let id = block.get(id_key).and_then(|v| v.as_str()).unwrap_or("");
+        if wanted == "tool_use" {
+            let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+            let detail = block
+                .get("input")
+                .map(tool_input_detail)
+                .unwrap_or_default();
+            tools.start(id);
+            tools.remember(&tool_chip(name, &detail));
+        } else {
+            tools.finish(id);
+        }
+    }
 }
 
 fn permission_detail(
@@ -970,6 +1116,66 @@ mod tests {
     }
 
     #[test]
+    fn a_tool_runs_until_its_result_comes_back() {
+        let mut tools = ToolWatch::default();
+        let mut thinking = ThinkingLine::default();
+        let line = |raw: &str| serde_json::from_str::<serde_json::Value>(raw).unwrap();
+        let started = claude_thinking_status(
+            &line(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm test"}}]}}"#,
+            ),
+            &mut tools,
+            &mut thinking,
+        );
+        assert_eq!(started, None);
+        assert!(tools.running());
+        assert_eq!(tools.last_label(), "Bash: npm test");
+        let returned = claude_thinking_status(
+            &line(
+                r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
+            ),
+            &mut tools,
+            &mut thinking,
+        );
+        assert!(!tools.running());
+        assert_eq!(returned.as_deref(), Some(THINKING_AFTER_TOOL));
+    }
+
+    #[test]
+    fn thinking_deltas_become_a_live_line() {
+        let mut tools = ToolWatch::default();
+        let mut thinking = ThinkingLine::default();
+        let line = |raw: &str| serde_json::from_str::<serde_json::Value>(raw).unwrap();
+        claude_thinking_status(
+            &line(
+                r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking"}}}"#,
+            ),
+            &mut tools,
+            &mut thinking,
+        );
+        let shown = claude_thinking_status(
+            &line(
+                r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"看一下笔记目录\n然后"}}}"#,
+            ),
+            &mut tools,
+            &mut thinking,
+        );
+        assert_eq!(shown.as_deref(), Some("正在思考：看一下笔记目录"));
+        assert_eq!(
+            claude_thinking_delta(&line(
+                r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"然后"}}}"#
+            )),
+            Some("然后")
+        );
+        assert_eq!(
+            claude_thinking_delta(&line(
+                r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}"#
+            )),
+            None
+        );
+    }
+
+    #[test]
     fn result_marks_turn_done() {
         let flag = AtomicBool::new(false);
         let _ = parse_claude_stream_line(
@@ -1064,15 +1270,15 @@ mod tests {
     #[test]
     fn interactive_claude_routes_open_questions() {
         let dir = tempdir().unwrap();
-        let cmd = build_claude_command(
-            "hi",
-            dir.path(),
-            false,
-            true,
-            None,
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let overlay = std::collections::HashMap::new();
+        let launch = ClaudeLaunch {
+            cwd: dir.path(),
+            skip_permissions: false,
+            interactive: true,
+            stream_input: true,
+            overlay: &overlay,
+        };
+        let cmd = build_claude_command("hi", &launch, None).unwrap();
         let args: Vec<String> = cmd
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -1105,15 +1311,15 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{}}"#).unwrap();
         let prompt = "Response style: answer the user directly and concisely.";
-        let cmd = build_claude_command(
-            prompt,
-            dir.path(),
-            true,
-            false,
-            None,
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let overlay = std::collections::HashMap::new();
+        let launch = ClaudeLaunch {
+            cwd: dir.path(),
+            skip_permissions: true,
+            interactive: false,
+            stream_input: false,
+            overlay: &overlay,
+        };
+        let cmd = build_claude_command(prompt, &launch, None).unwrap();
         let args: Vec<String> = cmd
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())

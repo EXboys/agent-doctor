@@ -113,6 +113,9 @@ import { createBubblesController } from "./chat/bubbles";
 import { createStreamController } from "./chat/stream";
 import { createSendController } from "./chat/send";
 import { createActivityController } from "./chat/activity";
+import { createThinkingController } from "./chat/thinking";
+import { createRunningIndicator } from "./chat/running";
+import { t } from "./i18n";
 import { createModelPickerController } from "./chat/model-picker";
 import { createDecisionController } from "./chat/decision";
 import { createAttachmentsController } from "./chat/attachments";
@@ -326,6 +329,27 @@ export function wireChatControllers(): void {
     },
   });
 
+  chatState.running = createRunningIndicator(composerBoxEl);
+
+  chatState.thinking = createThinkingController({
+    logEl,
+    isViewingRunningSession: () => isViewingRunningSession(),
+    persistMessage: (content) => chatState.bubbles.persistMessage("thinking", content),
+    updateMessage: (id, content) => {
+      updateAssistantMessage(id, content, { persist: false });
+      scheduleStorePersist();
+    },
+    endReply: () => {
+      flushPendingTextSync();
+      sealAssistantBubble();
+    },
+    beforeBlock: () => {
+      dismissLifecycleActivity();
+      settleActivity();
+      finishToolGroup(true);
+    },
+  });
+
   chatState.permissions = createPermissionsController({
     logEl,
     isViewingRunningSession: () => isViewingRunningSession(),
@@ -493,6 +517,14 @@ export function wireChatControllers(): void {
     flushSessionListRender: () => flushSessionListRender(),
     noteVerifyBrowserSignal: (text, source) => noteVerifyBrowserSignal(text, source),
     queueAssistantText: (text) => queueAssistantText(text),
+    thinking: {
+      append: (text) => {
+        chatState.running?.setText(t("chat.thinkingLive"));
+        chatState.thinking.append(text);
+      },
+      seal: () => chatState.thinking.seal(),
+      isLive: () => chatState.thinking.isLive(),
+    },
     appendStderrLine: (line) => appendStderrLine(line),
     pushPermissionCard: (payload) => pushPermissionCard(payload),
     markPermissionResolved: (requestId, allowed) => markPermissionResolved(requestId, allowed),

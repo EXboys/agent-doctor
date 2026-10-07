@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::prompt_session::control::{CodexReplyKind, PromptSessionControl};
 use crate::prompt_session::plan::{plan_from_item, plan_from_tool};
-use crate::prompt_session::util::humanize_runtime_error;
+use crate::prompt_session::util::{humanize_runtime_error, THINKING_AFTER_TOOL};
 use crate::prompt_session::PromptSessionEvent;
 
 use super::*;
@@ -94,31 +94,8 @@ where
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .context("thread/start missing thread id")?;
-        state.thread_id = Some(thread_id.clone());
-
-        let turn_id = next_rpc_id();
-        state.waiting_turn = Some(turn_id);
-        on_event(PromptSessionEvent::Status {
-            session_id: state.session_id.clone(),
-            phase: "requesting".into(),
-            message: "正在请求模型…".into(),
-        });
-        control.write_line(
-            &json!({
-                "method": "turn/start",
-                "id": turn_id,
-                "params": {
-                    "threadId": thread_id,
-                    "input": [{ "type": "text", "text": state.prompt }],
-                    "cwd": state.cwd,
-                    "approvalPolicy": state.approval_policy,
-                    // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).
-                    "sandboxPolicy": turn_sandbox_policy(&state.cwd)
-                }
-            })
-            .to_string(),
-        )?;
-        return Ok(());
+        state.thread_id = Some(thread_id);
+        return start_turn(control, state, on_event);
     }
 
     if state.waiting_turn == id_num {
@@ -127,6 +104,40 @@ where
     }
 
     Ok(())
+}
+
+/// Send this message as a new turn on the open thread.
+pub(crate) fn start_turn<F>(
+    control: &PromptSessionControl,
+    state: &mut PumpState,
+    on_event: &mut F,
+) -> Result<()>
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let thread_id = state.thread_id.clone().context("no open Codex thread")?;
+    let turn_id = next_rpc_id();
+    state.waiting_turn = Some(turn_id);
+    on_event(PromptSessionEvent::Status {
+        session_id: state.session_id.clone(),
+        phase: "requesting".into(),
+        message: "正在请求模型…".into(),
+    });
+    control.write_line(
+        &json!({
+            "method": "turn/start",
+            "id": turn_id,
+            "params": {
+                "threadId": thread_id,
+                "input": [{ "type": "text", "text": state.prompt }],
+                "cwd": state.cwd,
+                "approvalPolicy": state.approval_policy,
+                // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).
+                "sandboxPolicy": turn_sandbox_policy(&state.cwd)
+            }
+        })
+        .to_string(),
+    )
 }
 
 pub(crate) fn handle_server_request<F>(
@@ -267,6 +278,26 @@ pub(crate) fn handle_notification<F>(
                 });
             }
         }
+        "item/reasoning/summaryTextDelta" | "item/reasoning/summaryPartAdded" => {
+            let delta = if method == "item/reasoning/summaryPartAdded" {
+                "\n\n".to_string()
+            } else {
+                json_delta_text(&params).unwrap_or_default()
+            };
+            if !delta.is_empty() {
+                on_event(PromptSessionEvent::Thinking {
+                    session_id: state.session_id.clone(),
+                    text: delta.clone(),
+                });
+            }
+            if let Some(message) = state.thinking.push(&delta) {
+                on_event(PromptSessionEvent::Status {
+                    session_id: state.session_id.clone(),
+                    phase: "thinking".into(),
+                    message,
+                });
+            }
+        }
         "mcpServer/startupStatus/updated" => {
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("mcp");
             let status = params
@@ -327,6 +358,22 @@ pub(crate) fn handle_notification<F>(
                 }
                 t if is_agent_message_type(t) => {}
                 t if is_tool_activity(t) => {
+                    let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    if method == "item/started" {
+                        state.tools.start(item_id);
+                        state
+                            .tools
+                            .remember(&shorten_tool_label(&tool_activity_label(&item, item_type)));
+                    } else {
+                        state.tools.finish(item_id);
+                        if !state.tools.running() {
+                            on_event(PromptSessionEvent::Status {
+                                session_id: state.session_id.clone(),
+                                phase: "thinking".into(),
+                                message: THINKING_AFTER_TOOL.into(),
+                            });
+                        }
+                    }
                     // Emit once on start — completed would duplicate the same chip in UI.
                     if method == "item/started" {
                         let label = shorten_tool_label(&tool_activity_label(&item, item_type));
@@ -339,6 +386,7 @@ pub(crate) fn handle_notification<F>(
                 }
                 "reasoning" => {
                     if method == "item/started" {
+                        state.thinking.reset();
                         on_event(PromptSessionEvent::Status {
                             session_id: state.session_id.clone(),
                             phase: "thinking".into(),

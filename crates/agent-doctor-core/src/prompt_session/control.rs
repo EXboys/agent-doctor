@@ -342,6 +342,14 @@ impl PromptSessionControl {
         self.write_line(&payload.to_string())
     }
 
+    /// Hand stdin back without closing it, so the process can serve another turn.
+    pub(crate) fn detach_stdin(&self) -> Option<ChildStdin> {
+        if let Ok(mut guard) = self.pending.lock() {
+            guard.clear();
+        }
+        self.stdin.lock().ok().and_then(|mut guard| guard.take())
+    }
+
     pub(crate) fn close(&self) {
         if let Ok(mut guard) = self.stdin.lock() {
             *guard = None;

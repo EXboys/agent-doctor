@@ -1,7 +1,8 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
 import type { PlanStep } from "../plan";
+import { markTurnStarted } from "./activity";
 import { preferPlainSummary } from "./format";
 import type { PromptSessionEvent, SessionStore } from "./types";
 
@@ -26,6 +27,7 @@ export type StreamDeps = {
   flushSessionListRender: () => void;
   noteVerifyBrowserSignal: (text: string, source: "status" | "assistant" | "tool") => void;
   queueAssistantText: (text: string) => void;
+  thinking: { append: (text: string) => void; seal: () => void; isLive: () => boolean };
   appendStderrLine: (line: string) => void;
   pushPermissionCard: (payload: {
     session_id: string;
@@ -70,19 +72,38 @@ export type StreamDeps = {
 
 export type StreamApi = ReturnType<typeof createStreamController>;
 
-export function createStreamController(deps: StreamDeps) {
-  let unlisten: UnlistenFn | null = null;
+type ListenerHolder = { __adPromptSessionUnlisten?: UnlistenFn };
 
-  async function ensureListener(): Promise<void> {
-    if (unlisten) return;
-    unlisten = await getCurrentWebviewWindow().listen<PromptSessionEvent>("prompt-session-event", (event) => {
+export function createStreamController(deps: StreamDeps) {
+  let listening: Promise<void> | null = null;
+
+  function ensureListener(): Promise<void> {
+    listening ??= attachListener().catch((error) => {
+      listening = null;
+      throw error;
+    });
+    return listening;
+  }
+
+  async function attachListener(): Promise<void> {
+    // One listener per window: a second one would paint every reply chunk twice.
+    // A hot-reloaded copy of this module must drop the old copy's listener.
+    const holder = window as unknown as ListenerHolder;
+    holder.__adPromptSessionUnlisten?.();
+    holder.__adPromptSessionUnlisten = undefined;
+    const unlisten = await getCurrentWebviewWindow().listen<PromptSessionEvent>("prompt-session-event", (event) => {
       const payload = event.payload;
       const eventSessionId = "session_id" in payload ? payload.session_id : undefined;
       if (payload.type !== "started" && !deps.isEventForCurrentRun(eventSessionId)) {
         return;
       }
+      const thinkingStatus = payload.type === "status" && payload.phase === "thinking";
+      if (payload.type !== "thinking" && payload.type !== "stderr_line" && !thinkingStatus) {
+        deps.thinking.seal();
+      }
       switch (payload.type) {
         case "started":
+          markTurnStarted();
           deps.setRunningBackendSessionId(payload.session_id);
           deps.setDisplayedCwd(payload.cwd);
           deps.setAssistantBubble(null);
@@ -94,8 +115,13 @@ export function createStreamController(deps: StreamDeps) {
           deps.flushSessionListRender();
           break;
         case "status":
-          deps.pushActivity(payload.phase, payload.message);
+          if (!(thinkingStatus && deps.thinking.isLive())) {
+            deps.pushActivity(payload.phase, payload.message);
+          }
           deps.noteVerifyBrowserSignal(payload.message, "status");
+          break;
+        case "thinking":
+          deps.thinking.append(payload.text);
           break;
         case "delta":
           deps.queueAssistantText(payload.text);
@@ -153,10 +179,11 @@ export function createStreamController(deps: StreamDeps) {
           if (payload.status === "cancelled") {
             deps.setStatus(t("chat.forceStopped"), "warn");
           } else if (payload.status === "timed_out") {
+            const notice = timedOutNotice(payload.timeout);
             if (viewing) {
-              deps.appendBubble("meta", t("chat.timedOut"), { persist: false });
+              deps.appendBubble("meta", notice, { persist: false });
             }
-            deps.setStatus(t("chat.timedOut"), "warn");
+            deps.setStatus(notice, "warn");
           } else if (payload.status !== "succeeded") {
             if (viewing) {
               deps.appendBubble(
@@ -186,7 +213,38 @@ export function createStreamController(deps: StreamDeps) {
         }
       }
     });
+    holder.__adPromptSessionUnlisten = unlisten;
   }
 
   return { ensureListener };
+}
+
+function spanLabel(sec: number): string {
+  const zh = getLocale() === "zh";
+  const whole = Math.max(0, Math.round(sec));
+  if (whole < 90) {
+    const n = Math.max(1, whole);
+    return zh ? `${n} 秒` : n === 1 ? "1 second" : `${n} seconds`;
+  }
+  const minutes = Math.round(whole / 60);
+  if (minutes < 90) {
+    return zh ? `${minutes} 分钟` : minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  }
+  const hours = Math.max(1, Math.round(minutes / 60));
+  return zh ? `${hours} 小时` : hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
+function timedOutNotice(
+  note: { kind: string; quiet_sec: number; elapsed_sec: number; last_tool: string } | null | undefined,
+): string {
+  const tool = note?.last_tool.trim() ?? "";
+  if (!note || !Number.isFinite(note.quiet_sec)) return t("chat.timedOut");
+  if (note.kind === "absolute") {
+    const elapsed = spanLabel(note.elapsed_sec);
+    return tool ? t("chat.timedOutLongTool", { elapsed, tool }) : t("chat.timedOutLong", { elapsed });
+  }
+  const quiet = spanLabel(note.quiet_sec);
+  if (note.kind === "tool" && tool) return t("chat.timedOutTool", { quiet, tool });
+  if (tool) return t("chat.timedOutAfterTool", { quiet, tool });
+  return t("chat.timedOutQuiet", { quiet });
 }
