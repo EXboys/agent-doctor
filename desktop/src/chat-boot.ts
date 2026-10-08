@@ -13,11 +13,8 @@ import {
   contextPopoverEl,
   contextCompactEl,
   mentionMenuEl,
-  clearEl,
-  restoreBackupEl,
   newSessionEl,
   addProjectEl,
-  terminalEl,
   workspaceSelectEl,
   workspaceActivateEl,
   workspaceHintEl,
@@ -35,7 +32,6 @@ import {
   ensureRuntimeSession,
   startNewSession,
   addProjectFromAsk,
-  clearActiveSession,
   compactActiveSession,
   isViewingRunningSession,
   autoResizePrompt,
@@ -63,10 +59,8 @@ import {
   ensureListener,
   readInitialRuntime,
   applyVerifyDraftIfAny,
-  openTerminal,
   cancelAsk,
   sendAsk,
-  restoreChatFromBackup,
   offerBackupRestoreIfNeeded,
   askResources,
   mentionMenu,
@@ -145,13 +139,8 @@ export function bootChat(): void {
     else void sendAsk();
   });
   attachEl.addEventListener("click", () => void pickAttachments());
-  clearEl.addEventListener("click", clearActiveSession);
-  restoreBackupEl?.addEventListener("click", () => {
-    restoreChatFromBackup();
-  });
   newSessionEl.addEventListener("click", () => startNewSession());
   addProjectEl.addEventListener("click", () => addProjectFromAsk());
-  terminalEl.addEventListener("click", () => void openTerminal());
   themeEl.addEventListener("click", () => {
     applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
   });

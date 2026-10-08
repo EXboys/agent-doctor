@@ -715,28 +715,6 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   background: rgba(214, 69, 69, 0.08);
 }
 
-.chat-brand {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.chat-brand-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 0.74rem;
-  font-weight: 700;
-  background: var(--accent);
-  box-shadow: none;
-}
-
-.chat-brand-name { margin: 0; font-size: 0.92rem; font-weight: 700; }
-.chat-brand-sub { margin: 2px 0 0; font-size: 0.72rem; color: var(--muted); }
-
 .chat-field {
   display: grid;
   gap: 6px;
@@ -1008,8 +986,6 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   background: var(--panel);
   color: var(--text);
 }
-
-.chat-side-actions { display: grid; gap: 8px; }
 
 .btn-side,
 .btn-primary,

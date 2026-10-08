@@ -232,7 +232,6 @@ export const zh = {
     "ask.doneMeta": "{cwd} · {ms}ms",
     "ask.failHint": "如果连不上模型服务，可先「诊断」或去「服务商」填密钥。",
     "ask.failed": "问答没有完成，请再试一次。",
-    "chat.subtitle": "应用内问答",
     "chat.runtime": "Agent",
     "chat.runtimeLockedHint": "在主页 Agent 卡片进入时选定",
     "chat.modelPickHint": "按主页已接服务商切换模型",
@@ -329,6 +328,8 @@ export const zh = {
     "chat.voiceCancelled": "已停止听写。",
     "chat.voiceNoSpeech": "没听清。再点麦克风试一次。",
     "chat.voicePermission": "请允许使用麦克风和语音识别，然后再点一次。",
+    "chat.voiceWindowsSpeech":
+      "这台电脑还没打开语音识别。到系统设置打开麦克风和语音，再点一次麦克风。",
     "chat.voiceBusy": "还在听。先再点一次麦克风停下。",
     "chat.voiceUnavailable": "这台电脑还不能语音输入，请直接打字。",
     "chat.voiceFailed": "这次没写成字。请打字，或再点麦克风试一次。",

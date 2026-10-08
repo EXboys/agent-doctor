@@ -230,7 +230,6 @@ export const en = {
     "ask.doneMeta": "{cwd} · {ms}ms",
     "ask.failHint": "Try Diagnose or Provider if the agent cannot reach the model service.",
     "ask.failed": "Ask did not finish. Try again.",
-    "chat.subtitle": "In-app ask",
     "chat.runtime": "Agent",
     "chat.runtimeLockedHint": "Chosen on the main Agents page",
     "chat.modelPickHint": "Switch model from your wired provider",
@@ -327,6 +326,8 @@ export const en = {
     "chat.voiceCancelled": "Stopped listening.",
     "chat.voiceNoSpeech": "Didn’t catch that. Tap the mic and try again.",
     "chat.voicePermission": "Allow the mic and speech recognition, then tap again.",
+    "chat.voiceWindowsSpeech":
+      "This PC has not turned speech on. Open Settings for the mic and Speech, then tap the mic again.",
     "chat.voiceBusy": "Still listening. Tap the mic to stop first.",
     "chat.voiceUnavailable": "This computer can’t take voice input. Please type instead.",
     "chat.voiceFailed": "Couldn’t hear that. Please type, or try the mic again.",
