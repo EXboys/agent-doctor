@@ -175,3 +175,104 @@ export function withProviderFailure(messageKey: MessageKey, error: unknown): str
   }
   return `${message} ${explained.next}`.replace(/\s+/g, " ").trim();
 }
+
+export type ChatFailureKind =
+  | "glm_codex_url"
+  | "geo_blocked"
+  | "provider_key"
+  | "provider_url"
+  | "provider_model"
+  | "network"
+  | "unknown";
+
+export type ChatFailureAction = "provider" | "repair" | "native";
+
+export type ChatFailureExplain = {
+  kind: ChatFailureKind;
+  message: string;
+  next: string;
+  actions: ChatFailureAction[];
+};
+
+function isGlmCodexResponses404(lower: string): boolean {
+  return (
+    /paas\/v4\/responses/.test(lower) ||
+    (/open\.bigmodel\.cn|api\.z\.ai/.test(lower) &&
+      (/unexpected status 404|404 not found|status 404/.test(lower) ||
+        /\/responses/.test(lower))) ||
+    /codex needs zhipu responses|responses_base_url|chat-completions host.*codex/i.test(lower)
+  );
+}
+
+function isGeoBlockedService(lower: string): boolean {
+  return (
+    (/api\.anthropic\.com|auth\.openai\.com/.test(lower) &&
+      (/403|forbidden|not available in your country|supported countries/.test(lower) ||
+        /unable to connect to anthropic|failed to connect to api\.anthropic/.test(lower))) ||
+    /not logged in.*codex|codex.*not logged in/.test(lower)
+  );
+}
+
+/** Classify Codex / Ask stderr and API dumps for in-chat beginner copy. */
+export function explainChatFailure(raw: string): ChatFailureExplain | null {
+  const text = raw.trim();
+  if (!text) return null;
+  const lower = text.toLowerCase();
+
+  if (isGlmCodexResponses404(lower)) {
+    return {
+      kind: "glm_codex_url",
+      message: t("chat.fail.glmCodex.message"),
+      next: t("chat.fail.glmCodex.next"),
+      actions: ["repair", "provider", "native"],
+    };
+  }
+
+  if (isGeoBlockedService(lower)) {
+    return {
+      kind: "geo_blocked",
+      message: t("chat.fail.geo.message"),
+      next: t("chat.fail.geo.next"),
+      actions: ["provider", "native"],
+    };
+  }
+
+  const provider = explainProviderFailure(text);
+  const actions: ChatFailureAction[] = ["provider"];
+  if (provider.kind === "url" || provider.kind === "unknown") {
+    actions.push("repair");
+  }
+  actions.push("native");
+
+  let kind: ChatFailureKind = "unknown";
+  if (provider.kind === "key" || provider.kind === "missing") kind = "provider_key";
+  else if (provider.kind === "url") kind = "provider_url";
+  else if (provider.kind === "model") kind = "provider_model";
+  else if (
+    /reconnecting|network|timeout|connection|unreachable|dns|certificate|tls/.test(lower)
+  ) {
+    kind = "network";
+  } else if (
+    /unexpected status|401|403|404|500|502|503|not found|forbidden/.test(lower)
+  ) {
+    kind = "unknown";
+  } else {
+    return null;
+  }
+
+  return {
+    kind,
+    message: provider.message,
+    next: provider.next,
+    actions: [...new Set(actions)],
+  };
+}
+
+export function formatChatFailureLine(explain: ChatFailureExplain): string {
+  return t("provider.fail.combined", {
+    message: explain.message,
+    next: explain.next,
+  })
+    .replace(/\s+/g, " ")
+    .trim();
+}

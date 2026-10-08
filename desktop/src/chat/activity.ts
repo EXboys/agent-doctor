@@ -1,3 +1,5 @@
+import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
+import type { ChatFailureExplain } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import {
   activityKind,
@@ -6,6 +8,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
+import { pushChatTurnError } from "./turn-errors";
 
 export type ActivityDeps = {
   logEl: HTMLElement;
@@ -23,6 +26,8 @@ export type ActivityDeps = {
   rememberTool: (text: string) => void;
   /** Tool notes saved since the latest user message. */
   toolRecordsForTurn: () => string[];
+  /** First critical connection failure this turn (GLM / geo block). */
+  onChatConnectionFailure?: (explain: ChatFailureExplain) => void;
 };
 
 export type ActivityApi = ReturnType<typeof createActivityController>;
@@ -255,11 +260,21 @@ export function createActivityController(deps: ActivityDeps) {
     if (!deps.isViewingRunningSession()) return;
     const text = line.trim();
     if (!text || isQuietStderr(text)) return;
+    pushChatTurnError(text);
+    const explain = explainChatFailure(text);
+    const display = explain ? formatChatFailureLine(explain) : text;
+    if (
+      explain &&
+      (explain.kind === "glm_codex_url" || explain.kind === "geo_blocked") &&
+      deps.onChatConnectionFailure
+    ) {
+      deps.onChatConnectionFailure(explain);
+    }
     const last = deps.logEl.lastElementChild as HTMLElement | null;
     if (last?.dataset.kind === "log" && last.dataset.stderr === "1") {
       const label = last.querySelector<HTMLElement>(".chat-activity-text");
       if (label) {
-        label.textContent = `${label.textContent}\n${text}`;
+        label.textContent = `${label.textContent}\n${display}`;
         deps.logEl.scrollTop = deps.logEl.scrollHeight;
         return;
       }
@@ -270,7 +285,7 @@ export function createActivityController(deps: ActivityDeps) {
     row.dataset.stderr = "1";
     const label = document.createElement("span");
     label.className = "chat-activity-text";
-    label.textContent = text;
+    label.textContent = display;
     row.appendChild(label);
     deps.logEl.appendChild(row);
     deps.logEl.scrollTop = deps.logEl.scrollHeight;

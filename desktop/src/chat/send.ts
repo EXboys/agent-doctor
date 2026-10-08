@@ -9,7 +9,13 @@ import {
   type AskRuntime,
 } from "../ask-resources";
 import { getLocale, t } from "../i18n";
-import { withErrorDetail } from "../friendly-error";
+import {
+  explainChatFailure,
+  formatChatFailureLine,
+  type ChatFailureExplain,
+  withErrorDetail,
+} from "../friendly-error";
+import { pushChatTurnError } from "./turn-errors";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -77,6 +83,7 @@ export type SendDeps = {
     text: string,
     opts?: { id?: string; persist?: boolean; attachments?: ChatAttachment[] },
   ) => HTMLElement;
+  appendChatFailure?: (explain: ChatFailureExplain) => void;
   autoResizePrompt: () => void;
   renderPendingAttachments: () => void;
   buildPromptWithHistory: (
@@ -391,13 +398,21 @@ export function createSendController(deps: SendDeps) {
           deps.appendBubble("meta", t("chat.forceStopped"), { persist: false });
         }
       } else {
-        const failed =
-          /session cwd does not exist/i.test(message)
-            ? t("chat.failedCwd")
-            : withErrorDetail(t("chat.failed"), error);
-        deps.setStatus(failed, "error");
-        if (deps.getStore().activeId === chatSessionId) {
-          deps.appendBubble("meta", failed, { persist: false });
+        pushChatTurnError(message);
+        const explained = explainChatFailure(message);
+        if (explained && deps.appendChatFailure && deps.getStore().activeId === chatSessionId) {
+          deps.appendChatFailure(explained);
+        } else {
+          const failed =
+            /session cwd does not exist/i.test(message)
+              ? t("chat.failedCwd")
+              : explained
+                ? formatChatFailureLine(explained)
+                : withErrorDetail(t("chat.failed"), error);
+          deps.setStatus(failed, "error");
+          if (deps.getStore().activeId === chatSessionId) {
+            deps.appendBubble("meta", failed, { persist: false });
+          }
         }
       }
     } finally {

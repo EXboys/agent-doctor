@@ -576,16 +576,14 @@ pub fn workspace_doctor() -> Result<WorkspaceDoctorReport> {
         let actual = codex_home_from_env();
         let detail = if std::env::var_os("CODEX_HOME").is_none() {
             format!(
-                "This process has no CODEX_HOME (falls back to {}). \
-                 Launch Codex via Agents → Open (loads workspace env), \
-                 or: source active-workspace.env then run codex. \
-                 expected={}",
-                actual.display(),
+                "Codex was not opened from Agent Doctor, so this workspace's Codex settings are not loaded (saved under {}). \
+                 Use Agents → Open for Codex, or align the project first.",
                 entry.codex_home.display()
             )
         } else {
             format!(
-                "expected={} actual={} — source active-workspace.env before launching Codex",
+                "Codex settings path does not match this workspace (expected {}, got {}). \
+                 Open Codex from Agent Doctor after aligning the project.",
                 entry.codex_home.display(),
                 actual.display()
             )
@@ -774,10 +772,9 @@ fn codex_runtime_status(entry: &WorkspaceEntry) -> RuntimeStatus {
     let actual = codex_home_from_env().display().to_string();
     let aligned = workspace_paths_match(&entry.codex_home, &codex_home_from_env());
     let hint = if std::env::var_os("CODEX_HOME").is_none() {
-        "Desktop Check has no CODEX_HOME; use Agents → Open for Codex (or source active-workspace.env in the terminal)"
-            .into()
+        "Open Codex from Agent Doctor (Agents → Open), not from a separate terminal window".into()
     } else {
-        "Source active-workspace.env before running codex".into()
+        "Open Codex from Agent Doctor so settings match this workspace".into()
     };
     RuntimeStatus {
         runtime_id: "codex",

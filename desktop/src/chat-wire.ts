@@ -125,8 +125,23 @@ import { createBackupUiController } from "./chat/backup-ui";
 import { createVoiceInputController } from "./chat/voice";
 import { createHostedController } from "./chat/hosted";
 import { readImageTextEnabled } from "./chat/image-text";
+import { mountChatFailureBubble } from "./chat/chat-failure-ui";
+import {
+  formatChatFailureLine,
+  type ChatFailureExplain,
+} from "./friendly-error";
+import { markChatFailureBubbleShown } from "./chat/turn-errors";
 
 export function wireChatControllers(): void {
+  const chatFailureHandlers = {
+    setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => setStatus(text, tone),
+    selectedRuntime: () => selectedRuntime(),
+  };
+  const showChatFailureBubble = (explain: ChatFailureExplain) => {
+    if (!markChatFailureBubbleShown()) return;
+    mountChatFailureBubble(logEl, explain, chatFailureHandlers);
+    setStatus(formatChatFailureLine(explain), "error");
+  };
   chatState.backupUi = createBackupUiController({
     logEl,
     titleEl,
@@ -176,6 +191,7 @@ export function wireChatControllers(): void {
       }
       return messages.slice(start).filter((message) => message.role === "tool").map((message) => message.content);
     },
+    onChatConnectionFailure: (explain) => showChatFailureBubble(explain),
   });
 
   chatState.modelPicker = createModelPickerController({
@@ -537,6 +553,7 @@ export function wireChatControllers(): void {
     expireLivePermissionCards: () => expireLivePermissionCards(),
     hideDecisionDock: () => hideDecisionDock(),
     appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    appendChatFailure: (explain) => showChatFailureBubble(explain),
     reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
     applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
     flushStorePersist: () => flushStorePersist(),
@@ -626,6 +643,7 @@ export function wireChatControllers(): void {
     pushActivity: (phase, message) => pushActivity(phase, message),
     persistMessage: (role, content, opts) => persistMessage(role, content, opts),
     appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    appendChatFailure: (explain) => showChatFailureBubble(explain),
     autoResizePrompt: () => autoResizePrompt(),
     renderPendingAttachments: () => renderPendingAttachments(),
     buildPromptWithHistory: (text, picked, chatSessionId, pictures) =>

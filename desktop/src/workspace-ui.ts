@@ -15,7 +15,27 @@ import type {
   WorkspaceDoctorReport,
   WorkspacesDocument,
 } from "./types";
-import { listWorkspaces, useWorkspace, initWorkspace, workspaceDoctor, workspaceFix, listRemoteHosts, listRemoteHostRows, listRemoteProjects, probeRemoteHost, removeRemoteHost, runRemoteDoctor, removeRemoteProject, bootstrapRemoteHost, addRemoteProject } from "./ipc";
+import {
+  listWorkspaces,
+  useWorkspace,
+  initWorkspace,
+  workspaceDoctor,
+  workspaceFix,
+  listRemoteHosts,
+  listRemoteHostRows,
+  listRemoteProjects,
+  probeRemoteHost,
+  removeRemoteHost,
+  runRemoteDoctor,
+  removeRemoteProject,
+  bootstrapRemoteHost,
+  addRemoteProject,
+  openSession,
+} from "./ipc";
+import {
+  workspaceCheckNeedsCodexLaunchGuide,
+  workspaceReportNeedsCodexLaunchGuide,
+} from "./workspace-codex-guide";
 
 export interface WorkspaceUiDeps {
   onWorkspacesChanged: (doc: WorkspacesDocument) => void;
@@ -30,6 +50,8 @@ const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-c
 const workspaceChecksSummaryEl = document.querySelector<HTMLElement>("#workspace-checks-summary")!;
 const workspaceChecksToggleEl = document.querySelector<HTMLButtonElement>("#workspace-checks-toggle")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
+let workspaceCodexCtaEl: HTMLElement | null = null;
+let openingCodexFromWorkspace = false;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
 const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
 const remoteHostListEl = document.querySelector<HTMLUListElement>("#remote-host-list")!;
@@ -296,6 +318,80 @@ function clearWorkspaceChecks() {
   workspaceChecksEl.innerHTML = "";
   workspaceChecksSummaryEl.textContent = "";
   workspaceChecksToggleEl.textContent = "";
+  if (workspaceCodexCtaEl) {
+    workspaceCodexCtaEl.hidden = true;
+  }
+}
+
+function workspaceCheckDetailForDisplay(check: WorkspaceCheck): string {
+  if (!workspaceCheckNeedsCodexLaunchGuide(check)) {
+    return check.detail;
+  }
+  if (check.id === "workspace.cwd.mismatch") {
+    return t("workspaces.checkDetail.cwdMismatch");
+  }
+  return t("workspaces.checkDetail.codexNotFromApp");
+}
+
+function ensureWorkspaceCodexCtaEl(): HTMLElement {
+  if (!workspaceCodexCtaEl) {
+    workspaceCodexCtaEl = document.createElement("div");
+    workspaceCodexCtaEl.id = "workspace-codex-cta";
+    workspaceCodexCtaEl.className = "workspace-codex-cta";
+    workspaceCodexCtaEl.hidden = true;
+    workspaceChecksPanelEl.appendChild(workspaceCodexCtaEl);
+    workspaceCodexCtaEl.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+        "[data-workspace-open-codex]",
+      );
+      if (button) {
+        void openCodexFromWorkspace();
+      }
+    });
+  }
+  return workspaceCodexCtaEl;
+}
+
+function syncWorkspaceCodexCta(report: WorkspaceDoctorReport): void {
+  const cta = ensureWorkspaceCodexCtaEl();
+  if (!workspaceReportNeedsCodexLaunchGuide(report)) {
+    cta.hidden = true;
+    return;
+  }
+  cta.hidden = false;
+  cta.innerHTML = `
+    <p class="workspace-codex-cta-text">${escapeHtml(t("workspaces.codexOpenLead"))}</p>
+    <button type="button" class="btn-primary btn-compact" data-workspace-open-codex ${openingCodexFromWorkspace ? "disabled" : ""}>
+      ${escapeHtml(openingCodexFromWorkspace ? t("workspaces.codexOpenRunning") : t("workspaces.codexOpenAction"))}
+    </button>
+  `;
+}
+
+async function openCodexFromWorkspace(): Promise<void> {
+  if (openingCodexFromWorkspace) {
+    return;
+  }
+  openingCodexFromWorkspace = true;
+  if (lastWorkspaceDoctorReport) {
+    syncWorkspaceCodexCta(lastWorkspaceDoctorReport);
+  }
+  workspaceHintEl.textContent = t("workspaces.codexOpenRunning");
+  try {
+    await openSession({
+      runtime: "codex",
+      cwd: null,
+      prompt: null,
+      terminal: null,
+    });
+    workspaceHintEl.textContent = t("workspaces.codexOpenOk");
+  } catch (error) {
+    workspaceHintEl.textContent = withErrorDetail(t("workspaces.codexOpenFailed"), error);
+  } finally {
+    openingCodexFromWorkspace = false;
+    if (lastWorkspaceDoctorReport) {
+      syncWorkspaceCodexCta(lastWorkspaceDoctorReport);
+    }
+  }
 }
 
 function syncWorkspaceChecksToggle() {
@@ -350,12 +446,13 @@ function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
           <span class="repair-check-status ${workspaceStatusClass(check.status)}">${escapeHtml(workspaceStatusLabel(check.status))}</span>
           <span class="repair-check-body">
             <strong>${escapeHtml(check.title)}</strong>
-            <span>${escapeHtml(check.detail)}</span>
+            <span>${escapeHtml(workspaceCheckDetailForDisplay(check))}</span>
           </span>
         </li>
       `,
     )
     .join("");
+  syncWorkspaceCodexCta(report);
   syncWorkspaceChecksToggle();
   workspaceHintEl.textContent = "";
 }

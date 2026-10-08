@@ -2819,6 +2819,46 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   padding: 0;
 }
 
+.chat-failure-wrap {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, 92%);
+  margin: 4px 0 8px;
+}
+
+.chat-bubble.meta.is-failure {
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.chat-failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.chat-failure-btn {
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chat-failure-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .chat-typing {
   align-self: flex-start;
   display: inline-flex;

@@ -1,9 +1,15 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { formatChatFailureLine, type ChatFailureExplain } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import type { PlanStep } from "../plan";
 import { markTurnStarted } from "./activity";
 import { preferPlainSummary } from "./format";
+import {
+  explainCurrentChatTurnFailure,
+  markChatFailureBubbleShown,
+  resetChatTurnErrors,
+} from "./turn-errors";
 import type { PromptSessionEvent, SessionStore } from "./types";
 
 export type StreamDeps = {
@@ -50,6 +56,7 @@ export type StreamDeps = {
     text: string,
     opts?: { id?: string; persist?: boolean },
   ) => HTMLElement;
+  appendChatFailure: (explain: ChatFailureExplain) => void;
   reportVerifyMcpIfNeeded: () => void;
   applyVerifyMcpFooter: () => void;
   flushStorePersist: () => void;
@@ -103,6 +110,7 @@ export function createStreamController(deps: StreamDeps) {
       }
       switch (payload.type) {
         case "started":
+          resetChatTurnErrors();
           markTurnStarted();
           deps.setRunningBackendSessionId(payload.session_id);
           deps.setDisplayedCwd(payload.cwd);
@@ -165,7 +173,15 @@ export function createStreamController(deps: StreamDeps) {
           if (viewing) {
             deps.hideDecisionDock();
             if (!hadAssistantText && payload.status === "succeeded") {
-              deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
+              if (!showChatTurnFailure(deps)) {
+                deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
+              }
+            } else if (
+              payload.status !== "succeeded" &&
+              payload.status !== "cancelled" &&
+              payload.status !== "timed_out"
+            ) {
+              showChatTurnFailure(deps);
             }
           }
           deps.reportVerifyMcpIfNeeded();
@@ -232,6 +248,19 @@ function spanLabel(sec: number): string {
   }
   const hours = Math.max(1, Math.round(minutes / 60));
   return zh ? `${hours} 小时` : hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
+function showChatTurnFailure(
+  deps: StreamDeps,
+  explain?: ChatFailureExplain | null,
+): boolean {
+  const resolved = explain ?? explainCurrentChatTurnFailure();
+  if (!resolved || !markChatFailureBubbleShown()) {
+    return false;
+  }
+  deps.appendChatFailure(resolved);
+  deps.setStatus(formatChatFailureLine(resolved), "error");
+  return true;
 }
 
 function timedOutNotice(

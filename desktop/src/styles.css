@@ -1220,6 +1220,25 @@ body.is-diagnose-open .diagnose-detail {
   margin-top: 2px;
 }
 
+.workspace-codex-cta {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.workspace-codex-cta-text {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-soft);
+}
+
+.workspace-checks-panel.is-collapsed .workspace-codex-cta {
+  display: none;
+}
+
 .ws-manage-main {
   min-width: 0;
 }
