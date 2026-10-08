@@ -1,7 +1,24 @@
-import type { AskRuntime } from "../ask-resources";
+import type { AskRuntime, WorkspaceDoc } from "../ask-resources";
 import { getLocale, t } from "../i18n";
 import { runtimeDisplayName } from "./runtime";
 import { createEmptySession, uid } from "./store";
+import {
+  defaultWorkspaceName,
+  listProjectGroupsForSidebar,
+} from "./session-workspace";
+import { attachProjectReorderPointer, consumeProjectDragClick } from "./project-drag";
+import {
+  moveProjectInOrder,
+  orderedProjectNames,
+  reorderProjectKeys,
+  saveProjectOrder,
+} from "./project-order";
+import {
+  SESSIONS_PREVIEW_COUNT,
+  shouldUseProjectSidebar,
+  sidebarGroupKey,
+  visibleSessionsForGroup,
+} from "./session-sidebar";
 import { formatTime } from "./copy-ui";
 import {
   COMPACT_KEEP_TURNS,
@@ -68,61 +85,272 @@ export type SessionsDeps = {
   setPendingAttachments: (items: import("./types").ChatAttachment[]) => void;
   touchSession: (session: ChatSession) => void;
   isComposerLocked: () => boolean;
+  getWorkspaceDoc: () => WorkspaceDoc | null;
+  syncSessionWorkspaceUi: () => void;
 };
 
 export type SessionsApi = ReturnType<typeof createSessionsController>;
 
 export function createSessionsController(deps: SessionsDeps) {
-  function renderSessionList(): void {
-    deps.sessionListEl.replaceChildren();
-    for (const session of deps.getStore().sessions) {
-      const isRunning = deps.getBusy() && session.id === deps.getRunningChatSessionId();
-      const awaitingConfirm = isRunning && deps.getPendingPermissionBatch().length > 0;
-      const doneUnseen = !isRunning && deps.getUnseenCompletedSessionIds().has(session.id);
-      const row = document.createElement("div");
-      row.className = `chat-session${session.id === deps.getStore().activeId ? " is-active" : ""}${
-        awaitingConfirm ? " is-awaiting-confirm" : isRunning ? " is-running" : ""
-      }${doneUnseen ? " is-done-unseen" : ""}`;
-      row.dataset.sessionId = session.id;
+  /** Whole project folder collapsed (Cursor-style). */
+  const collapsedProjects = new Set<string>();
+  /** Per-project list expanded past SESSIONS_PREVIEW_COUNT. */
+  const expandedSessionLists = new Set<string>();
 
-      const main = document.createElement("button");
-      main.type = "button";
-      main.className = "chat-session-main";
+  function commitProjectReorder(
+    from: string,
+    to: string,
+    position: "before" | "after" = "before",
+  ): void {
+    const doc = deps.getWorkspaceDoc();
+    if (!doc) return;
+    const order = orderedProjectNames(doc);
+    saveProjectOrder(reorderProjectKeys(order, from, to, position));
+    renderSessionList();
+  }
 
-      const title = document.createElement("span");
-      title.className = "chat-session-title";
-      title.textContent = deps.sessionTitle(session);
+  function nudgeProjectOrder(name: string, delta: -1 | 1): void {
+    const doc = deps.getWorkspaceDoc();
+    if (!doc) return;
+    const order = orderedProjectNames(doc);
+    const next = moveProjectInOrder(order, name, delta);
+    if (next === order) return;
+    saveProjectOrder(next);
+    renderSessionList();
+  }
 
+  function createProjectGrip(): HTMLElement {
+    const grip = document.createElement("span");
+    grip.className = "chat-session-group-grip";
+    grip.title = t("chat.projectReorder");
+    grip.setAttribute("aria-label", t("chat.projectReorder"));
+    grip.innerHTML = `<svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="2" cy="10" r="1"/><circle cx="6" cy="10" r="1"/></svg>`;
+    return grip;
+  }
+
+  function sessionMetaLine(session: ChatSession, isRunning: boolean, awaitingConfirm: boolean, doneUnseen: boolean): string {
+    if (awaitingConfirm) {
+      return `${t("chat.sessionAwaitingConfirm")} · ${runtimeDisplayName(session.runtime)}`;
+    }
+    if (isRunning) {
+      return `${t("chat.sessionRunning")} · ${runtimeDisplayName(session.runtime)}`;
+    }
+    if (doneUnseen) {
+      return `${t("chat.sessionDoneUnseen")} · ${runtimeDisplayName(session.runtime)}`;
+    }
+    return `${runtimeDisplayName(session.runtime)} · ${formatTime(session.updatedAt)}`;
+  }
+
+  function renderSessionRow(session: ChatSession, layout: "default" | "compact" = "default"): HTMLElement {
+    const isRunning = deps.getBusy() && session.id === deps.getRunningChatSessionId();
+    const awaitingConfirm = isRunning && deps.getPendingPermissionBatch().length > 0;
+    const doneUnseen = !isRunning && deps.getUnseenCompletedSessionIds().has(session.id);
+    const row = document.createElement("div");
+    row.className = `chat-session${session.id === deps.getStore().activeId ? " is-active" : ""}${
+      awaitingConfirm ? " is-awaiting-confirm" : isRunning ? " is-running" : ""
+    }${doneUnseen ? " is-done-unseen" : ""}`;
+    row.dataset.sessionId = session.id;
+
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "chat-session-main";
+
+    const title = document.createElement("span");
+    title.className = "chat-session-title";
+    title.textContent = deps.sessionTitle(session);
+
+    const metaText = sessionMetaLine(session, isRunning, awaitingConfirm, doneUnseen);
+
+    if (layout === "compact") {
+      row.classList.add("is-compact");
+      const line = document.createElement("span");
+      line.className = "chat-session-line";
+      const dot = document.createElement("span");
+      dot.className = "chat-session-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const when = document.createElement("span");
+      when.className = "chat-session-when";
+      when.textContent = awaitingConfirm || isRunning || doneUnseen ? "…" : formatTime(session.updatedAt);
+      title.classList.add("chat-session-title-inline");
+      line.append(dot, title, when);
+      const agent = document.createElement("span");
+      agent.className = "chat-session-agent";
+      agent.textContent =
+        awaitingConfirm || isRunning || doneUnseen
+          ? metaText
+          : runtimeDisplayName(session.runtime);
+      main.append(line, agent);
+      main.title = metaText;
+    } else {
       const meta = document.createElement("span");
       meta.className = "chat-session-meta";
-      if (awaitingConfirm) {
-        meta.textContent = `${t("chat.sessionAwaitingConfirm")} · ${runtimeDisplayName(session.runtime)}`;
-      } else if (isRunning) {
-        meta.textContent = `${t("chat.sessionRunning")} · ${runtimeDisplayName(session.runtime)}`;
-      } else if (doneUnseen) {
-        meta.textContent = `${t("chat.sessionDoneUnseen")} · ${runtimeDisplayName(session.runtime)}`;
-      } else {
-        meta.textContent = `${runtimeDisplayName(session.runtime)} · ${formatTime(session.updatedAt)}`;
+      meta.textContent = metaText;
+      main.append(title, meta);
+    }
+    main.addEventListener("click", () => {
+      switchSession(session.id);
+    });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "chat-session-delete";
+    del.title = t("chat.deleteSession");
+    del.setAttribute("aria-label", t("chat.deleteSession"));
+    del.textContent = "×";
+    del.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteSession(session.id);
+    });
+
+    row.append(main, del);
+    return row;
+  }
+
+  function groupFoldIcon(collapsed: boolean): HTMLElement {
+    const wrap = document.createElement("span");
+    wrap.className = "chat-session-group-icon";
+    wrap.setAttribute("aria-hidden", "true");
+    const folder = document.createElement("span");
+    folder.className = "chat-session-group-icon-folder";
+    folder.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h6l2 2h8v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+    const chevron = document.createElement("span");
+    chevron.className = `chat-session-group-icon-chevron${collapsed ? " is-collapsed" : ""}`;
+    chevron.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 10l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    wrap.append(folder, chevron);
+    return wrap;
+  }
+
+  function renderSessionList(): void {
+    deps.sessionListEl.replaceChildren();
+    const doc = deps.getWorkspaceDoc();
+    const sessions = deps.getStore().sessions;
+    const workspaceCount = doc ? Object.keys(doc.workspaces).length : 0;
+    const groups = listProjectGroupsForSidebar(sessions, doc, t("chat.sessionGroupOther"));
+    if (!shouldUseProjectSidebar(workspaceCount)) {
+      for (const session of deps.getStore().sessions) {
+        deps.sessionListEl.appendChild(renderSessionRow(session));
+      }
+      return;
+    }
+
+    for (const group of groups) {
+      const key = sidebarGroupKey(group.name);
+      const projectCollapsed = collapsedProjects.has(key);
+      const block = document.createElement("section");
+      block.className = `chat-session-group${projectCollapsed ? " is-collapsed" : ""}`;
+      block.dataset.groupKey = key;
+      if (group.name) {
+        block.dataset.projectName = group.name;
       }
 
-      main.append(title, meta);
-      main.addEventListener("click", () => {
-        switchSession(session.id);
-      });
+      const head = document.createElement("div");
+      head.className = "chat-session-group-head";
 
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "chat-session-delete";
-      del.title = t("chat.deleteSession");
-      del.setAttribute("aria-label", t("chat.deleteSession"));
-      del.textContent = "×";
-      del.addEventListener("click", (event) => {
+      const fold = document.createElement("button");
+      fold.type = "button";
+      fold.className = "chat-session-group-fold";
+      fold.setAttribute("aria-expanded", projectCollapsed ? "false" : "true");
+      fold.title = projectCollapsed ? t("chat.sessionGroupExpand") : t("chat.sessionGroupFold");
+      fold.append(groupFoldIcon(projectCollapsed));
+      fold.addEventListener("click", (event) => {
         event.stopPropagation();
-        deleteSession(session.id);
+        if (consumeProjectDragClick()) return;
+        if (projectCollapsed) collapsedProjects.delete(key);
+        else collapsedProjects.add(key);
+        renderSessionList();
       });
 
-      row.append(main, del);
-      deps.sessionListEl.appendChild(row);
+      const grip = createProjectGrip();
+      const label = document.createElement("span");
+      label.className = "chat-session-group-label";
+      label.textContent = group.label;
+
+      head.append(fold, grip, label);
+
+      if (group.name) {
+        const projectName = group.name;
+        attachProjectReorderPointer(deps.sessionListEl, head, projectName, commitProjectReorder);
+
+        const reorder = document.createElement("span");
+        reorder.className = "chat-session-group-reorder";
+        const up = document.createElement("button");
+        up.type = "button";
+        up.className = "chat-session-group-nudge";
+        up.title = t("chat.projectMoveUp");
+        up.setAttribute("aria-label", t("chat.projectMoveUp"));
+        up.textContent = "↑";
+        up.addEventListener("click", (event) => {
+          event.stopPropagation();
+          nudgeProjectOrder(projectName, -1);
+        });
+        const down = document.createElement("button");
+        down.type = "button";
+        down.className = "chat-session-group-nudge";
+        down.title = t("chat.projectMoveDown");
+        down.setAttribute("aria-label", t("chat.projectMoveDown"));
+        down.textContent = "↓";
+        down.addEventListener("click", (event) => {
+          event.stopPropagation();
+          nudgeProjectOrder(projectName, 1);
+        });
+        reorder.append(up, down);
+
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "chat-session-group-new";
+        add.title = t("chat.newSessionInProject");
+        add.setAttribute("aria-label", t("chat.newSessionInProject"));
+        add.textContent = "+";
+        add.addEventListener("click", (event) => {
+          event.stopPropagation();
+          startNewSession(group.name);
+        });
+        head.append(reorder, add);
+      }
+
+      block.append(head);
+
+      if (!projectCollapsed) {
+        const { visible, hiddenCount } = visibleSessionsForGroup(
+          group.sessions,
+          key,
+          expandedSessionLists,
+        );
+        const list = document.createElement("div");
+        list.className = "chat-session-group-list";
+        list.setAttribute("role", "list");
+        for (const session of visible) {
+          list.appendChild(renderSessionRow(session, "compact"));
+        }
+        block.append(list);
+
+        if (hiddenCount > 0) {
+          const more = document.createElement("button");
+          more.type = "button";
+          more.className = "chat-session-group-more";
+          more.textContent = t("chat.sessionShowMore", { n: String(hiddenCount) });
+          more.addEventListener("click", () => {
+            expandedSessionLists.add(key);
+            renderSessionList();
+          });
+          block.append(more);
+        } else if (
+          group.sessions.length > SESSIONS_PREVIEW_COUNT &&
+          expandedSessionLists.has(key)
+        ) {
+          const less = document.createElement("button");
+          less.type = "button";
+          less.className = "chat-session-group-more";
+          less.textContent = t("chat.sessionShowLess");
+          less.addEventListener("click", () => {
+            expandedSessionLists.delete(key);
+            renderSessionList();
+          });
+          block.append(less);
+        }
+      }
+
+      deps.sessionListEl.appendChild(block);
     }
   }
 
@@ -240,6 +468,7 @@ export function createSessionsController(deps: SessionsDeps) {
       deps.setStatus("");
     }
     deps.syncComposerUi();
+    deps.syncSessionWorkspaceUi();
     renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(session);
     deps.updateContextMeter();
@@ -285,6 +514,7 @@ export function createSessionsController(deps: SessionsDeps) {
       reattachLiveUi();
     }
     deps.syncComposerUi();
+    deps.syncSessionWorkspaceUi();
     renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(active);
     deps.setStatus("");
@@ -310,7 +540,7 @@ export function createSessionsController(deps: SessionsDeps) {
     startNewSession();
   }
 
-  function startNewSession(): void {
+  function startNewSession(workspaceName?: string | null): void {
     if (deps.getBusy() && deps.getStore().activeId === deps.getRunningChatSessionId()) {
       detachLiveDom();
     } else if (!deps.getBusy()) {
@@ -322,7 +552,11 @@ export function createSessionsController(deps: SessionsDeps) {
     } else {
       deps.setAssistantBubble(null);
     }
-    const session = createEmptySession(deps.selectedRuntime());
+    const pinned =
+      workspaceName?.trim() ||
+      defaultWorkspaceName(deps.getWorkspaceDoc()) ||
+      undefined;
+    const session = createEmptySession(deps.selectedRuntime(), pinned);
     deps.getStore().sessions.unshift(session);
     deps.getStore().activeId = session.id;
     deps.getStore().sessions = deps.getStore().sessions.slice(0, MAX_SESSIONS);
@@ -334,6 +568,7 @@ export function createSessionsController(deps: SessionsDeps) {
     deps.renderPendingAttachments();
     deps.renderActiveMessages();
     deps.syncComposerUi();
+    deps.syncSessionWorkspaceUi();
     renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(session);
     if (deps.getBusy() && deps.getRunningChatSessionId()) {

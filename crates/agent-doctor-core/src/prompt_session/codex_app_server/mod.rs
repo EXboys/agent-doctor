@@ -12,8 +12,9 @@ use serde_json::{json, Value};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_codex_env, apply_overlay_env, codex_provider_config_args, collect_overlay_env,
-    format_command_display, prepare_codex_home, resolve_codex_overlay,
+    apply_codex_env, apply_overlay_env, codex_provider_config_args,
+    collect_overlay_env_for_options, format_command_display, prepare_codex_home,
+    resolve_codex_overlay,
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
@@ -153,13 +154,13 @@ fn run_codex_app_server(
         bail!("prompt must not be empty");
     }
 
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
-    let overlay = collect_overlay_env();
+    let overlay = collect_overlay_env_for_options(options);
     prepare_codex_home(&overlay);
     // Project-local Codex config is loaded with the message's folder, separate
     // from ~/.codex. A missing tool there fails the same way.
@@ -1032,6 +1033,7 @@ time.sleep(5)
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 Some(control),
@@ -1143,6 +1145,7 @@ sys.exit(0)
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 Some(PromptSessionControl::new()),

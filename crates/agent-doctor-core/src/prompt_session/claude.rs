@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_claude_env, apply_overlay_env, collect_overlay_env, format_command_display,
+    apply_claude_env, apply_overlay_env, collect_overlay_env_for_options, format_command_display,
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::plan::{tool_carries_plan, PlanBoard};
@@ -56,7 +56,7 @@ fn run_claude(
         bail!("prompt must not be empty");
     }
 
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -69,7 +69,7 @@ fn run_claude(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    let overlay = collect_overlay_env();
+    let overlay = collect_overlay_env_for_options(options);
     let browser_mcp = wants_browser_mcp(options);
     if browser_mcp {
         if let Some(note) = ensure_browser_mcp_for_ask("claude-code", &cwd, &overlay) {
@@ -1409,6 +1409,7 @@ mod tests {
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -1480,6 +1481,7 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 Some(control),

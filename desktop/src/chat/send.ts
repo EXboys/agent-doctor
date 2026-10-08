@@ -46,7 +46,10 @@ export type SendDeps = {
   getRunningChatSessionId: () => string | null;
   getPendingAttachments: () => ChatAttachment[];
   setPendingAttachments: (items: ChatAttachment[]) => void;
-  getWorkspaceCwd: () => string | null;
+  resolveSendWorkspace: (session: ChatSession) => {
+    cwd: string | null;
+    workspaceName: string | null;
+  };
   getVerifyMcpTurn: () => boolean;
   setVerifyMcpTurn: (v: boolean) => void;
   getVerifySawBrowserNavigate: () => boolean;
@@ -319,11 +322,16 @@ export function createSendController(deps: SendDeps) {
       : undefined;
     if (pictures) notePictures(pictures, runtime);
 
+    const sendSession = deps.sessionById(chatSessionId) ?? deps.activeSession();
+    const { cwd: sessionCwd, workspaceName: sessionWorkspace } =
+      deps.resolveSendWorkspace(sendSession);
+
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
         runtime,
         prompt: deps.buildPromptWithHistory(promptUserText, attachments, chatSessionId, turn),
-        cwd: deps.getWorkspaceCwd()?.trim() || null,
+        cwd: sessionCwd?.trim() || null,
+        workspaceName: sessionWorkspace?.trim() || null,
         timeoutSec: 86_400,
         dangerouslySkipPermissions:
           (runtime === "claude-code" || runtime === "hermes" || runtime === "deepseek-harness") &&

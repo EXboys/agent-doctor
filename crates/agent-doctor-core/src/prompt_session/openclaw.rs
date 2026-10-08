@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{apply_overlay_env, collect_overlay_env, format_command_display};
+use super::env::{apply_overlay_env, collect_overlay_env_for_options, format_command_display};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
     is_runtime_stderr_noise, join_reader, push_capped, summarize, SessionClock,
@@ -54,7 +54,7 @@ fn run_openclaw(
         bail!("prompt must not be empty");
     }
 
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -71,7 +71,7 @@ fn run_openclaw(
         .map(str::to_string)
         .unwrap_or_else(fresh_openclaw_session_id);
 
-    let overlay = collect_overlay_env();
+    let overlay = collect_overlay_env_for_options(options);
     if let Some(note) = ensure_openclaw_config_current() {
         on_event(PromptSessionEvent::Status {
             session_id: session_id.clone(),
@@ -104,7 +104,13 @@ fn run_openclaw(
         );
     }
 
-    let mut cmd = build_openclaw_command(&prompt_text, &cwd, &openclaw_session_id, timeout_sec)?;
+    let mut cmd = build_openclaw_command(
+        &prompt_text,
+        &cwd,
+        &openclaw_session_id,
+        timeout_sec,
+        &overlay,
+    )?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -326,10 +332,10 @@ fn build_openclaw_command(
     cwd: &Path,
     session_id: &str,
     _timeout_sec: u64,
+    overlay: &std::collections::HashMap<String, String>,
 ) -> Result<Command> {
-    let overlay = collect_overlay_env();
     let bin = std::env::var("AGENT_DOCTOR_OPENCLAW_BIN").unwrap_or_else(|_| "openclaw".into());
-    let agent = resolve_openclaw_agent(&overlay);
+    let agent = resolve_openclaw_agent(overlay);
     let mut cmd = command_from_cli(&bin);
     cmd.arg("agent")
         .arg("--local")
@@ -346,7 +352,7 @@ fn build_openclaw_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    apply_overlay_env(&mut cmd, &overlay);
+    apply_overlay_env(&mut cmd, overlay);
     Ok(cmd)
 }
 
@@ -1017,6 +1023,7 @@ Bind: loopback); resolved command secrets locally.";
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 None,

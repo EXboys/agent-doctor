@@ -100,6 +100,8 @@ export interface ChatSession {
   plan?: AgentPlan;
   /** Set when the last turn stopped before it finished. The next turn hears what it already did. */
   interrupted?: { status: Exclude<PromptSessionStatus, "succeeded">; at: number } | null;
+  /** Registered project from the main app (`workspaces.yaml`). Empty = use default when sending. */
+  workspaceName?: string | null;
 }
 
 export interface SessionStore {

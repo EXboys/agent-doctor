@@ -16,8 +16,8 @@ import {
   clearEl,
   restoreBackupEl,
   newSessionEl,
+  addProjectEl,
   terminalEl,
-  cwdEl,
   workspaceSelectEl,
   workspaceActivateEl,
   workspaceHintEl,
@@ -34,6 +34,7 @@ import {
   renderSessionList,
   ensureRuntimeSession,
   startNewSession,
+  addProjectFromAsk,
   clearActiveSession,
   compactActiveSession,
   isViewingRunningSession,
@@ -51,6 +52,8 @@ import {
   loadAskResources,
   syncWorkspaceActivateButton,
   activateSelectedWorkspace,
+  assignActiveSessionWorkspace,
+  syncSessionWorkspaceUi,
   openMainWorkspace,
   openMainResources,
   closeContextPopover,
@@ -121,8 +124,21 @@ export function bootChat(): void {
   void setupFileDrop();
   void (async () => {
     await loadAskResources();
+    syncSessionWorkspaceUi();
+    renderSessionList();
     applyVerifyDraftIfAny();
   })();
+
+  window.addEventListener("focus", () => {
+    renderSessionList();
+    syncSessionWorkspaceUi();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      renderSessionList();
+      syncSessionWorkspaceUi();
+    }
+  });
 
   actionEl.addEventListener("click", () => {
     if (isViewingRunningSession()) void cancelAsk();
@@ -133,7 +149,8 @@ export function bootChat(): void {
   restoreBackupEl?.addEventListener("click", () => {
     restoreChatFromBackup();
   });
-  newSessionEl.addEventListener("click", startNewSession);
+  newSessionEl.addEventListener("click", () => startNewSession());
+  addProjectEl.addEventListener("click", () => addProjectFromAsk());
   terminalEl.addEventListener("click", () => void openTerminal());
   themeEl.addEventListener("click", () => {
     applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
@@ -166,15 +183,11 @@ export function bootChat(): void {
   workspaceActivateEl.addEventListener("click", () => void activateSelectedWorkspace());
   workspaceSelectEl.addEventListener("change", () => {
     const name = workspaceSelectEl.value.trim();
-    if (!name || !chatState.workspaceDoc) {
+    if (!name) {
       syncWorkspaceActivateButton();
       return;
     }
-    const path = chatState.workspaceDoc.workspaces[name]?.path;
-    if (path) {
-      cwdEl.textContent = path;
-      cwdEl.title = path;
-    }
+    assignActiveSessionWorkspace(name);
     syncWorkspaceActivateButton();
   });
   workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());

@@ -16,6 +16,25 @@ use crate::setup::{
 };
 use crate::workspace::active_env_path;
 
+/// Overlay env for an Ask turn, optionally bound to a registered workspace (not global `active` only).
+pub(crate) fn collect_overlay_env_for_options(
+    options: &super::PromptSessionOptions,
+) -> HashMap<String, String> {
+    collect_overlay_env_for_workspace(options.workspace_name.as_deref())
+}
+
+pub(crate) fn collect_overlay_env_for_workspace(
+    workspace_name: Option<&str>,
+) -> HashMap<String, String> {
+    let mut env = collect_overlay_env();
+    if let Some(name) = workspace_name.map(str::trim).filter(|n| !n.is_empty()) {
+        if let Ok(session) = crate::workspace::session_env_for_workspace(name) {
+            env.extend(session);
+        }
+    }
+    env
+}
+
 pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
     let mut env = HashMap::new();
     let personal_edition =
@@ -266,7 +285,9 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
     let global = crate::adapters::util::home_join(".codex");
     let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(&global.join("config.toml"));
     if let Some(home) = overlay.get("CODEX_HOME").map(PathBuf::from) {
-        let project = crate::session_launch::resolve_session_cwd(None);
+        let workspace = overlay.get("AGENT_DOCTOR_WORKSPACE").map(|s| s.as_str());
+        let explicit_root = overlay.get("AGENT_DOCTOR_PROJECT_ROOT").map(Path::new);
+        let project = crate::session_launch::resolve_session_cwd(explicit_root, workspace);
         let _ = crate::workspace::backends::bind_codex_for_project(&home, Some(&project));
         // Existing installs may still have provider keys in ~/.codex from older
         // wiring. Strip them when Ask uses an isolated CODEX_HOME so newer Codex

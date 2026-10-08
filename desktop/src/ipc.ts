@@ -124,6 +124,7 @@ export type StartPromptSessionArgs = {
   runtime: string;
   prompt: string;
   cwd?: string | null;
+  workspaceName?: string | null;
   timeoutSec?: number | null;
   dangerouslySkipPermissions?: boolean | null;
   fullAuto?: boolean | null;
@@ -342,6 +343,8 @@ export function initWorkspace(args: {
   path: string;
   name?: string | null;
   gitRoot: boolean;
+  /** When true (default), switch global default project after register — main window flow. */
+  activate?: boolean | null;
 }): Promise<{ name: string }> {
   return invoke("init_workspace_command", args);
 }

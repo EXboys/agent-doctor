@@ -18,6 +18,7 @@ import {
   mentionMenuEl,
   restoreBackupEl,
   newSessionEl,
+  addProjectEl,
   sessionListEl,
   statusEl,
   cwdEl,
@@ -45,6 +46,8 @@ import {
 import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 
+import { registerProjectFromAsk } from "./chat/register-project";
+import { sessionWorkspaceName, sessionWorkspacePath } from "./chat/session-workspace";
 import {
   ASK_VERIFY_DRAFT_KEY,
   MAX_SESSIONS,
@@ -138,8 +141,50 @@ export function renderSessionList(): void {
 export function ensureRuntimeSession(runtime: AskRuntime): void {
   chatState.sessions.ensureRuntimeSession(runtime);
 }
-export function startNewSession(): void {
-  chatState.sessions.startNewSession();
+export function startNewSession(workspaceName?: string | null): void {
+  chatState.sessions.startNewSession(workspaceName);
+}
+
+export function resolveSendWorkspace(session: ChatSession): {
+  cwd: string | null;
+  workspaceName: string | null;
+} {
+  const doc = chatState.workspaceDoc;
+  return {
+    workspaceName: sessionWorkspaceName(session, doc),
+    cwd: sessionWorkspacePath(session, doc),
+  };
+}
+
+export function syncSessionWorkspaceUi(session?: ChatSession): void {
+  chatState.shellUi?.syncWorkspaceForSession(session ?? activeSession());
+}
+
+/** Pin the open chat to a registered project (clears resume thread when the project changes). */
+export function assignActiveSessionWorkspace(name: string): boolean {
+  const doc = chatState.workspaceDoc;
+  if (!doc?.workspaces[name]) return false;
+  if (chatState.busy && isViewingRunningSession()) {
+    setStatus(t("chat.cannotChangeWorkspaceRunning"), "warn");
+    syncSessionWorkspaceUi();
+    return false;
+  }
+  const session = activeSession();
+  if (session.workspaceName === name) {
+    syncSessionWorkspaceUi(session);
+    return true;
+  }
+  session.workspaceName = name;
+  session.runtimeThreadId = null;
+  session.interrupted = null;
+  touchSession(session);
+  saveStore();
+  const path = doc.workspaces[name]?.path?.trim();
+  if (path) setDisplayedCwd(path);
+  syncSessionWorkspaceUi(session);
+  renderSessionList();
+  setStatus(t("chat.sessionWorkspaceChanged", { name }), "ok");
+  return true;
 }
 export function clearActiveSession(): void {
   chatState.sessions.clearActiveSession();
@@ -297,6 +342,8 @@ export function applyI18n(): void {
   promptEl.placeholder = t(isComposerLocked() ? "chat.placeholderBusy" : "chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
+  addProjectEl.title = t("chat.addProject");
+  addProjectEl.setAttribute("aria-label", t("chat.addProject"));
   if (readImageWrapEl) {
     readImageWrapEl.title = t("chat.readImageTextHint");
   }
@@ -584,12 +631,27 @@ export function toggleResourcesPanel(): void {
 }
 export async function loadAskResources(): Promise<void> {
   await chatState.shellUi.loadAskResources();
+  renderSessionList();
+  syncSessionWorkspaceUi();
+}
+
+export function addProjectFromAsk(): void {
+  void registerProjectFromAsk({
+    getBusy: () => chatState.busy,
+    getWorkspaceDoc: () => chatState.workspaceDoc,
+    setStatus: (text, tone) => setStatus(text, tone),
+    loadAskResources: () => loadAskResources(),
+    renderSessionList: () => renderSessionList(),
+    syncSessionWorkspaceUi: () => syncSessionWorkspaceUi(),
+    startNewSession: (name) => startNewSession(name),
+  });
 }
 export function syncWorkspaceActivateButton(doc: WorkspaceDoc | null = chatState.workspaceDoc): void {
   chatState.shellUi.syncWorkspaceActivateButton(doc);
 }
 export async function activateSelectedWorkspace(): Promise<void> {
   await chatState.shellUi.activateSelectedWorkspace();
+  renderSessionList();
 }
 export async function openMainWorkspace(): Promise<void> {
   await chatState.shellUi.openMainWorkspace();

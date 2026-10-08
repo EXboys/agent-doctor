@@ -131,7 +131,10 @@ export function loadStoreFromLocalKeys(): SessionStore | null {
   return null;
 }
 
-export function createEmptySession(runtime: AskRuntime): ChatSession {
+export function createEmptySession(
+  runtime: AskRuntime,
+  workspaceName?: string | null,
+): ChatSession {
   const now = Date.now();
   return {
     id: uid(),
@@ -141,6 +144,7 @@ export function createEmptySession(runtime: AskRuntime): ChatSession {
     updatedAt: now,
     messages: [],
     runtimeThreadId: null,
+    workspaceName: workspaceName ?? null,
   };
 }
 

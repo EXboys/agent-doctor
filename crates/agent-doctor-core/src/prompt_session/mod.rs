@@ -69,6 +69,9 @@ pub struct PromptSessionOptions {
     /// and its model can see them; otherwise the prompt carries their text.
     #[serde(default)]
     pub image_paths: Vec<std::path::PathBuf>,
+    /// Registered workspace name from `workspaces.yaml` (Ask session binding).
+    #[serde(default)]
+    pub workspace_name: Option<String>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -249,7 +252,10 @@ where
         let supported = crate::runtime::ask_runtime_ids().join(", ");
         bail!("ask supports {supported} (got '{runtime}')");
     };
-    let cwd = crate::session_launch::resolve_session_cwd(options.cwd.as_deref());
+    let cwd = crate::session_launch::resolve_session_cwd(
+        options.cwd.as_deref(),
+        options.workspace_name.as_deref(),
+    );
     // Every assistant starts its tools as part of sending. Drop missing
     // programs first so that failure never shows up on the message.
     crate::setup::merge::drop_unreachable_ask_tools(&cwd);
@@ -289,6 +295,7 @@ mod tests {
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
+                workspace_name: None,
             },
             |_| {},
         )
@@ -306,6 +313,7 @@ mod tests {
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
+                workspace_name: None,
             },
             |_| {},
         )
@@ -375,6 +383,7 @@ time.sleep(30)
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
+                workspace_name: None,
             },
             cancel,
             None,

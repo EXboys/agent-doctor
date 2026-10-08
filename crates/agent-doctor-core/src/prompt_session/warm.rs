@@ -359,6 +359,7 @@ mod tests {
                     resume_thread_id: resume,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 cancel,
                 None,

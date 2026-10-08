@@ -54,15 +54,22 @@ fn existing_dir(path: &Path) -> Option<PathBuf> {
     path.is_dir().then(|| path.to_path_buf())
 }
 
-/// Resolve cwd: existing explicit dir → existing workspace → home → process cwd.
+/// Resolve cwd: existing explicit dir → named workspace → global active → home → process cwd.
 /// Missing folders (deleted projects / leftover temp paths) never fail Ask.
-pub fn resolve_session_cwd(explicit: Option<&Path>) -> PathBuf {
+pub fn resolve_session_cwd(explicit: Option<&Path>, workspace_name: Option<&str>) -> PathBuf {
     if let Some(path) = explicit {
         if let Some(dir) = existing_dir(path) {
             return dir;
         }
     }
     if let Ok(doc) = ensure_default_workspace().or_else(|_| load_workspaces()) {
+        if let Some(name) = workspace_name.map(str::trim).filter(|n| !n.is_empty()) {
+            if let Some(entry) = doc.workspaces.get(name) {
+                if let Some(dir) = existing_dir(&entry.path) {
+                    return dir;
+                }
+            }
+        }
         if let Some(active) = doc.active.as_deref() {
             if let Some(entry) = doc.workspaces.get(active) {
                 if let Some(dir) = existing_dir(&entry.path) {
@@ -80,7 +87,7 @@ pub fn resolve_session_cwd(explicit: Option<&Path>) -> PathBuf {
 /// Open an interactive session for a known runtime.
 pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSessionReport> {
     let runtime = normalize_runtime(&options.runtime);
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), None);
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -119,7 +126,7 @@ mod tests {
     fn resolve_session_cwd_skips_missing_explicit_dir() {
         let missing = PathBuf::from("/this/path/should/not/exist/agent-doctor-cwd-test");
         assert!(!missing.exists());
-        let cwd = resolve_session_cwd(Some(&missing));
+        let cwd = resolve_session_cwd(Some(&missing), None);
         assert!(
             cwd.is_dir(),
             "fallback must be an existing directory: {}",

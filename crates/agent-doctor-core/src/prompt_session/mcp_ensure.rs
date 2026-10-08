@@ -185,13 +185,20 @@ fn resolve_workspace_paths(
     Option<PathBuf>,
 ) {
     let doc = load_workspaces().unwrap_or_default();
-    let active = doc
-        .active
-        .as_ref()
-        .and_then(|name| doc.workspaces.get(name));
+    let bound_name = overlay
+        .get("AGENT_DOCTOR_WORKSPACE")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty());
+    let entry = bound_name
+        .and_then(|name| doc.workspaces.get(name))
+        .or_else(|| {
+            doc.active
+                .as_ref()
+                .and_then(|name| doc.workspaces.get(name))
+        });
 
-    let project_path = active
-        .map(|entry| entry.path.clone())
+    let project_path = entry
+        .map(|e| e.path.clone())
         .or_else(|| Some(project_cwd.to_path_buf()));
 
     let codex_home = overlay
@@ -199,27 +206,21 @@ fn resolve_workspace_paths(
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| active.map(|entry| entry.codex_home.clone()));
+        .or_else(|| entry.map(|e| e.codex_home.clone()));
 
     let hermes_home = overlay
         .get("HERMES_HOME")
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            active.map(|entry| {
-                dirs_home()
-                    .join(".hermes/profiles")
-                    .join(&entry.hermes_profile)
-            })
-        });
+        .or_else(|| entry.map(|e| dirs_home().join(".hermes/profiles").join(&e.hermes_profile)));
 
     let openclaw_workspace = overlay
         .get("OPENCLAW_WORKSPACE")
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| active.map(|entry| entry.openclaw_workspace.clone()));
+        .or_else(|| entry.map(|e| e.openclaw_workspace.clone()));
 
     (project_path, codex_home, hermes_home, openclaw_workspace)
 }
@@ -259,6 +260,7 @@ mod tests {
             resume_thread_id: None,
             selected_mcps: vec!["browser".into()],
             image_paths: Vec::new(),
+            workspace_name: None,
         };
         assert!(wants_browser_mcp(&opts));
         opts.selected_mcps.clear();

@@ -36,6 +36,7 @@ export const clearEl = document.querySelector<HTMLButtonElement>("#chat-clear")!
 export const restoreBackupEl = document.querySelector<HTMLButtonElement>("#chat-restore-backup");
 export const newSessionEl = document.querySelector<HTMLButtonElement>("#chat-new")!;
 export const terminalEl = document.querySelector<HTMLButtonElement>("#chat-terminal")!;
+export const addProjectEl = document.querySelector<HTMLButtonElement>("#chat-add-project")!;
 export const sessionListEl = document.querySelector<HTMLElement>("#chat-sessions")!;
 export const logEl = document.querySelector<HTMLElement>("#chat-log")!;
 export const statusEl = document.querySelector<HTMLElement>("#chat-status")!;

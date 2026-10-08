@@ -145,7 +145,10 @@ function newController(sessionId: string, opts?: { readImages?: boolean }) {
     setPendingAttachments: (items: never[]) => {
       state.attachments = items;
     },
-    getWorkspaceCwd: () => "/tmp/ws",
+    resolveSendWorkspace: () => ({
+      cwd: "/tmp/ws",
+      workspaceName: "default",
+    }),
     getVerifyMcpTurn: () => false,
     setVerifyMcpTurn: () => {},
     getVerifySawBrowserNavigate: () => false,

@@ -805,13 +805,45 @@ fn openclaw_runtime_status(entry: &WorkspaceEntry) -> RuntimeStatus {
     }
 }
 
+/// Env vars for one Ask turn bound to a registered workspace (does not require global `active`).
+pub fn session_env_for_workspace(name: &str) -> Result<std::collections::HashMap<String, String>> {
+    let doc = load_workspaces()?;
+    let entry = doc
+        .workspaces
+        .get(name)
+        .with_context(|| format!("workspace '{name}' not found"))?;
+    Ok(session_env_from_entry(name, entry))
+}
+
+fn session_env_from_entry(
+    name: &str,
+    entry: &WorkspaceEntry,
+) -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let profile_home = home_join(".hermes/profiles").join(&entry.hermes_profile);
+    let mut map = HashMap::new();
+    map.insert("AGENT_DOCTOR_WORKSPACE".into(), name.to_string());
+    map.insert(
+        "AGENT_DOCTOR_PROJECT_ROOT".into(),
+        entry.path.display().to_string(),
+    );
+    map.insert("HERMES_HOME".into(), profile_home.display().to_string());
+    map.insert("CODEX_HOME".into(), entry.codex_home.display().to_string());
+    map.insert("OPENCLAW_AGENT_ID".into(), entry.openclaw_agent_id.clone());
+    map.insert(
+        "OPENCLAW_WORKSPACE".into(),
+        entry.openclaw_workspace.display().to_string(),
+    );
+    map
+}
+
 pub(crate) fn write_active_env(name: &str, entry: &WorkspaceEntry) -> Result<PathBuf> {
     let path = active_env_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let profile_home = home_join(".hermes/profiles").join(&entry.hermes_profile);
+    let env = session_env_from_entry(name, entry);
     let mut file = fs::File::create(&path).context("create active-workspace.env")?;
     writeln!(file, "# Agent Doctor active workspace: {name}")?;
     writeln!(
@@ -820,32 +852,9 @@ pub(crate) fn write_active_env(name: &str, entry: &WorkspaceEntry) -> Result<Pat
         path.display()
     )?;
     // Quote values: macOS config paths contain spaces (`Application Support`).
-    writeln!(file, "AGENT_DOCTOR_WORKSPACE={}", shell_quote_env(name))?;
-    writeln!(
-        file,
-        "AGENT_DOCTOR_PROJECT_ROOT={}",
-        shell_quote_env(&entry.path.display().to_string())
-    )?;
-    writeln!(
-        file,
-        "HERMES_HOME={}",
-        shell_quote_env(&profile_home.display().to_string())
-    )?;
-    writeln!(
-        file,
-        "CODEX_HOME={}",
-        shell_quote_env(&entry.codex_home.display().to_string())
-    )?;
-    writeln!(
-        file,
-        "OPENCLAW_AGENT_ID={}",
-        shell_quote_env(&entry.openclaw_agent_id)
-    )?;
-    writeln!(
-        file,
-        "OPENCLAW_WORKSPACE={}",
-        shell_quote_env(&entry.openclaw_workspace.display().to_string())
-    )?;
+    for (key, value) in &env {
+        writeln!(file, "{key}={}", shell_quote_env(value))?;
+    }
 
     #[cfg(unix)]
     {

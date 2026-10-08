@@ -16,7 +16,7 @@ use anyhow::{bail, Context, Result};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_hermes_env, apply_overlay_env, collect_overlay_env, format_command_display,
+    apply_hermes_env, apply_overlay_env, collect_overlay_env_for_options, format_command_display,
     prepare_hermes_home,
 };
 use super::plan::{tool_carries_plan, PlanBoard};
@@ -58,7 +58,7 @@ fn run_hermes(
         bail!("prompt must not be empty");
     }
 
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -71,7 +71,7 @@ fn run_hermes(
         .filter(|s| !s.is_empty());
     let yolo = options.dangerously_skip_permissions || options.full_auto;
 
-    let overlay = collect_overlay_env();
+    let overlay = collect_overlay_env_for_options(options);
     let mut prompt_text = prompt.to_string();
     if super::mcp_ensure::wants_browser_mcp(options) {
         if let Some(note) = super::mcp_ensure::ensure_browser_mcp_for_ask("hermes", &cwd, &overlay)
@@ -89,7 +89,7 @@ fn run_hermes(
         );
     }
 
-    let mut cmd = build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo)?;
+    let mut cmd = build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo, &overlay)?;
     let command_display = format_command_display(&cmd);
 
     on_event(PromptSessionEvent::Started {
@@ -211,9 +211,9 @@ fn build_hermes_command(
     cwd: &Path,
     resume_session_id: Option<&str>,
     yolo: bool,
+    overlay: &std::collections::HashMap<String, String>,
 ) -> Result<Command> {
-    let overlay = collect_overlay_env();
-    prepare_hermes_home(&overlay);
+    prepare_hermes_home(overlay);
     let bin = std::env::var("AGENT_DOCTOR_HERMES_BIN").unwrap_or_else(|_| "hermes".into());
     let mut cmd = command_from_cli(&bin);
     // stream-json implies quiet and yields live text/tool events (not a blank “waiting” spinner).
@@ -232,8 +232,8 @@ fn build_hermes_command(
     if yolo {
         cmd.arg("--yolo");
     }
-    apply_overlay_env(&mut cmd, &overlay);
-    apply_hermes_env(&mut cmd, &overlay);
+    apply_overlay_env(&mut cmd, overlay);
+    apply_hermes_env(&mut cmd, overlay);
     Ok(cmd)
 }
 
@@ -849,6 +849,7 @@ exit 0
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
                     image_paths: Vec::new(),
+                    workspace_name: None,
                 },
                 PromptSessionCancel::new(),
                 None,

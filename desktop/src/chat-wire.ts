@@ -95,6 +95,8 @@ import {
   renderActiveMessages,
   queueAssistantText,
   setDisplayedCwd,
+  resolveSendWorkspace,
+  syncSessionWorkspaceUi,
   closeContextPopover,
   updateContextMeter,
   ensureListener,
@@ -499,6 +501,8 @@ export function wireChatControllers(): void {
     },
     touchSession: (session) => touchSession(session),
     isComposerLocked: () => isComposerLocked(),
+    getWorkspaceDoc: () => chatState.workspaceDoc,
+    syncSessionWorkspaceUi: () => syncSessionWorkspaceUi(),
   });
 
   chatState.stream = createStreamController({
@@ -596,7 +600,7 @@ export function wireChatControllers(): void {
     setPendingAttachments: (items) => {
       chatState.pendingAttachments = items;
     },
-    getWorkspaceCwd: () => chatState.workspaceCwd,
+    resolveSendWorkspace: (session) => resolveSendWorkspace(session),
     getVerifyMcpTurn: () => chatState.verifyMcpTurn,
     setVerifyMcpTurn: (v) => {
       chatState.verifyMcpTurn = v;

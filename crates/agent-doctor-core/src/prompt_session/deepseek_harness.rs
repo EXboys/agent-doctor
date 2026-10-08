@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env, format_command_display,
+    apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env_for_options,
+    format_command_display,
 };
 use super::util::{
     command_from_cli, force_stop_child, is_runtime_stderr_noise, summarize, SessionClock,
@@ -60,7 +61,7 @@ fn run_deepseek_harness(
     if prompt.is_empty() {
         bail!("prompt must not be empty");
     }
-    let cwd = resolve_session_cwd(options.cwd.as_deref());
+    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -72,13 +73,13 @@ fn run_deepseek_harness(
         .filter(|id| !id.is_empty())
         .map(str::to_string);
     let auto_allow = options.dangerously_skip_permissions || options.full_auto;
-    let images: Vec<EncodedImage> =
-        turn_images(RUNTIME_KEY, &options.image_paths, &collect_overlay_env())
-            .iter()
-            .filter_map(|p| encode_image(p))
-            .collect();
+    let overlay = collect_overlay_env_for_options(options);
+    let images: Vec<EncodedImage> = turn_images(RUNTIME_KEY, &options.image_paths, &overlay)
+        .iter()
+        .filter_map(|p| encode_image(p))
+        .collect();
 
-    let mut cmd = build_command(&cwd);
+    let mut cmd = build_command(&cwd, &overlay);
     let command_display = format_command_display(&cmd);
     let fingerprint = warm::enabled().then(|| warm::fingerprint(&cmd, &[]));
 
@@ -237,10 +238,9 @@ fn finish_failed(
     }
 }
 
-fn build_command(cwd: &Path) -> Command {
+fn build_command(cwd: &Path, overlay: &std::collections::HashMap<String, String>) -> Command {
     let binary =
         std::env::var("AGENT_DOCTOR_DSH_BIN").unwrap_or_else(|_| DEEPSEEK_HARNESS_CLI.into());
-    let overlay = collect_overlay_env();
     let mut command = command_from_cli(&binary);
     command
         .arg("--profile")
@@ -249,8 +249,8 @@ fn build_command(cwd: &Path) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    apply_overlay_env(&mut command, &overlay);
-    apply_deepseek_harness_env(&mut command, &overlay);
+    apply_overlay_env(&mut command, overlay);
+    apply_deepseek_harness_env(&mut command, overlay);
     command
 }
 
@@ -895,6 +895,7 @@ for raw in sys.stdin:
             resume_thread_id: resume.map(str::to_string),
             selected_mcps: Vec::new(),
             image_paths: Vec::new(),
+            workspace_name: None,
         }
     }
 

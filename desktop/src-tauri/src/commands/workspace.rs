@@ -19,17 +19,20 @@ pub fn init_workspace_command(
     path: String,
     name: Option<String>,
     git_root: bool,
+    activate: Option<bool>,
     app: tauri::AppHandle,
 ) -> Result<InitWorkspaceReport, String> {
     let report = init_workspace(Some(PathBuf::from(path)), name, git_root)
         .map_err(|error| error.to_string())?;
-    let _ = use_workspace_with_options(
-        &report.name,
-        &UseWorkspaceOptions {
-            backup: true,
-            restart_gateways: false,
-        },
-    );
+    if activate.unwrap_or(true) {
+        let _ = use_workspace_with_options(
+            &report.name,
+            &UseWorkspaceOptions {
+                backup: true,
+                restart_gateways: false,
+            },
+        );
+    }
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
     Ok(report)

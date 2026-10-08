@@ -81,7 +81,38 @@
 
         <button id="chat-new" type="button" class="btn-side btn-new" data-i18n="chat.newSession">新建会话</button>
         <div class="chat-session-block">
-          <p class="chat-session-label" data-i18n="chat.sessions">会话记录</p>
+          <div class="chat-sessions-head">
+            <p class="chat-session-label" data-i18n="chat.projects">项目</p>
+            <button
+              id="chat-add-project"
+              type="button"
+              class="chat-sessions-head-btn chat-add-project-btn"
+              data-i18n-title="chat.addProject"
+              aria-label="添加项目"
+            >
+              <svg
+                class="chat-add-project-icon"
+                width="15"
+                height="15"
+                viewBox="0 0 15 15"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M2 5.25A.75.75 0 0 1 2.75 4.5H5.6L6.85 6h5.4a.75.75 0 0 1 .75.75V11a.75.75 0 0 1-.75.75H2.75A.75.75 0 0 1 2 11.25V5.25z"
+                  stroke="currentColor"
+                  stroke-width="1.15"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M10.25 1.75h2.5M11.5.5v2.5"
+                  stroke="currentColor"
+                  stroke-width="1.15"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
           <div id="chat-sessions" class="chat-sessions" role="list"></div>
         </div>
 

@@ -256,6 +256,7 @@ async fn start_prompt_session_command(
     resume_thread_id: Option<String>,
     selected_mcps: Option<Vec<String>>,
     image_paths: Option<Vec<String>>,
+    workspace_name: Option<String>,
 ) -> Result<PromptSessionReport, String> {
     let owner_label = window.label().to_string();
     {
@@ -307,6 +308,9 @@ async fn start_prompt_session_command(
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
             .collect(),
+        workspace_name: workspace_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
     };
 
     // The window's Allow button writes through this control. DeepSeek always

@@ -3,6 +3,8 @@ import { AskResourcesController, type WorkspaceDoc } from "../ask-resources";
 import { t } from "../i18n";
 import { shortCwdLabel } from "./format";
 import { useWorkspace, focusMainTab, openResourcesWindow } from "../ipc";
+import type { ChatSession } from "./types";
+import { sessionWorkspaceName, sessionWorkspacePath } from "./session-workspace";
 
 export type ShellUiEls = {
   shellEl: HTMLElement;
@@ -40,8 +42,21 @@ export function createShellUiController(deps: ShellUiDeps) {
       !selected || isCurrent || !doc || Object.keys(doc.workspaces).length === 0;
     deps.workspaceActivateEl.classList.toggle("is-current", isCurrent);
     deps.workspaceActivateEl.textContent = isCurrent
-      ? t("ask.workspaceCurrent")
-      : t("ask.workspaceActivate");
+      ? t("ask.workspaceDefault")
+      : t("ask.workspaceSetDefault");
+  }
+
+  function syncWorkspaceForSession(session: ChatSession): void {
+    const doc = deps.getWorkspaceDoc();
+    const name = sessionWorkspaceName(session, doc);
+    if (name && doc?.workspaces[name]) {
+      deps.workspaceSelectEl.value = name;
+      const path = sessionWorkspacePath(session, doc);
+      if (path) {
+        deps.setDisplayedCwd(path);
+      }
+    }
+    syncWorkspaceActivateButton(doc);
   }
 
   function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
@@ -123,6 +138,7 @@ export function createShellUiController(deps: ShellUiDeps) {
   return {
     toggleResourcesPanel,
     syncWorkspaceActivateButton,
+    syncWorkspaceForSession,
     renderWorkspaceSwitcher,
     loadAskResources,
     activateSelectedWorkspace,
