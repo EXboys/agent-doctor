@@ -13,8 +13,7 @@ import {
   contextPopoverEl,
   contextCompactEl,
   mentionMenuEl,
-  newSessionEl,
-  addProjectEl,
+  newWorkspaceEl,
   workspaceSelectEl,
   workspaceActivateEl,
   workspaceHintEl,
@@ -30,7 +29,6 @@ import {
   applyChatTheme,
   renderSessionList,
   ensureRuntimeSession,
-  startNewSession,
   addProjectFromAsk,
   compactActiveSession,
   isViewingRunningSession,
@@ -147,8 +145,7 @@ export function bootChat(): void {
     else void sendAsk();
   });
   attachEl.addEventListener("click", () => void pickAttachments());
-  newSessionEl.addEventListener("click", () => startNewSession());
-  addProjectEl.addEventListener("click", () => addProjectFromAsk());
+  newWorkspaceEl.addEventListener("click", () => addProjectFromAsk());
   themeEl.addEventListener("click", () => {
     applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
   });

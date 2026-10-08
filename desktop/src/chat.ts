@@ -17,8 +17,7 @@ import {
   mentionsEl,
   mentionMenuEl,
   restoreBackupEl,
-  newSessionEl,
-  addProjectEl,
+  newWorkspaceEl,
   sessionListEl,
   statusEl,
   cwdEl,
@@ -342,8 +341,7 @@ export function applyI18n(): void {
   promptEl.placeholder = t(isComposerLocked() ? "chat.placeholderBusy" : "chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
-  addProjectEl.title = t("chat.addProject");
-  addProjectEl.setAttribute("aria-label", t("chat.addProject"));
+  newWorkspaceEl.title = t("chat.addProjectPick");
   if (readImageWrapEl) {
     readImageWrapEl.title = t("chat.readImageTextHint");
   }
@@ -436,7 +434,7 @@ export function syncComposerUi(): void {
     closeModelMenu();
     closeContextPopover();
   }
-  newSessionEl.disabled = false;
+  newWorkspaceEl.disabled = false;
   attachEl.disabled = false;
   renderFollowQueue(followQueueEl, chatState.store.activeId, locked);
   if (locked && chatState.voiceInput?.isListening()) {

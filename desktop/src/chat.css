@@ -592,34 +592,6 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   color: var(--faint);
 }
 
-.chat-sessions-head-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-}
-
-.chat-sessions-head-btn:hover {
-  color: var(--text);
-  background: rgba(127, 127, 127, 0.12);
-}
-
-.chat-add-project-btn .chat-add-project-icon {
-  display: block;
-  opacity: 0.72;
-}
-
-.chat-add-project-btn:hover .chat-add-project-icon {
-  opacity: 1;
-}
-
 .chat-sessions {
   display: flex;
   flex-direction: column;
