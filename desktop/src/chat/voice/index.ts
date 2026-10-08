@@ -41,7 +41,10 @@ function appendToPrompt(promptEl: HTMLTextAreaElement, text: string): void {
   promptEl.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function mapErrorMessage(code: string): string {
+function mapErrorMessage(code: string, detail = ""): string {
+  const lower = detail.toLowerCase();
+  const needsWindowsSpeech =
+    /speech_language|constraint|dictation|recognizer/.test(lower);
   switch (code) {
     case "permission_denied":
       return t("chat.voicePermission");
@@ -52,8 +55,14 @@ function mapErrorMessage(code: string): string {
     case "cancelled":
       return t("chat.voiceCancelled");
     case "unavailable":
-      return t("chat.voiceUnavailable");
+      return needsWindowsSpeech ? t("chat.voiceWindowsSpeech") : t("chat.voiceUnavailable");
     default:
+      if (/0x80070005|access|denied|privacy/.test(lower)) {
+        return t("chat.voicePermission");
+      }
+      if (needsWindowsSpeech) {
+        return t("chat.voiceWindowsSpeech");
+      }
       return t("chat.voiceFailed");
   }
 }
@@ -153,7 +162,7 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
           live.value = baseline;
           deps.autoResizePrompt();
         }
-        deps.setStatus(mapErrorMessage(parsed.code), "warn");
+        deps.setStatus(mapErrorMessage(parsed.code, parsed.detail), "warn");
       } else {
         deps.setStatus(t("chat.voiceCancelled"), "muted");
       }

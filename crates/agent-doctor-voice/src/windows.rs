@@ -8,7 +8,7 @@ use std::time::Duration;
 use super::backend::SpeechBackend;
 use super::types::{SpeechCapability, SpeechError, SpeechErrorCode, SpeechOptions, SpeechResult};
 use windows::{
-    core::{Interface, HSTRING},
+    core::{Interface, HRESULT, HSTRING},
     Foundation::{IAsyncAction, IAsyncOperation, TypedEventHandler},
     Globalization::Language,
     Media::SpeechRecognition::{
@@ -18,7 +18,30 @@ use windows::{
         SpeechRecognitionResultStatus, SpeechRecognitionScenario, SpeechRecognitionTopicConstraint,
         SpeechRecognizer,
     },
+    Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED},
 };
+
+fn ensure_winrt() {
+    thread_local! {
+        static INIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    INIT.with(|done| {
+        if done.get() {
+            return;
+        }
+        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        done.set(true);
+    });
+}
+
+fn classify_hresult(code: HRESULT) -> SpeechErrorCode {
+    let value = code.0 as u32;
+    // E_ACCESSDENIED, privacy / capability denials.
+    if value == 0x8007_0005 || value == 0x8007_000E || value == 0x8004_5509 {
+        return SpeechErrorCode::PermissionDenied;
+    }
+    SpeechErrorCode::Failed
+}
 
 pub struct WindowsSpeechBackend;
 
@@ -44,9 +67,9 @@ fn block_on<T: windows::core::RuntimeType>(
                 });
             }
             windows::Foundation::AsyncStatus::Error => {
-                let code = op.ErrorCode().unwrap_or(windows::core::HRESULT(-1));
+                let code = op.ErrorCode().unwrap_or(HRESULT(-1));
                 return Err(SpeechError::new(
-                    SpeechErrorCode::Failed,
+                    classify_hresult(code),
                     format!("async error: {code:?}"),
                 ));
             }
@@ -79,9 +102,9 @@ fn block_on_action(
         {
             windows::Foundation::AsyncStatus::Completed => return Ok(()),
             windows::Foundation::AsyncStatus::Error => {
-                let code = action.ErrorCode().unwrap_or(windows::core::HRESULT(-1));
+                let code = action.ErrorCode().unwrap_or(HRESULT(-1));
                 return Err(SpeechError::new(
-                    SpeechErrorCode::Failed,
+                    classify_hresult(code),
                     format!("async error: {code:?}"),
                 ));
             }
@@ -96,25 +119,64 @@ fn block_on_action(
     }
 }
 
-fn create_recognizer(options: &SpeechOptions) -> Result<SpeechRecognizer, SpeechError> {
-    let recognizer = if let Some(lang) = options.language.as_deref() {
-        let language = Language::CreateLanguage(&HSTRING::from(lang)).map_err(|e| {
-            SpeechError::new(
-                SpeechErrorCode::Failed,
-                format!("invalid language {lang}: {e}"),
-            )
-        })?;
-        SpeechRecognizer::Create(&language)
-    } else {
-        SpeechRecognizer::new()
+fn pick_installed_language(wanted: Option<&str>) -> Option<Language> {
+    let list = SpeechRecognizer::SupportedTopicLanguages().ok()?;
+    let count = list.Size().ok()?;
+    let want = wanted
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    let mut fallback = None;
+    for index in 0..count {
+        let Ok(language) = list.GetAt(index) else {
+            continue;
+        };
+        let tag = language
+            .LanguageTag()
+            .ok()
+            .map(|value| value.to_string().to_ascii_lowercase())
+            .unwrap_or_default();
+        if fallback.is_none() {
+            fallback = Some(language.clone());
+        }
+        let Some(want) = want.as_deref() else {
+            continue;
+        };
+        if tag == want || tag.starts_with(want) || want.starts_with(&tag) {
+            return Some(language);
+        }
     }
-    .map_err(|e| {
-        SpeechError::new(
-            SpeechErrorCode::Unavailable,
-            format!("create SpeechRecognizer: {e}"),
-        )
-    })?;
+    fallback
+}
 
+fn create_recognizer(options: &SpeechOptions) -> Result<SpeechRecognizer, SpeechError> {
+    let mut last = None;
+    if let Some(language) = pick_installed_language(options.language.as_deref()) {
+        match SpeechRecognizer::Create(&language) {
+            Ok(recognizer) => return finish_recognizer(recognizer),
+            Err(error) => last = Some(error),
+        }
+    }
+    if let Some(tag) = options.language.as_deref() {
+        if let Ok(language) = Language::CreateLanguage(&HSTRING::from(tag)) {
+            match SpeechRecognizer::Create(&language) {
+                Ok(recognizer) => return finish_recognizer(recognizer),
+                Err(error) => last = Some(error),
+            }
+        }
+    }
+    match SpeechRecognizer::new() {
+        Ok(recognizer) => finish_recognizer(recognizer),
+        Err(error) => Err(SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            format!(
+                "speech_language: create SpeechRecognizer: {}",
+                last.unwrap_or(error)
+            ),
+        )),
+    }
+}
+
+fn finish_recognizer(recognizer: SpeechRecognizer) -> Result<SpeechRecognizer, SpeechError> {
     if let Ok(timeouts) = recognizer.Timeouts() {
         let _ = timeouts.SetInitialSilenceTimeout(Duration::from_secs(8).into());
         let _ = timeouts.SetEndSilenceTimeout(Duration::from_millis(2500).into());
@@ -169,28 +231,23 @@ fn result_text(result: &SpeechRecognitionResult) -> Result<SpeechResult, SpeechE
     })
 }
 
-fn recognize_once_inner(
-    options: SpeechOptions,
-    on_partial: &dyn Fn(&str),
+fn try_compile_scenario(
+    recognizer: &SpeechRecognizer,
+    scenario: SpeechRecognitionScenario,
+    tag: &str,
     should_cancel: &dyn Fn() -> bool,
-) -> Result<SpeechResult, SpeechError> {
-    let recognizer = create_recognizer(&options)?;
-    let constraint = SpeechRecognitionTopicConstraint::Create(
-        SpeechRecognitionScenario::Dictation,
-        &HSTRING::from("dictation"),
-    )
-    .map_err(|e| {
-        SpeechError::new(
-            SpeechErrorCode::Failed,
-            format!("dictation constraint: {e}"),
-        )
-    })?;
+) -> Result<(), SpeechError> {
+    if let Ok(list) = recognizer.Constraints() {
+        let _ = list.Clear();
+    }
+    let constraint = SpeechRecognitionTopicConstraint::Create(scenario, &HSTRING::from(tag))
+        .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("{tag} constraint: {e}")))?;
     let constraint = constraint
         .cast::<ISpeechRecognitionConstraint>()
         .map_err(|e| {
             SpeechError::new(
                 SpeechErrorCode::Failed,
-                format!("dictation constraint cast: {e}"),
+                format!("{tag} constraint cast: {e}"),
             )
         })?;
     recognizer
@@ -198,16 +255,126 @@ fn recognize_once_inner(
         .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("constraints: {e}")))?
         .Append(&constraint)
         .map_err(|e| SpeechError::new(SpeechErrorCode::Failed, format!("add constraint: {e}")))?;
-
     let compile_op = recognizer.CompileConstraintsAsync().map_err(|e| {
-        SpeechError::new(SpeechErrorCode::Failed, format!("compile constraints: {e}"))
+        SpeechError::new(
+            SpeechErrorCode::Failed,
+            format!("compile {tag} constraints: {e}"),
+        )
     })?;
     let _ = block_on(compile_op, should_cancel)?;
+    Ok(())
+}
 
-    match recognize_live(&recognizer, on_partial, should_cancel) {
-        Ok(result) => Ok(result),
+fn compile_empty_constraints(
+    recognizer: &SpeechRecognizer,
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), SpeechError> {
+    if let Ok(list) = recognizer.Constraints() {
+        let _ = list.Clear();
+    }
+    let compile_op = recognizer.CompileConstraintsAsync().map_err(|e| {
+        SpeechError::new(
+            SpeechErrorCode::Failed,
+            format!("compile empty constraints: {e}"),
+        )
+    })?;
+    let _ = block_on(compile_op, should_cancel)?;
+    Ok(())
+}
+
+fn can_retry_local(error: &SpeechError) -> bool {
+    matches!(
+        error.code,
+        SpeechErrorCode::Failed | SpeechErrorCode::NoSpeech | SpeechErrorCode::Unavailable
+    )
+}
+
+/// Online dictation first. If it cannot start or hears nothing, listen again
+/// with a local speech pack (form / web search / no topic).
+fn recognize_once_inner(
+    options: SpeechOptions,
+    on_partial: &dyn Fn(&str),
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<SpeechResult, SpeechError> {
+    ensure_winrt();
+    let first = recognize_pass(
+        &options,
+        Some((SpeechRecognitionScenario::Dictation, "dictation")),
+        on_partial,
+        should_cancel,
+        Duration::from_secs(8),
+    );
+    match first {
+        Ok(result) if !result.text.trim().is_empty() => return Ok(result),
+        Err(error) if !can_retry_local(&error) => return Err(error),
+        other => {
+            let mut last = match other {
+                Ok(_) => SpeechError::new(SpeechErrorCode::NoSpeech, "dictation heard nothing"),
+                Err(error) => error,
+            };
+            let local_passes = [
+                Some((SpeechRecognitionScenario::FormFilling, "form")),
+                Some((SpeechRecognitionScenario::WebSearch, "websearch")),
+                None,
+            ];
+            for spec in local_passes {
+                if should_cancel() {
+                    return Err(SpeechError::new(
+                        SpeechErrorCode::Cancelled,
+                        "cancelled by user",
+                    ));
+                }
+                match recognize_pass(
+                    &options,
+                    spec,
+                    on_partial,
+                    should_cancel,
+                    Duration::from_secs(12),
+                ) {
+                    Ok(result) if !result.text.trim().is_empty() => return Ok(result),
+                    Ok(_) => {
+                        last = SpeechError::new(
+                            SpeechErrorCode::NoSpeech,
+                            "local speech heard nothing",
+                        );
+                    }
+                    Err(error) if !can_retry_local(&error) => return Err(error),
+                    Err(error) => last = error,
+                }
+            }
+            Err(last)
+        }
+    }
+}
+
+fn recognize_pass(
+    options: &SpeechOptions,
+    scenario: Option<(SpeechRecognitionScenario, &'static str)>,
+    on_partial: &dyn Fn(&str),
+    should_cancel: &dyn Fn() -> bool,
+    empty_budget: Duration,
+) -> Result<SpeechResult, SpeechError> {
+    let recognizer = create_recognizer(options)?;
+    if let Some((kind, tag)) = scenario {
+        try_compile_scenario(&recognizer, kind, tag, should_cancel)?;
+    } else {
+        compile_empty_constraints(&recognizer, should_cancel)?;
+    }
+    match recognize_live(&recognizer, on_partial, should_cancel, empty_budget) {
+        Ok(result) if !result.text.trim().is_empty() => Ok(result),
+        Ok(_) => Err(SpeechError::new(
+            SpeechErrorCode::NoSpeech,
+            "empty recognition result",
+        )),
         Err(err) if err.code == SpeechErrorCode::Failed => {
-            recognize_single(&recognizer, should_cancel)
+            match recognize_single(&recognizer, should_cancel) {
+                Ok(result) if !result.text.trim().is_empty() => Ok(result),
+                Ok(_) => Err(SpeechError::new(
+                    SpeechErrorCode::NoSpeech,
+                    "single recognize heard nothing",
+                )),
+                Err(error) => Err(error),
+            }
         }
         Err(err) => Err(err),
     }
@@ -218,6 +385,7 @@ fn recognize_live(
     recognizer: &SpeechRecognizer,
     on_partial: &dyn Fn(&str),
     should_cancel: &dyn Fn() -> bool,
+    empty_budget: Duration,
 ) -> Result<SpeechResult, SpeechError> {
     let session = recognizer.ContinuousRecognitionSession().map_err(|e| {
         SpeechError::new(SpeechErrorCode::Failed, format!("continuous session: {e}"))
@@ -291,6 +459,7 @@ fn recognize_live(
         &completed,
         on_partial,
         should_cancel,
+        empty_budget,
     );
 
     let _ = recognizer.RemoveHypothesisGenerated(hypothesis_token);
@@ -309,6 +478,7 @@ fn listen_until_utterance(
     completed: &AtomicBool,
     on_partial: &dyn Fn(&str),
     should_cancel: &dyn Fn() -> bool,
+    empty_budget: Duration,
 ) -> Result<SpeechResult, SpeechError> {
     block_on_action(
         session.StartAsync().map_err(|e| {
@@ -357,6 +527,15 @@ fn listen_until_utterance(
                 is_final: true,
             });
         }
+        if shown.is_empty() && started.elapsed() > empty_budget {
+            if let Ok(stop) = session.StopAsync() {
+                let _ = block_on_action(stop, &|| false);
+            }
+            return Err(SpeechError::new(
+                SpeechErrorCode::NoSpeech,
+                "no text during listen",
+            ));
+        }
         if started.elapsed() > Duration::from_secs(30) && !shown.is_empty() {
             return Ok(SpeechResult {
                 text: shown,
@@ -385,6 +564,7 @@ impl SpeechBackend for WindowsSpeechBackend {
     }
 
     fn capability(&self) -> SpeechCapability {
+        ensure_winrt();
         let available = SpeechRecognizer::new().is_ok();
         SpeechCapability {
             available,
