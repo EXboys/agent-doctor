@@ -73,12 +73,50 @@ pub(crate) fn thread_sandbox_mode() -> &'static str {
 }
 
 /// `turn/start` SandboxPolicy — camelCase `type`.
-pub(crate) fn turn_sandbox_policy(cwd: &str) -> Value {
+///
+/// Always include isolated `CODEX_HOME` (and the app data dir). Seatbelt
+/// `workspace-write` only sees the project folder; a nested `codex` then cannot
+/// read its own config and dies with `Operation not permitted (os error 1)`.
+pub(crate) fn turn_sandbox_policy(cwd: &str, extra_roots: &[String]) -> Value {
     json!({
         "type": "workspaceWrite",
-        "writableRoots": [cwd],
+        "writableRoots": sandbox_writable_roots(cwd, extra_roots),
         "networkAccess": true
     })
+}
+
+fn sandbox_writable_roots(cwd: &str, extra_roots: &[String]) -> Vec<String> {
+    let mut roots = Vec::new();
+    let mut push = |raw: &str| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if roots.iter().any(|existing| existing == trimmed) {
+            return;
+        }
+        roots.push(trimmed.to_string());
+    };
+    push(cwd);
+    for root in extra_roots {
+        push(root);
+    }
+    roots
+}
+
+fn ask_sandbox_roots(overlay: &std::collections::HashMap<String, String>) -> Vec<String> {
+    let mut roots = Vec::new();
+    if let Some(home) = overlay
+        .get("CODEX_HOME")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        roots.push(home.to_string());
+    }
+    if let Some(dir) = crate::adapters::util::config_dir() {
+        roots.push(dir.join("agent-doctor").display().to_string());
+    }
+    roots
 }
 
 /// How long to wait for `thread/start` or `thread/resume` before giving up.
@@ -261,6 +299,7 @@ fn run_codex_app_server(
         turn_done: false,
         interactive,
         cwd: cwd.display().to_string(),
+        sandbox_roots: ask_sandbox_roots(&overlay),
         prompt: agent_prompt.clone(),
         images: images.clone(),
         approval_policy: approval_policy.clone(),
@@ -519,6 +558,7 @@ pub(crate) struct PumpState {
     turn_done: bool,
     interactive: bool,
     cwd: String,
+    sandbox_roots: Vec<String>,
     prompt: String,
     images: Vec<String>,
     approval_policy: Value,
@@ -740,6 +780,7 @@ mod tests {
             turn_done: false,
             interactive: true,
             cwd: "/tmp".into(),
+            sandbox_roots: Vec::new(),
             prompt: "hi".into(),
             images: Vec::new(),
             approval_policy: json!("on-request"),
@@ -777,6 +818,7 @@ mod tests {
             turn_done: false,
             interactive: false,
             cwd: "/tmp".into(),
+            sandbox_roots: Vec::new(),
             prompt: "hi".into(),
             images: Vec::new(),
             approval_policy: json!("on-request"),
@@ -928,9 +970,13 @@ mod tests {
         assert_eq!(interactive_approval_policy(), json!("on-request"));
         assert_eq!(elevated_approval_policy(), json!("never"));
         assert_eq!(thread_sandbox_mode(), "workspace-write");
-        let policy = turn_sandbox_policy("/tmp/proj");
+        let policy =
+            turn_sandbox_policy("/tmp/proj", &["/tmp/codex-home".into(), "/tmp/proj".into()]);
         assert_eq!(policy["type"], "workspaceWrite");
-        assert_eq!(policy["writableRoots"][0], "/tmp/proj");
+        assert_eq!(
+            policy["writableRoots"],
+            json!(["/tmp/proj", "/tmp/codex-home"])
+        );
     }
 
     #[cfg(unix)]

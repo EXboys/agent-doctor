@@ -40,6 +40,12 @@ async function main() {
   const geo = explainChatFailure(anthropic);
   assert(geo?.kind === "geo_blocked", "anthropic 403 should map to geo_blocked");
 
+  const denied =
+    "Error: error loading default config after config error: Operation not permitted (os error 1)";
+  const mac = explainChatFailure(denied);
+  assert(mac?.kind === "macos_denied", "codex eperm should map to macos_denied");
+  assert(mac!.actions.length === 0, "macos denied has no in-app fix button");
+
   const noise = explainChatFailure("session_id: abc");
   assert(noise === null, "benign stderr should not classify");
 

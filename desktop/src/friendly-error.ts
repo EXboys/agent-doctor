@@ -179,6 +179,7 @@ export function withProviderFailure(messageKey: MessageKey, error: unknown): str
 export type ChatFailureKind =
   | "glm_codex_url"
   | "geo_blocked"
+  | "macos_denied"
   | "provider_key"
   | "provider_url"
   | "provider_model"
@@ -201,6 +202,13 @@ function isGlmCodexResponses404(lower: string): boolean {
       (/unexpected status 404|404 not found|status 404/.test(lower) ||
         /\/responses/.test(lower))) ||
     /codex needs zhipu responses|responses_base_url|chat-completions host.*codex/i.test(lower)
+  );
+}
+
+function isMacosFileDenied(lower: string): boolean {
+  return (
+    /operation not permitted/.test(lower) &&
+    (/config error|loading default config|os error 1/.test(lower) || /eperm/.test(lower))
   );
 }
 
@@ -234,6 +242,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       message: t("chat.fail.geo.message"),
       next: t("chat.fail.geo.next"),
       actions: ["provider", "native"],
+    };
+  }
+
+  if (isMacosFileDenied(lower)) {
+    return {
+      kind: "macos_denied",
+      message: t("chat.fail.macosDenied.message"),
+      next: t("chat.fail.macosDenied.next"),
+      actions: [],
     };
   }
 

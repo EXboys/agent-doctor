@@ -389,6 +389,9 @@ export const en = {
     "chat.fail.glmCodex.next": "Tap One-click repair below, or open Provider to save GLM again, then retry.",
     "chat.fail.geo.message": "This tool is trying to reach an overseas service your network cannot use.",
     "chat.fail.geo.next": "Open Provider and use GLM or another service you configured — not the overseas site directly.",
+    "chat.fail.macosDenied.message": "This Mac blocked the project settings, so this turn stopped.",
+    "chat.fail.macosDenied.next":
+      "Open System Settings → Privacy & Security → Files and Folders, turn on Agent Doctor, then ask again.",
     "chat.fail.actionProvider": "Open Provider",
     "chat.fail.actionRepair": "One-click repair",
     "chat.fail.actionNative": "Open Native",

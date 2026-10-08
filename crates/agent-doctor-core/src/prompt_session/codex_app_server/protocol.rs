@@ -144,7 +144,7 @@ where
                 "cwd": state.cwd,
                 "approvalPolicy": state.approval_policy,
                 // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).
-                "sandboxPolicy": turn_sandbox_policy(&state.cwd)
+                "sandboxPolicy": turn_sandbox_policy(&state.cwd, &state.sandbox_roots)
             }
         })
         .to_string(),

@@ -393,6 +393,9 @@ export const zh = {
     "chat.fail.glmCodex.next": "点下面「一键修复」或到「服务商」重新保存 GLM，再试一次。",
     "chat.fail.geo.message": "这个工具在连海外官网，当前网络用不了。",
     "chat.fail.geo.next": "到「服务商」改用国内 GLM 等已配置的服务，不要直连海外官网。",
+    "chat.fail.macosDenied.message": "本机没允许打开这个项目的设置，所以这一轮停住了。",
+    "chat.fail.macosDenied.next":
+      "打开「系统设置 → 隐私与安全性 → 文件和文件夹」，打开 Agent Doctor，再回到问答重试。",
     "chat.fail.actionProvider": "去服务商",
     "chat.fail.actionRepair": "一键修复",
     "chat.fail.actionNative": "打开原生",
