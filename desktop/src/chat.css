@@ -11,8 +11,8 @@
   --faint: #8b95a8;
   --accent: #2f6fed;
   --accent-soft: rgba(47, 111, 237, 0.1);
-  --user-bubble: #2f6fed;
-  --user-bubble-fg: #ffffff;
+  --user-bubble: #eef1f6;
+  --user-bubble-fg: #152033;
   --ok: #149a5a;
   --warn: #c47d12;
   --danger: #d64545;
@@ -68,7 +68,7 @@ html, body {
 
 .chat-shell {
   display: grid;
-  grid-template-columns: 0 250px minmax(0, 1fr);
+  grid-template-columns: 250px minmax(0, 1fr);
   height: 100%;
   max-height: 100%;
   min-height: 0;
@@ -81,10 +81,15 @@ html, body {
 }
 
 .chat-resources-panel {
+  display: none;
   min-width: 0;
   overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--panel-soft);
+}
+
+.chat-shell.is-resources-open .chat-resources-panel {
+  display: block;
 }
 
 .chat-resources-panel-inner {
@@ -120,6 +125,10 @@ html, body {
 .chat-resources-count {
   font-size: 0.68rem;
   color: var(--muted);
+}
+
+.chat-side > .chat-resources-toggle {
+  order: 10;
 }
 
 .chat-resources-toggle {
@@ -1048,7 +1057,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-activity.is-live {
-  background: rgba(47, 111, 237, 0.055);
+  background: transparent;
   color: var(--text);
 }
 
@@ -1073,13 +1082,13 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-items: center;
   gap: 6px;
   min-height: 26px;
-  padding: 3px 8px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
-  background: rgba(247, 248, 251, 0.92);
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 550;
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -1091,31 +1100,28 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-group-summary:hover {
-  border-color: rgba(15, 23, 42, 0.16);
-  background: var(--panel);
+  background: var(--fill);
   color: var(--text);
 }
 
 .chat-tool-group.is-live .chat-tool-group-summary {
-  border-color: rgba(47, 111, 237, 0.22);
-  background: rgba(47, 111, 237, 0.06);
-  color: #2f6fed;
+  background: transparent;
+  color: var(--text);
 }
 
+/* The markup carries a "$" glyph; hide it and draw a wrench instead. */
 .chat-tool-group-icon {
-  width: 1rem;
-  height: 1rem;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  font-size: 0.62rem;
-  font-weight: 750;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  font-size: 0;
   color: inherit;
-}
-
-.chat-tool-group.is-live .chat-tool-group-icon {
-  background: rgba(47, 111, 237, 0.12);
+  background: currentColor;
+  opacity: 0.75;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
 }
 
 .chat-tool-group-chevron {
@@ -1150,11 +1156,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-items: center;
   gap: 6px;
   min-height: 26px;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: 3px 6px;
+  border-radius: 8px;
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 550;
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -1166,7 +1172,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-thinking-summary:hover {
-  background: rgba(15, 23, 42, 0.05);
+  background: var(--fill);
   color: var(--text);
 }
 
@@ -1341,7 +1347,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-activity.kind-tool.is-live {
-  background: rgba(47, 111, 237, 0.04);
+  background: transparent;
   color: var(--text);
   box-shadow: none;
 }
@@ -1809,6 +1815,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   color: var(--muted);
   white-space: pre-wrap;
 }
+.chat-status:empty { display: none; }
 .chat-status.is-ok { color: var(--ok); }
 .chat-status.is-warn { color: var(--warn); }
 .chat-status.is-error { color: var(--danger); }
@@ -1820,11 +1827,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-footnote {
-  margin-top: auto;
-  margin-bottom: 0;
-  font-size: 0.66rem;
-  color: var(--faint);
-  line-height: 1.4;
+  display: none;
 }
 
 .chat-main {
@@ -2696,7 +2699,8 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   overflow-wrap: anywhere;
   background: var(--user-bubble);
   color: var(--user-bubble-fg);
-  border-bottom-right-radius: 6px;
+  padding: 10px 14px;
+  border-radius: 14px;
   box-shadow: none;
 }
 
@@ -3961,7 +3965,6 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   .chat-resources-panel {
     border-right: none;
     border-bottom: 1px solid var(--line);
-    max-height: 0;
   }
   .chat-shell.is-resources-open .chat-resources-panel {
     max-height: 36vh;
@@ -4110,7 +4113,7 @@ html[data-theme="dark"] .chat-running-dot {
 html[data-theme="dark"] .chat-bubble.user {
   background: var(--user-bubble);
   color: var(--user-bubble-fg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 0;
 }
 
 html[data-theme="dark"] .chat-composer-bar .btn-send,
@@ -4358,21 +4361,18 @@ html[data-theme="dark"] .chat-tool-group {
 }
 
 html[data-theme="dark"] .chat-tool-group-summary {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.78);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.66);
 }
 
 html[data-theme="dark"] .chat-tool-group-summary:hover {
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
 html[data-theme="dark"] .chat-tool-group.is-live .chat-tool-group-summary {
-  border-color: rgba(91, 143, 255, 0.4);
-  background: rgba(91, 143, 255, 0.12);
-  color: #8eb6ff;
+  background: transparent;
+  color: #fff;
 }
 
 html[data-theme="dark"] .chat-thinking,
@@ -4400,7 +4400,7 @@ html[data-theme="dark"] .chat-thinking.is-live .chat-thinking-label {
 }
 
 html[data-theme="dark"] .chat-tool-group-icon {
-  background: rgba(255, 255, 255, 0.1);
+  background: currentColor;
   color: inherit;
 }
 
@@ -4417,7 +4417,7 @@ html[data-theme="dark"] .chat-activity.kind-tool {
 
 html[data-theme="dark"] .chat-activity.is-live,
 html[data-theme="dark"] .chat-activity.kind-tool.is-live {
-  background: rgba(91, 143, 255, 0.1);
+  background: transparent;
   color: #fff;
 }
 

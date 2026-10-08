@@ -96,14 +96,22 @@ export function bootChat(): void {
   } catch (error) {
     console.error("Ask: early paint failed", error);
   }
-  applyI18n();
+  try {
+    applyI18n();
+  } catch (error) {
+    console.error("Ask: applyI18n failed", error);
+  }
   readImageEl.checked = readImageTextEnabled();
   try {
     readInitialRuntime();
   } catch (error) {
     console.error("Ask: runtime session setup failed", error);
   }
-  applyI18n();
+  try {
+    applyI18n();
+  } catch (error) {
+    console.error("Ask: applyI18n failed", error);
+  }
   renderActiveMessages();
   offerBackupRestoreIfNeeded();
   win.__AD_ASK_BOOTED__ = true;

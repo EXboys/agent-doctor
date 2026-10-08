@@ -376,12 +376,10 @@ export function createSendController(deps: SendDeps) {
         deps.touchSession(session);
         deps.saveStore();
       }
-      const tone =
-        report.status === "succeeded" ? "ok" : report.status === "cancelled" ? "warn" : "error";
       if (deps.getVerifyMcpTurn()) {
         deps.applyVerifyMcpFooter();
-      } else {
-        deps.setStatus(t("chat.done", { status: report.status, ms: String(report.duration_ms) }), tone);
+      } else if (report.status === "succeeded") {
+        deps.setStatus("");
       }
     } catch (error) {
       const message = String(error);
