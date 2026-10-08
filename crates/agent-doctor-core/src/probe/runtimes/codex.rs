@@ -5,6 +5,7 @@ use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
 use crate::prompt_session::env::collect_overlay_env;
 use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::setup::merge::codex_responses_gateway_url;
 
 use super::super::config::ParsedConfig;
 use super::super::schema::schema_warn;
@@ -72,11 +73,11 @@ pub(crate) fn probe_schema(
                 .map(str::to_string)
         });
 
-    match base_url {
+    match &base_url {
         Some(url) => {
             facts.push(DiagnosticFact::new(
                 "gateway.url",
-                &url,
+                url.as_str(),
                 SensitivityLevel::ConfigShape,
             ));
             if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -136,6 +137,25 @@ pub(crate) fn probe_schema(
             format!("model_providers.{provider}.wire_api is '{wire_api}'; expected 'responses'"),
             SensitivityLevel::ConfigShape,
         ));
+    }
+
+    if wire_api == "responses" {
+        if let Some(url) = base_url.as_ref() {
+            let codex_url = codex_responses_gateway_url(url);
+            if codex_url != *url {
+                checks.push(ProbeCheck::new(
+                    "codex.schema.responses_base_url",
+                    "Codex GLM base URL",
+                    ProbeStatus::Warn,
+                    ProbeSeverity::Warning,
+                    format!(
+                        "model_providers.{provider}.base_url uses chat-completions host {url}; \
+                         Codex needs Zhipu Responses API at {codex_url}"
+                    ),
+                    SensitivityLevel::ConfigShape,
+                ));
+            }
+        }
     }
 
     if value

@@ -130,6 +130,22 @@ pub(crate) fn codex_slot_env_key(slot: &str) -> &'static str {
     }
 }
 
+/// Codex ≥0.84 uses OpenAI Responses (`wire_api=responses`). Zhipu GLM exposes that
+/// on `/api/v1`, not on `/api/paas/v4` (chat completions only).
+pub fn codex_responses_gateway_url(gateway_url: &str) -> String {
+    let trimmed = gateway_url.trim().trim_end_matches('/');
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("open.bigmodel.cn")
+        && (lower.contains("paas/v4") || lower.contains("/api/paas/v4"))
+    {
+        return "https://open.bigmodel.cn/api/v1".into();
+    }
+    if lower.contains("api.z.ai") && lower.contains("paas/v4") {
+        return "https://api.z.ai/api/v1".into();
+    }
+    trimmed.to_string()
+}
+
 pub(crate) fn write_codex_provider_config(
     path: &std::path::Path,
     gateway_url: &str,
@@ -137,6 +153,7 @@ pub(crate) fn write_codex_provider_config(
     slot: &str,
 ) -> AnyhowResult<()> {
     ensure_parent(path)?;
+    let gateway_url = codex_responses_gateway_url(gateway_url);
 
     let mut doc = if path.exists() {
         let raw = fs::read_to_string(path)?;
@@ -150,7 +167,7 @@ pub(crate) fn write_codex_provider_config(
     doc["model_provider"] = toml_edit::value(slot);
     // Codex 0.14x still falls back to the built-in `openai` provider (api.openai.com)
     // unless this top-level override is set — custom model_providers alone is not enough.
-    doc["openai_base_url"] = toml_edit::value(gateway_url);
+    doc["openai_base_url"] = toml_edit::value(gateway_url.as_str());
 
     let display = codex_slot_display_name(slot);
 
@@ -273,6 +290,22 @@ base_url = "https://gateway.example/v1"
         assert!(!rendered.contains("model_provider"));
         assert!(!rendered.contains("openai_base_url"));
         assert!(!rendered.contains("model_providers"));
+    }
+
+    #[test]
+    fn glm_chat_base_url_maps_to_responses_api_v1() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        write_codex_provider_config(
+            &path,
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-5.3",
+            CODEX_PERSONAL_SLOT,
+        )
+        .unwrap();
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("https://open.bigmodel.cn/api/v1"));
+        assert!(!rendered.contains("api/paas/v4"));
     }
 
     #[test]

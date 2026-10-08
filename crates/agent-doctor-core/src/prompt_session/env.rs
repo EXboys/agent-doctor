@@ -535,6 +535,7 @@ pub(crate) fn resolve_codex_overlay(
             }
         })
         .unwrap_or_else(|| "company".to_string());
+    let url = crate::setup::merge::codex_responses_gateway_url(&url);
     Some((url, key, model, slot))
 }
 

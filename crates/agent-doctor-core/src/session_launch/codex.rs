@@ -159,6 +159,7 @@ pub(crate) fn codex_launch_from_env(
         }
     };
 
+    let gateway_url = crate::setup::merge::codex_responses_gateway_url(&gateway_url);
     Some((gateway_url, api_key, model, slot))
 }
 

@@ -518,6 +518,9 @@ export const zh = {
     "repair.check.browserDesc": "下一步：点「一键修复」加上浏览器工具，再用问答确认。",
     "repair.check.codexWireTitle": "Codex 连接方式不对",
     "repair.check.codexWireDesc": "点「一键修复」改成正确的连接方式。",
+    "repair.check.codexGlmUrlTitle": "Codex 连智谱的地址不对",
+    "repair.check.codexGlmUrlDesc":
+      "Codex 要用智谱 Coding 的 Responses 地址，不能填普通对话地址。点「一键修复」。",
     "repair.check.codexAuthTitle": "登录信息还是占位符",
     "repair.check.codexAuthDesc": "下一步：到「服务商」填好真实密钥。",
     "repair.check.modeOkTitle": "服务地址与当前模式一致",

@@ -516,6 +516,9 @@ export const en = {
     "repair.check.browserDesc": "Next: one-click repair to add browser tools, then confirm with Ask.",
     "repair.check.codexWireTitle": "Codex connection mode is wrong",
     "repair.check.codexWireDesc": "Tap one-click repair to set the correct connection mode.",
+    "repair.check.codexGlmUrlTitle": "Codex is using the wrong GLM address",
+    "repair.check.codexGlmUrlDesc":
+      "Codex needs Zhipu's Responses API base URL, not the chat-completions URL. Tap one-click repair.",
     "repair.check.codexAuthTitle": "Login info is still a placeholder",
     "repair.check.codexAuthDesc": "Next: open Provider and fill in a real key.",
     "repair.check.modeOkTitle": "Service address matches the current mode",

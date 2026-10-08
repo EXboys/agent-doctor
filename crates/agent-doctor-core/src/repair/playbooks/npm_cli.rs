@@ -113,7 +113,9 @@ pub(crate) const CODEX_RULES: &[Rule] = &[
         title: "Set Codex wire_api to responses",
         description: "Patch active model_providers.*.wire_api = \"responses\".",
         check: CheckMatch::Custom(|check| {
-            (check.id == "codex.schema.wire_api_missing" || check.id == "codex.schema.wire_api")
+            (check.id == "codex.schema.wire_api_missing"
+                || check.id == "codex.schema.wire_api"
+                || check.id == "codex.schema.responses_base_url")
                 && check.status == ProbeStatus::Warn
         }),
         versions: Versions::ANY,
@@ -924,8 +926,12 @@ fn patch_codex_wire_api() -> Result<()> {
 
     // Keep top-level openai_base_url aligned with the active provider base_url when present.
     if let Some(base) = entry.get("base_url").and_then(|v| v.as_str()) {
-        if !base.trim().is_empty() {
-            doc["openai_base_url"] = toml_edit::value(base);
+        let fixed = crate::setup::merge::codex_responses_gateway_url(base);
+        if fixed != base {
+            entry["base_url"] = toml_edit::value(&fixed);
+        }
+        if !fixed.trim().is_empty() {
+            doc["openai_base_url"] = toml_edit::value(fixed);
         }
     }
 

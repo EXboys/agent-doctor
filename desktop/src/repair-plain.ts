@@ -94,6 +94,7 @@ function idFamily(id: string): string {
   if (id.includes("legacy_agents")) return "legacy_agents";
   if (id.includes("legacy") || id.includes("schema.")) return "schema.legacy";
   if (id.includes("wire_api")) return "codex.wire_api";
+  if (id.includes("responses_base_url")) return "codex.responses_base_url";
   if (id.includes("auth.placeholder")) return "codex.auth.placeholder";
   if (id.includes("mode.overlay")) return "mode.overlay";
   if (id.includes("env.conflicts") || id === "env.conflicts") return "env.conflicts";
@@ -251,6 +252,12 @@ function familyCopy(family: string): FamilyCopy | null {
       badTitle: t("repair.check.codexWireTitle"),
       badMsg: t("repair.check.codexWireDesc"),
     },
+    "codex.responses_base_url": {
+      okTitle: t("repair.check.schemaOkTitle"),
+      okMsg: t("repair.check.schemaOkDesc"),
+      badTitle: t("repair.check.codexGlmUrlTitle"),
+      badMsg: t("repair.check.codexGlmUrlDesc"),
+    },
     "codex.auth.placeholder": {
       okTitle: t("repair.check.keyOkTitle"),
       okMsg: t("repair.check.keyOkDesc"),
@@ -316,6 +323,9 @@ function inferFamilyFromTitle(check: RepairCheckLike): string {
   if (/Config (exists|parse|read)/i.test(blob)) return "config.parse";
   if (/MCP|browser|Skills path/i.test(blob)) return "mcp.browser";
   if (/wire_api/i.test(blob)) return "codex.wire_api";
+  if (/Responses API|responses_base_url|chat-completions host/i.test(blob)) {
+    return "codex.responses_base_url";
+  }
   if (/placeholder auth/i.test(blob)) return "codex.auth.placeholder";
   if (/Environment variables/i.test(blob)) return "env.conflicts";
   if (/Gateway configured|Gateway profile/i.test(blob)) return "gateway.configured";
