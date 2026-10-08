@@ -106,6 +106,17 @@ where
     Ok(())
 }
 
+/// Text first, then each picture as `localImage` (Codex reads and encodes the file).
+pub(crate) fn turn_input(prompt: &str, images: &[String]) -> Value {
+    let mut input = vec![json!({ "type": "text", "text": prompt })];
+    input.extend(
+        images
+            .iter()
+            .map(|path| json!({ "type": "localImage", "path": path })),
+    );
+    Value::Array(input)
+}
+
 /// Send this message as a new turn on the open thread.
 pub(crate) fn start_turn<F>(
     control: &PromptSessionControl,
@@ -129,7 +140,7 @@ where
             "id": turn_id,
             "params": {
                 "threadId": thread_id,
-                "input": [{ "type": "text", "text": state.prompt }],
+                "input": turn_input(&state.prompt, &state.images),
                 "cwd": state.cwd,
                 "approvalPolicy": state.approval_policy,
                 // SandboxPolicy.type uses camelCase (unlike thread `sandbox` SandboxMode kebab-case).

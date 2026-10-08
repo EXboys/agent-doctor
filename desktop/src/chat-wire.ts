@@ -628,8 +628,8 @@ export function wireChatControllers(): void {
     appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
     autoResizePrompt: () => autoResizePrompt(),
     renderPendingAttachments: () => renderPendingAttachments(),
-    buildPromptWithHistory: (text, picked, chatSessionId, readings) =>
-      buildPromptWithHistory(text, picked, chatSessionId, readings),
+    buildPromptWithHistory: (text, picked, chatSessionId, pictures) =>
+      buildPromptWithHistory(text, picked, chatSessionId, pictures),
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
     sessionById: (id) => sessionById(id),
     runTargetSession: () => runTargetSession(),

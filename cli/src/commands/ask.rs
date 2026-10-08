@@ -32,6 +32,7 @@ pub fn run(
         full_auto,
         resume_thread_id: None,
         selected_mcps: Vec::new(),
+        image_paths: Vec::new(),
     };
 
     let report = run_prompt_session_with_cancel(&options, cancel, None, |event| {

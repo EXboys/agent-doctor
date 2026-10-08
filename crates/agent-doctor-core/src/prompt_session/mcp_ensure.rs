@@ -258,6 +258,7 @@ mod tests {
             full_auto: false,
             resume_thread_id: None,
             selected_mcps: vec!["browser".into()],
+            image_paths: Vec::new(),
         };
         assert!(wants_browser_mcp(&opts));
         opts.selected_mcps.clear();

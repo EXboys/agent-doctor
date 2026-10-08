@@ -242,6 +242,14 @@ fn run_codex_app_server(
     } else {
         prompt.to_string()
     };
+    let prepared = super::vision::prepare_turn_images("codex", &options.image_paths, &overlay);
+    let images: Vec<String> = prepared
+        .paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    // Temp files stay until this function returns (Codex reads them during the turn).
+    let _keep_images = prepared.keep;
     let new_state = |thread_id: Option<String>, waiting_thread: Option<u64>| PumpState {
         session_id: session_id.clone(),
         waiting_thread,
@@ -253,6 +261,7 @@ fn run_codex_app_server(
         interactive,
         cwd: cwd.display().to_string(),
         prompt: agent_prompt.clone(),
+        images: images.clone(),
         approval_policy: approval_policy.clone(),
         saw_agent_delta: false,
         tools: ToolWatch::default(),
@@ -510,6 +519,7 @@ pub(crate) struct PumpState {
     interactive: bool,
     cwd: String,
     prompt: String,
+    images: Vec<String>,
     approval_policy: Value,
     saw_agent_delta: bool,
     tools: ToolWatch,
@@ -707,6 +717,17 @@ mod tests {
     }
 
     #[test]
+    fn turn_input_adds_pictures_after_text() {
+        let input = protocol::turn_input("看图", &["/tmp/a.png".into()]);
+        assert_eq!(input[0], json!({"type": "text", "text": "看图"}));
+        assert_eq!(
+            input[1],
+            json!({"type": "localImage", "path": "/tmp/a.png"})
+        );
+        assert_eq!(protocol::turn_input("hi", &[]).as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn thread_open_error_does_not_pretend_the_turn_finished() {
         let mut state = PumpState {
             session_id: "s1".into(),
@@ -719,6 +740,7 @@ mod tests {
             interactive: true,
             cwd: "/tmp".into(),
             prompt: "hi".into(),
+            images: Vec::new(),
             approval_policy: json!("on-request"),
             saw_agent_delta: false,
             tools: ToolWatch::default(),
@@ -755,6 +777,7 @@ mod tests {
             interactive: false,
             cwd: "/tmp".into(),
             prompt: "hi".into(),
+            images: Vec::new(),
             approval_policy: json!("on-request"),
             saw_agent_delta: false,
             tools: ToolWatch::default(),
@@ -1008,6 +1031,7 @@ time.sleep(5)
                     full_auto: false,
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 Some(control),
@@ -1118,6 +1142,7 @@ sys.exit(0)
                     full_auto: true,
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 Some(PromptSessionControl::new()),

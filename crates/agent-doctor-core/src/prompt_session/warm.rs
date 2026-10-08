@@ -358,6 +358,7 @@ mod tests {
                     full_auto: true,
                     resume_thread_id: resume,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 cancel,
                 None,

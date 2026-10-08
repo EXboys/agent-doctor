@@ -1016,6 +1016,7 @@ Bind: loopback); resolved command secrets locally.";
                     full_auto: true,
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 None,

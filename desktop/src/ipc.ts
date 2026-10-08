@@ -129,6 +129,7 @@ export type StartPromptSessionArgs = {
   fullAuto?: boolean | null;
   resumeThreadId?: string | null;
   selectedMcps?: string[] | null;
+  imagePaths?: string[] | null;
 };
 
 export function getEvotownStatus(): Promise<EvotownStatus> {
@@ -616,6 +617,17 @@ export function voiceTurnEnd(args: {
 
 export function readImageTexts(args: { paths: string[] }): Promise<ImageTextReport> {
   return invoke("read_image_texts_command", args);
+}
+
+export type AskImageSupport = {
+  runtime: string;
+  sees_images: boolean;
+  model: string | null;
+  formats: string[];
+};
+
+export function askImageSupport(args: { runtime: string }): Promise<AskImageSupport> {
+  return invoke("ask_image_support_command", args);
 }
 
 export function publishIslandSnapshot(snapshot: import("./island/track").IslandSnapshot): Promise<void> {

@@ -14,6 +14,7 @@ export interface PromptSessionReport {
   status: PromptSessionStatus;
   exit_code: number | null;
   summary: string;
+  log_excerpt?: string;
   duration_ms: number;
   runtime_thread_id?: string | null;
 }

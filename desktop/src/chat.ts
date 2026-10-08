@@ -68,9 +68,9 @@ import {
 import { shortCwdLabel } from "./chat/format";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
-  type ImageReading,
   contextUsagePercent as contextUsagePercentBase,
 } from "./chat/context";
+import type { PictureTurn } from "./chat/picture-route";
 import {
   looksLikeBrowserMcpVerifyEvidence,
   looksLikeBrowserToolCall,
@@ -94,10 +94,10 @@ export function buildPromptWithHistory(
   userText: string,
   picked: ChatAttachment[],
   sessionId?: string,
-  readings?: ImageReading[],
+  pictures?: PictureTurn,
 ): string {
   const session = sessionById(sessionId) ?? (chatState.busy ? runTargetSession() : activeSession());
-  return buildPromptWithHistoryBase(userText, picked, session, readings);
+  return buildPromptWithHistoryBase(userText, picked, session, pictures);
 }
 
 export function contextUsagePercent(session: ChatSession, draft = ""): number {

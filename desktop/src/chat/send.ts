@@ -14,10 +14,12 @@ import type {
   ChatAttachment,
   ChatMessage,
   ChatSession,
+  PromptSessionReport,
   SessionStore,
 } from "./types";
 import { noteIslandUserText } from "../island/publish";
-import { cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import { askImageSupport, cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import { planPictures, type PictureInput, type PictureTurn } from "./picture-route";
 import {
   consumeDrainIntent,
   enqueueFollowUp,
@@ -81,7 +83,7 @@ export type SendDeps = {
     text: string,
     attachments: ChatAttachment[],
     chatSessionId: string,
-    readings?: import("./context").ImageReading[],
+    pictures?: PictureTurn,
   ) => string;
   setDisplayedCwd: (cwd: string) => void;
   sessionById: (id: string | null | undefined) => ChatSession | undefined;
@@ -100,7 +102,64 @@ export type SendDeps = {
 
 export type SendApi = ReturnType<typeof createSendController>;
 
+const PICTURE_REJECTED =
+  /(not|n't|no)\s+(support|accept|allow)\w*\s+(image|picture|vision)|image\w*\s+(is|are)?\s*not\s+(supported|allowed)|unsupported\s+(image|content type)|multimodal|不支持(图片|图像|多模态)/i;
+
+function rejectedPictures(report: PromptSessionReport): boolean {
+  if (report.status !== "failed") return false;
+  return PICTURE_REJECTED.test(`${report.summary ?? ""}\n${report.log_excerpt ?? ""}`);
+}
+
 export function createSendController(deps: SendDeps) {
+  /** Ask whether the model sees pictures, and read their words when that is on. */
+  async function readPictures(
+    items: ChatAttachment[],
+    runtime: string,
+  ): Promise<{ length: number; inputs: PictureInput[]; support: { seesImages: boolean; formats: string[] } }> {
+    let support = { seesImages: false, formats: [] as string[] };
+    if (items.length === 0) return { length: 0, inputs: [], support };
+    try {
+      const found = await askImageSupport({ runtime });
+      if (found) support = { seesImages: Boolean(found.sees_images), formats: found.formats ?? [] };
+    } catch {
+      /* treat as text-only */
+    }
+    const texts = items.map(() => "");
+    // Always read locally first: wordy shots go as text, charts go as pictures.
+    // The toggle still lets people skip reading (then every sendable shot is a picture).
+    if (deps.readImageTextEnabled()) {
+      deps.setStatus(t("chat.readingImages"), "muted");
+      deps.pushActivity("think", t("chat.readingImages"));
+      try {
+        const report = await readImageTexts({ paths: items.map((item) => item.path) });
+        (report.readings ?? []).forEach((item, i) => {
+          if (i < texts.length && item.ok) texts[i] = item.text ?? "";
+        });
+      } catch {
+        /* send without words */
+      }
+    }
+    return {
+      length: items.length,
+      inputs: items.map((item, i) => ({ path: item.path, name: item.name, text: texts[i] })),
+      support,
+    };
+  }
+
+  function notePictures(turn: PictureTurn, runtime: string): void {
+    if (turn.unseenNames.length > 0) {
+      deps.setStatus(t("chat.picturesUnseen"), "warn");
+      deps.pushActivity("info", t("chat.picturesUnseen"));
+      return;
+    }
+    if (turn.sendPaths.length > 0) {
+      deps.pushActivity("info", t("chat.picturesSent", { n: String(turn.sendPaths.length) }));
+    } else if (turn.readings.length > 0) {
+      deps.pushActivity("info", t("chat.picturesAsText"));
+    }
+    deps.setStatus(t("chat.running", { runtime }), "muted");
+  }
+
   async function cancelAsk(): Promise<void> {
     holdFollowUps();
     const gen = deps.getBusyGen();
@@ -244,41 +303,19 @@ export function createSendController(deps: SendDeps) {
     deps.setStatus(t("chat.running", { runtime }), "muted");
     deps.pushActivity("think", t("chat.waitingModel"));
 
-    const imagePaths = attachments.filter((item) => item.kind === "image").map((item) => item.path);
-    let readings: import("./context").ImageReading[] = [];
-    if (imagePaths.length > 0 && deps.readImageTextEnabled()) {
-      deps.setStatus(t("chat.readingImages"), "muted");
-      deps.pushActivity("think", t("chat.readingImages"));
-      try {
-        const report = await readImageTexts({ paths: imagePaths });
-        readings = (report.readings ?? [])
-          .filter((item) => item.ok && item.text.trim())
-          .map((item) => ({ name: item.name, text: item.text }));
-        if (readings.length === 0) {
-          deps.setStatus(t("chat.readingImagesNone"), "warn");
-        } else {
-          deps.setStatus(t("chat.running", { runtime }), "muted");
-        }
-      } catch {
-        readings = [];
-        deps.setStatus(t("chat.readingImagesNone"), "warn");
-      }
-    }
-
-    const prompt = deps.buildPromptWithHistory(
-      promptUserText,
-      attachments,
-      chatSessionId,
-      readings,
+    const pictureInputs = await readPictures(
+      attachments.filter((item) => item.kind === "image"),
+      runtime,
     );
+    let pictures = pictureInputs.length
+      ? planPictures(pictureInputs.inputs, pictureInputs.support)
+      : undefined;
+    if (pictures) notePictures(pictures, runtime);
 
-    try {
-      // Stop during picture reading clears busy before a session exists.
-      // Starting anyway would ignore that click.
-      if (!deps.getBusy()) return;
-      const report = await startPromptSession({
+    const startRound = (turn: PictureTurn | undefined) =>
+      startPromptSession({
         runtime,
-        prompt,
+        prompt: deps.buildPromptWithHistory(promptUserText, attachments, chatSessionId, turn),
         cwd: deps.getWorkspaceCwd()?.trim() || null,
         timeoutSec: 86_400,
         dangerouslySkipPermissions:
@@ -287,7 +324,26 @@ export function createSendController(deps: SendDeps) {
         fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
         resumeThreadId,
         selectedMcps,
+        imagePaths: turn?.sendPaths ?? [],
       });
+
+    try {
+      // Stop during picture reading clears busy before a session exists.
+      // Starting anyway would ignore that click.
+      if (!deps.getBusy()) return;
+      let report = await startRound(pictures);
+      if (pictures?.sendPaths.length && rejectedPictures(report)) {
+        // The provider said no to pictures. Send the words once instead.
+        pictures = planPictures(pictureInputs.inputs, { seesImages: false, formats: [] });
+        deps.setStatus(t("chat.picturesRetryText"), "warn");
+        deps.pushActivity("info", t("chat.picturesRetryText"));
+        deps.setAssistantBubble(null);
+        deps.setAssistantMessageId(null);
+        deps.setAssistantRaw("");
+        deps.setPendingText("");
+        deps.setTurnHadAssistantText(false);
+        if (deps.getBusy()) report = await startRound(pictures);
+      }
       deps.setDisplayedCwd(report.cwd);
       const session = deps.sessionById(chatSessionId) ?? deps.runTargetSession();
       session.interrupted =

@@ -23,6 +23,7 @@ use super::env::{
 use super::util::{
     command_from_cli, force_stop_child, is_runtime_stderr_noise, summarize, SessionClock,
 };
+use super::vision::{encode_image, turn_images, EncodedImage};
 use super::warm::{self, LivePipes};
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -71,6 +72,11 @@ fn run_deepseek_harness(
         .filter(|id| !id.is_empty())
         .map(str::to_string);
     let auto_allow = options.dangerously_skip_permissions || options.full_auto;
+    let images: Vec<EncodedImage> =
+        turn_images(RUNTIME_KEY, &options.image_paths, &collect_overlay_env())
+            .iter()
+            .filter_map(|p| encode_image(p))
+            .collect();
 
     let mut cmd = build_command(&cwd);
     let command_display = format_command_display(&cmd);
@@ -86,7 +92,10 @@ fn run_deepseek_harness(
     let started = Instant::now();
     let writer = control.unwrap_or_default();
     let mut reused = None;
-    if let (Some(fp), Some(sid)) = (fingerprint, resume_session_id.as_deref()) {
+    // A parked process skipped `initialize`, so it cannot say whether it takes pictures.
+    if let (Some(fp), Some(sid), true) =
+        (fingerprint, resume_session_id.as_deref(), images.is_empty())
+    {
         if let Some(parked) = warm::take(RUNTIME_KEY, sid, fp) {
             let warm::WarmProcess {
                 child,
@@ -137,6 +146,7 @@ fn run_deepseek_harness(
             cancel.handle(),
             &writer,
             prompt,
+            images,
             already_open,
             resume_session_id.as_deref(),
             auto_allow,
@@ -272,6 +282,9 @@ struct AcpState {
     resume_target: Option<String>,
     /// toolCallId → (name, raw arguments). The permission request itself has no title.
     tools: HashMap<String, (String, String)>,
+    images: Vec<EncodedImage>,
+    /// `initialize` said `promptCapabilities.image`.
+    takes_images: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,6 +297,7 @@ fn pump_acp<F>(
     cancel: Arc<AtomicBool>,
     control: &PromptSessionControl,
     prompt: &str,
+    images: Vec<EncodedImage>,
     already_open: Option<String>,
     resume_id: Option<&str>,
     auto_allow: bool,
@@ -302,6 +316,8 @@ where
         resume_rejected: false,
         resume_target: None,
         tools: HashMap::new(),
+        images,
+        takes_images: false,
     };
     let mut clock = SessionClock::new(timeout_sec);
     let mut timeout_note = None;
@@ -485,6 +501,7 @@ fn queue_prompt(
     sid: &str,
     prompt: &str,
 ) -> Result<()> {
+    let blocks = prompt_blocks(prompt, &state.images, state.takes_images);
     queue_rpc(
         control,
         state,
@@ -492,9 +509,24 @@ fn queue_prompt(
         "session/prompt",
         json!({
             "sessionId": sid,
-            "prompt": [{ "type": "text", "text": prompt }],
+            "prompt": blocks,
         }),
     )
+}
+
+/// ACP content blocks: text, then pictures when the agent accepts them.
+fn prompt_blocks(prompt: &str, images: &[EncodedImage], takes_images: bool) -> Value {
+    let mut blocks = vec![json!({ "type": "text", "text": prompt })];
+    if takes_images {
+        blocks.extend(images.iter().map(|image| {
+            json!({
+                "type": "image",
+                "mimeType": image.media_type,
+                "data": image.base64,
+            })
+        }));
+    }
+    Value::Array(blocks)
 }
 
 fn queue_rpc(
@@ -571,7 +603,19 @@ fn handle_acp_message<F>(
     }
     let result = message.get("result").cloned().unwrap_or(Value::Null);
     match kind {
-        Waiting::Initialize => {}
+        Waiting::Initialize => {
+            state.takes_images = result
+                .pointer("/agentCapabilities/promptCapabilities/image")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !state.images.is_empty() && !state.takes_images {
+                on_event(PromptSessionEvent::Status {
+                    session_id: session_id.to_string(),
+                    phase: "info".into(),
+                    message: "这个 DeepSeek 助手收不了图片，这次只带上了图里的字。".into(),
+                });
+            }
+        }
         Waiting::Resume | Waiting::NewSession => {
             let sid = result
                 .get("sessionId")
@@ -758,6 +802,27 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    #[test]
+    fn prompt_blocks_add_pictures_only_when_agent_takes_them() {
+        let images = vec![EncodedImage {
+            media_type: "image/webp",
+            base64: "QUJD".into(),
+        }];
+        let with = prompt_blocks("图", &images, true);
+        assert_eq!(with[0], json!({"type": "text", "text": "图"}));
+        assert_eq!(
+            with[1],
+            json!({"type": "image", "mimeType": "image/webp", "data": "QUJD"})
+        );
+        assert_eq!(
+            prompt_blocks("图", &images, false)
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
     #[cfg(unix)]
     fn write_fake(dir: &Path, name: &str, script: &str) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -829,6 +894,7 @@ for raw in sys.stdin:
             full_auto: false,
             resume_thread_id: resume.map(str::to_string),
             selected_mcps: Vec::new(),
+            image_paths: Vec::new(),
         }
     }
 

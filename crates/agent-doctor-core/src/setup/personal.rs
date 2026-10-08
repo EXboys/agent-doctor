@@ -29,6 +29,9 @@ pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
 pub const TEAMUPS_OFFICIAL_PROVIDER_ID: &str = "teamups-official";
 const TEAMUPS_OFFICIAL_PROVIDER_NAME: &str = "官方";
+/// The gateway picks the real model; this id marks the line as one that takes pictures.
+/// `deepseek-chat` was retired upstream.
+const TEAMUPS_OFFICIAL_MODEL: &str = "deepseek-flash";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalProviderOptions {
@@ -244,7 +247,7 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
         entry.name = TEAMUPS_OFFICIAL_PROVIDER_NAME.to_string();
         entry.url = url;
         entry.api_key = license.to_string();
-        entry.model = "deepseek-chat".to_string();
+        entry.model = TEAMUPS_OFFICIAL_MODEL.to_string();
         entry.protocol = PROTOCOL_OPENAI.to_string();
     } else {
         store.providers.insert(
@@ -254,7 +257,7 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
                 name: TEAMUPS_OFFICIAL_PROVIDER_NAME.to_string(),
                 url,
                 api_key: license.to_string(),
-                model: "deepseek-chat".to_string(),
+                model: TEAMUPS_OFFICIAL_MODEL.to_string(),
                 protocol: PROTOCOL_OPENAI.to_string(),
             },
         );

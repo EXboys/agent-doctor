@@ -1,4 +1,5 @@
 import { splitToolActivity } from "./format";
+import type { PictureTurn } from "./picture-route";
 import type { ChatAttachment, ChatSession } from "./types";
 import { MAX_CONTEXT_MESSAGES } from "./types";
 
@@ -76,24 +77,60 @@ export function attachmentSummary(attachments: ChatAttachment[] | undefined): st
   return attachments.map((item) => `- ${item.name}`).join("\n");
 }
 
-export function imageReadingBlock(readings: ImageReading[] | undefined): string {
+export function imageReadingBlock(
+  readings: ImageReading[] | undefined,
+  picturesAttached = false,
+): string {
   const useful = (readings ?? []).filter((item) => item.text.trim());
   if (useful.length === 0) return "";
   const body = useful
     .map((item) => `--- ${item.name} ---\n${item.text.trim()}`)
     .join("\n\n");
-  return (
-    "The user attached pictures. The current model may not see images. " +
-    "Text already read from those pictures on this computer:\n\n" +
-    body
-  );
+  const lead = picturesAttached
+    ? "Text read on this computer from the user's pictures:\n\n"
+    : "The user attached pictures. The current model may not see images. " +
+      "Text already read from those pictures on this computer:\n\n";
+  return lead + body;
+}
+
+/** This turn's attachments as the model should understand them. */
+export function turnAttachmentBlock(
+  attachments: ChatAttachment[],
+  pictures?: PictureTurn,
+): string {
+  const parts: string[] = [];
+  const files = pictures ? attachments.filter((item) => item.kind !== "image") : attachments;
+  if (pictures?.sentNames.length) {
+    parts.push(
+      `The user attached ${pictures.sentNames.length === 1 ? "a picture" : "pictures"} to this message ` +
+        `(${pictures.sentNames.join(", ")}). They are included in this message: look at them directly. ` +
+        "Do not search the disk for them.",
+    );
+  }
+  const pictureText = imageReadingBlock(pictures?.readings, Boolean(pictures?.sentNames.length));
+  if (pictureText) parts.push(pictureText);
+  if (pictures?.unseenNames.length) {
+    parts.push(
+      `The user also attached pictures you cannot see, and no words were found in them ` +
+        `(${pictures.unseenNames.join(", ")}). In one short sentence, tell the user you cannot see ` +
+        "these pictures and suggest switching to an assistant that can see pictures. " +
+        "Do not search the disk for them.",
+    );
+  }
+  if (files.length > 0) {
+    parts.push(
+      "Attached local files for this turn (read them with your tools if needed):\n" +
+        files.map((item) => `- ${item.name}: ${item.path}`).join("\n"),
+    );
+  }
+  return parts.join("\n\n");
 }
 
 export function buildPromptWithHistory(
   userText: string,
   attachments: ChatAttachment[],
   session: ChatSession,
-  readings?: ImageReading[],
+  pictures?: PictureTurn,
 ): string {
   const responseStyle =
     "Response style: answer the user directly and concisely. Lead with the result. " +
@@ -105,14 +142,8 @@ export function buildPromptWithHistory(
     // A killed turn may not have saved its last words in the native thread.
     const stopped = stoppedTurnNote(session, true);
     if (stopped) parts.push(stopped);
-    const pictureText = imageReadingBlock(readings);
-    if (pictureText) {
-      parts.push(pictureText);
-    } else if (attachments.length > 0) {
-      parts.push(
-        `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
-      );
-    }
+    const attached = turnAttachmentBlock(attachments, pictures);
+    if (attached) parts.push(attached);
     parts.push(userText);
     return parts.join("\n\n");
   }
@@ -139,14 +170,8 @@ export function buildPromptWithHistory(
   const stopped = stoppedTurnNote(session, false);
   if (stopped) parts.push(stopped);
 
-  const pictureText = imageReadingBlock(readings);
-  if (pictureText) {
-    parts.push(pictureText);
-  } else if (attachments.length > 0) {
-    parts.push(
-      `Attached local files for this turn (read them with your tools if needed):\n${attachmentSummary(attachments)}`,
-    );
-  }
+  const attached = turnAttachmentBlock(attachments, pictures);
+  if (attached) parts.push(attached);
 
   parts.push(`User: ${userText}\n\nAssistant:`);
   return parts.join("\n\n");

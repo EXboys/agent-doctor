@@ -91,8 +91,14 @@ fn run_claude(
         prompt.to_string()
     };
 
+    let images: Vec<super::vision::EncodedImage> =
+        super::vision::turn_images("claude-code", &options.image_paths, &overlay)
+            .iter()
+            .filter_map(|p| super::vision::encode_image(p))
+            .collect();
     // A process that reads messages on stdin can take the next one too.
-    let stream_input = interactive || warm::enabled();
+    // Pictures only travel in a stdin message, never in the `-p` argument.
+    let stream_input = interactive || warm::enabled() || !images.is_empty();
     let launch = ClaudeLaunch {
         cwd: &cwd,
         skip_permissions: options.dangerously_skip_permissions,
@@ -119,14 +125,7 @@ fn run_claude(
 
     let started = Instant::now();
     let writer = control.clone().unwrap_or_default();
-    let user_msg = serde_json::json!({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{ "type": "text", "text": effective_prompt }]
-        }
-    })
-    .to_string();
+    let user_msg = claude_user_message(&effective_prompt, &images);
 
     let mut reused = None;
     if let (Some(fp), Some(sid)) = (fingerprint, resume_session_id) {
@@ -294,6 +293,29 @@ fn run_claude(
         }
     };
     Ok(report)
+}
+
+/// One stream-json user turn: pictures first, then the text.
+fn claude_user_message(prompt: &str, images: &[super::vision::EncodedImage]) -> String {
+    let mut content: Vec<serde_json::Value> = images
+        .iter()
+        .map(|image| {
+            serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.media_type,
+                    "data": image.base64,
+                }
+            })
+        })
+        .collect();
+    content.push(serde_json::json!({ "type": "text", "text": prompt }));
+    serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": content }
+    })
+    .to_string()
 }
 
 struct ClaudeLaunch<'a> {
@@ -1076,6 +1098,27 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn user_message_puts_pictures_before_text() {
+        let images = vec![crate::prompt_session::vision::EncodedImage {
+            media_type: "image/png",
+            base64: "AAAA".into(),
+        }];
+        let msg: serde_json::Value =
+            serde_json::from_str(&claude_user_message("看看", &images)).unwrap();
+        let content = &msg["message"]["content"];
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[0]["source"]["data"], "AAAA");
+        assert_eq!(
+            content[1],
+            serde_json::json!({"type": "text", "text": "看看"})
+        );
+        let plain: serde_json::Value =
+            serde_json::from_str(&claude_user_message("hi", &[])).unwrap();
+        assert_eq!(plain["message"]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn readable_output_drops_stream_json_lines() {
         let stdout = "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/tmp\"}\n\
                       {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"te\n\
@@ -1365,6 +1408,7 @@ mod tests {
                     full_auto: false,
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -1435,6 +1479,7 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
                     full_auto: false,
                     resume_thread_id: None,
                     selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
                 },
                 PromptSessionCancel::new(),
                 Some(control),

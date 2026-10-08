@@ -255,6 +255,7 @@ async fn start_prompt_session_command(
     full_auto: Option<bool>,
     resume_thread_id: Option<String>,
     selected_mcps: Option<Vec<String>>,
+    image_paths: Option<Vec<String>>,
 ) -> Result<PromptSessionReport, String> {
     let owner_label = window.label().to_string();
     {
@@ -298,6 +299,13 @@ async fn start_prompt_session_command(
             .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
+            .collect(),
+        image_paths: image_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
             .collect(),
     };
 
@@ -554,6 +562,7 @@ pub fn run() {
             voice_hosted_reduce_command,
             voice_turn_end_command,
             read_image_texts_command,
+            ask_image_support_command,
             publish_island_snapshot_command,
             island_set_hover_command,
             island_restore_command,

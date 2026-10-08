@@ -15,6 +15,7 @@ mod mcp_ensure;
 mod openclaw;
 mod plan;
 mod util;
+mod vision;
 mod warm;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,6 +28,7 @@ use crate::evotown::normalize_runtime;
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
 pub use plan::{PlanStep, PlanStepState};
+pub use vision::{ask_image_support, AskImageSupport, SENDABLE_IMAGE_EXTS};
 pub use warm::{enable_warm_sessions, shutdown_warm_sessions};
 
 pub(crate) use claude::ClaudeAskBackend;
@@ -63,6 +65,10 @@ pub struct PromptSessionOptions {
     /// MCP server names selected in Ask (e.g. `browser`). Wired into Claude/Codex config before spawn.
     #[serde(default)]
     pub selected_mcps: Vec<String>,
+    /// Local pictures for this turn. Sent as real images only when the runtime
+    /// and its model can see them; otherwise the prompt carries their text.
+    #[serde(default)]
+    pub image_paths: Vec<std::path::PathBuf>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -282,6 +288,7 @@ mod tests {
                 full_auto: false,
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
+                image_paths: Vec::new(),
             },
             |_| {},
         )
@@ -298,6 +305,7 @@ mod tests {
                 full_auto: false,
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
+                image_paths: Vec::new(),
             },
             |_| {},
         )
@@ -366,6 +374,7 @@ time.sleep(30)
                 full_auto: true,
                 resume_thread_id: None,
                 selected_mcps: Vec::new(),
+                image_paths: Vec::new(),
             },
             cancel,
             None,
