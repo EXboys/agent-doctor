@@ -38,6 +38,7 @@ pub fn init_workspace_command(
     }
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
+    let _ = app.emit("workspace-changed", &report.name);
     Ok(report)
 }
 
@@ -56,6 +57,7 @@ pub fn use_workspace_command(
     .map_err(|error| error.to_string())?;
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
+    let _ = app.emit("workspace-changed", &name);
     Ok(report)
 }
 

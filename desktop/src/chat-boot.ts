@@ -360,6 +360,10 @@ export function bootChat(): void {
     void refreshWiredProvider();
   });
 
+  void listen("workspace-changed", () => {
+    void loadAskResources();
+  });
+
   void ensureListener();
   void refreshWiredProvider();
   autoResizePrompt();
