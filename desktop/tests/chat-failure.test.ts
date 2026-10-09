@@ -49,6 +49,25 @@ async function main() {
   const noise = explainChatFailure("session_id: abc");
   assert(noise === null, "benign stderr should not classify");
 
+  const balanceRaw =
+    'LLM HTTP 429 Too Many Requests: {"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}';
+  const balance = explainChatFailure(balanceRaw);
+  assert(balance?.kind === "account_balance", "zhipu 1113 should be a balance block");
+  assert(balance!.actions.length === 1 && balance!.actions[0] === "provider", "balance offers provider only");
+  assert(!balance!.message.includes("429"), "balance copy hides the raw status");
+  assert(balance!.message.includes("不是本软件"), "balance copy says the app is fine");
+
+  const limited = explainChatFailure("LLM HTTP 429 Too Many Requests");
+  assert(limited?.kind === "rate_limit", "bare 429 should be rate limit");
+  assert(limited!.actions.length === 0, "rate limit has no repair button");
+
+  const { explainProviderFailure, accountBlockMessage } = await import("../src/friendly-error");
+  const provider = explainProviderFailure(balanceRaw, { statusCode: 429 });
+  assert(provider.kind === "balance", "provider verify should say balance, not a bad key");
+  const banner = accountBlockMessage("balance");
+  assert(banner.includes("去服务商"), "diagnose banner names the next button");
+  assert(!banner.includes("LLM HTTP"), "diagnose banner hides the raw dump");
+
   console.log("chat-failure.test.ts OK");
 }
 

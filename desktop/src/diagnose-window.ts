@@ -1,7 +1,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { applyStaticI18n, getLocale, t } from "./i18n";
-import { withErrorDetail } from "./friendly-error";
+import { accountBlockMessage, withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
 import {
   computeDiagnoseScore,
@@ -42,6 +42,13 @@ const session = createDiagnoseSession(resolveInitialRuntime());
 rememberDiagnoseRuntime(session.runtimeId);
 const deepChat = createDeepChat(session, {
   onRepaired: () => refreshState({ preferStep: "test" }),
+  onAccountBlock: (kind) => {
+    session.accountBlock = kind;
+    paint.setResult("warn", accountBlockMessage(kind));
+    if (session.activeStep === "test") {
+      paint.paintAll();
+    }
+  },
 });
 const paint = createDiagnosePaint(session, deepChat);
 
@@ -186,6 +193,7 @@ function applyRuntime(next: string): void {
   session.repairTried = false;
   session.autoFixTried = false;
   session.repairNotice = null;
+  session.accountBlock = null;
   void refreshState();
 }
 
@@ -240,6 +248,9 @@ dom.primaryEl.addEventListener("click", () => {
       break;
     case "open-ask":
       void actions.openAskYourself();
+      break;
+    case "open-provider":
+      void actions.openTeamWiring();
       break;
     case "rescan":
       void refreshState({ preferStep: "test" });

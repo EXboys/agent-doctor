@@ -7,10 +7,12 @@ import {
   knowledgeAddSource,
   knowledgeContext,
   knowledgeImport,
+  knowledgeDeletePage,
   knowledgePages,
   knowledgePrepare,
   knowledgeReadPage,
   knowledgeSavePage,
+  listWorkspaceDir,
   resolvePermissionSession,
   startPromptSession,
   type KnowledgePage,
@@ -28,9 +30,22 @@ export type WikiScope = {
   projectName: string | null;
 };
 
+export type WikiChat = { title: string; text: string; projectName: string | null };
+
 export type WikiDeps = {
   currentAgent: () => string;
   chatTranscript: () => { title: string; text: string } | null;
+  /** Chats in the app. The wiki keeps the ones that belong to this scope. */
+  chats: () => WikiChat[];
+};
+
+type Starter = {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  path?: string;
+  chat?: { title: string; text: string };
 };
 
 type Notice = { tone: "ok" | "warn" | "muted"; text: string };
@@ -46,6 +61,9 @@ type WikiState = {
   pageError: string | null;
   run: { id: string; agent: string; startedAt: number } | null;
   notice: Notice | null;
+  /** Second click on 删除 actually removes the page. */
+  pendingDelete: string | null;
+  starters: Starter[] | null;
 };
 
 const states = new Map<string, WikiState>();
@@ -66,6 +84,8 @@ function stateFor(key: string): WikiState {
       pageError: null,
       run: null,
       notice: null,
+      pendingDelete: null,
+      starters: null,
     };
     states.set(key, state);
   }
@@ -114,6 +134,25 @@ function dateText(ms: number): string {
   });
 }
 
+const FOLDER_NAMES_ZH: Record<string, string> = {
+  sources: "资料",
+  topics: "主题",
+  overview: "概览",
+  components: "组成部分",
+  guides: "使用指南",
+  concepts: "概念",
+  entities: "人和事",
+  people: "人物",
+  projects: "项目",
+  notes: "笔记",
+  decisions: "决定",
+};
+
+function folderLabel(name: string): string {
+  if (getLocale() === "en") return name.replace(/-/g, " ");
+  return FOLDER_NAMES_ZH[name.toLowerCase()] ?? name.replace(/-/g, " ");
+}
+
 function folderOf(path: string): string {
   const cut = path.lastIndexOf("/");
   return cut < 0 ? "" : path.slice(0, cut);
@@ -158,6 +197,7 @@ async function load(scope: WikiScope): Promise<void> {
   rerender();
   try {
     await reloadPages(scope);
+    if (!state.pages.length) await loadStarters(scope, depsFor(scope));
   } catch (error) {
     state.error = String(error);
   } finally {
@@ -167,6 +207,103 @@ async function load(scope: WikiScope): Promise<void> {
   if (state.selected) void openPage(scope, state.selected);
 }
 
+function depsFor(scope: WikiScope): WikiDeps | null {
+  return mounted && mounted.scope.key === scope.key ? mounted.deps : null;
+}
+
+async function loadStarters(scope: WikiScope, deps: WikiDeps | null): Promise<void> {
+  const state = stateFor(scope.key);
+  const starters: Starter[] = [];
+  const chats = (deps?.chats() ?? [])
+    .filter((chat) => chat.text.trim() && (!scope.projectName || chat.projectName === scope.projectName))
+    .slice(0, 30);
+  chats.forEach((chat, index) => {
+    starters.push({
+      id: `chat:${index}:${chat.title}`,
+      label: chat.title.trim() || t("chat.wikiStartChat"),
+      hint: t("chat.wikiStartChat"),
+      checked: true,
+      chat: { title: chat.title, text: chat.text },
+    });
+  });
+  if (scope.projectPath) {
+    try {
+      const entries = await listWorkspaceDir({ root: scope.projectPath });
+      for (const entry of entries) {
+        starters.push({
+          id: `path:${entry.relativePath}`,
+          label: entry.name,
+          hint: entry.isDir ? t("chat.wikiStartFolder") : t("chat.wikiStartFile"),
+          checked: true,
+          path: `${scope.projectPath.replace(/\/$/, "")}/${entry.relativePath}`,
+        });
+      }
+    } catch {
+      /* The folder list is optional. Chats still show. */
+    }
+  }
+  state.starters = starters;
+}
+
+async function generateFromStarters(scope: WikiScope, deps: WikiDeps): Promise<void> {
+  const state = stateFor(scope.key);
+  const picked = (state.starters ?? []).filter((item) => item.checked);
+  if (!picked.length || state.run) return;
+  const paths = picked.flatMap((item) => (item.path ? [item.path] : []));
+  const chats = picked.flatMap((item) => (item.chat ? [item.chat] : []));
+  try {
+    let root = await knowledgePrepare({ projectPath: scope.projectPath });
+    const sources: string[] = [];
+    let skipped = 0;
+    let unreadable = 0;
+    if (paths.length) {
+      const imported = await knowledgeImport({ projectPath: scope.projectPath, paths });
+      root = imported.root;
+      sources.push(...imported.sources);
+      skipped += imported.skipped;
+      unreadable += imported.unreadable;
+    }
+    for (const chat of chats) {
+      const saved = await knowledgeAddSource({
+        projectPath: scope.projectPath,
+        name: `chat-${chat.title}`,
+        content: chat.text,
+      });
+      root = saved.root;
+      sources.push(...saved.sources);
+    }
+    if (!sources.length) {
+      setNotice(scope, { tone: "warn", text: t("chat.wikiNothingCopied") });
+      return;
+    }
+    await runIngest(scope, deps, root, sources, false, { skipped, unreadable });
+  } catch (error) {
+    setNotice(scope, { tone: "warn", text: String(error) });
+  }
+}
+
+async function deletePage(scope: WikiScope, path: string): Promise<void> {
+  const state = stateFor(scope.key);
+  if (state.pendingDelete !== path) {
+    state.pendingDelete = path;
+    rerender();
+    return;
+  }
+  state.pendingDelete = null;
+  try {
+    await knowledgeDeletePage({ projectPath: scope.projectPath, path });
+    state.page = null;
+    state.selected = null;
+    await reloadPages(scope);
+    if (!state.pages.length) await loadStarters(scope, depsFor(scope));
+    state.notice = { tone: "muted", text: t("chat.wikiDeleted") };
+  } catch (error) {
+    state.notice = { tone: "warn", text: String(error) };
+  }
+  rerender();
+  if (state.selected && isMounted(scope)) void openPage(scope, state.selected);
+}
+
 function withoutTitle(markdown: string): string {
   return markdown.replace(/^\s*#\s+[^\n]*\n?/, "");
 }
@@ -174,6 +311,7 @@ function withoutTitle(markdown: string): string {
 async function openPage(scope: WikiScope, path: string): Promise<void> {
   const state = stateFor(scope.key);
   state.selected = path;
+  if (state.pendingDelete && state.pendingDelete !== path) state.pendingDelete = null;
   state.pageError = null;
   if (state.page?.path !== path) state.page = null;
   rerender();
@@ -367,7 +505,7 @@ function toolbar(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTM
   );
   bar.append(sources);
   if (state.pages.length) {
-    bar.append(button(t("chat.wikiRebuild"), "kw-btn kw-btn-quiet", () => void rebuild(m.scope, m.deps), busy));
+    bar.append(button(t("chat.wikiRebuild"), "kw-btn kw-btn-solid", () => void rebuild(m.scope, m.deps), busy));
   }
   return bar;
 }
@@ -406,7 +544,7 @@ function navList(m: { scope: WikiScope }, state: WikiState): HTMLElement {
   }
   const folders = [...groups.keys()].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
   for (const folder of folders) {
-    if (folder) list.append(el("p", "kw-tree-folder", folder.split("/").join(" / ")));
+    if (folder) list.append(el("p", "kw-tree-folder", folder.split("/").map(folderLabel).join(" / ")));
     for (const page of groups.get(folder) ?? []) {
       const item = button(page.title, "kw-tree-item", () => void openPage(m.scope, page.path));
       item.title = page.path;
@@ -424,8 +562,16 @@ function pageView(m: { scope: WikiScope }, state: WikiState): HTMLElement {
   if (!info) return view;
   const head = el("header", "kw-page-head");
   head.append(el("h3", "kw-page-title", info.title));
+  const meta = el("div", "kw-page-meta");
   const updated = dateText(info.modifiedMs);
-  if (updated) head.append(el("p", "kw-page-meta", t("chat.wikiUpdated", { time: updated })));
+  if (updated) meta.append(el("span", "", t("chat.wikiUpdated", { time: updated })));
+  const removing = state.pendingDelete === info.path;
+  const remove = button(removing ? t("chat.wikiDeleteConfirm") : t("chat.wikiDelete"), "kw-delete", () => {
+    void deletePage(m.scope, info.path);
+  });
+  remove.classList.toggle("is-armed", removing);
+  meta.append(remove);
+  head.append(meta);
   view.append(head);
   if (state.pageError) {
     view.append(el("p", "kw-hint", state.pageError));
@@ -453,6 +599,78 @@ function pageView(m: { scope: WikiScope }, state: WikiState): HTMLElement {
   return view;
 }
 
+function starterView(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTMLElement {
+  const box = el("div", "kw-start");
+  box.append(el("strong", "", t("chat.wikiEmptyTitle")), el("p", "", t("chat.wikiEmptyHint")));
+  if (!state.starters) {
+    box.append(el("p", "kw-hint", t("chat.wikiStartScanning")));
+    return box;
+  }
+  if (!state.starters.length) {
+    box.append(el("p", "kw-hint", t("chat.wikiStartNone")));
+    return box;
+  }
+  const list = el("div", "kw-start-list");
+  for (const item of state.starters) {
+    const row = el("label", "kw-start-row");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = item.checked;
+    input.addEventListener("change", () => {
+      item.checked = input.checked;
+      const next = box.querySelector<HTMLButtonElement>(".kw-generate");
+      if (next) next.disabled = !state.starters?.some((entry) => entry.checked);
+    });
+    const text = el("span", "kw-start-label", item.label);
+    row.append(input, text, el("span", "kw-start-hint", item.hint));
+    list.append(row);
+  }
+  box.append(list);
+  const picked = state.starters.some((item) => item.checked);
+  box.append(
+    button(t("chat.wikiGenerate"), "kw-btn kw-btn-solid kw-generate", () => void generateFromStarters(m.scope, m.deps), !picked),
+  );
+  return box;
+}
+
+const NAV_WIDTH_KEY = "agent-doctor.kw-nav-width";
+const NAV_WIDTH_DEFAULT = 210;
+
+function clampNavWidth(width: number): number {
+  return Math.round(Math.min(420, Math.max(150, width)));
+}
+
+function navResizer(body: HTMLElement): HTMLElement {
+  const saved = Number(localStorage.getItem(NAV_WIDTH_KEY));
+  if (saved) body.style.setProperty("--kw-nav-w", `${clampNavWidth(saved)}px`);
+  const handle = el("div", "kw-resizer");
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.title = t("chat.wikiResize");
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    body.classList.add("is-resizing");
+    const left = body.getBoundingClientRect().left;
+    const move = (e: PointerEvent) => {
+      body.style.setProperty("--kw-nav-w", `${clampNavWidth(e.clientX - left)}px`);
+    };
+    const end = (e: PointerEvent) => {
+      handle.releasePointerCapture(e.pointerId);
+      handle.removeEventListener("pointermove", move);
+      body.classList.remove("is-resizing");
+      localStorage.setItem(NAV_WIDTH_KEY, String(clampNavWidth(e.clientX - left)));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end, { once: true });
+  });
+  handle.addEventListener("dblclick", () => {
+    localStorage.removeItem(NAV_WIDTH_KEY);
+    body.style.setProperty("--kw-nav-w", `${NAV_WIDTH_DEFAULT}px`);
+  });
+  return handle;
+}
+
 function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): void {
   const state = stateFor(m.scope.key);
   const root = el("div", "kw");
@@ -461,11 +679,9 @@ function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): voi
   if (notice) root.append(notice);
   if (!state.loaded) {
     root.append(el("p", "kw-hint", state.error ?? t("chat.wikiLoading")));
-  } else if (!state.pages.length) {
-    const empty = el("div", "kw-empty");
-    empty.append(el("strong", "", t("chat.wikiEmptyTitle")), el("p", "", t("chat.wikiEmptyHint")));
-    root.append(empty);
-  } else {
+  } else if (!state.pages.length && !state.run) {
+    root.append(starterView(m, state));
+  } else if (state.pages.length) {
     const body = el("div", "kw-body");
     const nav = el("aside", "kw-nav");
     const search = el("input", "chat-knowledge-input kw-search");
@@ -480,10 +696,21 @@ function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): voi
       tree = next;
     });
     nav.append(search, tree);
-    body.append(nav, pageView(m, state));
+    body.append(nav, navResizer(body), pageView(m, state));
     root.append(body);
   }
+  const oldPage = m.host.querySelector<HTMLElement>(".kw-page");
+  const oldTree = m.host.querySelector<HTMLElement>(".kw-tree");
+  const keepPage = oldPage?.dataset.path === state.page?.path ? oldPage?.scrollTop : 0;
+  const keepTree = oldTree?.scrollTop ?? 0;
   m.host.replaceChildren(root);
+  const page = root.querySelector<HTMLElement>(".kw-page");
+  if (page) {
+    page.dataset.path = state.page?.path ?? "";
+    page.scrollTop = keepPage ?? 0;
+  }
+  const tree = root.querySelector<HTMLElement>(".kw-tree");
+  if (tree) tree.scrollTop = keepTree;
 }
 
 export function mountWiki(host: HTMLElement, scope: WikiScope, deps: WikiDeps): void {

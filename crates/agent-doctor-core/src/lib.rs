@@ -142,10 +142,11 @@ pub use setup::{
     PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 pub use skills::{
-    execute_skills_sync, install_teamups_mall_item, list_teamups_mall_catalog,
-    load_local_skills_layout, poll_teamups_login, resolve_skills_source,
-    save_skills_source_override, sign_out_teamups, start_teamups_login, teamups_account_status,
-    LocalSkillsLayout, ResolvedSkillsSource, SkillsSyncOptions, TeamupsAccountStatus,
+    execute_skills_sync, install_local_skills, install_teamups_mall_item,
+    list_teamups_mall_catalog, load_local_skills_layout, poll_teamups_login, remove_local_skill,
+    resolve_skills_source, save_skills_source_override, sign_out_teamups, skill_roots,
+    start_teamups_login, teamups_account_status, LocalSkillsLayout, ResolvedSkillsSource,
+    SkillInstallError, SkillInstallReport, SkillsSyncOptions, TeamupsAccountStatus,
     TeamupsCatalogItem, TeamupsClient, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
     TeamupsMallCatalog, TeamupsOfficialStatus, TeamupsPackManifest, TeamupsSkillEntry,
 };

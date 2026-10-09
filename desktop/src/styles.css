@@ -1,14 +1,13 @@
 :root {
   color-scheme: light;
   font-family:
+    -apple-system,
+    BlinkMacSystemFont,
     "SF Pro Text",
     "PingFang SC",
     "Hiragino Sans GB",
     "Microsoft YaHei",
     "Segoe UI",
-    Inter,
-    system-ui,
-    -apple-system,
     sans-serif;
   --bg: #e8ecf4;
   --bg-accent: rgba(59, 130, 246, 0.07);
@@ -39,6 +38,10 @@
 
 * {
   box-sizing: border-box;
+}
+
+:where(button, input, textarea, select) {
+  font-family: inherit;
 }
 
 html,

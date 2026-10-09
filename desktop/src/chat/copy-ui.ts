@@ -41,18 +41,17 @@ export function setCopyButtonState(
   state: "idle" | "copied" | "failed",
   idleKind: CopyIdleKind = "text",
 ): void {
-  if (state === "copied") {
-    btn.innerHTML = copyIconSvg("check");
-    btn.classList.add("is-copied");
-    btn.title = t("chat.copied");
-    btn.setAttribute("aria-label", t("chat.copied"));
-    return;
-  }
-  btn.innerHTML = copyIconSvg("copy");
-  btn.classList.remove("is-copied");
-  const label = state === "failed" ? t("chat.copyFailed") : copyIdleLabel(idleKind);
+  const label =
+    state === "copied" ? t("chat.copied") : state === "failed" ? t("chat.copyFailed") : copyIdleLabel(idleKind);
+  const icon = copyIconSvg(state === "copied" ? "check" : "copy");
+  btn.classList.toggle("is-copied", state === "copied");
   btn.title = label;
   btn.setAttribute("aria-label", label);
+  if (btn.classList.contains("chat-code-copy")) {
+    btn.innerHTML = `${icon}<span class="chat-code-copy-label">${label}</span>`;
+    return;
+  }
+  btn.innerHTML = icon;
 }
 
 export async function copyTextToClipboard(text: string): Promise<void> {
@@ -130,6 +129,12 @@ export function syncMessageCopyActions(
   wrap.classList.toggle("is-compact", show && isShortCopyLayout(bubble, layoutSource));
 }
 
+function codeBlockTitle(pre: HTMLElement): string {
+  const lang = pre.querySelector("code")?.className.match(/language-([\w+-]+)/)?.[1]?.toLowerCase() ?? "";
+  if (!lang || lang === "text" || lang === "plain" || lang === "plaintext") return t("chat.codePlain");
+  return lang;
+}
+
 export function enhanceCodeBlocks(root: HTMLElement): void {
   for (const pre of Array.from(root.querySelectorAll("pre"))) {
     if (pre.parentElement?.classList.contains("chat-code-block")) continue;
@@ -137,6 +142,11 @@ export function enhanceCodeBlocks(root: HTMLElement): void {
     wrap.className = "chat-code-block";
     pre.replaceWith(wrap);
 
+    const bar = document.createElement("div");
+    bar.className = "chat-code-bar";
+    const lang = document.createElement("span");
+    lang.className = "chat-code-lang";
+    lang.textContent = codeBlockTitle(pre);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chat-code-copy";
@@ -147,8 +157,8 @@ export function enhanceCodeBlocks(root: HTMLElement): void {
       const text = code?.textContent ?? pre.textContent ?? "";
       void runCopyButton(btn, () => text, "code");
     });
-
-    wrap.append(btn, pre);
+    bar.append(lang, btn);
+    wrap.append(bar, pre);
   }
 }
 

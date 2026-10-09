@@ -1,4 +1,5 @@
 import type { DiagnoseScore, DiagnoseStepId } from "../diagnose-flow";
+import type { LlmAccountBlock } from "../friendly-error";
 import type { RepairPreviewResponse, RepairStatusFilter } from "../types";
 
 export const SCORE_MIN_MS = 2800;
@@ -14,6 +15,7 @@ export type PrimaryAction =
   | "ask-fix"
   | "ask-verify"
   | "open-ask"
+  | "open-provider"
   | "rescan"
   | "none";
 
@@ -37,6 +39,8 @@ export type DiagnoseSession = {
   repairTried: boolean;
   /** Result of the last repair, shown in front of the next score line. */
   repairNotice: string | null;
+  /** Model account refused the repair call. One-click repair cannot clear this. */
+  accountBlock: LlmAccountBlock | null;
   checkFilter: CheckFilter;
   guideFillConfig: boolean;
   /** Full repair panel (one-click / rollback / Chrome check). */
@@ -93,6 +97,7 @@ export function createDiagnoseSession(runtimeId: string): DiagnoseSession {
     autoFixTried: false,
     repairTried: false,
     repairNotice: null,
+    accountBlock: null,
     checkFilter: "all",
     guideFillConfig: false,
     deepOpen: false,

@@ -586,6 +586,39 @@ pub fn knowledge_save_page_command(
     fs::write(&page, content).map_err(|_| "这一页没能保存。".to_string())
 }
 
+#[tauri::command]
+pub fn knowledge_delete_page_command(
+    project_path: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    let root = knowledge_root(project_path.as_deref())?;
+    let wiki = root.join("wiki");
+    let page = resolve_page(&wiki, &path)?;
+    if !page.is_file() {
+        return Err("找不到这一页。".to_string());
+    }
+    fs::remove_file(&page).map_err(|_| "这一页没能删掉。".to_string())?;
+    if let Some(parent) = page.parent() {
+        remove_empty_dirs(&wiki, parent);
+    }
+    Ok(())
+}
+
+fn remove_empty_dirs(wiki: &Path, mut dir: &Path) {
+    while dir != wiki && dir.starts_with(wiki) {
+        let empty = fs::read_dir(dir)
+            .ok()
+            .is_some_and(|mut entries| entries.next().is_none());
+        if !empty || fs::remove_dir(dir).is_err() {
+            break;
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => break,
+        }
+    }
+}
+
 /// What a chat turn should know about this wiki; `None` when it has no pages yet.
 #[tauri::command]
 pub fn knowledge_context_command(
@@ -696,6 +729,14 @@ mod tests {
         assert!(context.index.contains("guides/start.md"));
         assert!(context.full.unwrap().contains("hi"));
 
+        knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
+        assert!(knowledge_pages_command(project_str.clone())
+            .unwrap()
+            .pages
+            .is_empty());
+        assert!(
+            knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).is_err()
+        );
         assert!(knowledge_read_page_command(project_str, "../AGENTS.md".into()).is_err());
         let _ = fs::remove_dir_all(project);
     }

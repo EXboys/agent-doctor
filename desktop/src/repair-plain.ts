@@ -100,6 +100,7 @@ function idFamily(id: string): string {
   if (id.includes("env.conflicts") || id === "env.conflicts") return "env.conflicts";
   if (id.includes("version.pinned") || id.includes("upstream_version")) return "version";
   if (id.includes("paths.references")) return "paths.references";
+  if (id.includes("model.dot_rewrite") || id.includes("dot_rewrite")) return "model.dot_rewrite";
   if (id.includes("model_unroutable")) return "model.unroutable";
   if (id.includes("env_stale")) return "env.stale";
   if (id.includes("provider")) return "provider";
@@ -287,6 +288,12 @@ function familyCopy(family: string): FamilyCopy | null {
       okMsg: t("repair.check.modelOkDesc"),
       badTitle: t("repair.check.modelTitle"),
       badMsg: t("repair.check.modelDesc"),
+    },
+    "model.dot_rewrite": {
+      okTitle: t("repair.check.modelOkTitle"),
+      okMsg: t("repair.check.modelOkDesc"),
+      badTitle: t("repair.check.modelDotsTitle"),
+      badMsg: t("repair.check.modelDotsDesc"),
     },
     "env.stale": {
       okTitle: t("repair.check.keyOkTitle"),

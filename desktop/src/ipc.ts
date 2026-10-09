@@ -174,6 +174,24 @@ export function skillMountRuntimeIds(): Promise<string[]> {
   return invoke("skill_mount_runtime_ids_command");
 }
 
+export function skillRemove(args: {
+  scope: "global" | "project" | "agent";
+  projectName?: string | null;
+  runtime?: string | null;
+  skillId: string;
+}): Promise<void> {
+  return invoke("skill_remove_command", args);
+}
+
+export function skillInstall(args: {
+  scope: "global" | "project" | "agent";
+  projectName?: string | null;
+  runtime?: string | null;
+  paths: string[];
+}): Promise<{ installed: string[]; replaced: string[]; skipped: number }> {
+  return invoke("skill_install_command", args);
+}
+
 export function listTeamupsMallCatalog(): Promise<TeamupsMallCatalog> {
   return invoke("list_teamups_mall_catalog_command");
 }
@@ -458,6 +476,10 @@ export function knowledgeSavePage(args: {
   content: string;
 }): Promise<void> {
   return invoke("knowledge_save_page_command", args);
+}
+
+export function knowledgeDeletePage(args: { projectPath: string | null; path: string }): Promise<void> {
+  return invoke("knowledge_delete_page_command", args);
 }
 
 export function knowledgeContext(args: { projectPath: string | null }): Promise<KnowledgeContext | null> {

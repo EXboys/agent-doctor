@@ -827,10 +827,10 @@ html:has(.diagnose-page) body {
 
 .diagnose-result {
   margin: 6px 0 0 !important;
-  padding: 7px 10px;
+  padding: 8px 12px;
   border-radius: 8px;
-  font-size: 0.64rem;
-  line-height: 1.4;
+  font-size: 0.78rem;
+  line-height: 1.45;
   min-height: 2.1em;
   box-sizing: border-box;
 }
@@ -850,6 +850,11 @@ html:has(.diagnose-page) body {
 .diagnose-result.is-error {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.diagnose-result.is-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
 .diagnose-result.is-busy {

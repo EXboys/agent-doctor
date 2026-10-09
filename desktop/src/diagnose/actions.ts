@@ -9,7 +9,12 @@ import {
   type DiagnoseStepId,
 } from "../diagnose-flow";
 import { isPersonalEdition } from "../edition";
-import { withErrorDetail, formatProviderFailure, withProviderFailure } from "../friendly-error";
+import {
+  explainLlmAccountBlock,
+  withErrorDetail,
+  formatProviderFailure,
+  withProviderFailure,
+} from "../friendly-error";
 import { isDesktopAppRuntimeId } from "../agents-ui";
 import { t } from "../i18n";
 import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
@@ -116,13 +121,19 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     let repaired = false;
     try {
       const summary = await deepRepair({ runtime: session.runtimeId });
+      session.accountBlock = null;
       session.repairTried = summary.issue_score_after >= summary.issue_score_before;
       session.repairNotice = describeRepairSummary(summary);
       repaired = true;
     } catch (error) {
-      paint.setResult("error", friendlyDeepError(error));
+      const account = explainLlmAccountBlock(error);
+      session.accountBlock = account;
+      paint.setResult(account ? "warn" : "error", friendlyDeepError(error));
     } finally {
       paint.setBusy(false);
+    }
+    if (!repaired && session.accountBlock) {
+      paint.paintAll();
     }
     if (repaired) {
       await deps.refreshState({ preferStep: "test" });
@@ -203,6 +214,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
   }
 
   async function runScoreTest(opts?: { reusePreview?: boolean }): Promise<void> {
+    session.accountBlock = null;
     paint.setBusy(true);
     paint.ensureDetailsOpen();
     session.activeStep = "test";

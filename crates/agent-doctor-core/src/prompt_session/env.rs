@@ -379,10 +379,37 @@ fn ensure_hermes_model_config(home: &Path, gateway_url: &str, model: Option<&str
     let model_map = model_section
         .as_mapping_mut()
         .context("Hermes model section must be a mapping")?;
+    let requested = model.map(str::trim).filter(|m| !m.is_empty());
+    let existing_model = model_map
+        .get(YamlValue::from("default"))
+        .and_then(YamlValue::as_str)
+        .unwrap_or("")
+        .to_string();
+    let chosen = requested.unwrap_or(existing_model.as_str());
+    let pin_chat = chosen.is_empty() || !crate::setup::merge::model_is_claude(chosen);
+    let gateway_url = if pin_chat {
+        crate::setup::merge::hermes_chat_base_url(gateway_url)
+    } else {
+        gateway_url.trim().trim_end_matches('/').to_string()
+    };
     model_map.insert(YamlValue::from("provider"), YamlValue::from("custom"));
-    model_map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
-    if let Some(model_id) = model.map(str::trim).filter(|m| !m.is_empty()) {
+    model_map.insert(
+        YamlValue::from("base_url"),
+        YamlValue::from(gateway_url.as_str()),
+    );
+    if !chosen.is_empty() {
+        let model_id = if pin_chat {
+            crate::setup::merge::restore_hyphenated_vendor_model(chosen)
+        } else {
+            chosen.to_string()
+        };
         model_map.insert(YamlValue::from("default"), YamlValue::from(model_id));
+    }
+    if pin_chat {
+        model_map.insert(
+            YamlValue::from("api_mode"),
+            YamlValue::from("chat_completions"),
+        );
     }
     // Keep auxiliary helpers on the same gateway so Hermes does not fall back to OpenRouter.
     let aux = root_map
@@ -395,7 +422,10 @@ fn ensure_hermes_model_config(home: &Path, gateway_url: &str, model: Option<&str
                 .or_insert_with(|| YamlValue::Mapping(Mapping::new()));
             if let Some(map) = entry.as_mapping_mut() {
                 map.insert(YamlValue::from("provider"), YamlValue::from("custom"));
-                map.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
+                map.insert(
+                    YamlValue::from("base_url"),
+                    YamlValue::from(gateway_url.as_str()),
+                );
             }
         }
     }

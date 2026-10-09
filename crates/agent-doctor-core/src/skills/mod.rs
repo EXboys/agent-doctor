@@ -2,6 +2,7 @@
 
 mod custom;
 mod evotown_source;
+mod install;
 pub(crate) mod local;
 mod mall;
 mod resolve;
@@ -9,6 +10,9 @@ mod sync_router;
 mod teamups;
 mod teamups_auth;
 
+pub use install::{
+    install_local_skills, remove_local_skill, skill_roots, SkillInstallError, SkillInstallReport,
+};
 pub use mall::{install_teamups_mall_item, list_teamups_mall_catalog};
 pub use resolve::{
     load_local_skills_layout, resolve_cached_skill_dir, resolve_skills_source,

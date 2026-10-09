@@ -22,6 +22,7 @@ type Deps = {
   currentAgent: () => string;
   projectPath: (projectName: string) => string | null;
   chatTranscript: () => { title: string; text: string } | null;
+  chats: () => { title: string; text: string; projectName: string | null }[];
 };
 
 function asText(value: unknown): string {
@@ -135,6 +136,7 @@ let deps: Deps = {
   currentAgent: () => "codex",
   projectPath: () => null,
   chatTranscript: () => null,
+  chats: () => [],
 };
 let agentMemoryFetchId = 0;
 let tab: Tab = "global";
@@ -349,6 +351,7 @@ function paintContent(): void {
   mountWiki(wikiHost, wikiScope, {
     currentAgent: () => deps.currentAgent(),
     chatTranscript: () => deps.chatTranscript(),
+    chats: () => deps.chats(),
   });
   void migrateScope(wikiScope);
 }

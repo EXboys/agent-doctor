@@ -11,6 +11,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+:where(button, input, textarea, select) {
+  font-family: inherit;
+}
+
 .island {
   position: relative;
   box-sizing: border-box;

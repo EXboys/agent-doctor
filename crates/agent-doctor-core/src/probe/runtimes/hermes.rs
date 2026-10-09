@@ -66,6 +66,40 @@ fn probe_yaml_schema(
             SensitivityLevel::ConfigShape,
         ));
     }
+    probe_dotted_model_rewrite(model, checks);
+}
+
+/// Hermes turns `glm-5.3` into `glm-5-3` when the provider or URL is Anthropic.
+fn probe_dotted_model_rewrite(model: &serde_yaml::Value, checks: &mut Vec<ProbeCheck>) {
+    use crate::setup::merge::hermes_model_will_be_rewritten;
+
+    let provider = model
+        .get("provider")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("");
+    let api_mode = model
+        .get("api_mode")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("");
+    let base_url = model
+        .get("base_url")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("");
+    let name = model
+        .get("default")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("");
+    if !hermes_model_will_be_rewritten(provider, api_mode, base_url, name) {
+        return;
+    }
+    checks.push(ProbeCheck::new(
+        "hermes.model.dot_rewrite",
+        "Hermes model id",
+        ProbeStatus::Fail,
+        ProbeSeverity::Error,
+        format!("Hermes would rewrite model `{name}` (provider={provider}, api_mode={api_mode})"),
+        SensitivityLevel::ConfigShape,
+    ));
 }
 
 fn probe_env_schema(path: &Path, env: &EnvFile, checks: &mut Vec<ProbeCheck>) {

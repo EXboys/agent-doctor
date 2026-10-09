@@ -60,7 +60,42 @@ export function teamupsMallInstallFailure(error: unknown): string {
   return t("resources.mallInstallFailed");
 }
 
-export type ProviderFailureKind = "key" | "url" | "model" | "missing" | "unknown";
+export type ProviderFailureKind =
+  | "key"
+  | "url"
+  | "model"
+  | "missing"
+  | "balance"
+  | "rate_limit"
+  | "unknown";
+
+export type LlmAccountBlock = "balance" | "rate_limit";
+
+/** Provider said the key works but the account cannot answer: no credit, or a temporary limit. */
+export function explainLlmAccountBlock(error: unknown): LlmAccountBlock | null {
+  const raw = errorDetail(error);
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const balance =
+    /"code"\s*:\s*"?1113\b/.test(lower) ||
+    /余额不足|无可用资源包|请充值|欠费/.test(raw) ||
+    /insufficient[_\s-]*(quota|balance|credit)|exceeded your current quota|billing[_\s-]*hard[_\s-]*limit|account.?balance|no available resource/.test(
+      lower,
+    );
+  if (balance) return "balance";
+  if (
+    /\b429\b|too many requests|rate[_\s-]*limit|请求过于频繁|请求频率|限流/.test(lower)
+  ) {
+    return "rate_limit";
+  }
+  return null;
+}
+
+export function accountBlockMessage(kind: LlmAccountBlock): string {
+  return kind === "balance"
+    ? t("diagnose.flow.accountBalance")
+    : t("diagnose.flow.accountRateLimit");
+}
 
 export type ProviderFailureExplain = {
   kind: ProviderFailureKind;
@@ -89,6 +124,23 @@ export function explainProviderFailure(
   const status = opts?.statusCode ?? null;
   const raw = stripProviderNoise(errorDetail(error));
   const lower = raw.toLowerCase();
+  const account = explainLlmAccountBlock(raw);
+
+  if (account === "balance") {
+    return {
+      kind: "balance",
+      message: t("provider.fail.balance"),
+      next: t("provider.fail.balanceNext"),
+    };
+  }
+
+  if (account === "rate_limit" || status === 429) {
+    return {
+      kind: "rate_limit",
+      message: t("provider.fail.rateLimit"),
+      next: t("provider.fail.rateLimitNext"),
+    };
+  }
 
   if (
     status === 401 ||
@@ -180,6 +232,8 @@ export type ChatFailureKind =
   | "glm_codex_url"
   | "geo_blocked"
   | "macos_denied"
+  | "account_balance"
+  | "rate_limit"
   | "provider_key"
   | "provider_url"
   | "provider_model"
@@ -226,6 +280,25 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   const text = raw.trim();
   if (!text) return null;
   const lower = text.toLowerCase();
+  const account = explainLlmAccountBlock(text);
+
+  if (account === "balance") {
+    return {
+      kind: "account_balance",
+      message: t("chat.fail.balance.message"),
+      next: t("chat.fail.balance.next"),
+      actions: ["provider"],
+    };
+  }
+
+  if (account === "rate_limit") {
+    return {
+      kind: "rate_limit",
+      message: t("chat.fail.rateLimit.message"),
+      next: t("chat.fail.rateLimit.next"),
+      actions: [],
+    };
+  }
 
   if (isGlmCodexResponses404(lower)) {
     return {

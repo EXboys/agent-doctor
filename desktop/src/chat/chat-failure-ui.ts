@@ -23,22 +23,24 @@ export function mountChatFailureBubble(
   bubble.textContent = formatChatFailureLine(explain);
   wrap.appendChild(bubble);
 
-  const actions = document.createElement("div");
-  actions.className = "chat-failure-actions";
-  actions.setAttribute("role", "group");
+  if (explain.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "chat-failure-actions";
+    actions.setAttribute("role", "group");
 
-  for (const action of explain.actions) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chat-failure-btn";
-    btn.textContent = actionLabel(action);
-    btn.addEventListener("click", () => {
-      void runChatFailureAction(action, explain, handlers);
-    });
-    actions.appendChild(btn);
+    for (const action of explain.actions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chat-failure-btn";
+      btn.textContent = actionLabel(action);
+      btn.addEventListener("click", () => {
+        void runChatFailureAction(action, explain, handlers);
+      });
+      actions.appendChild(btn);
+    }
+
+    wrap.appendChild(actions);
   }
-
-  wrap.appendChild(actions);
   logEl.appendChild(wrap);
   logEl.scrollTop = logEl.scrollHeight;
   return bubble;

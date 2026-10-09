@@ -389,6 +389,8 @@ export class AskResourcesController {
       skillsEmptyEl: HTMLElement;
       mcpEmptyEl: HTMLElement;
       query?: string;
+      onDeleteSkill?: (skillId: string) => void;
+      pendingDeleteId?: string;
     },
   ): void {
     const q = (targets.query ?? this.resourcesQuery).trim().toLowerCase();
@@ -429,6 +431,7 @@ export class AskResourcesController {
           ? t("chat.resourcesRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
           : "";
       const meta = [calls, rate].filter(Boolean).join(" · ") || skill.metrics_source || "local";
+      const removing = targets.pendingDeleteId === skill.skill_id;
       targets.skillsListEl.appendChild(
         this.buildResourceRow({
           kind: "skill",
@@ -445,6 +448,9 @@ export class AskResourcesController {
               id: skill.skill_id,
               label: title,
             }),
+          onDelete: targets.onDeleteSkill ? () => targets.onDeleteSkill?.(skill.skill_id) : undefined,
+          deleteLabel: removing ? t("chat.skillDeleteConfirm") : t("chat.skillDelete"),
+          deleteArmed: removing,
         }),
       );
     }
@@ -597,10 +603,13 @@ export class AskResourcesController {
     active: boolean;
     warn?: boolean;
     onClick: () => void;
-  }): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chat-res-row";
+    onDelete?: () => void;
+    deleteLabel?: string;
+    deleteArmed?: boolean;
+  }): HTMLElement {
+    const btn = document.createElement(opts.onDelete ? "div" : "button");
+    if (!opts.onDelete) (btn as HTMLButtonElement).type = "button";
+    btn.className = opts.onDelete ? "chat-res-row has-delete" : "chat-res-row";
     btn.setAttribute("role", "listitem");
     btn.dataset.kind = opts.kind;
     btn.dataset.id = opts.id;
@@ -639,8 +648,26 @@ export class AskResourcesController {
     meta.textContent = opts.meta;
 
     btn.title = opts.description;
-    btn.append(icon, body, meta);
-    btn.addEventListener("click", opts.onClick);
+    if (!opts.onDelete) {
+      btn.append(icon, body, meta);
+      btn.addEventListener("click", opts.onClick);
+      return btn;
+    }
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "chat-res-open";
+    open.append(icon, body, meta);
+    open.addEventListener("click", opts.onClick);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chat-res-delete";
+    remove.classList.toggle("is-armed", opts.deleteArmed === true);
+    remove.textContent = opts.deleteLabel ?? "";
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      opts.onDelete?.();
+    });
+    btn.append(open, remove);
     return btn;
   }
 

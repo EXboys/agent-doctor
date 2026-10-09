@@ -93,16 +93,6 @@
           <div id="chat-sessions" class="chat-sessions" role="list"></div>
         </div>
 
-        <button
-          id="chat-resources-toggle"
-          type="button"
-          class="chat-resources-toggle"
-          aria-expanded="false"
-          aria-controls="chat-resources-panel"
-        >
-          <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
-        </button>
-
         <div class="chat-side-foot">
           <button
             id="chat-knowledge-open"
@@ -111,7 +101,23 @@
             aria-pressed="false"
             aria-controls="chat-knowledge"
           >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5V5.5z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M4 19.2A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+            </svg>
             <span data-i18n="chat.knowledge">知识库</span>
+          </button>
+          <button
+            id="chat-resources-toggle"
+            type="button"
+            class="chat-resources-toggle"
+            aria-expanded="false"
+            aria-controls="chat-resources-panel"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
           </button>
           <div class="chat-account-bar">
             <button id="chat-account" type="button" class="chat-account" title="个人中心">
@@ -250,6 +256,13 @@
               <h2 data-i18n="chat.resourcesPanelTitle">技能 / 工具</h2>
               <div class="chat-knowledge-head-tools">
                 <div class="chat-resources-page-actions">
+                  <div id="chat-resources-add" class="chat-skill-add">
+                    <button id="chat-resources-add-skill" type="button" class="kw-btn kw-btn-solid" aria-haspopup="menu" aria-expanded="false" data-i18n="chat.skillInstall">增加技能</button>
+                    <div id="chat-resources-add-menu" class="chat-skill-add-menu" role="menu" hidden>
+                      <button id="chat-resources-add-folder" type="button" role="menuitem" data-i18n="chat.skillInstallFolder">文件夹</button>
+                      <button id="chat-resources-add-zip" type="button" role="menuitem" data-i18n="chat.skillInstallZip">zip 包</button>
+                    </div>
+                  </div>
                   <button id="chat-resources-page-refresh" type="button" class="chat-knowledge-textbtn" data-i18n="chat.resourcesRefresh">刷新</button>
                   <button id="chat-resources-page-manage" type="button" class="chat-knowledge-save" data-i18n="chat.openResources">管理</button>
                 </div>
@@ -262,6 +275,7 @@
             </header>
             <div id="chat-resources-picks" class="chat-knowledge-picks" hidden></div>
             <p id="chat-resources-scope" class="chat-knowledge-scope"></p>
+            <p id="chat-resources-install-note" class="chat-knowledge-scope" hidden></p>
             <label class="chat-res-search chat-resources-page-search">
               <span class="chat-res-search-icon" aria-hidden="true">⌕</span>
               <input

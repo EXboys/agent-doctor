@@ -69,6 +69,16 @@ pub(crate) const HERMES_RULES: &[Rule] = &[
         },
     },
     Rule {
+        id: "fix-hermes-model-dots",
+        title: "Keep the model name Hermes would rewrite",
+        description:
+            "Hermes turns dotted ids like glm-5.3 into glm-5-3 when the provider is Anthropic. \
+            Point Hermes at the OpenAI-compatible address and restore the dotted name.",
+        check: CheckMatch::Is("hermes.model.dot_rewrite", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| repair_hermes_dotted_model().map(|_| None)),
+    },
+    Rule {
         id: "fix-hermes-api-key-scaffold",
         title: "Prepare ~/.hermes/.env for API key",
         description:
@@ -236,6 +246,77 @@ fn active_hermes_preset() -> Result<HermesProfilePreset> {
         .clone()
         .or_else(|| entry.models.first().cloned())
         .with_context(|| format!("profile '{active}' has no Hermes model preset"))
+}
+
+fn repair_hermes_dotted_model() -> Result<()> {
+    use crate::setup::merge::{
+        hermes_chat_base_url, hermes_model_will_be_rewritten, model_is_claude,
+        restore_hyphenated_vendor_model,
+    };
+
+    let path = hermes_config_path();
+    if !path.exists() {
+        anyhow::bail!("Hermes config not found at {}", path.display());
+    }
+    let raw = fs::read_to_string(&path)?;
+    let mut root: Value = serde_yaml::from_str(&raw)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let mapping = root
+        .as_mapping_mut()
+        .context("Hermes config root must be a mapping")?;
+    let model = mapping
+        .get(Value::from("model"))
+        .and_then(Value::as_mapping)
+        .context("Hermes model section must be a mapping")?;
+    let provider = model
+        .get(Value::from("provider"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let api_mode = model
+        .get(Value::from("api_mode"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let base_url = model
+        .get(Value::from("base_url"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let name = model
+        .get(Value::from("default"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if !hermes_model_will_be_rewritten(&provider, &api_mode, &base_url, &name) {
+        return Ok(());
+    }
+    let pin_chat = name.trim().is_empty() || !model_is_claude(&name);
+    let next_url = if pin_chat {
+        hermes_chat_base_url(&base_url)
+    } else {
+        base_url.trim().trim_end_matches('/').to_string()
+    };
+    let next_model = if pin_chat {
+        restore_hyphenated_vendor_model(&name)
+    } else {
+        name
+    };
+    let model = mapping
+        .get_mut(Value::from("model"))
+        .and_then(Value::as_mapping_mut)
+        .context("Hermes model section must be a mapping")?;
+    model.insert(Value::from("provider"), Value::from("custom"));
+    model.insert(Value::from("api_mode"), Value::from("chat_completions"));
+    if !next_url.is_empty() {
+        model.insert(Value::from("base_url"), Value::from(next_url));
+    }
+    if !next_model.trim().is_empty() {
+        model.insert(Value::from("default"), Value::from(next_model));
+    }
+    fs::write(&path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
 }
 
 fn apply_hermes_config_from_profile() -> Result<()> {

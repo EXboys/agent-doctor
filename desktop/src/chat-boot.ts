@@ -80,6 +80,15 @@ import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 import { wireChatControllers } from "./chat-wire";
 
+function transcriptOf(session: ReturnType<typeof activeSession>): { title: string; text: string } | null {
+  const lines = session.messages
+    .filter((message) => (message.role === "user" || message.role === "assistant") && message.content.trim())
+    .map((message) => `## ${message.role === "user" ? "User" : "Assistant"}\n\n${message.content.trim()}`);
+  if (!lines.length) return null;
+  const title = session.title.trim() || "聊天";
+  return { title, text: `# ${title}\n\n${lines.join("\n\n")}\n` };
+}
+
 export function bootChat(): void {
   setFollowQueueInsertHandler(() => {
     void cancelAsk();
@@ -101,13 +110,12 @@ export function bootChat(): void {
     currentProject: () => sessionWorkspaceName(activeSession(), chatState.workspaceDoc),
     currentAgent: () => selectedRuntime(),
     projectPath: (name) => chatState.workspaceDoc?.workspaces[name]?.path?.trim() || null,
-    chatTranscript: () => {
-      const session = activeSession();
-      const lines = session.messages
-        .filter((message) => (message.role === "user" || message.role === "assistant") && message.content.trim())
-        .map((message) => `## ${message.role === "user" ? "User" : "Assistant"}\n\n${message.content.trim()}`);
-      return lines.length ? { title: session.title, text: `# ${session.title}\n\n${lines.join("\n\n")}\n` } : null;
-    },
+    chatTranscript: () => transcriptOf(activeSession()),
+    chats: () =>
+      (chatState.store?.sessions ?? []).flatMap((session) => {
+        const text = transcriptOf(session);
+        return text ? [{ ...text, projectName: session.workspaceName?.trim() || null }] : [];
+      }),
   });
   bindResourcesPage({
     projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),

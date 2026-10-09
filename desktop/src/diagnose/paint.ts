@@ -23,7 +23,7 @@ import {
 export type DiagnosePaintApi = ReturnType<typeof createDiagnosePaint>;
 
 export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepChatApi) {
-  function setResult(kind: "ok" | "error" | "busy" | "hide", message = ""): void {
+  function setResult(kind: "ok" | "error" | "warn" | "busy" | "hide", message = ""): void {
     if (kind === "hide" || !message) {
       dom.resultEl.hidden = true;
       dom.resultEl.textContent = "";
@@ -508,7 +508,9 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
         window.requestAnimationFrame(() => focusConfigFill());
       }
     } else {
-      if (session.busy && !session.testedOk) {
+      if (session.accountBlock) {
+        paintHeroTone("warn");
+      } else if (session.busy && !session.testedOk) {
         paintHeroTone("busy");
       } else if (session.testedOk || (session.lastScore && scoreLooksGood(session.lastScore))) {
         paintHeroTone("ok");
@@ -550,6 +552,18 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
         dom.secondaryEl.hidden = false;
         dom.secondaryEl.textContent = t("diagnose.flow.rescan");
         dom.secondaryEl.dataset.fallback = "rescan";
+      } else if (session.accountBlock === "balance") {
+        session.primaryAction = "open-provider";
+        dom.primaryEl.hidden = false;
+        dom.primaryEl.textContent = t("diagnose.flow.goProvider");
+        dom.secondaryEl.hidden = false;
+        dom.secondaryEl.textContent = t("diagnose.flow.rescan");
+        dom.secondaryEl.dataset.fallback = "rescan";
+      } else if (session.accountBlock === "rate_limit") {
+        session.primaryAction = "rescan";
+        dom.primaryEl.hidden = false;
+        dom.primaryEl.textContent = t("diagnose.flow.rescan");
+        dom.secondaryEl.hidden = true;
       } else if (session.preview && session.preview.summary.fail > 0) {
         session.primaryAction = session.repairTried ? "ask-fix" : "deep-repair";
         dom.primaryEl.hidden = false;

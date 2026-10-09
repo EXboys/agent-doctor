@@ -1,5 +1,7 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import type { AskResourcesController, AskRuntime, ResourcesScopeTab } from "../ask-resources";
 import { t, tNamed } from "../i18n";
+import { skillInstall, skillRemove } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import { closeKnowledgePage, closeResourcesMainPage } from "./overlay-pages";
 
@@ -35,6 +37,8 @@ let projectPick = "";
 let agentPick: string = AGENTS[0];
 let query = "";
 let resourceKind: "skills" | "mcp" = "skills";
+let installing = false;
+let pendingDelete = "";
 
 export function isResourcesPageOpen(): boolean {
   const page = pageEl();
@@ -129,8 +133,118 @@ function paintContent(): void {
       skillsEmptyEl: skillsEmpty,
       mcpEmptyEl: mcpEmpty,
       query,
+      pendingDeleteId: pendingDelete,
+      onDeleteSkill: (skillId) => {
+        if (pendingDelete !== skillId) {
+          pendingDelete = skillId;
+          paintContent();
+          return;
+        }
+        void removeSkill(skillId);
+      },
     },
   );
+}
+
+async function removeSkill(skillId: string): Promise<void> {
+  pendingDelete = "";
+  setInstallNote(t("chat.skillDeleting"));
+  try {
+    await skillRemove({
+      scope: tab,
+      projectName: tab === "project" ? projectPick : null,
+      runtime: tab === "agent" ? agentPick : null,
+      skillId,
+    });
+    await deps.reload();
+    paint();
+    setInstallNote(t("chat.skillDeleted", { name: skillId }));
+  } catch (error) {
+    const code = String(error);
+    setInstallNote(
+      code.includes("not-found")
+        ? t("chat.skillDeleteMissing")
+        : code.includes("no-project")
+          ? t("chat.skillInstallNoProject")
+          : code.includes("no-agent")
+            ? t("chat.skillInstallNoAgent")
+            : t("chat.skillDeleteFailed"),
+    );
+  }
+}
+
+function setInstallNote(text: string): void {
+  const note = document.querySelector<HTMLElement>("#chat-resources-install-note");
+  if (!note) return;
+  note.hidden = text.length === 0;
+  note.textContent = text;
+}
+
+function installError(error: unknown): string {
+  const code = String(error);
+  if (code.includes("not-a-skill")) return t("chat.skillInstallNone");
+  if (code.includes("no-agent")) return t("chat.skillInstallNoAgent");
+  if (code.includes("no-project")) return t("chat.skillInstallNoProject");
+  if (code.includes("too-big")) return t("chat.skillInstallTooBig");
+  return t("chat.skillInstallFailed");
+}
+
+function setAddMenu(open: boolean): void {
+  const menu = document.querySelector<HTMLElement>("#chat-resources-add-menu");
+  const button = document.querySelector<HTMLButtonElement>("#chat-resources-add-skill");
+  if (!menu || !button) return;
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+async function installSkills(directory: boolean): Promise<void> {
+  if (installing) return;
+  setAddMenu(false);
+  if (tab === "project" && deps.projects().length === 0) {
+    setInstallNote(t("chat.skillInstallNoProject"));
+    return;
+  }
+  let picked: string | string[] | null;
+  try {
+    picked = await open({
+      multiple: true,
+      directory,
+      filters: directory ? undefined : [{ name: "zip", extensions: ["zip"] }],
+    });
+  } catch {
+    return;
+  }
+  const paths = (Array.isArray(picked) ? picked : picked ? [picked] : []).filter(Boolean);
+  if (!paths.length) return;
+  installing = true;
+  const addButton = document.querySelector<HTMLButtonElement>("#chat-resources-add-skill");
+  if (addButton) addButton.disabled = true;
+  setInstallNote(t("chat.skillInstalling"));
+  try {
+    const report = await skillInstall({
+      scope: tab,
+      projectName: tab === "project" ? projectPick : null,
+      runtime: tab === "agent" ? agentPick : null,
+      paths,
+    });
+    await deps.reload();
+    paint();
+    const parts: string[] = [];
+    if (report.installed.length) {
+      parts.push(t("chat.skillInstalled", { names: report.installed.join("、") }));
+    }
+    if (report.replaced.length) {
+      parts.push(t("chat.skillUpdated", { names: report.replaced.join("、") }));
+    }
+    if (report.skipped > 0) parts.push(t("chat.skillInstallSkipped"));
+    setInstallNote(parts.join(" "));
+  } catch (error) {
+    setInstallNote(installError(error));
+  } finally {
+    installing = false;
+    const addButton = document.querySelector<HTMLButtonElement>("#chat-resources-add-skill");
+    if (addButton) addButton.disabled = false;
+  }
 }
 
 function paintResourceKind(): void {
@@ -143,9 +257,13 @@ function paintResourceKind(): void {
   document.querySelectorAll<HTMLElement>("[data-resource-section]").forEach((section) => {
     section.hidden = section.dataset.resourceSection !== resourceKind;
   });
+  const add = document.querySelector<HTMLElement>("#chat-resources-add");
+  if (add) add.hidden = resourceKind !== "skills";
+  if (resourceKind !== "skills") setAddMenu(false);
 }
 
 function paint(): void {
+  setInstallNote("");
   document.querySelectorAll<HTMLButtonElement>("[data-rt-tab]").forEach((button) => {
     const on = button.dataset.rtTab === tab;
     button.setAttribute("aria-selected", on ? "true" : "false");
@@ -190,6 +308,7 @@ export function bindResourcesPage(next: Deps): void {
     const nextTab = button?.dataset.rtTab;
     if (nextTab !== "global" && nextTab !== "project" && nextTab !== "agent") return;
     tab = nextTab;
+    pendingDelete = "";
     paint();
   });
   const kindTabs = document.querySelector<HTMLElement>(".chat-resources-kind-tabs");
@@ -198,6 +317,7 @@ export function bindResourcesPage(next: Deps): void {
     const nextKind = button?.dataset.resourceKind;
     if (nextKind !== "skills" && nextKind !== "mcp") return;
     resourceKind = nextKind;
+    pendingDelete = "";
     paintResourceKind();
   });
   kindTabs?.addEventListener("keydown", (event) => {
@@ -220,5 +340,19 @@ export function bindResourcesPage(next: Deps): void {
   });
   document.querySelector<HTMLButtonElement>("#chat-resources-page-manage")?.addEventListener("click", () => {
     deps.openManage();
+  });
+  document.querySelector<HTMLButtonElement>("#chat-resources-add-skill")?.addEventListener("click", () => {
+    const menu = document.querySelector<HTMLElement>("#chat-resources-add-menu");
+    setAddMenu(menu?.hidden !== false);
+  });
+  document.querySelector<HTMLButtonElement>("#chat-resources-add-folder")?.addEventListener("click", () => {
+    void installSkills(true);
+  });
+  document.querySelector<HTMLButtonElement>("#chat-resources-add-zip")?.addEventListener("click", () => {
+    void installSkills(false);
+  });
+  document.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("#chat-resources-add")) return;
+    setAddMenu(false);
   });
 }

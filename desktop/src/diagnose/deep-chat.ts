@@ -18,7 +18,7 @@ import {
   createVoiceInputController,
   type VoiceInputApi,
 } from "../chat/voice";
-import { withErrorDetail } from "../friendly-error";
+import { accountBlockMessage, explainLlmAccountBlock, withErrorDetail, type LlmAccountBlock } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { renderMarkdown } from "../markdown";
 import * as dom from "./dom";
@@ -44,6 +44,8 @@ type DeepDiagnoseEvent =
 export type DeepChatHooks = {
   /** Re-run the left-side checks after a repair changed files. */
   onRepaired?: () => void | Promise<void>;
+  /** The model account blocked the call. Repair cannot clear this. */
+  onAccountBlock?: (kind: LlmAccountBlock) => void;
 };
 
 function attachmentStripHtml(attachments: ChatAttachment[] | undefined): string {
@@ -123,6 +125,10 @@ export function friendlyDeepError(error: unknown): string {
   }
   if (/already running/i.test(message)) {
     return t("diagnose.flow.deepBusy");
+  }
+  const account = explainLlmAccountBlock(message);
+  if (account) {
+    return accountBlockMessage(account);
   }
   return withErrorDetail(t("diagnose.flow.deepFailedGeneric"), error);
 }
@@ -574,6 +580,8 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
       }
       pushBubble("assistant", answer, undefined, { offerRepair: report.open_issues > 0 });
     } catch (error) {
+      const account = explainLlmAccountBlock(error);
+      if (account) hooks.onAccountBlock?.(account);
       pushBubble("meta", friendlyDeepError(error));
     } finally {
       busy = false;
@@ -609,6 +617,8 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
       pushBubble("assistant", describeRepairSummary(summary));
       await hooks.onRepaired?.();
     } catch (error) {
+      const account = explainLlmAccountBlock(error);
+      if (account) hooks.onAccountBlock?.(account);
       pushBubble("meta", friendlyDeepError(error));
     } finally {
       repairing = false;
