@@ -7,6 +7,7 @@ mod speech;
 mod versions;
 mod wiring;
 mod workspace;
+mod workspace_files;
 
 pub use deep_diagnose::*;
 pub use mcp::*;
@@ -17,3 +18,4 @@ pub use speech::*;
 pub use versions::*;
 pub use wiring::*;
 pub use workspace::*;
+pub use workspace_files::*;

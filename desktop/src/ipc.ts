@@ -339,6 +339,43 @@ export function listWorkspaces(): Promise<WorkspacesDocument> {
   return invoke("list_workspaces_command");
 }
 
+export type WorkspaceDirEntry = {
+  name: string;
+  relativePath: string;
+  isDir: boolean;
+};
+
+export type WorkspaceFilePayload = {
+  relativePath: string;
+  name: string;
+  content: string;
+  language: string;
+  editable: boolean;
+  sizeBytes: number;
+};
+
+export function listWorkspaceDir(args: {
+  root: string;
+  relative?: string | null;
+}): Promise<WorkspaceDirEntry[]> {
+  return invoke("list_workspace_dir_command", args);
+}
+
+export function readWorkspaceFile(args: {
+  root: string;
+  relative: string;
+}): Promise<WorkspaceFilePayload> {
+  return invoke("read_workspace_file_command", args);
+}
+
+export function writeWorkspaceFile(args: {
+  root: string;
+  relative: string;
+  content: string;
+}): Promise<void> {
+  return invoke("write_workspace_file_command", args);
+}
+
 export function initWorkspace(args: {
   path: string;
   name?: string | null;

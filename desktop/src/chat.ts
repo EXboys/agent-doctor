@@ -34,7 +34,24 @@ import {
   skillsEmptyEl,
   mcpListEl,
   mcpEmptyEl,
+  mainEl,
+  filesToggleEl,
+  filesPanelEl,
+  filesListEl,
+  filesViewEl,
+  filesBackEl,
+  filesCloseEl,
+  filesBreadcrumbEl,
+  filesNameEl,
+  filesLanguageEl,
+  filesPlaceholderEl,
+  filesPreviewEl,
+  filesEditorEl,
+  filesEditEl,
+  filesSaveEl,
+  filesEmptyEl,
 } from "./chat-dom";
+import { createFilesPanel } from "./chat/files-panel";
 import { bootChat } from "./chat-boot";
 import {
   AskMentionMenuController,
@@ -355,6 +372,7 @@ export function applyI18n(): void {
   updateElevatedLabel();
   updateRuntimeLabel();
   syncActionButton();
+  askFilesPanel.applyI18n();
   if (contextCompactEl) {
     contextCompactEl.textContent = t("chat.contextCompact");
     contextCompactEl.title = t("chat.contextCompactHint");
@@ -581,6 +599,32 @@ export function displayCwd(): string {
   if (live && live !== "—") return live;
   return chatState.workspaceCwd?.trim() || "—";
 }
+
+const askFilesPanel = createFilesPanel({
+  mainEl,
+  toggleEl: filesToggleEl,
+  panelEl: filesPanelEl,
+  listEl: filesListEl,
+  viewEl: filesViewEl,
+  backEl: filesBackEl,
+  closeEl: filesCloseEl,
+  breadcrumbEl: filesBreadcrumbEl,
+  fileNameEl: filesNameEl,
+  languageEl: filesLanguageEl,
+  placeholderEl: filesPlaceholderEl,
+  previewEl: filesPreviewEl,
+  editorEl: filesEditorEl,
+  editEl: filesEditEl,
+  saveEl: filesSaveEl,
+  emptyEl: filesEmptyEl,
+  getRoot: () => {
+    const cwd = displayCwd();
+    if (cwd !== "—") return cwd;
+    const fromSession = sessionWorkspacePath(activeSession(), chatState.workspaceDoc);
+    return fromSession?.trim() || "—";
+  },
+  setStatus,
+});
 
 export function setDisplayedCwd(cwd: string): void {
   const value = cwd.trim() || "—";

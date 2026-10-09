@@ -1818,6 +1818,334 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   grid-row: 2;
 }
 
+.chat-main > .chat-files-panel {
+  grid-row: 2;
+  min-height: 0;
+  min-width: 0;
+  display: none;
+  grid-template-columns: minmax(190px, 28%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+  background: var(--main-bg);
+}
+
+.chat-main.is-files-open > .chat-files-panel {
+  display: grid;
+}
+
+.chat-main.is-files-open > .chat-log {
+  display: none;
+}
+
+.chat-files-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.chat-files-toggle:hover,
+.chat-files-toggle.is-on {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--fill);
+}
+
+.chat-files-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.chat-files-breadcrumb {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-files-back,
+.chat-files-close,
+.chat-files-edit,
+.chat-files-save {
+  border: 1px solid transparent;
+  background: var(--fill);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 9px;
+  border-radius: 7px;
+}
+
+.chat-files-back:hover,
+.chat-files-close:hover,
+.chat-files-edit:hover,
+.chat-files-save:hover {
+  color: var(--text);
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.chat-files-list {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-soft) 80%, var(--main-bg));
+}
+
+.chat-files-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.chat-files-item:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.chat-files-item.is-active {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.chat-files-item-icon {
+  flex-shrink: 0;
+  width: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.chat-files-item.is-dir .chat-files-item-icon {
+  color: #d6a84d;
+}
+
+.chat-files-item-chevron {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 1rem;
+}
+
+.chat-files-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-files-view {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--main-bg);
+}
+
+.chat-files-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.chat-files-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-files-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.chat-files-language {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--fill);
+  color: var(--faint);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.chat-files-view-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-files-preview,
+.chat-files-editor {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 18px 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.65;
+  tab-size: 2;
+  color: var(--text);
+}
+
+.chat-files-preview code {
+  display: block;
+  min-width: max-content;
+  white-space: pre;
+}
+
+.chat-files-editor {
+  resize: none;
+  outline: none;
+}
+
+.chat-files-editor:focus {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.chat-files-empty {
+  margin: 8px 10px;
+  font-size: 0.78rem;
+  color: var(--faint);
+}
+
+.chat-files-placeholder {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 0;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.chat-files-placeholder-icon {
+  opacity: 0.55;
+}
+
+.chat-files-preview .syntax-comment {
+  color: #7c8a72;
+  font-style: italic;
+}
+
+.chat-files-preview .syntax-string {
+  color: #b76b45;
+}
+
+.chat-files-preview .syntax-number,
+.chat-files-preview .syntax-literal {
+  color: #7c65b3;
+}
+
+.chat-files-preview .syntax-keyword {
+  color: #a04a75;
+  font-weight: 600;
+}
+
+.chat-files-preview .syntax-function {
+  color: #4d74a8;
+}
+
+.chat-files-preview .syntax-marker {
+  color: #a04a75;
+}
+
+.chat-files-preview .syntax-heading {
+  color: var(--text);
+  font-weight: 750;
+}
+
+html[data-theme="dark"] .chat-files-preview .syntax-comment {
+  color: #7f9a74;
+}
+
+html[data-theme="dark"] .chat-files-preview .syntax-string {
+  color: #d69d85;
+}
+
+html[data-theme="dark"] .chat-files-preview .syntax-number,
+html[data-theme="dark"] .chat-files-preview .syntax-literal {
+  color: #b5a2e0;
+}
+
+html[data-theme="dark"] .chat-files-preview .syntax-keyword,
+html[data-theme="dark"] .chat-files-preview .syntax-marker {
+  color: #d889b1;
+}
+
+html[data-theme="dark"] .chat-files-preview .syntax-function {
+  color: #82aaff;
+}
+
+.chat-files-panel [hidden],
+.chat-files-view [hidden] {
+  display: none !important;
+}
+
 .chat-main > .chat-composer {
   grid-row: 3;
   min-width: 0;

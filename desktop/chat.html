@@ -121,6 +121,18 @@
               </button>
             </div>
             <button
+              id="chat-files-toggle"
+              type="button"
+              class="chat-files-toggle"
+              aria-pressed="false"
+              aria-label="当前文件夹"
+              title="查看当前文件夹"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3.75 6.75A1.75 1.75 0 0 1 5.5 5h4.1l2 2.25h6.9A1.75 1.75 0 0 1 20.25 9v8A1.75 1.75 0 0 1 18.5 18.75h-13A1.75 1.75 0 0 1 3.75 17V6.75Z" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button
               id="chat-theme"
               type="button"
               class="chat-theme"
@@ -148,6 +160,46 @@
             </button>
           </div>
         </header>
+
+        <section
+          id="chat-files-panel"
+          class="chat-files-panel"
+          hidden
+          aria-hidden="true"
+          aria-label="当前文件夹"
+        >
+          <header class="chat-files-head">
+            <button id="chat-files-back" type="button" class="chat-files-back" hidden data-i18n="chat.filesBack">返回</button>
+            <p id="chat-files-breadcrumb" class="chat-files-breadcrumb"></p>
+            <button id="chat-files-close" type="button" class="chat-files-close" data-i18n="chat.filesClose">关闭</button>
+          </header>
+          <div id="chat-files-list" class="chat-files-list" role="list">
+            <p id="chat-files-empty" class="chat-files-empty" hidden></p>
+          </div>
+          <div id="chat-files-view" class="chat-files-view">
+            <div class="chat-files-view-head">
+              <div class="chat-files-title">
+                <strong id="chat-files-name" class="chat-files-name" data-i18n="chat.filesPreviewTitle">文件预览</strong>
+                <span class="chat-files-language" id="chat-files-language">—</span>
+              </div>
+              <div class="chat-files-view-actions">
+                <button id="chat-files-edit" type="button" class="chat-files-edit" hidden data-i18n="chat.filesEdit">编辑</button>
+                <button id="chat-files-save" type="button" class="chat-files-save" hidden data-i18n="chat.filesSave">保存</button>
+              </div>
+            </div>
+            <div id="chat-files-placeholder" class="chat-files-placeholder">
+              <span class="chat-files-placeholder-icon" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <path d="M6 3.75h7l5 5V20.25H6V3.75Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                  <path d="M13 3.75v5h5M9 13h6M9 16h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span data-i18n="chat.filesPickOne">从左侧选择一个文件查看内容</span>
+            </div>
+            <pre id="chat-files-preview" class="chat-files-preview" hidden><code></code></pre>
+            <textarea id="chat-files-editor" class="chat-files-editor" hidden spellcheck="false"></textarea>
+          </div>
+        </section>
 
         <div id="chat-log" class="chat-log" aria-live="polite">
           <div id="chat-boot-placeholder" class="chat-bubble meta" style="margin:0">正在加载会话…</div>
