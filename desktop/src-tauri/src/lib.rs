@@ -518,6 +518,7 @@ pub fn run() {
             list_workspaces_command,
             init_workspace_command,
             use_workspace_command,
+            remove_workspace_command,
             workspace_status_command,
             workspace_doctor_command,
             workspace_fix_command,

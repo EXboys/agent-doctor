@@ -175,6 +175,13 @@ where
             let _ = control.respond_permission(&request_id, false);
             return Ok(());
         }
+        // Clearing a temp folder is how a video edit throws away scraps.
+        // Ask only when the delete can reach the user's own files.
+        if temp_only_delete(&params) {
+            control.remember_codex_reply(&request_id, kind);
+            let _ = control.respond_permission(&request_id, true);
+            return Ok(());
+        }
         let (tool_name, detail, input_json) = permission_from_codex(method, &params);
         control.remember_codex_reply(&request_id, kind);
         let input_mode = permission_input_mode(method, &params);
@@ -728,6 +735,67 @@ fn prompt_looks_secret(params: &Value) -> bool {
     .any(|needle| blob.contains(needle))
 }
 
+fn command_line(params: &Value) -> String {
+    let Some(command) = params.get("command") else {
+        return String::new();
+    };
+    if let Some(text) = command.as_str() {
+        return text.to_string();
+    }
+    command
+        .as_array()
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default()
+}
+
+fn is_temp_path(path: &str) -> bool {
+    let path = path.trim().trim_matches('"').trim_matches('\'');
+    if path.is_empty() || path.starts_with('-') || path.contains('*') || path.contains('$') {
+        return false;
+    }
+    let mut roots = vec![
+        "/tmp".to_string(),
+        "/private/tmp".to_string(),
+        std::env::temp_dir().display().to_string(),
+    ];
+    roots.retain(|root| !root.is_empty());
+    roots.iter().any(|root| {
+        let root = root.trim_end_matches('/');
+        path == root || path.starts_with(&format!("{root}/"))
+    })
+}
+
+/// Forced delete whose every path stays in a temp folder.
+pub(crate) fn temp_only_delete(params: &Value) -> bool {
+    let line = command_line(params);
+    let lower = line.to_ascii_lowercase();
+    let forced = lower.contains("rm -rf")
+        || lower.contains("rm -fr")
+        || lower.contains("rm -f")
+        || lower.contains("rm --force");
+    if !forced || line.contains('$') || line.contains('~') {
+        return false;
+    }
+    let paths: Vec<&str> = line
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| c == '"' || c == '\'' || c == ';'))
+        .filter(|token| token.starts_with('/'))
+        .filter(|token| {
+            !matches!(
+                token.rsplit('/').next(),
+                Some("zsh" | "bash" | "sh" | "rm" | "ffmpeg")
+            )
+        })
+        .collect();
+    !paths.is_empty() && paths.iter().all(|path| is_temp_path(path))
+}
+
 pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, String, String) {
     let tool_name = if method.contains("fileChange") || method.contains("file_change") {
         "FileChange".to_string()
@@ -751,7 +819,18 @@ pub(crate) fn permission_from_codex(method: &str, params: &Value) -> (String, St
         "Bash".to_string()
     };
 
-    let detail = if method.to_ascii_lowercase().contains("requestuserinput") {
+    let command_line = command_line(params);
+    let command_lower = command_line.to_ascii_lowercase();
+    let show_command = command_lower.contains("rm -f")
+        || command_lower.contains("rm -rf")
+        || command_lower.contains("rm -fr")
+        || command_lower.contains("ffmpeg")
+        || command_lower.contains(".mp4")
+        || command_lower.contains(".mov")
+        || command_lower.contains(".mkv");
+    let detail = if show_command {
+        command_line
+    } else if method.to_ascii_lowercase().contains("requestuserinput") {
         params
             .pointer("/questions/0/question")
             .and_then(|v| v.as_str())

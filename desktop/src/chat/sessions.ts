@@ -20,6 +20,7 @@ import {
   visibleSessionsForGroup,
 } from "./session-sidebar";
 import { formatTime } from "./copy-ui";
+import { closeChatSettings } from "./settings-page";
 import { backgroundChoiceCount, isChatRunning, runningCount } from "./live-runs";
 import {
   COMPACT_KEEP_TURNS,
@@ -90,6 +91,9 @@ export type SessionsDeps = {
   syncSessionWorkspaceUi: () => void;
   captureRunningView: () => void;
   restoreRunningView: () => void;
+  addProject: () => void;
+  removeProject: (name: string) => void;
+  syncAskChrome: (hasProjects: boolean) => void;
 };
 
 export type SessionsApi = ReturnType<typeof createSessionsController>;
@@ -227,12 +231,96 @@ export function createSessionsController(deps: SessionsDeps) {
     return wrap;
   }
 
+  let projectMenu: HTMLElement | null = null;
+
+  function closeProjectMenu(): void {
+    projectMenu?.remove();
+    projectMenu = null;
+  }
+
+  function openProjectMenu(x: number, y: number, name: string, sessions: ChatSession[]): void {
+    closeProjectMenu();
+    const menu = document.createElement("div");
+    menu.className = "chat-project-menu";
+    menu.setAttribute("role", "menu");
+
+    const addItem = (label: string, onPick: () => void) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "chat-project-menu-item";
+      item.setAttribute("role", "menuitem");
+      item.textContent = label;
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeProjectMenu();
+        onPick();
+      });
+      menu.append(item);
+    };
+
+    addItem(t("chat.projectMenuNew"), () => startNewSession(name));
+    addItem(t("chat.projectMenuRemove"), () => {
+      if (sessions.some((session) => isChatRunning(session.id))) {
+        deps.setStatus(t("chat.removeProjectBusy"), "warn");
+        return;
+      }
+      if (!window.confirm(t("chat.removeProjectConfirm", { name }))) return;
+      deps.removeProject(name);
+    });
+
+    document.body.append(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(x, window.innerWidth - rect.width - 8);
+    const top = Math.min(y, window.innerHeight - rect.height - 8);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+    projectMenu = menu;
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!projectMenu) return;
+    if (event.target instanceof Node && projectMenu.contains(event.target)) return;
+    closeProjectMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeProjectMenu();
+  });
+
+  function renderEmptyProjects(): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "chat-empty-projects";
+    const title = document.createElement("p");
+    title.className = "chat-empty-projects-title";
+    title.textContent = t("chat.emptyProjectsTitle");
+    const hint = document.createElement("p");
+    hint.className = "chat-empty-projects-hint";
+    hint.textContent = t("chat.emptyProjectsHint");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-empty-projects-action";
+    button.textContent = t("chat.emptyProjectsAction");
+    button.addEventListener("click", () => deps.addProject());
+    card.append(title, hint, button);
+    return card;
+  }
+
   function renderSessionList(): void {
     deps.sessionListEl.replaceChildren();
     const doc = deps.getWorkspaceDoc();
     const sessions = deps.getStore().sessions;
     const workspaceCount = doc ? Object.keys(doc.workspaces).length : 0;
+    deps.syncAskChrome(workspaceCount > 0 || doc == null);
     const groups = listProjectGroupsForSidebar(sessions, doc, t("chat.sessionGroupOther"));
+    if (doc && workspaceCount === 0) {
+      deps.sessionListEl.appendChild(renderEmptyProjects());
+      for (const session of sessions) {
+        if (!session.messages.some((message) => message.role === "user" || message.role === "assistant")) {
+          continue;
+        }
+        deps.sessionListEl.appendChild(renderSessionRow(session));
+      }
+      return;
+    }
     if (!shouldUseProjectSidebar(workspaceCount)) {
       for (const session of deps.getStore().sessions) {
         deps.sessionListEl.appendChild(renderSessionRow(session));
@@ -276,6 +364,11 @@ export function createSessionsController(deps: SessionsDeps) {
 
       if (group.name) {
         const projectName = group.name;
+        head.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openProjectMenu(event.clientX, event.clientY, projectName, group.sessions);
+        });
         attachProjectReorderPointer(deps.sessionListEl, head, projectName, commitProjectReorder);
 
         const reorder = document.createElement("span");
@@ -434,6 +527,7 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function switchSession(id: string, focus = true): void {
+    closeChatSettings();
     if (id === deps.getStore().activeId) return;
     const session = deps.getStore().sessions.find((s) => s.id === id);
     if (!session) return;
@@ -544,6 +638,7 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function startNewSession(workspaceName?: string | null): void {
+    closeChatSettings();
     if (isChatRunning(deps.getStore().activeId)) {
       deps.captureRunningView();
       detachLiveDom();

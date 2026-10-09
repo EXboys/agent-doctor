@@ -1,3 +1,4 @@
+import { focusMainTab } from "./ipc";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
@@ -63,6 +64,9 @@ import {
   resolveEventChatId,
   captureRunningView,
   restoreRunningView,
+  addProjectFromAsk,
+  removeProjectFromAsk,
+  syncAskChrome,
   settleRunRouting,
   autoResizePrompt,
   selectedRuntime,
@@ -350,6 +354,12 @@ export function wireChatControllers(): void {
     setLifecycleActivityEl: (el) => {
       chatState.lifecycleActivityEl = el;
     },
+    addProject: () => addProjectFromAsk(),
+    openProvider: () => {
+      void focusMainTab({ tab: "provider" }).catch((error) => {
+        setStatus(String(error), "error");
+      });
+    },
   });
 
   chatState.running = createRunningIndicator(composerBoxEl);
@@ -510,6 +520,11 @@ export function wireChatControllers(): void {
     syncSessionWorkspaceUi: () => syncSessionWorkspaceUi(),
     captureRunningView: () => captureRunningView(),
     restoreRunningView: () => restoreRunningView(),
+    addProject: () => addProjectFromAsk(),
+    removeProject: (name) => {
+      void removeProjectFromAsk(name);
+    },
+    syncAskChrome: (showNewWorkspace) => syncAskChrome(showNewWorkspace),
   });
 
   chatState.stream = createStreamController({

@@ -4,7 +4,6 @@ import type { WorkspaceCheck, WorkspaceDoctorReport } from "./types";
 export const CODEX_LAUNCH_GUIDE_CHECK_IDS = new Set<string>([
   "workspace.codex.home",
   "workspace.codex.global_memory",
-  "workspace.cwd.mismatch",
   "workspace.codex.shared_global_home",
 ]);
 

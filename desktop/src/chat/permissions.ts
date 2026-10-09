@@ -9,6 +9,14 @@ import { assistantMsgWrap, bubblePlainText } from "./copy-ui";
 import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from "./types";
 import { resolvePermissionSession } from "../ipc";
 
+function permissionToolLabel(name: string): string {
+  const key = name.trim().toLowerCase();
+  if (key === "bash" || key === "shell" || key === "exec" || key === "exec_command") {
+    return t("chat.permissionStep");
+  }
+  return name;
+}
+
 export type PermissionsDeps = {
   logEl: HTMLElement;
   isViewingRunningSession: () => boolean;
@@ -509,7 +517,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       li.dataset.requestId = item.requestId;
       const tool = document.createElement("span");
       tool.className = "chat-permission-tool";
-      tool.textContent = item.toolName;
+      tool.textContent = permissionToolLabel(item.toolName);
       const summary = document.createElement("span");
       summary.className = "chat-permission-summary";
       summary.textContent = formatted.summary || item.toolName;
@@ -625,7 +633,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
 
     const tool = document.createElement("span");
     tool.className = "chat-permission-tool";
-    tool.textContent = toolName;
+    tool.textContent = permissionToolLabel(toolName);
 
     const summary = document.createElement("span");
     summary.className = "chat-permission-summary";

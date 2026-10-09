@@ -1,8 +1,36 @@
+import { t } from "../i18n";
+
+/** One sentence for a command the user should allow without reading a shell line. */
+export function plainPermissionSummary(raw: string): string | null {
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("rm -f") ||
+    lower.includes("rm -rf") ||
+    lower.includes("rm -fr") ||
+    lower.includes("safer approach") ||
+    /\brm\b[^\n]{0,40}-[a-z]*f/.test(lower)
+  ) {
+    return t("chat.permissionTempFiles");
+  }
+  if (
+    lower.includes("ffmpeg") ||
+    lower.includes("剪视频") ||
+    /\.(mp4|mov|mkv|m4v|avi)\b/.test(lower)
+  ) {
+    return t("chat.permissionVideo");
+  }
+  return null;
+}
+
 /** Prefer a short human summary; keep the full command for the expandable row. */
 export function formatPermissionDetail(raw: string): { summary: string; full: string } {
   const full = raw.trim();
   if (!full) {
     return { summary: "", full: "" };
+  }
+  const plain = plainPermissionSummary(full);
+  if (plain) {
+    return { summary: plain, full };
   }
   const unfenced = full
     .replace(/^```(?:json)?\s*/i, "")

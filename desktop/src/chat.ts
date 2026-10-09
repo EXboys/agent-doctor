@@ -73,7 +73,7 @@ import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 
 import { registerProjectFromAsk } from "./chat/register-project";
-import { sessionWorkspaceName, sessionWorkspacePath } from "./chat/session-workspace";
+import { defaultWorkspaceName, sessionWorkspaceName, sessionWorkspacePath } from "./chat/session-workspace";
 import {
   ASK_VERIFY_DRAFT_KEY,
   MAX_SESSIONS,
@@ -105,7 +105,7 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
-import { openSession } from "./ipc";
+import { openSession, removeWorkspace } from "./ipc";
 
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
@@ -761,6 +761,45 @@ export async function loadAskResources(): Promise<void> {
   await chatState.shellUi.loadAskResources();
   renderSessionList();
   syncSessionWorkspaceUi();
+}
+
+/** New-workspace button stays once a project exists. Skills stay hidden until a real chat. */
+export function syncAskChrome(showNewWorkspace: boolean): void {
+  newWorkspaceEl.hidden = !showNewWorkspace;
+  const hasChat = Boolean(
+    chatState.store?.sessions?.some((session) =>
+      session.messages.some((message) => message.role === "user" || message.role === "assistant"),
+    ),
+  );
+  resourcesToggleEl.hidden = !hasChat;
+  if (!hasChat && shellEl.classList.contains("is-resources-open")) {
+    chatState.shellUi?.toggleResourcesPanel();
+  }
+}
+
+export async function removeProjectFromAsk(name: string): Promise<void> {
+  try {
+    await removeWorkspace({ name });
+    const store = chatState.store;
+    if (store) {
+      for (const session of store.sessions) {
+        if (session.workspaceName === name) session.workspaceName = undefined;
+      }
+      saveStore();
+    }
+    await loadAskResources();
+    const active = activeSession();
+    const stillListed = !active.workspaceName || Boolean(chatState.workspaceDoc?.workspaces[active.workspaceName]);
+    if (!stillListed) {
+      startNewSession(defaultWorkspaceName(chatState.workspaceDoc));
+    } else {
+      renderSessionList();
+      syncSessionWorkspaceUi();
+    }
+    setStatus(t("chat.removeProjectDone", { name }), "ok");
+  } catch (error) {
+    setStatus(withErrorDetail(t("chat.removeProjectFailed"), error), "error");
+  }
 }
 
 export function addProjectFromAsk(): void {

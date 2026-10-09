@@ -11,16 +11,12 @@ import type {
   RemoteHostsDocument,
   RemoteProjectRow,
   RemoteProbeCheck,
-  WorkspaceCheck,
-  WorkspaceDoctorReport,
   WorkspacesDocument,
 } from "./types";
 import {
   listWorkspaces,
   useWorkspace,
   initWorkspace,
-  workspaceDoctor,
-  workspaceFix,
   listRemoteHosts,
   listRemoteHostRows,
   listRemoteProjects,
@@ -30,12 +26,8 @@ import {
   removeRemoteProject,
   bootstrapRemoteHost,
   addRemoteProject,
-  openSession,
+  openDiagnoseWindow,
 } from "./ipc";
-import {
-  workspaceCheckNeedsCodexLaunchGuide,
-  workspaceReportNeedsCodexLaunchGuide,
-} from "./workspace-codex-guide";
 
 export interface WorkspaceUiDeps {
   onWorkspacesChanged: (doc: WorkspacesDocument) => void;
@@ -45,13 +37,7 @@ let deps!: WorkspaceUiDeps;
 
 const workspaceStatusEl = document.querySelector<HTMLElement>("#workspace-status")!;
 const workspaceListEl = document.querySelector<HTMLUListElement>("#workspace-list")!;
-const workspaceChecksPanelEl = document.querySelector<HTMLElement>("#workspace-checks-panel")!;
-const workspaceChecksEl = document.querySelector<HTMLUListElement>("#workspace-checks")!;
-const workspaceChecksSummaryEl = document.querySelector<HTMLElement>("#workspace-checks-summary")!;
-const workspaceChecksToggleEl = document.querySelector<HTMLButtonElement>("#workspace-checks-toggle")!;
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
-let workspaceCodexCtaEl: HTMLElement | null = null;
-let openingCodexFromWorkspace = false;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
 const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
 const remoteHostListEl = document.querySelector<HTMLUListElement>("#remote-host-list")!;
@@ -124,8 +110,7 @@ function renderWorkspaceManageList(doc: WorkspacesDocument): void {
           <div class="ws-manage-right">
             <span class="badge ok">${escapeHtml(t("agents.wsActiveBadge"))}</span>
             <div class="ws-manage-actions">
-              <button type="button" class="btn-ghost btn-compact" data-workspace-action="doctor" data-workspace="${escapeHtml(name)}" ${appState.workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.doctor"))}</button>
-              <button type="button" class="btn-ghost btn-compact" data-workspace-action="fix" data-workspace="${escapeHtml(name)}" ${appState.workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.fix"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-workspace-action="diagnose" data-workspace="${escapeHtml(name)}">${escapeHtml(t("runtime.diagnose"))}</button>
             </div>
           </div>
         `
@@ -240,225 +225,19 @@ async function registerWorkspace() {
   }
 }
 
-async function doctorWorkspace() {
-  if (appState.workspaceBusy) {
-    return;
-  }
-  appState.workspaceBusy = true;
-  if (appState.lastWorkspaces) {
-    renderWorkspaceManageList(appState.lastWorkspaces);
-  }
-  workspaceHintEl.textContent = t("workspaces.doctorRunning");
+async function openProjectDiagnose(): Promise<void> {
+  const runtime =
+    appState.activeRuntimeId ??
+    appState.lastReport?.runtimes.find((item) => item.installed)?.id ??
+    null;
   try {
-    const report = await workspaceDoctor();
-    renderWorkspaceChecks(report);
+    await openDiagnoseWindow({ runtime });
+    workspaceHintEl.textContent = "";
   } catch (error) {
-    clearWorkspaceChecks();
-    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
-  } finally {
-    appState.workspaceBusy = false;
-    if (appState.lastWorkspaces) {
-      renderWorkspaceManageList(appState.lastWorkspaces);
-    }
+    workspaceHintEl.textContent = withErrorDetail(t("runtime.openFailed"), error);
   }
 }
 
-async function fixWorkspace() {
-  if (appState.workspaceBusy) {
-    return;
-  }
-  appState.workspaceBusy = true;
-  if (appState.lastWorkspaces) {
-    renderWorkspaceManageList(appState.lastWorkspaces);
-  }
-  workspaceHintEl.textContent = t("workspaces.fixRunning");
-  try {
-    const report = await workspaceFix({
-      migrateClaudeMcp: false,
-    });
-    const applied = report.actions.filter((action) => action.applied).length;
-    workspaceHintEl.textContent = t("workspaces.fixSummary", { count: String(applied) });
-    appState.workspaceBusy = false;
-    await doctorWorkspace();
-  } catch (error) {
-    workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
-    appState.workspaceBusy = false;
-    if (appState.lastWorkspaces) {
-      renderWorkspaceManageList(appState.lastWorkspaces);
-    }
-  }
-}
-
-function workspaceStatusLabel(status: WorkspaceCheck["status"]): string {
-  switch (status) {
-    case "pass":
-      return t("repair.pass");
-    case "warn":
-      return t("repair.warn");
-    case "fail":
-      return t("repair.fail");
-  }
-}
-
-function workspaceStatusClass(status: WorkspaceCheck["status"]): string {
-  if (status === "pass") {
-    return "pass";
-  }
-  if (status === "warn") {
-    return "warn";
-  }
-  return "fail";
-}
-
-function clearWorkspaceChecks() {
-  lastWorkspaceDoctorReport = null;
-  workspaceChecksCollapsed = false;
-  workspaceChecksPanelEl.hidden = true;
-  workspaceChecksPanelEl.classList.remove("is-collapsed");
-  workspaceChecksEl.innerHTML = "";
-  workspaceChecksSummaryEl.textContent = "";
-  workspaceChecksToggleEl.textContent = "";
-  if (workspaceCodexCtaEl) {
-    workspaceCodexCtaEl.hidden = true;
-  }
-}
-
-function workspaceCheckDetailForDisplay(check: WorkspaceCheck): string {
-  if (!workspaceCheckNeedsCodexLaunchGuide(check)) {
-    return check.detail;
-  }
-  if (check.id === "workspace.cwd.mismatch") {
-    return t("workspaces.checkDetail.cwdMismatch");
-  }
-  return t("workspaces.checkDetail.codexNotFromApp");
-}
-
-function ensureWorkspaceCodexCtaEl(): HTMLElement {
-  if (!workspaceCodexCtaEl) {
-    workspaceCodexCtaEl = document.createElement("div");
-    workspaceCodexCtaEl.id = "workspace-codex-cta";
-    workspaceCodexCtaEl.className = "workspace-codex-cta";
-    workspaceCodexCtaEl.hidden = true;
-    workspaceChecksPanelEl.appendChild(workspaceCodexCtaEl);
-    workspaceCodexCtaEl.addEventListener("click", (event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
-        "[data-workspace-open-codex]",
-      );
-      if (button) {
-        void openCodexFromWorkspace();
-      }
-    });
-  }
-  return workspaceCodexCtaEl;
-}
-
-function syncWorkspaceCodexCta(report: WorkspaceDoctorReport): void {
-  const cta = ensureWorkspaceCodexCtaEl();
-  if (!workspaceReportNeedsCodexLaunchGuide(report)) {
-    cta.hidden = true;
-    return;
-  }
-  cta.hidden = false;
-  cta.innerHTML = `
-    <p class="workspace-codex-cta-text">${escapeHtml(t("workspaces.codexOpenLead"))}</p>
-    <button type="button" class="btn-primary btn-compact" data-workspace-open-codex ${openingCodexFromWorkspace ? "disabled" : ""}>
-      ${escapeHtml(openingCodexFromWorkspace ? t("workspaces.codexOpenRunning") : t("workspaces.codexOpenAction"))}
-    </button>
-  `;
-}
-
-async function openCodexFromWorkspace(): Promise<void> {
-  if (openingCodexFromWorkspace) {
-    return;
-  }
-  openingCodexFromWorkspace = true;
-  if (lastWorkspaceDoctorReport) {
-    syncWorkspaceCodexCta(lastWorkspaceDoctorReport);
-  }
-  workspaceHintEl.textContent = t("workspaces.codexOpenRunning");
-  try {
-    await openSession({
-      runtime: "codex",
-      cwd: null,
-      prompt: null,
-      terminal: null,
-    });
-    workspaceHintEl.textContent = t("workspaces.codexOpenOk");
-  } catch (error) {
-    workspaceHintEl.textContent = withErrorDetail(t("workspaces.codexOpenFailed"), error);
-  } finally {
-    openingCodexFromWorkspace = false;
-    if (lastWorkspaceDoctorReport) {
-      syncWorkspaceCodexCta(lastWorkspaceDoctorReport);
-    }
-  }
-}
-
-function syncWorkspaceChecksToggle() {
-  workspaceChecksPanelEl.classList.toggle("is-collapsed", workspaceChecksCollapsed);
-  workspaceChecksToggleEl.textContent = workspaceChecksCollapsed
-    ? t("workspaces.expandChecks")
-    : t("workspaces.collapseChecks");
-  workspaceChecksToggleEl.setAttribute(
-    "aria-expanded",
-    workspaceChecksCollapsed ? "false" : "true",
-  );
-}
-
-function toggleWorkspaceChecks() {
-  if (!lastWorkspaceDoctorReport) {
-    return;
-  }
-  workspaceChecksCollapsed = !workspaceChecksCollapsed;
-  syncWorkspaceChecksToggle();
-}
-
-function renderWorkspaceChecks(report: WorkspaceDoctorReport) {
-  if (!report.checks.length) {
-    clearWorkspaceChecks();
-    workspaceHintEl.textContent = t("workspaces.noActive");
-    return;
-  }
-
-  lastWorkspaceDoctorReport = report;
-  workspaceChecksCollapsed = false;
-
-  let pass = 0;
-  let warn = 0;
-  let fail = 0;
-  for (const check of report.checks) {
-    if (check.status === "pass") pass += 1;
-    else if (check.status === "warn") warn += 1;
-    else fail += 1;
-  }
-  const summary = t("workspaces.doctorSummary", {
-    pass: String(pass),
-    warn: String(warn),
-    fail: String(fail),
-  });
-
-  workspaceChecksPanelEl.hidden = false;
-  workspaceChecksSummaryEl.textContent = summary;
-  workspaceChecksEl.innerHTML = report.checks
-    .map(
-      (check) => `
-        <li class="repair-check">
-          <span class="repair-check-status ${workspaceStatusClass(check.status)}">${escapeHtml(workspaceStatusLabel(check.status))}</span>
-          <span class="repair-check-body">
-            <strong>${escapeHtml(check.title)}</strong>
-            <span>${escapeHtml(workspaceCheckDetailForDisplay(check))}</span>
-          </span>
-        </li>
-      `,
-    )
-    .join("");
-  syncWorkspaceCodexCta(report);
-  syncWorkspaceChecksToggle();
-  workspaceHintEl.textContent = "";
-}
-
-let lastWorkspaceDoctorReport: WorkspaceDoctorReport | null = null;
-let workspaceChecksCollapsed = false;
 
 let lastRemoteProjects: RemoteProjectRow[] = [];
 let lastRemoteHosts: RemoteHostRow[] = [];
@@ -789,7 +568,6 @@ export interface WorkspaceUiApi {
   loadWorkspaces: () => Promise<void>;
   loadRemoteProjects: () => Promise<void>;
   renderWorkspaces: (doc: WorkspacesDocument) => void;
-  renderWorkspaceChecks: (report: WorkspaceDoctorReport) => void;
   getLastWorkspaces: () => WorkspacesDocument | null;
   reloadLocale: () => void;
 }
@@ -799,10 +577,6 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
 
   workspaceRegisterEl.addEventListener("click", () => {
     void registerWorkspace();
-  });
-
-  workspaceChecksToggleEl.addEventListener("click", () => {
-    toggleWorkspaceChecks();
   });
 
   workspaceListEl.addEventListener("click", (event) => {
@@ -819,12 +593,8 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
       void applyWorkspace(name);
       return;
     }
-    if (action === "doctor") {
-      void doctorWorkspace();
-      return;
-    }
-    if (action === "fix") {
-      void fixWorkspace();
+    if (action === "diagnose") {
+      void openProjectDiagnose();
     }
   });
 
@@ -992,7 +762,6 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     loadWorkspaces,
     loadRemoteProjects,
     renderWorkspaces,
-    renderWorkspaceChecks,
     getLastWorkspaces: () => appState.lastWorkspaces,
     reloadLocale: () => {
       if (appState.lastWorkspaces) {
@@ -1000,12 +769,6 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
       }
       renderRemoteHostList(lastRemoteHosts);
       renderRemoteList(lastRemoteProjects);
-      if (lastWorkspaceDoctorReport) {
-        const collapsed = workspaceChecksCollapsed;
-        renderWorkspaceChecks(lastWorkspaceDoctorReport);
-        workspaceChecksCollapsed = collapsed;
-        syncWorkspaceChecksToggle();
-      }
     },
   };
 }

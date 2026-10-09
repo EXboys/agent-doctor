@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use agent_doctor_core::{
-    ensure_default_workspace, init_workspace, load_workspaces, use_workspace_with_options,
-    workspace_doctor, workspace_fix, workspace_status, InitWorkspaceReport, UseWorkspaceOptions,
-    UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport,
-    WorkspaceStatusReport, WorkspacesDocument,
+    ensure_default_workspace, init_workspace, load_workspaces, remove_workspace,
+    use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status,
+    InitWorkspaceReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
+    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
 };
+
+use tauri::Emitter;
 
 use crate::{rebuild_tray_menu, update_tray_tooltip};
 
@@ -54,6 +56,15 @@ pub fn use_workspace_command(
     update_tray_tooltip(&app);
     rebuild_tray_menu(&app);
     Ok(report)
+}
+
+#[tauri::command]
+pub fn remove_workspace_command(name: String, app: tauri::AppHandle) -> Result<(), String> {
+    remove_workspace(&name, false).map_err(|error| error.to_string())?;
+    update_tray_tooltip(&app);
+    rebuild_tray_menu(&app);
+    let _ = app.emit("workspace-changed", &name);
+    Ok(())
 }
 
 #[tauri::command]

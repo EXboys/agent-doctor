@@ -1,3 +1,4 @@
+import { plainPermissionSummary } from "../chat/format";
 import { t } from "../i18n";
 import type { IslandPending } from "./track";
 
@@ -103,9 +104,10 @@ export function permissionView(pending: IslandPending): PermissionView {
 
   if (kind === "run") {
     const command = firstText(input, ["command", "cmd"]);
+    const plain = plainPermissionSummary(command || pending.detail || "");
     const all = command ? linesOf(command, "ctx") : [];
-    target = all[0]?.text ?? "";
-    lines = all.length > 1 || target.length > 64 ? all : [];
+    target = plain || all[0]?.text || "";
+    lines = plain ? [] : all.length > 1 || target.length > 64 ? all : [];
   } else if (kind === "edit") {
     target = firstText(input, ["file_path", "path", "notebook_path"]);
     lines = editLines(input);

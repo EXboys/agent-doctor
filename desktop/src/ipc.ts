@@ -392,6 +392,11 @@ export function useWorkspace(args: { name: string }): Promise<void> {
   return invoke("use_workspace_command", args);
 }
 
+/** Take a project off the list. The folder on disk stays. */
+export function removeWorkspace(args: { name: string }): Promise<void> {
+  return invoke("remove_workspace_command", args);
+}
+
 export function workspaceStatus(): Promise<WorkspaceStatusReport> {
   return invoke("workspace_status_command");
 }

@@ -71,6 +71,8 @@ export type BubblesDeps = {
   setToolGroupEl: (el: HTMLDetailsElement | null) => void;
   getLifecycleActivityEl: () => HTMLElement | null;
   setLifecycleActivityEl: (el: HTMLElement | null) => void;
+  addProject: () => void;
+  openProvider: () => void;
 };
 
 export type BubblesApi = ReturnType<typeof createBubblesController>;
@@ -386,6 +388,27 @@ export function createBubblesController(deps: BubblesDeps) {
     return out;
   }
 
+  function renderEmptyChat(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-start";
+    const project = document.createElement("button");
+    project.type = "button";
+    project.className = "chat-start-card";
+    project.innerHTML = `<strong></strong><span></span>`;
+    project.querySelector("strong")!.textContent = t("chat.emptyProjectsAction");
+    project.querySelector("span")!.textContent = t("chat.emptyProjectsHint");
+    project.addEventListener("click", () => deps.addProject());
+    const provider = document.createElement("button");
+    provider.type = "button";
+    provider.className = "chat-start-card";
+    provider.innerHTML = `<strong></strong><span></span>`;
+    provider.querySelector("strong")!.textContent = t("chat.startProvider");
+    provider.querySelector("span")!.textContent = t("chat.startProviderHint");
+    provider.addEventListener("click", () => deps.openProvider());
+    wrap.append(project, provider);
+    return wrap;
+  }
+
   function renderActiveMessages(): void {
     const previous = Array.from(deps.logEl.childNodes);
     try {
@@ -402,7 +425,7 @@ export function createBubblesController(deps: BubblesDeps) {
       }
       const session = deps.activeSession();
       if (session.messages.length === 0) {
-        appendBubble("meta", t("chat.welcome"), { persist: false });
+        deps.logEl.appendChild(renderEmptyChat());
         paintChatPlan(deps.logEl, session.plan);
         return;
       }

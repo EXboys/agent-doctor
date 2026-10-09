@@ -18,7 +18,6 @@ import {
   workspaceSelectEl,
   workspaceActivateEl,
   workspaceHintEl,
-  themeEl,
   resourcesToggleEl,
   resourcesTabsEl,
   resourcesSearchEl,
@@ -27,7 +26,6 @@ import {
 } from "./chat-dom";
 
 import {
-  applyChatTheme,
   renderSessionList,
   ensureRuntimeSession,
   addProjectFromAsk,
@@ -69,7 +67,8 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { startIslandPublisher } from "./island/publish";
 import { isAskRuntime } from "./chat/runtime";
 import { t } from "./i18n";
-import { currentChatTheme, readStoredChatTheme, systemChatTheme } from "./chat/theme";
+import { applyThemePreference, readThemePreference, watchSystemTheme } from "./chat/theme";
+import { bindChatSettings } from "./chat/settings-page";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 import { wireChatControllers } from "./chat-wire";
 
@@ -82,7 +81,9 @@ export function bootChat(): void {
     __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
     __AD_ASK_BOOTED__?: boolean;
   };
-  applyChatTheme(readStoredChatTheme() ?? systemChatTheme(), false);
+  applyThemePreference(readThemePreference(), false);
+  watchSystemTheme();
+  bindChatSettings(() => applyI18n());
   win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
     if (isAskRuntime(runtime)) {
       ensureRuntimeSession(runtime);
@@ -147,9 +148,6 @@ export function bootChat(): void {
   });
   attachEl.addEventListener("click", () => void pickAttachments());
   newWorkspaceEl.addEventListener("click", () => addProjectFromAsk());
-  themeEl.addEventListener("click", () => {
-    applyChatTheme(currentChatTheme() === "dark" ? "light" : "dark");
-  });
   resourcesToggleEl.addEventListener("click", () => {
     toggleResourcesPanel();
   });

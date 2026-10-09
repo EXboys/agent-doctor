@@ -63,8 +63,22 @@ pub(crate) fn interactive_approval_policy() -> Value {
     json!("on-request")
 }
 
+/// No Allow button is on screen. Codex then rejects forced deletes instead of asking.
 pub(crate) fn elevated_approval_policy() -> Value {
     json!("never")
+}
+
+/// Desktop chat can show Allow. Always ask, including when auto-approve is on.
+///
+/// `never` does not mean “allow everything”. Codex rejects `rm -f` / `rm -rf`
+/// outright, so a video edit that clears a temp folder dies before the button
+/// exists. Auto-approve is the chat ticking Allow, not this policy.
+pub(crate) fn approval_policy_for_turn(has_ui: bool) -> Value {
+    if has_ui {
+        interactive_approval_policy()
+    } else {
+        elevated_approval_policy()
+    }
 }
 
 /// `thread/start` SandboxMode — kebab-case enum.
@@ -116,6 +130,19 @@ fn ask_sandbox_roots(overlay: &std::collections::HashMap<String, String>) -> Vec
     if let Some(dir) = crate::adapters::util::config_dir() {
         roots.push(dir.join("agent-doctor").display().to_string());
     }
+    // Videos and other files usually sit on the Desktop, in Downloads, or in
+    // Movies — not inside the project folder. Temp clips sit in /tmp.
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.display().to_string());
+    }
+    let temp = std::env::temp_dir();
+    if !temp.as_os_str().is_empty() {
+        roots.push(temp.display().to_string());
+    }
+    #[cfg(unix)]
+    {
+        roots.push("/tmp".to_string());
+    }
     roots
 }
 
@@ -156,8 +183,9 @@ fn is_thread_open_failure(err: &anyhow::Error) -> bool {
 
 fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
     let mut text = String::from(
-        "Do not use require_escalated or ask for elevated permissions. \
-         Use ordinary shell/file/network tools when they are appropriate; the host UI will show Allow/Deny when approval is required. \
+        "Use ordinary shell and file tools, including when the task edits a video or other files outside the project folder, or removes temporary files. \
+         If an ordinary command is blocked, call it again with require_escalated so the app can show Allow, then continue the task. \
+         Do not stop, and do not tell the user to open a terminal, change settings, or avoid a command. \
          When creating or editing files with apply_patch, every hunk MUST start with one of: \
          '*** Add File: {path}', '*** Delete File: {path}', or '*** Update File: {path}'. \
          Never put file contents on the hunk header line. Example to add a file:\n\
@@ -232,12 +260,10 @@ fn run_codex_app_server(
     let has_ui_control = control.is_some();
     let control = control.unwrap_or_default();
 
-    let interactive = !options.full_auto && has_ui_control;
-    let approval_policy = if interactive {
-        interactive_approval_policy()
-    } else {
-        elevated_approval_policy()
-    };
+    // Auto-approve still asks Codex, then the chat accepts. `never` would
+    // reject forced deletes before that button exists.
+    let interactive = has_ui_control;
+    let approval_policy = approval_policy_for_turn(has_ui_control);
     let resume_thread_id = options
         .resume_thread_id
         .as_deref()
@@ -954,6 +980,22 @@ mod tests {
     }
 
     #[test]
+    fn temp_folder_deletes_continue_without_a_prompt() {
+        assert!(protocol::temp_only_delete(&json!({
+            "command": ["/bin/zsh", "-c", "rm -rf /tmp/clips && echo done"]
+        })));
+        assert!(!protocol::temp_only_delete(&json!({
+            "command": "rm -rf /tmp/clips ~/Movies/cut.mp4"
+        })));
+        assert!(!protocol::temp_only_delete(&json!({
+            "command": "rm -rf /Users/me/Desktop/video.mp4"
+        })));
+        assert!(!protocol::temp_only_delete(&json!({
+            "command": "ffmpeg -i /Users/me/Desktop/a.mp4 /Users/me/Desktop/b.mp4"
+        })));
+    }
+
+    #[test]
     fn permission_from_command_approval() {
         let params = json!({
             "command": ["curl", "-s", "https://example.com"],
@@ -970,6 +1012,8 @@ mod tests {
     fn interactive_policy_is_on_request_not_unless_trusted() {
         assert_eq!(interactive_approval_policy(), json!("on-request"));
         assert_eq!(elevated_approval_policy(), json!("never"));
+        assert_eq!(approval_policy_for_turn(true), json!("on-request"));
+        assert_eq!(approval_policy_for_turn(false), json!("never"));
         assert_eq!(thread_sandbox_mode(), "workspace-write");
         let policy =
             turn_sandbox_policy("/tmp/proj", &["/tmp/codex-home".into(), "/tmp/proj".into()]);
@@ -978,6 +1022,14 @@ mod tests {
             policy["writableRoots"],
             json!(["/tmp/proj", "/tmp/codex-home"])
         );
+        let roots = ask_sandbox_roots(&std::collections::HashMap::new());
+        assert!(roots
+            .iter()
+            .any(|root| root == "/tmp" || root.contains("tmp")));
+        if let Some(home) = dirs::home_dir() {
+            let home = home.display().to_string();
+            assert!(roots.iter().any(|root| root == &home));
+        }
     }
 
     #[cfg(unix)]
