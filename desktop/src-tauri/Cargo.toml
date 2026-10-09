@@ -19,6 +19,8 @@ agent-doctor-mcp.workspace = true
 agent-doctor-ocr.workspace = true
 agent-doctor-voice.workspace = true
 anyhow.workspace = true
+calamine = "0.26"
+dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api"] }
@@ -26,6 +28,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
+zip = "2.2"
 
 # `tauri dev` runs with `--no-default-features` (loads http://127.0.0.1:1420).
 # `tauri build` / normal cargo builds enable this so frontendDist is embedded —

@@ -101,7 +101,6 @@
           aria-controls="chat-resources-panel"
         >
           <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
-          <span id="chat-resources-label" class="chat-resources-label">—</span>
         </button>
 
         <div class="chat-side-foot">
@@ -245,6 +244,75 @@
           </div>
         </section>
 
+        <section id="chat-resources-page" class="chat-resources-page" hidden aria-hidden="true" aria-label="技能与工具">
+          <div class="chat-knowledge-inner">
+            <header class="chat-knowledge-head">
+              <h2 data-i18n="chat.resourcesPanelTitle">技能 / 工具</h2>
+              <div class="chat-knowledge-head-tools">
+                <div class="chat-resources-page-actions">
+                  <button id="chat-resources-page-refresh" type="button" class="chat-knowledge-textbtn" data-i18n="chat.resourcesRefresh">刷新</button>
+                  <button id="chat-resources-page-manage" type="button" class="chat-knowledge-save" data-i18n="chat.openResources">管理</button>
+                </div>
+                <div class="chat-mode chat-resources-scope-tabs" role="tablist" aria-label="技能与工具">
+                  <button type="button" class="chat-mode-btn is-on" role="tab" data-rt-tab="global" aria-selected="true" data-i18n="chat.knowledgeGlobal">全局</button>
+                  <button type="button" class="chat-mode-btn" role="tab" data-rt-tab="project" aria-selected="false" data-i18n="chat.knowledgeProject">项目</button>
+                  <button type="button" class="chat-mode-btn" role="tab" data-rt-tab="agent" aria-selected="false" data-i18n="chat.knowledgeAgent">Agent</button>
+                </div>
+              </div>
+            </header>
+            <div id="chat-resources-picks" class="chat-knowledge-picks" hidden></div>
+            <p id="chat-resources-scope" class="chat-knowledge-scope"></p>
+            <label class="chat-res-search chat-resources-page-search">
+              <span class="chat-res-search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="chat-resources-page-search"
+                type="search"
+                autocomplete="off"
+                spellcheck="false"
+                data-i18n-placeholder="chat.resourcesSearch"
+                placeholder="搜索名称或描述…"
+              />
+            </label>
+            <div class="chat-resources-kind-tabs" role="tablist" aria-label="资源类型">
+              <button
+                type="button"
+                class="chat-resources-kind-tab is-on"
+                role="tab"
+                data-resource-kind="skills"
+                aria-selected="true"
+                aria-controls="chat-resources-skills-section"
+                data-i18n="chat.resourcesTabSkills"
+              >Skills</button>
+              <button
+                type="button"
+                class="chat-resources-kind-tab"
+                role="tab"
+                data-resource-kind="mcp"
+                aria-selected="false"
+                aria-controls="chat-resources-mcp-section"
+                data-i18n="chat.resourcesTabMcp"
+              >工具</button>
+            </div>
+            <div id="chat-resources-content" class="chat-knowledge-content">
+              <section id="chat-resources-skills-section" class="chat-knowledge-block" data-resource-section="skills" role="tabpanel">
+                <div class="chat-knowledge-block-head">
+                  <h3 data-i18n="chat.skillsTitle">Skills</h3>
+                </div>
+                <div id="chat-resources-skills-list" class="chat-res-list" role="list"></div>
+                <p id="chat-resources-skills-empty" class="chat-knowledge-empty" hidden data-i18n="chat.skillsEmpty">当前 Agent 还没有可用技能</p>
+              </section>
+              <section id="chat-resources-mcp-section" class="chat-knowledge-block" data-resource-section="mcp" role="tabpanel" hidden>
+                <div class="chat-knowledge-block-head">
+                  <h3 data-i18n="chat.mcpTitle">工具</h3>
+                </div>
+                <div id="chat-resources-mcp-list" class="chat-res-list" role="list"></div>
+                <p id="chat-resources-mcp-empty" class="chat-knowledge-empty" hidden data-i18n="chat.mcpEmpty">当前 Agent 还没有可用工具</p>
+              </section>
+            </div>
+            <p class="chat-knowledge-block-hint chat-resources-page-foot" data-i18n="chat.resourcesHint">点击加入本轮优先；完整交互用「打开原生」。</p>
+          </div>
+        </section>
+
         <section id="chat-knowledge" class="chat-knowledge" hidden aria-hidden="true" aria-label="知识库">
           <div class="chat-knowledge-inner">
             <header class="chat-knowledge-head">
@@ -257,9 +325,24 @@
             </header>
             <div id="chat-knowledge-picks" class="chat-knowledge-picks" hidden></div>
             <p id="chat-knowledge-scope" class="chat-knowledge-scope"></p>
-            <div id="chat-knowledge-inherit"></div>
-            <div id="chat-knowledge-quick" class="chat-knowledge-quick" hidden></div>
-            <div id="chat-knowledge-workspace" class="chat-knowledge-workspace" hidden></div>
+            <div class="chat-resources-kind-tabs chat-knowledge-kind-tabs" role="tablist" aria-label="知识类型" hidden>
+              <button
+                type="button"
+                class="chat-resources-kind-tab is-on"
+                role="tab"
+                data-knowledge-kind="docs"
+                aria-selected="true"
+                data-i18n="chat.knowledgeDocs"
+              >知识</button>
+              <button
+                type="button"
+                class="chat-resources-kind-tab"
+                role="tab"
+                data-knowledge-kind="memories"
+                aria-selected="false"
+                data-i18n="chat.knowledgeMemories"
+              >记忆</button>
+            </div>
             <div id="chat-knowledge-content" class="chat-knowledge-content"></div>
           </div>
         </section>
@@ -326,6 +409,15 @@
               <pre id="chat-files-preview" class="chat-files-preview"><code></code></pre>
               <textarea id="chat-files-editor" class="chat-files-editor" spellcheck="false" wrap="off"></textarea>
             </div>
+            <div id="chat-files-image" class="chat-files-image" hidden>
+              <img alt="" />
+            </div>
+            <div id="chat-files-sheet" class="chat-files-sheet" hidden>
+              <div class="chat-files-sheet-tabs" role="tablist"></div>
+              <div class="chat-files-sheet-scroll"><table class="chat-files-sheet-table"></table></div>
+              <p class="chat-files-sheet-note" hidden></p>
+            </div>
+            <p id="chat-files-notice" class="chat-files-notice" hidden></p>
           </div>
         </section>
 

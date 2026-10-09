@@ -8,7 +8,12 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function inlineMarkdown(text: string): string {
+export type MarkdownOptions = {
+  /** Turn `[text](page.md)` and `[[Page]]` into in-page links carrying `data-wiki-page` / `data-wiki-name`. */
+  wikiLinks?: boolean;
+};
+
+function inlineMarkdown(text: string, opts: MarkdownOptions = {}): string {
   let s = escapeHtml(text);
   // code
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -22,13 +27,20 @@ function inlineMarkdown(text: string): string {
     /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
   );
+  if (opts.wikiLinks) {
+    s = s.replace(/\[([^\]]+)\]\(([^)\s#]+\.md)(?:#[^)\s]*)?\)/g, '<a href="#" data-wiki-page="$2">$1</a>');
+    s = s.replace(
+      /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+      (_all, name: string, label?: string) => `<a href="#" data-wiki-name="${name.trim()}">${(label ?? name).trim()}</a>`,
+    );
+  }
   return s;
 }
 
 /**
  * Convert markdown source to sanitized HTML (no raw HTML passthrough).
  */
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, opts: MarkdownOptions = {}): string {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let i = 0;
@@ -104,14 +116,14 @@ export function renderMarkdown(source: string): string {
         i += 1;
       }
       const thead = `<thead><tr>${header
-        .map((cell) => `<th>${inlineMarkdown(cell)}</th>`)
+        .map((cell) => `<th>${inlineMarkdown(cell, opts)}</th>`)
         .join("")}</tr></thead>`;
       const tbody =
         body.length > 0
           ? `<tbody>${body
               .map(
                 (row) =>
-                  `<tr>${row.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`,
+                  `<tr>${row.map((cell) => `<td>${inlineMarkdown(cell, opts)}</td>`).join("")}</tr>`,
               )
               .join("")}</tbody>`
           : "";
@@ -123,7 +135,7 @@ export function renderMarkdown(source: string): string {
     if (heading) {
       closeList();
       const level = heading[1].length;
-      out.push(`<h${level}>${inlineMarkdown(heading[2].trim())}</h${level}>`);
+      out.push(`<h${level}>${inlineMarkdown(heading[2].trim(), opts)}</h${level}>`);
       i += 1;
       continue;
     }
@@ -135,7 +147,7 @@ export function renderMarkdown(source: string): string {
         quote.push(lines[i].replace(/^>\s?/, ""));
         i += 1;
       }
-      out.push(`<blockquote>${inlineMarkdown(quote.join(" "))}</blockquote>`);
+      out.push(`<blockquote>${inlineMarkdown(quote.join(" "), opts)}</blockquote>`);
       continue;
     }
 
@@ -146,7 +158,7 @@ export function renderMarkdown(source: string): string {
         listType = "ul";
         out.push("<ul>");
       }
-      out.push(`<li>${inlineMarkdown(ul[1])}</li>`);
+      out.push(`<li>${inlineMarkdown(ul[1], opts)}</li>`);
       i += 1;
       continue;
     }
@@ -158,7 +170,7 @@ export function renderMarkdown(source: string): string {
         listType = "ol";
         out.push("<ol>");
       }
-      out.push(`<li>${inlineMarkdown(ol[1])}</li>`);
+      out.push(`<li>${inlineMarkdown(ol[1], opts)}</li>`);
       i += 1;
       continue;
     }
@@ -182,7 +194,7 @@ export function renderMarkdown(source: string): string {
       para.push(lines[i]);
       i += 1;
     }
-    out.push(`<p>${inlineMarkdown(para.join("\n")).replace(/\n/g, "<br />")}</p>`);
+    out.push(`<p>${inlineMarkdown(para.join("\n"), opts).replace(/\n/g, "<br />")}</p>`);
   }
 
   if (inCode != null) {

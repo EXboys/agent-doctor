@@ -3,6 +3,8 @@ import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
 import { syncTuneLabels } from "./chat/tune-menu";
 import { syncKnowledgeLabels } from "./chat/knowledge-page";
+import { KNOWLEDGE_RUN_PREFIX } from "./chat/knowledge-wiki";
+import { syncResourcesPageLabels } from "./chat/resources-page";
 import type { PromptSessionEvent } from "./chat/types";
 import {
   beginLiveRun,
@@ -40,7 +42,6 @@ import {
   shellEl,
   resourcesPanelEl,
   resourcesToggleEl,
-  resourcesLabelEl,
   resourcesCountEl,
   resourcesTabsEl,
   resourcesSearchEl,
@@ -62,6 +63,9 @@ import {
   filesPreviewEl,
   filesEditorEl,
   filesCodeEl,
+  filesImageEl,
+  filesSheetEl,
+  filesNoticeEl,
   filesSaveEl,
   filesEmptyEl,
 } from "./chat-dom";
@@ -98,7 +102,6 @@ import {
   persistStore,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
-import { shortCwdLabel } from "./chat/format";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
   contextUsagePercent as contextUsagePercentBase,
@@ -231,6 +234,7 @@ export function isViewingRunningSession(): boolean {
 export function resolveEventChatId(payload: PromptSessionEvent): string | null {
   if (payload.type === "started") {
     const clientId = payload.client_run_id?.trim();
+    if (clientId?.startsWith(KNOWLEDGE_RUN_PREFIX)) return null;
     if (clientId && isChatRunning(clientId)) {
       bindBackendSession(clientId, payload.session_id);
       return clientId;
@@ -447,6 +451,7 @@ export function applyI18n(): void {
   syncAccountBarLabels();
   syncTuneLabels();
   syncKnowledgeLabels();
+  syncResourcesPageLabels();
   if (contextCompactEl) {
     contextCompactEl.textContent = t("chat.contextCompact");
     contextCompactEl.title = t("chat.contextCompactHint");
@@ -710,6 +715,9 @@ const askFilesPanel = createFilesPanel({
   previewEl: filesPreviewEl,
   editorEl: filesEditorEl,
   codeEl: filesCodeEl,
+  imageEl: filesImageEl,
+  sheetEl: filesSheetEl,
+  noticeEl: filesNoticeEl,
   saveEl: filesSaveEl,
   emptyEl: filesEmptyEl,
   getRoot: () => {
@@ -734,7 +742,6 @@ export const askResources = new AskResourcesController(
     shellEl,
     resourcesPanelEl,
     resourcesToggleEl,
-    resourcesLabelEl,
     resourcesCountEl,
     resourcesTabsEl,
     resourcesSearchEl,
@@ -745,8 +752,6 @@ export const askResources = new AskResourcesController(
     mentionsEl,
   },
   selectedRuntime,
-  displayCwd,
-  shortCwdLabel,
 );
 
 export const mentionMenu = new AskMentionMenuController(

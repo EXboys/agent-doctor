@@ -18,7 +18,6 @@ import {
   workspaceSelectEl,
   workspaceActivateEl,
   workspaceHintEl,
-  resourcesToggleEl,
   resourcesTabsEl,
   resourcesSearchEl,
   resourcesRefreshEl,
@@ -43,7 +42,6 @@ import {
   pickAttachments,
   setupFileDrop,
   renderActiveMessages,
-  toggleResourcesPanel,
   loadAskResources,
   syncWorkspaceActivateButton,
   activateSelectedWorkspace,
@@ -76,6 +74,7 @@ import { bindAccountBar } from "./chat/account-bar";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
+import { bindResourcesPage } from "./chat/resources-page";
 import { orderedProjectNames } from "./chat/project-order";
 import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
@@ -102,17 +101,24 @@ export function bootChat(): void {
     currentProject: () => sessionWorkspaceName(activeSession(), chatState.workspaceDoc),
     currentAgent: () => selectedRuntime(),
     projectPath: (name) => chatState.workspaceDoc?.workspaces[name]?.path?.trim() || null,
-    lastUserPrompt: () => {
-      const messages = activeSession().messages;
-      for (let i = messages.length - 1; i >= 0; i -= 1) {
-        const message = messages[i];
-        if (message.role === "user") {
-          const text = message.content.trim();
-          if (text) return text;
-        }
-      }
-      return null;
+    chatTranscript: () => {
+      const session = activeSession();
+      const lines = session.messages
+        .filter((message) => (message.role === "user" || message.role === "assistant") && message.content.trim())
+        .map((message) => `## ${message.role === "user" ? "User" : "Assistant"}\n\n${message.content.trim()}`);
+      return lines.length ? { title: session.title, text: `# ${session.title}\n\n${lines.join("\n\n")}\n` } : null;
     },
+  });
+  bindResourcesPage({
+    projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),
+    currentProject: () => sessionWorkspaceName(activeSession(), chatState.workspaceDoc),
+    currentAgent: () => selectedRuntime(),
+    askResources,
+    reload: () => loadAskResources(),
+    openManage: () => {
+      void openMainResources();
+    },
+    closeSidePanel: () => askResources.setResourcesOpen(false),
   });
   win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
     if (isAskRuntime(runtime)) {
@@ -178,9 +184,6 @@ export function bootChat(): void {
   });
   attachEl.addEventListener("click", () => void pickAttachments());
   newWorkspaceEl.addEventListener("click", () => addProjectFromAsk());
-  resourcesToggleEl.addEventListener("click", () => {
-    toggleResourcesPanel();
-  });
   resourcesRefreshEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();

@@ -1,4 +1,5 @@
 mod deep_diagnose;
+mod knowledge;
 mod mcp;
 mod ocr;
 mod remote;
@@ -10,6 +11,7 @@ mod workspace;
 mod workspace_files;
 
 pub use deep_diagnose::*;
+pub use knowledge::*;
 pub use mcp::*;
 pub use ocr::*;
 pub use remote::*;

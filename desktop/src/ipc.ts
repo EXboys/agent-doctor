@@ -371,7 +371,16 @@ export type WorkspaceFilePayload = {
   content: string;
   language: string;
   editable: boolean;
+  isImage: boolean;
+  absolutePath: string;
+  sheets: WorkspaceSheet[] | null;
   sizeBytes: number;
+};
+
+export type WorkspaceSheet = {
+  name: string;
+  rows: string[][];
+  truncated: boolean;
 };
 
 export function listWorkspaceDir(args: {
@@ -394,6 +403,65 @@ export function writeWorkspaceFile(args: {
   content: string;
 }): Promise<void> {
   return invoke("write_workspace_file_command", args);
+}
+
+export type KnowledgePage = {
+  path: string;
+  title: string;
+  modifiedMs: number;
+};
+
+export type KnowledgeImport = {
+  root: string;
+  sources: string[];
+  files: number;
+  skipped: number;
+  unreadable: number;
+};
+
+export type KnowledgeContext = {
+  wiki: string;
+  index: string;
+  full?: string | null;
+};
+
+/** `projectPath` null means the global knowledge base in the home folder. */
+export function knowledgePages(args: {
+  projectPath: string | null;
+}): Promise<{ root: string; pages: KnowledgePage[] }> {
+  return invoke("knowledge_pages_command", args);
+}
+
+export function knowledgeReadPage(args: { projectPath: string | null; path: string }): Promise<string> {
+  return invoke("knowledge_read_page_command", args);
+}
+
+export function knowledgePrepare(args: { projectPath: string | null }): Promise<string> {
+  return invoke("knowledge_prepare_command", args);
+}
+
+export function knowledgeImport(args: { projectPath: string | null; paths: string[] }): Promise<KnowledgeImport> {
+  return invoke("knowledge_import_command", args);
+}
+
+export function knowledgeAddSource(args: {
+  projectPath: string | null;
+  name: string;
+  content: string;
+}): Promise<KnowledgeImport> {
+  return invoke("knowledge_add_source_command", args);
+}
+
+export function knowledgeSavePage(args: {
+  projectPath: string | null;
+  path: string;
+  content: string;
+}): Promise<void> {
+  return invoke("knowledge_save_page_command", args);
+}
+
+export function knowledgeContext(args: { projectPath: string | null }): Promise<KnowledgeContext | null> {
+  return invoke("knowledge_context_command", args);
 }
 
 export function initWorkspace(args: {

@@ -179,7 +179,6 @@ const controller = new AskResourcesController(
       classList: { toggle() {} },
       setAttribute() {},
     } as unknown as HTMLButtonElement,
-    resourcesLabelEl: { textContent: "", title: "" } as unknown as HTMLElement,
     skillsListEl: { replaceChildren() {}, appendChild() {} } as unknown as HTMLElement,
     mcpListEl: { replaceChildren() {}, appendChild() {} } as unknown as HTMLElement,
     skillsEmptyEl: { hidden: false } as unknown as HTMLElement,
@@ -191,8 +190,6 @@ const controller = new AskResourcesController(
     } as unknown as HTMLElement,
   },
   () => "hermes",
-  () => "/tmp/proj",
-  (cwd) => cwd,
 );
 controller.mountedSkills = [
   {

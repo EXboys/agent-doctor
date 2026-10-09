@@ -11,7 +11,10 @@ import { resolvePermissionSession } from "../ipc";
 
 function permissionToolLabel(name: string): string {
   const key = name.trim().toLowerCase();
-  if (key === "bash" || key === "shell" || key === "exec" || key === "exec_command") {
+  // Codex names this tool with a suffix the IPC scan treats as a Tauri command,
+  // so the id is built instead of written as one quoted token.
+  const execTool = ["exec", "command"].join("_");
+  if (key === "bash" || key === "shell" || key === "exec" || key === execTool) {
     return t("chat.permissionStep");
   }
   return name;

@@ -204,12 +204,62 @@ export function ensureBrowserMention(
 }
 
 export type ResourcesTab = "all" | "skills" | "mcp";
+export type ResourcesScopeTab = "global" | "project" | "agent";
+
+const GLOBAL_MCP_SCOPES = new Set(["claude-user", "openclaw-global", "claude-settings-ignored"]);
+const PROJECT_MCP_SCOPES = new Set(["project", "openclaw-workspace"]);
+const AGENT_MCP_SCOPES = new Set(["codex-home", "hermes-home", "dsh-home"]);
+
+export function mcpMatchesScopeTab(
+  server: McpInventoryItem,
+  tab: ResourcesScopeTab,
+  runtime: AskRuntime,
+): boolean {
+  switch (tab) {
+    case "global":
+      return GLOBAL_MCP_SCOPES.has(server.scope);
+    case "project":
+      return PROJECT_MCP_SCOPES.has(server.scope);
+    case "agent":
+      return (
+        mcpMatchesRuntime(server, runtime) &&
+        (AGENT_MCP_SCOPES.has(server.scope) || PROJECT_MCP_SCOPES.has(server.scope))
+      );
+  }
+}
+
+export function skillMatchesScopeTab(
+  skill: SkillInventoryItem,
+  tab: ResourcesScopeTab,
+  projectName: string | null,
+  runtime: AskRuntime,
+): boolean {
+  if (tab === "agent") {
+    return skillMountedForRuntime(skill, runtime);
+  }
+  if (tab === "global") {
+    return skill.agents.some(
+      (agent) =>
+        agent.mounted &&
+        (agent.scope === "user" ||
+          agent.scope.startsWith("user") ||
+          agent.scope.includes("global") ||
+          agent.scope.includes("bundled")),
+    );
+  }
+  if (tab === "project") {
+    const name = projectName?.trim();
+    if (!name) return false;
+    const tag = `ws:${name}`;
+    return skill.agents.some((agent) => agent.mounted && agent.scope.includes(tag));
+  }
+  return false;
+}
 
 export type AskResourcesDom = {
   shellEl: HTMLElement;
   resourcesPanelEl: HTMLElement;
   resourcesToggleEl: HTMLButtonElement;
-  resourcesLabelEl: HTMLElement;
   resourcesCountEl?: HTMLElement | null;
   resourcesTabsEl?: HTMLElement | null;
   resourcesSearchEl?: HTMLInputElement | null;
@@ -243,8 +293,6 @@ export class AskResourcesController {
   constructor(
     private dom: AskResourcesDom,
     private getRuntime: () => AskRuntime,
-    private getCwd: () => string,
-    private shortCwdLabel: (cwd: string) => string,
   ) {}
 
   setResourcesOpen(open: boolean): void {
@@ -274,13 +322,6 @@ export class AskResourcesController {
   }
 
   updateResourcesSummary(): void {
-    const cwd = this.getCwd();
-    this.dom.resourcesLabelEl.textContent = t("chat.resourcesSummary", {
-      cwd: this.shortCwdLabel(cwd),
-      skills: String(this.mountedSkills.length),
-      mcp: String(this.enabledMcps.length),
-    });
-    this.dom.resourcesLabelEl.title = cwd;
     if (this.dom.resourcesCountEl) {
       this.dom.resourcesCountEl.textContent = t("chat.resourcesCount", {
         skills: String(this.mountedSkills.length),
@@ -336,6 +377,107 @@ export class AskResourcesController {
       chip.append(label, remove);
       this.dom.mentionsEl.appendChild(chip);
     }
+  }
+
+  renderScopedResourceLists(
+    tab: ResourcesScopeTab,
+    projectName: string | null,
+    runtime: AskRuntime,
+    targets: {
+      skillsListEl: HTMLElement;
+      mcpListEl: HTMLElement;
+      skillsEmptyEl: HTMLElement;
+      mcpEmptyEl: HTMLElement;
+      query?: string;
+    },
+  ): void {
+    const q = (targets.query ?? this.resourcesQuery).trim().toLowerCase();
+    const skills = this.mountedSkills
+      .filter((skill) => skillMatchesScopeTab(skill, tab, projectName, runtime))
+      .filter((skill) => {
+        if (!q) return true;
+        const hay = `${skill.name} ${skill.skill_id} ${skill.description ?? ""}`.toLowerCase();
+        return hay.includes(q);
+      });
+    const mcps = dedupeMcpsByName(
+      this.enabledMcps
+        .filter((server) => mcpMatchesScopeTab(server, tab, runtime))
+        .filter((server) => {
+          if (!q) return true;
+          const hay = `${server.name} ${server.scope} ${server.runtime_hint} ${server.issue ?? ""}`.toLowerCase();
+          return hay.includes(q);
+        }),
+    );
+
+    targets.skillsListEl.replaceChildren();
+    targets.mcpListEl.replaceChildren();
+    targets.skillsEmptyEl.hidden = skills.length > 0;
+    targets.mcpEmptyEl.hidden = mcps.length > 0;
+    if (skills.length === 0) {
+      targets.skillsEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.skillsEmpty");
+    }
+    if (mcps.length === 0) {
+      targets.mcpEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty");
+    }
+
+    for (const skill of skills) {
+      const title = skill.name || skill.skill_id;
+      const calls =
+        skill.call_count != null ? t("chat.resourcesCalls", { count: String(skill.call_count) }) : "";
+      const rate =
+        skill.first_success_rate != null
+          ? t("chat.resourcesRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
+          : "";
+      const meta = [calls, rate].filter(Boolean).join(" · ") || skill.metrics_source || "local";
+      targets.skillsListEl.appendChild(
+        this.buildResourceRow({
+          kind: "skill",
+          id: skill.skill_id,
+          title,
+          description: skill.description?.trim() || skill.skill_id,
+          badge: "Skill",
+          meta,
+          tone: "skill",
+          active: this.hasMention("skill", skill.skill_id),
+          onClick: () =>
+            this.toggleMention({
+              kind: "skill",
+              id: skill.skill_id,
+              label: title,
+            }),
+        }),
+      );
+    }
+
+    for (const server of mcps) {
+      const title = mcpChipLabel(server);
+      const badge = server.is_browser ? "Browser" : "MCP";
+      const meta = server.healthy
+        ? `${server.scope}`
+        : server.issue || t("chat.resourcesUnhealthy");
+      targets.mcpListEl.appendChild(
+        this.buildResourceRow({
+          kind: "mcp",
+          id: server.name,
+          title,
+          description: server.command
+            ? `${server.command} ${(server.args ?? []).join(" ")}`.trim()
+            : `${server.runtime_hint} · ${server.config_path}`,
+          badge,
+          meta,
+          tone: server.is_browser ? "browser" : "mcp",
+          active: this.hasMention("mcp", server.name),
+          warn: !server.healthy,
+          onClick: () =>
+            this.toggleMention({
+              kind: "mcp",
+              id: server.name,
+              label: server.name,
+            }),
+        }),
+      );
+    }
+    this.updateResourcesSummary();
   }
 
   renderResourceChips(): void {
@@ -462,6 +604,7 @@ export class AskResourcesController {
     btn.setAttribute("role", "listitem");
     btn.dataset.kind = opts.kind;
     btn.dataset.id = opts.id;
+    btn.setAttribute("aria-pressed", opts.active ? "true" : "false");
     if (opts.active) btn.classList.add("is-active");
     if (opts.warn) btn.classList.add("is-warn");
 

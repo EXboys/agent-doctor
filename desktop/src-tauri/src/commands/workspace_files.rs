@@ -5,6 +5,17 @@ use serde::Serialize;
 
 const MAX_READ_BYTES: u64 = 512 * 1024;
 const MAX_LIST_ENTRIES: usize = 400;
+const MAX_SHEET_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_SHEET_ROWS: usize = 500;
+const MAX_SHEET_COLS: usize = 60;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSheet {
+    name: String,
+    rows: Vec<Vec<String>>,
+    truncated: bool,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +33,9 @@ pub struct WorkspaceFilePayload {
     content: String,
     language: String,
     editable: bool,
+    is_image: bool,
+    absolute_path: String,
+    sheets: Option<Vec<WorkspaceSheet>>,
     size_bytes: u64,
 }
 
@@ -113,6 +127,27 @@ fn language_from_name(name: &str) -> String {
     .to_string()
 }
 
+fn is_image_name(name: &str) -> bool {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg" | "avif"
+    )
+}
+
+fn is_sheet_name(name: &str) -> bool {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "xlsx" | "xlsm" | "xlsb" | "xls" | "ods")
+}
+
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
@@ -182,24 +217,44 @@ pub fn read_workspace_file_command(
     }
     let metadata = fs::metadata(&path).map_err(|_| "找不到这个文件。".to_string())?;
     let size_bytes = metadata.len();
-    if size_bytes > MAX_READ_BYTES {
-        return Err("文件太大，问答里暂时打不开。请在系统里用其他应用查看。".to_string());
-    }
-
-    let bytes = fs::read(&path).map_err(|_| "无法读取这个文件。".to_string())?;
-    let editable = !bytes.contains(&0);
-    let content = if editable {
-        String::from_utf8(bytes).map_err(|_| "这是二进制文件，问答里不能编辑。".to_string())?
-    } else {
-        String::new()
-    };
-
     let name = path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("file")
         .to_string();
-    let language = language_from_name(&name);
+    let is_image = is_image_name(&name);
+    let is_sheet = is_sheet_name(&name);
+    let limit = if is_sheet {
+        MAX_SHEET_BYTES
+    } else {
+        MAX_READ_BYTES
+    };
+    if !is_image && size_bytes > limit {
+        return Err("文件太大，问答里暂时打不开。请在系统里用其他应用查看。".to_string());
+    }
+    let sheets = if is_sheet {
+        Some(read_sheets(&path)?)
+    } else {
+        None
+    };
+
+    let (content, editable) = if is_image || is_sheet {
+        (String::new(), false)
+    } else {
+        let bytes = fs::read(&path).map_err(|_| "无法读取这个文件。".to_string())?;
+        match String::from_utf8(bytes) {
+            Ok(text) if !text.contains('\0') => (text, true),
+            _ => (String::new(), false),
+        }
+    };
+
+    let language = if is_image {
+        "image".to_string()
+    } else if is_sheet {
+        "sheet".to_string()
+    } else {
+        language_from_name(&name)
+    };
     let root_canon = PathBuf::from(root.trim())
         .canonicalize()
         .map_err(|_| invalid_root_message())?;
@@ -211,8 +266,48 @@ pub fn read_workspace_file_command(
         content,
         language,
         editable,
+        is_image,
+        absolute_path: path.to_string_lossy().to_string(),
+        sheets,
         size_bytes,
     })
+}
+
+fn read_sheets(path: &Path) -> Result<Vec<WorkspaceSheet>, String> {
+    use calamine::{open_workbook_auto, Data, Reader};
+
+    let unreadable = || "这个表格打不开，可能已损坏或设置了密码。".to_string();
+    let mut workbook = open_workbook_auto(path).map_err(|_| unreadable())?;
+    let mut sheets = Vec::new();
+    for name in workbook.sheet_names().to_owned() {
+        let Ok(range) = workbook.worksheet_range(&name) else {
+            continue;
+        };
+        let truncated = range.height() > MAX_SHEET_ROWS || range.width() > MAX_SHEET_COLS;
+        let rows = range
+            .rows()
+            .take(MAX_SHEET_ROWS)
+            .map(|row| {
+                row.iter()
+                    .take(MAX_SHEET_COLS)
+                    .map(|cell| match cell {
+                        Data::Empty => String::new(),
+                        Data::Error(_) => "#ERROR".to_string(),
+                        other => other.to_string(),
+                    })
+                    .collect()
+            })
+            .collect();
+        sheets.push(WorkspaceSheet {
+            name,
+            rows,
+            truncated,
+        });
+    }
+    if sheets.is_empty() {
+        return Err(unreadable());
+    }
+    Ok(sheets)
 }
 
 #[tauri::command]
@@ -258,8 +353,60 @@ mod tests {
 
         write_workspace_file_command(root.clone(), "src/main.rs".into(), "fn main() { }\n".into())
             .unwrap();
-        let updated = read_workspace_file_command(root, "src/main.rs".into()).unwrap();
+        let updated = read_workspace_file_command(root.clone(), "src/main.rs".into()).unwrap();
         assert!(updated.content.contains("{ }"));
+
+        fs::write(dir.join("shot.png"), vec![0x89, b'P', b'N', b'G', 0, 0, 1]).unwrap();
+        let image = read_workspace_file_command(root.clone(), "shot.png".into()).unwrap();
+        assert!(image.is_image && !image.editable);
+        assert!(image.absolute_path.ends_with("shot.png"));
+
+        fs::write(dir.join("blob.bin"), vec![0u8, 1, 2]).unwrap();
+        let blob = read_workspace_file_command(root.clone(), "blob.bin".into()).unwrap();
+        assert!(!blob.is_image && !blob.editable && blob.sheets.is_none());
+
+        write_test_xlsx(&dir.join("data.xlsx"));
+        let book = read_workspace_file_command(root, "data.xlsx".into()).unwrap();
+        let sheets = book.sheets.expect("xlsx should be read as sheets");
+        assert_eq!(sheets[0].name, "Sheet1");
+        assert_eq!(
+            sheets[0].rows[0],
+            vec!["名字".to_string(), "数量".to_string()]
+        );
+        assert_eq!(sheets[0].rows[1], vec!["苹果".to_string(), "3".to_string()]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn write_test_xlsx(path: &Path) {
+        use std::io::Write;
+        let parts = [
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+            ),
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>名字</t></is></c><c r="B1" t="inlineStr"><is><t>数量</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>苹果</t></is></c><c r="B2"><v>3</v></c></row></sheetData></worksheet>"#,
+            ),
+        ];
+        let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        for (name, body) in parts {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
     }
 }

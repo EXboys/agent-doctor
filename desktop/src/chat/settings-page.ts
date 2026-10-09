@@ -1,5 +1,5 @@
 import { getLocale, setLocale, t, type Locale } from "../i18n";
-import { closeKnowledge } from "./knowledge-page";
+import { closeKnowledgePage, closeResourcesMainPage, isKnowledgePageOpen } from "./overlay-pages";
 import {
   applyThemePreference,
   readThemePreference,
@@ -38,7 +38,8 @@ export function closeChatSettings(): void {
 }
 
 export function openChatSettings(): void {
-  closeKnowledge();
+  if (isKnowledgePageOpen()) closeKnowledgePage();
+  closeResourcesMainPage();
   syncChatSettings();
   shellEl()?.classList.add("is-settings");
   mainEl()?.classList.add("is-settings");

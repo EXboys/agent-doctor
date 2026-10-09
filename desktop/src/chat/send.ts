@@ -372,11 +372,12 @@ export function createSendController(deps: SendDeps) {
     const { cwd: sessionCwd, workspaceName: sessionWorkspace } =
       deps.resolveSendWorkspace(sendSession);
 
+    const promptWithKnowledge = await appendKnowledgeToPrompt(promptUserText, sessionWorkspace?.trim() || null);
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
         runtime: runtimeForTurn,
         prompt: deps.buildPromptWithHistory(
-          appendKnowledgeToPrompt(promptUserText, sessionWorkspace?.trim() || null, runtimeForTurn),
+          promptWithKnowledge,
           attachments,
           chatSessionId,
           turn,

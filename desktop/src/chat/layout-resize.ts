@@ -5,7 +5,13 @@ const FILES_DEFAULT = 400;
 
 const SIDE_MIN = 200;
 const SIDE_MAX = 420;
-const FILES_MIN = 280;
+const FILES_MIN = 200;
+
+function chatSplitMinPx(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-split-chat-min").trim();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 390;
+}
 
 function readPx(key: string, fallback: number): number {
   const raw = localStorage.getItem(key);
@@ -99,9 +105,12 @@ export function bindLayoutResize(): void {
     bindDrag(
       chatFiles,
       (clientX, ctx) => {
-        if (!ctx.startW) ctx.startW = currentFilesPx();
+        if (!ctx.startW) {
+          const panel = main.querySelector("#chat-files-panel");
+          ctx.startW = panel?.getBoundingClientRect().width || currentFilesPx();
+        }
         const mainW = main.getBoundingClientRect().width;
-        const max = Math.max(FILES_MIN, mainW - 280);
+        const max = Math.max(FILES_MIN, mainW - chatSplitMinPx());
         const delta = ctx.startX - clientX;
         const next = clamp(ctx.startW + delta, FILES_MIN, max);
         document.documentElement.style.setProperty("--chat-files-panel-w", `${next}px`);

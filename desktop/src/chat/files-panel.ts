@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { escapeHtml } from "../markdown";
 import { t } from "../i18n";
 import { highlightCode } from "./code-highlight";
@@ -6,6 +7,7 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
   type WorkspaceDirEntry,
+  type WorkspaceSheet,
 } from "../ipc";
 import { syncChatFilesSplitter } from "./layout-resize";
 
@@ -24,6 +26,9 @@ export type FilesPanelDeps = {
   previewEl: HTMLPreElement;
   editorEl: HTMLTextAreaElement;
   codeEl: HTMLElement;
+  imageEl: HTMLElement;
+  sheetEl: HTMLElement;
+  noticeEl: HTMLElement;
   saveEl: HTMLButtonElement;
   emptyEl: HTMLElement;
   getRoot: () => string;
@@ -88,8 +93,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     const code = deps.previewEl.querySelector("code");
     if (code) {
       code.className = `language-${language}`;
-      if (editable) code.innerHTML = highlightCode(content, language);
-      else code.textContent = t("chat.filesBinary");
+      code.innerHTML = editable ? highlightCode(content, language) : "";
     }
     deps.editorEl.hidden = !editable;
     deps.saveEl.hidden = !editable;
@@ -98,6 +102,61 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.editorEl.scrollLeft = resetScroll ? 0 : left;
     deps.previewEl.scrollTop = deps.editorEl.scrollTop;
     deps.previewEl.scrollLeft = deps.editorEl.scrollLeft;
+  }
+
+  function columnLabel(index: number): string {
+    let label = "";
+    for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+      label = String.fromCharCode(65 + ((n - 1) % 26)) + label;
+    }
+    return label;
+  }
+
+  function paintSheet(sheets: WorkspaceSheet[], active: number): void {
+    const tabs = deps.sheetEl.querySelector<HTMLElement>(".chat-files-sheet-tabs")!;
+    const table = deps.sheetEl.querySelector<HTMLTableElement>(".chat-files-sheet-table")!;
+    const note = deps.sheetEl.querySelector<HTMLElement>(".chat-files-sheet-note")!;
+    const scroll = deps.sheetEl.querySelector<HTMLElement>(".chat-files-sheet-scroll")!;
+
+    tabs.replaceChildren();
+    tabs.hidden = sheets.length < 2;
+    sheets.forEach((sheet, index) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = `chat-files-sheet-tab${index === active ? " is-active" : ""}`;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", index === active ? "true" : "false");
+      tab.textContent = sheet.name;
+      tab.addEventListener("click", () => paintSheet(sheets, index));
+      tabs.append(tab);
+    });
+
+    const sheet = sheets[active];
+    const width = sheet.rows.reduce((max, row) => Math.max(max, row.length), 0);
+    table.replaceChildren();
+    if (width > 0) {
+      const head = table.createTHead().insertRow();
+      head.append(document.createElement("th"));
+      for (let col = 0; col < width; col++) {
+        const th = document.createElement("th");
+        th.textContent = columnLabel(col);
+        head.append(th);
+      }
+      const body = table.createTBody();
+      sheet.rows.forEach((row, rowIndex) => {
+        const tr = body.insertRow();
+        const th = document.createElement("th");
+        th.textContent = String(rowIndex + 1);
+        tr.append(th);
+        for (let col = 0; col < width; col++) {
+          tr.insertCell().textContent = row[col] ?? "";
+        }
+      });
+    }
+    note.hidden = width > 0 && !sheet.truncated;
+    note.textContent = width === 0 ? t("chat.filesSheetEmpty") : t("chat.filesSheetTruncated");
+    scroll.scrollTop = 0;
+    scroll.scrollLeft = 0;
   }
 
   function showList(): void {
@@ -181,8 +240,23 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       dirty = false;
       deps.viewEl.hidden = false;
       deps.placeholderEl.hidden = true;
-      deps.codeEl.hidden = false;
+      deps.codeEl.hidden = !file.editable;
+      deps.imageEl.hidden = !file.isImage;
+      deps.sheetEl.hidden = !file.sheets;
+      if (file.sheets) paintSheet(file.sheets, 0);
+      deps.noticeEl.hidden = file.editable || file.isImage || Boolean(file.sheets);
+      deps.noticeEl.textContent = t("chat.filesBinary");
+      const img = deps.imageEl.querySelector("img");
+      if (img) {
+        if (file.isImage) {
+          img.alt = file.name;
+          img.src = convertFileSrc(file.absolutePath);
+        } else {
+          img.removeAttribute("src");
+        }
+      }
       deps.fileNameEl.textContent = file.name;
+      deps.languageEl.hidden = !file.editable;
       deps.languageEl.textContent = file.language.toUpperCase();
       deps.breadcrumbEl.textContent = file.relativePath;
       deps.listEl.querySelectorAll(".chat-files-item.is-active").forEach((item) => {

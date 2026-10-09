@@ -1,6 +1,8 @@
 import type { AskRuntime, WorkspaceDoc } from "../ask-resources";
+import { setAgentBrandIcon } from "../agent-brand";
 import { getLocale, t } from "../i18n";
-import { runtimeDisplayName } from "./runtime";
+import { runDoctor } from "../ipc";
+import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import { createEmptySession, uid } from "./store";
 import {
   defaultWorkspaceName,
@@ -20,6 +22,7 @@ import {
   visibleSessionsForGroup,
 } from "./session-sidebar";
 import { formatTime } from "./copy-ui";
+import { leaveChatOverlayPages } from "./overlay-pages";
 import { closeChatSettings } from "./settings-page";
 import { backgroundChoiceCount, isChatRunning, runningCount } from "./live-runs";
 import {
@@ -198,10 +201,6 @@ export function createSessionsController(deps: SessionsDeps) {
       meta.textContent = metaText;
       main.append(title, meta);
     }
-    main.addEventListener("click", () => {
-      switchSession(session.id);
-    });
-
     const del = document.createElement("button");
     del.type = "button";
     del.className = "chat-session-delete";
@@ -232,11 +231,22 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   let projectMenu: HTMLElement | null = null;
+  /** Bumped whenever a menu closes, so a slow install scan cannot open late. */
+  let agentPickToken = 0;
+  let installedAgentsCache: { at: number; agents: InstalledAgent[] } | null = null;
+
+  type InstalledAgent = { id: AskRuntime; label: string };
+  type MenuAnchor = HTMLElement | { x: number; y: number };
 
   function closeProjectMenu(): void {
     projectMenu?.remove();
     projectMenu = null;
+    agentPickToken += 1;
   }
+
+  window.addEventListener("focus", () => {
+    installedAgentsCache = null;
+  });
 
   function openProjectMenu(x: number, y: number, name: string, sessions: ChatSession[]): void {
     closeProjectMenu();
@@ -258,7 +268,9 @@ export function createSessionsController(deps: SessionsDeps) {
       menu.append(item);
     };
 
-    addItem(t("chat.projectMenuNew"), () => startNewSession(name));
+    addItem(t("chat.projectMenuNew"), () => {
+      void beginNewSessionInProject(name, { x, y });
+    });
     addItem(t("chat.projectMenuRemove"), () => {
       if (sessions.some((session) => isChatRunning(session.id))) {
         deps.setStatus(t("chat.removeProjectBusy"), "warn");
@@ -279,7 +291,15 @@ export function createSessionsController(deps: SessionsDeps) {
 
   document.addEventListener("pointerdown", (event) => {
     if (!projectMenu) return;
-    if (event.target instanceof Node && projectMenu.contains(event.target)) return;
+    const target = event.target;
+    if (!(target instanceof Node) || projectMenu.contains(target)) return;
+    if (
+      projectMenu.dataset.kind === "agent-pick" &&
+      target instanceof Element &&
+      target.closest(".chat-session-group-new")
+    ) {
+      return;
+    }
     closeProjectMenu();
   });
   document.addEventListener("keydown", (event) => {
@@ -401,9 +421,10 @@ export function createSessionsController(deps: SessionsDeps) {
         add.title = t("chat.newSessionInProject");
         add.setAttribute("aria-label", t("chat.newSessionInProject"));
         add.textContent = "+";
+        add.setAttribute("aria-haspopup", "menu");
         add.addEventListener("click", (event) => {
           event.stopPropagation();
-          startNewSession(group.name);
+          void beginNewSessionInProject(projectName, add);
         });
         head.append(reorder, add);
       }
@@ -526,8 +547,18 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function switchSession(id: string, focus = true): void {
+    const hadOverlay = leaveChatOverlayPages();
     closeChatSettings();
-    if (id === deps.getStore().activeId) return;
+    if (id === deps.getStore().activeId) {
+      if (hadOverlay) {
+        deps.renderActiveMessages();
+        deps.syncComposerUi();
+        deps.syncSessionWorkspaceUi();
+        renderSessionList();
+        if (focus) deps.promptEl.focus();
+      }
+      return;
+    }
     const session = deps.getStore().sessions.find((s) => s.id === id);
     if (!session) return;
 
@@ -636,8 +667,126 @@ export function createSessionsController(deps: SessionsDeps) {
     startNewSession();
   }
 
-  function startNewSession(workspaceName?: string | null): void {
+  async function installedAskAgents(): Promise<InstalledAgent[] | null> {
+    if (installedAgentsCache && Date.now() - installedAgentsCache.at < 20_000) {
+      return installedAgentsCache.agents;
+    }
+    try {
+      const report = await runDoctor();
+      const agents: InstalledAgent[] = [];
+      const seen = new Set<string>();
+      for (const runtime of report.runtimes) {
+        if (!runtime.installed || !isAskRuntime(runtime.id) || seen.has(runtime.id)) continue;
+        seen.add(runtime.id);
+        agents.push({
+          id: runtime.id,
+          label: runtime.display_name.trim() || runtimeDisplayName(runtime.id),
+        });
+      }
+      installedAgentsCache = { at: Date.now(), agents };
+      return agents;
+    } catch (error) {
+      console.warn("Ask: failed to list installed agents", error);
+      return null;
+    }
+  }
+
+  function placeMenu(menu: HTMLElement, anchor: MenuAnchor): void {
+    document.body.append(menu);
+    const menuRect = menu.getBoundingClientRect();
+    let left: number;
+    let top: number;
+    if (anchor instanceof HTMLElement) {
+      const rect = anchor.getBoundingClientRect();
+      left = rect.right - menuRect.width;
+      top = rect.bottom + 6;
+      if (top + menuRect.height > window.innerHeight - 8) {
+        top = rect.top - menuRect.height - 6;
+      }
+    } else {
+      left = anchor.x;
+      top = anchor.y;
+    }
+    left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - menuRect.width - 8));
+    top = Math.min(Math.max(8, top), Math.max(8, window.innerHeight - menuRect.height - 8));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
+  function openAgentPickMenu(anchor: MenuAnchor, projectName: string, agents: InstalledAgent[]): void {
+    closeProjectMenu();
+    const menu = document.createElement("div");
+    menu.className = "chat-project-menu";
+    menu.dataset.kind = "agent-pick";
+    menu.dataset.project = projectName;
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", t("chat.pickAgent"));
+
+    const heading = document.createElement("div");
+    heading.className = "chat-project-menu-label";
+    heading.textContent = t("chat.pickAgent");
+    menu.append(heading);
+
+    for (const agent of agents) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "chat-project-menu-item chat-agent-pick-item";
+      item.setAttribute("role", "menuitem");
+      const icon = document.createElement("span");
+      icon.className = "chat-agent-pick-icon";
+      setAgentBrandIcon(icon, agent.id);
+      const label = document.createElement("span");
+      label.textContent = agent.label;
+      item.append(icon, label);
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeProjectMenu();
+        startNewSession(projectName, agent.id);
+      });
+      menu.append(item);
+    }
+
+    placeMenu(menu, anchor);
+    projectMenu = menu;
+  }
+
+  /** One installed agent starts immediately. Several agents open a picker first. */
+  async function beginNewSessionInProject(projectName: string, anchor: MenuAnchor): Promise<void> {
+    if (
+      projectMenu?.dataset.kind === "agent-pick" &&
+      projectMenu.dataset.project === projectName
+    ) {
+      closeProjectMenu();
+      return;
+    }
+    const token = ++agentPickToken;
+    const hadCache = installedAgentsCache != null;
+    if (!hadCache) deps.setStatus(t("chat.checkingAgents"), "muted");
+    const agents = await installedAskAgents();
+    if (token !== agentPickToken) return;
+    if (!agents) {
+      startNewSession(projectName);
+      return;
+    }
+    if (agents.length === 0) {
+      deps.setStatus(t("chat.noInstalledAgent"), "warn");
+      return;
+    }
+    if (agents.length === 1) {
+      startNewSession(projectName, agents[0].id);
+      return;
+    }
+    if (!hadCache) deps.setStatus("");
+    openAgentPickMenu(anchor, projectName, agents);
+  }
+
+  function startNewSession(workspaceName?: string | null, runtime?: AskRuntime): void {
+    leaveChatOverlayPages();
     closeChatSettings();
+    const chosen = runtime ?? deps.selectedRuntime();
+    if (chosen !== deps.getCurrentRuntime()) {
+      deps.setCurrentRuntime(chosen);
+    }
     if (isChatRunning(deps.getStore().activeId)) {
       deps.captureRunningView();
       detachLiveDom();
@@ -652,7 +801,7 @@ export function createSessionsController(deps: SessionsDeps) {
       workspaceName?.trim() ||
       defaultWorkspaceName(deps.getWorkspaceDoc()) ||
       undefined;
-    const session = createEmptySession(deps.selectedRuntime(), pinned);
+    const session = createEmptySession(chosen, pinned);
     deps.getStore().sessions.unshift(session);
     deps.getStore().activeId = session.id;
     deps.getStore().sessions = deps.getStore().sessions.slice(0, MAX_SESSIONS);
@@ -752,6 +901,26 @@ export function createSessionsController(deps: SessionsDeps) {
     deps.setStatus(t("chat.contextCompactDone"), "ok");
   }
 
+
+  if (deps.sessionListEl.dataset.sessionNavBound !== "1") {
+    deps.sessionListEl.dataset.sessionNavBound = "1";
+    deps.sessionListEl.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          ".chat-session-delete, .chat-session-group-fold, .chat-session-group-new, .chat-session-group-nudge, .chat-session-group-more",
+        )
+      ) {
+        return;
+      }
+      const main = target.closest(".chat-session-main");
+      if (!main) return;
+      const id = main.closest<HTMLElement>(".chat-session[data-session-id]")?.dataset.sessionId;
+      if (!id) return;
+      switchSession(id);
+    });
+  }
 
   return {
     renderSessionList,
