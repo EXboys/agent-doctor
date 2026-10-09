@@ -1,5 +1,7 @@
 
 import { t } from "./i18n";
+import { isPersonalEdition } from "./edition";
+import { listPersonalProviders } from "./ipc";
 import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
 import {
@@ -307,6 +309,14 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       await loadHermesModel();
     } else if (!hermesInstalled) {
       appState.hermesModel = null;
+    }
+
+    if (isPersonalEdition()) {
+      try {
+        appState.personalProvidersDoc = await listPersonalProviders();
+      } catch {
+        // The card can still name a known service from the address alone.
+      }
     }
 
     const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);

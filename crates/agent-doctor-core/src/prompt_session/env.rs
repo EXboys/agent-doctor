@@ -678,6 +678,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_claude_personal_official_maps_to_anthropic() {
+        let mut env = HashMap::new();
+        env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+        env.insert(PROVIDER_PROTOCOL_ENV.into(), "openai".into());
+        env.insert(
+            GATEWAY_URL_ENV.into(),
+            "https://teamups.vip/api/v1/official".into(),
+        );
+        env.insert(
+            "ANTHROPIC_BASE_URL".into(),
+            "https://api.deepseek.com/anthropic".into(),
+        );
+        env.insert("OPENAI_API_KEY".into(), "sk-test".into());
+
+        let (url, key) = resolve_claude_overlay(&env).expect("overlay");
+        assert_eq!(url, "https://teamups.vip/api/v1/official/anthropic");
+        assert_eq!(key, "sk-test");
+    }
+
+    #[test]
     fn resolve_claude_personal_deepseek_openai_maps_to_anthropic() {
         let mut env = HashMap::new();
         env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());

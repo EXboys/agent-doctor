@@ -539,6 +539,23 @@ struct DualProtocolEndpoints {
     anthropic_url: String,
 }
 
+/// TeamUps 官方：OpenAI 在 `/api/v1/official`，Claude Code 在旁边的 Anthropic 入口。
+/// Claude 自己会在这个地址后面加 `/v1/messages`。
+fn teamups_official_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let lower = trimmed.to_ascii_lowercase();
+    let marker = "/api/v1/official";
+    let idx = lower.find(marker)?;
+    let origin = trimmed[..idx].trim_end_matches('/');
+    if origin.is_empty() || !origin.contains("://") {
+        return None;
+    }
+    Some(DualProtocolEndpoints {
+        openai_url: format!("{origin}/api/v1/official"),
+        anthropic_url: format!("{origin}/api/v1/official/anthropic"),
+    })
+}
+
 /// Providers that expose both OpenAI-compatible and Anthropic Messages APIs with one key.
 pub fn anthropic_gateway_for_provider_url(url: &str) -> Option<String> {
     if let Some(dual) = dual_protocol_endpoints(url) {
@@ -553,6 +570,9 @@ pub fn anthropic_gateway_for_provider_url(url: &str) -> Option<String> {
 }
 
 fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
+    if let Some(official) = teamups_official_endpoints(url) {
+        return Some(official);
+    }
     let lower = url.trim().to_ascii_lowercase();
     // DeepSeek: /v1 (OpenAI) + /anthropic (Claude Code)
     if lower.contains("api.deepseek.com") {
@@ -814,6 +834,31 @@ mod tests {
         assert_eq!(
             claude_code_target_url(&bundle),
             Some("https://www.skilllite.ai/api/gateway/anthropic")
+        );
+    }
+
+    #[test]
+    fn official_openai_also_targets_claude() {
+        let dual =
+            dual_protocol_endpoints("https://teamups.vip/api/v1/official").expect("official");
+        assert_eq!(dual.openai_url, "https://teamups.vip/api/v1/official");
+        assert_eq!(
+            dual.anthropic_url,
+            "https://teamups.vip/api/v1/official/anthropic"
+        );
+        let dual_anthropic =
+            dual_protocol_endpoints("https://teamups.vip/api/v1/official/anthropic")
+                .expect("official anthropic");
+        assert_eq!(dual_anthropic.openai_url, dual.openai_url);
+        assert_eq!(dual_anthropic.anthropic_url, dual.anthropic_url);
+
+        let mut bundle = sample_bundle(PROTOCOL_OPENAI, None);
+        bundle.mode = MODE_PERSONAL.to_string();
+        bundle.gateway_url = dual.openai_url;
+        bundle.anthropic_gateway_url = Some(dual.anthropic_url.clone());
+        assert_eq!(
+            claude_code_target_url(&bundle),
+            Some(dual.anthropic_url.as_str())
         );
     }
 

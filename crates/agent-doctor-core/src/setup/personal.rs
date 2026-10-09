@@ -543,14 +543,21 @@ pub fn execute_personal_provider_setup(
                 merge::apply_hermes(&gateway_url, api_key, "custom", Some(model))
             }
             (PROTOCOL_OPENAI, "codex") => merge::apply_codex(&gateway_url, api_key, Some(model)),
-            (PROTOCOL_OPENAI, "claude-code") => Ok(RuntimeSetupResult {
-                runtime_id: "claude-code".to_string(),
-                display_name: "Claude Code".to_string(),
-                applied: false,
-                message: "skipped — this provider uses OpenAI protocol; Claude Code needs Anthropic/Claude protocol"
-                    .to_string(),
-                ..Default::default()
-            }),
+            (PROTOCOL_OPENAI, "claude-code") => {
+                if let Some(anthropic) = crate::setup::anthropic_gateway_for_provider_url(&gateway_url)
+                {
+                    merge::apply_claude_code_with_model(&anthropic, api_key, Some(model))
+                } else {
+                    Ok(RuntimeSetupResult {
+                        runtime_id: "claude-code".to_string(),
+                        display_name: "Claude Code".to_string(),
+                        applied: false,
+                        message: "skipped — this provider uses OpenAI protocol; Claude Code needs Anthropic/Claude protocol"
+                            .to_string(),
+                        ..Default::default()
+                    })
+                }
+            }
             (PROTOCOL_ANTHROPIC, "claude-code") => {
                 merge::apply_claude_code(&gateway_url, api_key)
             }

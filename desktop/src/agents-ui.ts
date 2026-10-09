@@ -2,6 +2,7 @@ import { agentBrandIconHtml } from "./agent-brand";
 import { t, tRuntimeBlurb, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
 import { appState } from "./app-state";
+import { PROVIDER_PRESETS } from "./provider-presets";
 import {
   isAskRuntimeId as catalogIsAskRuntimeId,
   isDesktopAppRuntimeId as catalogIsDesktopAppRuntimeId,
@@ -33,6 +34,63 @@ export function runtimeClass(id: string): string {
     return id;
   }
   return "default";
+}
+
+const OFFICIAL_PROVIDER_ID = "teamups-official";
+
+function sameService(savedUrl: string, gatewayUrl: string): boolean {
+  const left = savedUrl.trim().toLowerCase().replace(/\/+$/, "");
+  const right = gatewayUrl.trim().toLowerCase().replace(/\/+$/, "");
+  if (!left || !right) return false;
+  if (left === right || right.startsWith(`${left}/`) || left.startsWith(`${right}/`)) return true;
+  try {
+    const savedHost = new URL(left).host;
+    const gatewayHost = new URL(right).host;
+    if (savedHost !== gatewayHost) return false;
+    return (
+      savedHost === "api.deepseek.com" ||
+      savedHost.endsWith("minimaxi.com") ||
+      savedHost.endsWith("minimax.io") ||
+      savedHost.endsWith("bigmodel.cn") ||
+      savedHost.endsWith("z.ai") ||
+      savedHost.includes("dashscope") ||
+      savedHost === "api.moonshot.cn" ||
+      savedHost === "api.siliconflow.cn"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function providerDisplayName(id: string, name: string): string {
+  if (id === OFFICIAL_PROVIDER_ID) return t("personal.officialName");
+  const trimmed = name.trim();
+  return trimmed || id;
+}
+
+/** The service this agent is actually pointed at, in words the person already used. */
+function serviceRow(gatewayUrl: string | null | undefined): string {
+  const url = gatewayUrl?.trim();
+  if (!url) return "";
+  const providers = appState.personalProvidersDoc?.providers ?? [];
+  const wired = providers.find((item) => sameService(item.url, url));
+  const preset = Object.values(PROVIDER_PRESETS).find((item) => sameService(item.url, url));
+  const using = wired
+    ? providerDisplayName(wired.id, wired.name)
+    : preset?.name ?? null;
+  const active = providers.find((item) => item.active);
+  const selected = active ? providerDisplayName(active.id, active.name) : null;
+  if (using && selected && using !== selected) {
+    return metaRow(
+      "meta.service",
+      t("meta.serviceStill", { using, selected }),
+      url,
+    );
+  }
+  if (using) {
+    return metaRow("meta.service", t("meta.serviceNow", { name: using }), url);
+  }
+  return metaRow("meta.service", t("meta.serviceCustom"), url);
 }
 
 export function metaRow(labelKey: MessageKey, value: string, detailTitle?: string): string {
@@ -135,7 +193,7 @@ export function hermesAdvancedMeta(
   );
   return [
     model?.provider ? metaRow("meta.provider", model.provider) : "",
-    model?.base_url ? metaRow("meta.gateway", model.base_url) : "",
+    model?.base_url ? serviceRow(model.base_url) : "",
     model && !keyNeedsAttention ? renderApiKeyRow(model) : "",
     genericRuntimeAdvancedMeta(runtime),
   ]
@@ -372,7 +430,7 @@ export function renderRuntimeCard(
   const summaryMeta = runtime.installed
     ? [
         versionRow,
-        runtime.profile.gateway_url ? metaRow("meta.gateway", runtime.profile.gateway_url) : "",
+        runtime.profile.gateway_url ? serviceRow(runtime.profile.gateway_url) : "",
       ]
         .filter(Boolean)
         .join("")
