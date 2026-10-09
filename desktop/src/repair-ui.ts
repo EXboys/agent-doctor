@@ -92,6 +92,7 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-openclaw-tools-profile": "repair.fix.openclawToolsProfile",
   "fix-openclaw-api-key-scaffold": "repair.fix.apiKeyScaffold",
   "fix-hermes-install": "repair.fix.hermesInstall",
+  "fix-hermes-model-dots": "repair.fix.hermesModelDots",
   "fix-deepseek-harness-install": "repair.fix.deepseekInstall",
   "fix-deepseek-harness-version": "repair.fix.deepseekVersion",
   "fix-qoder-install": "repair.fix.qoderInstall",

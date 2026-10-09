@@ -792,6 +792,7 @@ export const zh = {
     "repair.fix.openclawEnvObject": "改好写错格式的环境设置",
     "repair.fix.openclawToolsProfile": "把工具档位改回默认的「编程」",
     "repair.fix.hermesInstall": "安装 Hermes",
+    "repair.fix.hermesModelDots": "保留服务商认的模型名",
     "repair.fix.deepseekInstall": "安装 DeepSeek Harness",
     "repair.fix.deepseekVersion": "把 DeepSeek Harness 换成要求的版本",
     "repair.fix.qoderInstall": "安装 Qoder",

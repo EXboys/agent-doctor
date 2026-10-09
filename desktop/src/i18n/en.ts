@@ -793,6 +793,7 @@ export const en = {
     "repair.fix.openclawEnvObject": "Fix environment settings saved in the wrong format",
     "repair.fix.openclawToolsProfile": "Reset the tool set to the default \"coding\"",
     "repair.fix.hermesInstall": "Install Hermes",
+    "repair.fix.hermesModelDots": "Keep the model name the provider expects",
     "repair.fix.deepseekInstall": "Install DeepSeek Harness",
     "repair.fix.deepseekVersion": "Switch DeepSeek Harness to the required version",
     "repair.fix.qoderInstall": "Install Qoder",
