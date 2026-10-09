@@ -22,7 +22,7 @@ export type FilesPanelDeps = {
   placeholderEl: HTMLElement;
   previewEl: HTMLPreElement;
   editorEl: HTMLTextAreaElement;
-  editEl: HTMLButtonElement;
+  codeEl: HTMLElement;
   saveEl: HTMLButtonElement;
   emptyEl: HTMLElement;
   getRoot: () => string;
@@ -54,6 +54,26 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.toggleEl.setAttribute("aria-pressed", open ? "true" : "false");
     deps.panelEl.hidden = !open;
     deps.panelEl.setAttribute("aria-hidden", open ? "false" : "true");
+  }
+
+  function paintFile(content: string, language: string, editable: boolean, resetScroll = false): void {
+    const top = deps.editorEl.scrollTop;
+    const left = deps.editorEl.scrollLeft;
+    deps.editorEl.value = content;
+    deps.editorEl.className = `chat-files-editor language-${language}`;
+    const code = deps.previewEl.querySelector("code");
+    if (code) {
+      code.className = `language-${language}`;
+      if (editable) code.innerHTML = highlightCode(content, language);
+      else code.textContent = t("chat.filesBinary");
+    }
+    deps.editorEl.hidden = !editable;
+    deps.saveEl.hidden = !editable;
+    deps.saveEl.classList.remove("is-dirty");
+    deps.editorEl.scrollTop = resetScroll ? 0 : top;
+    deps.editorEl.scrollLeft = resetScroll ? 0 : left;
+    deps.previewEl.scrollTop = deps.editorEl.scrollTop;
+    deps.previewEl.scrollLeft = deps.editorEl.scrollLeft;
   }
 
   function showList(): void {
@@ -138,6 +158,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       dirty = false;
       deps.viewEl.hidden = false;
       deps.placeholderEl.hidden = true;
+      deps.codeEl.hidden = false;
       deps.fileNameEl.textContent = file.name;
       deps.languageEl.textContent = file.language.toUpperCase();
       deps.breadcrumbEl.textContent = file.relativePath;
@@ -145,39 +166,11 @@ export function createFilesPanel(deps: FilesPanelDeps) {
         item.classList.remove("is-active");
       });
       row?.classList.add("is-active");
-
-      const code = deps.previewEl.querySelector("code");
-      if (code) {
-        code.className = `language-${file.language}`;
-        code.innerHTML = highlightCode(file.content, file.language);
-      }
-      deps.previewEl.hidden = false;
-      deps.editorEl.hidden = true;
-      deps.editorEl.value = file.content;
-      deps.editorEl.className = `chat-files-editor language-${file.language}`;
-
-      if (!file.editable) {
-        deps.editEl.hidden = true;
-        deps.saveEl.hidden = true;
-        deps.previewEl.hidden = false;
-        if (code) code.textContent = t("chat.filesBinary");
-        return;
-      }
-
-      deps.editEl.hidden = false;
-      deps.saveEl.hidden = true;
-      deps.editEl.textContent = t("chat.filesEdit");
+      paintFile(file.content, file.language, file.editable, true);
+      if (file.editable) deps.editorEl.focus();
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesLoadFailed")), "error");
     }
-  }
-
-  function enterEdit(): void {
-    deps.previewEl.hidden = true;
-    deps.editorEl.hidden = false;
-    deps.editEl.hidden = true;
-    deps.saveEl.hidden = false;
-    deps.editorEl.focus();
   }
 
   async function saveFile(): Promise<void> {
@@ -190,15 +183,8 @@ export function createFilesPanel(deps: FilesPanelDeps) {
         content: deps.editorEl.value,
       });
       dirty = false;
-      const code = deps.previewEl.querySelector("code");
-      if (code) {
-        code.className = `language-${openFileLanguage}`;
-        code.innerHTML = highlightCode(deps.editorEl.value, openFileLanguage);
-      }
-      deps.previewEl.hidden = false;
-      deps.editorEl.hidden = true;
-      deps.editEl.hidden = false;
-      deps.saveEl.hidden = true;
+      deps.saveEl.classList.remove("is-dirty");
+      paintFile(deps.editorEl.value, openFileLanguage, true);
       deps.setStatus(t("chat.filesSaved"), "ok");
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesSaveFailed")), "error");
@@ -225,10 +211,16 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     }
   });
 
-  deps.editEl.addEventListener("click", () => enterEdit());
   deps.saveEl.addEventListener("click", () => void saveFile());
+  deps.editorEl.addEventListener("scroll", () => {
+    deps.previewEl.scrollTop = deps.editorEl.scrollTop;
+    deps.previewEl.scrollLeft = deps.editorEl.scrollLeft;
+  });
   deps.editorEl.addEventListener("input", () => {
     dirty = true;
+    deps.saveEl.classList.add("is-dirty");
+    const code = deps.previewEl.querySelector("code");
+    if (code) code.innerHTML = highlightCode(deps.editorEl.value, openFileLanguage);
   });
   deps.editorEl.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -241,7 +233,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       const start = deps.editorEl.selectionStart;
       const end = deps.editorEl.selectionEnd;
       deps.editorEl.setRangeText("  ", start, end, "end");
-      dirty = true;
+      deps.editorEl.dispatchEvent(new Event("input", { bubbles: true }));
     }
   });
 
@@ -250,7 +242,6 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       deps.toggleEl.title = t("chat.filesToggleHint");
       deps.toggleEl.setAttribute("aria-label", t("chat.filesToggle"));
       deps.closeEl.textContent = t("chat.filesClose");
-      deps.editEl.textContent = t("chat.filesEdit");
       deps.saveEl.textContent = t("chat.filesSave");
     },
     isOpen: () => mode !== "closed",

@@ -151,35 +151,61 @@
         </header>
 
         <section id="chat-settings" class="chat-settings" hidden aria-hidden="true">
-          <header class="chat-settings-top">
-            <button id="chat-settings-back" type="button" class="chat-settings-back" data-i18n="chat.settingsBack">返回</button>
-            <h2 data-i18n="chat.settings">设置</h2>
-          </header>
-          <div class="chat-settings-body">
-            <section class="chat-settings-group">
-              <h3 data-i18n="chat.settingsAppearance">外观</h3>
-              <div class="chat-settings-row">
-                <div class="chat-settings-copy">
-                  <strong data-i18n="chat.settingsTheme">颜色</strong>
-                  <span data-i18n="chat.settingsThemeHint">问答页面的明暗</span>
-                </div>
-                <div class="chat-settings-segment" role="radiogroup" aria-label="颜色">
-                  <button type="button" role="radio" data-theme-choice="light" data-i18n="chat.themeLight">浅色</button>
-                  <button type="button" role="radio" data-theme-choice="dark" data-i18n="chat.themeDark">深色</button>
-                  <button type="button" role="radio" data-theme-choice="system" data-i18n="chat.settingsThemeSystem">和电脑一样</button>
+          <aside class="chat-settings-nav">
+            <button id="chat-settings-back" type="button" class="chat-settings-back">
+              <span aria-hidden="true">←</span>
+              <span data-i18n="chat.settingsBack">返回</span>
+            </button>
+            <label class="chat-settings-search">
+              <span class="chat-settings-search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="chat-settings-search"
+                type="search"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="搜索设置"
+              />
+            </label>
+            <nav class="chat-settings-menu" aria-label="设置">
+              <button type="button" class="chat-settings-nav-item is-on" data-settings-nav="appearance">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.5v2.2M12 18.3v2.2M4.8 6.2l1.6 1.6M17.6 16.2l1.6 1.6M4.8 17.8l1.6-1.6M17.6 7.8l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <span data-i18n="chat.settingsAppearance">外观</span>
+              </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="language">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h10M9 6c0 6-2.5 9.5-6 12M9 6c1.2 2.4 2.2 4.2 2.8 6.2M14 18l2.2-6L18.5 18M15.1 16h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span data-i18n="chat.settingsLanguage">语言</span>
+              </button>
+            </nav>
+          </aside>
+          <div class="chat-settings-main">
+            <h2 id="chat-settings-heading">外观</h2>
+            <p id="chat-settings-empty" class="chat-settings-empty" hidden data-i18n="chat.settingsSearchEmpty">没有找到这项设置。</p>
+            <section class="chat-settings-panel" data-settings-panel="appearance">
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsTheme">颜色</strong>
+                    <span data-i18n="chat.settingsThemeHint">问答页面的明暗</span>
+                  </div>
+                  <select id="chat-settings-theme" class="chat-settings-select" aria-label="颜色">
+                    <option value="light" data-i18n="chat.themeLight">浅色</option>
+                    <option value="dark" data-i18n="chat.themeDark">深色</option>
+                    <option value="system" data-i18n="chat.settingsThemeSystem">和电脑一样</option>
+                  </select>
                 </div>
               </div>
             </section>
-            <section class="chat-settings-group">
-              <h3 data-i18n="chat.settingsLanguage">语言</h3>
-              <div class="chat-settings-row">
-                <div class="chat-settings-copy">
-                  <strong data-i18n="chat.settingsLanguageLabel">界面文字</strong>
-                  <span data-i18n="chat.settingsLanguageHint">按钮和说明用哪种文字</span>
-                </div>
-                <div class="chat-settings-segment" role="radiogroup">
-                  <button type="button" role="radio" data-locale-choice="zh">中文</button>
-                  <button type="button" role="radio" data-locale-choice="en">English</button>
+            <section class="chat-settings-panel" data-settings-panel="language" hidden>
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsLanguageLabel">界面文字</strong>
+                    <span data-i18n="chat.settingsLanguageHint">按钮和说明用哪种文字</span>
+                  </div>
+                  <select id="chat-settings-locale" class="chat-settings-select">
+                    <option value="zh">中文</option>
+                    <option value="en">English</option>
+                  </select>
                 </div>
               </div>
             </section>
@@ -208,7 +234,6 @@
                 <span class="chat-files-language" id="chat-files-language">—</span>
               </div>
               <div class="chat-files-view-actions">
-                <button id="chat-files-edit" type="button" class="chat-files-edit" hidden data-i18n="chat.filesEdit">编辑</button>
                 <button id="chat-files-save" type="button" class="chat-files-save" hidden data-i18n="chat.filesSave">保存</button>
               </div>
             </div>
@@ -219,10 +244,12 @@
                   <path d="M13 3.75v5h5M9 13h6M9 16h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
                 </svg>
               </span>
-              <span data-i18n="chat.filesPickOne">从左侧选择一个文件查看内容</span>
+              <span data-i18n="chat.filesPickOne">从左侧选择一个文件，打开后直接修改</span>
             </div>
-            <pre id="chat-files-preview" class="chat-files-preview" hidden><code></code></pre>
-            <textarea id="chat-files-editor" class="chat-files-editor" hidden spellcheck="false"></textarea>
+            <div id="chat-files-code" class="chat-files-code" hidden>
+              <pre id="chat-files-preview" class="chat-files-preview"><code></code></pre>
+              <textarea id="chat-files-editor" class="chat-files-editor" spellcheck="false" wrap="off"></textarea>
+            </div>
           </div>
         </section>
 

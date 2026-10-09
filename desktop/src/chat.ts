@@ -57,7 +57,7 @@ import {
   filesPlaceholderEl,
   filesPreviewEl,
   filesEditorEl,
-  filesEditEl,
+  filesCodeEl,
   filesSaveEl,
   filesEmptyEl,
 } from "./chat-dom";
@@ -700,7 +700,7 @@ const askFilesPanel = createFilesPanel({
   placeholderEl: filesPlaceholderEl,
   previewEl: filesPreviewEl,
   editorEl: filesEditorEl,
-  editEl: filesEditEl,
+  codeEl: filesCodeEl,
   saveEl: filesSaveEl,
   emptyEl: filesEmptyEl,
   getRoot: () => {
