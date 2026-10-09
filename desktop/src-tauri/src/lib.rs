@@ -516,6 +516,7 @@ pub fn run() {
             check_runtime_versions_command,
             list_profiles_command,
             list_workspaces_command,
+            list_agent_memory_command,
             init_workspace_command,
             use_workspace_command,
             remove_workspace_command,

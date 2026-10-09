@@ -71,6 +71,20 @@
       </aside>
 
       <aside class="chat-side">
+        <div class="chat-side-tools">
+          <button
+            id="chat-side-collapse"
+            type="button"
+            class="chat-side-icon"
+            aria-label="收起项目栏"
+            title="收起项目栏"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="1.25" y="2.25" width="13.5" height="11.5" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M6 2.25v11.5" stroke="currentColor" stroke-width="1.2"/>
+            </svg>
+          </button>
+        </div>
         <button id="chat-new-workspace" type="button" class="btn-side btn-new" data-i18n="chat.newWorkspace">新建工作区</button>
         <div class="chat-session-block">
           <div class="chat-sessions-head">
@@ -91,50 +105,73 @@
         </button>
 
         <div class="chat-side-foot">
-          <p id="chat-status" class="chat-status" aria-live="polite"></p>
           <button
-            id="chat-settings-open"
+            id="chat-knowledge-open"
             type="button"
-            class="chat-settings-open"
+            class="chat-knowledge-open"
             aria-pressed="false"
-            aria-controls="chat-settings"
+            aria-controls="chat-knowledge"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/>
-              <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.1 6.1l1.6 1.6M16.3 16.3l1.6 1.6M6.1 17.9l1.6-1.6M16.3 7.7l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-            </svg>
-            <span data-i18n="chat.settings">设置</span>
+            <span data-i18n="chat.knowledge">知识库</span>
           </button>
+          <div class="chat-account-bar">
+            <button id="chat-account" type="button" class="chat-account" title="个人中心">
+              <span id="chat-account-avatar" class="chat-account-avatar" aria-hidden="true">个</span>
+              <span id="chat-account-name" class="chat-account-name">个人中心</span>
+            </button>
+            <button id="chat-update" type="button" class="chat-update" hidden data-i18n="chat.updateReady">更新</button>
+            <button
+              id="chat-settings-open"
+              type="button"
+              class="chat-settings-open"
+              aria-pressed="false"
+              aria-controls="chat-settings"
+              aria-label="设置"
+              title="设置"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <p class="chat-footnote" data-i18n="chat.footnote">默认贴屏幕右侧 · 完整交互请用终端</p>
       </aside>
 
+      <div
+        id="chat-splitter-sessions"
+        class="chat-layout-splitter chat-splitter-between-sessions-chat"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整对话栏与聊天栏宽度"
+        tabindex="0"
+      ></div>
+
       <main class="chat-main" id="chat-main">
         <header class="chat-top">
-          <h1 id="chat-title" class="chat-title">对话</h1>
+          <div class="chat-title-wrap">
+            <button
+              id="chat-side-expand"
+              type="button"
+              class="chat-side-icon chat-side-expand"
+              aria-label="展开项目栏"
+              title="展开项目栏"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="1.25" y="2.25" width="13.5" height="11.5" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+                <path d="M6 2.25v11.5" stroke="currentColor" stroke-width="1.2"/>
+              </svg>
+            </button>
+            <h1 id="chat-title" class="chat-title">对话</h1>
+          </div>
           <div class="chat-top-actions">
-            <div class="chat-mode" role="group" aria-label="选择怎么聊天">
-              <button
-                id="chat-mode-dialog"
-                type="button"
-                class="chat-mode-btn is-on"
-                aria-pressed="true"
-                data-i18n="chat.modeDialog"
-              >
-                对话
-              </button>
-              <button
-                id="chat-mode-voice"
-                type="button"
-                class="chat-mode-btn"
-                aria-pressed="false"
-                data-i18n="chat.modeVoice"
-                data-i18n-title="chat.modeVoiceHint"
-                title="说完一句就会发送。说「退出」或点「对话」回来。"
-              >
-                语音
-              </button>
-            </div>
             <button
               id="chat-files-toggle"
               type="button"
@@ -152,10 +189,6 @@
 
         <section id="chat-settings" class="chat-settings" hidden aria-hidden="true">
           <aside class="chat-settings-nav">
-            <button id="chat-settings-back" type="button" class="chat-settings-back">
-              <span aria-hidden="true">←</span>
-              <span data-i18n="chat.settingsBack">返回</span>
-            </button>
             <label class="chat-settings-search">
               <span class="chat-settings-search-icon" aria-hidden="true">⌕</span>
               <input
@@ -212,6 +245,34 @@
           </div>
         </section>
 
+        <section id="chat-knowledge" class="chat-knowledge" hidden aria-hidden="true" aria-label="知识库">
+          <div class="chat-knowledge-inner">
+            <header class="chat-knowledge-head">
+              <h2 data-i18n="chat.knowledge">知识库</h2>
+              <div class="chat-mode chat-knowledge-tabs" role="tablist" aria-label="知识库">
+                <button type="button" class="chat-mode-btn is-on" role="tab" data-kb-tab="global" aria-selected="true" data-i18n="chat.knowledgeGlobal">全局</button>
+                <button type="button" class="chat-mode-btn" role="tab" data-kb-tab="project" aria-selected="false" data-i18n="chat.knowledgeProject">项目</button>
+                <button type="button" class="chat-mode-btn" role="tab" data-kb-tab="agent" aria-selected="false" data-i18n="chat.knowledgeAgent">Agent</button>
+              </div>
+            </header>
+            <div id="chat-knowledge-picks" class="chat-knowledge-picks" hidden></div>
+            <p id="chat-knowledge-scope" class="chat-knowledge-scope"></p>
+            <div id="chat-knowledge-inherit"></div>
+            <div id="chat-knowledge-quick" class="chat-knowledge-quick" hidden></div>
+            <div id="chat-knowledge-workspace" class="chat-knowledge-workspace" hidden></div>
+            <div id="chat-knowledge-content" class="chat-knowledge-content"></div>
+          </div>
+        </section>
+
+        <div
+          id="chat-splitter-chat-files"
+          class="chat-layout-splitter chat-splitter-between-chat-files"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整聊天栏与文件夹宽度"
+          tabindex="0"
+        ></div>
+
         <section
           id="chat-files-panel"
           class="chat-files-panel"
@@ -220,8 +281,23 @@
           aria-label="当前文件夹"
         >
           <header class="chat-files-head">
-            <button id="chat-files-back" type="button" class="chat-files-back" hidden data-i18n="chat.filesBack">返回</button>
             <p id="chat-files-breadcrumb" class="chat-files-breadcrumb"></p>
+            <button
+              id="chat-files-layout"
+              type="button"
+              class="chat-files-layout chat-files-icon-btn"
+              aria-pressed="false"
+              aria-label="左右排列"
+              title="对话留在左边，文件在右边"
+            >
+              <svg class="chat-files-layout-icon chat-files-layout-icon-split" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3.5" y="5" width="7.5" height="14" rx="1.8" stroke="currentColor" stroke-width="1.7"/>
+                <rect x="13" y="5" width="7.5" height="14" rx="1.8" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+              <svg class="chat-files-layout-icon chat-files-layout-icon-cover" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
+                <rect x="4" y="5" width="16" height="14" rx="1.8" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+            </button>
             <button id="chat-files-close" type="button" class="chat-files-close" data-i18n="chat.filesClose">关闭</button>
           </header>
           <div id="chat-files-list" class="chat-files-list" role="list">
@@ -289,8 +365,20 @@
               <button id="chat-island-deny" type="button" class="chat-island-deny" data-i18n="chat.permissionDeny">拒绝</button>
             </div>
             <p id="chat-island-hint" class="chat-island-hint" data-i18n="chat.modeVoiceHint">
-              说完停几秒。这里会变成「正在问 AI」，然后把回复读出来。说「退出」或点「对话」回来。
+              说完停几秒。这里会变成「正在问 AI」，然后把回复读出来。说「退出」或点「回到打字」。
             </p>
+            <button
+              id="chat-mode-dialog"
+              type="button"
+              class="chat-island-leave"
+              aria-pressed="true"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="2.5" y="6" width="19" height="12" rx="2.5" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M8 14h8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+              </svg>
+              <span data-i18n="chat.modeDialog">回到打字</span>
+            </button>
           </section>
           <div class="chat-composer-box">
             <div id="chat-follow-queue" class="chat-follow-queue" hidden></div>
@@ -349,24 +437,48 @@
                   </button>
                   <div id="chat-model-menu" class="chat-model-menu" hidden role="listbox"></div>
                 </div>
-                <label
-                  class="chat-elevated"
-                  title="关闭自动审批时，需要确认的操作会在输入框上方弹出选择。"
-                >
-                  <input id="chat-elevated" type="checkbox" />
-                  <span class="chat-elevated-switch" aria-hidden="true"></span>
-                  <span id="chat-elevated-label" class="chat-elevated-text" data-i18n="chat.elevatedClaude">自动审批</span>
-                </label>
-                <label
-                  id="chat-read-image-wrap"
-                  class="chat-elevated"
-                  data-i18n-title="chat.readImageTextHint"
-                  title="打开后，把图里的字带给模型。不能看图的模型也能用。关掉可少占对话位置。"
-                >
-                  <input id="chat-read-image" type="checkbox" checked />
-                  <span class="chat-elevated-switch" aria-hidden="true"></span>
-                  <span id="chat-read-image-label" class="chat-elevated-text" data-i18n="chat.readImageText">图中文字</span>
-                </label>
+                <div class="chat-tune-wrap">
+                  <button
+                    id="chat-tune"
+                    type="button"
+                    class="btn-composer-icon chat-tune-btn"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-controls="chat-tune-menu"
+                    aria-label="回答设置"
+                    title="回答设置"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                      <circle cx="15" cy="7" r="2.2" stroke="currentColor" stroke-width="1.8"/>
+                      <circle cx="9" cy="17" r="2.2" stroke="currentColor" stroke-width="1.8"/>
+                    </svg>
+                    <span class="chat-tune-dot" aria-hidden="true"></span>
+                  </button>
+                  <div id="chat-tune-menu" class="chat-tune-menu" hidden>
+                    <div class="chat-tune-item">
+                      <label class="chat-elevated" title="关闭自动审批时，需要确认的操作会在输入框上方弹出选择。">
+                        <input id="chat-elevated" type="checkbox" />
+                        <span id="chat-elevated-label" class="chat-elevated-text" data-i18n="chat.elevatedClaude">自动审批</span>
+                        <span class="chat-elevated-switch" aria-hidden="true"></span>
+                      </label>
+                      <p class="chat-tune-hint" data-i18n="chat.tuneElevatedHint">打开后，要你点「允许」的操作会直接做。</p>
+                    </div>
+                    <div class="chat-tune-item">
+                      <label
+                        id="chat-read-image-wrap"
+                        class="chat-elevated"
+                        data-i18n-title="chat.readImageTextHint"
+                        title="打开后，把图里的字带给模型。不能看图的模型也能用。关掉可少占对话位置。"
+                      >
+                        <input id="chat-read-image" type="checkbox" checked />
+                        <span id="chat-read-image-label" class="chat-elevated-text" data-i18n="chat.readImageText">图中文字</span>
+                        <span class="chat-elevated-switch" aria-hidden="true"></span>
+                      </label>
+                      <p class="chat-tune-hint" data-i18n="chat.tuneReadImageHint">把图里的字一起发给 AI，看不了图的模型也能用。</p>
+                    </div>
+                  </div>
+                </div>
                 <div class="chat-context-wrap">
                   <button
                     id="chat-context-meter"
@@ -391,7 +503,21 @@
                   </button>
                 </div>
               </div>
-              <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
+              <div class="chat-composer-send">
+                <button
+                  id="chat-mode-voice"
+                  type="button"
+                  class="btn-composer-icon chat-voice-mode"
+                  aria-pressed="false"
+                  aria-label="语音对话"
+                  title="语音对话"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
+              </div>
             </div>
           </div>
         </footer>

@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
 import { paintChatPlan } from "../plan";
 import { renderMarkdown } from "../markdown";
 import {
@@ -197,6 +198,9 @@ export function createBubblesController(deps: BubblesDeps) {
       permission: opts?.permission,
     };
     session.messages.push(message);
+    if (role === "user") {
+      if (session.id === deps.getStore().activeId) clearEmptyChatStart(deps.logEl);
+    }
     if (role === "user" && !session.title.trim()) {
       const seed = content.trim() || opts?.attachments?.[0]?.name || "";
       session.title = seed.split(/\n/)[0].slice(0, 48);
@@ -340,6 +344,7 @@ export function createBubblesController(deps: BubblesDeps) {
     text: string,
     opts?: { id?: string; persist?: boolean; attachments?: ChatAttachment[] },
   ): HTMLElement {
+    clearEmptyChatStart(deps.logEl);
     if (kind === "assistant") {
       const { wrap, bubble } = createAssistantBubbleEl({ id: opts?.id });
       setAssistantMarkdown(bubble, text);
@@ -424,7 +429,7 @@ export function createBubblesController(deps: BubblesDeps) {
         deps.setTurnHadAssistantText(false);
       }
       const session = deps.activeSession();
-      if (session.messages.length === 0) {
+      if (!sessionHasChatContent(session)) {
         deps.logEl.appendChild(renderEmptyChat());
         paintChatPlan(deps.logEl, session.plan);
         return;

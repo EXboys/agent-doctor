@@ -18,6 +18,7 @@ use self::path::{
 };
 use crate::runtime::{bind_workspace_runtimes, WorkspaceBindInput};
 
+pub mod agent_memory;
 pub mod backends;
 pub mod backup;
 pub mod baseline;
@@ -84,6 +85,7 @@ pub struct UseWorkspaceOptions {
     pub restart_gateways: bool,
 }
 
+pub use agent_memory::{list_runtime_agent_memory, AgentMemoryReport, AgentMemorySnippet};
 pub use browser_mcp::{
     browser_mcp_wire_options_for_active_workspace, diagnose_and_wire_browser_mcp,
     installed_browser_mcp_runtime_ids, list_browser_mcp_targets, wire_browser_mcp_installed,

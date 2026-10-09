@@ -1,4 +1,5 @@
 import { getLocale, setLocale, t, type Locale } from "../i18n";
+import { closeKnowledge } from "./knowledge-page";
 import {
   applyThemePreference,
   readThemePreference,
@@ -37,6 +38,7 @@ export function closeChatSettings(): void {
 }
 
 export function openChatSettings(): void {
+  closeKnowledge();
   syncChatSettings();
   shellEl()?.classList.add("is-settings");
   mainEl()?.classList.add("is-settings");
@@ -112,9 +114,6 @@ export function bindChatSettings(applyI18n: () => void): void {
   openEl()?.addEventListener("click", () => {
     if (isChatSettingsOpen()) closeChatSettings();
     else openChatSettings();
-  });
-  document.querySelector("#chat-settings-back")?.addEventListener("click", () => {
-    closeChatSettings();
   });
   document.querySelector(".chat-settings-menu")?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-nav]");

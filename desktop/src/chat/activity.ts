@@ -8,6 +8,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
+import { clearEmptyChatStart } from "./empty-start";
 import { pushChatTurnError } from "./turn-errors";
 
 export type ActivityDeps = {
@@ -295,6 +296,7 @@ export function createActivityController(deps: ActivityDeps) {
   function pushActivity(phase: string, message: string): void {
     const text = message.trim() || phase;
     if (!text) return;
+    if (deps.isViewingRunningSession()) clearEmptyChatStart(deps.logEl);
 
     // The permission card that follows carries this state and its resolution.
     if (phase === "permission") return;

@@ -36,8 +36,18 @@ export function t(key: MessageKey, params?: Record<string, string>): string {
   let text: string = messages[locale][key] ?? messages.en[key] ?? key;
   if (params) {
     for (const [name, value] of Object.entries(params)) {
-      text = text.replace(`{${name}}`, value);
+      text = text.split(`{${name}}`).join(value);
     }
+  }
+  return text;
+}
+
+/** Fill `{name}` (and other `{param}`) in copy — never leave raw placeholders on screen. */
+export function tNamed(key: MessageKey, name: string, params?: Record<string, string>): string {
+  const merged = { name: name.trim() || "—", ...params };
+  let text = t(key, merged);
+  for (const [param, value] of Object.entries(merged)) {
+    text = text.split(`{${param}}`).join(value);
   }
   return text;
 }

@@ -94,6 +94,17 @@ function isDevUpdaterPathError(raw: string): boolean {
   return /StartingBinary|symlink on a non-allowed platform|contains a symlink/i.test(raw);
 }
 
+/** Version string when a packaged build can update. Dev builds stay quiet. */
+export async function probeAppUpdate(): Promise<string | null> {
+  if (checking) return null;
+  try {
+    const update = await check();
+    return update?.version?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readAppVersion(): Promise<string> {
   try {
     return await getVersion();

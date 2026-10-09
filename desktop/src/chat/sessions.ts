@@ -207,7 +207,7 @@ export function createSessionsController(deps: SessionsDeps) {
     del.className = "chat-session-delete";
     del.title = t("chat.deleteSession");
     del.setAttribute("aria-label", t("chat.deleteSession"));
-    del.textContent = "×";
+    del.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     del.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteSession(session.id);
@@ -422,18 +422,16 @@ export function createSessionsController(deps: SessionsDeps) {
         for (const session of visible) {
           list.appendChild(renderSessionRow(session, "compact"));
         }
-        block.append(list);
-
         if (hiddenCount > 0) {
           const more = document.createElement("button");
           more.type = "button";
           more.className = "chat-session-group-more";
-          more.textContent = t("chat.sessionShowMore", { n: String(hiddenCount) });
+          more.textContent = t("chat.sessionShowMore");
           more.addEventListener("click", () => {
             expandedSessionLists.add(key);
             renderSessionList();
           });
-          block.append(more);
+          list.append(more);
         } else if (
           group.sessions.length > SESSIONS_PREVIEW_COUNT &&
           expandedSessionLists.has(key)
@@ -446,8 +444,9 @@ export function createSessionsController(deps: SessionsDeps) {
             expandedSessionLists.delete(key);
             renderSessionList();
           });
-          block.append(less);
+          list.append(less);
         }
+        block.append(list);
       }
 
       deps.sessionListEl.appendChild(block);

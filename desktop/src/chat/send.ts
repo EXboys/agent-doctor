@@ -9,6 +9,7 @@ import {
   type AskRuntime,
 } from "../ask-resources";
 import { getLocale, t } from "../i18n";
+import { appendKnowledgeToPrompt } from "./knowledge-page";
 import {
   explainChatFailure,
   formatChatFailureLine,
@@ -332,7 +333,6 @@ export function createSendController(deps: SendDeps) {
     // Claim this chat before the first await, so a second send sees it and queues.
     deps.setBusy(true, chatSessionId);
     try {
-    await deps.ensureListener();
     if (foreground) {
       deps.clearQuickReplies();
       deps.setAssistantBubble(null);
@@ -340,9 +340,6 @@ export function createSendController(deps: SendDeps) {
       deps.setAssistantRaw("");
       deps.setPendingText("");
       deps.setTurnHadAssistantText(false);
-    }
-    if (foreground && deps.getVerifyMcpTurn()) {
-      deps.pushActivity("info", t("chat.verifyMcpWatching"));
     }
     const userMessage = foreground
       ? deps.persistMessage("user", userText, { attachments })
@@ -356,6 +353,11 @@ export function createSendController(deps: SendDeps) {
     if (!opts?.draft && foreground) clearComposer();
     if (here()) deps.setStatus(t("chat.running", { runtime: runtimeForTurn }), "muted");
     if (foreground) deps.pushActivity("think", t("chat.waitingModel"));
+
+    await deps.ensureListener();
+    if (foreground && deps.getVerifyMcpTurn()) {
+      deps.pushActivity("info", t("chat.verifyMcpWatching"));
+    }
 
     const pictureInputs = await readPictures(
       attachments.filter((item) => item.kind === "image"),
@@ -373,7 +375,12 @@ export function createSendController(deps: SendDeps) {
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
         runtime: runtimeForTurn,
-        prompt: deps.buildPromptWithHistory(promptUserText, attachments, chatSessionId, turn),
+        prompt: deps.buildPromptWithHistory(
+          appendKnowledgeToPrompt(promptUserText, sessionWorkspace?.trim() || null, runtimeForTurn),
+          attachments,
+          chatSessionId,
+          turn,
+        ),
         cwd: sessionCwd?.trim() || null,
         workspaceName: sessionWorkspace?.trim() || null,
         timeoutSec: 86_400,

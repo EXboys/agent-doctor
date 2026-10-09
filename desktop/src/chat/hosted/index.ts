@@ -180,7 +180,8 @@ export function createHostedController(deps: HostedDeps) {
 
     let title = t("chat.hostedListening");
     let detail = "";
-    deps.voiceModeEl.title = t("chat.modeVoiceHint");
+    deps.voiceModeEl.title = t("chat.modeVoice");
+    deps.voiceModeEl.setAttribute("aria-label", t("chat.modeVoice"));
     deps.islandEl.classList.remove("is-listening", "is-thinking", "is-speaking");
     if (!on) {
       deps.syncDictation();

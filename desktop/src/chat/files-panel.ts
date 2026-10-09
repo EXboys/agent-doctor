@@ -7,6 +7,7 @@ import {
   writeWorkspaceFile,
   type WorkspaceDirEntry,
 } from "../ipc";
+import { syncChatFilesSplitter } from "./layout-resize";
 
 export type FilesPanelDeps = {
   mainEl: HTMLElement;
@@ -14,8 +15,8 @@ export type FilesPanelDeps = {
   panelEl: HTMLElement;
   listEl: HTMLElement;
   viewEl: HTMLElement;
-  backEl: HTMLButtonElement;
   closeEl: HTMLButtonElement;
+  layoutEl: HTMLButtonElement;
   breadcrumbEl: HTMLElement;
   fileNameEl: HTMLElement;
   languageEl: HTMLElement;
@@ -30,9 +31,17 @@ export type FilesPanelDeps = {
 };
 
 type PanelMode = "closed" | "list" | "file";
+type FilesLayout = "cover" | "split";
+
+const LAYOUT_KEY = "agent-doctor-ask-files-layout";
+
+function readFilesLayout(): FilesLayout {
+  return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "cover";
+}
 
 export function createFilesPanel(deps: FilesPanelDeps) {
   let mode: PanelMode = "closed";
+  let layout: FilesLayout = readFilesLayout();
   let listRelative = "";
   let openFileRelative = "";
   let openFileLanguage = "text";
@@ -47,13 +56,28 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     return root;
   }
 
+  function syncLayoutButton(): void {
+    const split = layout === "split";
+    const label = t(split ? "chat.filesCover" : "chat.filesSplit");
+    const hint = t(split ? "chat.filesCoverHint" : "chat.filesSplitHint");
+    deps.layoutEl.title = hint;
+    deps.layoutEl.setAttribute("aria-label", label);
+    deps.layoutEl.setAttribute("aria-pressed", split ? "true" : "false");
+    deps.layoutEl.classList.toggle("is-on", split);
+    deps.layoutEl.querySelector<SVGElement>(".chat-files-layout-icon-split")?.toggleAttribute("hidden", split);
+    deps.layoutEl.querySelector<SVGElement>(".chat-files-layout-icon-cover")?.toggleAttribute("hidden", !split);
+  }
+
   function setOpen(open: boolean): void {
     mode = open ? "list" : "closed";
     deps.mainEl.classList.toggle("is-files-open", open);
+    deps.mainEl.classList.toggle("is-files-split", open && layout === "split");
     deps.toggleEl.classList.toggle("is-on", open);
     deps.toggleEl.setAttribute("aria-pressed", open ? "true" : "false");
     deps.panelEl.hidden = !open;
     deps.panelEl.setAttribute("aria-hidden", open ? "false" : "true");
+    syncChatFilesSplitter(open && layout === "split");
+    syncLayoutButton();
   }
 
   function paintFile(content: string, language: string, editable: boolean, resetScroll = false): void {
@@ -78,7 +102,6 @@ export function createFilesPanel(deps: FilesPanelDeps) {
 
   function showList(): void {
     deps.listEl.hidden = false;
-    deps.backEl.hidden = listRelative === "";
     void renderList();
   }
 
@@ -201,14 +224,11 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   });
 
   deps.closeEl.addEventListener("click", () => setOpen(false));
-
-  deps.backEl.addEventListener("click", () => {
-    if (listRelative) {
-      const parts = listRelative.split("/").filter(Boolean);
-      parts.pop();
-      listRelative = parts.join("/");
-      showList();
-    }
+  deps.layoutEl.addEventListener("click", () => {
+    layout = layout === "split" ? "cover" : "split";
+    localStorage.setItem(LAYOUT_KEY, layout);
+    if (mode !== "closed") setOpen(true);
+    else syncLayoutButton();
   });
 
   deps.saveEl.addEventListener("click", () => void saveFile());
@@ -243,6 +263,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       deps.toggleEl.setAttribute("aria-label", t("chat.filesToggle"));
       deps.closeEl.textContent = t("chat.filesClose");
       deps.saveEl.textContent = t("chat.filesSave");
+      syncLayoutButton();
     },
     isOpen: () => mode !== "closed",
     close: () => setOpen(false),

@@ -341,6 +341,24 @@ export function listWorkspaces(): Promise<WorkspacesDocument> {
   return invoke("list_workspaces_command");
 }
 
+export type AgentMemorySnippet = {
+  label: string;
+  body: string;
+};
+
+export type AgentMemoryReport = {
+  runtime: string;
+  snippets: AgentMemorySnippet[];
+  emptyHint?: string | null;
+};
+
+export function listAgentMemory(args: {
+  runtime: string;
+  workspaceName?: string | null;
+}): Promise<AgentMemoryReport> {
+  return invoke("list_agent_memory_command", args);
+}
+
 export type WorkspaceDirEntry = {
   name: string;
   relativePath: string;

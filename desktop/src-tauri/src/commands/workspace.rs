@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use agent_doctor_core::{
-    ensure_default_workspace, init_workspace, load_workspaces, remove_workspace,
-    use_workspace_with_options, workspace_doctor, workspace_fix, workspace_status,
-    InitWorkspaceReport, UseWorkspaceOptions, UseWorkspaceReport, WorkspaceDoctorReport,
-    WorkspaceFixOptions, WorkspaceFixReport, WorkspaceStatusReport, WorkspacesDocument,
+    ensure_default_workspace, init_workspace, list_runtime_agent_memory, load_workspaces,
+    remove_workspace, use_workspace_with_options, workspace_doctor, workspace_fix,
+    workspace_status, AgentMemoryReport, InitWorkspaceReport, UseWorkspaceOptions,
+    UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport,
+    WorkspaceStatusReport, WorkspacesDocument,
 };
 
 use tauri::Emitter;
@@ -85,4 +86,13 @@ pub fn workspace_fix_command(migrate_claude_mcp: bool) -> Result<WorkspaceFixRep
         migrate_claude_mcp,
     })
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_agent_memory_command(
+    runtime: String,
+    workspace_name: Option<String>,
+) -> Result<AgentMemoryReport, String> {
+    list_runtime_agent_memory(&runtime, workspace_name.as_deref())
+        .map_err(|error| error.to_string())
 }

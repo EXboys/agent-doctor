@@ -1,4 +1,8 @@
 import { renderFollowQueue } from "./chat/follow-queue";
+import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
+import { syncAccountBarLabels } from "./chat/account-bar";
+import { syncTuneLabels } from "./chat/tune-menu";
+import { syncKnowledgeLabels } from "./chat/knowledge-page";
 import type { PromptSessionEvent } from "./chat/types";
 import {
   beginLiveRun,
@@ -49,8 +53,8 @@ import {
   filesPanelEl,
   filesListEl,
   filesViewEl,
-  filesBackEl,
   filesCloseEl,
+  filesLayoutEl,
   filesBreadcrumbEl,
   filesNameEl,
   filesLanguageEl,
@@ -439,6 +443,10 @@ export function applyI18n(): void {
   updateRuntimeLabel();
   syncActionButton();
   askFilesPanel.applyI18n();
+  syncSidebarCollapseLabels();
+  syncAccountBarLabels();
+  syncTuneLabels();
+  syncKnowledgeLabels();
   if (contextCompactEl) {
     contextCompactEl.textContent = t("chat.contextCompact");
     contextCompactEl.title = t("chat.contextCompactHint");
@@ -484,6 +492,7 @@ export function updateElevatedLabel(): void {
 }
 
 export function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {
+  if (!statusEl) return;
   statusEl.textContent = text;
   statusEl.classList.remove("is-ok", "is-warn", "is-error");
   if (tone === "ok") statusEl.classList.add("is-ok");
@@ -692,8 +701,8 @@ const askFilesPanel = createFilesPanel({
   panelEl: filesPanelEl,
   listEl: filesListEl,
   viewEl: filesViewEl,
-  backEl: filesBackEl,
   closeEl: filesCloseEl,
+  layoutEl: filesLayoutEl,
   breadcrumbEl: filesBreadcrumbEl,
   fileNameEl: filesNameEl,
   languageEl: filesLanguageEl,
@@ -763,18 +772,10 @@ export async function loadAskResources(): Promise<void> {
   syncSessionWorkspaceUi();
 }
 
-/** New-workspace button stays once a project exists. Skills stay hidden until a real chat. */
+/** New-workspace button stays once a project exists. Skills and tools stay available. */
 export function syncAskChrome(showNewWorkspace: boolean): void {
   newWorkspaceEl.hidden = !showNewWorkspace;
-  const hasChat = Boolean(
-    chatState.store?.sessions?.some((session) =>
-      session.messages.some((message) => message.role === "user" || message.role === "assistant"),
-    ),
-  );
-  resourcesToggleEl.hidden = !hasChat;
-  if (!hasChat && shellEl.classList.contains("is-resources-open")) {
-    chatState.shellUi?.toggleResourcesPanel();
-  }
+  resourcesToggleEl.hidden = false;
 }
 
 export async function removeProjectFromAsk(name: string): Promise<void> {

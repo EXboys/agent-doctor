@@ -8,6 +8,7 @@ import { formatProviderFailure, teamupsLoginFailure, withProviderFailure } from 
 import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
+import { DEFAULT_TEAMUPS_BASE_URL, setTeamupsBaseUrl } from "../teamups-site";
 import type {
   PersonalProviderListItem,
   PersonalProvidersDocument,
@@ -76,7 +77,7 @@ function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderLi
   const placeholder: PersonalProviderListItem = {
     id: OFFICIAL_PROVIDER_ID,
     name: t("personal.officialName"),
-    url: officialAccount?.base_url || "https://teamups.vip",
+    url: officialAccount?.base_url || DEFAULT_TEAMUPS_BASE_URL,
     model: "",
     protocol: "openai",
     api_key_hint: "",
@@ -368,6 +369,7 @@ export function createPersonalController(deps: PersonalDeps) {
       const account = await teamupsAccountStatus().catch(() => null);
       if (!account) return;
       officialAccount = account;
+      setTeamupsBaseUrl(account.base_url);
       const doc = appState.personalProvidersDoc;
       if (doc) renderPersonalProviderList(doc);
       noteOfficialBalanceRefresh();
@@ -425,6 +427,7 @@ export function createPersonalController(deps: PersonalDeps) {
     personalListHintEl.textContent = t("personal.officialSwitching");
     try {
       officialAccount = await signOutTeamups();
+      setTeamupsBaseUrl(officialAccount?.base_url);
       const doc = appState.personalProvidersDoc;
       if (doc) renderPersonalProviderList(doc);
       await startOfficialLogin();
@@ -796,7 +799,7 @@ export function createPersonalController(deps: PersonalDeps) {
         return;
       }
       if (action === "official-membership") {
-        const base = officialAccount?.base_url?.replace(/\/+$/, "") || "https://teamups.vip";
+        const base = officialAccount?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
         startOfficialBalanceWatch();
         void openUrl(`${base}/membership`);
         return;

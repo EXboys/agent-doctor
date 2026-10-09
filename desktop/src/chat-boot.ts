@@ -38,6 +38,8 @@ import {
   refreshWiredProvider,
   flushStorePersist,
   applyI18n,
+  selectedRuntime,
+  activeSession,
   pickAttachments,
   setupFileDrop,
   renderActiveMessages,
@@ -69,6 +71,13 @@ import { isAskRuntime } from "./chat/runtime";
 import { t } from "./i18n";
 import { applyThemePreference, readThemePreference, watchSystemTheme } from "./chat/theme";
 import { bindChatSettings } from "./chat/settings-page";
+import { bindSidebarCollapse } from "./chat/session-sidebar";
+import { bindAccountBar } from "./chat/account-bar";
+import { bindLayoutResize } from "./chat/layout-resize";
+import { bindTuneMenu } from "./chat/tune-menu";
+import { bindKnowledge } from "./chat/knowledge-page";
+import { orderedProjectNames } from "./chat/project-order";
+import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 import { wireChatControllers } from "./chat-wire";
 
@@ -84,6 +93,27 @@ export function bootChat(): void {
   applyThemePreference(readThemePreference(), false);
   watchSystemTheme();
   bindChatSettings(() => applyI18n());
+  bindSidebarCollapse();
+  bindLayoutResize();
+  bindAccountBar();
+  bindTuneMenu();
+  bindKnowledge({
+    projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),
+    currentProject: () => sessionWorkspaceName(activeSession(), chatState.workspaceDoc),
+    currentAgent: () => selectedRuntime(),
+    projectPath: (name) => chatState.workspaceDoc?.workspaces[name]?.path?.trim() || null,
+    lastUserPrompt: () => {
+      const messages = activeSession().messages;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role === "user") {
+          const text = message.content.trim();
+          if (text) return text;
+        }
+      }
+      return null;
+    },
+  });
   win.__AD_ASK_APPLY_RUNTIME__ = (runtime) => {
     if (isAskRuntime(runtime)) {
       ensureRuntimeSession(runtime);
