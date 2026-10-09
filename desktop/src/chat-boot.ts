@@ -389,8 +389,8 @@ export function bootChat(): void {
   }));
   void listen<string>("island-open-session", (event) => {
     const id = event.payload;
-    if (!id || !chatState.sessions?.switchSession) return;
-    chatState.sessions.switchSession(id);
+    if (!id || !chatState.sessions?.openSessionFromIsland) return;
+    chatState.sessions.openSessionFromIsland(id);
   });
   void listen<{ sessionId?: string; text?: string }>("island-send-text", (event) => {
     const text = event.payload?.text?.trim() ?? "";

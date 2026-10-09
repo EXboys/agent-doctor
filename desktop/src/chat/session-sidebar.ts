@@ -51,6 +51,14 @@ export function sidebarGroupKey(name: string | null): string {
   return name ?? "__none__";
 }
 
+/**
+ * Order key for one chat in a project.
+ * Opening a chat from the island surfaces it above older rows until a later update.
+ */
+export function sidebarSessionRank(updatedAt: number, surfacedAt = 0): number {
+  return Math.max(updatedAt, surfacedAt);
+}
+
 export function visibleSessionsForGroup(
   sessions: ChatSession[],
   groupKey: string,

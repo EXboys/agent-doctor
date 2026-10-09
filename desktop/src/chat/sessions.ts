@@ -7,6 +7,7 @@ import { createEmptySession, uid } from "./store";
 import {
   defaultWorkspaceName,
   listProjectGroupsForSidebar,
+  sessionWorkspaceName,
 } from "./session-workspace";
 import { attachProjectReorderPointer, consumeProjectDragClick } from "./project-drag";
 import {
@@ -19,6 +20,7 @@ import {
   SESSIONS_PREVIEW_COUNT,
   shouldUseProjectSidebar,
   sidebarGroupKey,
+  sidebarSessionRank,
   visibleSessionsForGroup,
 } from "./session-sidebar";
 import { formatTime } from "./copy-ui";
@@ -106,6 +108,8 @@ export function createSessionsController(deps: SessionsDeps) {
   const collapsedProjects = new Set<string>();
   /** Per-project list expanded past SESSIONS_PREVIEW_COUNT. */
   const expandedSessionLists = new Set<string>();
+  /** Chats opened from the island, so they sit at the top until a newer update. */
+  const surfacedAt = new Map<string, number>();
 
   function commitProjectReorder(
     from: string,
@@ -349,6 +353,11 @@ export function createSessionsController(deps: SessionsDeps) {
     }
 
     for (const group of groups) {
+      group.sessions.sort(
+        (a, b) =>
+          sidebarSessionRank(b.updatedAt, surfacedAt.get(b.id) ?? 0) -
+          sidebarSessionRank(a.updatedAt, surfacedAt.get(a.id) ?? 0),
+      );
       const key = sidebarGroupKey(group.name);
       const projectCollapsed = collapsedProjects.has(key);
       const block = document.createElement("section");
@@ -544,6 +553,28 @@ export function createSessionsController(deps: SessionsDeps) {
       deps.pushActivity("think", t("chat.typing"));
     }
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
+  }
+
+  /** The chat opened from the island belongs at the top, still showing its last activity time. */
+  function openSessionFromIsland(id: string): void {
+    const sessions = deps.getStore().sessions;
+    const index = sessions.findIndex((session) => session.id === id);
+    if (index < 0) return;
+    const session = sessions[index]!;
+    surfacedAt.set(id, Date.now());
+    collapsedProjects.delete(
+      sidebarGroupKey(sessionWorkspaceName(session, deps.getWorkspaceDoc())),
+    );
+    if (index > 0) {
+      sessions.splice(index, 1);
+      sessions.unshift(session);
+      deps.saveStore();
+    }
+    switchSession(id);
+    renderSessionList();
+    deps.sessionListEl
+      .querySelector<HTMLElement>(`.chat-session[data-session-id="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }
 
   function switchSession(id: string, focus = true): void {
@@ -927,6 +958,7 @@ export function createSessionsController(deps: SessionsDeps) {
     detachLiveDom,
     reattachLiveUi,
     switchSession,
+    openSessionFromIsland,
     deleteSession,
     ensureRuntimeSession,
     startNewSession,
