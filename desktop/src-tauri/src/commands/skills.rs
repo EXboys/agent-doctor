@@ -149,7 +149,7 @@ fn extract_zip(from: &Path, to: &Path) -> Result<(), String> {
         if entry.is_dir() {
             continue;
         }
-        let Some(relative) = entry.enclosed_name().map(PathBuf::from) else {
+        let Some(relative) = entry.enclosed_name() else {
             continue;
         };
         if relative
