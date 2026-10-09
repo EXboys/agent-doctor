@@ -1,6 +1,7 @@
 import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
+import { bindLocaleSync } from "../locale-sync";
 import { stripMarkdown } from "../chat/format";
 import { renderMarkdown } from "../markdown";
 import { doingText, planProgress, renderPlanCard } from "../plan";
@@ -1111,6 +1112,10 @@ function syncScrollHint(): void {
 
 function boot(): void {
   applyStaticI18n();
+  bindLocaleSync(() => {
+    applyStaticI18n();
+    if (lastView) render(lastView);
+  });
   scrollHintEl?.addEventListener("click", () => {
     if (!detailEl) return;
     detailEl.scrollTo({ top: detailEl.scrollHeight, behavior: "smooth" });

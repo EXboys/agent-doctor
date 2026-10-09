@@ -1,11 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  applyStaticI18n,
-  getLocale,
-  setLocale,
-  type Locale,
-} from "./i18n";
+import { applyStaticI18n, getLocale, type Locale } from "./i18n";
+import { bindLocaleSync, publishLocale } from "./locale-sync";
 import { initUpdaterUi } from "./updater";
 import { isTeamEdition } from "./edition";
 import {
@@ -85,11 +81,12 @@ async function switchLocale(next: Locale) {
   if (next === getLocale()) {
     return;
   }
-  setLocale(next);
+  await publishLocale(next);
+  applyMainLocale();
+}
+
+function applyMainLocale() {
   updateLangButtons();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
-  });
   applyStaticI18n();
   if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && refs.firstRun.getPhase() !== "awaitingWiring") {
     refs.firstRun.renderFirstRunUi();
@@ -184,7 +181,7 @@ void listen("workspace-changed", () => {
   void refs.resources!.loadMcpStatus();
 });
 
-setLocale(getLocale());
+bindLocaleSync(() => applyMainLocale());
 applyStaticI18n();
 refs.wiring.syncProviderPanelToEdition();
 refs.wiring.updateFooterCopy(isTeamEdition() ? "team" : "personal");

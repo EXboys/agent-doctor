@@ -359,6 +359,14 @@ export function listWorkspaces(): Promise<WorkspacesDocument> {
   return invoke("list_workspaces_command");
 }
 
+export function getAppLocale(): Promise<string | null> {
+  return invoke("get_app_locale_command");
+}
+
+export function setAppLocale(locale: string): Promise<void> {
+  return invoke("set_app_locale_command", { locale });
+}
+
 export type AgentMemorySnippet = {
   label: string;
   body: string;

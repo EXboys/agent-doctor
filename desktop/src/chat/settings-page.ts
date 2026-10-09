@@ -1,4 +1,5 @@
-import { getLocale, setLocale, t, type Locale } from "../i18n";
+import { getLocale, t } from "../i18n";
+import { publishLocale } from "../locale-sync";
 import { closeKnowledgePage, closeResourcesMainPage, isKnowledgePageOpen } from "./overlay-pages";
 import {
   applyThemePreference,
@@ -131,9 +132,10 @@ export function bindChatSettings(applyI18n: () => void): void {
   localeEl()?.addEventListener("change", () => {
     const next = localeEl()?.value;
     if (next === "zh" || next === "en") {
-      setLocale(next as Locale);
-      applyI18n();
-      syncChatSettings();
+      void publishLocale(next).then(() => {
+        applyI18n();
+        syncChatSettings();
+      });
     }
   });
   syncChatSettings();

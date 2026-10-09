@@ -596,7 +596,9 @@ pub fn run() {
             island_set_content_height_command,
             island_set_hide_when_idle_command,
             island_hide_when_idle_command,
-            current_island_view_command
+            current_island_view_command,
+            get_app_locale_command,
+            set_app_locale_command
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

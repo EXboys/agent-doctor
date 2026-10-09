@@ -1,6 +1,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { applyStaticI18n, getLocale, t } from "./i18n";
+import { bindLocaleSync } from "./locale-sync";
 import { accountBlockMessage, withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
 import {
@@ -333,6 +334,11 @@ dom.deepBodyEl.addEventListener("submit", (event) => {
 document.documentElement.classList.add("is-opaque-shell");
 document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
 applyStaticI18n(document);
+bindLocaleSync(() => {
+  document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
+  applyStaticI18n(document);
+  renderPresetChips();
+});
 renderPresetChips();
 paint.paintBootShell();
 if (!diagnoseBootDeferred()) {

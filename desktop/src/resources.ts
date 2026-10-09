@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { getLocale, t } from "./i18n";
+import { bindLocaleSync } from "./locale-sync";
 import type { MessageKey } from "./i18n";
 import type { ResourceRow } from "./types";
 import { resourcesState, subtitleEl, sectionTabsEl, mainHeadEl, skillsPanelEl, skillScopeEl, skillScopeHintEl, panelLeadEl, skillsStickyEl, toolFiltersEl, searchEl, footnoteEl, toolsFootnoteEl, mallAccountEl, mallLoginEl, mallLogoutEl, mcpShowUiEl, mcpUserDataDirEl, mcpProfileDirectoryEl, mcpProfileSystemEl, mcpProfileIsolatedEl, mcpRefreshEl, mcpDiagnoseWireEl, personalEdition } from "./resources-state";
@@ -482,6 +483,7 @@ function openFocusedSection(section?: string | null): void {
 }
 
 applyI18n();
+bindLocaleSync(() => applyI18n());
 (window as Window & { __AD_RESOURCES_APPLY_SECTION__?: (section: string) => void }).__AD_RESOURCES_APPLY_SECTION__ =
   (section) => {
     openFocusedSection(section);

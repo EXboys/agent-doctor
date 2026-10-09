@@ -64,9 +64,10 @@ import {
 } from "./chat";
 
 import { emit, listen } from "@tauri-apps/api/event";
+import { bindLocaleSync } from "./locale-sync";
 import { startIslandPublisher } from "./island/publish";
 import { isAskRuntime } from "./chat/runtime";
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
 import { applyThemePreference, readThemePreference, watchSystemTheme } from "./chat/theme";
 import { bindChatSettings } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
@@ -362,6 +363,12 @@ export function bootChat(): void {
 
   void listen("workspace-changed", () => {
     void loadAskResources();
+  });
+
+  bindLocaleSync(() => {
+    applyI18n();
+    const locale = document.querySelector<HTMLSelectElement>("#chat-settings-locale");
+    if (locale) locale.value = getLocale();
   });
 
   void ensureListener();
