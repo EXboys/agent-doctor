@@ -20,7 +20,14 @@ export interface PromptSessionReport {
 }
 
 export type PromptSessionEvent =
-  | { type: "started"; session_id: string; runtime: string; cwd: string; command: string }
+  | {
+      type: "started";
+      session_id: string;
+      runtime: string;
+      cwd: string;
+      command: string;
+      client_run_id?: string;
+    }
   | { type: "status"; session_id: string; phase: string; message: string }
   | { type: "delta"; session_id: string; text: string }
   | { type: "thinking"; session_id: string; text: string }

@@ -131,6 +131,8 @@ export type StartPromptSessionArgs = {
   resumeThreadId?: string | null;
   selectedMcps?: string[] | null;
   imagePaths?: string[] | null;
+  /** Chat session id, so several chats can run at the same time. */
+  clientRunId?: string | null;
 };
 
 export function getEvotownStatus(): Promise<EvotownStatus> {
@@ -597,8 +599,8 @@ export function startPromptSession(args: StartPromptSessionArgs): Promise<Prompt
   return invoke("start_prompt_session_command", args);
 }
 
-export function cancelPromptSession(): Promise<boolean> {
-  return invoke("cancel_prompt_session_command");
+export function cancelPromptSession(clientRunId?: string | null): Promise<boolean> {
+  return invoke("cancel_prompt_session_command", { clientRunId: clientRunId ?? null });
 }
 
 export function resolvePermissionSession(args: {

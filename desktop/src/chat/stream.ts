@@ -28,6 +28,9 @@ export type StreamDeps = {
   setTurnHadAssistantText: (v: boolean) => void;
   getUnseenCompletedSessionIds: () => Set<string>;
   isEventForCurrentRun: (sessionId: string | undefined) => boolean;
+  resolveEventChatId: (payload: PromptSessionEvent) => string | null;
+  isForegroundChat: (chatId: string) => boolean;
+  applyBackgroundEvent: (chatId: string, payload: PromptSessionEvent) => void;
   setDisplayedCwd: (cwd: string) => void;
   pushActivity: (phase: string, message: string) => void;
   flushSessionListRender: () => void;
@@ -61,7 +64,7 @@ export type StreamDeps = {
   applyVerifyMcpFooter: () => void;
   flushStorePersist: () => void;
   setBusy: (next: boolean, chatSessionId?: string | null) => void;
-  settleRunRouting: () => void;
+  settleRunRouting: (chatSessionId?: string | null) => void;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
@@ -100,8 +103,10 @@ export function createStreamController(deps: StreamDeps) {
     holder.__adPromptSessionUnlisten = undefined;
     const unlisten = await getCurrentWebviewWindow().listen<PromptSessionEvent>("prompt-session-event", (event) => {
       const payload = event.payload;
-      const eventSessionId = "session_id" in payload ? payload.session_id : undefined;
-      if (payload.type !== "started" && !deps.isEventForCurrentRun(eventSessionId)) {
+      const chatId = deps.resolveEventChatId(payload);
+      if (!chatId) return;
+      if (!deps.isForegroundChat(chatId)) {
+        deps.applyBackgroundEvent(chatId, payload);
         return;
       }
       const thinkingStatus = payload.type === "status" && payload.phase === "thinking";
@@ -154,8 +159,8 @@ export function createStreamController(deps: StreamDeps) {
           deps.onPlan(payload.items);
           break;
         case "completed": {
-          const completedSessionId = deps.getRunningChatSessionId();
-          const viewing = deps.isViewingRunningSession() || deps.getStore().activeId === completedSessionId;
+          const completedSessionId = chatId;
+          const viewing = deps.getStore().activeId === completedSessionId;
           deps.flushPendingTextSync();
           // Fallback only when this turn never streamed assistant text.
           if (!deps.getTurnHadAssistantText() && !deps.getAssistantRaw().trim() && payload.summary?.trim()) {
@@ -187,8 +192,8 @@ export function createStreamController(deps: StreamDeps) {
           deps.reportVerifyMcpIfNeeded();
           deps.applyVerifyMcpFooter();
           deps.flushStorePersist();
-          deps.setBusy(false);
-          deps.settleRunRouting();
+          deps.setBusy(false, completedSessionId);
+          deps.settleRunRouting(completedSessionId);
           if (!viewing && completedSessionId) {
             deps.getUnseenCompletedSessionIds().add(completedSessionId);
           }

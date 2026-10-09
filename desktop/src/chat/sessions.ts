@@ -20,6 +20,7 @@ import {
   visibleSessionsForGroup,
 } from "./session-sidebar";
 import { formatTime } from "./copy-ui";
+import { backgroundChoiceCount, isChatRunning, runningCount } from "./live-runs";
 import {
   COMPACT_KEEP_TURNS,
   MAX_SESSIONS,
@@ -87,6 +88,8 @@ export type SessionsDeps = {
   isComposerLocked: () => boolean;
   getWorkspaceDoc: () => WorkspaceDoc | null;
   syncSessionWorkspaceUi: () => void;
+  captureRunningView: () => void;
+  restoreRunningView: () => void;
 };
 
 export type SessionsApi = ReturnType<typeof createSessionsController>;
@@ -142,8 +145,12 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function renderSessionRow(session: ChatSession, layout: "default" | "compact" = "default"): HTMLElement {
-    const isRunning = deps.getBusy() && session.id === deps.getRunningChatSessionId();
-    const awaitingConfirm = isRunning && deps.getPendingPermissionBatch().length > 0;
+    const isRunning = isChatRunning(session.id);
+    const awaitingConfirm =
+      isRunning &&
+      (session.id === deps.getStore().activeId
+        ? deps.getPendingPermissionBatch().length > 0
+        : backgroundChoiceCount(session.id) > 0);
     const doneUnseen = !isRunning && deps.getUnseenCompletedSessionIds().has(session.id);
     const row = document.createElement("div");
     row.className = `chat-session${session.id === deps.getStore().activeId ? " is-active" : ""}${
@@ -431,23 +438,18 @@ export function createSessionsController(deps: SessionsDeps) {
     const session = deps.getStore().sessions.find((s) => s.id === id);
     if (!session) return;
 
-    const leavingRunning = Boolean(deps.getBusy() && deps.getStore().activeId === deps.getRunningChatSessionId());
-    const enteringRunning = Boolean(deps.getBusy() && id === deps.getRunningChatSessionId());
+    const leavingRunning = isChatRunning(deps.getStore().activeId);
+    const enteringRunning = isChatRunning(id);
 
     if (leavingRunning) {
+      deps.captureRunningView();
       detachLiveDom();
-    } else if (!deps.getBusy()) {
+    } else {
       deps.setAssistantBubble(null);
       deps.setAssistantMessageId(null);
       deps.setAssistantRaw("");
       deps.setPendingText("");
       deps.setTurnHadAssistantText(false);
-      deps.setActivityEl(null);
-      deps.setLifecycleActivityEl(null);
-      deps.setToolGroupEl(null);
-    } else {
-      // Leaving a non-running chat while another run continues — clear local view only.
-      deps.setAssistantBubble(null);
       deps.setActivityEl(null);
       deps.setLifecycleActivityEl(null);
       deps.setToolGroupEl(null);
@@ -461,8 +463,9 @@ export function createSessionsController(deps: SessionsDeps) {
     }
     deps.renderActiveMessages();
     if (enteringRunning) {
+      deps.restoreRunningView();
       reattachLiveUi();
-    } else if (deps.getBusy() && deps.getRunningChatSessionId()) {
+    } else if (runningCount() > 0) {
       deps.setStatus(t("chat.otherSessionRunningHint"), "muted");
     } else {
       deps.setStatus("");
@@ -476,7 +479,7 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function deleteSession(id: string): void {
-    if (deps.getBusy() && id === deps.getRunningChatSessionId()) {
+    if (isChatRunning(id)) {
       deps.setStatus(t("chat.cannotDeleteRunning"), "warn");
       return;
     }
@@ -541,16 +544,15 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   function startNewSession(workspaceName?: string | null): void {
-    if (deps.getBusy() && deps.getStore().activeId === deps.getRunningChatSessionId()) {
+    if (isChatRunning(deps.getStore().activeId)) {
+      deps.captureRunningView();
       detachLiveDom();
-    } else if (!deps.getBusy()) {
+    } else {
       deps.setAssistantBubble(null);
       deps.setAssistantMessageId(null);
       deps.setAssistantRaw("");
       deps.setPendingText("");
       deps.setTurnHadAssistantText(false);
-    } else {
-      deps.setAssistantBubble(null);
     }
     const pinned =
       workspaceName?.trim() ||
@@ -571,7 +573,7 @@ export function createSessionsController(deps: SessionsDeps) {
     deps.syncSessionWorkspaceUi();
     renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(session);
-    if (deps.getBusy() && deps.getRunningChatSessionId()) {
+    if (runningCount() > 0) {
       deps.setStatus(t("chat.otherSessionRunningHint"), "muted");
     } else {
       deps.setStatus(t("chat.newSessionReady"), "ok");

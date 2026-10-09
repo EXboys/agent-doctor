@@ -1,3 +1,5 @@
+import { applyBackgroundEvent } from "./chat/background-run";
+import { isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 import { normalizePlanItems, paintChatPlan } from "./plan";
 
@@ -58,6 +60,9 @@ import {
   sessionById,
   runTargetSession,
   isEventForCurrentRun,
+  resolveEventChatId,
+  captureRunningView,
+  restoreRunningView,
   settleRunRouting,
   autoResizePrompt,
   selectedRuntime,
@@ -503,6 +508,8 @@ export function wireChatControllers(): void {
     isComposerLocked: () => isComposerLocked(),
     getWorkspaceDoc: () => chatState.workspaceDoc,
     syncSessionWorkspaceUi: () => syncSessionWorkspaceUi(),
+    captureRunningView: () => captureRunningView(),
+    restoreRunningView: () => restoreRunningView(),
   });
 
   chatState.stream = createStreamController({
@@ -533,6 +540,36 @@ export function wireChatControllers(): void {
     },
     getUnseenCompletedSessionIds: () => chatState.unseenCompletedSessionIds,
     isEventForCurrentRun: (sessionId) => isEventForCurrentRun(sessionId),
+    resolveEventChatId: (payload) => resolveEventChatId(payload),
+    isForegroundChat: (chatId) => chatState.store.activeId === chatId,
+    applyBackgroundEvent: (chatId, payload) => {
+      applyBackgroundEvent(
+        {
+          sessionById: (id) => sessionById(id),
+          touchSession: (session) => touchSession(session),
+          scheduleStorePersist: () => scheduleStorePersist(),
+          scheduleSessionListRender: () => scheduleSessionListRender(),
+          setStatus: (text, tone) => setStatus(text, tone),
+          getActiveId: () => chatState.store.activeId,
+          endRun: (id) => setBusy(false, id),
+          noteUnseen: (id) => {
+            chatState.unseenCompletedSessionIds.add(id);
+          },
+          onPlan: (id, planEvent) => {
+            const steps = normalizePlanItems(planEvent.items);
+            const session = chatState.store.sessions.find((item) => item.id === id);
+            if (!session) return;
+            session.plan = steps.length ? { items: steps, at: Date.now() } : undefined;
+            touchSession(session);
+            flushStorePersist();
+            if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
+          },
+          autoApprove: () => elevatedEl.checked,
+        },
+        chatId,
+        payload,
+      );
+    },
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
     pushActivity: (phase, message) => pushActivity(phase, message),
     flushSessionListRender: () => flushSessionListRender(),
@@ -562,7 +599,7 @@ export function wireChatControllers(): void {
     applyVerifyMcpFooter: () => applyVerifyMcpFooter(),
     flushStorePersist: () => flushStorePersist(),
     setBusy: (next, chatSessionId) => setBusy(next, chatSessionId),
-    settleRunRouting: () => settleRunRouting(),
+    settleRunRouting: (chatSessionId) => settleRunRouting(chatSessionId),
     setStatus: (text, tone) => setStatus(text, tone),
     showQuickReplies: (sourceText) => {
       if (chatState.hosted?.isActive()) {
@@ -595,6 +632,8 @@ export function wireChatControllers(): void {
     getStore: () => chatState.store,
     getBusy: () => chatState.busy,
     getBusyGen: () => chatState.busyGen,
+    isChatRunning: (id) => isChatRunning(id),
+    runningCount: () => runningCount(),
     getRunningChatSessionId: () => chatState.runningChatSessionId,
     getPendingAttachments: () => chatState.pendingAttachments,
     setPendingAttachments: (items) => {
@@ -661,7 +700,7 @@ export function wireChatControllers(): void {
     applyVerifyEvidenceFromAssistant: () => applyVerifyEvidenceFromAssistant(),
     reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
     expireLivePermissionCards: () => expireLivePermissionCards(),
-    settleRunRouting: () => settleRunRouting(),
+    settleRunRouting: (chatSessionId) => settleRunRouting(chatSessionId),
     renderSessionList: () => renderSessionList(),
     readImageTextEnabled: () => readImageTextEnabled(),
     refreshComposer: () => syncComposerUi(),

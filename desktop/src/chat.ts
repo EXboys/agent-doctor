@@ -1,4 +1,14 @@
 import { renderFollowQueue } from "./chat/follow-queue";
+import type { PromptSessionEvent } from "./chat/types";
+import {
+  beginLiveRun,
+  bindBackendSession,
+  chatIdForBackend,
+  endLiveRun,
+  isChatRunning,
+  liveRun,
+  liveRuns,
+} from "./chat/live-runs";
 import { chatState, initChatStore } from "./chat-state";
 import {
   elevatedEl,
@@ -208,9 +218,27 @@ export function clearActiveSession(): void {
 export function compactActiveSession(): void {
   chatState.sessions.compactActiveSession();
 }
-/** True when the open chat owns the in-flight (or just-finishing) run. */
+/** True when the open chat has a run in flight. Other chats may be running too. */
 export function isViewingRunningSession(): boolean {
-  return Boolean(chatState.runningChatSessionId && chatState.store.activeId === chatState.runningChatSessionId);
+  return isChatRunning(chatState.store?.activeId);
+}
+
+/** Bind a backend prompt-session id to the chat that started it. */
+export function resolveEventChatId(payload: PromptSessionEvent): string | null {
+  if (payload.type === "started") {
+    const clientId = payload.client_run_id?.trim();
+    if (clientId && isChatRunning(clientId)) {
+      bindBackendSession(clientId, payload.session_id);
+      return clientId;
+    }
+    const waiting = [...liveRuns()].filter((run) => !run.backendSessionId);
+    if (waiting.length === 1) {
+      bindBackendSession(waiting[0].chatSessionId, payload.session_id);
+      return waiting[0].chatSessionId;
+    }
+  }
+  const mapped = chatIdForBackend(payload.session_id);
+  return mapped && isChatRunning(mapped) ? mapped : null;
 }
 
 /** Composer/send locks only while a run is busy and that chat is open. */
@@ -232,17 +260,55 @@ export function runTargetSession(): ChatSession {
 
 /** Ignore stale events from a previous backend session. */
 export function isEventForCurrentRun(sessionId: string | undefined): boolean {
-  // Prefer backend session id so late events still apply after invoke()>finally
-  // clears `busy` a tick before the matching `completed`/delta is handled.
-  if (chatState.runningBackendSessionId) {
-    return !sessionId || sessionId === chatState.runningBackendSessionId;
-  }
-  return chatState.busy;
+  if (sessionId && chatIdForBackend(sessionId)) return true;
+  return isChatRunning(chatState.runningChatSessionId) && !sessionId;
 }
 
-export function settleRunRouting(): void {
-  chatState.runningChatSessionId = null;
-  chatState.runningBackendSessionId = null;
+export function settleRunRouting(chatSessionId?: string | null): void {
+  const id = chatSessionId ?? chatState.runningChatSessionId;
+  if (!id || id === chatState.store.activeId) {
+    chatState.runningChatSessionId = null;
+    chatState.runningBackendSessionId = null;
+  }
+}
+
+/** Copy the on-screen run into its slot before leaving that chat. */
+export function captureRunningView(): void {
+  const id = chatState.store.activeId;
+  const run = liveRun(id);
+  if (!run) return;
+  run.assistantMessageId = chatState.assistantMessageId;
+  run.assistantRaw = chatState.assistantRaw;
+  run.pendingText = chatState.pendingText;
+  run.turnHadAssistantText = chatState.turnHadAssistantText;
+  if (chatState.runningBackendSessionId) run.backendSessionId = chatState.runningBackendSessionId;
+  run.pendingPermissions = [...(chatState.permissions?.pendingPermissionBatch ?? [])];
+  const thinking = chatState.thinking?.exportState?.();
+  if (thinking) {
+    run.thinkingMessageId = thinking.messageId;
+    run.thinkingText = thinking.text;
+  }
+}
+
+/** Put a background run back on screen. */
+export function restoreRunningView(): void {
+  const id = chatState.store.activeId;
+  const run = liveRun(id);
+  if (!run) return;
+  chatState.assistantMessageId = run.assistantMessageId;
+  chatState.assistantRaw = run.assistantRaw;
+  chatState.pendingText = run.pendingText;
+  chatState.turnHadAssistantText = run.turnHadAssistantText;
+  chatState.runningBackendSessionId = run.backendSessionId;
+  chatState.runningChatSessionId = id;
+  chatState.busy = true;
+  if (chatState.permissions) {
+    chatState.permissions.pendingPermissionBatch = [...run.pendingPermissions];
+  }
+  chatState.thinking?.importState?.({
+    messageId: run.thinkingMessageId,
+    text: run.thinkingText,
+  });
 }
 
 /** Expire leftover Allow/Deny cards when the ask ends (in place — do not reshuffle the log). */
@@ -442,6 +508,14 @@ export function syncActionButton(): void {
 }
 
 export function syncComposerUi(): void {
+  const viewingRun = isChatRunning(chatState.store?.activeId);
+  chatState.busy = viewingRun;
+  if (viewingRun) {
+    chatState.runningChatSessionId = chatState.store.activeId;
+  } else {
+    chatState.runningChatSessionId = null;
+    chatState.runningBackendSessionId = null;
+  }
   const locked = isComposerLocked();
   promptEl.disabled = false;
   promptEl.readOnly = false;
@@ -468,35 +542,47 @@ export function syncComposerUi(): void {
 }
 
 export function setBusy(next: boolean, chatSessionId?: string | null): void {
+  const id = chatSessionId || chatState.store.activeId;
   if (next) {
+    const run = beginLiveRun(id);
     chatState.busyGen += 1;
-    chatState.busy = true;
-    chatState.runningChatSessionId = chatSessionId ?? chatState.store.activeId;
-    syncComposerUi();
+    run.busyGen = chatState.busyGen;
+    run.assistantMessageId = null;
+    run.assistantRaw = "";
+    run.pendingText = "";
+    run.turnHadAssistantText = false;
+    run.pendingPermissions = [];
+    run.thinkingMessageId = null;
+    run.thinkingText = "";
+    if (id === chatState.store.activeId) {
+      chatState.busy = true;
+      chatState.runningChatSessionId = id;
+      syncComposerUi();
+    }
     flushSessionListRender();
     return;
   }
-  const wasViewing = isViewingRunningSession();
-  chatState.busy = false;
-  // Do not clear runningBackendSessionId here — late prompt-session-event
-  // handlers (completed / trailing deltas) must still match the run.
-  syncComposerUi();
-  if (wasViewing) {
+  const viewing = id === chatState.store.activeId && isChatRunning(id);
+  endLiveRun(id);
+  if (viewing) {
+    chatState.busy = false;
+    chatState.runningChatSessionId = null;
     settleActivity();
     finishToolGroup(false);
     if (chatState.assistantBubble?.isConnected) {
       chatState.assistantBubble.classList.remove("is-streaming");
       syncAssistantCopyButton(chatState.assistantBubble);
     }
+    chatState.assistantBubble = null;
+    chatState.assistantMessageId = null;
+    chatState.assistantRaw = "";
+    chatState.pendingText = "";
+    chatState.turnHadAssistantText = false;
+    chatState.activityEl = null;
+    chatState.lifecycleActivityEl = null;
+    chatState.toolGroupEl = null;
+    syncComposerUi();
   }
-  chatState.assistantBubble = null;
-  chatState.assistantMessageId = null;
-  chatState.assistantRaw = "";
-  chatState.pendingText = "";
-  chatState.turnHadAssistantText = false;
-  chatState.activityEl = null;
-  chatState.lifecycleActivityEl = null;
-  chatState.toolGroupEl = null;
   flushStorePersist();
   flushSessionListRender();
 }
@@ -679,7 +765,6 @@ export async function loadAskResources(): Promise<void> {
 
 export function addProjectFromAsk(): void {
   void registerProjectFromAsk({
-    getBusy: () => chatState.busy,
     getWorkspaceDoc: () => chatState.workspaceDoc,
     setStatus: (text, tone) => setStatus(text, tone),
     loadAskResources: () => loadAskResources(),

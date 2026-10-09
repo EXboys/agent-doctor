@@ -97,6 +97,7 @@ fn run_hermes(
         runtime: runtime.clone(),
         cwd: cwd.display().to_string(),
         command: command_display,
+        client_run_id: String::new(),
     });
 
     let started = Instant::now();

@@ -1,4 +1,5 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
+import { isChatRunning, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 
 import {
@@ -352,31 +353,17 @@ export function bootChat(): void {
       return;
     }
     const draft = { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] };
-    if (chatState.busy) {
-      if (chatState.runningChatSessionId && chatState.runningChatSessionId !== sessionId) {
-        report("busy");
-        return;
-      }
+    if (isChatRunning(sessionId)) {
       void chatState.send.sendAsk({ draft });
       report("queued");
       return;
     }
-    // The run takes the session's own assistant, so it has to be the active one
-    // when it starts. Put the person's view back once it is running.
-    const viewing = chatState.store?.activeId ?? "";
-    chatState.sessions?.switchSession(sessionId, false);
+    if (runningCount() >= MAX_PARALLEL_RUNS) {
+      report("busy");
+      return;
+    }
+    // Start this chat without leaving the one on screen. Both can run together.
     void chatState.send.sendAsk({ draft });
     report("sent");
-    if (viewing && viewing !== sessionId) {
-      const started = Date.now();
-      const restore = () => {
-        if (chatState.runningChatSessionId === sessionId) {
-          chatState.sessions?.switchSession(viewing, false);
-          return;
-        }
-        if (Date.now() - started < 3000) window.setTimeout(restore, 50);
-      };
-      window.setTimeout(restore, 50);
-    }
   });
 }

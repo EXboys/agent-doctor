@@ -7,7 +7,6 @@ import { parentDirectoryForPicker } from "./session-workspace";
 import { initWorkspace } from "../ipc";
 
 export type RegisterProjectDeps = {
-  getBusy: () => boolean;
   getWorkspaceDoc: () => WorkspaceDoc | null;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   loadAskResources: () => Promise<void>;
@@ -18,11 +17,6 @@ export type RegisterProjectDeps = {
 
 /** Register a folder as a project (same flow as main window workspace tab). */
 export async function registerProjectFromAsk(deps: RegisterProjectDeps): Promise<void> {
-  if (deps.getBusy()) {
-    deps.setStatus(t("chat.addProjectWhileBusy"), "warn");
-    return;
-  }
-
   const doc = deps.getWorkspaceDoc();
   const defaultName = doc?.active?.trim() || "agent-doctor";
   const defaultEntry = doc?.workspaces[defaultName] ?? doc?.workspaces["agent-doctor"];

@@ -25,6 +25,7 @@ import type {
 } from "./types";
 import { noteIslandUserText } from "../island/publish";
 import { askImageSupport, cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import { MAX_PARALLEL_RUNS } from "./live-runs";
 import { planPictures, type PictureInput, type PictureTurn } from "./picture-route";
 import {
   consumeDrainIntent,
@@ -43,6 +44,9 @@ export type SendDeps = {
   getStore: () => SessionStore;
   getBusy: () => boolean;
   getBusyGen: () => number;
+  /** When set, a chat can run while other chats are still working. */
+  isChatRunning?: (id: string) => boolean;
+  runningCount?: () => number;
   getRunningChatSessionId: () => string | null;
   getPendingAttachments: () => ChatAttachment[];
   setPendingAttachments: (items: ChatAttachment[]) => void;
@@ -104,13 +108,34 @@ export type SendDeps = {
   applyVerifyEvidenceFromAssistant: () => void;
   reportVerifyMcpIfNeeded: () => void;
   expireLivePermissionCards: () => void;
-  settleRunRouting: () => void;
+  settleRunRouting: (chatSessionId?: string | null) => void;
   renderSessionList: () => void;
   readImageTextEnabled: () => boolean;
   refreshComposer: () => void;
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
+
+function appendUserOnSession(
+  session: ChatSession,
+  text: string,
+  attachments: ChatAttachment[],
+): ChatMessage | null {
+  if (!session.messages) return null;
+  const message: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: text,
+    at: Date.now(),
+    attachments: attachments.length ? attachments : undefined,
+  };
+  session.messages.push(message);
+  if (!session.title?.trim()) {
+    const seed = text.trim() || attachments[0]?.name || "";
+    session.title = seed.split(/\n/)[0].slice(0, 48);
+  }
+  return message;
+}
 
 const PICTURE_REJECTED =
   /(not|n't|no)\s+(support|accept|allow)\w*\s+(image|picture|vision)|image\w*\s+(is|are)?\s*not\s+(supported|allowed)|unsupported\s+(image|content type)|multimodal|不支持(图片|图像|多模态)/i;
@@ -175,7 +200,7 @@ export function createSendController(deps: SendDeps) {
     const gen = deps.getBusyGen();
     deps.clearQuickReplies();
     try {
-      const stopped = await cancelPromptSession();
+      const stopped = await cancelPromptSession(deps.getStore().activeId);
       deps.setStatus(t("chat.cancelling"), "warn");
       deps.pushActivity("think", t("chat.cancelling"));
       if (!stopped && deps.getBusy() && deps.getBusyGen() === gen) {
@@ -221,31 +246,37 @@ export function createSendController(deps: SendDeps) {
     deps.renderPendingAttachments();
   }
 
+  function targetIsRunning(targetId: string): boolean {
+    if (deps.isChatRunning) return deps.isChatRunning(targetId);
+    if (!deps.getBusy()) return false;
+    const runningId = deps.getRunningChatSessionId();
+    return !runningId || runningId === targetId;
+  }
+
   async function sendAsk(opts?: {
     verifyMcp?: boolean;
     fromVoice?: boolean;
     draft?: FollowDraft;
   }): Promise<void> {
-    const sameRunningChat =
-      !deps.getRunningChatSessionId() || deps.getRunningChatSessionId() === deps.getStore().activeId;
-    if (deps.getBusy() && !opts?.draft) {
-      if (!sameRunningChat) {
-        deps.setStatus(t("chat.otherSessionRunning"), "warn");
+    const targetId = opts?.draft?.sessionId || deps.getStore().activeId;
+    if (targetIsRunning(targetId)) {
+      if (!opts?.draft) {
+        const queued = draftFromComposer(opts);
+        if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
+          deps.setStatus(t("chat.emptyPrompt"), "warn");
+          return;
+        }
+        enqueueFollowUp(targetId, queued);
+        clearComposer();
+        deps.setStatus(t("chat.queuedStatus"), "muted");
+        deps.refreshComposer();
         return;
       }
-      const queued = draftFromComposer(opts);
-      if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
-        deps.setStatus(t("chat.emptyPrompt"), "warn");
-        return;
-      }
-      enqueueFollowUp(deps.getStore().activeId, queued);
-      clearComposer();
-      deps.setStatus(t("chat.queuedStatus"), "muted");
-      deps.refreshComposer();
+      enqueueFollowUp(opts.draft.sessionId, opts.draft);
       return;
     }
-    if (deps.getBusy()) {
-      if (opts?.draft) enqueueFollowUp(opts.draft.sessionId, opts.draft);
+    if ((deps.runningCount?.() ?? 0) >= MAX_PARALLEL_RUNS) {
+      deps.setStatus(t("chat.tooManyRunning", { n: String(MAX_PARALLEL_RUNS) }), "warn");
       return;
     }
 
@@ -257,18 +288,22 @@ export function createSendController(deps: SendDeps) {
       return;
     }
 
-    const runtime = deps.selectedRuntime();
     const elevated = deps.elevatedEl.checked;
     if (elevated && !draft.fromVoice && !opts?.draft && !window.confirm(t("chat.elevatedConfirm"))) return;
 
     const chatSessionId = draft.sessionId || deps.getStore().activeId;
-    const resumeThreadId =
-      (deps.sessionById(chatSessionId) ?? deps.activeSession()).runtimeThreadId?.trim() || null;
+    const foreground = chatSessionId === deps.getStore().activeId;
+    const here = () => deps.getStore().activeId === chatSessionId;
+    const sendSessionEarly = deps.sessionById(chatSessionId) ?? deps.activeSession();
+    const runtimeForTurn = foreground ? deps.selectedRuntime() : sendSessionEarly.runtime;
+    const resumeThreadId = sendSessionEarly.runtimeThreadId?.trim() || null;
 
-    deps.setVerifyMcpTurn(Boolean(draft.verifyMcp));
-    deps.setVerifySawBrowserNavigate(false);
-    deps.setVerifyMcpReported(false);
-    deps.setVerifyTurnText("");
+    if (foreground) {
+      deps.setVerifyMcpTurn(Boolean(draft.verifyMcp));
+      deps.setVerifySawBrowserNavigate(false);
+      deps.setVerifyMcpReported(false);
+      deps.setVerifyTurnText("");
+    }
 
     const mentions = ensureBrowserMention(
       mergeMentionsForSend(
@@ -293,34 +328,43 @@ export function createSendController(deps: SendDeps) {
     const promptUserText = constraint ? `${constraint}\n\n${promptBody}` : promptBody;
     const selectedMcps = mentions.filter((m) => m.kind === "mcp").map((m) => m.id);
 
-    deps.allowQuickRepliesAgain();
-    await deps.ensureListener();
-    deps.clearQuickReplies();
-    deps.setAssistantBubble(null);
-    deps.setAssistantMessageId(null);
-    deps.setAssistantRaw("");
-    deps.setPendingText("");
-    deps.setTurnHadAssistantText(false);
+    if (foreground) deps.allowQuickRepliesAgain();
+    // Claim this chat before the first await, so a second send sees it and queues.
     deps.setBusy(true, chatSessionId);
-    if (deps.getVerifyMcpTurn()) {
+    try {
+    await deps.ensureListener();
+    if (foreground) {
+      deps.clearQuickReplies();
+      deps.setAssistantBubble(null);
+      deps.setAssistantMessageId(null);
+      deps.setAssistantRaw("");
+      deps.setPendingText("");
+      deps.setTurnHadAssistantText(false);
+    }
+    if (foreground && deps.getVerifyMcpTurn()) {
       deps.pushActivity("info", t("chat.verifyMcpWatching"));
     }
-    const userMessage = deps.persistMessage("user", userText, { attachments });
-    if (deps.getStore().activeId === chatSessionId) {
+    const userMessage = foreground
+      ? deps.persistMessage("user", userText, { attachments })
+      : appendUserOnSession(sendSessionEarly, userText, attachments);
+    if (foreground && userMessage) {
       deps.appendBubble("user", userText, { id: userMessage.id, persist: false, attachments });
+    } else if (userMessage) {
+      deps.touchSession(sendSessionEarly);
+      deps.saveStore();
     }
-    if (!opts?.draft) clearComposer();
-    deps.setStatus(t("chat.running", { runtime }), "muted");
-    deps.pushActivity("think", t("chat.waitingModel"));
+    if (!opts?.draft && foreground) clearComposer();
+    if (here()) deps.setStatus(t("chat.running", { runtime: runtimeForTurn }), "muted");
+    if (foreground) deps.pushActivity("think", t("chat.waitingModel"));
 
     const pictureInputs = await readPictures(
       attachments.filter((item) => item.kind === "image"),
-      runtime,
+      runtimeForTurn,
     );
     let pictures = pictureInputs.length
       ? planPictures(pictureInputs.inputs, pictureInputs.support)
       : undefined;
-    if (pictures) notePictures(pictures, runtime);
+    if (pictures && foreground) notePictures(pictures, runtimeForTurn);
 
     const sendSession = deps.sessionById(chatSessionId) ?? deps.activeSession();
     const { cwd: sessionCwd, workspaceName: sessionWorkspace } =
@@ -328,24 +372,28 @@ export function createSendController(deps: SendDeps) {
 
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
-        runtime,
+        runtime: runtimeForTurn,
         prompt: deps.buildPromptWithHistory(promptUserText, attachments, chatSessionId, turn),
         cwd: sessionCwd?.trim() || null,
         workspaceName: sessionWorkspace?.trim() || null,
         timeoutSec: 86_400,
         dangerouslySkipPermissions:
-          (runtime === "claude-code" || runtime === "hermes" || runtime === "deepseek-harness") &&
+          (runtimeForTurn === "claude-code" ||
+            runtimeForTurn === "hermes" ||
+            runtimeForTurn === "deepseek-harness") &&
           elevated,
-        fullAuto: (runtime === "codex" || runtime === "openclaw") && elevated,
+        fullAuto: (runtimeForTurn === "codex" || runtimeForTurn === "openclaw") && elevated,
         resumeThreadId,
         selectedMcps,
         imagePaths: turn?.sendPaths ?? [],
+        clientRunId: chatSessionId,
       });
 
-    try {
-      // Stop during picture reading clears busy before a session exists.
+    const stillGoing = () => (deps.isChatRunning ? deps.isChatRunning(chatSessionId) : deps.getBusy());
+
+      // Stop during picture reading clears this chat's run before it exists.
       // Starting anyway would ignore that click.
-      if (!deps.getBusy()) return;
+      if (!stillGoing()) return;
       let report = await startRound(pictures);
       if (pictures?.sendPaths.length && rejectedPictures(report)) {
         // The provider said no to pictures. Send the words once instead.
@@ -357,9 +405,9 @@ export function createSendController(deps: SendDeps) {
         deps.setAssistantRaw("");
         deps.setPendingText("");
         deps.setTurnHadAssistantText(false);
-        if (deps.getBusy()) report = await startRound(pictures);
+        if (stillGoing()) report = await startRound(pictures);
       }
-      deps.setDisplayedCwd(report.cwd);
+      if (here()) deps.setDisplayedCwd(report.cwd);
       const session = deps.sessionById(chatSessionId) ?? deps.runTargetSession();
       session.interrupted =
         report.status === "succeeded" ? null : { status: report.status, at: Date.now() };
@@ -376,9 +424,9 @@ export function createSendController(deps: SendDeps) {
         deps.touchSession(session);
         deps.saveStore();
       }
-      if (deps.getVerifyMcpTurn()) {
+      if (foreground && deps.getVerifyMcpTurn() && here()) {
         deps.applyVerifyMcpFooter();
-      } else if (report.status === "succeeded") {
+      } else if (report.status === "succeeded" && here()) {
         deps.setStatus("");
       }
     } catch (error) {
@@ -395,7 +443,7 @@ export function createSendController(deps: SendDeps) {
         }
       } else if (/already running/i.test(message)) {
         try {
-          await cancelPromptSession();
+          await cancelPromptSession(chatSessionId);
         } catch {
           /* ignore */
         }
@@ -422,28 +470,32 @@ export function createSendController(deps: SendDeps) {
         }
       }
     } finally {
-      deps.applyVerifyEvidenceFromAssistant();
-      if (deps.getVerifySawBrowserNavigate()) {
-        deps.reportVerifyMcpIfNeeded();
-        deps.applyVerifyMcpFooter();
-      }
-      // Yield so any trailing `completed` / delta events from this invoke are
-      // handled before we tear down deps.getBusy() UI (avoids dropping the rest of the turn).
-      await Promise.resolve();
-      deps.setBusy(false);
-      deps.expireLivePermissionCards();
-      deps.settleRunRouting();
-      deps.renderSessionList();
-      const wasVerify = deps.getVerifyMcpTurn();
-      if (wasVerify && !deps.getVerifyMcpReported()) {
-        window.setTimeout(() => {
-          deps.applyVerifyEvidenceFromAssistant();
+      if (foreground && here()) {
+        deps.applyVerifyEvidenceFromAssistant();
+        if (deps.getVerifySawBrowserNavigate()) {
           deps.reportVerifyMcpIfNeeded();
           deps.applyVerifyMcpFooter();
+        }
+      }
+      // Yield so any trailing `completed` / delta events from this invoke are
+      // handled before we tear down this chat's run (avoids dropping the rest of the turn).
+      await Promise.resolve();
+      deps.setBusy(false, chatSessionId);
+      if (here()) deps.expireLivePermissionCards();
+      deps.settleRunRouting(chatSessionId);
+      deps.renderSessionList();
+      if (foreground) {
+        const wasVerify = deps.getVerifyMcpTurn();
+        if (wasVerify && !deps.getVerifyMcpReported()) {
+          window.setTimeout(() => {
+            deps.applyVerifyEvidenceFromAssistant();
+            deps.reportVerifyMcpIfNeeded();
+            deps.applyVerifyMcpFooter();
+            deps.setVerifyMcpTurn(false);
+          }, 80);
+        } else {
           deps.setVerifyMcpTurn(false);
-        }, 80);
-      } else {
-        deps.setVerifyMcpTurn(false);
+        }
       }
       const intent = consumeDrainIntent();
       if (intent !== "hold") {

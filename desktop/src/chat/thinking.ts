@@ -106,5 +106,16 @@ export function createThinkingController(deps: ThinkingDeps) {
     el = null;
   }
 
-  return { append, seal, isLive: () => messageId !== null };
+  function exportState(): { messageId: string | null; text: string } {
+    return { messageId, text };
+  }
+
+  function importState(next: { messageId: string | null; text: string }): void {
+    messageId = next.messageId;
+    text = next.text;
+    el = null;
+    if (messageId && !startedAt) startedAt = Date.now();
+  }
+
+  return { append, seal, isLive: () => messageId !== null, exportState, importState };
 }

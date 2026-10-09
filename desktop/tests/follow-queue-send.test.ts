@@ -243,21 +243,22 @@ await check("Enter during a round with an empty composer warns instead of queuei
   eq(state.statuses.at(-1)?.text, t("chat.emptyPrompt"), "status");
 });
 
-await check("Enter while another session is running does not queue into this one", async () => {
+await check("Enter while another session is running starts this chat too", async () => {
   invokes.length = 0;
   const { api, state, promptEl } = newController("w-other");
   state.busy = true;
   state.runningChatSessionId = "w-somewhere-else";
-  promptEl.value = "note for the busy session";
+  promptEl.value = "note for this chat";
 
   await api.sendAsk();
 
   eq(followUpsFor("w-other").length, 0, "queued count");
-  eq(state.statuses.at(-1)?.text, t("chat.otherSessionRunning"), "status");
-  eq(promptEl.value, "note for the busy session", "composer should keep the text");
+  eq(roundCalls().length, 1, "this chat should start its own round");
+  eq(roundCalls()[0].args.clientRunId, "w-other", "round is bound to this chat");
+  eq(promptEl.value, "", "composer should be cleared");
 });
 
-await check("a draft handed to a busy controller is queued on its own session", async () => {
+await check("a draft for a different chat starts even while this one is busy", async () => {
   invokes.length = 0;
   const { api, state } = newController("w-draft-active");
   state.busy = true;
@@ -267,9 +268,9 @@ await check("a draft handed to a busy controller is queued on its own session", 
   });
 
   eq(followUpsFor("w-draft-active").length, 0, "active session queue");
-  eq(followUpsFor("w-draft-target").map((item) => item.text), ["voice note"], "draft session queue");
-  eq(roundCalls().length, 0, "no round should start");
-  takeFollowUps("w-draft-target");
+  eq(followUpsFor("w-draft-target").length, 0, "draft session queue");
+  eq(roundCalls().length, 1, "the other chat should start");
+  eq(roundCalls()[0].args.clientRunId, "w-draft-target", "round is bound to the draft chat");
 });
 
 console.log("\nfollow-queue wiring: the round ends and the queue runs");

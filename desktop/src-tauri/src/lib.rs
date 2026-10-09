@@ -38,7 +38,7 @@ use island::{
     island_set_hover_command, island_set_reading_command, publish_island_snapshot_command,
     IslandHost,
 };
-use state::PromptSessionState;
+use state::{ActivePromptRun, PromptSessionState};
 use windows::{
     close_ask_window_command, close_diagnose_window_command, close_resources_window_command,
     focus_main_tab_command, open_ask_window_command, open_diagnose_window_command,
@@ -241,6 +241,40 @@ async fn open_session_command(
     .map_err(|err| err.to_string())?
 }
 
+fn event_session_id(event: &PromptSessionEvent) -> Option<&str> {
+    Some(match event {
+        PromptSessionEvent::Started { session_id, .. }
+        | PromptSessionEvent::Status { session_id, .. }
+        | PromptSessionEvent::Delta { session_id, .. }
+        | PromptSessionEvent::Thinking { session_id, .. }
+        | PromptSessionEvent::StdoutLine { session_id, .. }
+        | PromptSessionEvent::StderrLine { session_id, .. }
+        | PromptSessionEvent::PermissionRequest { session_id, .. }
+        | PromptSessionEvent::PermissionResolved { session_id, .. }
+        | PromptSessionEvent::Plan { session_id, .. }
+        | PromptSessionEvent::Completed { session_id, .. } => session_id.as_str(),
+    })
+}
+
+fn stamp_client_run(event: PromptSessionEvent, client_run_id: &str) -> PromptSessionEvent {
+    match event {
+        PromptSessionEvent::Started {
+            session_id,
+            runtime,
+            cwd,
+            command,
+            ..
+        } => PromptSessionEvent::Started {
+            session_id,
+            runtime,
+            cwd,
+            command,
+            client_run_id: client_run_id.to_string(),
+        },
+        other => other,
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn start_prompt_session_command(
@@ -257,33 +291,26 @@ async fn start_prompt_session_command(
     selected_mcps: Option<Vec<String>>,
     image_paths: Option<Vec<String>>,
     workspace_name: Option<String>,
+    client_run_id: Option<String>,
 ) -> Result<PromptSessionReport, String> {
     let owner_label = window.label().to_string();
-    {
-        let guard = state.cancel.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            let owner = state.owner.lock().map_err(|e| e.to_string())?;
-            if owner.as_deref().is_some_and(|label| label != owner_label) {
-                return Err("prompt session busy in another window".into());
-            }
-            return Err("another ask session is already running".into());
-        }
-    }
+    // Chat sessions pass their own id so several can run together. Callers
+    // that omit it keep one slot for that window.
+    let client_key = client_run_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| owner_label.clone());
 
     let cancel = PromptSessionCancel::new();
     let control = PromptSessionControl::new();
-    {
-        let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
-        *guard = Some(cancel.clone());
-    }
-    {
-        let mut guard = state.control.lock().map_err(|e| e.to_string())?;
-        *guard = Some(control.clone());
-    }
-    {
-        let mut guard = state.owner.lock().map_err(|e| e.to_string())?;
-        *guard = Some(owner_label.clone());
-    }
+    state.try_insert(
+        client_key.clone(),
+        ActivePromptRun {
+            cancel: cancel.clone(),
+            control: control.clone(),
+            owner: owner_label.clone(),
+        },
+    )?;
 
     let options = PromptSessionOptions {
         runtime,
@@ -329,12 +356,19 @@ async fn start_prompt_session_command(
 
     let app_for_emit = app.clone();
     let emit_target = owner_label.clone();
+    let client_for_events = client_key.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         run_prompt_session_with_cancel(
             &options,
             cancel,
             control_for_run,
             |event: PromptSessionEvent| {
+                let event = stamp_client_run(event, &client_for_events);
+                if let Some(backend_id) = event_session_id(&event) {
+                    if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
+                        sessions.note_backend(backend_id, &client_for_events);
+                    }
+                }
                 // Only the window that started this run: Ask and Diagnose share the
                 // event name, and a broadcast made each one render the other's reply.
                 let _ = app_for_emit.emit_to(emit_target.as_str(), "prompt-session-event", &event);
@@ -343,15 +377,7 @@ async fn start_prompt_session_command(
     })
     .await;
 
-    if let Ok(mut guard) = state.cancel.lock() {
-        *guard = None;
-    }
-    if let Ok(mut guard) = state.control.lock() {
-        *guard = None;
-    }
-    if let Ok(mut guard) = state.owner.lock() {
-        *guard = None;
-    }
+    state.release(&client_key);
 
     let report = result
         .map_err(|e| e.to_string())?
@@ -363,23 +389,9 @@ async fn start_prompt_session_command(
 fn cancel_prompt_session_command(
     window: tauri::Window,
     state: State<'_, PromptSessionState>,
+    client_run_id: Option<String>,
 ) -> Result<bool, String> {
-    {
-        let owner = state.owner.lock().map_err(|e| e.to_string())?;
-        if owner
-            .as_deref()
-            .is_some_and(|label| label != window.label())
-        {
-            return Ok(false);
-        }
-    }
-    let guard = state.cancel.lock().map_err(|e| e.to_string())?;
-    if let Some(cancel) = guard.as_ref() {
-        cancel.request();
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    state.cancel_owned(window.label(), client_run_id)
 }
 
 #[tauri::command]
@@ -391,10 +403,7 @@ fn resolve_permission_session_command(
     allow: bool,
     text: Option<String>,
 ) -> Result<bool, String> {
-    let guard = state.control.lock().map_err(|e| e.to_string())?;
-    let Some(control) = guard.as_ref() else {
-        return Err("no active ask session for permission reply".into());
-    };
+    let (control, owner) = state.control_for_backend(&session_id)?;
     let sent_text = text.as_deref().map(str::trim).filter(|s| !s.is_empty());
     if let Some(text) = sent_text {
         control
@@ -406,12 +415,6 @@ fn resolve_permission_session_command(
             .map_err(|e| format!("{e:#}"))?;
     }
     let allowed = sent_text.is_some() || allow;
-    let owner = state
-        .owner
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .unwrap_or_else(|| "main".to_string());
     let _ = app.emit_to(
         owner.as_str(),
         "prompt-session-event",

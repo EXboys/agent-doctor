@@ -122,6 +122,10 @@ pub enum PromptSessionEvent {
         runtime: String,
         cwd: String,
         command: String,
+        /// Chat session that started this run. Empty for callers that still
+        /// use one slot per window.
+        #[serde(default)]
+        client_run_id: String,
     },
     /// Live status for the ask UI (requesting / thinking / writing / tool).
     Status {
