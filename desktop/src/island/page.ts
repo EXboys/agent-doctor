@@ -58,7 +58,6 @@ function setHover(hovering: boolean, sticky = false): void {
       field.value.trim() !== "";
     if (!typing && field instanceof HTMLElement) field.blur();
     pointerInside = false;
-    window.clearTimeout(rowHoverTimer);
     void islandSetHover(false, typing).catch(() => {});
   }, 180);
 }
@@ -656,66 +655,13 @@ function appendReply(body: HTMLElement, rowId: string, reply: string): void {
 
 function setReplyOpen(rowId: string): void {
   expandedReplyId = rowId;
-  heightLock = 0;
   feedSig = "";
   if (lastView) render(lastView);
   else renderFeed(lastRows);
 }
 
-let rowHoverTimer: number | undefined;
-let scrollSettleTimer = 0;
 let snappedRowId = "";
 let expandedReplyId = "";
-
-function openRow(id: string): void {
-  window.clearTimeout(rowHoverTimer);
-  if (openRowId === id) return;
-  toggleRow(id);
-}
-
-const SCROLL_QUIET_MS = 600;
-let lastWheelAt = 0;
-
-function scrolling(): boolean {
-  return Date.now() - lastWheelAt < SCROLL_QUIET_MS;
-}
-
-function rowUnderPointer(): string {
-  return detailEl?.querySelector<HTMLElement>(".island-row:hover")?.dataset.id ?? "";
-}
-
-/** A reply already typed in this row stays put when the pointer leaves. */
-function rowHasDraft(id: string): boolean {
-  const row = detailEl?.querySelector<HTMLElement>(`.island-row[data-id="${CSS.escape(id)}"]`);
-  const field = row?.querySelector("input, textarea");
-  return (
-    (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
-    field.value.trim() !== ""
-  );
-}
-
-function hoverRow(item: HTMLElement, id: string): void {
-  item.addEventListener("mouseenter", () => {
-    window.clearTimeout(rowHoverTimer);
-    if (openRowId === id || scrolling() || activePending) return;
-    rowHoverTimer = window.setTimeout(() => {
-      if (!scrolling() && !activePending && rowUnderPointer() === id) openRow(id);
-    }, 180);
-  });
-  item.addEventListener("mouseleave", () => {
-    window.clearTimeout(rowHoverTimer);
-    if (openRowId !== id) return;
-    rowHoverTimer = window.setTimeout(() => {
-      if (scrolling() || activePending) return;
-      const hovered = rowUnderPointer();
-      if (hovered && hovered !== openRowId) {
-        openRow(hovered);
-        return;
-      }
-      if (openRowId === id && !hovered && !rowHasDraft(id)) toggleRow(id);
-    }, 140);
-  });
-}
 
 function toggleRow(id: string): void {
   const closing = openRowId === id;
@@ -990,8 +936,8 @@ function renderFeed(rows: IslandFeedRow[]): void {
     meta.append(when, badge);
     appendState(meta, row);
     head.append(avatar, copy, meta);
-    head.addEventListener("click", () => openRow(row.id));
-    hoverRow(item, row.id);
+    head.setAttribute("aria-expanded", String(open));
+    head.addEventListener("click", () => toggleRow(row.id));
     item.append(head);
     if (row.id === openRowId) {
       const panel = document.createElement("div");
@@ -1065,12 +1011,25 @@ function placeActions(view: IslandView): void {
 
 let lastView: IslandView | null = null;
 let reportedHeight = 0;
-/** Tallest size this hover has needed. It does not shrink until the island closes. */
-let heightLock = 0;
 
 function marginsOf(el: Element): number {
   const style = getComputedStyle(el);
   return (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+}
+
+/** Rows, not the stretched frame. A tall window must not keep the next measure tall. */
+function listContentHeight(list: HTMLElement): number {
+  const style = getComputedStyle(list);
+  let height =
+    (parseFloat(style.paddingTop) || 0) +
+    (parseFloat(style.paddingBottom) || 0) +
+    (parseFloat(style.borderTopWidth) || 0) +
+    (parseFloat(style.borderBottomWidth) || 0);
+  for (const child of list.children) {
+    if (!(child instanceof HTMLElement) || child.getClientRects().length === 0) continue;
+    height += marginsOf(child) + child.offsetHeight;
+  }
+  return height;
 }
 
 /** The window is sized from this, so the rows fit without a scrollbar. */
@@ -1091,11 +1050,11 @@ function reportHeight(): void {
     const list = child.classList.contains("island-read-frame")
       ? child.querySelector<HTMLElement>(".island-read")
       : null;
-    height += marginsOf(child) + (list && !list.hidden ? list.scrollHeight : child.offsetHeight);
+    height +=
+      marginsOf(child) +
+      (list && !list.hidden ? listContentHeight(list) : child.offsetHeight);
   }
   height = Math.ceil(height);
-  if (height > heightLock) heightLock = height;
-  else height = heightLock;
   if (Math.abs(height - reportedHeight) < 2) return;
   reportedHeight = height;
   void islandSetContentHeight(height).catch(() => {});
@@ -1111,10 +1070,7 @@ function render(view: IslandView): void {
   }
   if (!view.expanded) {
     pointerInside = false;
-    window.clearTimeout(rowHoverTimer);
-    window.clearTimeout(scrollSettleTimer);
     snappedRowId = "";
-    heightLock = 0;
     reportedHeight = 0;
     expandedReplyId = "";
     if (openRowId) {
@@ -1165,16 +1121,6 @@ function boot(): void {
     "wheel",
     (event) => {
       if (!detailEl || !event.deltaY) return;
-      lastWheelAt = Date.now();
-      window.clearTimeout(rowHoverTimer);
-      window.clearTimeout(scrollSettleTimer);
-      scrollSettleTimer = window.setTimeout(() => {
-        if (scrolling() || activePending) return;
-        const hovered = rowUnderPointer();
-        if (hovered === openRowId) return;
-        if (!hovered && openRowId && !rowHasDraft(openRowId)) toggleRow(openRowId);
-        else if (hovered) openRow(hovered);
-      }, SCROLL_QUIET_MS);
       let node = event.target instanceof Element ? event.target : null;
       let blocked = false;
       while (node && node !== detailEl) {

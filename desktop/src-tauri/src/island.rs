@@ -499,8 +499,8 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         )
     };
     let (_, mut peek_height) = chrome_size(chrome, rows, pending);
-    // The page measures the card and then keeps that height until the pointer
-    // leaves. Reading a conversation must not resize it again.
+    // The page measures the card from its current rows. Collapsing a row
+    // sends a shorter height, and the window follows.
     if measured > 0.0 {
         peek_height = measured.clamp(120.0, PEEK_HEIGHT);
     } else if reading || pending {
