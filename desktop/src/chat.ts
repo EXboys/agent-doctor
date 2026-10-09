@@ -5,6 +5,7 @@ import { syncTuneLabels } from "./chat/tune-menu";
 import { syncKnowledgeLabels } from "./chat/knowledge-page";
 import { KNOWLEDGE_RUN_PREFIX } from "./chat/knowledge-wiki";
 import { syncResourcesPageLabels } from "./chat/resources-page";
+import { syncScheduleLabels } from "./chat/schedule-page";
 import type { PromptSessionEvent } from "./chat/types";
 import {
   beginLiveRun,
@@ -452,6 +453,7 @@ export function applyI18n(): void {
   syncTuneLabels();
   syncKnowledgeLabels();
   syncResourcesPageLabels();
+  syncScheduleLabels();
   if (contextCompactEl) {
     contextCompactEl.textContent = t("chat.contextCompact");
     contextCompactEl.title = t("chat.contextCompactHint");

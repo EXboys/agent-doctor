@@ -60,12 +60,35 @@ export function closeResourcesMainPage(): void {
   open?.setAttribute("aria-pressed", "false");
 }
 
-/** Leave knowledge / settings / resources so the chat transcript is visible again. */
+export function isSchedulePageOpen(): boolean {
+  const page = document.querySelector<HTMLElement>("#chat-schedule");
+  if (page && !page.hidden) return true;
+  return document.querySelector("#chat-main")?.classList.contains("is-schedule") === true;
+}
+
+export function closeSchedulePage(): void {
+  document.querySelector("#chat-shell")?.classList.remove("is-schedule");
+  document.querySelector("#chat-main")?.classList.remove("is-schedule");
+  const page = document.querySelector<HTMLElement>("#chat-schedule");
+  if (page) {
+    page.hidden = true;
+    page.setAttribute("aria-hidden", "true");
+  }
+  const open = document.querySelector<HTMLButtonElement>("#chat-schedule-open");
+  open?.classList.remove("is-on");
+  open?.setAttribute("aria-pressed", "false");
+}
+
+/** Leave knowledge / settings / resources / schedule so the chat transcript is visible again. */
 export function leaveChatOverlayPages(): boolean {
   const hadOverlay =
-    isKnowledgePageOpen() || isChatSettingsPageOpen() || isResourcesMainPageOpen();
+    isKnowledgePageOpen() ||
+    isChatSettingsPageOpen() ||
+    isResourcesMainPageOpen() ||
+    isSchedulePageOpen();
   if (isKnowledgePageOpen()) closeKnowledgePage();
   if (isChatSettingsPageOpen()) closeChatSettingsPage();
   if (isResourcesMainPageOpen()) closeResourcesMainPage();
+  if (isSchedulePageOpen()) closeSchedulePage();
   return hadOverlay;
 }

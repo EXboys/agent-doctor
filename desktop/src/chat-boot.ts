@@ -31,6 +31,7 @@ import {
   compactActiveSession,
   isViewingRunningSession,
   autoResizePrompt,
+  setStatus,
   closeModelMenu,
   positionModelMenu,
   openModelMenu,
@@ -76,6 +77,7 @@ import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
 import { bindResourcesPage } from "./chat/resources-page";
+import { bindSchedule } from "./chat/schedule-page";
 import { orderedProjectNames } from "./chat/project-order";
 import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
@@ -117,6 +119,20 @@ export function bootChat(): void {
         const text = transcriptOf(session);
         return text ? [{ ...text, projectName: session.workspaceName?.trim() || null }] : [];
       }),
+  });
+  bindSchedule({
+    activeSession,
+    sessions: () => chatState.store?.sessions ?? [],
+    workspaceDoc: () => chatState.workspaceDoc,
+    switchSession: (id) => chatState.sessions.switchSession(id),
+    fillPrompt: (text) => {
+      promptEl.value = text;
+      autoResizePrompt();
+      promptEl.focus();
+      const end = promptEl.value.length;
+      promptEl.setSelectionRange(end, end);
+    },
+    setStatus,
   });
   bindResourcesPage({
     projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),

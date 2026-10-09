@@ -3,7 +3,7 @@ import type { AskResourcesController, AskRuntime, ResourcesScopeTab } from "../a
 import { t, tNamed } from "../i18n";
 import { skillInstall, skillRemove } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
-import { closeKnowledgePage, closeResourcesMainPage } from "./overlay-pages";
+import { closeKnowledgePage, closeResourcesMainPage, closeSchedulePage } from "./overlay-pages";
 
 const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "deepseek-harness"] as const;
 
@@ -284,6 +284,7 @@ function openResourcesPage(): void {
   const project = deps.currentProject();
   if (project) projectPick = project;
   closeKnowledgePage();
+  closeSchedulePage();
   deps.closeSidePanel();
   shellEl()?.classList.add("is-resources-page");
   mainEl()?.classList.add("is-resources-page");

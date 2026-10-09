@@ -1,7 +1,12 @@
 import { getLocale, t, tNamed } from "../i18n";
 import { listAgentMemory } from "../ipc";
 import { migrateLegacyNotes, mountWiki, wikiPromptSection, type WikiScope } from "./knowledge-wiki";
-import { closeKnowledgePage, closeResourcesMainPage, isKnowledgePageOpen } from "./overlay-pages";
+import {
+  closeKnowledgePage,
+  closeResourcesMainPage,
+  closeSchedulePage,
+  isKnowledgePageOpen,
+} from "./overlay-pages";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 
 const STORAGE_KEY = "agent-doctor-ask-knowledge";
@@ -405,6 +410,7 @@ function openKnowledge(): void {
   closeSettings();
   closeFiles();
   closeResourcesMainPage();
+  closeSchedulePage();
   shellEl()?.classList.add("is-knowledge");
   mainEl()?.classList.add("is-knowledge");
   const page = pageEl();

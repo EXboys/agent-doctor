@@ -205,7 +205,8 @@ body.chat-is-resizing * {
 }
 
 .chat-resources-toggle,
-.chat-knowledge-open {
+.chat-knowledge-open,
+.chat-schedule-open {
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -226,7 +227,8 @@ body.chat-is-resizing * {
 }
 
 .chat-resources-toggle svg,
-.chat-knowledge-open svg {
+.chat-knowledge-open svg,
+.chat-schedule-open svg {
   flex: none;
   color: var(--muted);
 }
@@ -234,7 +236,9 @@ body.chat-is-resizing * {
 .chat-resources-toggle:hover,
 .chat-resources-toggle.is-open,
 .chat-knowledge-open:hover,
-.chat-knowledge-open.is-on {
+.chat-knowledge-open.is-on,
+.chat-schedule-open:hover,
+.chat-schedule-open.is-on {
   background: rgba(15, 23, 42, 0.06);
 }
 
@@ -493,6 +497,10 @@ body.chat-is-resizing * {
 .chat-shell.is-knowledge.is-side-collapsed,
 .chat-shell.is-knowledge.is-resources-open,
 .chat-shell.is-knowledge.is-resources-open.is-side-collapsed,
+.chat-shell.is-schedule,
+.chat-shell.is-schedule.is-side-collapsed,
+.chat-shell.is-schedule.is-resources-open,
+.chat-shell.is-schedule.is-resources-open.is-side-collapsed,
 .chat-shell.is-resources-page,
 .chat-shell.is-resources-page.is-side-collapsed,
 .chat-shell.is-resources-page.is-resources-open,
@@ -502,12 +510,14 @@ body.chat-is-resizing * {
 
 .chat-shell.is-settings > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
 .chat-shell.is-knowledge > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
+.chat-shell.is-schedule > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat),
 .chat-shell.is-resources-page > :not(.chat-main):not(.chat-side):not(.chat-splitter-between-sessions-chat) {
   display: none !important;
 }
 
 .chat-shell.is-settings > .chat-side,
 .chat-shell.is-knowledge > .chat-side,
+.chat-shell.is-schedule > .chat-side,
 .chat-shell.is-resources-page > .chat-side {
   display: flex;
 }
@@ -532,6 +542,7 @@ body.chat-is-resizing * {
 }
 
 .chat-knowledge,
+.chat-schedule,
 .chat-resources-page {
   display: none;
   grid-row: 1 / -1;
@@ -542,11 +553,13 @@ body.chat-is-resizing * {
 }
 
 .chat-main.is-knowledge > :not(#chat-knowledge),
+.chat-main.is-schedule > :not(#chat-schedule),
 .chat-main.is-resources-page > :not(#chat-resources-page) {
   display: none !important;
 }
 
 .chat-main.is-knowledge #chat-knowledge,
+.chat-main.is-schedule #chat-schedule,
 .chat-main.is-resources-page #chat-resources-page {
   display: block;
   grid-column: 1 / -1;
@@ -859,6 +872,44 @@ body.chat-is-resizing * {
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.45;
+}
+
+.chat-schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.chat-schedule-card {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-schedule-card strong {
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.chat-schedule-card span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.chat-schedule-card:hover {
+  border-color: var(--line-strong);
+  background: var(--fill);
 }
 
 .chat-knowledge-content {
@@ -6450,7 +6501,9 @@ html[data-theme="dark"] .chat-resources-toggle-title {
 html[data-theme="dark"] .chat-resources-toggle:hover,
 html[data-theme="dark"] .chat-resources-toggle.is-open,
 html[data-theme="dark"] .chat-knowledge-open:hover,
-html[data-theme="dark"] .chat-knowledge-open.is-on {
+html[data-theme="dark"] .chat-knowledge-open.is-on,
+html[data-theme="dark"] .chat-schedule-open:hover,
+html[data-theme="dark"] .chat-schedule-open.is-on {
   background: rgba(255, 255, 255, 0.08);
 }
 

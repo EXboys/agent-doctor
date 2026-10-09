@@ -108,6 +108,19 @@
             <span data-i18n="chat.knowledge">知识库</span>
           </button>
           <button
+            id="chat-schedule-open"
+            type="button"
+            class="chat-schedule-open"
+            aria-pressed="false"
+            aria-controls="chat-schedule"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M12 8v4.5l3 1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span data-i18n="chat.schedule">定时任务</span>
+          </button>
+          <button
             id="chat-resources-toggle"
             type="button"
             class="chat-resources-toggle"
@@ -324,6 +337,16 @@
               </section>
             </div>
             <p class="chat-knowledge-block-hint chat-resources-page-foot" data-i18n="chat.resourcesHint">点击加入本轮优先；完整交互用「打开原生」。</p>
+          </div>
+        </section>
+
+        <section id="chat-schedule" class="chat-schedule" hidden aria-hidden="true" aria-label="定时任务">
+          <div class="chat-knowledge-inner">
+            <header class="chat-knowledge-head">
+              <h2 data-i18n="chat.schedule">定时任务</h2>
+            </header>
+            <p class="chat-knowledge-scope" data-i18n="chat.scheduleHint">选一种。话术会填进当前项目里最近的一次对话，时间和内容可以再改，然后发送。</p>
+            <div id="chat-schedule-grid" class="chat-schedule-grid"></div>
           </div>
         </section>
 
