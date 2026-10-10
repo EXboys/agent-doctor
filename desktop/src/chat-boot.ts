@@ -38,6 +38,7 @@ import {
   refreshWiredProvider,
   flushStorePersist,
   applyI18n,
+  publishActiveRuntime,
   selectedRuntime,
   activeSession,
   pickAttachments,
@@ -67,7 +68,11 @@ import {
 import { emit, listen } from "@tauri-apps/api/event";
 import { bindLocaleSync } from "./locale-sync";
 import { startIslandPublisher } from "./island/publish";
-import { isAskRuntime } from "./chat/runtime";
+import {
+  ASK_RUNTIME_QUERY_EVENT,
+  ASK_SELECT_RUNTIME_EVENT,
+  isAskRuntime,
+} from "./chat/runtime";
 import { getLocale, t } from "./i18n";
 import { applyThemePreference, readThemePreference, watchSystemTheme } from "./chat/theme";
 import { bindChatSettings } from "./chat/settings-page";
@@ -358,6 +363,17 @@ export function bootChat(): void {
   window.addEventListener("resize", () => {
     if (chatState.modelMenuOpen) positionModelMenu();
     if (contextPopoverEl && !contextPopoverEl.hidden) positionContextPopover();
+  });
+
+  void listen(ASK_RUNTIME_QUERY_EVENT, () => {
+    publishActiveRuntime();
+  });
+
+  void listen<{ runtime?: string }>(ASK_SELECT_RUNTIME_EVENT, (event) => {
+    const runtime = event.payload?.runtime;
+    if (isAskRuntime(runtime)) {
+      ensureRuntimeSession(runtime);
+    }
   });
 
   void listen<{ runtime?: string }>("ask-window-focus", (event) => {

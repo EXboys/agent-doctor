@@ -3,6 +3,15 @@ import type { AskRuntime } from "../ask-resources";
 /** Survives Ask soft-reload; beats the create-time `__AD_ASK_RUNTIME__` init script. */
 export const ASK_PENDING_RUNTIME_KEY = "ad.ask.pendingRuntime";
 
+/** Ask → main: the open conversation's agent changed. */
+export const ASK_ACTIVE_RUNTIME_EVENT = "ask-active-runtime";
+
+/** Main → ask: the user picked an agent card; switch to that agent's conversation. */
+export const ASK_SELECT_RUNTIME_EVENT = "ask-select-runtime";
+
+/** Main → ask: report the open conversation's agent (ask may already be open). */
+export const ASK_RUNTIME_QUERY_EVENT = "ask-runtime-query";
+
 export function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "codex") return "Codex";
   if (runtime === "hermes") return "Hermes";

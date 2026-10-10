@@ -7,6 +7,7 @@ import {
   knowledgeAddSource,
   knowledgeContext,
   knowledgeImport,
+  knowledgeClear,
   knowledgeDeletePage,
   knowledgePages,
   knowledgePrepare,
@@ -20,6 +21,7 @@ import {
 import { renderMarkdown } from "../markdown";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import type { PromptSessionEvent } from "./types";
+import { wikiRunProgress } from "./wiki-progress";
 
 /** Chat ignores prompt-session events whose client run id starts with this. */
 export const KNOWLEDGE_RUN_PREFIX = "knowledge:";
@@ -59,10 +61,20 @@ type WikiState = {
   query: string;
   page: { path: string; html: string } | null;
   pageError: string | null;
-  run: { id: string; agent: string; startedAt: number } | null;
+  run: {
+    id: string;
+    agent: string;
+    startedAt: number;
+    /** Pages expected from the sources, or the pages already here on a rebuild. */
+    total: number;
+    done: number;
+    before: Set<string>;
+  } | null;
   notice: Notice | null;
   /** Second click on 删除 actually removes the page. */
   pendingDelete: string | null;
+  /** Second click on 删除知识库 removes this whole scope. */
+  pendingClear: boolean;
   starters: Starter[] | null;
 };
 
@@ -85,6 +97,7 @@ function stateFor(key: string): WikiState {
       run: null,
       notice: null,
       pendingDelete: null,
+      pendingClear: false,
       starters: null,
     };
     states.set(key, state);
@@ -276,15 +289,15 @@ async function generateFromStarters(scope: WikiScope, deps: WikiDeps): Promise<v
       setNotice(scope, { tone: "warn", text: t("chat.wikiNothingCopied") });
       return;
     }
-    await runIngest(scope, deps, root, sources, false, { skipped, unreadable });
+    await runIngest(scope, deps, root, sources, "add", { skipped, unreadable });
   } catch (error) {
     setNotice(scope, { tone: "warn", text: String(error) });
   }
 }
 
-async function deletePage(scope: WikiScope, path: string): Promise<void> {
+async function deletePage(scope: WikiScope, path: string, confirmed = false): Promise<void> {
   const state = stateFor(scope.key);
-  if (state.pendingDelete !== path) {
+  if (!confirmed && state.pendingDelete !== path) {
     state.pendingDelete = path;
     rerender();
     return;
@@ -331,16 +344,24 @@ function setNotice(scope: WikiScope, notice: Notice | null): void {
   rerender();
 }
 
+type IngestKind = "add" | "rebuild" | "merge";
+
 /** Absolute paths only: some agents (OpenClaw) start in their own folder, not the wiki. */
-function ingestPrompt(root: string, sources: string[], rebuild: boolean): string {
+function ingestPrompt(root: string, sources: string[], kind: IngestKind): string {
   const language = getLocale() === "en" ? "English" : "Simplified Chinese";
   const at = (relative: string) => `${root}/${relative}`;
-  const task = rebuild
-    ? `Rebuild the wiki from every source in ${at("raw/")}. Keep good pages, rewrite weak ones, merge duplicates, and make sure ${at("wiki/index.md")} lists every page.`
-    : `Add these new sources to the wiki:\n${sources.map((source) => `- ${at(source)}`).join("\n")}`;
+  const task =
+    kind === "rebuild"
+      ? `Rebuild the wiki from every source in ${at("raw/")}. Keep good pages, rewrite weak ones, and make sure ${at("wiki/index.md")} lists every page.`
+      : kind === "merge"
+        ? sources.length
+          ? `Merge duplicates into ${sources.map((source) => at(`wiki/${source}`)).join(", ")}. Fold every other page that repeats the same facts into that page.`
+          : `Find pages that repeat the same facts. Merge each group into one page.`
+        : `Add these new sources to the wiki:\n${sources.map((source) => `- ${at(source)}`).join("\n")}\n\nIf a source repeats a page that already exists, update that page. Do not add another page for the same fact.`;
   return [
     `You maintain the knowledge wiki in ${root}. Your shell may start in a different folder, so always use these full paths. Read ${at("AGENTS.md")} first and follow it exactly.`,
     task,
+    "When two pages say the same thing, keep one page, move any extra facts into it, delete the other page, and update the index. Do not leave a second page that only repeats the first.",
     "PDF and Word files already have a plain-text copy beside them with `.txt` added to the name (for example `spec.pdf.txt`). Read that copy. Do not try to convert, render, or OCR any file yourself. If a PDF or Word file has no `.txt` copy, it could not be read: skip it.",
     "Only run commands that finish within a few seconds. Never start a command that keeps running in the background.",
     `Write every page in ${language}.`,
@@ -348,16 +369,111 @@ function ingestPrompt(root: string, sources: string[], rebuild: boolean): string
   ].join("\n\n");
 }
 
+function leftText(remainingMs: number): string {
+  if (remainingMs < 45_000) return t("chat.wikiLeftSoon");
+  const minutes = Math.max(1, Math.round(remainingMs / 60_000));
+  if (minutes >= 60) return t("chat.wikiLeftHours", { n: String(Math.max(1, Math.round(minutes / 60))) });
+  return t("chat.wikiLeftMinutes", { n: String(minutes) });
+}
+
+function progressCaption(run: NonNullable<WikiState["run"]>): {
+  percent: number;
+  caption: string;
+  phase: "reading" | "writing" | "finishing";
+} {
+  const progress = wikiRunProgress({
+    elapsedMs: Date.now() - run.startedAt,
+    done: run.done,
+    total: run.total,
+  });
+  if (progress.phase === "reading") {
+    return { percent: progress.percent, caption: t("chat.wikiProgressReading"), phase: progress.phase };
+  }
+  if (progress.phase === "finishing") {
+    return { percent: progress.percent, caption: t("chat.wikiProgressFinishing"), phase: progress.phase };
+  }
+  return {
+    percent: progress.percent,
+    caption: t("chat.wikiProgressPages", {
+      done: String(Math.min(run.done, run.total)),
+      total: String(run.total),
+      left: leftText(progress.remainingMs ?? 0),
+    }),
+    phase: progress.phase,
+  };
+}
+
+function runningText(scope: WikiScope, run: NonNullable<WikiState["run"]>): string {
+  const time = elapsedText(run.startedAt);
+  if (scope.projectName) {
+    return t("chat.wikiRunningProject", { agent: run.agent, name: scope.projectName, time });
+  }
+  return t("chat.wikiRunningGlobal", { agent: run.agent, time });
+}
+
 function paintRunText(): void {
   if (!mounted) return;
   const run = stateFor(mounted.scope.key).run;
+  if (!run) return;
   const line = mounted.host.querySelector<HTMLElement>(".kw-notice-text[data-run]");
-  if (run && line) line.textContent = t("chat.wikiRunning", { agent: run.agent, time: elapsedText(run.startedAt) });
+  if (line) line.textContent = runningText(mounted.scope, run);
+  const painted = progressCaption(run);
+  const caption = mounted.host.querySelector<HTMLElement>(".kw-progress-caption");
+  if (caption) caption.textContent = painted.caption;
+  const fill = mounted.host.querySelector<HTMLElement>(".kw-progress-fill");
+  const bar = mounted.host.querySelector<HTMLElement>(".kw-progress");
+  if (fill) fill.style.width = painted.phase === "reading" ? "" : `${painted.percent}%`;
+  if (bar) {
+    bar.classList.toggle("is-reading", painted.phase === "reading");
+    bar.setAttribute("aria-valuenow", String(painted.percent));
+  }
+}
+
+let pollingPages = false;
+
+async function refreshRunPages(): Promise<void> {
+  if (pollingPages || !mounted) return;
+  const scope = mounted.scope;
+  const state = stateFor(scope.key);
+  const run = state.run;
+  if (!run) return;
+  pollingPages = true;
+  try {
+    const { pages } = await knowledgePages({ projectPath: scope.projectPath });
+    if (state.run?.id !== run.id) return;
+    run.done = pages.filter(
+      (page) => !run.before.has(page.path) || page.modifiedMs >= run.startedAt - 1500,
+    ).length;
+    const changed =
+      pages.length !== state.pages.length || pages.some((page, index) => page.path !== state.pages[index]?.path);
+    if (changed) {
+      state.pages = pages;
+      if (!state.selected || !pages.some((page) => page.path === state.selected)) {
+        state.selected = pages[0]?.path ?? null;
+        state.page = null;
+      }
+      rerender();
+      return;
+    }
+  } catch {
+    /* Keep the last page count. The bar still moves with time. */
+  } finally {
+    pollingPages = false;
+  }
+  paintRunText();
+}
+
+let pollTick = 0;
+
+function tickRun(): void {
+  pollTick += 1;
+  if (pollTick % 3 === 0) void refreshRunPages();
+  else paintRunText();
 }
 
 function syncRunTimer(): void {
   const anyRunning = [...states.values()].some((state) => state.run);
-  if (anyRunning && runTimer === null) runTimer = window.setInterval(paintRunText, 1000);
+  if (anyRunning && runTimer === null) runTimer = window.setInterval(tickRun, 1000);
   if (!anyRunning && runTimer !== null) {
     window.clearInterval(runTimer);
     runTimer = null;
@@ -388,16 +504,24 @@ async function runIngest(
   deps: WikiDeps,
   root: string,
   sources: string[],
-  rebuild: boolean,
+  kind: IngestKind,
   imported?: { skipped: number; unreadable: number },
 ): Promise<void> {
   const state = stateFor(scope.key);
   if (state.run) return;
+  state.pendingClear = false;
   const runtime = deps.currentAgent();
   const agent = agentName(runtime);
   const id = `${KNOWLEDGE_RUN_PREFIX}${scope.key}:${Date.now()}`;
   const before = new Set(state.pages.map((page) => page.path));
-  state.run = { id, agent, startedAt: Date.now() };
+  state.run = {
+    id,
+    agent,
+    startedAt: Date.now(),
+    total: kind === "add" ? Math.max(sources.length + 1, 1) : Math.max(before.size, 1),
+    done: 0,
+    before,
+  };
   state.notice = null;
   syncRunTimer();
   rerender();
@@ -406,7 +530,7 @@ async function runIngest(
   try {
     const report = await startPromptSession({
       runtime,
-      prompt: ingestPrompt(root, sources, rebuild),
+      prompt: ingestPrompt(root, sources, kind),
       cwd: root,
       workspaceName: scope.projectName,
       timeoutSec: 3600,
@@ -457,7 +581,7 @@ async function addFromChat(scope: WikiScope, deps: WikiDeps): Promise<void> {
       name: `chat-${transcript.title}`,
       content: transcript.text,
     });
-    await runIngest(scope, deps, saved.root, saved.sources, false);
+    await runIngest(scope, deps, saved.root, saved.sources, "add");
   } catch (error) {
     setNotice(scope, { tone: "warn", text: String(error) });
   }
@@ -479,16 +603,123 @@ async function addPicked(scope: WikiScope, deps: WikiDeps, directory: boolean): 
       setNotice(scope, { tone: "warn", text: t("chat.wikiNothingCopied") });
       return;
     }
-    await runIngest(scope, deps, imported.root, imported.sources, false, imported);
+    await runIngest(scope, deps, imported.root, imported.sources, "add", imported);
   } catch (error) {
     setNotice(scope, { tone: "warn", text: String(error) });
   }
 }
 
-async function rebuild(scope: WikiScope, deps: WikiDeps): Promise<void> {
+async function clearKnowledge(scope: WikiScope): Promise<void> {
+  const state = stateFor(scope.key);
+  if (state.run) return;
+  if (!state.pendingClear) {
+    state.pendingClear = true;
+    rerender();
+    return;
+  }
+  state.pendingClear = false;
+  try {
+    await knowledgeClear({ projectPath: scope.projectPath });
+    state.pages = [];
+    state.selected = null;
+    state.page = null;
+    state.pageError = null;
+    state.pendingDelete = null;
+    state.starters = null;
+    state.notice = { tone: "muted", text: t("chat.wikiDeletedAll") };
+    await loadStarters(scope, depsFor(scope));
+  } catch (error) {
+    state.notice = { tone: "warn", text: String(error) };
+  }
+  rerender();
+}
+
+async function mergeDuplicates(scope: WikiScope, deps: WikiDeps, focusPath?: string): Promise<void> {
+  if (stateFor(scope.key).run) return;
+  closePageMenu();
   try {
     const root = await knowledgePrepare({ projectPath: scope.projectPath });
-    await runIngest(scope, deps, root, [], true);
+    await runIngest(scope, deps, root, focusPath ? [focusPath] : [], "merge");
+  } catch (error) {
+    setNotice(scope, { tone: "warn", text: String(error) });
+  }
+}
+
+let pageMenu: HTMLElement | null = null;
+let pageMenuBound = false;
+
+function closePageMenu(): void {
+  pageMenu?.remove();
+  pageMenu = null;
+}
+
+function ensurePageMenuListeners(): void {
+  if (pageMenuBound) return;
+  pageMenuBound = true;
+  document.addEventListener("pointerdown", (event) => {
+    if (!pageMenu) return;
+    const target = event.target;
+    if (target instanceof Node && pageMenu.contains(target)) return;
+    closePageMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePageMenu();
+  });
+}
+
+function openPageMenu(
+  x: number,
+  y: number,
+  scope: WikiScope,
+  deps: WikiDeps,
+  path: string,
+): void {
+  ensurePageMenuListeners();
+  closePageMenu();
+  const menu = document.createElement("div");
+  menu.className = "chat-project-menu";
+  menu.setAttribute("role", "menu");
+
+  const merge = document.createElement("button");
+  merge.type = "button";
+  merge.className = "chat-project-menu-item";
+  merge.setAttribute("role", "menuitem");
+  merge.textContent = t("chat.wikiMergePage");
+  merge.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void mergeDuplicates(scope, deps, path);
+  });
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "chat-project-menu-item";
+  remove.setAttribute("role", "menuitem");
+  remove.textContent = t("chat.wikiMenuDelete");
+  let armed = false;
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!armed) {
+      armed = true;
+      remove.textContent = t("chat.wikiDeleteConfirm");
+      return;
+    }
+    closePageMenu();
+    void deletePage(scope, path, true);
+  });
+
+  menu.append(merge, remove);
+  document.body.append(menu);
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  pageMenu = menu;
+}
+
+async function rebuild(scope: WikiScope, deps: WikiDeps): Promise<void> {
+  stateFor(scope.key).pendingClear = false;
+  try {
+    const root = await knowledgePrepare({ projectPath: scope.projectPath });
+    await runIngest(scope, deps, root, [], "rebuild");
   } catch (error) {
     setNotice(scope, { tone: "warn", text: String(error) });
   }
@@ -505,19 +736,44 @@ function toolbar(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTM
   );
   bar.append(sources);
   if (state.pages.length) {
-    bar.append(button(t("chat.wikiRebuild"), "kw-btn kw-btn-solid", () => void rebuild(m.scope, m.deps), busy));
+    const actions = el("div", "kw-bar-end");
+    if (state.pages.length > 1) {
+      actions.append(button(t("chat.wikiMerge"), "kw-btn", () => void mergeDuplicates(m.scope, m.deps), busy));
+    }
+    actions.append(button(t("chat.wikiRebuild"), "kw-btn kw-btn-solid", () => void rebuild(m.scope, m.deps), busy));
+    const wipe = button(
+      state.pendingClear ? t("chat.wikiDeleteAllConfirm") : t("chat.wikiDeleteAll"),
+      "kw-btn kw-btn-danger",
+      () => void clearKnowledge(m.scope),
+      busy,
+    );
+    wipe.classList.toggle("is-armed", state.pendingClear);
+    actions.append(wipe);
+    bar.append(actions);
   }
   return bar;
 }
 
-function noticeLine(state: WikiState): HTMLElement | null {
+function noticeLine(scope: WikiScope, state: WikiState): HTMLElement | null {
   if (state.run) {
     const run = state.run;
-    const line = el("div", "kw-notice");
+    const line = el("div", "kw-notice kw-notice-run");
     line.dataset.tone = "muted";
-    const text = el("span", "kw-notice-text", t("chat.wikiRunning", { agent: run.agent, time: elapsedText(run.startedAt) }));
+    const row = el("div", "kw-notice-row");
+    const text = el("span", "kw-notice-text", runningText(scope, run));
     text.dataset.run = "1";
-    line.append(el("span", "kw-spinner"), text, button(t("chat.wikiStop"), "kw-btn kw-btn-quiet", () => void cancelPromptSession(run.id)));
+    row.append(el("span", "kw-spinner"), text, button(t("chat.wikiStop"), "kw-btn kw-btn-quiet", () => void cancelPromptSession(run.id)));
+    const painted = progressCaption(run);
+    const bar = el("div", "kw-progress");
+    bar.classList.toggle("is-reading", painted.phase === "reading");
+    bar.setAttribute("role", "progressbar");
+    bar.setAttribute("aria-valuemin", "0");
+    bar.setAttribute("aria-valuemax", "100");
+    bar.setAttribute("aria-valuenow", String(painted.percent));
+    const fill = el("div", "kw-progress-fill");
+    if (painted.phase !== "reading") fill.style.width = `${painted.percent}%`;
+    bar.append(fill);
+    line.append(row, bar, el("p", "kw-progress-caption", painted.caption));
     return line;
   }
   if (!state.notice) return null;
@@ -527,7 +783,7 @@ function noticeLine(state: WikiState): HTMLElement | null {
   return line;
 }
 
-function navList(m: { scope: WikiScope }, state: WikiState): HTMLElement {
+function navList(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTMLElement {
   const list = el("div", "kw-tree");
   const q = state.query.trim().toLowerCase();
   const pages = q
@@ -547,7 +803,11 @@ function navList(m: { scope: WikiScope }, state: WikiState): HTMLElement {
     if (folder) list.append(el("p", "kw-tree-folder", folder.split("/").map(folderLabel).join(" / ")));
     for (const page of groups.get(folder) ?? []) {
       const item = button(page.title, "kw-tree-item", () => void openPage(m.scope, page.path));
-      item.title = page.path;
+      item.title = page.title;
+      item.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openPageMenu(event.clientX, event.clientY, m.scope, m.deps, page.path);
+      });
       if (folder) item.classList.add("is-nested");
       item.setAttribute("aria-current", page.path === state.selected ? "page" : "false");
       list.append(item);
@@ -673,9 +933,10 @@ function navResizer(body: HTMLElement): HTMLElement {
 
 function render(m: { host: HTMLElement; scope: WikiScope; deps: WikiDeps }): void {
   const state = stateFor(m.scope.key);
+  closePageMenu();
   const root = el("div", "kw");
   root.append(toolbar(m, state));
-  const notice = noticeLine(state);
+  const notice = noticeLine(m.scope, state);
   if (notice) root.append(notice);
   if (!state.loaded) {
     root.append(el("p", "kw-hint", state.error ?? t("chat.wikiLoading")));

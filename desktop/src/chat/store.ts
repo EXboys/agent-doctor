@@ -109,6 +109,25 @@ export function parseStoreRaw(raw: string): SessionStore | null {
   }
 }
 
+/** Agent of the conversation currently open in 问答. Read-only; does not rewrite the store. */
+export function readActiveSessionRuntime(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      activeId?: unknown;
+      sessions?: { id?: unknown; runtime?: unknown }[];
+    };
+    if (!Array.isArray(parsed.sessions)) return null;
+    const active = parsed.sessions.find((session) => session.id === parsed.activeId);
+    return typeof active?.runtime === "string" && active.runtime.trim()
+      ? active.runtime.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadStoreFromLocalKeys(): SessionStore | null {
   const keys = [STORAGE_KEY, STORAGE_BACKUP_KEY, LEGACY_STORAGE_KEY];
   for (const key of keys) {

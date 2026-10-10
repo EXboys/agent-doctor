@@ -1,4 +1,5 @@
 
+import { emit, listen } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import { isPersonalEdition } from "./edition";
 import { listPersonalProviders } from "./ipc";
@@ -34,6 +35,12 @@ import type {
   WorkspacesDocument,
 } from "./types";
 import { getHermesModel, runDoctor, checkRuntimeVersions, openResourcesWindow } from "./ipc";
+import { readActiveSessionRuntime } from "./chat/store";
+import {
+  ASK_ACTIVE_RUNTIME_EVENT,
+  ASK_RUNTIME_QUERY_EVENT,
+  ASK_SELECT_RUNTIME_EVENT,
+} from "./chat/runtime";
 
 export interface AgentsPanelDeps {
   setMainTab: (tab: MainTabId) => void;
@@ -339,6 +346,13 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
 
+    if (!appState.activeRuntimeId) {
+      const fromChat = readActiveSessionRuntime();
+      if (fromChat && installedRuntimes.some((runtime) => runtime.id === fromChat)) {
+        appState.activeRuntimeId = fromChat;
+      }
+    }
+
     const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
     appState.activeRuntimeId = selectedId;
     paintRuntimeTabs(installedRuntimes, selectedId);
@@ -449,6 +463,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
     showInstalledRuntime(runtimeId);
+    if (isAskRuntimeId(runtimeId)) {
+      void emit(ASK_SELECT_RUNTIME_EVENT, { runtime: runtimeId }).catch(() => {});
+    }
   });
 
   runtimesEl.addEventListener("click", (event) => {
@@ -593,6 +610,18 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   refreshBtn.addEventListener("click", () => {
     void refresh();
   });
+
+  void listen<{ runtime?: string }>(ASK_ACTIVE_RUNTIME_EVENT, (event) => {
+    const runtime = event.payload?.runtime;
+    if (!runtime) return;
+    if (!appState.lastReport) {
+      appState.activeRuntimeId = runtime;
+      return;
+    }
+    if (runtime === appState.activeRuntimeId) return;
+    showInstalledRuntime(runtime);
+  });
+  void emit(ASK_RUNTIME_QUERY_EVENT).catch(() => {});
 
   document.addEventListener("click", (event) => {
     const target = event.target as Node;

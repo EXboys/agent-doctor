@@ -133,7 +133,21 @@ function highlightMarkdown(source: string): string {
     .join("\n");
 }
 
-/** Safe, lightweight syntax coloring for the file preview. */
+const PLAIN_FENCE_LANGUAGES = new Set(["", "text", "plain", "plaintext", "txt"]);
+
+/** Vertical wheel stays in the code box only while that box can still move. */
+export function verticalWheelStaysInCodeBlock(deltaY: number, scrollTop: number, maxScrollTop: number): boolean {
+  if (Math.abs(deltaY) < 0.5 || maxScrollTop <= 1) return false;
+  if (deltaY < 0) return scrollTop > 0;
+  return scrollTop < maxScrollTop - 1;
+}
+
+/** Fences with no language, or marked as plain text, stay uncolored and wrap. */
+export function isPlainFenceLanguage(language: string): boolean {
+  return PLAIN_FENCE_LANGUAGES.has(language.trim().toLowerCase());
+}
+
+/** Safe, lightweight syntax coloring for file preview and chat code fences. */
 export function highlightCode(source: string, language: string): string {
   const normalized = language.toLowerCase();
   if (normalized === "markdown") return highlightMarkdown(source);

@@ -535,6 +535,7 @@ pub fn run() {
             knowledge_add_source_command,
             knowledge_save_page_command,
             knowledge_delete_page_command,
+            knowledge_clear_command,
             knowledge_context_command,
             list_remote_hosts_command,
             list_remote_host_rows_command,

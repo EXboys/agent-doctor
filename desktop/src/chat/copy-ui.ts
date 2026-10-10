@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { t } from "../i18n";
+import { highlightCode, isPlainFenceLanguage, verticalWheelStaysInCodeBlock } from "./code-highlight";
 import type { ChatAttachment, CopyIdleKind } from "./types";
 import { IMAGE_EXTS, SHORT_MSG_COPY_CHARS, SHORT_MSG_COPY_LINES } from "./types";
 
@@ -129,24 +130,66 @@ export function syncMessageCopyActions(
   wrap.classList.toggle("is-compact", show && isShortCopyLayout(bubble, layoutSource));
 }
 
-function codeBlockTitle(pre: HTMLElement): string {
-  const lang = pre.querySelector("code")?.className.match(/language-([\w+-]+)/)?.[1]?.toLowerCase() ?? "";
-  if (!lang || lang === "text" || lang === "plain" || lang === "plaintext") return t("chat.codePlain");
-  return lang;
+function fenceLanguage(pre: HTMLElement): string {
+  return pre.querySelector("code")?.className.match(/language-([\w+-]+)/)?.[1]?.toLowerCase() ?? "";
+}
+
+function wheelPixels(delta: number, mode: number): number {
+  if (mode === 1) return delta * 16;
+  if (mode === 2) return delta * window.innerHeight;
+  return delta;
+}
+
+function nearestVerticalScroller(start: HTMLElement): HTMLElement | null {
+  let node = start.parentElement;
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function bindCodeBlockWheel(pre: HTMLElement): void {
+  pre.addEventListener(
+    "wheel",
+    (event) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const deltaY = wheelPixels(event.deltaY, event.deltaMode);
+      const deltaX = wheelPixels(event.deltaX, event.deltaMode);
+      if (Math.abs(deltaY) < Math.abs(deltaX)) return;
+      const maxTop = pre.scrollHeight - pre.clientHeight;
+      if (verticalWheelStaysInCodeBlock(deltaY, pre.scrollTop, maxTop)) return;
+      const parent = nearestVerticalScroller(pre);
+      if (!parent) return;
+      event.preventDefault();
+      parent.scrollTop += deltaY;
+    },
+    { passive: false },
+  );
 }
 
 export function enhanceCodeBlocks(root: HTMLElement): void {
   for (const pre of Array.from(root.querySelectorAll("pre"))) {
     if (pre.parentElement?.classList.contains("chat-code-block")) continue;
+    const code = pre.querySelector("code");
+    const language = fenceLanguage(pre);
+    const plain = isPlainFenceLanguage(language);
+    if (!plain && code) code.innerHTML = highlightCode(code.textContent ?? "", language);
     const wrap = document.createElement("div");
-    wrap.className = "chat-code-block";
+    wrap.className = plain ? "chat-code-block is-plain" : "chat-code-block is-source";
     pre.replaceWith(wrap);
 
     const bar = document.createElement("div");
     bar.className = "chat-code-bar";
     const lang = document.createElement("span");
     lang.className = "chat-code-lang";
-    lang.textContent = codeBlockTitle(pre);
+    lang.textContent = plain ? t("chat.codePlain") : language;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chat-code-copy";
@@ -159,6 +202,7 @@ export function enhanceCodeBlocks(root: HTMLElement): void {
     });
     bar.append(lang, btn);
     wrap.append(bar, pre);
+    bindCodeBlockWheel(pre);
   }
 }
 

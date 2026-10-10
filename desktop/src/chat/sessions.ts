@@ -483,20 +483,28 @@ export function createSessionsController(deps: SessionsDeps) {
     }
   }
 
-  /** The conversation just opened from an agent card belongs at the top of the list. */
+  /**
+   * Show this chat at the top of its project without changing its last-activity time.
+   * Same temporary pin the island uses, so a session hidden under「更多」becomes visible.
+   */
   function bringSessionToFront(id: string): void {
     const sessions = deps.getStore().sessions;
     const index = sessions.findIndex((session) => session.id === id);
+    if (index < 0) return;
+    const session = sessions[index]!;
+    surfacedAt.set(id, Date.now());
+    collapsedProjects.delete(
+      sidebarGroupKey(sessionWorkspaceName(session, deps.getWorkspaceDoc())),
+    );
     if (index > 0) {
-      const [session] = sessions.splice(index, 1);
+      sessions.splice(index, 1);
       sessions.unshift(session);
       deps.saveStore();
-      renderSessionList();
     }
-    const row = deps.sessionListEl.querySelector<HTMLElement>(
-      `.chat-session[data-session-id="${CSS.escape(id)}"]`,
-    );
-    row?.scrollIntoView({ block: "nearest" });
+    renderSessionList();
+    deps.sessionListEl
+      .querySelector<HTMLElement>(`.chat-session[data-session-id="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }
 
   function detachLiveDom(): void {
@@ -557,21 +565,9 @@ export function createSessionsController(deps: SessionsDeps) {
 
   /** The chat opened from the island belongs at the top, still showing its last activity time. */
   function openSessionFromIsland(id: string): void {
-    const sessions = deps.getStore().sessions;
-    const index = sessions.findIndex((session) => session.id === id);
-    if (index < 0) return;
-    const session = sessions[index]!;
-    surfacedAt.set(id, Date.now());
-    collapsedProjects.delete(
-      sidebarGroupKey(sessionWorkspaceName(session, deps.getWorkspaceDoc())),
-    );
-    if (index > 0) {
-      sessions.splice(index, 1);
-      sessions.unshift(session);
-      deps.saveStore();
-    }
+    if (!deps.getStore().sessions.some((session) => session.id === id)) return;
+    bringSessionToFront(id);
     switchSession(id);
-    renderSessionList();
     deps.sessionListEl
       .querySelector<HTMLElement>(`.chat-session[data-session-id="${CSS.escape(id)}"]`)
       ?.scrollIntoView({ block: "nearest" });
@@ -691,8 +687,8 @@ export function createSessionsController(deps: SessionsDeps) {
       .filter((s) => s.runtime === runtime)
       .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (existing) {
-      switchSession(existing.id);
       bringSessionToFront(existing.id);
+      switchSession(existing.id);
       return;
     }
     startNewSession();

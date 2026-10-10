@@ -97,7 +97,12 @@ import {
   applyChatTheme as applyChatThemeBase,
   currentChatTheme,
 } from "./chat/theme";
-import { isAskRuntime, runtimeFromLocation } from "./chat/runtime";
+import { emit } from "@tauri-apps/api/event";
+import {
+  ASK_ACTIVE_RUNTIME_EVENT,
+  isAskRuntime,
+  runtimeFromLocation,
+} from "./chat/runtime";
 import {
   createEmptySession,
   persistStore,
@@ -327,10 +332,13 @@ export function autoResizePrompt(): void {
   const styles = window.getComputedStyle(promptEl);
   const maxHeight = Number.parseFloat(styles.maxHeight);
   const minHeight = Number.parseFloat(styles.minHeight);
-  let next = promptEl.scrollHeight;
+  const content = promptEl.scrollHeight;
+  let next = content;
   if (Number.isFinite(minHeight)) next = Math.max(next, minHeight);
-  if (Number.isFinite(maxHeight)) next = Math.min(next, maxHeight);
+  const capped = Number.isFinite(maxHeight) && content > maxHeight;
+  if (capped) next = maxHeight;
   promptEl.style.height = `${next}px`;
+  promptEl.style.overflowY = capped ? "auto" : "hidden";
 }
 
 export function selectedRuntime(): AskRuntime {
@@ -357,6 +365,7 @@ export async function refreshWiredProvider(): Promise<void> {
   await chatState.modelPicker.refreshWiredProvider();
 }
 export function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
+  const changed = chatState.currentRuntime !== runtime;
   chatState.currentRuntime = runtime;
   updateElevatedLabel();
   updateRuntimeLabel();
@@ -367,7 +376,14 @@ export function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: bo
       saveStore();
     }
   }
+  if (changed) {
+    publishActiveRuntime();
+  }
   void loadAskResources();
+}
+
+export function publishActiveRuntime(): void {
+  void emit(ASK_ACTIVE_RUNTIME_EVENT, { runtime: chatState.currentRuntime }).catch(() => {});
 }
 
 // Repair historical “one token = one message” fragmentation from early Codex streaming.
@@ -860,6 +876,7 @@ export function readInitialRuntime(): void {
   } else {
     setCurrentRuntime(activeSession().runtime);
   }
+  publishActiveRuntime();
 }
 
 /** OpenClaw often replies with the page title and never streams the tool name. */

@@ -1073,10 +1073,29 @@ html[data-theme="dark"] .chat-knowledge-save {
   border-bottom: 1px solid var(--line);
 }
 
-.kw-sources {
+.kw-sources,
+.kw-bar-end {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.kw-btn-danger,
+html[data-theme="dark"] .kw-btn-danger {
+  background: transparent;
+  color: var(--muted);
+}
+
+.kw-btn-danger:hover:not(:disabled),
+.kw-btn-danger.is-armed {
+  background: rgba(180, 40, 40, 0.1);
+  color: #b42318;
+}
+
+html[data-theme="dark"] .kw-btn-danger:hover:not(:disabled),
+html[data-theme="dark"] .kw-btn-danger.is-armed {
+  background: rgba(220, 70, 70, 0.14);
+  color: #e8a0a0;
 }
 
 .kw-btn {
@@ -1178,6 +1197,65 @@ html[data-theme="dark"] .kw-btn-solid:disabled {
 
 .kw-notice[data-tone="warn"] {
   color: var(--warn, #c47a12);
+}
+
+.kw > .kw-notice {
+  flex: none;
+}
+
+.kw-notice-run {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.kw-notice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.kw-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .kw-progress {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.kw-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+.kw-progress.is-reading .kw-progress-fill {
+  width: 35%;
+  transition: none;
+  animation: kw-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes kw-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.kw-progress-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .kw-notice-text {
@@ -3888,57 +3966,72 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   overflow-wrap: anywhere;
 }
 
-.chat-files-preview .syntax-comment {
+.chat-files-preview .syntax-comment,
+.chat-code-block.is-source .syntax-comment {
   color: #7c8a72;
   font-style: italic;
 }
 
-.chat-files-preview .syntax-string {
+.chat-files-preview .syntax-string,
+.chat-code-block.is-source .syntax-string {
   color: #b76b45;
 }
 
 .chat-files-preview .syntax-number,
-.chat-files-preview .syntax-literal {
+.chat-files-preview .syntax-literal,
+.chat-code-block.is-source .syntax-number,
+.chat-code-block.is-source .syntax-literal {
   color: #7c65b3;
 }
 
-.chat-files-preview .syntax-keyword {
+.chat-files-preview .syntax-keyword,
+.chat-code-block.is-source .syntax-keyword {
   color: #a04a75;
   font-weight: 600;
 }
 
-.chat-files-preview .syntax-function {
+.chat-files-preview .syntax-function,
+.chat-code-block.is-source .syntax-function {
   color: #4d74a8;
 }
 
-.chat-files-preview .syntax-marker {
+.chat-files-preview .syntax-marker,
+.chat-code-block.is-source .syntax-marker {
   color: #a04a75;
 }
 
-.chat-files-preview .syntax-heading {
+.chat-files-preview .syntax-heading,
+.chat-code-block.is-source .syntax-heading {
   color: var(--text);
   font-weight: 750;
 }
 
-html[data-theme="dark"] .chat-files-preview .syntax-comment {
+html[data-theme="dark"] .chat-files-preview .syntax-comment,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-comment {
   color: #7f9a74;
 }
 
-html[data-theme="dark"] .chat-files-preview .syntax-string {
+html[data-theme="dark"] .chat-files-preview .syntax-string,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-string {
   color: #d69d85;
 }
 
 html[data-theme="dark"] .chat-files-preview .syntax-number,
-html[data-theme="dark"] .chat-files-preview .syntax-literal {
+html[data-theme="dark"] .chat-files-preview .syntax-literal,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-number,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-literal {
   color: #b5a2e0;
 }
 
 html[data-theme="dark"] .chat-files-preview .syntax-keyword,
-html[data-theme="dark"] .chat-files-preview .syntax-marker {
+html[data-theme="dark"] .chat-files-preview .syntax-marker,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-keyword,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-marker {
   color: #d889b1;
 }
 
-html[data-theme="dark"] .chat-files-preview .syntax-function {
+html[data-theme="dark"] .chat-files-preview .syntax-function,
+html[data-theme="dark"] .chat-code-block.is-source .syntax-function {
   color: #82aaff;
 }
 
@@ -5049,7 +5142,12 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 }
 
 .chat-code-block {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   margin: 0.75em 0;
+  max-height: 50vh;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 14px;
   background: #ececee;
@@ -5058,6 +5156,7 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-code-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -5083,10 +5182,20 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 }
 
 .chat-code-block pre {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
   padding: 2px 16px 14px;
   background: transparent;
   color: inherit;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+}
+
+.chat-code-block.is-source pre {
+  overflow-x: auto;
 }
 
 .chat-code-copy {
@@ -5268,10 +5377,16 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 .chat-md .chat-code-block pre {
   margin: 0;
   padding: 2px 16px 14px;
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
   border-radius: 0;
   background: transparent;
   color: var(--text);
+}
+
+.chat-md .chat-code-block.is-source pre {
+  overflow-x: auto;
 }
 
 .chat-md pre code {
@@ -5283,6 +5398,12 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   font-weight: 400;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.chat-md .chat-code-block.is-source pre code {
+  white-space: pre;
+  overflow-wrap: normal;
   word-break: normal;
 }
 
@@ -5739,10 +5860,13 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-prompt {
   width: 100%;
-  /* min-height = one line + padding; grow via autoResizePrompt / resources-open. */
+  /* One line when empty. autoResizePrompt grows this with the text. */
   min-height: calc(1.45em + 14px);
-  max-height: calc(1.45em * 3 + 14px);
-  overflow-y: auto;
+  max-height: min(36vh, 260px);
+  overflow-x: hidden;
+  overflow-y: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   resize: none;
   border: 0;
   border-radius: 0;

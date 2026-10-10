@@ -490,6 +490,10 @@ export function knowledgeDeletePage(args: { projectPath: string | null; path: st
   return invoke("knowledge_delete_page_command", args);
 }
 
+export function knowledgeClear(args: { projectPath: string | null }): Promise<void> {
+  return invoke("knowledge_clear_command", args);
+}
+
 export function knowledgeContext(args: { projectPath: string | null }): Promise<KnowledgeContext | null> {
   return invoke("knowledge_context_command", args);
 }

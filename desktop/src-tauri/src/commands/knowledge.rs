@@ -619,6 +619,16 @@ fn remove_empty_dirs(wiki: &Path, mut dir: &Path) {
     }
 }
 
+/// Removes this scope’s knowledge folder, pages and sources together.
+#[tauri::command]
+pub fn knowledge_clear_command(project_path: Option<String>) -> Result<(), String> {
+    let root = knowledge_root(project_path.as_deref())?;
+    if !root.exists() {
+        return Ok(());
+    }
+    fs::remove_dir_all(&root).map_err(|_| "知识库没能删掉，请再试一次。".to_string())
+}
+
 /// What a chat turn should know about this wiki; `None` when it has no pages yet.
 #[tauri::command]
 pub fn knowledge_context_command(
@@ -730,6 +740,14 @@ mod tests {
         assert!(context.full.unwrap().contains("hi"));
 
         knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
+        assert!(knowledge_pages_command(project_str.clone())
+            .unwrap()
+            .pages
+            .is_empty());
+        knowledge_save_page_command(project_str.clone(), "index.md".into(), "# Index\n".into())
+            .unwrap();
+        knowledge_clear_command(project_str.clone()).unwrap();
+        assert!(!root.exists());
         assert!(knowledge_pages_command(project_str.clone())
             .unwrap()
             .pages
