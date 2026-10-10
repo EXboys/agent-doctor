@@ -1684,6 +1684,10 @@ body.is-diagnose-open .diagnose-detail {
   gap: 4px;
 }
 
+.glm-plan-row[hidden] {
+  display: none !important;
+}
+
 .field-row-inline {
   grid-template-columns: 88px 1fr;
   align-items: center;
@@ -2975,13 +2979,10 @@ body.is-diagnose-open .diagnose-detail {
 
 .meta-row-version.is-update {
   align-items: start;
-  border-color: color-mix(in srgb, var(--warn) 28%, var(--border));
-  background: var(--warn-bg);
 }
 
 .meta-row-version.is-update .meta-value {
-  color: #b45309;
-  font-weight: 600;
+  font-weight: 500;
   white-space: normal;
 }
 

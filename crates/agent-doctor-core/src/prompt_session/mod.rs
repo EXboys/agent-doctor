@@ -29,7 +29,7 @@ pub use backend::AskBackend;
 pub use control::PromptSessionControl;
 pub use plan::{PlanStep, PlanStepState};
 pub use vision::{ask_image_support, AskImageSupport, SENDABLE_IMAGE_EXTS};
-pub use warm::{enable_warm_sessions, shutdown_warm_sessions};
+pub use warm::{enable_warm_sessions, retire_warm_sessions, shutdown_warm_sessions};
 
 pub(crate) use claude::ClaudeAskBackend;
 pub(crate) use codex_app_server::CodexAskBackend;

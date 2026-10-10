@@ -521,6 +521,7 @@ export function createPersonalController(deps: PersonalDeps) {
       personalNameEl.value = item.name;
       personalUrlEl.value = item.url;
       personalModelEl.value = item.model;
+      presets.syncGlmPlan();
       if (personalModelSelectEl) {
         if (![...personalModelSelectEl.options].some((o) => o.value === item.model)) {
           const option = document.createElement("option");
@@ -583,6 +584,12 @@ export function createPersonalController(deps: PersonalDeps) {
         protocol: values.protocol,
       });
       if (report.ok) {
+        if (report.resolved_url) {
+          personalUrlEl.value = report.resolved_url;
+          presets.syncGlmPlan();
+          setPersonalHint("ok", t("personal.glmPlanSwitched"));
+          return;
+        }
         const presetId = personalPresetEl.value;
         const base =
           presetId !== "custom" && PROVIDER_PRESETS[presetId]

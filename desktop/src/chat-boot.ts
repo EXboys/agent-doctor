@@ -391,6 +391,7 @@ export function bootChat(): void {
 
   void listen("personal-provider-changed", () => {
     void refreshWiredProvider();
+    if (runningCount() > 0) setStatus(t("chat.providerChangedMidTurn"), "warn");
   });
 
   void listen("workspace-changed", () => {

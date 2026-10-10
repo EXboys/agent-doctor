@@ -110,6 +110,22 @@
               <p class="diagnose-config-label" data-i18n="diagnose.flow.fieldProvider">服务商</p>
               <div class="diagnose-preset-chips" id="diagnose-preset-chips" role="listbox"></div>
             </div>
+            <div id="diagnose-minimax-region" class="diagnose-config-block" hidden>
+              <p class="diagnose-config-label" data-i18n="personal.minimaxRegion">网站</p>
+              <div class="diagnose-preset-chips" role="listbox">
+                <button type="button" class="provider-chip" data-minimax-region="cn" data-i18n="personal.minimaxRegionCn">国内</button>
+                <button type="button" class="provider-chip" data-minimax-region="intl" data-i18n="personal.minimaxRegionIntl">国际</button>
+              </div>
+              <p class="section-footnote" data-i18n="personal.minimaxRegionHint">订阅钥匙和按量钥匙不是同一把。钥匙从国内网站来的，选「国内」。</p>
+            </div>
+            <div id="diagnose-glm-plan" class="diagnose-config-block" hidden>
+              <p class="diagnose-config-label" data-i18n="personal.glmPlan">钥匙来源</p>
+              <div class="diagnose-preset-chips" role="listbox">
+                <button type="button" class="provider-chip" data-glm-plan="payg" data-i18n="personal.glmPlanPayg">按量付费</button>
+                <button type="button" class="provider-chip" data-glm-plan="coding" data-i18n="personal.glmPlanCoding">编程套餐</button>
+              </div>
+              <p class="section-footnote" data-key-plan-hint data-i18n="personal.glmPlanHint">编程套餐和按量付费的钥匙不是同一把。</p>
+            </div>
             <div class="diagnose-form-grid">
               <label class="diagnose-field diagnose-field-key">
                 <span data-i18n="diagnose.flow.fieldKey">密钥</span>

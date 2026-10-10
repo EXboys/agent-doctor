@@ -156,6 +156,19 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
         .is_some_and(|mode| mode == crate::setup::MODE_PERSONAL);
     if personal_edition || stored_personal {
         if let Ok(providers) = store.list_personal_providers() {
+            // DeepSeek Harness keeps using a saved DeepSeek provider while another one is active.
+            let deepseek = providers
+                .iter()
+                .filter(|p| p.url.to_ascii_lowercase().contains("api.deepseek.com"))
+                .max_by_key(|p| p.active);
+            if let Some(saved) = deepseek {
+                if let Ok(Some(key)) = store.get_personal_api_key(&saved.id) {
+                    if !key.trim().is_empty() {
+                        env.insert("DEEPSEEK_API_KEY".into(), key.trim().to_string());
+                        env.insert("DEEPSEEK_BASE_URL".into(), saved.url.clone());
+                    }
+                }
+            }
             if let Some(active) = providers.into_iter().find(|p| p.active) {
                 strip_team_gateway_leftovers(env);
                 env.insert(
@@ -182,7 +195,12 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
                     env.remove("ANTHROPIC_BASE_URL");
                 }
                 if !active.model.trim().is_empty() {
-                    env.insert(MODEL_ENV.to_string(), active.model);
+                    let model = crate::setup::coerce_gateway_model(&active.url, &active.model)
+                        .unwrap_or_else(|| active.model.clone());
+                    if model != active.model {
+                        let _ = crate::setup::persist_personal_provider_model(&active.id, &model);
+                    }
+                    env.insert(MODEL_ENV.to_string(), model);
                 }
             }
         }
@@ -202,25 +220,65 @@ pub(crate) fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, Stri
         cmd.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
     }
     if let Some((url, key)) = resolve_claude_overlay(overlay) {
-        cmd.env("ANTHROPIC_BASE_URL", &url);
-        cmd.env("ANTHROPIC_API_KEY", &key);
+        // A previous provider can leave these in the app's own environment.
+        for stale in CLAUDE_PROVIDER_ENV {
+            cmd.env_remove(stale);
+        }
+        for (name, value) in claude_provider_env(overlay).unwrap_or_default() {
+            cmd.env(name, value);
+        }
         cmd.env(COMPANY_API_KEY_ENV, &key);
         cmd.env(EVOTOWN_API_KEY_ENV, &key);
-        let model = overlay
-            .get(MODEL_ENV)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty());
+        let model = claude_model(overlay);
         if let Some(model_id) = model {
-            cmd.env("ANTHROPIC_MODEL", model_id);
-            cmd.env("ANTHROPIC_DEFAULT_SONNET_MODEL", model_id);
-            cmd.env("ANTHROPIC_DEFAULT_OPUS_MODEL", model_id);
-            cmd.env("ANTHROPIC_DEFAULT_HAIKU_MODEL", model_id);
-            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", model_id);
             cmd.env(MODEL_ENV, model_id);
         }
         // Keep ~/.claude/settings.json aligned — Claude CLI still reads it when env is sparse.
         let _ = crate::setup::apply_claude_code_with_model(&url, &key, model);
     }
+}
+
+/// Every variable that decides where Claude Code sends a message and with which model.
+const CLAUDE_PROVIDER_ENV: &[&str] = &[
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+];
+
+fn claude_model(overlay: &HashMap<String, String>) -> Option<&str> {
+    overlay
+        .get(MODEL_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+/// The active provider for Claude Code, every slot filled. Claude prefers
+/// ANTHROPIC_AUTH_TOKEN over ANTHROPIC_API_KEY, so both carry the same key.
+pub(crate) fn claude_provider_env(
+    overlay: &HashMap<String, String>,
+) -> Option<Vec<(&'static str, String)>> {
+    let (url, key) = resolve_claude_overlay(overlay)?;
+    let model = claude_model(overlay).unwrap_or_default().to_string();
+    Some(
+        CLAUDE_PROVIDER_ENV
+            .iter()
+            .map(|name| {
+                let value = match *name {
+                    "ANTHROPIC_BASE_URL" => url.clone(),
+                    "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" => key.clone(),
+                    _ => model.clone(),
+                };
+                (*name, value)
+            })
+            .filter(|(_, value)| !value.is_empty())
+            .collect(),
+    )
 }
 
 pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
@@ -270,10 +328,17 @@ pub(crate) fn resolve_deepseek_harness_overlay(
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let compatible = resolve_hermes_overlay(overlay);
-    let key = direct_key.or_else(|| compatible.as_ref().map(|(_, key, _)| key.clone()));
-    let url = direct_url.or_else(|| compatible.map(|(url, _, _)| url));
-    (url, key)
+    // DeepSeek Harness only talks to DeepSeek. A DeepSeek key must never be
+    // paired with another provider's address, or the other way round.
+    if direct_key.is_some() {
+        return (direct_url, direct_key);
+    }
+    match resolve_hermes_overlay(overlay) {
+        Some((url, key, _)) if url.to_ascii_lowercase().contains("api.deepseek.com") => {
+            (Some(url), Some(key))
+        }
+        _ => (None, None),
+    }
 }
 
 pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
@@ -397,19 +462,28 @@ fn ensure_hermes_model_config(home: &Path, gateway_url: &str, model: Option<&str
         YamlValue::from("base_url"),
         YamlValue::from(gateway_url.as_str()),
     );
-    if !chosen.is_empty() {
-        let model_id = if pin_chat {
+    // A key written here beats OPENAI_API_KEY in .env, so an old one would stay in use.
+    model_map.remove(YamlValue::from("api_key"));
+    let model_id = (!chosen.is_empty()).then(|| {
+        if pin_chat {
             crate::setup::merge::restore_hyphenated_vendor_model(chosen)
         } else {
             chosen.to_string()
-        };
-        model_map.insert(YamlValue::from("default"), YamlValue::from(model_id));
+        }
+    });
+    if let Some(model_id) = &model_id {
+        model_map.insert(
+            YamlValue::from("default"),
+            YamlValue::from(model_id.as_str()),
+        );
     }
     if pin_chat {
         model_map.insert(
             YamlValue::from("api_mode"),
             YamlValue::from("chat_completions"),
         );
+    } else {
+        model_map.remove(YamlValue::from("api_mode"));
     }
     // Keep auxiliary helpers on the same gateway so Hermes does not fall back to OpenRouter.
     let aux = root_map
@@ -426,6 +500,11 @@ fn ensure_hermes_model_config(home: &Path, gateway_url: &str, model: Option<&str
                     YamlValue::from("base_url"),
                     YamlValue::from(gateway_url.as_str()),
                 );
+                map.remove(YamlValue::from("api_key"));
+                // The previous provider's model id is unknown to this gateway.
+                if let Some(model_id) = &model_id {
+                    map.insert(YamlValue::from("model"), YamlValue::from(model_id.as_str()));
+                }
             }
         }
     }
@@ -743,6 +822,36 @@ mod tests {
         env.insert("OPENAI_API_KEY".into(), "sk-test".into());
 
         assert!(resolve_claude_overlay(&env).is_none());
+    }
+
+    #[test]
+    fn deepseek_harness_never_mixes_providers() {
+        let mut env = HashMap::new();
+        env.insert(
+            GATEWAY_URL_ENV.to_string(),
+            "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
+        );
+        env.insert("OPENAI_API_KEY".to_string(), "glm-key".to_string());
+        assert_eq!(resolve_deepseek_harness_overlay(&env), (None, None));
+
+        env.insert("DEEPSEEK_API_KEY".to_string(), "ds-key".to_string());
+        assert_eq!(
+            resolve_deepseek_harness_overlay(&env),
+            (None, Some("ds-key".to_string()))
+        );
+
+        env.remove("DEEPSEEK_API_KEY");
+        env.insert(
+            GATEWAY_URL_ENV.to_string(),
+            "https://api.deepseek.com/v1".to_string(),
+        );
+        assert_eq!(
+            resolve_deepseek_harness_overlay(&env),
+            (
+                Some("https://api.deepseek.com/v1".to_string()),
+                Some("glm-key".to_string())
+            )
+        );
     }
 
     #[test]

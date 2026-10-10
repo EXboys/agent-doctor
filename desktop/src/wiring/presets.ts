@@ -3,7 +3,17 @@ import {
   modelsForCustomProtocol,
   modelsForPresetId,
 } from "../provider-models";
-import { PROVIDER_PRESETS } from "../provider-presets";
+import {
+  keyPlanFromUrl,
+  minimaxRegionFromUrl,
+  minimaxUrlForRegion,
+  presetHasKeyPlan,
+  presetIdForPlanUrl,
+  urlForKeyPlan,
+  type GlmKeyPlan,
+  type MinimaxRegion,
+  PROVIDER_PRESETS,
+} from "../provider-presets";
 
 const personalPresetEl = document.querySelector<HTMLSelectElement>("#personal-preset")!;
 const personalPresetPickerEl = document.querySelector<HTMLElement>("#personal-preset-picker");
@@ -20,6 +30,8 @@ const personalPresetUrlEl = document.querySelector<HTMLElement>("#personal-prese
 const personalAdvancedEl = document.querySelector<HTMLDetailsElement>("#personal-advanced");
 const personalSaveEl = document.querySelector<HTMLButtonElement>("#personal-save")!;
 const personalKeyEl = document.querySelector<HTMLInputElement>("#personal-key")!;
+const personalGlmPlanEl = document.querySelector<HTMLElement>("#personal-glm-plan");
+const personalMinimaxRegionEl = document.querySelector<HTMLElement>("#personal-minimax-region");
 
 const PRESET_PICKER_GROUPS: Array<{ labelKey: MessageKey; ids: string[] }> = [
   {
@@ -32,7 +44,7 @@ const PRESET_PICKER_GROUPS: Array<{ labelKey: MessageKey; ids: string[] }> = [
   },
   {
     labelKey: "personal.groupHub",
-    ids: ["siliconflow", "openrouter", "groq"],
+    ids: ["volcengine", "qianfan", "siliconflow", "openrouter", "groq"],
   },
 ];
 
@@ -126,10 +138,19 @@ export function createPresetsController() {
         group.label = t(key);
       }
     });
+    syncGlmPlan();
+    syncMinimaxRegion();
   }
 
   function matchPresetId(name: string, url: string, protocol?: string): string {
     const normalizedUrl = url.trim().replace(/\/+$/, "");
+    const planPreset = presetIdForPlanUrl(normalizedUrl);
+    if ((!protocol || protocol === "openai") && planPreset) {
+      return planPreset;
+    }
+    if ((!protocol || protocol === "openai") && minimaxRegionFromUrl(normalizedUrl)) {
+      return "minimax";
+    }
     for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
       const presetUrl = preset.url.replace(/\/+$/, "");
       if (protocol && preset.protocol !== protocol) {
@@ -179,6 +200,54 @@ export function createPresetsController() {
     }
   }
 
+  function markGlmPlan(plan: GlmKeyPlan) {
+    personalGlmPlanEl?.querySelectorAll<HTMLButtonElement>("[data-glm-plan]").forEach((chip) => {
+      const selected = chip.dataset.glmPlan === plan;
+      chip.classList.toggle("is-active", selected);
+      chip.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+  }
+
+  function syncGlmPlan() {
+    syncMinimaxRegion();
+    if (!personalGlmPlanEl) return;
+    const presetId = personalPresetEl.value;
+    const show = presetHasKeyPlan(presetId);
+    personalGlmPlanEl.hidden = !show;
+    if (!show) return;
+    markGlmPlan(keyPlanFromUrl(personalUrlEl.value) ?? "payg");
+    const hint = personalGlmPlanEl.querySelector<HTMLElement>("[data-key-plan-hint]");
+    if (hint) hint.textContent = t("personal.glmPlanHint");
+  }
+
+  function setGlmPlan(plan: GlmKeyPlan) {
+    personalUrlEl.value = urlForKeyPlan(personalPresetEl.value, plan, personalUrlEl.value);
+    markGlmPlan(plan);
+  }
+
+  function markMinimaxRegion(region: MinimaxRegion) {
+    personalMinimaxRegionEl
+      ?.querySelectorAll<HTMLButtonElement>("[data-minimax-region]")
+      .forEach((chip) => {
+        const selected = chip.dataset.minimaxRegion === region;
+        chip.classList.toggle("is-active", selected);
+        chip.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+  }
+
+  function syncMinimaxRegion() {
+    if (!personalMinimaxRegionEl) return;
+    const show = personalPresetEl.value === "minimax";
+    personalMinimaxRegionEl.hidden = !show;
+    if (!show) return;
+    markMinimaxRegion(minimaxRegionFromUrl(personalUrlEl.value) ?? "cn");
+  }
+
+  function setMinimaxRegion(region: MinimaxRegion) {
+    personalUrlEl.value = minimaxUrlForRegion(region);
+    markMinimaxRegion(region);
+  }
+
   function setPresetFormMode(isCustom: boolean, presetUrl?: string) {
     if (personalAdvancedEl) {
       // Presets: hide entirely — URL/protocol auto-routed in background.
@@ -209,6 +278,8 @@ export function createPresetsController() {
       personalNameEl.readOnly = false;
       setModelSuggestions(modelsForCustomProtocol(personalProtocolEl.value));
       setPresetFormMode(true);
+      syncGlmPlan();
+      syncMinimaxRegion();
       return;
     }
     const preset = PROVIDER_PRESETS[presetId];
@@ -227,6 +298,8 @@ export function createPresetsController() {
     personalNameRowEl.classList.add("is-preset-locked");
     personalNameEl.readOnly = true;
     setPresetFormMode(false, preset.url);
+    syncGlmPlan();
+    syncMinimaxRegion();
   }
 
   function focusAfterPreset(presetId: string) {
@@ -258,9 +331,15 @@ export function createPresetsController() {
   function maybePromoteToCustomFromUrl(): void {
     const presetId = personalPresetEl.value;
     if (presetId !== "custom" && PROVIDER_PRESETS[presetId]) {
-      const presetUrl = PROVIDER_PRESETS[presetId].url.replace(/\/+$/, "");
       const currentUrl = personalUrlEl.value.trim().replace(/\/+$/, "");
-      if (currentUrl && currentUrl !== presetUrl) {
+      const presetUrl = PROVIDER_PRESETS[presetId].url.replace(/\/+$/, "");
+      const allowed = presetHasKeyPlan(presetId)
+        ? urlForKeyPlan(presetId, "payg", currentUrl) === currentUrl ||
+          urlForKeyPlan(presetId, "coding", currentUrl) === currentUrl
+        : presetId === "minimax"
+          ? minimaxRegionFromUrl(currentUrl) !== null
+          : currentUrl === presetUrl;
+      if (currentUrl && !allowed) {
         const keptName = personalNameEl.value;
         const keptProtocol = personalProtocolEl.value;
         applyProviderPreset("custom");
@@ -269,6 +348,24 @@ export function createPresetsController() {
       }
     }
   }
+
+  personalMinimaxRegionEl?.addEventListener("click", (event) => {
+    const chip = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>(
+      "[data-minimax-region]",
+    );
+    const region = chip?.dataset.minimaxRegion;
+    if (region === "cn" || region === "intl") {
+      setMinimaxRegion(region);
+    }
+  });
+
+  personalGlmPlanEl?.addEventListener("click", (event) => {
+    const chip = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-glm-plan]");
+    const plan = chip?.dataset.glmPlan;
+    if (plan === "payg" || plan === "coding") {
+      setGlmPlan(plan);
+    }
+  });
 
   return {
     els: {
@@ -287,6 +384,8 @@ export function createPresetsController() {
     setModelSuggestions,
     syncModelFromSelect,
     applyProviderPreset,
+    syncGlmPlan,
+    setGlmPlan,
     focusAfterPreset,
     maybePromoteToCustomFromProtocol,
     maybePromoteToCustomFromUrl,

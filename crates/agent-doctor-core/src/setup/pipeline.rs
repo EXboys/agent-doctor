@@ -14,10 +14,12 @@ use crate::profile::{
     agent_profile_path, company_baseline_path, read_company_baseline, read_env_map,
 };
 use crate::runtime::all_adapters;
+use crate::setup::coding_plan::plan_endpoints;
 use crate::setup::merge::{self, clear_codex_placeholder_auth, COMPANY_DEFAULT_MODEL};
 use crate::setup::personal::{
-    list_personal_providers, load_personal_provider_entry, normalize_personal_gateway_url,
-    normalize_protocol, set_active_personal_provider_id, write_personal_profile,
+    align_coding_plan_url, list_personal_providers, load_personal_provider_entry,
+    normalize_personal_gateway_url, normalize_protocol, persist_personal_provider_model,
+    persist_personal_provider_url, set_active_personal_provider_id, write_personal_profile,
     PersonalProviderSetupReport, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
 };
 use crate::setup::{
@@ -485,11 +487,18 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
         .context("no personal provider id")?;
     let entry = load_personal_provider_entry(&id)?;
 
-    let gateway_url = normalize_personal_gateway_url(&entry.url)?;
-    let model = entry.model.trim();
-    if model.is_empty() {
+    let mut gateway_url = normalize_personal_gateway_url(&entry.url)?;
+    let stored_model = entry.model.trim();
+    if stored_model.is_empty() {
         bail!("personal provider model must not be empty");
     }
+    let model = if let Some(fixed) = coerce_gateway_model(&gateway_url, stored_model) {
+        let _ = persist_personal_provider_model(&entry.id, &fixed);
+        fixed
+    } else {
+        stored_model.to_string()
+    };
+    let model = model.as_str();
     if model.eq_ignore_ascii_case("default") {
         bail!("personal provider model must not be bare \"default\"");
     }
@@ -501,12 +510,21 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
 
     set_active_personal_provider_id(&entry.id)?;
 
+    // Coding Plan keys (Pro / Lite / Max) fail with "no balance" on the pay-as-you-go
+    // address. One models request picks the line this key actually belongs to.
+    if let Some(resolved) = align_coding_plan_url(&gateway_url, api_key) {
+        let resolved = normalize_personal_gateway_url(&resolved).unwrap_or(resolved);
+        if resolved.trim_end_matches('/') != gateway_url.trim_end_matches('/') {
+            let _ = persist_personal_provider_url(&entry.id, &resolved);
+            gateway_url = resolved;
+        }
+    }
+
     let mut anthropic_gateway_url = if protocol == PROTOCOL_ANTHROPIC {
         Some(gateway_url.clone())
     } else {
         None
     };
-    let mut gateway_url = gateway_url;
     let mut protocol = protocol;
 
     // Known dual-protocol hosts (same key): auto-route OpenAI agents + Claude Code.
@@ -556,6 +574,57 @@ fn teamups_official_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
     })
 }
 
+/// Saved model id from another vendor (DeepSeek id on a GLM address, and the reverse).
+/// Custom ids are left alone. `Some` is the model this gateway should actually be called with.
+pub fn coerce_gateway_model(url: &str, model: &str) -> Option<String> {
+    let host = url.to_ascii_lowercase();
+    let model_l = model.trim().to_ascii_lowercase();
+    if model_l.is_empty() {
+        return None;
+    }
+    let (fits, default) = if host.contains("open.bigmodel.cn") || host.contains("api.z.ai") {
+        (model_l.starts_with("glm"), "glm-5.3")
+    } else if host.contains("api.deepseek.com") {
+        (model_l.starts_with("deepseek"), "deepseek-v4-flash")
+    } else if host.contains("dashscope") {
+        (model_l.starts_with("qwen"), "qwen3.7-plus")
+    } else if host.contains("api.kimi.") || host.contains("moonshot.") {
+        (
+            model_l.starts_with("kimi") || model_l.starts_with("moonshot"),
+            "kimi-k2.6",
+        )
+    } else if host.contains("minimax") {
+        (model_l.starts_with("minimax"), "MiniMax-M3")
+    } else {
+        return None;
+    };
+    if fits || !model_is_foreign_vendor(&model_l) {
+        None
+    } else {
+        Some(default.to_string())
+    }
+}
+
+fn model_is_foreign_vendor(model_l: &str) -> bool {
+    model_l.starts_with("glm")
+        || model_l.starts_with("deepseek")
+        || model_l.starts_with("qwen")
+        || model_l.starts_with("kimi")
+        || model_l.starts_with("moonshot")
+        || model_l.starts_with("minimax")
+        || model_l.starts_with("doubao")
+        || model_l.starts_with("claude")
+        || model_l.starts_with("gpt-")
+}
+
+/// The OpenAI-compatible address the runtimes are wired to for this saved address.
+pub(crate) fn openai_gateway_for_provider_url(url: &str) -> (String, bool) {
+    match dual_protocol_endpoints(url) {
+        Some(dual) => (dual.openai_url, true),
+        None => (url.trim().trim_end_matches('/').to_string(), false),
+    }
+}
+
 /// Providers that expose both OpenAI-compatible and Anthropic Messages APIs with one key.
 pub fn anthropic_gateway_for_provider_url(url: &str) -> Option<String> {
     if let Some(dual) = dual_protocol_endpoints(url) {
@@ -581,7 +650,14 @@ fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
             anthropic_url: "https://api.deepseek.com/anthropic".into(),
         });
     }
-    // MiniMax (China + intl): same key, OpenAI + Anthropic gateways
+    // MiniMax: China (minimax.cn) and international (minimaxi.com / minimax.io).
+    // Subscription keys and pay-as-you-go keys share the path; the host must stay.
+    if lower.contains("api.minimax.cn") {
+        return Some(DualProtocolEndpoints {
+            openai_url: "https://api.minimax.cn/v1".into(),
+            anthropic_url: "https://api.minimax.cn/anthropic".into(),
+        });
+    }
     if lower.contains("api.minimaxi.com") {
         return Some(DualProtocolEndpoints {
             openai_url: "https://api.minimaxi.com/v1".into(),
@@ -594,50 +670,11 @@ fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
             anthropic_url: "https://api.minimax.io/anthropic".into(),
         });
     }
-    // Zhipu GLM / Z.ai: OpenAI paas + Anthropic Messages
-    if lower.contains("open.bigmodel.cn") {
+    // GLM, Qwen, and Kimi each sell a coding subscription on its own address.
+    if let Some(plan) = plan_endpoints(&lower) {
         return Some(DualProtocolEndpoints {
-            openai_url: "https://open.bigmodel.cn/api/paas/v4".into(),
-            anthropic_url: "https://open.bigmodel.cn/api/anthropic".into(),
-        });
-    }
-    if lower.contains("api.z.ai") {
-        return Some(DualProtocolEndpoints {
-            openai_url: "https://api.z.ai/api/paas/v4".into(),
-            anthropic_url: "https://api.z.ai/api/anthropic".into(),
-        });
-    }
-    // Qwen / DashScope Model Studio: compatible-mode + apps/anthropic
-    if lower.contains("dashscope.aliyuncs.com")
-        || lower.contains("dashscope-intl.aliyuncs.com")
-        || lower.contains("dashscope-us.aliyuncs.com")
-        || lower.contains("cn-hongkong.dashscope.aliyuncs.com")
-    {
-        let host = if lower.contains("dashscope-intl") {
-            "https://dashscope-intl.aliyuncs.com"
-        } else if lower.contains("dashscope-us") {
-            "https://dashscope-us.aliyuncs.com"
-        } else if lower.contains("cn-hongkong.dashscope") {
-            "https://cn-hongkong.dashscope.aliyuncs.com"
-        } else {
-            "https://dashscope.aliyuncs.com"
-        };
-        return Some(DualProtocolEndpoints {
-            openai_url: format!("{host}/compatible-mode/v1"),
-            anthropic_url: format!("{host}/apps/anthropic"),
-        });
-    }
-    // Moonshot / Kimi (CN + intl)
-    if lower.contains("api.moonshot.cn") {
-        return Some(DualProtocolEndpoints {
-            openai_url: "https://api.moonshot.cn/v1".into(),
-            anthropic_url: "https://api.moonshot.cn/anthropic".into(),
-        });
-    }
-    if lower.contains("api.moonshot.ai") {
-        return Some(DualProtocolEndpoints {
-            openai_url: "https://api.moonshot.ai/v1".into(),
-            anthropic_url: "https://api.moonshot.ai/anthropic".into(),
+            openai_url: plan.openai_url,
+            anthropic_url: plan.anthropic_url,
         });
     }
     // SiliconFlow: OpenAI /v1 + Anthropic Messages on same host root
@@ -892,13 +929,66 @@ mod tests {
         assert_eq!(glm.openai_url, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(glm.anthropic_url, "https://open.bigmodel.cn/api/anthropic");
 
-        let mm = dual_protocol_endpoints("https://api.minimaxi.com/v1").expect("minimax cn");
+        let coding =
+            dual_protocol_endpoints("https://open.bigmodel.cn/api/coding/paas/v4").expect("coding");
+        assert_eq!(
+            coding.openai_url,
+            "https://open.bigmodel.cn/api/coding/paas/v4"
+        );
+        assert_eq!(
+            coding.anthropic_url,
+            "https://open.bigmodel.cn/api/anthropic"
+        );
+
+        let zai = dual_protocol_endpoints("https://api.z.ai/api/coding/paas/v4").expect("zai");
+        assert_eq!(zai.openai_url, "https://api.z.ai/api/coding/paas/v4");
+
+        let qwen_coding = dual_protocol_endpoints("https://coding.dashscope.aliyuncs.com/v1")
+            .expect("qwen coding");
+        assert_eq!(
+            qwen_coding.openai_url,
+            "https://coding.dashscope.aliyuncs.com/v1"
+        );
+        let kimi_coding =
+            dual_protocol_endpoints("https://api.kimi.com/coding/v1").expect("kimi coding");
+        assert_eq!(kimi_coding.openai_url, "https://api.kimi.com/coding/v1");
+        assert_eq!(kimi_coding.anthropic_url, "https://api.kimi.com/coding");
+
+        let mm_cn = dual_protocol_endpoints("https://api.minimax.cn/v1").expect("minimax cn");
+        assert_eq!(mm_cn.openai_url, "https://api.minimax.cn/v1");
+        assert_eq!(mm_cn.anthropic_url, "https://api.minimax.cn/anthropic");
+
+        let mm = dual_protocol_endpoints("https://api.minimaxi.com/v1").expect("minimax intl");
         assert_eq!(mm.openai_url, "https://api.minimaxi.com/v1");
         assert_eq!(mm.anthropic_url, "https://api.minimaxi.com/anthropic");
 
         let mm_io = dual_protocol_endpoints("https://api.minimax.io/v1").expect("minimax intl");
         assert_eq!(mm_io.openai_url, "https://api.minimax.io/v1");
         assert_eq!(mm_io.anthropic_url, "https://api.minimax.io/anthropic");
+    }
+
+    #[test]
+    fn deepseek_model_on_glm_address_is_replaced() {
+        assert_eq!(
+            coerce_gateway_model(
+                "https://open.bigmodel.cn/api/coding/paas/v4",
+                "deepseek-v4-flash"
+            )
+            .as_deref(),
+            Some("glm-5.3")
+        );
+        assert_eq!(
+            coerce_gateway_model("https://open.bigmodel.cn/api/paas/v4", "glm-5.3"),
+            None
+        );
+        assert_eq!(
+            coerce_gateway_model("https://api.deepseek.com/v1", "deepseek-v4-flash"),
+            None
+        );
+        assert_eq!(
+            coerce_gateway_model("https://qianfan.baidubce.com/v2", "deepseek-v3.2"),
+            None
+        );
     }
 
     #[test]

@@ -178,29 +178,20 @@ pub(crate) fn hermes_chat_base_url(url: &str) -> String {
     if !lower.contains("/anthropic") {
         return trimmed.to_string();
     }
-    if lower.contains("open.bigmodel.cn") {
-        return "https://open.bigmodel.cn/api/paas/v4".to_string();
-    }
-    if lower.contains("api.z.ai") {
-        return "https://api.z.ai/api/paas/v4".to_string();
+    if let Some(plan) = crate::setup::coding_plan::plan_endpoints(trimmed) {
+        return plan.openai_url;
     }
     if lower.contains("api.deepseek.com") {
         return "https://api.deepseek.com/v1".to_string();
+    }
+    if lower.contains("api.minimax.cn") {
+        return "https://api.minimax.cn/v1".to_string();
     }
     if lower.contains("api.minimaxi.com") {
         return "https://api.minimaxi.com/v1".to_string();
     }
     if lower.contains("api.minimax.io") {
         return "https://api.minimax.io/v1".to_string();
-    }
-    if lower.contains("dashscope.aliyuncs.com") {
-        return "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string();
-    }
-    if lower.contains("api.moonshot.cn") {
-        return "https://api.moonshot.cn/v1".to_string();
-    }
-    if lower.contains("api.moonshot.ai") {
-        return "https://api.moonshot.ai/v1".to_string();
     }
     trimmed.to_string()
 }
@@ -334,6 +325,14 @@ mod tests {
         assert_eq!(
             hermes_chat_base_url("https://open.bigmodel.cn/api/paas/v4"),
             "https://open.bigmodel.cn/api/paas/v4"
+        );
+        assert_eq!(
+            hermes_chat_base_url("https://open.bigmodel.cn/api/coding/paas/v4"),
+            "https://open.bigmodel.cn/api/coding/paas/v4"
+        );
+        assert_eq!(
+            hermes_chat_base_url("https://coding.dashscope.aliyuncs.com/apps/anthropic"),
+            "https://coding.dashscope.aliyuncs.com/v1"
         );
         assert!(hermes_model_will_be_rewritten(
             "anthropic",

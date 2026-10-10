@@ -49,6 +49,17 @@ async function main() {
   const noise = explainChatFailure("session_id: abc");
   assert(noise === null, "benign stderr should not classify");
 
+  const planRaw =
+    'LLM HTTP 429 Too Many Requests url: https://open.bigmodel.cn/api/paas/v4/chat/completions {"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}';
+  const plan = explainChatFailure(planRaw);
+  assert(plan?.kind === "glm_coding_plan", "coding-plan key on payg url should not look like a real empty balance");
+  assert(plan!.next.includes("编程套餐"), "coding-plan failure tells the user which key source to pick");
+
+  const qwenPlan = explainChatFailure(
+    "HTTP 401 invalid api-key url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+  );
+  assert(qwenPlan?.kind === "glm_coding_plan", "qwen coding key on payg should offer the plan switch");
+
   const balanceRaw =
     'LLM HTTP 429 Too Many Requests: {"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}';
   const balance = explainChatFailure(balanceRaw);

@@ -1,4 +1,14 @@
-import { PROVIDER_PRESETS, PRESET_PICKER_GROUPS } from "../provider-presets";
+import {
+  keyPlanFromUrl,
+  minimaxRegionFromUrl,
+  minimaxUrlForRegion,
+  presetHasKeyPlan,
+  urlForKeyPlan,
+  type GlmKeyPlan,
+  type MinimaxRegion,
+  PROVIDER_PRESETS,
+  PRESET_PICKER_GROUPS,
+} from "../provider-presets";
 import { shortModelLabel } from "../provider-models";
 import { t } from "../i18n";
 import {
@@ -11,6 +21,58 @@ import {
 } from "./dom";
 
 let activePresetId = "deepseek";
+const glmPlanEl = document.querySelector<HTMLElement>("#diagnose-glm-plan");
+const minimaxRegionEl = document.querySelector<HTMLElement>("#diagnose-minimax-region");
+
+function markMinimaxRegion(region: MinimaxRegion) {
+  minimaxRegionEl?.querySelectorAll<HTMLButtonElement>("[data-minimax-region]").forEach((chip) => {
+    const selected = chip.dataset.minimaxRegion === region;
+    chip.classList.toggle("is-active", selected);
+    chip.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+}
+
+function syncMinimaxRegion() {
+  if (!minimaxRegionEl) return;
+  const show = activePresetId === "minimax";
+  minimaxRegionEl.hidden = !show;
+  if (!show) return;
+  markMinimaxRegion(minimaxRegionFromUrl(urlEl.value) ?? "cn");
+}
+
+minimaxRegionEl?.addEventListener("click", (event) => {
+  const chip = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>(
+    "[data-minimax-region]",
+  );
+  const region = chip?.dataset.minimaxRegion;
+  if (region !== "cn" && region !== "intl") return;
+  urlEl.value = minimaxUrlForRegion(region);
+  markMinimaxRegion(region);
+});
+
+function markGlmPlan(plan: GlmKeyPlan) {
+  glmPlanEl?.querySelectorAll<HTMLButtonElement>("[data-glm-plan]").forEach((chip) => {
+    const selected = chip.dataset.glmPlan === plan;
+    chip.classList.toggle("is-active", selected);
+    chip.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+}
+
+function syncGlmPlan() {
+  if (!glmPlanEl) return;
+  const show = presetHasKeyPlan(activePresetId);
+  glmPlanEl.hidden = !show;
+  if (!show) return;
+  markGlmPlan(keyPlanFromUrl(urlEl.value) ?? "payg");
+}
+
+glmPlanEl?.addEventListener("click", (event) => {
+  const chip = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-glm-plan]");
+  const plan = chip?.dataset.glmPlan;
+  if (plan !== "payg" && plan !== "coding") return;
+  urlEl.value = urlForKeyPlan(activePresetId, plan, urlEl.value);
+  markGlmPlan(plan);
+});
 
 function syncModelChipSelection(modelId: string): void {
   modelChipsEl.querySelectorAll<HTMLButtonElement>(".diagnose-model-chip").forEach((chip) => {
@@ -76,6 +138,8 @@ export function applyPreset(presetId: string): void {
   presetChipsEl.querySelectorAll<HTMLButtonElement>(".provider-chip").forEach((chip) => {
     chip.classList.toggle("is-active", chip.dataset.presetId === presetId);
   });
+  syncGlmPlan();
+  syncMinimaxRegion();
 }
 
 export function renderPresetChips(): void {

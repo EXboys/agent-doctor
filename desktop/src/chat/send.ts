@@ -113,6 +113,8 @@ export type SendDeps = {
   renderSessionList: () => void;
   readImageTextEnabled: () => boolean;
   refreshComposer: () => void;
+  /** Which provider answers now; empty when the app does not choose one. */
+  providerTag?: () => string;
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
@@ -297,6 +299,16 @@ export function createSendController(deps: SendDeps) {
     const here = () => deps.getStore().activeId === chatSessionId;
     const sendSessionEarly = deps.sessionById(chatSessionId) ?? deps.activeSession();
     const runtimeForTurn = foreground ? deps.selectedRuntime() : sendSessionEarly.runtime;
+    const providerTag = deps.providerTag?.() ?? "";
+    if (
+      providerTag &&
+      sendSessionEarly.runtimeThreadId?.trim() &&
+      sendSessionEarly.providerTag !== providerTag
+    ) {
+      // The saved thread holds the old provider's replies. Resuming it on another
+      // provider can be refused outright, so carry the words over as text instead.
+      sendSessionEarly.runtimeThreadId = null;
+    }
     const resumeThreadId = sendSessionEarly.runtimeThreadId?.trim() || null;
 
     if (foreground) {
@@ -423,6 +435,7 @@ export function createSendController(deps: SendDeps) {
       deps.saveStore();
       if (report.runtime_thread_id?.trim()) {
         session.runtimeThreadId = report.runtime_thread_id.trim();
+        session.providerTag = providerTag || null;
         deps.touchSession(session);
         deps.saveStore();
       } else if (resumeThreadId && report.status === "failed") {

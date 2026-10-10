@@ -66,6 +66,7 @@ export type ProviderFailureKind =
   | "model"
   | "missing"
   | "balance"
+  | "glm_plan"
   | "rate_limit"
   | "unknown";
 
@@ -126,11 +127,31 @@ export function explainProviderFailure(
   const lower = raw.toLowerCase();
   const account = explainLlmAccountBlock(raw);
 
+  if (isGlmCodingPlanOnPayg(raw, lower)) {
+    return {
+      kind: "glm_plan",
+      message: t("provider.fail.glmPlan"),
+      next: t("provider.fail.glmPlanNext"),
+    };
+  }
+
   if (account === "balance") {
     return {
       kind: "balance",
       message: t("provider.fail.balance"),
       next: t("provider.fail.balanceNext"),
+    };
+  }
+
+  // Verify already tried MiniMax's China and international hosts before giving up.
+  if (
+    /minimaxi?\.(cn|com|io)/.test(lower) &&
+    (status === 401 || /http 401|\b1004\b|\b2049\b|invalid api key/.test(lower))
+  ) {
+    return {
+      kind: "key",
+      message: t("provider.fail.minimaxKey"),
+      next: t("provider.fail.minimaxKeyNext"),
     };
   }
 
@@ -230,6 +251,7 @@ export function withProviderFailure(messageKey: MessageKey, error: unknown): str
 
 export type ChatFailureKind =
   | "glm_codex_url"
+  | "glm_coding_plan"
   | "geo_blocked"
   | "macos_denied"
   | "account_balance"
@@ -248,6 +270,27 @@ export type ChatFailureExplain = {
   next: string;
   actions: ChatFailureAction[];
 };
+
+/** A coding-plan key on the pay-as-you-go address. GLM says "no balance"; Qwen and Kimi say the key is invalid. */
+function isGlmCodingPlanOnPayg(raw: string, lower: string): boolean {
+  const glmPayg =
+    /open\.bigmodel\.cn|api\.z\.ai/.test(lower) &&
+    /\/api\/paas\/v4/.test(lower) &&
+    !/\/api\/coding\//.test(lower);
+  if (glmPayg) {
+    return (
+      /"code"\s*:\s*"?1113\b/.test(lower) ||
+      /"code"\s*:\s*"?1315\b/.test(lower) ||
+      /编程套餐|coding plan/.test(raw)
+    );
+  }
+  const qwenPayg = /dashscope/.test(lower) && !/coding[-.]dashscope/.test(lower);
+  const kimiPayg = /api\.moonshot\.(cn|ai)/.test(lower);
+  if (!qwenPayg && !kimiPayg) return false;
+  return /\b401\b|\b403\b|invalid api-key|invalid access token|unauthorized|authentication/.test(
+    lower,
+  );
+}
 
 function isGlmCodexResponses404(lower: string): boolean {
   return (
@@ -281,6 +324,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   if (!text) return null;
   const lower = text.toLowerCase();
   const account = explainLlmAccountBlock(text);
+
+  if (isGlmCodingPlanOnPayg(text, lower)) {
+    return {
+      kind: "glm_coding_plan",
+      message: t("chat.fail.glmPlan.message"),
+      next: t("chat.fail.glmPlan.next"),
+      actions: ["provider"],
+    };
+  }
 
   if (account === "balance") {
     return {
@@ -335,7 +387,8 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   actions.push("native");
 
   let kind: ChatFailureKind = "unknown";
-  if (provider.kind === "key" || provider.kind === "missing") kind = "provider_key";
+  if (provider.kind === "glm_plan") kind = "glm_coding_plan";
+  else if (provider.kind === "key" || provider.kind === "missing") kind = "provider_key";
   else if (provider.kind === "url") kind = "provider_url";
   else if (provider.kind === "model") kind = "provider_model";
   else if (

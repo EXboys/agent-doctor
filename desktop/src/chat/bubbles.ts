@@ -11,6 +11,7 @@ import {
 } from "./format";
 import { renderToolHistoryGroup } from "./activity";
 import { renderThinkingBlock } from "./thinking";
+import { sealWorkTrail, wrapProcessRows } from "./work-trail";
 import {
   assistantMsgWrap,
   bubblePlainText,
@@ -177,6 +178,7 @@ export function createBubblesController(deps: BubblesDeps) {
     if (deps.getActivityEl()?.dataset.kind === "tool") deps.settleActivity();
     deps.finishToolGroup(false);
     deps.dismissLifecycleActivity();
+    sealWorkTrail(deps.logEl);
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);
@@ -437,13 +439,40 @@ export function createBubblesController(deps: BubblesDeps) {
       const messages = placeToolsBeforeReply(session.messages);
       for (let i = 0; i < messages.length; ) {
         const message = messages[i];
-        if (message.role === "tool") {
-          const run: ChatMessage[] = [message];
-          while (i + run.length < messages.length && messages[i + run.length].role === "tool") {
-            run.push(messages[i + run.length]);
+        if (message.role === "tool" || message.role === "thinking") {
+          const rows: HTMLElement[] = [];
+          while (i < messages.length) {
+            const current = messages[i];
+            if (current.role === "tool") {
+              const run: ChatMessage[] = [current];
+              while (i + run.length < messages.length && messages[i + run.length].role === "tool") {
+                run.push(messages[i + run.length]);
+              }
+              rows.push(renderToolHistoryGroup(run.map((item) => item.content)));
+              i += run.length;
+              continue;
+            }
+            if (current.role === "thinking") {
+              if (current.content.trim()) {
+                rows.push(renderThinkingBlock(current.content, { id: current.id }));
+              }
+              i += 1;
+              continue;
+            }
+            break;
           }
-          deps.logEl.appendChild(renderToolHistoryGroup(run.map((item) => item.content)));
-          i += run.length;
+          const live =
+            deps.getBusy() && deps.isViewingRunningSession() && i >= messages.length;
+          if (live) {
+            const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
+            const label = lastThink?.querySelector<HTMLElement>(".chat-thinking-label");
+            if (lastThink && label) {
+              lastThink.classList.add("is-live");
+              label.textContent = t("chat.thinkingLive");
+            }
+          }
+          if (rows.length === 1) deps.logEl.appendChild(rows[0]);
+          else if (rows.length > 1) deps.logEl.appendChild(wrapProcessRows(rows, live));
           continue;
         }
         if (message.role === "permission") {
@@ -492,11 +521,7 @@ export function createBubblesController(deps: BubblesDeps) {
           i += run.length;
           continue;
         }
-        if (message.role === "thinking") {
-          if (message.content.trim()) {
-            deps.logEl.appendChild(renderThinkingBlock(message.content, { id: message.id }));
-          }
-        } else if (message.role === "assistant") {
+        if (message.role === "assistant") {
           const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
           const liveContent =
             deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()

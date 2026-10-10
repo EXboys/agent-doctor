@@ -73,6 +73,7 @@ fn run_openclaw(
         .unwrap_or_else(fresh_openclaw_session_id);
 
     let overlay = collect_overlay_env_for_options(options);
+    sync_openclaw_personal_slot(&overlay);
     if let Some(note) = ensure_openclaw_config_current() {
         on_event(PromptSessionEvent::Status {
             session_id: session_id.clone(),
@@ -281,6 +282,70 @@ fn resolve_openclaw_agent(overlay: &std::collections::HashMap<String, String>) -
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "main".into())
+}
+
+/// OpenClaw reads its address and model from openclaw.json and its key from
+/// ~/.openclaw/.env, both written only when a provider is turned on. A model
+/// picked in chat, or a key saved without turning the provider on again,
+/// would otherwise leave OpenClaw on the old one. Rewrite only what differs:
+/// a new key also restarts the OpenClaw gateway.
+fn sync_openclaw_personal_slot(overlay: &std::collections::HashMap<String, String>) {
+    // Tests read this machine's saved provider; they must not rewrite its OpenClaw files.
+    if cfg!(test) {
+        return;
+    }
+    let personal = overlay
+        .get(crate::profile::PROVIDER_KIND_ENV)
+        .is_some_and(|kind| kind.eq_ignore_ascii_case(crate::profile::PROVIDER_KIND_PERSONAL));
+    if !personal {
+        return;
+    }
+    let protocol = overlay
+        .get(crate::setup::PROVIDER_PROTOCOL_ENV)
+        .map(|p| crate::setup::normalize_protocol(p));
+    let Some((saved_url, key, Some(model))) = super::env::resolve_hermes_overlay(overlay) else {
+        return;
+    };
+    let (url, dual) = crate::setup::openai_gateway_for_provider_url(&saved_url);
+    if protocol.as_deref() == Some(crate::setup::PROTOCOL_ANTHROPIC) && !dual {
+        return;
+    }
+    let slot = crate::setup::OPENCLAW_PERSONAL_SLOT;
+    let config: Value =
+        fs::read_to_string(crate::adapters::util::home_join(".openclaw/openclaw.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or(Value::Null);
+    let wired_url = config
+        .pointer(&format!("/models/providers/{slot}/baseUrl"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let wired_primary = config
+        .pointer("/agents/defaults/model/primary")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let wired_key = fs::read_to_string(crate::adapters::util::home_join(".openclaw/.env"))
+        .ok()
+        .and_then(|raw| {
+            raw.lines().find_map(|line| {
+                line.trim()
+                    .strip_prefix("OPENAI_API_KEY=")
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_default();
+    let config_stale =
+        wired_url.trim_end_matches('/') != url || wired_primary != format!("{slot}/{model}");
+    let key_stale = wired_key.trim() != key;
+    if !config_stale && !key_stale {
+        return;
+    }
+    let _ = crate::setup::apply_openclaw_slot(
+        &url,
+        if key_stale { &key } else { "" },
+        Some(&model),
+        Some(slot),
+    );
 }
 
 /// Drop legacy `agents.list` before Ask. OpenClaw rejects the file and exits

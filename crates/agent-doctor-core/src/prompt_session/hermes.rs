@@ -819,6 +819,32 @@ Session: 20260814223955a98b96
         assert!(env.contains("OPENAI_API_KEY=sk-test-key"));
     }
 
+    #[test]
+    fn prepare_hermes_home_clears_the_previous_provider() {
+        use super::super::env::prepare_hermes_home;
+        use std::collections::HashMap;
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("config.yaml"),
+            "model:\n  provider: custom\n  base_url: https://api.deepseek.com/v1\n  default: deepseek-v4-flash\n  api_key: old-key\n\
+             auxiliary:\n  compression:\n    provider: custom\n    model: deepseek-v4-flash\n    api_key: old-key\n",
+        )
+        .unwrap();
+        let mut overlay = HashMap::new();
+        overlay.insert("HERMES_HOME".into(), dir.path().display().to_string());
+        overlay.insert(
+            "AGENT_DOCTOR_GATEWAY_URL".into(),
+            "https://open.bigmodel.cn/api/coding/paas/v4".into(),
+        );
+        overlay.insert("OPENAI_API_KEY".into(), "new-key".into());
+        overlay.insert("AGENT_DOCTOR_MODEL".into(), "glm-5.3".into());
+        prepare_hermes_home(&overlay);
+        let cfg = fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(!cfg.contains("old-key"), "{cfg}");
+        assert!(!cfg.contains("deepseek"), "{cfg}");
+        assert!(cfg.contains("glm-5.3"), "{cfg}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn streams_stdout_and_succeeds() {

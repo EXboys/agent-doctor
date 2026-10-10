@@ -29,6 +29,12 @@ export const PRESET_MODELS_BY_ID: Record<string, string[]> = {
   anthropic: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
   // https://ai.google.dev/gemini-api/docs/models
   gemini: ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"],
+  volcengine: [
+    "doubao-seed-2-1-pro-260628",
+    "doubao-seed-evolving",
+    "doubao-seed-2-0-lite-260428",
+  ],
+  qianfan: ["ernie-4.5-turbo-128k", "deepseek-v3.2", "ernie-4.5-8k"],
   siliconflow: [
     "deepseek-ai/DeepSeek-V3.2",
     "Qwen/Qwen3-235B-A22B",
@@ -56,7 +62,9 @@ const PRESET_CHIPS_BY_ID: Record<string, string> = {
   openai: "ChatGPT",
   anthropic: "Claude",
   gemini: "Gemini",
-  siliconflow: "SiliconFlow",
+  volcengine: "火山方舟",
+  qianfan: "千帆",
+  siliconflow: "硅基流动",
   openrouter: "OpenRouter",
   groq: "Groq",
 };
@@ -65,11 +73,13 @@ const PRESET_URL_MATCHERS: Array<{ match: RegExp; id: string }> = [
   { match: /api\.deepseek\.com/i, id: "deepseek" },
   { match: /dashscope/i, id: "qwen" },
   { match: /bigmodel\.cn|api\.z\.ai/i, id: "glm" },
-  { match: /minimaxi\.com|minimax\.io/i, id: "minimax" },
+  { match: /minimax\.cn|minimaxi\.com|minimax\.io/i, id: "minimax" },
   { match: /moonshot\.(cn|ai)/i, id: "moonshot" },
   { match: /api\.openai\.com/i, id: "openai" },
   { match: /api\.anthropic\.com/i, id: "anthropic" },
   { match: /generativelanguage\.googleapis\.com/i, id: "gemini" },
+  { match: /volces\.com/i, id: "volcengine" },
+  { match: /qianfan\.baidubce\.com/i, id: "qianfan" },
   { match: /siliconflow\.(cn|com)/i, id: "siliconflow" },
   { match: /openrouter\.ai/i, id: "openrouter" },
   { match: /api\.groq\.com/i, id: "groq" },

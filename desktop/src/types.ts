@@ -417,6 +417,8 @@ export interface PersonalProviderVerifyReport {
   checked_url: string | null;
   message: string;
   models_sample: string[];
+  /** GLM key matched the other product line (pay-as-you-go or coding plan). */
+  resolved_url?: string | null;
 }
 
 export interface PersonalProviderSetupReport {

@@ -170,17 +170,18 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       }
 
       paint.setResult("busy", t("diagnose.flow.saving"));
+      const savedUrl = verify.resolved_url?.trim() || url;
       const doc = await upsertPersonalProvider({
         id: null,
         name,
-        url,
+        url: savedUrl,
         key,
         model,
         protocol,
         activate: false,
       });
       const targetId =
-        doc.providers.find((item) => item.name === name && item.url === url)?.id ??
+        doc.providers.find((item) => item.name === name && item.url === savedUrl)?.id ??
         doc.providers[doc.providers.length - 1]?.id;
       if (!targetId) {
         throw new Error("saved provider id missing");

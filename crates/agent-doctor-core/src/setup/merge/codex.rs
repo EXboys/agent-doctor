@@ -306,6 +306,17 @@ base_url = "https://gateway.example/v1"
         let rendered = fs::read_to_string(&path).unwrap();
         assert!(rendered.contains("https://open.bigmodel.cn/api/v1"));
         assert!(!rendered.contains("api/paas/v4"));
+
+        write_codex_provider_config(
+            &path,
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "glm-5.3",
+            CODEX_PERSONAL_SLOT,
+        )
+        .unwrap();
+        let coding = fs::read_to_string(&path).unwrap();
+        assert!(coding.contains("https://open.bigmodel.cn/api/v1"));
+        assert!(!coding.contains("api/coding/paas/v4"));
     }
 
     #[test]

@@ -10,6 +10,7 @@ import {
 } from "./format";
 import { clearEmptyChatStart } from "./empty-start";
 import { pushChatTurnError } from "./turn-errors";
+import { placeProcessBlock, sealWorkTrail } from "./work-trail";
 
 export type ActivityDeps = {
   logEl: HTMLElement;
@@ -101,10 +102,7 @@ export function renderToolHistoryGroup(texts: string[]): HTMLDetailsElement {
   summary.innerHTML = `<span class="chat-tool-group-icon" aria-hidden="true">$</span><span class="chat-tool-group-label"></span><span class="chat-tool-group-chevron" aria-hidden="true"></span>`;
   const label = summary.querySelector<HTMLElement>(".chat-tool-group-label");
   if (label) {
-    label.textContent =
-      getLocale() === "zh"
-        ? t("chat.permissionGroupTools", { count: String(count) })
-        : `${count} tool${count === 1 ? "" : "s"} used`;
+    label.textContent = t("chat.permissionGroupTools", { count: String(count) });
   }
   const list = document.createElement("div");
   list.className = "chat-tool-list";
@@ -117,7 +115,7 @@ export function createActivityController(deps: ActivityDeps) {
   window.setInterval(() => {
     const label = elapsedLabel();
     for (const el of deps.logEl.querySelectorAll<HTMLElement>(
-      ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed",
+      ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed",
     )) {
       el.textContent = label;
     }
@@ -138,13 +136,9 @@ export function createActivityController(deps: ActivityDeps) {
     ).length;
     const label = group.querySelector<HTMLElement>(".chat-tool-group-label");
     if (!label) return;
-    if (getLocale() === "zh") {
-      label.textContent = live ? `正在调用工具 · ${count}` : `已调用 ${count} 个工具`;
-    } else {
-      label.textContent = live
-        ? `Using tools · ${count}`
-        : `${count} tool${count === 1 ? "" : "s"} used`;
-    }
+    label.textContent = live
+      ? t("chat.toolsLive", { count: String(count) })
+      : t("chat.permissionGroupTools", { count: String(count) });
     group.classList.toggle("is-live", live);
   }
 
@@ -175,7 +169,7 @@ export function createActivityController(deps: ActivityDeps) {
     </summary>
     <div class="chat-tool-list"></div>
   `;
-    deps.logEl.appendChild(group);
+    placeProcessBlock(deps.logEl, group);
     deps.setToolGroupEl(group);
     updateToolGroupSummary(group, true);
     return group;
@@ -204,6 +198,7 @@ export function createActivityController(deps: ActivityDeps) {
 
   /** Drop ephemeral progress rows so they don't litter the transcript. */
   function clearEphemeralActivity(dropStderr = false): void {
+    sealWorkTrail(deps.logEl);
     const keptTools = toolTextsInLog();
     settleActivity();
     finishToolGroup(false);
@@ -232,7 +227,7 @@ export function createActivityController(deps: ActivityDeps) {
     const stored = deps.toolRecordsForTurn().filter((text) => text.trim());
     const texts = stored.length > 0 ? stored : seen.filter((text) => text.trim());
     if (!lastAssistant) {
-      if (texts.length === 0 || deps.logEl.querySelector(":scope > .chat-tool-group")) return;
+      if (texts.length === 0 || deps.logEl.querySelector(":scope > .chat-tool-group, :scope > .chat-work")) return;
       deps.logEl.appendChild(renderToolHistoryGroup(texts));
       return;
     }
@@ -240,6 +235,7 @@ export function createActivityController(deps: ActivityDeps) {
     const parent = block.parentElement;
     if (!parent) return;
     const previous = block.previousElementSibling;
+    if (previous?.classList.contains("chat-work")) return;
     if (isToolGroupEl(previous)) {
       const hasRows = previous.querySelector(".chat-tool-row, .chat-activity.kind-tool");
       if (hasRows || texts.length === 0) return;

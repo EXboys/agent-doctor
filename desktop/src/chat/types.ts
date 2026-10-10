@@ -103,6 +103,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Codex thread id / Claude session id for native resume */
   runtimeThreadId?: string | null;
+  /** Provider the native thread was made with. Another provider cannot resume it. */
+  providerTag?: string | null;
   /** Latest checklist from the agent. Replaced as items move. */
   plan?: AgentPlan;
   /** Set when the last turn stopped before it finished. The next turn hears what it already did. */

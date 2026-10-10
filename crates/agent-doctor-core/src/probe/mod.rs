@@ -170,7 +170,7 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
     })
 }
 
-/// Read-only upstream compare from cache. Warn only — never suggests auto-upgrade.
+/// Read-only upstream compare from cache. A newer release is not a problem to fix.
 fn probe_upstream_version(
     runtime_id: &str,
     binary_ok: bool,
@@ -201,10 +201,10 @@ fn probe_upstream_version(
                 ProbeCheck::new(
                     "binary.upstream_version",
                     "Upstream version",
-                    ProbeStatus::Warn,
-                    ProbeSeverity::Warning,
+                    ProbeStatus::Pass,
+                    ProbeSeverity::Info,
                     format!(
-                        "Installed {local}; latest is {latest}. Upgrading may break settings — diagnose again after any upgrade. Agent Doctor will not upgrade for you."
+                        "Installed {local}; latest is {latest}. The installed version can stay."
                     ),
                     SensitivityLevel::Public,
                 )

@@ -32,7 +32,9 @@ function isUpstreamVersionCheck(check: {
   return (
     check.id === "binary.upstream_version" ||
     check.title === "Upstream version" ||
-    /matches the latest known release|Upgrading may break settings/i.test(check.message)
+    /matches the latest known release|Upgrading may break settings|installed version can stay/i.test(
+      check.message,
+    )
   );
 }
 
@@ -58,7 +60,8 @@ export function plainUpstreamVersionCopy(check: {
   const local = parseUpstreamDetail(details, "local") || "—";
   const latest = parseUpstreamDetail(details, "latest") || "—";
   const recommended = parseUpstreamDetail(details, "recommended");
-  if (check.status === "pass") {
+  const newer = latest !== "—" && local !== "—" && local !== latest;
+  if (!newer) {
     return {
       title: t("repair.upstreamVersionOkTitle"),
       message: t("repair.upstreamVersionOkDesc", { local }),

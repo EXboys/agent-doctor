@@ -33,7 +33,11 @@ pub fn apply_claude_code_with_model(
         .or_insert_with(|| json!({}));
     if let Some(env_obj) = env.as_object_mut() {
         env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(gateway_url));
+        // Claude Code sends ANTHROPIC_AUTH_TOKEN when both are set. A leftover
+        // token (GLM's own installer writes one) ignores the key just saved
+        // and comes back as 401「令牌已过期或验证不正确」.
         env_obj.insert("ANTHROPIC_API_KEY".to_string(), json!(api_key));
+        env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(api_key));
         if let Some(model_id) = model.map(str::trim).filter(|m| !m.is_empty()) {
             env_obj.insert("ANTHROPIC_MODEL".to_string(), json!(model_id));
             env_obj.insert(

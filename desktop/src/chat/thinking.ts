@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import { durationLabel } from "./activity";
+import { noteThinkingLive, placeProcessBlock } from "./work-trail";
 import type { ChatMessage } from "./types";
 
 const MAX_THINKING_CHARS = 12_000;
@@ -17,6 +18,11 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
     <div class="chat-thinking-body"></div>
   `;
   block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = text;
+  block.open = false;
+  block.addEventListener("toggle", () => {
+    if (block.open) block.dataset.pinned = "1";
+    else delete block.dataset.pinned;
+  });
   if (opts?.live) {
     markLive(block);
   } else {
@@ -27,8 +33,8 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
 
 function markLive(block: HTMLDetailsElement): void {
   block.classList.add("is-live");
-  block.open = true;
   block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = t("chat.thinkingLive");
+  noteThinkingLive(block);
 }
 
 export type ThinkingDeps = {
@@ -66,7 +72,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     }
     deps.beforeBlock();
     el = renderThinkingBlock(text, { id: messageId ?? undefined, live: true });
-    deps.logEl.appendChild(el);
+    placeProcessBlock(deps.logEl, el);
     return el;
   }
 
@@ -94,7 +100,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     const block = findBlock();
     if (block) {
       block.classList.remove("is-live");
-      block.open = false;
+      if (block.dataset.pinned !== "1") block.open = false;
       const elapsed = durationLabel(Date.now() - startedAt);
       block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = elapsed
         ? t("chat.thinkingDone", { elapsed })

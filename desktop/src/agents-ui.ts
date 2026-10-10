@@ -49,12 +49,15 @@ function sameService(savedUrl: string, gatewayUrl: string): boolean {
     if (savedHost !== gatewayHost) return false;
     return (
       savedHost === "api.deepseek.com" ||
+      savedHost.endsWith("minimax.cn") ||
       savedHost.endsWith("minimaxi.com") ||
       savedHost.endsWith("minimax.io") ||
       savedHost.endsWith("bigmodel.cn") ||
       savedHost.endsWith("z.ai") ||
       savedHost.includes("dashscope") ||
       savedHost === "api.moonshot.cn" ||
+      savedHost.endsWith("volces.com") ||
+      savedHost === "qianfan.baidubce.com" ||
       savedHost === "api.siliconflow.cn"
     );
   } catch {
@@ -522,13 +525,7 @@ export function renderRuntimeTabs(
           ? t("runtime.configAttention")
           : t("runtime.installed");
       const versionStatus = appState.runtimeVersions.get(runtime.id);
-      const versionMeta =
-        versionStatus?.status === "update_available" && versionStatus.latest
-          ? t("meta.versionLocalLatest", {
-              local: versionStatus.installed || runtime.version || "—",
-              latest: versionStatus.latest,
-            })
-          : runtime.version;
+      const versionMeta = versionStatus?.installed || runtime.version;
       const tabMeta = [stateLabel, versionMeta].filter(Boolean).join(" · ");
       const displayMeta =
         runtime.id === "deepseek-harness"

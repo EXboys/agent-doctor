@@ -1,7 +1,9 @@
+mod coding_plan;
 pub(crate) mod merge;
 mod mode;
 mod personal;
 mod pipeline;
+mod zhipu;
 
 pub use merge::{
     apply_claude_code, apply_claude_code_with_model, apply_codex_slot, apply_hermes_slot,
@@ -15,6 +17,7 @@ pub use mode::{
     switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport, MODE_PERSONAL,
     MODE_TEAM, MODE_UNSET,
 };
+pub(crate) use personal::persist_personal_provider_model;
 pub use personal::{
     activate_personal_provider, delete_personal_provider, ensure_teamups_official_provider,
     execute_personal_provider_setup, list_personal_providers, load_active_personal_provider,
@@ -25,10 +28,11 @@ pub use personal::{
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
     PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
 };
+pub(crate) use pipeline::openai_gateway_for_provider_url;
 pub use pipeline::{
-    anthropic_gateway_for_provider_url, apply_mode_switch, effector_label, probe_endpoint_bundle,
-    project_bundle, runtime_strategies, strategy_for, BundleProbeReport, EffectorKind,
-    EndpointBundle, ModeSwitchTarget, RuntimeStrategy, WriteSemantics,
+    anthropic_gateway_for_provider_url, apply_mode_switch, coerce_gateway_model, effector_label,
+    probe_endpoint_bundle, project_bundle, runtime_strategies, strategy_for, BundleProbeReport,
+    EffectorKind, EndpointBundle, ModeSwitchTarget, RuntimeStrategy, WriteSemantics,
 };
 
 use std::fs;

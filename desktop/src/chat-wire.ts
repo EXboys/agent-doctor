@@ -719,6 +719,17 @@ export function wireChatControllers(): void {
     renderSessionList: () => renderSessionList(),
     readImageTextEnabled: () => readImageTextEnabled(),
     refreshComposer: () => syncComposerUi(),
+    providerTag: () => {
+      const wired = chatState.wiredProvider;
+      if (!wired) return "";
+      let host = wired.url;
+      try {
+        host = new URL(wired.url).host;
+      } catch {
+        // keep the raw address
+      }
+      return `${wired.id}|${host}`;
+    },
   });
 
   chatState.hosted = createHostedController({

@@ -18,7 +18,9 @@ use crate::profile::{
 };
 use crate::repair::mask_secret_value;
 use crate::runtime::all_adapters;
+use crate::setup::coding_plan::{models_list_is_public, plan_openai_alternates};
 use crate::setup::merge::{self, clear_codex_placeholder_auth};
+use crate::setup::zhipu::zhipu_plan_mismatch;
 use crate::setup::{normalize_gateway_url, RuntimeSetupResult};
 
 pub const MODEL_ENV: &str = "AGENT_DOCTOR_MODEL";
@@ -73,6 +75,9 @@ pub struct PersonalProviderVerifyReport {
     pub checked_url: Option<String>,
     pub message: String,
     pub models_sample: Vec<String>,
+    /// Set when a GLM key only works on the other product line (pay-as-you-go ↔ coding plan).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +222,13 @@ pub fn upsert_personal_provider(
     if options.activate {
         activate_personal_provider(&id)?;
         store = load_store(&path)?;
+    } else if store.active_id.as_deref() == Some(id.as_str()) && is_canonical_providers_path(&path)
+    {
+        // Editing the provider in use (the chat model menu does this) must reach
+        // the terminal launch too, which reads profile.env, not the store.
+        if let Some(entry) = store.providers.iter().find(|p| p.id == id) {
+            let _ = rewrite_active_profile(entry);
+        }
     }
 
     Ok(document_from_store(&store, &path))
@@ -449,8 +461,34 @@ pub fn verify_personal_provider_with_protocol(
         return verify_anthropic_endpoint(&client, &gateway_url, api_key);
     }
 
+    let report = verify_openai_models(&client, &gateway_url, api_key);
+    if report.ok || !plan_line_mismatch(&report.message) {
+        return Ok(report);
+    }
+    for other in plan_openai_alternates(&gateway_url) {
+        let mut alternate = verify_openai_models(&client, &other, api_key);
+        if alternate.ok {
+            alternate.resolved_url = Some(other);
+            return Ok(alternate);
+        }
+    }
+    Ok(report)
+}
+
+fn plan_line_mismatch(message: &str) -> bool {
+    zhipu_plan_mismatch(message) || message.contains("HTTP 401") || message.contains("HTTP 403")
+}
+
+fn verify_openai_models(
+    client: &reqwest::blocking::Client,
+    gateway_url: &str,
+    api_key: &str,
+) -> PersonalProviderVerifyReport {
+    if models_list_is_public(gateway_url) {
+        return verify_chat_auth(client, gateway_url, api_key);
+    }
     let mut last_error = String::from("no models endpoint responded");
-    for checked in models_endpoint_candidates(&gateway_url) {
+    for checked in models_endpoint_candidates(gateway_url) {
         let response = match client
             .get(&checked)
             .header("Authorization", format!("Bearer {api_key}"))
@@ -475,7 +513,7 @@ pub fn verify_personal_provider_with_protocol(
 
         let body = response.text().unwrap_or_default();
         let models_sample = extract_model_ids(&body);
-        return Ok(PersonalProviderVerifyReport {
+        return PersonalProviderVerifyReport {
             ok: true,
             status_code: Some(status_code),
             checked_url: Some(checked),
@@ -488,16 +526,153 @@ pub fn verify_personal_provider_with_protocol(
                 )
             },
             models_sample,
-        });
+            resolved_url: None,
+        };
     }
 
-    Ok(PersonalProviderVerifyReport {
+    PersonalProviderVerifyReport {
         ok: false,
         status_code: None,
         checked_url: None,
         message: last_error,
         models_sample: Vec::new(),
-    })
+        resolved_url: None,
+    }
+}
+
+/// If this key belongs to the other product line, return that OpenAI address.
+/// `None` means keep the saved address (already right, or not a plan mismatch).
+pub(crate) fn align_coding_plan_url(url: &str, api_key: &str) -> Option<String> {
+    let alternates = plan_openai_alternates(url);
+    let api_key = api_key.trim();
+    if alternates.is_empty() || api_key.is_empty() {
+        return None;
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let preferred = verify_openai_models(&client, url, api_key);
+    if preferred.ok || !plan_line_mismatch(&preferred.message) {
+        return None;
+    }
+    alternates
+        .into_iter()
+        .find(|other| verify_openai_models(&client, other, api_key).ok)
+}
+
+/// Qwen Coding Plan lists models with no key. A one-token chat call is what actually checks the key.
+fn verify_chat_auth(
+    client: &reqwest::blocking::Client,
+    gateway_url: &str,
+    api_key: &str,
+) -> PersonalProviderVerifyReport {
+    let checked = format!("{}/chat/completions", gateway_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": "qwen3-coder-plus",
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}]
+    });
+    let response = client
+        .post(&checked)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("content-type", "application/json")
+        .json(&body)
+        .send();
+    match response {
+        Ok(resp) => {
+            let status_code = resp.status().as_u16();
+            let text = resp.text().unwrap_or_default();
+            let snippet: String = text.chars().take(180).collect();
+            let message = format!("{checked} → HTTP {status_code}: {snippet}");
+            if status_code == 401 || status_code == 403 {
+                return PersonalProviderVerifyReport {
+                    ok: false,
+                    status_code: Some(status_code),
+                    checked_url: Some(checked),
+                    message,
+                    models_sample: Vec::new(),
+                    resolved_url: None,
+                };
+            }
+            if (200..500).contains(&status_code) {
+                return PersonalProviderVerifyReport {
+                    ok: true,
+                    status_code: Some(status_code),
+                    checked_url: Some(checked),
+                    message: "OpenAI-compatible gateway reachable.".to_string(),
+                    models_sample: Vec::new(),
+                    resolved_url: None,
+                };
+            }
+            PersonalProviderVerifyReport {
+                ok: false,
+                status_code: Some(status_code),
+                checked_url: Some(checked),
+                message,
+                models_sample: Vec::new(),
+                resolved_url: None,
+            }
+        }
+        Err(err) => {
+            let message = format!("request failed for {checked}: {err}");
+            PersonalProviderVerifyReport {
+                ok: false,
+                status_code: None,
+                checked_url: Some(checked),
+                message,
+                models_sample: Vec::new(),
+                resolved_url: None,
+            }
+        }
+    }
+}
+
+fn rewrite_active_profile(entry: &PersonalProviderEntry) -> Result<()> {
+    let profile_path = agent_profile_path().context("could not resolve config directory")?;
+    let env = read_env_file(&profile_path).unwrap_or_default();
+    if env.get(PROVIDER_KIND_ENV).map(String::as_str) != Some(PROVIDER_KIND_PERSONAL) {
+        return Ok(());
+    }
+    let (url, dual) = crate::setup::openai_gateway_for_provider_url(&entry.url);
+    let protocol = if dual {
+        PROTOCOL_OPENAI.to_string()
+    } else {
+        normalize_protocol(&entry.protocol)
+    };
+    write_personal_profile(
+        &profile_path,
+        &url,
+        entry.api_key.trim(),
+        entry.model.trim(),
+        &protocol,
+        Some(&entry.id),
+        Some(&entry.name),
+    )
+}
+
+pub(crate) fn persist_personal_provider_model(id: &str, model: &str) -> Result<()> {
+    let path = personal_providers_path().context("could not resolve config directory")?;
+    let mut store = load_store(&path)?;
+    let entry = store
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == id)
+        .with_context(|| format!("provider not found: {id}"))?;
+    entry.model = model.trim().to_string();
+    save_store(&path, &store)
+}
+
+pub(crate) fn persist_personal_provider_url(id: &str, url: &str) -> Result<()> {
+    let path = personal_providers_path().context("could not resolve config directory")?;
+    let mut store = load_store(&path)?;
+    let entry = store
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == id)
+        .with_context(|| format!("provider not found: {id}"))?;
+    entry.url = url.trim().trim_end_matches('/').to_string();
+    save_store(&path, &store)
 }
 
 pub fn execute_personal_provider_setup(
@@ -505,7 +680,7 @@ pub fn execute_personal_provider_setup(
 ) -> Result<PersonalProviderSetupReport> {
     crate::edition::ensure_edition_allows_mode(crate::setup::MODE_PERSONAL)?;
 
-    let gateway_url = normalize_personal_gateway_url(&options.url)?;
+    let mut gateway_url = normalize_personal_gateway_url(&options.url)?;
     let api_key = options.api_key.trim();
     if api_key.is_empty() {
         bail!("API key must not be empty");
@@ -519,6 +694,9 @@ pub fn execute_personal_provider_setup(
     let verify = verify_personal_provider_with_protocol(&gateway_url, api_key, &protocol)?;
     if !verify.ok {
         bail!("provider connectivity check failed: {}", verify.message);
+    }
+    if let Some(resolved) = verify.resolved_url.clone() {
+        gateway_url = normalize_personal_gateway_url(&resolved)?;
     }
 
     let profile_path = agent_profile_path().context("could not resolve config directory")?;
@@ -808,6 +986,7 @@ fn verify_anthropic_endpoint(
                         text.chars().take(180).collect::<String>()
                     ),
                     models_sample: Vec::new(),
+                    resolved_url: None,
                 });
             }
             if (200..500).contains(&status_code) {
@@ -817,6 +996,7 @@ fn verify_anthropic_endpoint(
                     checked_url: Some(checked),
                     message: "Claude/Anthropic endpoint reachable.".to_string(),
                     models_sample: Vec::new(),
+                    resolved_url: None,
                 });
             }
             let text = resp.text().unwrap_or_default();
@@ -829,6 +1009,7 @@ fn verify_anthropic_endpoint(
                     text.chars().take(180).collect::<String>()
                 ),
                 models_sample: Vec::new(),
+                resolved_url: None,
             })
         }
         Err(err) => Ok(PersonalProviderVerifyReport {
@@ -837,6 +1018,7 @@ fn verify_anthropic_endpoint(
             checked_url: Some(checked),
             message: format!("Anthropic request failed: {err}"),
             models_sample: Vec::new(),
+            resolved_url: None,
         }),
     }
 }
@@ -887,10 +1069,12 @@ pub(crate) fn write_personal_profile(
     if normalize_protocol(protocol) == PROTOCOL_ANTHROPIC {
         writeln!(file, "ANTHROPIC_BASE_URL={gateway_url}")?;
         writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
+        writeln!(file, "ANTHROPIC_AUTH_TOKEN={api_key}")?;
     } else if let Some(anthropic) = crate::setup::anthropic_gateway_for_provider_url(gateway_url) {
         // Dual-protocol hosts (DeepSeek etc.): Claude Code needs the Anthropic path.
         writeln!(file, "ANTHROPIC_BASE_URL={anthropic}")?;
         writeln!(file, "ANTHROPIC_API_KEY={api_key}")?;
+        writeln!(file, "ANTHROPIC_AUTH_TOKEN={api_key}")?;
     }
 
     #[cfg(unix)]

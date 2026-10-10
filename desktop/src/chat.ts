@@ -488,6 +488,13 @@ export function applyI18n(): void {
   }
   syncRestoreBackupButton();
   updateContextMeter();
+  // Transcript labels are painted in the language of that moment. Relabel them
+  // when the app language arrives or changes; static chrome alone is not enough.
+  try {
+    renderActiveMessages();
+  } catch (error) {
+    console.warn("Ask: relabel transcript failed", error);
+  }
 }
 
 export function syncRestoreBackupButton(): void {

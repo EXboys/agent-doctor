@@ -978,6 +978,11 @@ html:has(.diagnose-page) body {
   gap: 6px;
 }
 
+#diagnose-glm-plan[hidden],
+#diagnose-minimax-region[hidden] {
+  display: none !important;
+}
+
 .diagnose-config-label,
 .diagnose-field > span {
   margin: 0;

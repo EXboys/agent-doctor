@@ -12,7 +12,8 @@ use anyhow::{bail, Context, Result};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_claude_env, apply_overlay_env, collect_overlay_env_for_options, format_command_display,
+    apply_claude_env, apply_overlay_env, claude_provider_env, collect_overlay_env_for_options,
+    format_command_display,
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::plan::{tool_carries_plan, PlanBoard};
@@ -371,10 +372,18 @@ fn build_claude_command(
     if let Some(sid) = resume_session_id {
         cmd.arg("--resume").arg(sid);
     }
+    let mut ask_settings = serde_json::Map::new();
+    if let Some(pinned) = claude_provider_env(overlay) {
+        let env: serde_json::Map<String, serde_json::Value> = pinned
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), serde_json::Value::String(value)))
+            .collect();
+        ask_settings.insert("env".into(), serde_json::Value::Object(env));
+    }
     if skip_permissions {
         cmd.arg("--dangerously-skip-permissions");
     } else if interactive_permissions {
-        let ask_settings = serde_json::json!({
+        let permissions = serde_json::json!({
             "permissions": {
                 "ask": [
                     "Bash",
@@ -389,12 +398,19 @@ fn build_claude_command(
                 ]
             }
         });
+        if let Some(rules) = permissions.get("permissions") {
+            ask_settings.insert("permissions".into(), rules.clone());
+        }
         cmd.arg("--permission-prompt-tool")
             .arg("stdio")
-            .arg("--settings")
-            .arg(ask_settings.to_string())
             .arg("--append-system-prompt")
             .arg(CLAUDE_ASK_INSTRUCTIONS);
+    }
+    if !ask_settings.is_empty() {
+        cmd.arg("--settings")
+            .arg(write_ask_settings(&serde_json::Value::Object(
+                ask_settings,
+            ))?);
     }
     if stream_input || interactive_permissions {
         cmd.arg("--input-format").arg("stream-json");
@@ -405,6 +421,34 @@ fn build_claude_command(
     apply_overlay_env(&mut cmd, overlay);
     apply_claude_env(&mut cmd, overlay);
     Ok(cmd)
+}
+
+/// `--settings` outranks the user's and the project's Claude settings files, so
+/// a key or model left there by another tool cannot replace the active provider.
+/// It holds the key, so it goes in a private file instead of the argument list.
+/// The name follows the content: a changed provider is a changed launch.
+fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let body = settings.to_string();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    #[cfg(test)]
+    let dir = std::env::temp_dir().join("agent-doctor-test-ask");
+    #[cfg(not(test))]
+    let dir = crate::store::agent_doctor_config_dir()
+        .context("could not resolve config directory")?
+        .join("ask");
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = dir.join(format!("claude-settings-{:016x}.json", hasher.finish()));
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
+        std::fs::write(&path, &body).with_context(|| format!("write {}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    Ok(path)
 }
 
 /// Read one turn. With `keep_alive` Claude stays up after `result` so it can be
@@ -1328,7 +1372,12 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         let joined = args.join("\n");
-        assert!(joined.contains("\"AskUserQuestion\""));
+        let at = args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .expect("--settings");
+        let settings = fs::read_to_string(&args[at + 1]).unwrap();
+        assert!(settings.contains("\"AskUserQuestion\""));
         assert!(joined.contains("kind"));
         assert!(joined.contains("fewer than 2 options"));
     }
@@ -1348,6 +1397,77 @@ mod tests {
                 && detail == "用哪种登录？"
                 && input_mode == "options"
         )));
+    }
+
+    #[test]
+    fn saved_provider_outranks_leftover_claude_settings() {
+        let home = tempdir().unwrap();
+        let mut overlay = std::collections::HashMap::new();
+        overlay.insert(
+            "AGENT_DOCTOR_PROVIDER_KIND".to_string(),
+            "personal".to_string(),
+        );
+        overlay.insert(
+            "AGENT_DOCTOR_GATEWAY_URL".to_string(),
+            "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
+        );
+        overlay.insert("OPENAI_API_KEY".to_string(), "new-key".to_string());
+        overlay.insert(crate::setup::MODEL_ENV.to_string(), "glm-5.3".to_string());
+        let cmd = crate::adapters::util::with_test_home(home.path(), || {
+            let launch = ClaudeLaunch {
+                cwd: home.path(),
+                skip_permissions: true,
+                interactive: false,
+                stream_input: false,
+                overlay: &overlay,
+            };
+            build_claude_command("hi", &launch, None).unwrap()
+        });
+        let envs: std::collections::HashMap<String, Option<String>> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("ANTHROPIC_AUTH_TOKEN")
+                .cloned()
+                .flatten()
+                .as_deref(),
+            Some("new-key")
+        );
+        assert_eq!(
+            envs.get("ANTHROPIC_SMALL_FAST_MODEL")
+                .cloned()
+                .flatten()
+                .as_deref(),
+            Some("glm-5.3")
+        );
+
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let at = args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .expect("--settings");
+        let path = &args[at + 1];
+        assert!(
+            !path.contains("new-key"),
+            "key must not be on the command line"
+        );
+        let pinned: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(pinned["env"]["ANTHROPIC_AUTH_TOKEN"], "new-key");
+        assert_eq!(
+            pinned["env"]["ANTHROPIC_BASE_URL"],
+            "https://open.bigmodel.cn/api/anthropic"
+        );
+        assert_eq!(pinned["env"]["ANTHROPIC_MODEL"], "glm-5.3");
     }
 
     #[test]

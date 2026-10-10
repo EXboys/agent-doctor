@@ -139,6 +139,18 @@ pub fn enable_warm_sessions() {
     });
 }
 
+/// Close every parked process but keep parking on. Call when the provider changes:
+/// a parked process still holds the old key and model in its environment.
+pub fn retire_warm_sessions() {
+    let all = {
+        let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *pool)
+    };
+    for process in all {
+        retire(process.child, process.stdin, process.pipes);
+    }
+}
+
 /// Close every parked process. Call when the app quits.
 pub fn shutdown_warm_sessions() {
     ENABLED.store(false, Ordering::SeqCst);

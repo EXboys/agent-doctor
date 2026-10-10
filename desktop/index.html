@@ -199,11 +199,29 @@
                     <option value="openai">ChatGPT / OpenAI</option>
                     <option value="anthropic">Claude</option>
                     <option value="gemini">Gemini</option>
-                    <option value="siliconflow">SiliconFlow</option>
+                    <option value="volcengine">火山方舟</option>
+                    <option value="qianfan">千帆</option>
+                    <option value="siliconflow">硅基流动</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="groq">Groq</option>
                     <option value="custom" data-i18n="personal.presetCustom">自定义…</option>
                   </select>
+                </div>
+                <div id="personal-minimax-region" class="field-row glm-plan-row" hidden>
+                  <span class="field-label" data-i18n="personal.minimaxRegion">网站</span>
+                  <div class="provider-picker-chips" role="listbox">
+                    <button type="button" class="provider-chip" data-minimax-region="cn" data-i18n="personal.minimaxRegionCn">国内</button>
+                    <button type="button" class="provider-chip" data-minimax-region="intl" data-i18n="personal.minimaxRegionIntl">国际</button>
+                  </div>
+                  <p class="section-footnote" data-i18n="personal.minimaxRegionHint">订阅钥匙和按量钥匙不是同一把。钥匙从国内网站来的，选「国内」。</p>
+                </div>
+                <div id="personal-glm-plan" class="field-row glm-plan-row" hidden>
+                  <span class="field-label" data-i18n="personal.glmPlan">钥匙来源</span>
+                  <div class="provider-picker-chips" role="listbox">
+                    <button type="button" class="provider-chip" data-glm-plan="payg" data-i18n="personal.glmPlanPayg">按量付费</button>
+                    <button type="button" class="provider-chip" data-glm-plan="coding" data-i18n="personal.glmPlanCoding">编程套餐</button>
+                  </div>
+                  <p class="section-footnote" data-key-plan-hint data-i18n="personal.glmPlanHint">编程套餐和按量付费的钥匙不是同一把。</p>
                 </div>
                 <label class="field-row field-row-inline">
                   <span class="field-label" data-i18n="personal.apiKey">API Key</span>

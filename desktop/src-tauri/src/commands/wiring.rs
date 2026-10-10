@@ -14,6 +14,7 @@ use crate::update_tray_tooltip;
 use tauri::Emitter;
 
 fn notify_provider_changed(app: &tauri::AppHandle) {
+    agent_doctor_core::retire_warm_sessions();
     let _ = app.emit("personal-provider-changed", ());
 }
 
@@ -56,6 +57,7 @@ pub fn list_personal_providers_command() -> PersonalProvidersDocument {
 
 #[tauri::command]
 pub fn upsert_personal_provider_command(
+    app: tauri::AppHandle,
     id: Option<String>,
     name: String,
     url: String,
@@ -64,7 +66,7 @@ pub fn upsert_personal_provider_command(
     protocol: String,
     activate: bool,
 ) -> Result<PersonalProvidersDocument, String> {
-    upsert_personal_provider(&UpsertPersonalProviderOptions {
+    let doc = upsert_personal_provider(&UpsertPersonalProviderOptions {
         id,
         name,
         url,
@@ -73,7 +75,9 @@ pub fn upsert_personal_provider_command(
         protocol,
         activate,
     })
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    notify_provider_changed(&app);
+    Ok(doc)
 }
 
 #[tauri::command]
@@ -97,12 +101,19 @@ pub async fn activate_personal_provider_command(
 }
 
 #[tauri::command]
-pub fn verify_personal_provider_command(
+pub async fn verify_personal_provider_command(
     url: String,
     key: String,
     protocol: String,
 ) -> Result<PersonalProviderVerifyReport, String> {
-    verify_personal_provider_with_protocol(&url, &key, &protocol).map_err(|error| error.to_string())
+    // A plain command runs on the window's thread: the whole app froze while
+    // the provider (and its other region hosts) took their time to answer.
+    tauri::async_runtime::spawn_blocking(move || {
+        verify_personal_provider_with_protocol(&url, &key, &protocol)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
