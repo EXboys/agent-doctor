@@ -290,9 +290,10 @@ pub fn find_workspace_path_command(
             }
             let relative = relative_from_root(&root_canon, &path);
             if format!("/{relative}").ends_with(&suffix) {
-                let shorter = best
-                    .as_ref()
-                    .is_none_or(|b| relative.len() < b.relative_path.len());
+                let shorter = match best.as_ref() {
+                    None => true,
+                    Some(found) => relative.len() < found.relative_path.len(),
+                };
                 if shorter {
                     best = Some(WorkspaceMatch {
                         relative_path: relative,
@@ -306,7 +307,7 @@ pub fn find_workspace_path_command(
             }
         }
         // Breadth-first: the first level that matches holds the shortest path.
-        if best.is_some() && queue.front().is_none_or(|(_, d)| *d > depth) {
+        if best.is_some() && queue.front().map(|(_, d)| *d > depth).unwrap_or(true) {
             return Ok(best);
         }
     }

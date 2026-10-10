@@ -232,6 +232,7 @@ pub(crate) fn island_chrome(
 
 /// Windows shows a short chip only when a turn needs to be seen and the
 /// conversation window is not the one in front. It does not grow into a card.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn windows_status_chrome(ask_in_front: bool, awake: bool) -> Chrome {
     if ask_in_front || !awake {
         Chrome::Hidden
@@ -659,6 +660,7 @@ fn monitors_for_island(app: &AppHandle) -> Vec<tauri::Monitor> {
 
 const MENU_BAR_FALLBACK: f64 = 24.0;
 /// Windows has no menu bar to clear. A small gap keeps the chip off the edge.
+#[cfg_attr(not(windows), allow(dead_code))]
 const STATUS_TOP_GAP: f64 = 8.0;
 
 struct TopAnchor {
@@ -769,6 +771,7 @@ fn menu_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
 }
 
 /// Width, height, x, y, and a zero inset. The chip is a rounded bar, not a notch.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn windows_status_frame(
     chrome: Chrome,
     work_x: f64,
