@@ -14,6 +14,7 @@ mod hermes;
 mod mcp_ensure;
 mod openclaw;
 mod plan;
+mod tool_step;
 mod util;
 mod vision;
 mod warm;
@@ -29,6 +30,7 @@ pub use crate::usage::TokenUsage;
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
 pub use plan::{PlanStep, PlanStepState};
+pub use tool_step::ToolStep;
 pub use vision::{ask_image_support, AskImageSupport, SENDABLE_IMAGE_EXTS};
 pub use warm::{enable_warm_sessions, retire_warm_sessions, shutdown_warm_sessions};
 
@@ -168,6 +170,12 @@ pub enum PromptSessionEvent {
         session_id: String,
         request_id: String,
         allowed: bool,
+    },
+    /// One tool call as fixed fields. Sent when it starts, and again with the same id
+    /// once its result arrives. The matching `Status` with phase `tool` is still sent.
+    Tool {
+        session_id: String,
+        step: Box<ToolStep>,
     },
     /// Latest checklist from a plan tool. Replaces the previous list.
     Plan {

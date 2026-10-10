@@ -489,6 +489,7 @@ fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
             dismiss_secondary_window(&win, false);
         }
         WindowEvent::Destroyed => crate::island::on_ask_closed(&app),
+        WindowEvent::Focused(_) => crate::island::on_ask_focus_changed(&app),
         _ => {}
     });
 }

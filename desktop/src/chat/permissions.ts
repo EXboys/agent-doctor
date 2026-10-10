@@ -769,12 +769,11 @@ export function createPermissionsController(deps: PermissionsDeps) {
 
     const sameAsQuestion = formatted.full === formatted.summary;
     if (formatted.full && !(needsReply && sameAsQuestion)) {
-      const showOpen =
-        allowed == null &&
-        (formatted.full !== formatted.summary || /[\n|&;]/.test(formatted.full));
       const more = document.createElement("details");
       more.className = "chat-permission-more";
-      more.open = Boolean(showOpen && interactive);
+      // Commands and raw parameters are supporting detail. Keep them available,
+      // but let the plain-language action remain the default view.
+      more.open = false;
       const moreSummary = document.createElement("summary");
       moreSummary.textContent = t("chat.permissionExpand");
       const detail = document.createElement("pre");

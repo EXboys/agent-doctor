@@ -1,3 +1,4 @@
+import { getLocale } from "../i18n";
 import { splitToolActivity } from "./format";
 import type { PictureTurn } from "./picture-route";
 import type { ChatAttachment, ChatSession } from "./types";
@@ -132,10 +133,14 @@ export function buildPromptWithHistory(
   session: ChatSession,
   pictures?: PictureTurn,
 ): string {
+  const useChinese = getLocale() === "zh" || /[\u3400-\u9fff]/.test(userText);
   const responseStyle =
     "Response style: answer the user directly and concisely. Lead with the result. " +
     "Use short sections or bullets only when they improve clarity. Do not narrate hidden reasoning, " +
-    "routine progress, tool-selection decisions, retries, or permission flow. Do not repeat the request.";
+    "routine progress, tool-selection decisions, retries, or permission flow. Do not repeat the request." +
+    (useChinese
+      ? " Reply in Simplified Chinese. If this runtime exposes visible thinking or reasoning text, that visible text must also be in Simplified Chinese; do not output English thinking."
+      : "");
   // Native resume already carries thread history — only send this turn.
   if (session.runtimeThreadId?.trim()) {
     const parts: string[] = [responseStyle];

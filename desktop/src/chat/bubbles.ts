@@ -11,6 +11,8 @@ import {
 } from "./format";
 import { renderToolHistoryGroup } from "./activity";
 import { renderThinkingBlock } from "./thinking";
+import { linkFileMentions } from "./file-links";
+import { storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
 import {
   assistantMsgWrap,
@@ -29,6 +31,7 @@ import type {
   PendingPermission,
   PermissionMeta,
   SessionStore,
+  ToolStep,
 } from "./types";
 import type { AskRuntime } from "../ask-resources";
 
@@ -256,6 +259,12 @@ export function createBubblesController(deps: BubblesDeps) {
     }
     persistMessage("tool", text);
   }
+  function rememberToolStep(step: ToolStep): void {
+    const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    if (!storeToolStep(session.messages, step, deps.getAssistantMessageId(), uid)) return;
+    deps.touchSession(session);
+    deps.scheduleStorePersist();
+  }
   function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
     const message = session.messages.find((m) => m.id === id);
@@ -338,7 +347,10 @@ export function createBubblesController(deps: BubblesDeps) {
   }
   function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
     bubble.innerHTML = markdown.trim() ? renderMarkdown(markdown) : "";
-    if (markdown.trim()) enhanceCodeBlocks(bubble);
+    if (markdown.trim()) {
+      enhanceCodeBlocks(bubble);
+      linkFileMentions(bubble);
+    }
     syncAssistantCopyButton(bubble);
   }
   function appendBubble(
@@ -448,7 +460,11 @@ export function createBubblesController(deps: BubblesDeps) {
               while (i + run.length < messages.length && messages[i + run.length].role === "tool") {
                 run.push(messages[i + run.length]);
               }
-              rows.push(renderToolHistoryGroup(run.map((item) => item.content)));
+              rows.push(
+                renderToolHistoryGroup(
+                  run.map((item) => (item.step ? { text: item.content, step: item.step } : item.content)),
+                ),
+              );
               i += run.length;
               continue;
             }
@@ -585,6 +601,7 @@ export function createBubblesController(deps: BubblesDeps) {
     appendAssistantChunk,
     persistMessage,
     rememberTool,
+    rememberToolStep,
     updateAssistantMessage,
     assistantMarkdownSource,
     syncAssistantCopyButton,

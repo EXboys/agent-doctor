@@ -14,11 +14,16 @@ import {
   islandSetContentHeight,
   islandSetHideWhenIdle,
   islandHideWhenIdle,
+  islandRestore,
   islandSetReading,
   resolvePermissionSession,
 } from "../ipc";
 import { permissionView } from "./permission";
 import { buildIslandRows, type IslandPending, type IslandRow, type IslandView } from "./track";
+
+if (/\bWindows\b/.test(navigator.userAgent)) {
+  document.documentElement.classList.add("is-status-chip");
+}
 
 const root = document.querySelector<HTMLElement>("#island");
 const titleEl = document.querySelector<HTMLElement>("#island-title");
@@ -1148,19 +1153,26 @@ function boot(): void {
     { passive: false },
   );
   root?.addEventListener("mouseenter", (event) => {
+    if (document.documentElement.classList.contains("is-status-chip")) return;
     notePointer(event);
     setHover(true);
   });
   root?.addEventListener("mousemove", (event) => {
+    if (document.documentElement.classList.contains("is-status-chip")) return;
     notePointer(event);
     setHover(true);
   });
   root?.addEventListener("mousedown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const onControl = Boolean(target?.closest("input, textarea, button, a, .island-row-body"));
     // Cancelling mousedown also cancels the click, so buttons such as
     // 「查看更多」 would never run.
-    if (!target?.closest("input, textarea, button, a, .island-row-body")) {
-      event.preventDefault();
+    if (!onControl) event.preventDefault();
+    // On Windows the short bar is a way back to the conversation. Buttons on
+    // the opened card, such as 允许, still act in place.
+    if (document.documentElement.classList.contains("is-status-chip") && !onControl) {
+      void islandRestore().catch(() => {});
+      return;
     }
     setHover(true, true);
   });

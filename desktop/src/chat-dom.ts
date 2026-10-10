@@ -21,6 +21,7 @@ export const filesListEl = document.querySelector<HTMLElement>("#chat-files-list
 export const filesViewEl = document.querySelector<HTMLElement>("#chat-files-view")!;
 export const filesCloseEl = document.querySelector<HTMLButtonElement>("#chat-files-close")!;
 export const filesLayoutEl = document.querySelector<HTMLButtonElement>("#chat-files-layout")!;
+export const filesTreeEl = document.querySelector<HTMLButtonElement>("#chat-files-tree")!;
 export const filesBreadcrumbEl = document.querySelector<HTMLElement>("#chat-files-breadcrumb")!;
 export const filesNameEl = document.querySelector<HTMLElement>("#chat-files-name")!;
 export const filesLanguageEl = document.querySelector<HTMLElement>("#chat-files-language")!;

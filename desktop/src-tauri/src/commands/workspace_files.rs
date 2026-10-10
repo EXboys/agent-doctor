@@ -206,6 +206,113 @@ pub fn list_workspace_dir_command(
     Ok(entries)
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMatch {
+    relative_path: String,
+    is_dir: bool,
+    /// Set when the path is outside the project; `relative_path` is then absolute.
+    external: bool,
+}
+
+const MAX_FIND_DEPTH: usize = 6;
+const MAX_FIND_VISITS: usize = 20_000;
+
+/// A reply names a file the way a person would: a bare name, a short path, or
+/// a full path. Find the one it means inside the project.
+#[tauri::command]
+pub fn find_workspace_path_command(
+    root: String,
+    query: String,
+) -> Result<Option<WorkspaceMatch>, String> {
+    let root_canon = PathBuf::from(root.trim())
+        .canonicalize()
+        .map_err(|_| invalid_root_message())?;
+    let mut wanted = query
+        .trim()
+        .trim_matches(|c| c == '`' || c == '"' || c == '\'')
+        .replace('\\', "/");
+    if let Some(rest) = wanted.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            wanted = home.join(rest).to_string_lossy().replace('\\', "/");
+        }
+    }
+    let wanted = wanted.trim_end_matches('/').to_string();
+    if wanted.is_empty() || wanted.split('/').any(|part| part == "..") {
+        return Ok(None);
+    }
+
+    let direct = if Path::new(&wanted).is_absolute() {
+        PathBuf::from(&wanted)
+    } else {
+        root_canon.join(wanted.trim_start_matches("./"))
+    };
+    if let Ok(found) = direct.canonicalize() {
+        if found.starts_with(&root_canon) && found != root_canon {
+            return Ok(Some(WorkspaceMatch {
+                relative_path: relative_from_root(&root_canon, &found),
+                is_dir: found.is_dir(),
+                external: false,
+            }));
+        }
+        // An absolute path the agent named, such as /tmp/x.txt. Open it as is.
+        if Path::new(&wanted).is_absolute() && found.parent().is_some() {
+            return Ok(Some(WorkspaceMatch {
+                relative_path: found.to_string_lossy().replace('\\', "/"),
+                is_dir: found.is_dir(),
+                external: true,
+            }));
+        }
+        return Ok(None);
+    }
+    if Path::new(&wanted).is_absolute() {
+        return Ok(None);
+    }
+
+    let suffix = format!("/{}", wanted.trim_start_matches("./"));
+    let mut best: Option<WorkspaceMatch> = None;
+    let mut queue = std::collections::VecDeque::from([(root_canon.clone(), 0usize)]);
+    let mut visits = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(read_dir) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in read_dir.flatten() {
+            visits += 1;
+            if visits > MAX_FIND_VISITS {
+                return Ok(best);
+            }
+            let path = item.path();
+            let name = item.file_name().to_string_lossy().to_string();
+            let is_dir = path.is_dir();
+            if is_dir && should_skip_dir(&name) {
+                continue;
+            }
+            let relative = relative_from_root(&root_canon, &path);
+            if format!("/{relative}").ends_with(&suffix) {
+                let shorter = best
+                    .as_ref()
+                    .is_none_or(|b| relative.len() < b.relative_path.len());
+                if shorter {
+                    best = Some(WorkspaceMatch {
+                        relative_path: relative,
+                        is_dir,
+                        external: false,
+                    });
+                }
+            }
+            if is_dir && depth + 1 < MAX_FIND_DEPTH {
+                queue.push_back((path, depth + 1));
+            }
+        }
+        // Breadth-first: the first level that matches holds the shortest path.
+        if best.is_some() && queue.front().is_none_or(|(_, d)| *d > depth) {
+            return Ok(best);
+        }
+    }
+    Ok(best)
+}
+
 #[tauri::command]
 pub fn read_workspace_file_command(
     root: String,
@@ -331,6 +438,45 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn finds_files_named_in_a_reply() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("ad-ask-find-{stamp}"));
+        fs::create_dir_all(dir.join(".daily-digest/logs")).unwrap();
+        fs::write(dir.join(".daily-digest/digest.mjs"), "x").unwrap();
+        fs::write(dir.join(".daily-digest/logs/2026-10-10.md"), "x").unwrap();
+        let root = dir.to_string_lossy().to_string();
+        let find = |q: &str| find_workspace_path_command(root.clone(), q.into()).unwrap();
+
+        assert_eq!(
+            find("digest.mjs"),
+            Some(WorkspaceMatch {
+                relative_path: ".daily-digest/digest.mjs".into(),
+                is_dir: false,
+                external: false,
+            })
+        );
+        let outside = std::env::temp_dir().join(format!("ad-ask-outside-{stamp}.txt"));
+        fs::write(&outside, "x").unwrap();
+        let hit = find(&outside.to_string_lossy()).unwrap();
+        assert!(hit.external && !hit.is_dir);
+        let (folder, name) = hit.relative_path.rsplit_once('/').unwrap();
+        let opened = read_workspace_file_command(folder.into(), name.into()).unwrap();
+        assert_eq!(opened.content, "x");
+        let _ = fs::remove_file(&outside);
+        assert_eq!(
+            find("logs/2026-10-10.md").map(|m| m.relative_path),
+            Some(".daily-digest/logs/2026-10-10.md".into())
+        );
+        assert_eq!(find(".daily-digest").map(|m| m.is_dir), Some(true));
+        assert_eq!(find("missing.md"), None);
+        assert_eq!(find("../etc/passwd"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn lists_and_reads_under_root() {

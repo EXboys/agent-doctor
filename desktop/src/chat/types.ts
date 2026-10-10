@@ -50,6 +50,7 @@ export type PromptSessionEvent =
       allowed: boolean;
     }
   | { type: "plan"; session_id: string; items: PlanStep[] }
+  | { type: "tool"; session_id: string; step: ToolStep }
   | { type: "usage"; session_id: string; usage: TokenUsage; model?: string | null }
   | {
       type: "completed";
@@ -65,6 +66,26 @@ export type PromptSessionEvent =
         last_tool: string;
       } | null;
     };
+
+/** One tool call as fixed fields. A later event with the same id adds the result. */
+export interface ToolStep {
+  id: string;
+  kind?: "read" | "write" | "edit" | "terminal" | "search" | "other" | string;
+  name?: string;
+  status: "running" | "done" | "failed" | string;
+  title?: string;
+  path?: string;
+  command?: string;
+  query?: string;
+  line_start?: number;
+  line_end?: number;
+  additions?: number;
+  deletions?: number;
+  added_lines?: string[];
+  deleted_lines?: string[];
+  output?: string;
+  exit_code?: number;
+}
 
 export interface ChatAttachment {
   id: string;
@@ -94,6 +115,8 @@ export interface ChatMessage {
   at: number;
   attachments?: ChatAttachment[];
   permission?: PermissionMeta;
+  /** Structured tool call for `role: "tool"`. Older messages only have `content`. */
+  step?: ToolStep;
 }
 
 export interface ChatSession {

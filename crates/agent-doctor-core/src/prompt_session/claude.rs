@@ -17,10 +17,11 @@ use super::env::{
 };
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::plan::{tool_carries_plan, PlanBoard};
+use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, format_tool_status,
-    is_runtime_stderr_noise, summarize, tool_chip, tool_input_detail, SessionClock, ThinkingLine,
-    ToolWatch, THINKING_AFTER_TOOL,
+    is_runtime_stderr_noise, summarize, tool_activity_detail, tool_chip, SessionClock,
+    ThinkingLine, ToolWatch, THINKING_AFTER_TOOL,
 };
 use super::warm::{self, LivePipes};
 use super::{
@@ -673,7 +674,7 @@ fn observe_claude_tools(value: &serde_json::Value, tools: &mut ToolWatch) {
             let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
             let detail = block
                 .get("input")
-                .map(tool_input_detail)
+                .map(|input| tool_activity_detail(name, input))
                 .unwrap_or_default();
             tools.start(id);
             tools.remember(&tool_chip(name, &detail));
@@ -681,6 +682,29 @@ fn observe_claude_tools(value: &serde_json::Value, tools: &mut ToolWatch) {
             tools.finish(id);
         }
     }
+}
+
+/// Each `tool_result` on a user message finishes the step with the same id.
+fn claude_tool_results(value: &serde_json::Value) -> Vec<ToolStep> {
+    let Some(blocks) = value.pointer("/message/content").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result"))
+        .filter_map(|block| {
+            let id = block.get("tool_use_id").and_then(|v| v.as_str())?;
+            let output = block
+                .get("content")
+                .map(tool_result_text)
+                .unwrap_or_default();
+            let failed = block
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(tool_step_result(id, &output, failed))
+        })
+        .collect()
 }
 
 fn permission_detail(
@@ -967,12 +991,18 @@ fn parse_claude_stream_line(
                                 items,
                             });
                         } else if !tool_carries_plan(name) {
-                            let detail = tool_input_detail(&input);
+                            let detail = tool_activity_detail(name, &input);
                             out.push(PromptSessionEvent::Status {
                                 session_id: session_id.to_string(),
                                 phase: "tool".into(),
                                 message: format_tool_status(name, &detail),
                             });
+                            if !tool_use_id.is_empty() {
+                                out.push(PromptSessionEvent::Tool {
+                                    session_id: session_id.to_string(),
+                                    step: Box::new(tool_step(tool_use_id, name, &input)),
+                                });
+                            }
                         }
                     }
                     _ => {}
@@ -1014,7 +1044,7 @@ fn parse_claude_stream_line(
                     if !tool_carries_plan(name) {
                         let detail = value
                             .pointer("/event/content_block/input")
-                            .map(tool_input_detail)
+                            .map(|input| tool_activity_detail(name, input))
                             .unwrap_or_default();
                         out.push(PromptSessionEvent::Status {
                             session_id: session_id.to_string(),
@@ -1026,12 +1056,22 @@ fn parse_claude_stream_line(
             }
             out
         }
-        "user" => plan_board.observe_user(&value).map_or(Vec::new(), |items| {
-            vec![PromptSessionEvent::Plan {
-                session_id: session_id.to_string(),
-                items,
-            }]
-        }),
+        "user" => {
+            let mut out: Vec<PromptSessionEvent> = claude_tool_results(&value)
+                .into_iter()
+                .map(|step| PromptSessionEvent::Tool {
+                    session_id: session_id.to_string(),
+                    step: Box::new(step),
+                })
+                .collect();
+            if let Some(items) = plan_board.observe_user(&value) {
+                out.push(PromptSessionEvent::Plan {
+                    session_id: session_id.to_string(),
+                    items,
+                });
+            }
+            out
+        }
         // Final envelope — surface errors immediately; successful `result` text is
         // applied after pump when live deltas were missing (avoids duplicating
         // assistant text that already streamed).
@@ -1371,6 +1411,35 @@ mod tests {
         assert!(!events.iter().any(
             |event| matches!(event, PromptSessionEvent::Status { phase, .. } if phase == "tool")
         ));
+    }
+
+    #[test]
+    fn tool_use_and_result_share_one_step() {
+        let mut board = PlanBoard::default();
+        let start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t9","name":"Bash","input":{"command":"echo hi >> notes.md","description":"记一笔"}}]}}"#;
+        let events = parse_claude_stream_line("s1", start, None, None, &mut board);
+        let step = events.iter().find_map(|event| match event {
+            PromptSessionEvent::Tool { step, .. } => Some(step.clone()),
+            _ => None,
+        });
+        let step = step.expect("tool step on start");
+        assert_eq!(
+            (
+                step.id.as_str(),
+                step.kind.as_str(),
+                step.path.as_str(),
+                step.title.as_str()
+            ),
+            ("t9", "edit", "notes.md", "记一笔")
+        );
+
+        let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t9","is_error":true,"content":[{"type":"text","text":"Exit code 1\nno space"}]}]}}"#;
+        let events = parse_claude_stream_line("s1", result, None, None, &mut board);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Tool { step, .. }
+                if step.id == "t9" && step.status == "failed" && step.exit_code == Some(1)
+        )));
     }
 
     #[test]

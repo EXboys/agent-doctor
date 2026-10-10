@@ -318,6 +318,82 @@ pub(crate) fn tool_input_detail(input: &Value) -> String {
     clip_tool_detail(&lines.join("\n"))
 }
 
+fn text_line_count(text: &str) -> usize {
+    if text.is_empty() {
+        0
+    } else {
+        text.lines().count()
+    }
+}
+
+fn change_preview(old: &str, new: &str) -> String {
+    const MAX_LINES: usize = 40;
+    let mut lines = Vec::new();
+    for line in old.lines().take(MAX_LINES) {
+        lines.push(format!("-{line}"));
+    }
+    for line in new.lines().take(MAX_LINES) {
+        lines.push(format!("+{line}"));
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("\n@@diff\n{}", lines.join("\n"))
+    }
+}
+
+/// File tools carry enough input to show the file and a compact +/− line count.
+pub(crate) fn tool_activity_detail(tool: &str, input: &Value) -> String {
+    let detail = tool_input_detail(input);
+    let Some(obj) = input.as_object() else {
+        return detail;
+    };
+    let key: String = tool
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    if matches!(key.as_str(), "read" | "readfile") && !detail.is_empty() {
+        if let Some(start) = obj.get("offset").and_then(Value::as_u64).filter(|n| *n > 0) {
+            let limit = obj.get("limit").and_then(Value::as_u64).unwrap_or(1).max(1);
+            return format!("{detail} L{start}-{}", start + limit - 1);
+        }
+    }
+    let (additions, deletions, preview) =
+        if matches!(key.as_str(), "write" | "writefile" | "createfile") {
+            let new = obj.get("content").and_then(Value::as_str).unwrap_or("");
+            (text_line_count(new), 0, change_preview("", new))
+        } else if matches!(
+            key.as_str(),
+            "edit" | "multiedit" | "notebookedit" | "filechange"
+        ) {
+            let new = obj
+                .get("new_string")
+                .or_else(|| obj.get("newText"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let old = obj
+                .get("old_string")
+                .or_else(|| obj.get("oldText"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            (
+                text_line_count(new),
+                text_line_count(old),
+                change_preview(old, new),
+            )
+        } else {
+            (0, 0, String::new())
+        };
+    if additions == 0 && deletions == 0 {
+        detail
+    } else if detail.is_empty() {
+        format!("+{additions} -{deletions}{preview}")
+    } else {
+        format!("{detail}\n+{additions} -{deletions}{preview}")
+    }
+}
+
 fn clip_tool_detail(text: &str) -> String {
     const MAX: usize = 480;
     let text = text.trim();
@@ -500,6 +576,9 @@ pub(crate) fn humanize_runtime_error(raw: &str) -> String {
     }
     let lower = t.to_ascii_lowercase();
 
+    if lower.contains("unsupported call") && lower.contains("apply_patch") {
+        return "当前的 Codex 不支持这种改文件方式，它会换一种方式继续。".into();
+    }
     if lower.contains("apply_patch") && (lower.contains("hunk") || lower.contains("verification")) {
         return "写文件补丁格式不正确：每一段必须以 `*** Add File: 路径` / `*** Update File: 路径` / `*** Delete File: 路径` 开头，不能把文件内容写在标题行。模型应修正补丁后重试。".into();
     }
@@ -562,6 +641,15 @@ mod tests {
         assert!(!is_runtime_stderr_noise(
             "Failed to write to stdout: permission denied (os error 13)"
         ));
+    }
+
+    #[test]
+    fn humanizes_unsupported_apply_patch() {
+        let msg = humanize_runtime_error(
+            "2026-10-10T14:13:22.908636Z ERROR codex_core::tools::router: error=unsupported call: apply_patch",
+        );
+        assert!(msg.contains("不支持"));
+        assert!(!msg.contains("codex_core"));
     }
 
     #[test]
@@ -676,6 +764,35 @@ mod tests {
                 "target": "content"
             })),
             "fn main"
+        );
+    }
+
+    #[test]
+    fn file_tool_detail_includes_line_changes() {
+        assert_eq!(
+            tool_activity_detail(
+                "Read",
+                &serde_json::json!({"file_path": "src/chat.ts", "offset": 330, "limit": 80})
+            ),
+            "src/chat.ts L330-409"
+        );
+        assert_eq!(
+            tool_activity_detail(
+                "Edit",
+                &serde_json::json!({
+                    "file_path": "src/chat.ts",
+                    "old_string": "one\ntwo",
+                    "new_string": "one\nthree\nfour"
+                })
+            ),
+            "src/chat.ts\n+3 -2\n@@diff\n-one\n-two\n+one\n+three\n+four"
+        );
+        assert_eq!(
+            tool_activity_detail(
+                "Write",
+                &serde_json::json!({"path": "src/new.ts", "content": "a\nb"})
+            ),
+            "src/new.ts\n+2 -0\n@@diff\n+a\n+b"
         );
     }
 

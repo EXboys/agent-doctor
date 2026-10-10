@@ -83,6 +83,7 @@ pub fn run(
             }
             PromptSessionEvent::PermissionResolved { .. }
             | PromptSessionEvent::Thinking { .. }
+            | PromptSessionEvent::Tool { .. }
             | PromptSessionEvent::Usage { .. }
             | PromptSessionEvent::Completed { .. } => {}
         }

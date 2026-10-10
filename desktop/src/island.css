@@ -5,7 +5,7 @@ body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
   color: #fff;
   user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -145,6 +145,20 @@ body {
 
 .island.is-done .island-title::before {
   content: "✓ ";
+}
+
+/* Windows has no camera housing, so the chip is a rounded bar with a gap above it. */
+html.is-status-chip .island {
+  border-radius: 14px;
+}
+
+html.is-status-chip .island.is-expanded {
+  --island-top: 12px;
+  border-radius: 18px;
+}
+
+html.is-status-chip .island.is-expanded .island-idle {
+  display: none;
 }
 
 .island.is-expanded .island-mark {

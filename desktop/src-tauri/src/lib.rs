@@ -257,6 +257,7 @@ fn event_session_id(event: &PromptSessionEvent) -> Option<&str> {
         | PromptSessionEvent::PermissionRequest { session_id, .. }
         | PromptSessionEvent::PermissionResolved { session_id, .. }
         | PromptSessionEvent::Plan { session_id, .. }
+        | PromptSessionEvent::Tool { session_id, .. }
         | PromptSessionEvent::Usage { session_id, .. }
         | PromptSessionEvent::Completed { session_id, .. } => session_id.as_str(),
     })
@@ -479,6 +480,7 @@ pub fn run() {
             {
                 let _ = windows::ensure_resources_window(app.handle(), "skills", true);
                 let _ = windows::ensure_diagnose_window(app.handle(), "openclaw", true);
+                island::prepare_status_chip(app.handle());
             }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
@@ -532,6 +534,7 @@ pub fn run() {
             workspace_doctor_command,
             workspace_fix_command,
             list_workspace_dir_command,
+            find_workspace_path_command,
             read_workspace_file_command,
             write_workspace_file_command,
             knowledge_pages_command,

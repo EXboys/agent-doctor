@@ -87,6 +87,7 @@ import {
   clearEphemeralActivity,
   appendStderrLine,
   pushActivity,
+  pushToolStep,
   settleActivity,
   flushPendingTextSync,
   hideDecisionDock,
@@ -190,6 +191,7 @@ export function wireChatControllers(): void {
       chatState.toolGroupEl = el;
     },
     rememberTool: (text) => chatState.bubbles.rememberTool(text),
+    rememberToolStep: (step) => chatState.bubbles.rememberToolStep(step),
     toolRecordsForTurn: () => {
       const session = chatState.busy ? runTargetSession() : activeSession();
       const messages = session.messages;
@@ -200,7 +202,10 @@ export function wireChatControllers(): void {
           break;
         }
       }
-      return messages.slice(start).filter((message) => message.role === "tool").map((message) => message.content);
+      return messages
+        .slice(start)
+        .filter((message) => message.role === "tool")
+        .map((message) => (message.step ? { text: message.content, step: message.step } : message.content));
     },
     onChatConnectionFailure: (explain) => showChatFailureBubble(explain),
   });
@@ -587,6 +592,7 @@ export function wireChatControllers(): void {
     },
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
     pushActivity: (phase, message) => pushActivity(phase, message),
+    pushToolStep: (step) => pushToolStep(step),
     flushSessionListRender: () => flushSessionListRender(),
     noteVerifyBrowserSignal: (text, source) => noteVerifyBrowserSignal(text, source),
     queueAssistantText: (text) => queueAssistantText(text),

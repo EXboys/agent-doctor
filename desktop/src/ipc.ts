@@ -435,6 +435,16 @@ export function readWorkspaceFile(args: {
   return invoke("read_workspace_file_command", args);
 }
 
+/** `external` means `relativePath` is an absolute path outside the project. */
+export type WorkspaceMatch = { relativePath: string; isDir: boolean; external: boolean };
+
+export function findWorkspacePath(args: {
+  root: string;
+  query: string;
+}): Promise<WorkspaceMatch | null> {
+  return invoke("find_workspace_path_command", args);
+}
+
 export function writeWorkspaceFile(args: {
   root: string;
   relative: string;

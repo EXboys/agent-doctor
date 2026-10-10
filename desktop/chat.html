@@ -420,10 +420,7 @@
             </button>
             <button id="chat-files-close" type="button" class="chat-files-close" data-i18n="chat.filesClose">关闭</button>
           </header>
-          <div id="chat-files-list" class="chat-files-list" role="list">
-            <p id="chat-files-empty" class="chat-files-empty" hidden></p>
-          </div>
-          <div id="chat-files-view" class="chat-files-view">
+          <div class="chat-files-banner">
             <div class="chat-files-view-head">
               <div class="chat-files-title">
                 <strong id="chat-files-name" class="chat-files-name" data-i18n="chat.filesPreviewTitle">文件预览</strong>
@@ -433,6 +430,18 @@
                 <button id="chat-files-save" type="button" class="chat-files-save" hidden data-i18n="chat.filesSave">保存</button>
               </div>
             </div>
+            <button id="chat-files-tree" type="button" class="chat-files-tree" aria-pressed="false" aria-label="收起文件夹" title="先只看这个文件">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <aside class="chat-files-tree-col">
+            <div id="chat-files-list" class="chat-files-list" role="list">
+              <p id="chat-files-empty" class="chat-files-empty" hidden></p>
+            </div>
+          </aside>
+          <div id="chat-files-view" class="chat-files-view">
             <div id="chat-files-placeholder" class="chat-files-placeholder">
               <span class="chat-files-placeholder-icon" aria-hidden="true">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
@@ -440,8 +449,9 @@
                   <path d="M13 3.75v5h5M9 13h6M9 16h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
                 </svg>
               </span>
-              <span data-i18n="chat.filesPickOne">从左侧选择一个文件，打开后直接修改</span>
+              <span data-i18n="chat.filesPickOne">从右边选择一个文件，打开后直接修改</span>
             </div>
+            <div id="chat-files-diff" class="chat-files-diff" hidden></div>
             <div id="chat-files-code" class="chat-files-code" hidden>
               <pre id="chat-files-preview" class="chat-files-preview"><code></code></pre>
               <textarea id="chat-files-editor" class="chat-files-editor" spellcheck="false" wrap="off"></textarea>

@@ -3,7 +3,10 @@ use serde_json::{json, Value};
 
 use crate::prompt_session::control::{CodexReplyKind, PromptSessionControl};
 use crate::prompt_session::plan::{plan_from_item, plan_from_tool};
-use crate::prompt_session::util::{humanize_runtime_error, THINKING_AFTER_TOOL};
+use crate::prompt_session::tool_step::codex_tool_steps;
+use crate::prompt_session::util::{
+    humanize_runtime_error, tool_activity_detail, THINKING_AFTER_TOOL,
+};
 use crate::prompt_session::PromptSessionEvent;
 
 use super::*;
@@ -414,6 +417,15 @@ pub(crate) fn handle_notification<F>(
                             message: label,
                         });
                     }
+                    if !item_id.is_empty() {
+                        let completed = method == "item/completed";
+                        for step in codex_tool_steps(&item, item_type, completed) {
+                            on_event(PromptSessionEvent::Tool {
+                                session_id: state.session_id.clone(),
+                                step: Box::new(step),
+                            });
+                        }
+                    }
                 }
                 "reasoning" => {
                     if method == "item/started" {
@@ -499,7 +511,8 @@ fn is_tool_activity(item_type: &str) -> bool {
 }
 
 fn tool_activity_label(item: &Value, item_type: &str) -> String {
-    item.get("command")
+    let detail = item
+        .get("command")
         .and_then(|v| {
             if let Some(text) = v.as_str() {
                 Some(text.to_string())
@@ -533,7 +546,24 @@ fn tool_activity_label(item: &Value, item_type: &str) -> String {
                 .map(str::to_string)
         })
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| item_type.to_string())
+        .unwrap_or_else(|| item_type.to_string());
+    let kind = match codex_key(item_type).as_str() {
+        "commandexecution" => "Bash",
+        "filechange" => "Edit",
+        "websearch" => "WebSearch",
+        "imageview" => "Read",
+        _ => return detail,
+    };
+    let detail = if kind == "Edit" {
+        tool_activity_detail("FileChange", item)
+    } else {
+        detail
+    };
+    if detail.is_empty() || detail == item_type {
+        kind.to_string()
+    } else {
+        format!("{kind}\n{detail}")
+    }
 }
 
 /// Official failures use `{ error: { message } }`. Some builds put `message` on the params.

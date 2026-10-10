@@ -10,7 +10,7 @@ import {
   markChatFailureBubbleShown,
   resetChatTurnErrors,
 } from "./turn-errors";
-import type { PromptSessionEvent, SessionStore } from "./types";
+import type { PromptSessionEvent, SessionStore, ToolStep } from "./types";
 
 export type StreamDeps = {
   getStore: () => SessionStore;
@@ -33,6 +33,7 @@ export type StreamDeps = {
   applyBackgroundEvent: (chatId: string, payload: PromptSessionEvent) => void;
   setDisplayedCwd: (cwd: string) => void;
   pushActivity: (phase: string, message: string) => void;
+  pushToolStep: (step: ToolStep) => void;
   flushSessionListRender: () => void;
   noteVerifyBrowserSignal: (text: string, source: "status" | "assistant" | "tool") => void;
   queueAssistantText: (text: string) => void;
@@ -154,6 +155,9 @@ export function createStreamController(deps: StreamDeps) {
           break;
         case "permission_resolved":
           deps.markPermissionResolved(payload.request_id, payload.allowed);
+          break;
+        case "tool":
+          deps.pushToolStep(payload.step);
           break;
         case "plan":
           deps.onPlan(payload.items);

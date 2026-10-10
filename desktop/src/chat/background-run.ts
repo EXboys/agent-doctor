@@ -9,6 +9,7 @@ import {
   toolSignature,
 } from "./format";
 import { liveRun, type LiveRun } from "./live-runs";
+import { storeToolStep } from "./tool-records";
 import { uid } from "./store";
 import type { ChatMessage, ChatSession, PendingPermission, PromptSessionEvent } from "./types";
 
@@ -75,6 +76,12 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
       ctx.scheduleSessionListRender();
+      return;
+    case "tool":
+      if (storeToolStep(session.messages, payload.step, run.assistantMessageId, uid)) {
+        ctx.touchSession(session);
+        ctx.scheduleStorePersist();
+      }
       return;
     case "plan":
       ctx.onPlan(chatId, payload);

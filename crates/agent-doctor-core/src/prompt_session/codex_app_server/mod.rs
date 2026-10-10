@@ -186,16 +186,8 @@ fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
         "Use ordinary shell and file tools, including when the task edits a video or other files outside the project folder, or removes temporary files. \
          If an ordinary command is blocked, call it again with require_escalated so the app can show Allow, then continue the task. \
          Do not stop, and do not tell the user to open a terminal, change settings, or avoid a command. \
-         When creating or editing files with apply_patch, every hunk MUST start with one of: \
-         '*** Add File: {path}', '*** Delete File: {path}', or '*** Update File: {path}'. \
-         Never put file contents on the hunk header line. Example to add a file:\n\
-         *** Begin Patch\n\
-         *** Add File: path/to/file.txt\n\
-         +line one\n\
-         +line two\n\
-         *** End Patch\n\
-         Prefer apply_patch for file writes; if apply_patch fails validation, fix the hunk headers and retry \
-         (or fall back to a simple shell write of the file contents). \
+         Create and edit files with the file tools already listed for you. Do not call apply_patch: this Codex rejects that call. \
+         If no file tool is listed, write the file with an ordinary shell command. \
          When request_user_input is available and you need a secret, token, password, or a decision only the user can make, call that tool. \
          Do not ask the user to paste a secret into the chat.",
     );

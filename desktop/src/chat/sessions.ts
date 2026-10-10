@@ -198,7 +198,6 @@ export function createSessionsController(deps: SessionsDeps) {
           ? metaText
           : runtimeDisplayName(session.runtime);
       main.append(line, agent);
-      main.title = metaText;
     } else {
       const meta = document.createElement("span");
       meta.className = "chat-session-meta";

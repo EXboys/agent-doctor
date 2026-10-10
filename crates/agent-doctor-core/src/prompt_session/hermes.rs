@@ -20,10 +20,11 @@ use super::env::{
     prepare_hermes_home,
 };
 use super::plan::{tool_carries_plan, PlanBoard};
+use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_chip,
-    tool_input_detail, SessionClock, ToolWatch,
+    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
+    tool_activity_detail, tool_chip, SessionClock, ToolWatch,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -382,7 +383,7 @@ fn observe_hermes_tools(line: &str, tools: &mut ToolWatch) {
                 .get("input")
                 .or_else(|| value.get("arguments"))
                 .or_else(|| value.get("args"))
-                .map(tool_input_detail)
+                .map(|input| tool_activity_detail(name, input))
                 .unwrap_or_default();
             tools.remember(&tool_chip(hermes_tool_label(name), &detail));
         }
@@ -463,16 +464,41 @@ fn handle_hermes_stream_line<F>(
                 });
             } else if !tool_carries_plan(name) {
                 let label = hermes_tool_label(name);
-                let detail = tool_input_detail(&input);
+                let detail = tool_activity_detail(name, &input);
                 on_event(PromptSessionEvent::Status {
                     session_id: session_id.to_string(),
                     phase: "tool".into(),
                     message: format_tool_status(label, &detail),
                 });
+                if !tool_use_id.is_empty() {
+                    on_event(PromptSessionEvent::Tool {
+                        session_id: session_id.to_string(),
+                        step: Box::new(tool_step(tool_use_id, name, &input)),
+                    });
+                }
             }
         }
         "tool_result" => {
-            // Keep the last tool chip live until the next status/text; no extra row needed.
+            let id = value
+                .get("tool_use_id")
+                .or_else(|| value.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !id.is_empty() {
+                let output = ["content", "output", "result"]
+                    .iter()
+                    .find_map(|key| value.get(*key))
+                    .map(tool_result_text)
+                    .unwrap_or_default();
+                let failed = value
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                on_event(PromptSessionEvent::Tool {
+                    session_id: session_id.to_string(),
+                    step: Box::new(tool_step_result(id, &output, failed)),
+                });
+            }
         }
         "result" => {
             // Final text is read after the process exits via `extract_hermes_stream_final`.

@@ -18,10 +18,12 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
     <div class="chat-thinking-body"></div>
   `;
   block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = text;
-  block.open = false;
-  block.addEventListener("toggle", () => {
-    if (block.open) block.dataset.pinned = "1";
-    else delete block.dataset.pinned;
+  // Thinking is part of the work timeline, not an accordion. Keeping it open
+  // prevents the transcript from shrinking and jumping whenever the next
+  // phase starts.
+  block.open = true;
+  block.querySelector("summary")?.addEventListener("click", (event) => {
+    event.preventDefault();
   });
   if (opts?.live) {
     markLive(block);
@@ -100,7 +102,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     const block = findBlock();
     if (block) {
       block.classList.remove("is-live");
-      if (block.dataset.pinned !== "1") block.open = false;
+      block.open = true;
       const elapsed = durationLabel(Date.now() - startedAt);
       block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = elapsed
         ? t("chat.thinkingDone", { elapsed })

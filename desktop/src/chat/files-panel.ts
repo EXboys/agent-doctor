@@ -3,12 +3,14 @@ import { escapeHtml } from "../markdown";
 import { t } from "../i18n";
 import { highlightCode } from "./code-highlight";
 import {
+  findWorkspacePath,
   listWorkspaceDir,
   readWorkspaceFile,
   writeWorkspaceFile,
   type WorkspaceDirEntry,
   type WorkspaceSheet,
 } from "../ipc";
+import { fileChangeFor, hasFileChange, type FileChangePreview } from "./file-changes";
 import { syncChatFilesSplitter } from "./layout-resize";
 
 export type FilesPanelDeps = {
@@ -19,6 +21,7 @@ export type FilesPanelDeps = {
   viewEl: HTMLElement;
   closeEl: HTMLButtonElement;
   layoutEl: HTMLButtonElement;
+  treeEl: HTMLButtonElement;
   breadcrumbEl: HTMLElement;
   fileNameEl: HTMLElement;
   languageEl: HTMLElement;
@@ -39,6 +42,7 @@ type PanelMode = "closed" | "list" | "file";
 type FilesLayout = "cover" | "split";
 
 const LAYOUT_KEY = "agent-doctor-ask-files-layout";
+const TREE_KEY = "agent-doctor-ask-files-tree";
 
 function readFilesLayout(): FilesLayout {
   return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "cover";
@@ -47,12 +51,17 @@ function readFilesLayout(): FilesLayout {
 export function createFilesPanel(deps: FilesPanelDeps) {
   let mode: PanelMode = "closed";
   let layout: FilesLayout = readFilesLayout();
+  let treeCollapsed = localStorage.getItem(TREE_KEY) === "hidden";
   let listRelative = "";
   let openFileRelative = "";
   let openFileLanguage = "text";
   let dirty = false;
+  const diffEl = deps.panelEl.querySelector<HTMLElement>("#chat-files-diff");
+  /** Folder of a file opened from outside the project, such as /tmp. */
+  let outsideRoot: string | null = null;
 
   function rootOrWarn(): string | null {
+    if (outsideRoot) return outsideRoot;
     const root = deps.getRoot().trim();
     if (!root || root === "—") {
       deps.setStatus(t("chat.filesNoFolder"), "warn");
@@ -73,6 +82,23 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.layoutEl.querySelector<SVGElement>(".chat-files-layout-icon-cover")?.toggleAttribute("hidden", !split);
   }
 
+  function syncTreeButton(): void {
+    deps.panelEl.classList.toggle("is-tree-collapsed", treeCollapsed);
+    const label = t(treeCollapsed ? "chat.filesTreeShow" : "chat.filesTreeHide");
+    const hint = t(treeCollapsed ? "chat.filesTreeShowHint" : "chat.filesTreeHideHint");
+    deps.treeEl.title = hint;
+    deps.treeEl.setAttribute("aria-label", label);
+    deps.treeEl.setAttribute("aria-pressed", treeCollapsed ? "true" : "false");
+    const pick = deps.placeholderEl.querySelector<HTMLElement>("[data-i18n='chat.filesPickOne']");
+    if (pick) pick.textContent = t(treeCollapsed ? "chat.filesPickOneFolded" : "chat.filesPickOne");
+  }
+
+  /** The corner button opens the list; a file in the chat opens the file with the list folded. */
+  function rememberTree(collapsed: boolean): void {
+    treeCollapsed = collapsed;
+    localStorage.setItem(TREE_KEY, collapsed ? "hidden" : "shown");
+  }
+
   function setOpen(open: boolean): void {
     mode = open ? "list" : "closed";
     deps.mainEl.classList.toggle("is-files-open", open);
@@ -83,6 +109,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.panelEl.setAttribute("aria-hidden", open ? "false" : "true");
     syncChatFilesSplitter(open && layout === "split");
     syncLayoutButton();
+    syncTreeButton();
   }
 
   function paintFile(content: string, language: string, editable: boolean, resetScroll = false): void {
@@ -230,7 +257,70 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     return btn;
   }
 
-  async function openFile(relative: string, row?: HTMLElement): Promise<void> {
+  function paintDiffLines(kind: "delete" | "add", title: string, lines: string[]): void {
+    if (!diffEl || lines.length === 0) return;
+    const label = document.createElement("div");
+    label.className = "chat-files-diff-label";
+    label.dataset.kind = kind;
+    label.textContent = title;
+    diffEl.append(label);
+    for (const line of lines) {
+      const row = document.createElement("div");
+      row.className = "chat-files-diff-line";
+      row.dataset.kind = kind;
+      row.textContent = `${kind === "add" ? "+" : "−"} ${line}`;
+      diffEl.append(row);
+    }
+  }
+
+  function paintDiff(change?: FileChangePreview): void {
+    if (!diffEl) return;
+    diffEl.replaceChildren();
+    if (!hasFileChange(change) || !change) {
+      diffEl.hidden = true;
+      return;
+    }
+    diffEl.hidden = false;
+    const additions = change.additions || change.addedLines.length;
+    const deletions = change.deletions || change.deletedLines.length;
+    const head = document.createElement("div");
+    head.className = "chat-files-diff-head";
+    head.textContent = t("chat.filesChanged");
+    const counts = document.createElement("span");
+    counts.className = "chat-files-diff-counts";
+    const added = document.createElement("span");
+    added.dataset.kind = "add";
+    added.textContent = `+${additions}`;
+    const deleted = document.createElement("span");
+    deleted.dataset.kind = "delete";
+    deleted.textContent = `−${deletions}`;
+    counts.append(added, deleted);
+    head.append(counts);
+    diffEl.append(head);
+    paintDiffLines("delete", t("chat.filesRemoved"), change.deletedLines ?? []);
+    paintDiffLines("add", t("chat.filesAdded"), change.addedLines ?? []);
+  }
+
+  function revealLines(content: string, start = 0, end = start): void {
+    if (start < 1) return;
+    const lines = content.split("\n");
+    const first = Math.min(start, lines.length);
+    const last = Math.min(Math.max(end || first, first), lines.length);
+    let selectionStart = 0;
+    for (let i = 0; i < first - 1; i++) selectionStart += lines[i].length + 1;
+    let selectionEnd = selectionStart;
+    for (let i = first - 1; i < last; i++) selectionEnd += lines[i].length + (i < last - 1 ? 1 : 0);
+    deps.editorEl.setSelectionRange(selectionStart, selectionEnd);
+    const lineHeight = parseFloat(getComputedStyle(deps.editorEl).lineHeight) || 20;
+    deps.editorEl.scrollTop = Math.max(0, (first - 2) * lineHeight);
+    deps.previewEl.scrollTop = deps.editorEl.scrollTop;
+  }
+
+  async function openFile(
+    relative: string,
+    row?: HTMLElement,
+    change?: FileChangePreview,
+  ): Promise<void> {
     const root = rootOrWarn();
     if (!root) return;
     try {
@@ -259,12 +349,17 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       deps.languageEl.hidden = !file.editable;
       deps.languageEl.textContent = file.language.toUpperCase();
       deps.breadcrumbEl.textContent = file.relativePath;
+      const shown = hasFileChange(change) ? change : fileChangeFor(file.relativePath);
+      paintDiff(shown);
       deps.listEl.querySelectorAll(".chat-files-item.is-active").forEach((item) => {
         item.classList.remove("is-active");
       });
       row?.classList.add("is-active");
       paintFile(file.content, file.language, file.editable, true);
-      if (file.editable) deps.editorEl.focus();
+      if (file.editable) {
+        deps.editorEl.focus();
+        revealLines(file.content, shown?.lineStart, shown?.lineEnd);
+      }
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesLoadFailed")), "error");
     }
@@ -293,6 +388,11 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       setOpen(false);
       return;
     }
+    if (outsideRoot) {
+      outsideRoot = null;
+      listRelative = "";
+    }
+    rememberTree(false);
     setOpen(true);
     showList();
   });
@@ -303,6 +403,51 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     localStorage.setItem(LAYOUT_KEY, layout);
     if (mode !== "closed") setOpen(true);
     else syncLayoutButton();
+  });
+  deps.treeEl.addEventListener("click", () => {
+    rememberTree(!treeCollapsed);
+    syncTreeButton();
+  });
+
+  window.addEventListener("chat-open-workspace-file", (event) => {
+    const detail = (event as CustomEvent<Partial<FileChangePreview> & { path?: string }>).detail;
+    const projectRoot = deps.getRoot().trim();
+    const raw = detail?.path?.trim();
+    if (!raw) return;
+    const root = projectRoot && projectRoot !== "—" ? projectRoot : "/";
+    void findWorkspacePath({ root, query: raw })
+      .catch(() => null)
+      .then((match) => {
+        if (!match) {
+          deps.setStatus(t("chat.filesNotFound"), "warn");
+          return;
+        }
+        let relative = match.relativePath;
+        if (match.external) {
+          const cut = relative.lastIndexOf("/");
+          outsideRoot = match.isDir ? relative : relative.slice(0, cut) || "/";
+          relative = match.isDir ? "" : relative.slice(cut + 1);
+        } else {
+          outsideRoot = null;
+        }
+        layout = "split";
+        localStorage.setItem(LAYOUT_KEY, layout);
+        rememberTree(true);
+        setOpen(true);
+        if (match.isDir) {
+          listRelative = relative;
+          showList();
+          return;
+        }
+        void openFile(relative, undefined, {
+          additions: detail.additions ?? 0,
+          deletions: detail.deletions ?? 0,
+          addedLines: detail.addedLines ?? [],
+          deletedLines: detail.deletedLines ?? [],
+          lineStart: detail.lineStart,
+          lineEnd: detail.lineEnd,
+        });
+      });
   });
 
   deps.saveEl.addEventListener("click", () => void saveFile());
@@ -338,6 +483,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       deps.closeEl.textContent = t("chat.filesClose");
       deps.saveEl.textContent = t("chat.filesSave");
       syncLayoutButton();
+      syncTreeButton();
     },
     isOpen: () => mode !== "closed",
     close: () => setOpen(false),

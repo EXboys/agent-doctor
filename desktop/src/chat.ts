@@ -6,7 +6,7 @@ import { syncKnowledgeLabels } from "./chat/knowledge-page";
 import { KNOWLEDGE_RUN_PREFIX } from "./chat/knowledge-wiki";
 import { syncResourcesPageLabels } from "./chat/resources-page";
 import { syncScheduleLabels } from "./chat/schedule-page";
-import type { PromptSessionEvent } from "./chat/types";
+import type { PromptSessionEvent, ToolStep } from "./chat/types";
 import {
   beginLiveRun,
   bindBackendSession,
@@ -57,6 +57,7 @@ import {
   filesViewEl,
   filesCloseEl,
   filesLayoutEl,
+  filesTreeEl,
   filesBreadcrumbEl,
   filesNameEl,
   filesLanguageEl,
@@ -71,6 +72,7 @@ import {
   filesEmptyEl,
 } from "./chat-dom";
 import { createFilesPanel } from "./chat/files-panel";
+import { setFileLinkRoot } from "./chat/file-links";
 import { bootChat } from "./chat-boot";
 import {
   AskMentionMenuController,
@@ -643,6 +645,9 @@ export function pushActivity(phase: string, message: string): void {
   chatState.running?.setText(message);
   chatState.activity.pushActivity(phase, message);
 }
+export function pushToolStep(step: ToolStep): void {
+  chatState.activity.pushToolStep(step);
+}
 export function settleActivity(): void {
   chatState.activity.settleActivity();
 }
@@ -733,6 +738,7 @@ const askFilesPanel = createFilesPanel({
   viewEl: filesViewEl,
   closeEl: filesCloseEl,
   layoutEl: filesLayoutEl,
+  treeEl: filesTreeEl,
   breadcrumbEl: filesBreadcrumbEl,
   fileNameEl: filesNameEl,
   languageEl: filesLanguageEl,
@@ -752,6 +758,11 @@ const askFilesPanel = createFilesPanel({
     return fromSession?.trim() || "—";
   },
   setStatus,
+});
+setFileLinkRoot(() => {
+  const cwd = displayCwd();
+  if (cwd !== "—") return cwd;
+  return sessionWorkspacePath(activeSession(), chatState.workspaceDoc)?.trim() || "—";
 });
 
 export function setDisplayedCwd(cwd: string): void {

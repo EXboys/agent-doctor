@@ -1,10 +1,11 @@
-//! macOS-only top bar: a small window at the top of every screen.
-//! Screens with a camera housing fill that housing. Others hang the same bar
-//! just under the menu bar.
+//! Top bar: a small window at the top of every screen.
+//! On macOS, screens with a camera housing fill that housing. Others hang the
+//! same bar just under the menu bar. While a browser tool runs, the normal
+//! windows hide so the page can use the screen. The notch stays up.
 //!
-//! The Ask page publishes what the session is doing. The normal windows stay
-//! put until a browser tool is running; then this module hides them so the page
-//! can use the screen. The notch itself stays up on each screen.
+//! On Windows there is no housing. A rounded chip sits just under the top of
+//! the work area, and only while a turn is running and the conversation window
+//! is not the one in front. It does not hide the other windows.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -229,6 +230,54 @@ pub(crate) fn island_chrome(
     }
 }
 
+/// Windows shows a short chip only when a turn needs to be seen and the
+/// conversation window is not the one in front. It does not grow into a card.
+pub(crate) fn windows_status_chrome(ask_in_front: bool, awake: bool) -> Chrome {
+    if ask_in_front || !awake {
+        Chrome::Hidden
+    } else {
+        Chrome::Pill
+    }
+}
+
+/// The conversation window is visible and focused, so the person can already
+/// read what the turn is doing.
+fn windows_ask_in_front(app: &AppHandle) -> bool {
+    #[cfg(windows)]
+    {
+        let Some(window) = app.get_webview_window("ask") else {
+            return false;
+        };
+        if window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(false) {
+            return false;
+        }
+        return window.is_focused().unwrap_or(false);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// Ask gained or lost focus. The chip follows immediately, without waiting
+/// for the next status publish.
+pub(crate) fn on_ask_focus_changed(app: &AppHandle) {
+    #[cfg(windows)]
+    apply(app);
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
+/// Build the hidden chip at startup. Creating a WebView2 window on the first
+/// focus change can stall the click that needed the status.
+#[cfg(windows)]
+pub(crate) fn prepare_status_chip(app: &AppHandle) {
+    if ensure_island_window(app, ISLAND_LABEL).is_some() {
+        ensure_screen_follow(app);
+    }
+}
+
 fn hide_pref_path(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path()
         .app_config_dir()
@@ -332,7 +381,7 @@ pub(crate) fn on_ask_closed(app: &AppHandle) {
 }
 
 fn apply(app: &AppHandle) {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(any(target_os = "macos", windows)) {
         return;
     }
     {
@@ -359,25 +408,41 @@ fn apply(app: &AppHandle) {
 
 fn apply_once(app: &AppHandle) {
     ensure_hide_pref_loaded(app);
+    let ask_in_front = windows_ask_in_front(app);
     let (chrome, snapshot, park, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
-        let guard = host.inner.lock().expect("island");
+        let mut guard = host.inner.lock().expect("island");
+        // Coming back to the conversation closes the chip. The next time it
+        // appears, it starts as the short bar again.
+        if ask_in_front {
+            guard.hovering = false;
+            guard.opened = false;
+            guard.reading = false;
+            guard.folded = false;
+        }
+        let awake = island_awake(&guard.snapshot);
+        #[cfg(not(windows))]
+        let attention = pending_opens_card(guard.snapshot.pending.as_ref());
+        #[cfg(windows)]
+        let chrome = windows_status_chrome(ask_in_front, awake);
+        #[cfg(not(windows))]
         let chrome = island_chrome(
             guard.hovering,
-            pending_opens_card(guard.snapshot.pending.as_ref()),
+            attention,
             guard.snapshot.composing,
             guard.folded,
             guard.opened,
             guard.snapshot.hide_when_idle,
-            island_awake(&guard.snapshot),
+            awake,
         );
-        let park = should_park_windows(
-            guard.snapshot.active,
-            guard.snapshot.browser,
-            guard.snapshot.composing,
-            guard.hold_open,
-            guard.pinned,
-        );
+        let park = cfg!(target_os = "macos")
+            && should_park_windows(
+                guard.snapshot.active,
+                guard.snapshot.browser,
+                guard.snapshot.composing,
+                guard.hold_open,
+                guard.pinned,
+            );
         (
             chrome,
             guard.snapshot.clone(),
@@ -513,21 +578,11 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
             continue;
         };
         keep.push(label.clone());
-        let Some((screen_x, screen_y, screen_w)) = screen_top(monitor) else {
+        let Some((screen_x, screen_y, screen_w)) = status_origin(monitor) else {
             continue;
         };
-        let anchor = top_anchor(monitor);
-        // The camera housing cannot show anything. The black fills that band so
-        // the card looks like the notch grew; the inset keeps words below it.
-        // A screen without that housing still gets the bar, under the menu bar.
-        let (width, height, x, y, notch_inset) = island_frame(
-            chrome,
-            screen_x,
-            screen_y,
-            screen_w,
-            peek_height,
-            anchor.as_ref(),
-        );
+        let (width, height, x, y, notch_inset) =
+            status_frame(chrome, screen_x, screen_y, screen_w, peek_height, monitor);
         let place_key = (
             x.round() as i32,
             y.round() as i32,
@@ -603,6 +658,8 @@ fn monitors_for_island(app: &AppHandle) -> Vec<tauri::Monitor> {
 }
 
 const MENU_BAR_FALLBACK: f64 = 24.0;
+/// Windows has no menu bar to clear. A small gap keeps the chip off the edge.
+const STATUS_TOP_GAP: f64 = 8.0;
 
 struct TopAnchor {
     notch_x: f64,
@@ -711,6 +768,75 @@ fn menu_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
     None
 }
 
+/// Width, height, x, y, and a zero inset. The chip is a rounded bar, not a notch.
+pub(crate) fn windows_status_frame(
+    chrome: Chrome,
+    work_x: f64,
+    work_y: f64,
+    work_w: f64,
+    peek_height: f64,
+) -> (f64, f64, f64, f64, f64) {
+    let y = work_y + STATUS_TOP_GAP;
+    if chrome == Chrome::Pill {
+        (
+            CHIP_WIDTH,
+            CHIP_HEIGHT,
+            work_x + (work_w - CHIP_WIDTH) / 2.0,
+            y,
+            0.0,
+        )
+    } else {
+        let width = PEEK_WIDTH.min((work_w - 32.0).max(320.0));
+        (width, peek_height, work_x + (work_w - width) / 2.0, y, 0.0)
+    }
+}
+
+fn status_frame(
+    chrome: Chrome,
+    screen_x: f64,
+    screen_y: f64,
+    screen_w: f64,
+    peek_height: f64,
+    monitor: &tauri::Monitor,
+) -> (f64, f64, f64, f64, f64) {
+    #[cfg(windows)]
+    {
+        let _ = monitor;
+        return windows_status_frame(chrome, screen_x, screen_y, screen_w, peek_height);
+    }
+    #[cfg(not(windows))]
+    {
+        let anchor = top_anchor(monitor);
+        island_frame(
+            chrome,
+            screen_x,
+            screen_y,
+            screen_w,
+            peek_height,
+            anchor.as_ref(),
+        )
+    }
+}
+
+fn status_origin(monitor: &tauri::Monitor) -> Option<(f64, f64, f64)> {
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        let work = monitor.work_area();
+        return Some((
+            work.position.x as f64 / scale,
+            work.position.y as f64 / scale,
+            work.size.width as f64 / scale,
+        ));
+    }
+    #[cfg(not(windows))]
+    screen_top(monitor)
+}
+
+#[cfg(not(windows))]
 fn screen_top(monitor: &tauri::Monitor) -> Option<(f64, f64, f64)> {
     let scale = monitor.scale_factor();
     if scale <= 0.0 {
@@ -751,6 +877,27 @@ fn ensure_screen_follow(app: &AppHandle) {
 }
 
 fn refresh_screens(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        apply(app);
+        let shown = {
+            let host = app.state::<IslandHost>();
+            let guard = host.inner.lock().expect("island");
+            guard.last_view.shown
+        };
+        if shown {
+            for window in island_windows(app) {
+                present_island(&window);
+            }
+        }
+        return;
+    }
+    #[cfg(not(windows))]
+    refresh_notch_screens(app);
+}
+
+#[cfg(not(windows))]
+fn refresh_notch_screens(app: &AppHandle) {
     let sig = screen_signature(app);
     let (changed, applying) = {
         let host = app.state::<IslandHost>();
@@ -874,7 +1021,64 @@ fn present_island(window: &tauri::WebviewWindow) {
     }
     let _ = window.set_always_on_top(true);
     let _ = window.set_visible_on_all_workspaces(true);
+    #[cfg(windows)]
+    if present_status_chip(window) {
+        return;
+    }
     let _ = window.show();
+}
+
+/// Show the chip above other windows without taking the keyboard away from
+/// the page the person is looking at. A later click on the chip still focuses it.
+#[cfg(windows)]
+fn present_status_chip(window: &tauri::WebviewWindow) -> bool {
+    use std::ffi::c_void;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: *mut c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut c_void, index: i32, new_long: isize) -> isize;
+        fn SetWindowPos(
+            hwnd: *mut c_void,
+            insert_after: *mut c_void,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+        fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
+    }
+
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TOOLWINDOW: isize = 0x80;
+    const HWND_TOPMOST: isize = -1;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_SHOWWINDOW: u32 = 0x0040;
+    const SW_SHOWNOACTIVATE: i32 = 4;
+
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    let raw = hwnd.0;
+    unsafe {
+        let style = GetWindowLongPtrW(raw, GWL_EXSTYLE);
+        if style & WS_EX_TOOLWINDOW == 0 {
+            SetWindowLongPtrW(raw, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW);
+        }
+        let _ = ShowWindow(raw, SW_SHOWNOACTIVATE);
+        SetWindowPos(
+            raw,
+            HWND_TOPMOST as *mut c_void,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        ) != 0
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1433,8 +1637,8 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 #[cfg(test)]
 mod tests {
     use super::{
-        island_chrome, island_frame, peek_height, pending_opens_card, should_park_windows, Chrome,
-        IslandPending, TopAnchor,
+        island_chrome, island_frame, peek_height, pending_opens_card, should_park_windows,
+        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor,
     };
 
     #[test]
@@ -1602,5 +1806,37 @@ mod tests {
     #[test]
     fn pin_keeps_the_windows() {
         assert!(!should_park_windows(true, true, false, false, true));
+    }
+
+    #[test]
+    fn windows_hides_the_chip_while_the_conversation_is_in_front() {
+        assert_eq!(windows_status_chrome(true, true), Chrome::Hidden);
+    }
+
+    #[test]
+    fn windows_hides_the_chip_while_nothing_is_running() {
+        assert_eq!(windows_status_chrome(false, false), Chrome::Hidden);
+    }
+
+    #[test]
+    fn windows_shows_a_chip_when_the_conversation_is_covered() {
+        assert_eq!(windows_status_chrome(false, true), Chrome::Pill);
+    }
+
+    #[test]
+    fn windows_chip_sits_below_the_top_edge() {
+        let (width, height, x, y, inset) =
+            windows_status_frame(Chrome::Pill, 10.0, 40.0, 1280.0, 200.0);
+        assert_eq!(width, 156.0);
+        assert_eq!(height, 28.0);
+        assert_eq!(y, 48.0);
+        assert_eq!(inset, 0.0);
+        assert!((x - (10.0 + (1280.0 - 156.0) / 2.0)).abs() < 0.1);
+
+        let (_, card_h, _, card_y, card_inset) =
+            windows_status_frame(Chrome::Peek, 10.0, 40.0, 1280.0, 200.0);
+        assert_eq!(card_y, 48.0);
+        assert_eq!(card_h, 200.0);
+        assert_eq!(card_inset, 0.0);
     }
 }
