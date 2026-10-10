@@ -1,7 +1,7 @@
 import type { AskRuntime, WorkspaceDoc } from "../ask-resources";
 import { setAgentBrandIcon } from "../agent-brand";
 import { getLocale, t } from "../i18n";
-import { runDoctor } from "../ipc";
+import { listInstalledAskAgents } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import { createEmptySession, uid } from "./store";
 import {
@@ -249,8 +249,9 @@ export function createSessionsController(deps: SessionsDeps) {
   }
 
   window.addEventListener("focus", () => {
-    installedAgentsCache = null;
+    void refreshInstalledAgents();
   });
+  void refreshInstalledAgents();
 
   function openProjectMenu(x: number, y: number, name: string, sessions: ChatSession[]): void {
     closeProjectMenu();
@@ -694,20 +695,17 @@ export function createSessionsController(deps: SessionsDeps) {
     startNewSession();
   }
 
-  async function installedAskAgents(): Promise<InstalledAgent[] | null> {
-    if (installedAgentsCache && Date.now() - installedAgentsCache.at < 20_000) {
-      return installedAgentsCache.agents;
-    }
+  async function refreshInstalledAgents(): Promise<InstalledAgent[] | null> {
     try {
-      const report = await runDoctor();
+      const listed = await listInstalledAskAgents();
       const agents: InstalledAgent[] = [];
       const seen = new Set<string>();
-      for (const runtime of report.runtimes) {
-        if (!runtime.installed || !isAskRuntime(runtime.id) || seen.has(runtime.id)) continue;
-        seen.add(runtime.id);
+      for (const agent of listed) {
+        if (!isAskRuntime(agent.id) || seen.has(agent.id)) continue;
+        seen.add(agent.id);
         agents.push({
-          id: runtime.id,
-          label: runtime.display_name.trim() || runtimeDisplayName(runtime.id),
+          id: agent.id,
+          label: agent.label.trim() || runtimeDisplayName(agent.id),
         });
       }
       installedAgentsCache = { at: Date.now(), agents };
@@ -787,9 +785,10 @@ export function createSessionsController(deps: SessionsDeps) {
       return;
     }
     const token = ++agentPickToken;
-    const hadCache = installedAgentsCache != null;
-    if (!hadCache) deps.setStatus(t("chat.checkingAgents"), "muted");
-    const agents = await installedAskAgents();
+    // The list is loaded with the window. A click uses it at once; a miss
+    // falls through to the same lookup, which only checks that the program
+    // exists and does not start it.
+    const agents = installedAgentsCache?.agents ?? (await refreshInstalledAgents());
     if (token !== agentPickToken) return;
     if (!agents) {
       startNewSession(projectName);
@@ -803,7 +802,6 @@ export function createSessionsController(deps: SessionsDeps) {
       startNewSession(projectName, agents[0].id);
       return;
     }
-    if (!hadCache) deps.setStatus("");
     openAgentPickMenu(anchor, projectName, agents);
   }
 

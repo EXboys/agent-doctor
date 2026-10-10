@@ -138,6 +138,11 @@ fn run_engine_register_command(
 }
 
 #[tauri::command]
+fn list_installed_ask_agents_command() -> Vec<agent_doctor_core::InstalledAskAgent> {
+    agent_doctor_core::installed_ask_agents()
+}
+
+#[tauri::command]
 async fn run_doctor_command(app: tauri::AppHandle) -> Result<DoctorReport, String> {
     let report = tauri::async_runtime::spawn_blocking(run_doctor)
         .await
@@ -252,6 +257,7 @@ fn event_session_id(event: &PromptSessionEvent) -> Option<&str> {
         | PromptSessionEvent::PermissionRequest { session_id, .. }
         | PromptSessionEvent::PermissionResolved { session_id, .. }
         | PromptSessionEvent::Plan { session_id, .. }
+        | PromptSessionEvent::Usage { session_id, .. }
         | PromptSessionEvent::Completed { session_id, .. } => session_id.as_str(),
     })
 }
@@ -505,6 +511,7 @@ pub fn run() {
             delete_personal_provider_command,
             activate_personal_provider_command,
             verify_personal_provider_command,
+            token_usage_by_day_command,
             apply_personal_provider_command,
             get_mode_status_command,
             get_product_edition_command,
@@ -513,6 +520,7 @@ pub fn run() {
             wire_browser_mcp_command,
             rewire_current_mode_command,
             run_doctor_command,
+            list_installed_ask_agents_command,
             check_runtime_versions_command,
             list_profiles_command,
             list_workspaces_command,

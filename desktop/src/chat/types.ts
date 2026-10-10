@@ -1,5 +1,6 @@
 import type { AskRuntime } from "../ask-resources";
 import type { AgentPlan, PlanStep } from "../plan";
+import type { TokenUsage } from "../types";
 
 export type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 export type ChatRole = "user" | "assistant" | "meta" | "permission" | "tool" | "thinking";
@@ -49,6 +50,7 @@ export type PromptSessionEvent =
       allowed: boolean;
     }
   | { type: "plan"; session_id: string; items: PlanStep[] }
+  | { type: "usage"; session_id: string; usage: TokenUsage; model?: string | null }
   | {
       type: "completed";
       session_id: string;

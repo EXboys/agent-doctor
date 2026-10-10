@@ -8,7 +8,7 @@ use agent_doctor_core::{
     PersonalProviderVerifyReport, PersonalProvidersDocument, UpsertPersonalProviderOptions,
 };
 use agent_doctor_mcp::BrowserMcpWireReport;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::update_tray_tooltip;
 use tauri::Emitter;
@@ -55,9 +55,8 @@ pub fn list_personal_providers_command() -> PersonalProvidersDocument {
     })
 }
 
-#[tauri::command]
-pub fn upsert_personal_provider_command(
-    app: tauri::AppHandle,
+#[derive(Debug, Deserialize)]
+pub struct UpsertPersonalProviderArgs {
     id: Option<String>,
     name: String,
     url: String,
@@ -65,15 +64,21 @@ pub fn upsert_personal_provider_command(
     model: String,
     protocol: String,
     activate: bool,
+}
+
+#[tauri::command]
+pub fn upsert_personal_provider_command(
+    app: tauri::AppHandle,
+    args: UpsertPersonalProviderArgs,
 ) -> Result<PersonalProvidersDocument, String> {
     let doc = upsert_personal_provider(&UpsertPersonalProviderOptions {
-        id,
-        name,
-        url,
-        api_key: key,
-        model,
-        protocol,
-        activate,
+        id: args.id,
+        name: args.name,
+        url: args.url,
+        api_key: args.key,
+        model: args.model,
+        protocol: args.protocol,
+        activate: args.activate,
     })
     .map_err(|error| error.to_string())?;
     notify_provider_changed(&app);
@@ -98,6 +103,19 @@ pub async fn activate_personal_provider_command(
     update_tray_tooltip(&app);
     notify_provider_changed(&app);
     Ok(report)
+}
+
+#[tauri::command]
+pub async fn token_usage_by_day_command(
+    since_ts: i64,
+    tz_offset_sec: i64,
+) -> Result<Vec<agent_doctor_core::usage::UsageDayRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_doctor_core::usage::usage_by_day(since_ts, tz_offset_sec)
+            .map_err(|error| format!("{error:#}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

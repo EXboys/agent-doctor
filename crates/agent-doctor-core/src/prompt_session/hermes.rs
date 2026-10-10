@@ -169,6 +169,7 @@ fn run_hermes(
                 timeout,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -192,6 +193,7 @@ fn run_hermes(
                 timeout: None,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -473,7 +475,17 @@ fn handle_hermes_stream_line<F>(
             // Keep the last tool chip live until the next status/text; no extra row needed.
         }
         "result" => {
-            // Final envelope is read after the process exits via `extract_hermes_stream_final`.
+            // Final text is read after the process exits via `extract_hermes_stream_final`.
+            if let Some(usage) = crate::usage::find_usage(&value) {
+                on_event(PromptSessionEvent::Usage {
+                    session_id: session_id.to_string(),
+                    usage,
+                    model: value
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                });
+            }
         }
         _ => {}
     }

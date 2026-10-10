@@ -33,6 +33,7 @@ import {
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
 const personalFormViewEl = document.querySelector<HTMLElement>("#personal-form-view")!;
+const personalUsageViewEl = document.querySelector<HTMLElement>("#personal-usage-view");
 const personalStatusEl = document.querySelector<HTMLElement>("#personal-status")!;
 const personalConnectedEl = document.querySelector<HTMLElement>("#personal-connected")!;
 const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-connected-url");
@@ -94,6 +95,26 @@ function formatOfficialTokens(tokens: number): string {
   }).format(Math.floor(tokens));
 }
 
+const AVATAR_TONES = 6;
+
+function avatarTone(key: string): number {
+  let hash = 0;
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % AVATAR_TONES;
+}
+
+/** Signed in and has trial calls or tokens left. Unknown until the account loads. */
+function officialUsable(): boolean {
+  const official = officialAccount?.official;
+  if (!officialAccount) return true;
+  if (!officialAccount.signed_in || !official) return false;
+  const trials = Math.max(0, official.trial_calls_left ?? 0);
+  const tokens = Math.max(0, official.tokens_remaining ?? 0);
+  const hasTokenBalance = official.via === "member" || (official.token_cap ?? 0) > 0 || tokens > 0;
+  const onTrial = official.via === "trial";
+  return official.active && (onTrial ? trials > 0 || tokens > 0 : hasTokenBalance && tokens > 0);
+}
+
 function officialDescription(): string {
   const official = officialAccount?.official;
   if (!officialAccount?.signed_in) return t("personal.officialNeedsLogin");
@@ -103,7 +124,7 @@ function officialDescription(): string {
   const tokens = Math.max(0, official.tokens_remaining ?? 0);
   const hasTokenBalance = official.via === "member" || (official.token_cap ?? 0) > 0 || tokens > 0;
   const onTrial = official.via === "trial";
-  const usable = official.active && (onTrial ? trials > 0 || tokens > 0 : hasTokenBalance && tokens > 0);
+  const usable = officialUsable();
   if (!onTrial && !hasTokenBalance) return t("personal.officialNeedsMembership");
 
   const parts = [usable ? t("personal.officialUsable") : t("personal.officialUnusable")];
@@ -120,6 +141,8 @@ export type PersonalDeps = {
   presets: PresetsApi;
   refresh: () => Promise<void>;
   loadModeStatus: () => Promise<void>;
+  /** This saved service's own tokens, or null when it has none this month. */
+  usageFor?: (id: string, name: string) => { today: number; month: number } | null;
 };
 
 export type PersonalApi = ReturnType<typeof createPersonalController>;
@@ -174,20 +197,44 @@ export function createPersonalController(deps: PersonalDeps) {
           : item.name.trim() || t("personal.presetCustom");
       const titleText = officialProvider ? t("personal.officialName") : item.name.trim() || brand;
 
+      // A click on the card itself switches to it, or signs in for 官方.
+      const cardAction = officialNeedsLogin
+        ? "official-login"
+        : item.active
+          ? ""
+          : "activate-provider";
+
       const li = document.createElement("li");
-      li.className = `provider-item${routingActive ? " is-active" : ""}`;
+      li.className = `provider-item${routingActive ? " is-active" : ""}${
+        cardAction ? " is-pickable" : ""
+      }${switchingId === item.id ? " is-switching" : ""}`;
       li.dataset.providerId = item.id;
+      if (cardAction) {
+        li.dataset.action = cardAction;
+        li.tabIndex = 0;
+        li.setAttribute("role", "button");
+        li.title =
+          cardAction === "official-login"
+            ? t("personal.cardLoginHint")
+            : t("personal.cardSwitchHint", { name: titleText });
+      }
 
       const main = document.createElement("div");
       main.className = "provider-item-main";
 
-      const kicker = document.createElement("p");
-      kicker.className = "provider-item-kicker";
-      kicker.textContent = brand;
+      const avatar = document.createElement("span");
+      avatar.className = "provider-avatar";
+      avatar.dataset.tone = String(avatarTone(officialProvider ? "official" : presetId || brand));
+      avatar.textContent = Array.from(brand.trim() || "?")[0].toUpperCase();
+      avatar.setAttribute("aria-hidden", "true");
 
       const title = document.createElement("p");
       title.className = "provider-item-title";
-      title.textContent = titleText;
+      const titleName = document.createElement("span");
+      titleName.className = "provider-item-name";
+      titleName.textContent =
+        officialSignedIn && officialName ? `${titleText} · ${officialName}` : titleText;
+      title.appendChild(titleName);
       if (routingActive) {
         const badge = document.createElement("span");
         badge.className = "provider-badge";
@@ -195,27 +242,39 @@ export function createPersonalController(deps: PersonalDeps) {
         title.appendChild(badge);
       }
 
-      const meta = document.createElement("p");
-      meta.className = "provider-item-meta";
-      meta.textContent = item.model;
-      if (!item.model.trim()) meta.hidden = true;
+      // Second line: model, then what this service has used (or 官方's balance).
+      const sub = document.createElement("p");
+      sub.className = "provider-item-sub";
+      if (item.model.trim()) {
+        const model = document.createElement("span");
+        model.className = "provider-item-meta";
+        model.textContent = item.model;
+        sub.appendChild(model);
+      }
+      const used = deps.usageFor?.(item.id, item.name) ?? null;
+      const note =
+        switchingId === item.id
+          ? t("personal.switching")
+          : officialProvider
+            ? officialNeedsLogin
+              ? t("personal.officialNeedsLogin")
+              : officialDescription()
+            : used
+              ? t("personal.itemUsage", {
+                  today: formatOfficialTokens(used.today),
+                  month: formatOfficialTokens(used.month),
+                })
+              : "";
+      if (note) {
+        const noteEl = document.createElement("span");
+        noteEl.className = "provider-item-note";
+        noteEl.textContent = note;
+        noteEl.title = note;
+        sub.appendChild(noteEl);
+      }
+      if (!sub.childElementCount) sub.hidden = true;
 
-      const account = document.createElement("p");
-      account.className = "provider-item-account";
-      account.textContent = officialName;
-      if (!officialSignedIn || !officialName) account.hidden = true;
-
-      const showUse = !item.active;
-      const desc = document.createElement("p");
-      desc.className = "provider-item-desc";
-      desc.textContent = officialProvider
-        ? officialDescription()
-        : showUse
-          ? t("personal.itemIdleDesc")
-          : t("personal.itemActiveDesc");
-
-      if (officialProvider) main.append(title, account, meta, desc);
-      else main.append(kicker, title, meta, desc);
+      main.append(title, sub);
 
       const actions = document.createElement("div");
       actions.className = "provider-item-actions";
@@ -228,61 +287,87 @@ export function createPersonalController(deps: PersonalDeps) {
         loginBtn.dataset.providerId = item.id;
         loginBtn.textContent = t("personal.officialLogin");
         actions.appendChild(loginBtn);
-      } else if (!item.active) {
-        const activateBtn = document.createElement("button");
-        activateBtn.type = "button";
-        activateBtn.className = "btn-primary btn-compact";
-        activateBtn.dataset.action = "activate-provider";
-        activateBtn.dataset.providerId = item.id;
-        activateBtn.textContent = t("personal.activate");
-        actions.appendChild(activateBtn);
-      }
-
-      if (officialProvider && officialSignedIn) {
-        const switchBtn = document.createElement("button");
-        switchBtn.type = "button";
-        switchBtn.className = "btn-ghost btn-compact";
-        switchBtn.dataset.action = "official-switch";
-        switchBtn.dataset.providerId = item.id;
-        switchBtn.textContent = t("personal.officialSwitch");
-        actions.appendChild(switchBtn);
-      }
-
-      if (officialProvider) {
+      } else if (officialProvider && !officialUsable()) {
+        // Out of balance: the way to fix it stays in sight, not in the menu.
         const membershipBtn = document.createElement("button");
         membershipBtn.type = "button";
         membershipBtn.className = "btn-secondary btn-compact";
         membershipBtn.dataset.action = "official-membership";
         membershipBtn.dataset.providerId = item.id;
-        membershipBtn.textContent =
-          officialAccount?.official?.via === "member"
-            ? t("personal.officialManage")
-            : t("personal.officialOpen");
+        membershipBtn.textContent = t("personal.officialOpen");
         actions.appendChild(membershipBtn);
       } else {
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "btn-secondary btn-compact";
-        editBtn.dataset.action = "edit-provider";
-        editBtn.dataset.providerId = item.id;
-        editBtn.textContent = t("personal.edit");
-        actions.appendChild(editBtn);
-
-        const deleteBtn = document.createElement("button");
-        deleteBtn.type = "button";
-        deleteBtn.className = "btn-ghost btn-compact";
-        deleteBtn.dataset.action = "delete-provider";
-        deleteBtn.dataset.providerId = item.id;
-        deleteBtn.textContent = t("personal.delete");
-        actions.appendChild(deleteBtn);
+        const pick = document.createElement("span");
+        pick.className = "provider-pick";
+        pick.setAttribute("aria-hidden", "true");
+        actions.appendChild(pick);
       }
 
-      li.append(main, actions);
+      const menuItems: Array<{ action: string; label: string; danger?: boolean }> =
+        officialProvider
+          ? [
+              ...(officialSignedIn
+                ? [{ action: "official-switch", label: t("personal.officialSwitch") }]
+                : []),
+              {
+                action: "official-membership",
+                label:
+                  officialAccount?.official?.via === "member"
+                    ? t("personal.officialManage")
+                    : t("personal.officialOpen"),
+              },
+            ]
+          : [
+              { action: "edit-provider", label: t("personal.edit") },
+              { action: "delete-provider", label: t("personal.delete"), danger: true },
+            ];
+
+      const menuBtn = document.createElement("button");
+      menuBtn.type = "button";
+      menuBtn.className = "provider-menu-btn";
+      menuBtn.dataset.action = "open-menu";
+      menuBtn.dataset.providerId = item.id;
+      menuBtn.setAttribute("aria-haspopup", "menu");
+      menuBtn.setAttribute("aria-label", t("personal.moreActions"));
+      menuBtn.title = t("personal.moreActions");
+      menuBtn.textContent = "⋯";
+
+      const menu = document.createElement("div");
+      menu.className = "provider-menu";
+      menu.setAttribute("role", "menu");
+      menu.hidden = true;
+      for (const entry of menuItems) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.setAttribute("role", "menuitem");
+        option.className = `provider-menu-item${entry.danger ? " is-danger" : ""}`;
+        option.dataset.action = entry.action;
+        option.dataset.providerId = item.id;
+        option.textContent = entry.label;
+        menu.appendChild(option);
+      }
+      actions.append(menuBtn, menu);
+
+      li.append(avatar, main, actions);
       personalListEl.appendChild(li);
     }
   }
 
   let switchInFlight = false;
+  let switchingId: string | null = null;
+
+  function closeProviderMenus(except?: HTMLElement | null): void {
+    personalListEl.querySelectorAll<HTMLElement>(".provider-menu").forEach((menu) => {
+      if (menu === except) return;
+      menu.hidden = true;
+      menu.closest(".provider-item")?.classList.remove("is-menu-open");
+      const del = menu.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]');
+      if (del) {
+        del.dataset.action = "delete-provider";
+        del.textContent = t("personal.delete");
+      }
+    });
+  }
 
   async function loadPersonalProviderList() {
     const [status, doc] = await Promise.all([
@@ -465,11 +550,13 @@ export function createPersonalController(deps: PersonalDeps) {
   function showPersonalListView() {
     personalListViewEl.hidden = false;
     personalFormViewEl.hidden = true;
+    if (personalUsageViewEl) personalUsageViewEl.hidden = true;
   }
 
   function showPersonalFormView(mode: "add" | "edit") {
     personalListViewEl.hidden = true;
     personalFormViewEl.hidden = false;
+    if (personalUsageViewEl) personalUsageViewEl.hidden = true;
     personalFormTitleEl.textContent =
       mode === "edit" ? t("personal.formEdit") : t("personal.formAdd");
     setPersonalHint("hide");
@@ -563,6 +650,7 @@ export function createPersonalController(deps: PersonalDeps) {
     personalApplyEl.disabled = busy;
     personalAddEl.disabled = busy;
     personalBackEl.disabled = busy;
+    personalListEl.classList.toggle("is-busy", busy);
   }
 
   async function verifyPersonalProvider() {
@@ -684,6 +772,8 @@ export function createPersonalController(deps: PersonalDeps) {
   async function activateProviderById(id: string) {
     if (switchInFlight) return;
     switchInFlight = true;
+    switchingId = id;
+    if (appState.personalProvidersDoc) renderPersonalProviderList(appState.personalProvidersDoc);
     setPersonalBusy(true);
     personalListHintEl.hidden = false;
     personalListHintEl.textContent = t("personal.applying");
@@ -691,6 +781,7 @@ export function createPersonalController(deps: PersonalDeps) {
       const report = await activatePersonalProvider({
         id,
       });
+      switchingId = null;
       await loadPersonalProviderList();
       personalListHintEl.textContent = t("personal.applyOk", {
         name: report.provider_name ?? id,
@@ -700,6 +791,12 @@ export function createPersonalController(deps: PersonalDeps) {
       personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
     } finally {
       switchInFlight = false;
+      if (switchingId) {
+        switchingId = null;
+        if (appState.personalProvidersDoc) {
+          renderPersonalProviderList(appState.personalProvidersDoc);
+        }
+      }
       setPersonalBusy(false);
     }
   }
@@ -786,11 +883,52 @@ export function createPersonalController(deps: PersonalDeps) {
       void refreshOfficialAccount();
     });
 
+    document.addEventListener("click", (event) => {
+      if (!(event.target as HTMLElement).closest(".provider-menu, .provider-menu-btn")) {
+        closeProviderMenus();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeProviderMenus();
+    });
+
+    personalListEl.addEventListener("keydown", (event) => {
+      const card = event.target as HTMLElement;
+      if ((event.key === "Enter" || event.key === " ") && card.matches("li.is-pickable")) {
+        event.preventDefault();
+        card.click();
+      }
+    });
+
     personalListEl.addEventListener("click", (event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
+      const button = (event.target as HTMLElement).closest<HTMLElement>("[data-action]");
       const action = button?.dataset.action;
       const id = button?.dataset.providerId;
       if (!action || !id) {
+        return;
+      }
+      if (action === "open-menu") {
+        const menu = button.parentElement?.querySelector<HTMLElement>(".provider-menu") ?? null;
+        const opening = Boolean(menu?.hidden);
+        closeProviderMenus();
+        if (menu && opening) {
+          menu.hidden = false;
+          menu.closest(".provider-item")?.classList.add("is-menu-open");
+        }
+        return;
+      }
+      if (button.classList.contains("provider-menu-item") && action !== "delete-provider") {
+        closeProviderMenus();
+      }
+      if (action === "delete-provider") {
+        // First press asks; the same spot confirms, so a stray click cannot delete.
+        button.dataset.action = "confirm-delete";
+        button.textContent = t("personal.deleteConfirm");
+        return;
+      }
+      if (action === "confirm-delete") {
+        closeProviderMenus();
+        void deleteProviderById(id);
         return;
       }
       if (action === "activate-provider") {
@@ -819,9 +957,6 @@ export function createPersonalController(deps: PersonalDeps) {
           setPersonalHint("info", t("personal.keyKeepHint"));
         }
         return;
-      }
-      if (action === "delete-provider") {
-        void deleteProviderById(id);
       }
     });
   }

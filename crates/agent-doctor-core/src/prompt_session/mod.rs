@@ -24,6 +24,7 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::evotown::normalize_runtime;
+pub use crate::usage::TokenUsage;
 
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
@@ -173,6 +174,13 @@ pub enum PromptSessionEvent {
         session_id: String,
         items: Vec<PlanStep>,
     },
+    /// Tokens the runtime reported. Several in one turn add up.
+    Usage {
+        session_id: String,
+        usage: TokenUsage,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
     Completed {
         session_id: String,
         status: PromptSessionStatus,
@@ -197,6 +205,9 @@ pub struct PromptSessionReport {
     /// Codex thread id or Claude session id for the next turn's resume.
     #[serde(default)]
     pub runtime_thread_id: Option<String>,
+    /// Tokens for this turn, when the runtime reported them.
+    #[serde(default)]
+    pub usage: Option<TokenUsage>,
 }
 
 /// Cooperative cancel flag shared with a running session.
@@ -263,7 +274,24 @@ where
     // Every assistant starts its tools as part of sending. Drop missing
     // programs first so that failure never shows up on the message.
     crate::setup::merge::drop_unreachable_ask_tools(&cwd);
-    backend.run(options, cancel, control, &mut on_event)
+    let mut used = TokenUsage::default();
+    let mut used_model: Option<String> = None;
+    let mut report = backend.run(options, cancel, control, &mut |event| {
+        if let PromptSessionEvent::Usage { usage, model, .. } = &event {
+            used.add(usage);
+            if model.is_some() {
+                used_model = model.clone();
+            }
+        }
+        on_event(event);
+    })?;
+    if !used.is_empty() {
+        report.usage = Some(used);
+        if !cfg!(test) {
+            let _ = crate::usage::record_turn(&runtime, used_model.as_deref(), &used);
+        }
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

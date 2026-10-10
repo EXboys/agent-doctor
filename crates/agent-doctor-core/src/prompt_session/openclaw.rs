@@ -203,6 +203,18 @@ fn run_openclaw(
                 }
             }
 
+            if let Some(usage) = parsed.as_ref().and_then(crate::usage::find_usage) {
+                emit(PromptSessionEvent::Usage {
+                    session_id: session_id.clone(),
+                    usage,
+                    model: parsed
+                        .as_ref()
+                        .and_then(|v| v.pointer("/meta/agentMeta/model"))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                });
+            }
+
             let summary = summarize(&combined, &status, &runtime);
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
@@ -212,6 +224,7 @@ fn run_openclaw(
                 timeout,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -235,6 +248,7 @@ fn run_openclaw(
                 timeout: None,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),

@@ -225,6 +225,19 @@ pub(crate) fn handle_notification<F>(
 {
     let params = params.cloned().unwrap_or(Value::Null);
     match method {
+        // One per model call; `last` is that call alone, `total` the whole thread.
+        "thread/tokenUsage/updated" => {
+            if let Some(usage) = params
+                .pointer("/tokenUsage/last")
+                .and_then(crate::usage::usage_from_value)
+            {
+                on_event(PromptSessionEvent::Usage {
+                    session_id: state.session_id.clone(),
+                    usage,
+                    model: None,
+                });
+            }
+        }
         "turn/started" => {
             on_event(PromptSessionEvent::Status {
                 session_id: state.session_id.clone(),

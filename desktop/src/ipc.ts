@@ -23,6 +23,7 @@ import type {
   PersonalProviderSetupReport,
   PersonalProviderStatus,
   PersonalProviderVerifyReport,
+  UsageDayRow,
   PersonalProvidersDocument,
   ProfilesDocument,
   RegisterReport,
@@ -282,7 +283,7 @@ export function upsertPersonalProvider(args: {
   protocol: string;
   activate: boolean;
 }): Promise<PersonalProvidersDocument> {
-  return invoke("upsert_personal_provider_command", args);
+  return invoke("upsert_personal_provider_command", { args });
 }
 
 export function deletePersonalProvider(args: { id: string }): Promise<PersonalProvidersDocument> {
@@ -299,6 +300,13 @@ export function verifyPersonalProvider(args: {
   protocol: string;
 }): Promise<PersonalProviderVerifyReport> {
   return invoke("verify_personal_provider_command", args);
+}
+
+export function tokenUsageByDay(args: {
+  sinceTs: number;
+  tzOffsetSec: number;
+}): Promise<UsageDayRow[]> {
+  return invoke("token_usage_by_day_command", args);
 }
 
 export function applyPersonalProvider(args: {
@@ -339,6 +347,10 @@ export function rewireCurrentMode(args: {
   withBrowserMcp?: boolean | null;
 }): Promise<ModeSwitchReport> {
   return invoke("rewire_current_mode_command", args);
+}
+
+export function listInstalledAskAgents(): Promise<Array<{ id: string; label: string }>> {
+  return invoke("list_installed_ask_agents_command");
 }
 
 export function runDoctor(): Promise<DoctorReport> {

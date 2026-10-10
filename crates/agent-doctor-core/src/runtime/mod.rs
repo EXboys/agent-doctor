@@ -12,7 +12,8 @@ pub(crate) use registry::{
 
 pub use registry::{
     adapter_by_id, all_adapters, all_runtime_ids, apply_runtime_playbook,
-    apply_runtime_playbook_filtered, descriptor_by_id, run_runtime_lifecycle, runtime_catalog,
-    runtime_supports_lifecycle, runtime_supports_playbook, suggest_runtime_repairs,
-    RuntimeCatalogEntry, RuntimeDescriptor, RuntimeLifecycleAction, RuntimeProbeSpec,
+    apply_runtime_playbook_filtered, descriptor_by_id, installed_ask_agents, run_runtime_lifecycle,
+    runtime_catalog, runtime_supports_lifecycle, runtime_supports_playbook,
+    suggest_runtime_repairs, InstalledAskAgent, RuntimeCatalogEntry, RuntimeDescriptor,
+    RuntimeLifecycleAction, RuntimeProbeSpec,
 };

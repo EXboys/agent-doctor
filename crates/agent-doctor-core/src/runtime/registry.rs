@@ -789,6 +789,28 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
     descriptor_by_id(runtime_id).and_then(|entry| entry.ask)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledAskAgent {
+    pub id: String,
+    pub label: String,
+}
+
+/// Chat agents whose program is on this computer.
+/// Looks the file up and does not start it, so the picker does not wait on
+/// a version check.
+pub fn installed_ask_agents() -> Vec<InstalledAskAgent> {
+    crate::adapters::util::ensure_managed_runtime_path();
+    RUNTIME_REGISTRY
+        .iter()
+        .filter(|entry| entry.ask.is_some())
+        .filter(|entry| crate::adapters::util::find_binary(entry.probe.binary_name).is_some())
+        .map(|entry| InstalledAskAgent {
+            id: entry.id.to_string(),
+            label: (entry.create_adapter)().display_name().to_string(),
+        })
+        .collect()
+}
+
 pub(crate) fn ask_runtime_ids() -> Vec<&'static str> {
     RUNTIME_REGISTRY
         .iter()
@@ -894,6 +916,15 @@ mod tests {
         );
         let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len());
+    }
+
+    #[test]
+    fn installed_ask_agents_are_only_chat_runtimes() {
+        let ask: std::collections::HashSet<_> = ask_runtime_ids().into_iter().collect();
+        for agent in installed_ask_agents() {
+            assert!(ask.contains(agent.id.as_str()), "{}", agent.id);
+            assert!(!agent.label.is_empty());
+        }
     }
 
     #[test]

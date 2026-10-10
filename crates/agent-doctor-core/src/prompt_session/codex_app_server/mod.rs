@@ -506,6 +506,7 @@ fn run_codex_app_server(
                 timeout,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -527,6 +528,7 @@ fn run_codex_app_server(
                 timeout: None,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -873,11 +875,25 @@ mod tests {
             &mut |event| events.push(event),
         );
         handle_notification(
+            "thread/tokenUsage/updated",
+            Some(&json!({"tokenUsage": {
+                "total": {"inputTokens": 9000, "cachedInputTokens": 0, "outputTokens": 900},
+                "last": {"inputTokens": 1200, "cachedInputTokens": 1000, "outputTokens": 40}
+            }})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        handle_notification(
             "turn/completed",
             Some(&json!({"turn": {"status": "failed", "error": {"message": "这一轮失败了"}}})),
             &mut state,
             &mut |event| events.push(event),
         );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Usage { usage, .. }
+                if usage.input == 200 && usage.cache_read == 1000 && usage.output == 40
+        )));
         assert!(events.iter().any(|event| matches!(
             event,
             PromptSessionEvent::Delta { text, .. } if text == "旧版回复"

@@ -170,6 +170,29 @@
               </div>
               <p id="personal-status" class="sr-only" data-i18n="personal.loading">检查中…</p>
               <div id="personal-connected" class="evotown-connected" hidden></div>
+              <section id="usage-overview" class="usage-card" aria-labelledby="usage-overview-title">
+                <div class="usage-card-head">
+                  <h3 id="usage-overview-title"><span data-i18n="usage.title">用量</span><small data-i18n="usage.allServices">全部服务合计</small></h3>
+                  <button id="usage-open" type="button" class="usage-link" data-i18n="usage.open">看明细</button>
+                </div>
+                <div class="usage-stats">
+                  <div class="usage-stat">
+                    <span data-i18n="usage.today">今天</span>
+                    <strong id="usage-today">—</strong>
+                  </div>
+                  <div class="usage-stat">
+                    <span data-i18n="usage.week">近 7 天</span>
+                    <strong id="usage-week">—</strong>
+                  </div>
+                  <div class="usage-stat">
+                    <span data-i18n="usage.month">本月</span>
+                    <strong id="usage-month">—</strong>
+                  </div>
+                </div>
+                <div id="usage-mini-bars" class="usage-bars usage-bars-mini" aria-hidden="true" hidden></div>
+                <p id="usage-overview-empty" class="usage-empty" data-i18n="usage.empty" hidden>还没有用量。在对话里发一句话，这里就会显示用了多少。</p>
+                <p id="usage-overview-note" class="usage-empty" hidden></p>
+              </section>
               <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
               <p id="personal-list-hint" class="section-footnote" hidden></p>
               <p id="wiring-mode-footnote" class="section-footnote wiring-mode-footnote" aria-live="polite"></p>
@@ -261,6 +284,41 @@
                 </div>
               </form>
               <p id="personal-hint" class="wiring-result" role="status" aria-live="polite" hidden></p>
+            </div>
+
+            <div id="personal-usage-view" hidden>
+              <div class="section-label">
+                <button id="usage-back" type="button" class="btn-ghost btn-compact" data-i18n="personal.back">返回</button>
+                <h2 data-i18n="usage.detailTitle">用量明细</h2>
+              </div>
+              <div id="usage-range" class="provider-picker-chips usage-range" role="tablist">
+                <button type="button" class="provider-chip" data-usage-range="today" data-i18n="usage.today">今天</button>
+                <button type="button" class="provider-chip" data-usage-range="week" data-i18n="usage.week">近 7 天</button>
+                <button type="button" class="provider-chip" data-usage-range="days30" data-i18n="usage.days30">近 30 天</button>
+                <button type="button" class="provider-chip" data-usage-range="month" data-i18n="usage.month">本月</button>
+              </div>
+              <div class="usage-card usage-summary">
+                <div class="usage-total-row">
+                  <strong id="usage-total">0</strong>
+                  <span id="usage-total-meta"></span>
+                </div>
+                <div id="usage-split" class="usage-split"></div>
+                <div id="usage-chart" class="usage-bars" aria-hidden="true" hidden></div>
+                <p id="usage-detail-empty" class="usage-empty" data-i18n="usage.emptyRange" hidden>这段时间还没有用量。</p>
+              </div>
+              <div class="usage-block">
+                <h3 data-i18n="usage.byService">按服务</h3>
+                <ul id="usage-by-service" class="usage-share-list"></ul>
+              </div>
+              <div class="usage-block">
+                <h3 data-i18n="usage.byModel">按模型</h3>
+                <ul id="usage-by-model" class="usage-share-list"></ul>
+              </div>
+              <div class="usage-block">
+                <h3 data-i18n="usage.byTool">按 Agent</h3>
+                <ul id="usage-by-tool" class="usage-share-list"></ul>
+              </div>
+              <p class="section-footnote" data-i18n="usage.footnote">只算在 Agent Doctor 里发出的对话。直接在终端里用的不算，所以可能比服务商账单少。</p>
             </div>
           </section>
 

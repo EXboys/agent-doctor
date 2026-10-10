@@ -4,6 +4,7 @@ import { createEvotownController } from "./wiring/evotown";
 import { createModeController } from "./wiring/mode";
 import { createPersonalController } from "./wiring/personal";
 import { createPresetsController } from "./wiring/presets";
+import { createUsageController } from "./wiring/usage";
 import type { ModeStatus } from "./types";
 
 export interface WiringUiDeps {
@@ -40,22 +41,36 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     hideSkillsInventory: d.hideSkillsInventory,
     loadModeStatus: () => mode.loadModeStatus(),
   });
+  const usage = createUsageController({
+    onShowList: () => personal.showPersonalListView(),
+    onLoaded: () => {
+      if (appState.personalProvidersDoc) {
+        personal.renderPersonalProviderList(appState.personalProvidersDoc);
+      }
+    },
+  });
   const personal = createPersonalController({
     presets,
     refresh: d.refresh,
     loadModeStatus: () => mode.loadModeStatus(),
+    usageFor: (id, name) => usage.usageForService(id, name),
   });
 
   presets.renderPresetPicker();
   evotown.bindEvents();
   personal.bindEvents();
+  usage.bindEvents();
+  void usage.load();
 
   return {
     syncProviderPanelToEdition: () => mode.syncProviderPanelToEdition(),
     loadModeStatus: () => mode.loadModeStatus(),
     renderModeStatus: (status) => mode.renderModeStatus(status),
     loadEvotownStatus: () => evotown.loadEvotownStatus(),
-    loadPersonalProviderStatus: () => personal.loadPersonalProviderStatus(),
+    loadPersonalProviderStatus: () => {
+      void usage.load();
+      return personal.loadPersonalProviderStatus();
+    },
     rewireCurrentMode: (hintEl) => mode.rewireCurrentMode(hintEl),
     updateFooterCopy: (modeArg) => mode.updateFooterCopy(modeArg),
     updateWiringModeFootnote: (modeArg) => mode.updateWiringModeFootnote(modeArg),
@@ -76,6 +91,8 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
       if (appState.personalProvidersDoc) {
         personal.renderPersonalProviderList(appState.personalProvidersDoc);
       }
+      usage.renderOverview();
+      usage.renderDetail();
     },
   };
 }

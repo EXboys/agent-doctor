@@ -185,6 +185,7 @@ fn run_deepseek_harness(
                 timeout: turn.timeout,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -227,6 +228,7 @@ fn finish_failed(
         timeout: None,
     });
     PromptSessionReport {
+        usage: None,
         session_id,
         runtime,
         cwd,
@@ -645,6 +647,13 @@ fn handle_acp_message<F>(
                 state.failed = Some("DeepSeek 拒绝继续这一轮。".into());
             } else {
                 state.prompt_done = true;
+            }
+            if let Some(usage) = crate::usage::find_usage(&result) {
+                on_event(PromptSessionEvent::Usage {
+                    session_id: session_id.to_string(),
+                    usage,
+                    model: None,
+                });
             }
         }
     }

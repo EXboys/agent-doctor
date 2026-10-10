@@ -83,6 +83,7 @@ pub fn run(
             }
             PromptSessionEvent::PermissionResolved { .. }
             | PromptSessionEvent::Thinking { .. }
+            | PromptSessionEvent::Usage { .. }
             | PromptSessionEvent::Completed { .. } => {}
         }
         let _ = io::stdout().flush();

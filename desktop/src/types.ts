@@ -421,6 +421,24 @@ export interface PersonalProviderVerifyReport {
   resolved_url?: string | null;
 }
 
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+/** Turns added up per local day (days since 1970-01-01), tool, service and model. */
+export interface UsageDayRow extends TokenUsage {
+  day: number;
+  runtime: string;
+  /** Empty for team mode and turns stored before ids were kept. */
+  provider_id: string;
+  provider: string;
+  model: string;
+  turns: number;
+}
+
 export interface PersonalProviderSetupReport {
   profile_env_path: string;
   gateway_url: string;

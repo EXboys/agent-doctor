@@ -261,6 +261,7 @@ fn run_claude(
                 timeout,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -282,6 +283,7 @@ fn run_claude(
                 timeout: None,
             });
             PromptSessionReport {
+                usage: None,
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -494,6 +496,12 @@ where
                         message,
                     });
                 }
+                if let Some(event) = value
+                    .as_ref()
+                    .and_then(|value| claude_turn_usage(session_id, value))
+                {
+                    on_event(event);
+                }
                 for event in parse_claude_stream_line(
                     session_id,
                     &line,
@@ -577,6 +585,30 @@ where
 
     let (stdout, stderr) = pipes.take_output();
     Ok((status, exit_code, stdout, stderr, timeout_note))
+}
+
+/// `result` carries the whole turn's tokens; per-message usage would count twice.
+fn claude_turn_usage(session_id: &str, value: &serde_json::Value) -> Option<PromptSessionEvent> {
+    if value.get("type").and_then(|v| v.as_str()) != Some("result") {
+        return None;
+    }
+    let usage = crate::usage::usage_from_value(value.get("usage")?)?;
+    let model = value
+        .get("modelUsage")
+        .and_then(|v| v.as_object())
+        .and_then(|models| {
+            models
+                .iter()
+                .max_by_key(|(_, used)| {
+                    crate::usage::usage_from_value(used).map_or(0, |u| u.total())
+                })
+                .map(|(name, _)| name.clone())
+        });
+    Some(PromptSessionEvent::Usage {
+        session_id: session_id.to_string(),
+        usage,
+        model,
+    })
 }
 
 fn claude_thinking_delta(value: &serde_json::Value) -> Option<&str> {
@@ -1141,6 +1173,27 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
+
+    #[test]
+    fn result_line_reports_turn_tokens_and_model() {
+        let result = serde_json::json!({
+            "type": "result",
+            "usage": {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 300},
+            "modelUsage": {
+                "deepseek-v4-flash": {"inputTokens": 10, "outputTokens": 20},
+                "haiku": {"inputTokens": 1, "outputTokens": 1}
+            }
+        });
+        let Some(PromptSessionEvent::Usage { usage, model, .. }) = claude_turn_usage("s", &result)
+        else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.total(), 330);
+        assert_eq!(model.as_deref(), Some("deepseek-v4-flash"));
+        let assistant =
+            serde_json::json!({"type": "assistant", "message": {"usage": {"input_tokens": 5}}});
+        assert!(claude_turn_usage("s", &assistant).is_none());
+    }
 
     #[test]
     fn user_message_puts_pictures_before_text() {
