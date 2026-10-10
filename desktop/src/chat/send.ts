@@ -407,6 +407,8 @@ export function createSendController(deps: SendDeps) {
         selectedMcps,
         imagePaths: turn?.sendPaths ?? [],
         clientRunId: chatSessionId,
+        providerId: sendSession.providerId?.trim() || null,
+        model: sendSession.model?.trim() || null,
       });
 
     const stillGoing = () => (deps.isChatRunning ? deps.isChatRunning(chatSessionId) : deps.getBusy());

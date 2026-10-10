@@ -20,7 +20,48 @@ use crate::workspace::active_env_path;
 pub(crate) fn collect_overlay_env_for_options(
     options: &super::PromptSessionOptions,
 ) -> HashMap<String, String> {
-    collect_overlay_env_for_workspace(options.workspace_name.as_deref())
+    let mut env = collect_overlay_env_for_workspace(options.workspace_name.as_deref());
+    apply_ask_provider_choice(
+        &mut env,
+        options.provider_id.as_deref(),
+        options.model.as_deref(),
+    );
+    env
+}
+
+/// One chat can use a saved provider other than the checked default.
+fn apply_ask_provider_choice(
+    env: &mut HashMap<String, String>,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+) {
+    let provider_id = provider_id.map(str::trim).filter(|id| !id.is_empty());
+    let model = model.map(str::trim).filter(|id| !id.is_empty());
+    if provider_id.is_none() && model.is_none() {
+        return;
+    }
+    let Ok(store) = crate::store::SettingsStore::open_default() else {
+        return;
+    };
+    let Ok(providers) = store.list_personal_providers() else {
+        return;
+    };
+    let chosen = provider_id
+        .and_then(|id| providers.iter().find(|item| item.id == id))
+        .or_else(|| providers.iter().find(|item| item.active));
+    let Some(chosen) = chosen else {
+        return;
+    };
+    let model = model.unwrap_or(chosen.model.as_str());
+    install_personal_ask_env(
+        env,
+        &store,
+        &chosen.id,
+        &chosen.url,
+        &chosen.protocol,
+        model,
+        false,
+    );
 }
 
 pub(crate) fn collect_overlay_env_for_workspace(
@@ -33,6 +74,49 @@ pub(crate) fn collect_overlay_env_for_workspace(
         }
     }
     env
+}
+
+fn install_personal_ask_env(
+    env: &mut HashMap<String, String>,
+    store: &crate::store::SettingsStore,
+    id: &str,
+    url: &str,
+    protocol: &str,
+    model: &str,
+    persist_coerced: bool,
+) {
+    strip_team_gateway_leftovers(env);
+    env.insert(
+        PROVIDER_KIND_ENV.to_string(),
+        PROVIDER_KIND_PERSONAL.to_string(),
+    );
+    if let Ok(Some(key)) = store.get_personal_api_key(id) {
+        if !key.trim().is_empty() {
+            let key = key.trim().to_string();
+            env.insert("OPENAI_API_KEY".into(), key.clone());
+            env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
+            env.insert("ANTHROPIC_API_KEY".into(), key);
+        }
+    }
+    env.insert(GATEWAY_URL_ENV.to_string(), url.to_string());
+    env.insert("OPENAI_BASE_URL".into(), url.to_string());
+    let protocol = normalize_protocol(protocol);
+    env.insert(PROVIDER_PROTOCOL_ENV.to_string(), protocol.clone());
+    if protocol == PROTOCOL_ANTHROPIC {
+        env.insert("ANTHROPIC_BASE_URL".into(), url.to_string());
+    } else {
+        // OpenAI-compatible personal providers must not keep a leftover
+        // Anthropic/Evotown base URL — Claude Ask would call skilllite.
+        env.remove("ANTHROPIC_BASE_URL");
+    }
+    if !model.trim().is_empty() {
+        let resolved =
+            crate::setup::coerce_gateway_model(url, model).unwrap_or_else(|| model.to_string());
+        if persist_coerced && resolved != model {
+            let _ = crate::setup::persist_personal_provider_model(id, &resolved);
+        }
+        env.insert(MODEL_ENV.to_string(), resolved);
+    }
 }
 
 pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
@@ -169,39 +253,16 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
                     }
                 }
             }
-            if let Some(active) = providers.into_iter().find(|p| p.active) {
-                strip_team_gateway_leftovers(env);
-                env.insert(
-                    PROVIDER_KIND_ENV.to_string(),
-                    PROVIDER_KIND_PERSONAL.to_string(),
+            if let Some(active) = providers.iter().find(|p| p.active) {
+                install_personal_ask_env(
+                    env,
+                    &store,
+                    &active.id,
+                    &active.url,
+                    &active.protocol,
+                    &active.model,
+                    true,
                 );
-                if let Ok(Some(key)) = store.get_personal_api_key(&active.id) {
-                    if !key.trim().is_empty() {
-                        let key = key.trim().to_string();
-                        env.insert("OPENAI_API_KEY".into(), key.clone());
-                        env.insert(COMPANY_API_KEY_ENV.to_string(), key.clone());
-                        env.insert("ANTHROPIC_API_KEY".into(), key);
-                    }
-                }
-                env.insert(GATEWAY_URL_ENV.to_string(), active.url.clone());
-                env.insert("OPENAI_BASE_URL".into(), active.url.clone());
-                let protocol = normalize_protocol(&active.protocol);
-                env.insert(PROVIDER_PROTOCOL_ENV.to_string(), protocol.clone());
-                if protocol == PROTOCOL_ANTHROPIC {
-                    env.insert("ANTHROPIC_BASE_URL".into(), active.url.clone());
-                } else {
-                    // OpenAI-compatible personal providers must not keep a leftover
-                    // Anthropic/Evotown base URL — Claude Ask would call skilllite.
-                    env.remove("ANTHROPIC_BASE_URL");
-                }
-                if !active.model.trim().is_empty() {
-                    let model = crate::setup::coerce_gateway_model(&active.url, &active.model)
-                        .unwrap_or_else(|| active.model.clone());
-                    if model != active.model {
-                        let _ = crate::setup::persist_personal_provider_model(&active.id, &model);
-                    }
-                    env.insert(MODEL_ENV.to_string(), model);
-                }
             }
         }
     }

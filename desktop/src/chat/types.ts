@@ -130,6 +130,10 @@ export interface ChatSession {
   runtimeThreadId?: string | null;
   /** Provider the native thread was made with. Another provider cannot resume it. */
   providerTag?: string | null;
+  /** Saved provider for this chat. Empty follows the checked provider. */
+  providerId?: string | null;
+  /** Model for this chat. Empty follows that provider's saved model. */
+  model?: string | null;
   /** Latest checklist from the agent. Replaced as items move. */
   plan?: AgentPlan;
   /** Set when the last turn stopped before it finished. The next turn hears what it already did. */

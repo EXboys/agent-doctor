@@ -15,6 +15,7 @@ import {
 } from "./format";
 import { clearEmptyChatStart } from "./empty-start";
 import { rememberFileChange } from "./file-changes";
+import { interleaveLines } from "./file-diff";
 import { fileLinkRoot } from "./file-links";
 import type { ToolStep } from "./types";
 import { pushChatTurnError } from "./turn-errors";
@@ -77,15 +78,14 @@ function shortFolder(path: string): string {
 
 function paintDiffLines(box: HTMLElement, deleted: string[], added: string[]): void {
   box.replaceChildren();
-  const add = (kind: "delete" | "add", text: string) => {
-    const line = document.createElement("div");
-    line.className = "chat-tool-diff-line";
-    line.dataset.kind = kind;
-    line.textContent = `${kind === "add" ? "+" : "−"} ${text}`;
-    box.append(line);
-  };
-  for (const text of deleted) add("delete", text);
-  for (const text of added) add("add", text);
+  for (const line of interleaveLines(deleted, added)) {
+    if (line.kind === "same") continue;
+    const row = document.createElement("div");
+    row.className = "chat-tool-diff-line";
+    row.dataset.kind = line.kind;
+    row.textContent = line.text.length ? line.text : " ";
+    box.append(row);
+  }
 }
 
 export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): void {

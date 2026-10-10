@@ -75,6 +75,12 @@ pub struct PromptSessionOptions {
     /// Registered workspace name from `workspaces.yaml` (Ask session binding).
     #[serde(default)]
     pub workspace_name: Option<String>,
+    /// Saved provider for this chat. Empty keeps the checked default.
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    /// Model for this chat. Empty keeps that provider's saved model.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -336,6 +342,8 @@ mod tests {
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
                 workspace_name: None,
+                provider_id: None,
+                model: None,
             },
             |_| {},
         )
@@ -354,6 +362,8 @@ mod tests {
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
                 workspace_name: None,
+                provider_id: None,
+                model: None,
             },
             |_| {},
         )
@@ -424,6 +434,8 @@ time.sleep(30)
                 selected_mcps: Vec::new(),
                 image_paths: Vec::new(),
                 workspace_name: None,
+                provider_id: None,
+                model: None,
             },
             cancel,
             None,

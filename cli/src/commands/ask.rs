@@ -34,6 +34,8 @@ pub fn run(
         selected_mcps: Vec::new(),
         image_paths: Vec::new(),
         workspace_name: None,
+        provider_id: None,
+        model: None,
     };
 
     let report = run_prompt_session_with_cancel(&options, cancel, None, |event| {

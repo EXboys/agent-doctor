@@ -145,7 +145,7 @@ export function buildPromptWithHistory(
 }
 
 export function contextUsagePercent(session: ChatSession, draft = ""): number {
-  return contextUsagePercentBase(session, draft, chatState.wiredProvider?.model);
+  return contextUsagePercentBase(session, draft, session.model || chatState.wiredProvider?.model);
 }
 
 export function expireLivePermissionCards(): void {
@@ -562,7 +562,8 @@ export function syncComposerUi(): void {
   promptEl.readOnly = false;
   promptEl.placeholder = t(locked ? "chat.placeholderBusy" : "chat.placeholder");
   elevatedEl.disabled = false;
-  modelBtnEl.disabled = locked || !chatState.wiredProvider;
+  modelBtnEl.disabled = locked || chatState.personalProviders.length === 0 && !chatState.wiredProvider;
+  chatState.modelPicker?.renderModelPickerLabel();
   if (locked) {
     closeModelMenu();
     closeContextPopover();

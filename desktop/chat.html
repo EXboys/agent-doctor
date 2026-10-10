@@ -427,6 +427,10 @@
                 <span class="chat-files-language" id="chat-files-language">—</span>
               </div>
               <div class="chat-files-view-actions">
+                <div id="chat-files-mode" class="chat-files-mode" hidden role="group" aria-label="预览">
+                  <button type="button" id="chat-files-mode-preview" class="chat-files-mode-btn" aria-pressed="false">预览</button>
+                  <button type="button" id="chat-files-mode-source" class="chat-files-mode-btn is-on" aria-pressed="true">原文</button>
+                </div>
                 <button id="chat-files-save" type="button" class="chat-files-save" hidden data-i18n="chat.filesSave">保存</button>
               </div>
             </div>
@@ -452,6 +456,24 @@
               <span data-i18n="chat.filesPickOne">从右边选择一个文件，打开后直接修改</span>
             </div>
             <div id="chat-files-diff" class="chat-files-diff" hidden></div>
+            <div id="chat-files-rendered" class="chat-files-rendered" hidden>
+              <div id="chat-files-browser" class="chat-files-browser" hidden>
+                <button type="button" id="chat-files-browser-back" class="chat-files-browser-btn" aria-label="后退">←</button>
+                <button type="button" id="chat-files-browser-forward" class="chat-files-browser-btn" aria-label="前进">→</button>
+                <button type="button" id="chat-files-browser-reload" class="chat-files-browser-btn" aria-label="刷新">↻</button>
+                <input id="chat-files-browser-address" class="chat-files-browser-address" type="text" spellcheck="false" placeholder="网页地址，例如本机打开的页面" />
+              </div>
+              <div id="chat-files-ui" class="chat-files-ui" hidden>
+                <div id="chat-files-ui-steps" class="chat-files-ui-steps"></div>
+                <div class="chat-files-ui-bar">
+                  <button type="button" id="chat-files-ui-add" class="chat-files-ui-add">加一步</button>
+                  <button type="button" id="chat-files-ui-run" class="chat-files-ui-run">运行</button>
+                </div>
+                <ul id="chat-files-browser-checks" class="chat-files-browser-checks" hidden></ul>
+              </div>
+              <div class="chat-files-rendered-doc chat-md"></div>
+              <iframe class="chat-files-rendered-frame" title="预览" sandbox="allow-scripts allow-forms allow-popups" hidden></iframe>
+            </div>
             <div id="chat-files-code" class="chat-files-code" hidden>
               <pre id="chat-files-preview" class="chat-files-preview"><code></code></pre>
               <textarea id="chat-files-editor" class="chat-files-editor" spellcheck="false" wrap="off"></textarea>

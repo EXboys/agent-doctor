@@ -134,6 +134,10 @@ export type StartPromptSessionArgs = {
   imagePaths?: string[] | null;
   /** Chat session id, so several chats can run at the same time. */
   clientRunId?: string | null;
+  /** Saved provider for this chat. Empty keeps the checked default. */
+  providerId?: string | null;
+  /** Model for this chat. Empty keeps that provider's saved model. */
+  model?: string | null;
 };
 
 export function getEvotownStatus(): Promise<EvotownStatus> {

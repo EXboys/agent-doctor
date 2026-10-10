@@ -299,6 +299,8 @@ async fn start_prompt_session_command(
     image_paths: Option<Vec<String>>,
     workspace_name: Option<String>,
     client_run_id: Option<String>,
+    provider_id: Option<String>,
+    model: Option<String>,
 ) -> Result<PromptSessionReport, String> {
     let owner_label = window.label().to_string();
     // Chat sessions pass their own id so several can run together. Callers
@@ -343,6 +345,12 @@ async fn start_prompt_session_command(
             .map(PathBuf::from)
             .collect(),
         workspace_name: workspace_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        provider_id: provider_id
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        model: model
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
     };

@@ -261,6 +261,8 @@ mod tests {
             selected_mcps: vec!["browser".into()],
             image_paths: Vec::new(),
             workspace_name: None,
+            provider_id: None,
+            model: None,
         };
         assert!(wants_browser_mcp(&opts));
         opts.selected_mcps.clear();

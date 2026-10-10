@@ -144,6 +144,16 @@ import {
 } from "./friendly-error";
 import { markChatFailureBubbleShown } from "./chat/turn-errors";
 
+function providerHostTag(provider: { id: string; url: string }): string {
+  let host = provider.url;
+  try {
+    host = new URL(provider.url).host;
+  } catch {
+    // keep the raw address
+  }
+  return `${provider.id}|${host}`;
+}
+
 export function wireChatControllers(): void {
   const chatFailureHandlers = {
     setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => setStatus(text, tone),
@@ -222,6 +232,23 @@ export function wireChatControllers(): void {
     getWiredProvider: () => chatState.wiredProvider,
     setWiredProvider: (provider) => {
       chatState.wiredProvider = provider;
+    },
+    getProviders: () => chatState.personalProviders,
+    setProviders: (providers) => {
+      chatState.personalProviders = providers;
+    },
+    activeSession: () => (chatState.store?.sessions ? activeSession() : null),
+    pinSessionModel: (provider, model) => {
+      const session = activeSession();
+      const nextTag = providerHostTag(provider);
+      if (session.providerTag && session.providerTag !== nextTag && session.runtimeThreadId) {
+        session.runtimeThreadId = null;
+      }
+      session.providerId = provider.id;
+      session.model = model;
+      session.providerTag = nextTag;
+      touchSession(session);
+      saveStore();
     },
     getModelMenuOpen: () => chatState.modelMenuOpen,
     setModelMenuOpen: (open) => {
@@ -726,15 +753,13 @@ export function wireChatControllers(): void {
     readImageTextEnabled: () => readImageTextEnabled(),
     refreshComposer: () => syncComposerUi(),
     providerTag: () => {
-      const wired = chatState.wiredProvider;
+      const session = chatState.store?.sessions ? activeSession() : null;
+      const pinned = session?.providerId
+        ? chatState.personalProviders.find((item) => item.id === session.providerId)
+        : undefined;
+      const wired = pinned || chatState.wiredProvider;
       if (!wired) return "";
-      let host = wired.url;
-      try {
-        host = new URL(wired.url).host;
-      } catch {
-        // keep the raw address
-      }
-      return `${wired.id}|${host}`;
+      return providerHostTag(wired);
     },
   });
 

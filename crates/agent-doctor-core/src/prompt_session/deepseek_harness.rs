@@ -906,6 +906,8 @@ for raw in sys.stdin:
             selected_mcps: Vec::new(),
             image_paths: Vec::new(),
             workspace_name: None,
+            provider_id: None,
+            model: None,
         }
     }
 

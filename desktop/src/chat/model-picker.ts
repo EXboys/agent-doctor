@@ -1,14 +1,14 @@
 
 import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
-import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
-import { modelsForProviderUrl } from "../provider-models";
+import { modelsForProviderUrl, providerChipForUrl } from "../provider-models";
 import type {
   PersonalProviderListItem,
 } from "../types";
 import { runtimeDisplayName } from "./runtime";
-import { getPersonalProviderStatus, listPersonalProviders, upsertPersonalProvider } from "../ipc";
+import type { ChatSession } from "./types";
+import { getPersonalProviderStatus, listPersonalProviders } from "../ipc";
 
 export type ModelPickerEls = {
   modelBtnEl: HTMLButtonElement;
@@ -24,6 +24,10 @@ export type ModelPickerDeps = ModelPickerEls & {
   selectedRuntime: () => AskRuntime;
   getWiredProvider: () => PersonalProviderListItem | null;
   setWiredProvider: (provider: PersonalProviderListItem | null) => void;
+  getProviders: () => PersonalProviderListItem[];
+  setProviders: (providers: PersonalProviderListItem[]) => void;
+  activeSession: () => ChatSession | null;
+  pinSessionModel: (provider: PersonalProviderListItem, model: string) => void;
   getModelMenuOpen: () => boolean;
   setModelMenuOpen: (open: boolean) => void;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
@@ -54,8 +58,8 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   function positionModelMenu(): void {
     const rect = deps.modelBtnEl.getBoundingClientRect();
     const gap = 8;
-    const minWidth = Math.max(rect.width, 200);
-    const maxWidth = Math.min(280, window.innerWidth - 24);
+    const minWidth = Math.max(rect.width, 220);
+    const maxWidth = Math.min(340, window.innerWidth - 24);
     const width = Math.min(Math.max(minWidth, rect.width), maxWidth);
     let left = rect.left;
     if (left + width > window.innerWidth - 12) {
@@ -72,15 +76,26 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     deps.modelMenuEl.style.zIndex = "120";
   }
 
+  function chosenModel(): { provider: PersonalProviderListItem; model: string } | null {
+    const wired = deps.getWiredProvider();
+    const session = deps.activeSession();
+    const pinned = session?.providerId
+      ? deps.getProviders().find((item) => item.id === session.providerId)
+      : undefined;
+    const provider = pinned || wired;
+    if (!provider) return null;
+    const model = (pinned ? session?.model || provider.model : provider.model).trim();
+    return { provider, model: model || "—" };
+  }
+
   function renderModelPickerLabel(): void {
     const runtimeName = runtimeDisplayName(deps.selectedRuntime());
-    const wiredProvider = deps.getWiredProvider();
-    if (wiredProvider) {
-      const model = wiredProvider.model.trim() || "—";
-      deps.modelLabelEl.textContent = model;
+    const chosen = chosenModel();
+    if (chosen) {
+      deps.modelLabelEl.textContent = chosen.model;
       deps.modelBtnEl.disabled = deps.isComposerLocked();
       deps.modelBtnEl.title = t("chat.modelPickHint");
-      deps.modelBtnEl.setAttribute("aria-label", model);
+      deps.modelBtnEl.setAttribute("aria-label", chosen.model);
       return;
     }
     // Personal: keep clickable so the menu can say “go wire a provider”.
@@ -99,32 +114,52 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
   function renderModelMenu(): void {
     deps.modelMenuEl.replaceChildren();
-    const wiredProvider = deps.getWiredProvider();
-    if (!wiredProvider) {
+    const providers = deps.getProviders();
+    const wired = deps.getWiredProvider();
+    if (providers.length === 0 && !wired) {
       const hint = document.createElement("div");
       hint.className = "chat-model-menu-hint";
       hint.textContent = t("chat.modelNeedProvider");
       deps.modelMenuEl.appendChild(hint);
       return;
     }
-    const models = modelsForProviderUrl(wiredProvider.url, wiredProvider.model);
-    if (models.length === 0) {
+    const chosen = chosenModel();
+    const rows = providers.length > 0 ? providers : wired ? [wired] : [];
+    for (const provider of rows) {
+      const models = modelsForProviderUrl(provider.url, provider.model);
+      if (models.length === 0) continue;
+      const group = document.createElement("div");
+      group.className = "chat-model-group";
+      const label = document.createElement("div");
+      label.className = "chat-model-group-label";
+      label.textContent = provider.name.trim() || providerChipForUrl(provider.url, provider.name);
+      if (provider.active) {
+        const mark = document.createElement("span");
+        mark.className = "chat-model-default";
+        mark.textContent = t("chat.modelDefault");
+        label.appendChild(mark);
+      }
+      group.appendChild(label);
+      for (const model of models) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const active = chosen?.provider.id === provider.id && chosen.model === model;
+        btn.className = `chat-model-option${active ? " is-active" : ""}`;
+        btn.role = "option";
+        btn.setAttribute("aria-selected", active ? "true" : "false");
+        btn.textContent = model;
+        btn.addEventListener("click", () => {
+          selectSessionModel(provider, model);
+        });
+        group.appendChild(btn);
+      }
+      deps.modelMenuEl.appendChild(group);
+    }
+    if (!deps.modelMenuEl.childElementCount) {
       const hint = document.createElement("div");
       hint.className = "chat-model-menu-hint";
-      hint.textContent = wiredProvider.model || t("chat.modelNeedProvider");
+      hint.textContent = t("chat.modelNeedProvider");
       deps.modelMenuEl.appendChild(hint);
-      return;
-    }
-    for (const model of models) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = `chat-model-option${model === wiredProvider.model ? " is-active" : ""}`;
-      btn.role = "option";
-      btn.textContent = model;
-      btn.addEventListener("click", () => {
-        void switchWiredModel(model);
-      });
-      deps.modelMenuEl.appendChild(btn);
     }
   }
 
@@ -152,6 +187,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         getPersonalProviderStatus(),
         listPersonalProviders(),
       ]);
+      deps.setProviders(doc.providers);
       const active =
         doc.providers.find((p) => p.active) ||
         (status.active_id
@@ -179,46 +215,29 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       );
     } catch (error) {
       console.warn("Ask: failed to load personal provider", error);
+      deps.setProviders([]);
       deps.setWiredProvider(null);
     }
     renderModelPickerLabel();
     if (deps.getModelMenuOpen()) renderModelMenu();
   }
 
-  async function switchWiredModel(model: string): Promise<void> {
-    const wiredProvider = deps.getWiredProvider();
-    if (!wiredProvider || deps.isComposerLocked()) return;
+  function selectSessionModel(provider: PersonalProviderListItem, model: string): void {
+    if (deps.isComposerLocked()) return;
     const next = model.trim();
-    if (!next || next === wiredProvider.model) {
+    if (!next) {
       closeModelMenu();
       return;
     }
+    const current = chosenModel();
     closeModelMenu();
-    // Ask reads the active provider model from store at send time — skip full
-    // activate/mode-switch so the picker stays snappy.
-    const previous = wiredProvider.model;
-    deps.setWiredProvider({ ...wiredProvider, model: next });
+    if (current?.provider.id === provider.id && current.model === next) return;
+    deps.pinSessionModel(provider, next);
     renderModelPickerLabel();
-    deps.setStatus(t("chat.modelSwitching"), "muted");
-    try {
-      const current = deps.getWiredProvider()!;
-      await upsertPersonalProvider({
-        id: current.id,
-        name: current.name,
-        url: current.url,
-        key: "",
-        model: next,
-        protocol: current.protocol || "openai",
-        activate: false,
-      });
-      deps.setStatus(t("chat.modelSwitched", { model: next }), "ok");
-    } catch (error) {
-      deps.setWiredProvider({ ...wiredProvider, model: previous });
-      renderModelPickerLabel();
-      deps.setStatus(withErrorDetail(t("chat.modelSwitchFailed"), error), "error");
-    } finally {
-      deps.modelBtnEl.disabled = deps.isComposerLocked() || !deps.getWiredProvider();
-    }
+    deps.updateContextMeter();
+    const name = providerChipForUrl(provider.url, provider.name);
+    deps.setStatus(t("chat.modelSwitched", { model: `${name} · ${next}` }), "ok");
+    deps.modelBtnEl.disabled = deps.isComposerLocked() || !chosenModel();
   }
 
   function updateRuntimeLabel(): void {
@@ -233,7 +252,11 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     renderModelMenu,
     openModelMenu,
     refreshWiredProvider,
-    switchWiredModel,
+    switchWiredModel: async (model: string) => {
+      const wired = deps.getWiredProvider();
+      if (!wired) return;
+      selectSessionModel(wired, model);
+    },
     updateRuntimeLabel,
   };
 }

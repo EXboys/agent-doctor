@@ -24,6 +24,8 @@ export const chatState = {
   /** Locked by main-page Ask entry (`#runtime=` / ask-window-focus). Not switched in-chat. */
   currentRuntime: "claude-code" as AskRuntime,
   wiredProvider: null as PersonalProviderListItem | null,
+  /** Every saved provider, so one chat can pick a model from any of them. */
+  personalProviders: [] as PersonalProviderListItem[],
   modelMenuOpen: false,
   store: undefined as unknown as SessionStore,
   busy: false,
