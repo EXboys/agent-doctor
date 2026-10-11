@@ -123,6 +123,7 @@ type FakeSession = {
   runtimeThreadId: string | null;
   providerTag?: string | null;
   interrupted?: { status: string; at: number } | null;
+  autoApprove?: boolean;
 };
 
 function makeSession(id: string, extra: Partial<FakeSession> = {}): FakeSession {
@@ -148,6 +149,9 @@ function newController(opts: {
   runningCount?: number;
 }) {
   const sessions = opts.sessions;
+  if (opts.elevated) {
+    for (const session of sessions) session.autoApprove = true;
+  }
   const store = { activeId: opts.activeId ?? sessions[0].id, sessions };
   const promptEl = { value: "" } as HTMLTextAreaElement;
   const state = {
@@ -292,14 +296,14 @@ await check("a thread that cannot be resumed is dropped, so the next send starts
 
 console.log("\nsend: auto-approve and limits");
 
-await check("auto-approve turns on Claude's own switch and asks first", async () => {
+await check("auto-approve turns on Claude's own switch", async () => {
   reset();
   const { api, promptEl } = newController({ sessions: [makeSession("s-claude")], elevated: true });
   promptEl.value = "do it";
 
   await api.sendAsk();
 
-  eq(confirmAsked, 1, "asked before auto-approving");
+  eq(confirmAsked, 0, "the chat switch is already on, so send does not ask again");
   eq(roundCalls()[0].args.dangerouslySkipPermissions, true, "Claude skip-permissions");
   eq(roundCalls()[0].args.fullAuto, false, "Claude does not use full-auto");
 });
@@ -331,17 +335,16 @@ await check("auto-approve stays off when the switch is off", async () => {
   eq(roundCalls()[0].args.fullAuto, false, "full-auto off");
 });
 
-await check("saying no to auto-approve sends nothing and keeps the text", async () => {
+await check("a chat with auto-approve off does not borrow another chat's switch", async () => {
   reset();
-  confirmReply = false;
-  const { api, state, promptEl } = newController({ sessions: [makeSession("s-no")], elevated: true });
+  const quiet = makeSession("s-quiet");
+  const loud = makeSession("s-loud", { autoApprove: true });
+  const { api, promptEl } = newController({ sessions: [quiet, loud], elevated: false });
   promptEl.value = "do it";
 
   await api.sendAsk();
 
-  eq(roundCalls().length, 0, "no round");
-  eq(promptEl.value, "do it", "text kept");
-  eq(state.busy, false, "not busy");
+  eq(roundCalls()[0].args.dangerouslySkipPermissions, false, "this chat stays off");
 });
 
 await check("too many chats working: nothing is sent and the reason is shown", async () => {

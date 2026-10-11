@@ -19,6 +19,7 @@ import {
 import { chatState, initChatStore } from "./chat-state";
 import {
   elevatedEl,
+  elevatedLabelEl,
   elevatedWrapEl,
   readImageWrapEl,
   modelBtnEl,
@@ -503,8 +504,24 @@ export function syncRestoreBackupButton(): void {
 }
 
 export function updateElevatedLabel(): void {
-  if (elevatedWrapEl) elevatedWrapEl.hidden = true;
+  const session = chatState.store ? activeSession() : null;
+  elevatedEl.checked = session?.autoApprove === true;
   elevatedEl.disabled = false;
+  elevatedLabelEl.textContent = t("chat.elevatedClaude");
+  if (elevatedWrapEl) {
+    elevatedWrapEl.hidden = false;
+    elevatedWrapEl.title = t("chat.permissionHint");
+  }
+}
+
+export function setActiveSessionAutoApprove(on: boolean): void {
+  const session = activeSession();
+  session.autoApprove = on;
+  elevatedEl.checked = on;
+  saveStore();
+  if (on && session.id === runTargetSession().id) {
+    void chatState.permissions?.approvePendingChoices();
+  }
 }
 
 export function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {

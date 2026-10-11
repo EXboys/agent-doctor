@@ -1,5 +1,4 @@
 
-import { noteApprovalRemembered, sessionSkipsApproval } from "./confirm-pref";
 import { t } from "../i18n";
 import {
   cleanToolLabel,
@@ -52,8 +51,6 @@ export type PermissionsDeps = {
   setAssistantRaw: (raw: string) => void;
   /** Sends again the message that led to this card, or null when there is none. */
   resendBefore: (messageId: string) => (() => void) | null;
-  /** Tool approvals can be allowed without a card while this is on. Questions still wait. */
-  autoApprove: () => boolean;
 };
 
 export type PermissionsApi = ReturnType<typeof createPermissionsController>;
@@ -313,7 +310,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
         : "choice";
     // A running turn was started before the switch was on, so each tool still asks.
     // Allow those here. A question still needs an answer.
-    if (!needsTypedReply(inputMode) && (deps.autoApprove() || sessionSkipsApproval(deps.runTargetSession()))) {
+    if (!needsTypedReply(inputMode) && deps.runTargetSession().autoApprove === true) {
       void resolvePermissionSession({
         sessionId: payload.session_id,
         requestId: payload.request_id,
@@ -951,7 +948,6 @@ export function createPermissionsController(deps: PermissionsDeps) {
     );
     if (message?.permission) {
       message.permission.allowed = allowed;
-      if (allowed) noteApprovalRemembered(session, message.permission.inputMode);
       deps.touchSession(session);
       deps.saveStore();
     }

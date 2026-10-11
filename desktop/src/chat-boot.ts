@@ -32,6 +32,7 @@ import {
   isViewingRunningSession,
   autoResizePrompt,
   setStatus,
+  setActiveSessionAutoApprove,
   closeModelMenu,
   positionModelMenu,
   openModelMenu,
@@ -78,7 +79,7 @@ import { applyThemePreference, readThemePreference, watchSystemTheme } from "./c
 import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
-import { teamupsChannelConnected, teamupsChannelReply } from "./ipc";
+import { teamupsChannelConnected, teamupsChannelPref, teamupsChannelReply, teamupsChannelSetEnabled } from "./ipc";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
@@ -249,9 +250,7 @@ export function bootChat(): void {
   });
   workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());
   elevatedEl.addEventListener("change", () => {
-    if (elevatedEl.checked) {
-      void chatState.permissions?.approvePendingChoices();
-    }
+    setActiveSessionAutoApprove(elevatedEl.checked);
   });
   readImageEl.addEventListener("change", () => {
     setReadImageTextEnabled(readImageEl.checked);
@@ -428,14 +427,50 @@ export function bootChat(): void {
     chatState.sessions.openSessionFromIsland(id);
   });
   let channelOn = false;
+  let channelEnabled = true;
+  let channelSignedIn = false;
+  const channelSwitch = () => document.querySelector<HTMLInputElement>("#chat-settings-channel-switch");
   const paintChannel = () => {
     const el = document.querySelector<HTMLElement>("#chat-settings-channel");
+    const input = channelSwitch();
+    if (input) {
+      input.checked = channelEnabled;
+      input.setAttribute("aria-checked", channelEnabled ? "true" : "false");
+      input.setAttribute("aria-label", t("chat.settingsChannelSwitch"));
+    }
     if (!el) return;
-    el.textContent = channelOn ? t("chat.settingsChannelOn") : t("chat.settingsChannelOff");
+    const live = channelEnabled && channelSignedIn && channelOn;
+    el.classList.toggle("is-on", live);
+    if (!channelEnabled) el.textContent = t("chat.settingsChannelClosed");
+    else if (!channelSignedIn) el.textContent = t("chat.settingsChannelSignedOut");
+    else el.textContent = channelOn ? t("chat.settingsChannelOn") : t("chat.settingsChannelOff");
   };
+  const loadChannelPref = () => {
+    void teamupsChannelPref()
+      .then((pref) => {
+        channelEnabled = pref.enabled;
+        channelSignedIn = pref.signed_in;
+        paintChannel();
+      })
+      .catch(() => paintChannel());
+  };
+  channelSwitch()?.addEventListener("change", () => {
+    const input = channelSwitch();
+    if (!input) return;
+    const on = input.checked;
+    channelEnabled = on;
+    paintChannel();
+    void teamupsChannelSetEnabled(on).catch(() => {
+      channelEnabled = !on;
+      paintChannel();
+    });
+  });
   void listen<boolean>("teamups-channel-status", (event) => {
     channelOn = event.payload === true;
     paintChannel();
+  });
+  void listen("teamups-account-changed", () => {
+    loadChannelPref();
   });
   void teamupsChannelConnected()
     .then((on) => {
@@ -443,6 +478,7 @@ export function bootChat(): void {
       paintChannel();
     })
     .catch(() => paintChannel());
+  loadChannelPref();
   void listen<{ id?: string; text?: string }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
     const text = event.payload?.text?.trim() ?? "";

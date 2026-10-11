@@ -383,6 +383,7 @@ pub async fn poll_teamups_login_command(
         .map_err(|error| error.to_string())?;
     if matches!(poll.status, TeamupsLoginPollStatus::Approved) {
         let _ = app.emit("teamups-account-changed", ());
+        crate::channel_link::poke(&app);
     }
     Ok(poll)
 }
@@ -402,6 +403,7 @@ pub async fn sign_out_teamups_command(app: AppHandle) -> Result<TeamupsAccountSt
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     let _ = app.emit("teamups-account-changed", ());
+    crate::channel_link::poke(&app);
     Ok(status)
 }
 

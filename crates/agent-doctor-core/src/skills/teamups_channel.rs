@@ -40,8 +40,26 @@ pub fn teamups_channel_ws_url(http_base: &str) -> String {
     format!("{scheme}://{rest}/api/v1/doctor/channel")
 }
 
-/// Signed-in license and the socket address. `None` when the person is logged out.
+const CHANNEL_ENABLED_KEY: &str = "teamups_channel_enabled";
+
+/// Whether this computer should keep the line open. Default is on.
+/// Logged-out computers still do not connect.
+pub fn teamups_channel_enabled() -> Result<bool> {
+    let store = open_settings_store()?;
+    Ok(store.meta_get(CHANNEL_ENABLED_KEY)?.as_deref() != Some("0"))
+}
+
+pub fn set_teamups_channel_enabled(on: bool) -> Result<()> {
+    let store = open_settings_store()?;
+    store.meta_set(CHANNEL_ENABLED_KEY, if on { "1" } else { "0" })
+}
+
+/// `None` when nobody is signed in, or when the person turned the line off.
+/// Callers must not open a socket in that case.
 pub fn teamups_channel_auth() -> Result<Option<(String, String)>> {
+    if !teamups_channel_enabled()? {
+        return Ok(None);
+    }
     let store = open_settings_store()?;
     let Some(license) = store
         .get_teamups_license()?
@@ -52,6 +70,14 @@ pub fn teamups_channel_auth() -> Result<Option<(String, String)>> {
     };
     let base = default_teamups_base_url();
     Ok(Some((teamups_channel_ws_url(&base), license)))
+}
+
+pub fn teamups_channel_signed_in() -> Result<bool> {
+    let store = open_settings_store()?;
+    Ok(store
+        .get_teamups_license()?
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false))
 }
 
 pub fn teamups_channel_hello() -> String {

@@ -1,16 +1,18 @@
 //! Outbound socket to the TeamUps site. Feishu messages arrive as jobs.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_doctor_core::{
-    parse_teamups_channel_job, teamups_channel_auth, teamups_channel_hello, teamups_channel_reply,
+    parse_teamups_channel_job, set_teamups_channel_enabled, teamups_channel_auth,
+    teamups_channel_enabled, teamups_channel_hello, teamups_channel_reply,
+    teamups_channel_signed_in,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
@@ -19,6 +21,13 @@ use tokio_tungstenite::{
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 
 struct Outbound(Mutex<Option<mpsc::UnboundedSender<String>>>);
+struct Wake(Arc<Notify>);
+
+#[derive(Clone, Serialize)]
+pub struct ChannelPref {
+    enabled: bool,
+    signed_in: bool,
+}
 
 #[derive(Clone, Serialize)]
 struct JobPayload {
@@ -28,24 +37,39 @@ struct JobPayload {
 
 pub fn spawn(app: &AppHandle) {
     app.manage(Outbound(Mutex::new(None)));
+    app.manage(Wake(Arc::new(Notify::new())));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let wake = app.state::<Wake>().0.clone();
         loop {
+            // No license, or the person turned the line off: do not dial the site.
             match teamups_channel_auth() {
-                Ok(Some((url, _license))) => {
-                    if let Err(err) = connect(&app, &url, &_license).await {
-                        eprintln!("[channel] {err}");
+                Ok(Some((url, license))) => {
+                    if let Err(err) = connect(&app, &url, &license).await {
+                        if err != "stopped" {
+                            eprintln!("[channel] {err}");
+                        }
                         set_connected(&app, false);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        tokio::select! {
+                            _ = wake.notified() => {}
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                        }
                     }
                 }
                 _ => {
                     set_connected(&app, false);
-                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    wake.notified().await;
                 }
             }
         }
     });
+}
+
+/// Login, logout, or the on/off switch changed. Wakes the loop without opening a socket.
+pub fn poke(app: &AppHandle) {
+    if let Some(wake) = app.try_state::<Wake>() {
+        wake.0.notify_one();
+    }
 }
 
 fn set_connected(app: &AppHandle, connected: bool) {
@@ -75,6 +99,7 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
         *outbound.0.lock().expect("channel") = Some(tx);
     }
     set_connected(app, true);
+    let wake = app.state::<Wake>().0.clone();
     let mut open = true;
     while open {
         tokio::select! {
@@ -84,6 +109,13 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                     continue;
                 };
                 if write.send(Message::Text(frame.into())).await.is_err() {
+                    open = false;
+                }
+            }
+            _ = wake.notified() => {
+                // A login poke can arrive while the socket is already up.
+                // Close only when the line should actually stop.
+                if !matches!(teamups_channel_auth(), Ok(Some(_))) {
                     open = false;
                 }
             }
@@ -112,7 +144,22 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
         *outbound.0.lock().expect("channel") = None;
     }
     set_connected(app, false);
-    Err("连接已断开".to_string())
+    Err("stopped".to_string())
+}
+
+#[tauri::command]
+pub fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
+    Ok(ChannelPref {
+        enabled: teamups_channel_enabled().map_err(|err| err.to_string())?,
+        signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub fn teamups_channel_set_enabled_command(app: AppHandle, enabled: bool) -> Result<(), String> {
+    set_teamups_channel_enabled(enabled).map_err(|err| err.to_string())?;
+    poke(&app);
+    Ok(())
 }
 
 #[tauri::command]

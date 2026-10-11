@@ -2,9 +2,7 @@ import { getLocale, t } from "../i18n";
 import { islandEnabled, islandHideWhenIdle, islandSetEnabled, islandSetHideWhenIdle } from "../ipc";
 import { publishLocale } from "../locale-sync";
 import { checkForAppUpdates, readAppVersion } from "../updater";
-import { confirmHintKey, readConfirmMode, writeConfirmMode, type ConfirmMode } from "./confirm-pref";
-import { elevatedEl } from "../chat-dom";
-import { chatState } from "../chat-state";
+import { readAutoApproveDefault, writeAutoApproveDefault } from "./confirm-pref";
 import {
   closeKnowledgePage,
   closeResourcesMainPage,
@@ -25,8 +23,8 @@ const backEl = () => document.querySelector<HTMLButtonElement>("#chat-settings-b
 const searchEl = () => document.querySelector<HTMLInputElement>("#chat-settings-search");
 const headingEl = () => document.querySelector<HTMLElement>("#chat-settings-heading");
 const emptyEl = () => document.querySelector<HTMLElement>("#chat-settings-empty");
-function markChoice(attr: "settingsTheme" | "settingsLocale" | "settingsConfirm", value: string): void {
-  const name = attr === "settingsTheme" ? "settings-theme" : attr === "settingsLocale" ? "settings-locale" : "settings-confirm";
+function markChoice(attr: "settingsTheme" | "settingsLocale", value: string): void {
+  const name = attr === "settingsTheme" ? "settings-theme" : "settings-locale";
   document.querySelectorAll<HTMLButtonElement>(`[data-${name}]`).forEach((button) => {
     const on = button.dataset[attr] === value;
     button.classList.toggle("is-on", on);
@@ -34,7 +32,7 @@ function markChoice(attr: "settingsTheme" | "settingsLocale" | "settingsConfirm"
   });
 }
 
-const SECTIONS = ["appearance", "conversation", "language", "about"] as const;
+const SECTIONS = ["appearance", "conversation", "language", "channel", "about"] as const;
 type SettingsSection = (typeof SECTIONS)[number];
 
 let activeSection: SettingsSection = "appearance";
@@ -75,6 +73,7 @@ export function openChatSettings(): void {
 function sectionTitle(section: SettingsSection): string {
   if (section === "language") return t("chat.settingsLanguage");
   if (section === "conversation") return t("chat.settingsConversation");
+  if (section === "channel") return t("chat.settingsChannels");
   if (section === "about") return t("chat.settingsAbout");
   return t("chat.settingsAppearance");
 }
@@ -126,19 +125,13 @@ function showSection(section: SettingsSection): void {
 const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island");
 const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
 const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
-const confirmHintEl = () => document.querySelector<HTMLElement>("#chat-settings-confirm-hint");
+const autoApproveDefaultEl = () => document.querySelector<HTMLInputElement>("#chat-settings-auto-approve");
 
 export function refreshConfirmCopy(): void {
-  applyConfirmMode(readConfirmMode(), false);
-}
-
-function applyConfirmMode(mode: ConfirmMode, approveNow: boolean): void {
-  const hint = confirmHintEl();
-  if (hint) hint.textContent = t(confirmHintKey(mode));
-  elevatedEl.checked = mode === "auto";
-  if (approveNow && mode === "auto") {
-    void chatState.permissions?.approvePendingChoices();
-  }
+  const input = autoApproveDefaultEl();
+  if (!input) return;
+  input.checked = readAutoApproveDefault();
+  input.setAttribute("aria-label", t("chat.settingsAutoApproveSwitch"));
 }
 
 function syncIslandSwitch(): void {
@@ -173,9 +166,7 @@ function syncChatSettings(): void {
   if (search) search.placeholder = t("chat.settingsSearch");
   markChoice("settingsTheme", readThemePreference());
   markChoice("settingsLocale", getLocale());
-  const confirmMode = readConfirmMode();
-  markChoice("settingsConfirm", confirmMode);
-  applyConfirmMode(confirmMode, false);
+  refreshConfirmCopy();
   syncIslandSwitch();
   syncAbout();
   showSection(activeSection);
@@ -190,7 +181,7 @@ export function bindChatSettings(applyI18n: () => void): void {
   document.querySelector(".chat-settings-menu")?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-nav]");
     const next = button?.dataset.settingsNav;
-    if (next === "appearance" || next === "conversation" || next === "language" || next === "about") showSection(next);
+    if (next === "appearance" || next === "conversation" || next === "language" || next === "channel" || next === "about") showSection(next);
   });
   searchEl()?.addEventListener("input", () => showSection(activeSection));
   islandEl()?.addEventListener("change", () => {
@@ -212,14 +203,10 @@ export function bindChatSettings(applyI18n: () => void): void {
       input.checked = !hide;
     });
   });
-  document.querySelector("[data-settings-panel='conversation']")?.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-confirm]");
-    const next = button?.dataset.settingsConfirm;
-    if (next === "ask" || next === "session" || next === "auto") {
-      writeConfirmMode(next);
-      markChoice("settingsConfirm", next);
-      applyConfirmMode(next, true);
-    }
+  autoApproveDefaultEl()?.addEventListener("change", () => {
+    const input = autoApproveDefaultEl();
+    if (!input) return;
+    writeAutoApproveDefault(input.checked);
   });
   document.querySelector("#chat-settings-update")?.addEventListener("click", () => {
     void checkForAppUpdates({ interactive: true });

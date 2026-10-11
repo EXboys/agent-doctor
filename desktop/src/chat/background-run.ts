@@ -1,4 +1,3 @@
-import { noteApprovalRemembered, sessionSkipsApproval } from "./confirm-pref";
 import { t } from "../i18n";
 import { resolvePermissionSession } from "../ipc";
 import {
@@ -26,7 +25,6 @@ export type BackgroundRunCtx = {
   endRun: (id: string) => void;
   noteUnseen: (id: string) => void;
   onPlan: (chatId: string, items: PromptSessionEvent & { type: "plan" }) => void;
-  autoApprove: () => boolean;
 };
 
 export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payload: PromptSessionEvent): void {
@@ -175,7 +173,7 @@ function notePermission(
     payload.input_mode === "secret" || payload.input_mode === "line" || payload.input_mode === "options"
       ? payload.input_mode
       : "choice";
-  if (inputMode === "choice" && (ctx.autoApprove() || sessionSkipsApproval(session))) {
+  if (inputMode === "choice" && session.autoApprove === true) {
     void resolvePermissionSession({
       sessionId: payload.session_id,
       requestId: payload.request_id,
@@ -219,7 +217,6 @@ function resolveStoredPermission(session: ChatSession, run: LiveRun, requestId: 
   );
   if (message?.permission) {
     message.permission.allowed = allowed;
-    if (allowed) noteApprovalRemembered(session, message.permission.inputMode);
   }
   run.pendingPermissions = run.pendingPermissions.filter((item) => item.requestId !== requestId);
 }

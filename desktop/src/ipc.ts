@@ -217,6 +217,14 @@ export function teamupsChannelConnected(): Promise<boolean> {
   return invoke("teamups_channel_connected_command");
 }
 
+export function teamupsChannelPref(): Promise<{ enabled: boolean; signed_in: boolean }> {
+  return invoke("teamups_channel_pref_command");
+}
+
+export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
+  return invoke("teamups_channel_set_enabled_command", { enabled });
+}
+
 export function teamupsChannelReply(id: string, text: string, ok: boolean): Promise<void> {
   return invoke("teamups_channel_reply_command", { id, text, ok });
 }

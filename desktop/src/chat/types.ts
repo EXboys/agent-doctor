@@ -142,6 +142,8 @@ export interface ChatSession {
   workspaceName?: string | null;
   /** This chat already allowed a file change, so later ones are not asked again. */
   rememberApprovals?: boolean;
+  /** This chat's auto-approve switch. Missing means off. */
+  autoApprove?: boolean;
 }
 
 export interface SessionStore {

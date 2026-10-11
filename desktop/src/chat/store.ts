@@ -1,4 +1,5 @@
 import type { AskRuntime } from "../ask-resources";
+import { readAutoApproveDefault } from "./confirm-pref";
 import { normalizePlan } from "../plan";
 import type { ChatMessage, ChatSession, SessionStore } from "./types";
 import {
@@ -164,6 +165,7 @@ export function createEmptySession(
     messages: [],
     runtimeThreadId: null,
     workspaceName: workspaceName ?? null,
+    autoApprove: readAutoApproveDefault(),
   };
 }
 

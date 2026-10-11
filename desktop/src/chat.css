@@ -1878,6 +1878,53 @@ html[data-theme="dark"] .kw-search.chat-knowledge-input {
   font-size: 0.8rem;
 }
 
+.chat-settings-channel-row {
+  flex-wrap: nowrap;
+  gap: 16px;
+}
+
+.chat-settings-channel-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.chat-settings-feishu {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  box-shadow: 0 6px 14px rgba(51, 112, 255, 0.28);
+}
+
+.chat-settings-channel-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.chat-settings-channel-side .chat-settings-status {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--fill);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.chat-settings-channel-side .chat-settings-status.is-on {
+  color: #14804a;
+  background: rgba(52, 199, 89, 0.16);
+}
+
+html[data-theme="dark"] .chat-settings-channel-side .chat-settings-status.is-on {
+  color: #7ddea8;
+  background: rgba(52, 199, 89, 0.18);
+}
+
 .chat-settings-tabs .chat-mode-btn.is-on {
   background: #fff;
   color: var(--text);
@@ -5728,7 +5775,7 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 18px 16px 10px;
+  padding: 18px 16px 72px;
   --chat-log-fade: 44px;
   -webkit-mask-image: linear-gradient(
     to bottom,

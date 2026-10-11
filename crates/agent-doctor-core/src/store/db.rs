@@ -219,6 +219,27 @@ impl SettingsStore {
         Ok(())
     }
 
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        let value = self
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn get_team_settings(&self) -> Result<TeamSettings> {
         let row = self
             .conn

@@ -624,6 +624,8 @@ pub fn run() {
             get_app_locale_command,
             set_app_locale_command,
             channel_link::teamups_channel_connected_command,
+            channel_link::teamups_channel_pref_command,
+            channel_link::teamups_channel_set_enabled_command,
             channel_link::teamups_channel_reply_command
         ])
         .build(tauri::generate_context!())

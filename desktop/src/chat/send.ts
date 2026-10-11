@@ -291,12 +291,11 @@ export function createSendController(deps: SendDeps) {
       return;
     }
 
-    const elevated = deps.elevatedEl.checked;
-
     const chatSessionId = draft.sessionId || deps.getStore().activeId;
     const foreground = chatSessionId === deps.getStore().activeId;
     const here = () => deps.getStore().activeId === chatSessionId;
     const sendSessionEarly = deps.sessionById(chatSessionId) ?? deps.activeSession();
+    const elevated = sendSessionEarly.autoApprove === true;
     const runtimeForTurn = foreground ? deps.selectedRuntime() : sendSessionEarly.runtime;
     const providerTag = deps.providerTag?.() ?? "";
     if (

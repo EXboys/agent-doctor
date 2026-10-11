@@ -450,7 +450,6 @@ export function wireChatControllers(): void {
     setAssistantRaw: (raw) => {
       chatState.assistantRaw = raw;
     },
-    autoApprove: () => elevatedEl.checked,
     resendBefore: (messageId) => {
       const session = chatState.store?.sessions.find((item) =>
         item.messages.some((message) => message.id === messageId),
@@ -611,7 +610,6 @@ export function wireChatControllers(): void {
             flushStorePersist();
             if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
           },
-          autoApprove: () => elevatedEl.checked,
         },
         chatId,
         payload,
