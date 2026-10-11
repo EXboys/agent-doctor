@@ -75,9 +75,10 @@ import {
 } from "./chat/runtime";
 import { getLocale, t } from "./i18n";
 import { applyThemePreference, readThemePreference, watchSystemTheme } from "./chat/theme";
-import { bindChatSettings } from "./chat/settings-page";
+import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
+import { teamupsChannelConnected, teamupsChannelReply } from "./ipc";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
@@ -248,10 +249,6 @@ export function bootChat(): void {
   });
   workspaceHintEl.addEventListener("dblclick", () => void openMainWorkspace());
   elevatedEl.addEventListener("change", () => {
-    if (elevatedEl.checked && !window.confirm(t("chat.elevatedConfirm"))) {
-      elevatedEl.checked = false;
-      return;
-    }
     if (elevatedEl.checked) {
       void chatState.permissions?.approvePendingChoices();
     }
@@ -400,8 +397,13 @@ export function bootChat(): void {
 
   bindLocaleSync(() => {
     applyI18n();
-    const locale = document.querySelector<HTMLSelectElement>("#chat-settings-locale");
-    if (locale) locale.value = getLocale();
+    document.querySelectorAll<HTMLButtonElement>("[data-settings-locale]").forEach((button) => {
+      const on = button.dataset.settingsLocale === getLocale();
+      button.classList.toggle("is-on", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    refreshConfirmCopy();
+    paintChannel();
   });
 
   void ensureListener();
@@ -425,6 +427,55 @@ export function bootChat(): void {
     if (!id || !chatState.sessions?.openSessionFromIsland) return;
     chatState.sessions.openSessionFromIsland(id);
   });
+  let channelOn = false;
+  const paintChannel = () => {
+    const el = document.querySelector<HTMLElement>("#chat-settings-channel");
+    if (!el) return;
+    el.textContent = channelOn ? t("chat.settingsChannelOn") : t("chat.settingsChannelOff");
+  };
+  void listen<boolean>("teamups-channel-status", (event) => {
+    channelOn = event.payload === true;
+    paintChannel();
+  });
+  void teamupsChannelConnected()
+    .then((on) => {
+      channelOn = on;
+      paintChannel();
+    })
+    .catch(() => paintChannel());
+  void listen<{ id?: string; text?: string }>("teamups-channel-job", (event) => {
+    const id = event.payload?.id?.trim() ?? "";
+    const text = event.payload?.text?.trim() ?? "";
+    void runChannelJob(id, text);
+  });
+  async function runChannelJob(id: string, text: string): Promise<void> {
+    const sessionId = chatState.store?.activeId ?? "";
+    const fail = (message: string) => {
+      void teamupsChannelReply(id, message, false).catch(() => {});
+    };
+    if (!id || !text || !chatState.send || !sessionId) {
+      fail(t("chat.channelNotReady"));
+      return;
+    }
+    if (isChatRunning(sessionId) || runningCount() >= MAX_PARALLEL_RUNS) {
+      fail(t("chat.channelBusy"));
+      return;
+    }
+    const started = Date.now();
+    try {
+      await chatState.send.sendAsk({
+        draft: { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] },
+      });
+    } catch {
+      fail(t("chat.channelFailed"));
+      return;
+    }
+    const session = chatState.store?.sessions.find((item) => item.id === sessionId);
+    const reply = [...(session?.messages ?? [])]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.at >= started - 2000);
+    void teamupsChannelReply(id, reply?.content.trim() || t("chat.channelDone"), true).catch(() => {});
+  }
   void listen<{ sessionId?: string; text?: string }>("island-send-text", (event) => {
     const text = event.payload?.text?.trim() ?? "";
     const sessionId = event.payload?.sessionId || chatState.store?.activeId || "";

@@ -140,6 +140,8 @@ export interface ChatSession {
   interrupted?: { status: Exclude<PromptSessionStatus, "succeeded">; at: number } | null;
   /** Registered project from the main app (`workspaces.yaml`). Empty = use default when sending. */
   workspaceName?: string | null;
+  /** This chat already allowed a file change, so later ones are not asked again. */
+  rememberApprovals?: boolean;
 }
 
 export interface SessionStore {

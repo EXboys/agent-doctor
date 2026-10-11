@@ -21,6 +21,7 @@ use tauri_plugin_opener::OpenerExt;
 #[cfg(target_os = "macos")]
 const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
+mod channel_link;
 mod commands;
 mod island;
 mod speech;
@@ -32,11 +33,11 @@ pub(crate) use tray::{rebuild_tray_menu, remember_tray_health, update_tray_toolt
 
 use commands::*;
 use island::{
-    current_island_view_command, island_claim_keyboard_command, island_hide_when_idle_command,
-    island_open_session_command, island_pin_command, island_restore_command,
-    island_send_text_command, island_set_content_height_command, island_set_hide_when_idle_command,
-    island_set_hover_command, island_set_reading_command, publish_island_snapshot_command,
-    IslandHost,
+    current_island_view_command, island_claim_keyboard_command, island_enabled_command,
+    island_hide_when_idle_command, island_open_session_command, island_pin_command,
+    island_restore_command, island_send_text_command, island_set_content_height_command,
+    island_set_enabled_command, island_set_hide_when_idle_command, island_set_hover_command,
+    island_set_reading_command, publish_island_snapshot_command, IslandHost,
 };
 use state::{ActivePromptRun, PromptSessionState};
 use windows::{
@@ -475,6 +476,7 @@ pub fn run() {
             }
             windows::show_main_window(app.handle());
             tray::setup_tray(app);
+            channel_link::spawn(app.handle());
             seed_default_workspace_in_background();
             // Pre-create Ask on the UI thread at startup. Creating it on first
             // click can hang WebView2 on Windows (blank titled window, Close
@@ -616,9 +618,13 @@ pub fn run() {
             island_set_content_height_command,
             island_set_hide_when_idle_command,
             island_hide_when_idle_command,
+            island_set_enabled_command,
+            island_enabled_command,
             current_island_view_command,
             get_app_locale_command,
-            set_app_locale_command
+            set_app_locale_command,
+            channel_link::teamups_channel_connected_command,
+            channel_link::teamups_channel_reply_command
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -19,7 +19,6 @@ import {
 import { chatState, initChatStore } from "./chat-state";
 import {
   elevatedEl,
-  elevatedLabelEl,
   elevatedWrapEl,
   readImageWrapEl,
   modelBtnEl,
@@ -504,21 +503,8 @@ export function syncRestoreBackupButton(): void {
 }
 
 export function updateElevatedLabel(): void {
-  const runtime = selectedRuntime();
-  elevatedWrapEl.hidden = false;
-  const detail =
-    runtime === "codex"
-      ? t("chat.elevatedCodex")
-      : runtime === "hermes"
-        ? t("chat.elevatedHermes")
-        : runtime === "openclaw"
-          ? t("chat.elevatedOpenclaw")
-          : runtime === "deepseek-harness"
-            ? t("chat.elevatedDeepseekHarness")
-            : t("chat.elevatedClaude");
-  elevatedWrapEl.title = `${detail} — ${t("chat.permissionHint")}`;
+  if (elevatedWrapEl) elevatedWrapEl.hidden = true;
   elevatedEl.disabled = false;
-  elevatedLabelEl.textContent = detail;
 }
 
 export function setStatus(text: string, tone: "ok" | "warn" | "error" | "muted" = "muted"): void {

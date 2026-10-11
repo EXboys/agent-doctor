@@ -2,7 +2,7 @@ import { ensureChatThemeButton } from "./chat/theme";
 
 export const elevatedEl = document.querySelector<HTMLInputElement>("#chat-elevated")!;
 export const elevatedLabelEl = document.querySelector<HTMLElement>("#chat-elevated-label")!;
-export const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement;
+export const elevatedWrapEl = elevatedEl.closest("label") as HTMLLabelElement | null;
 export const readImageEl = document.querySelector<HTMLInputElement>("#chat-read-image")!;
 export const readImageWrapEl = document.querySelector<HTMLElement>("#chat-read-image-wrap");
 export const modelBtnEl = document.querySelector<HTMLButtonElement>("#chat-model-btn")!;

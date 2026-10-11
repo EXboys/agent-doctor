@@ -85,9 +85,19 @@ export type UiStep = {
   text: string;
 };
 
+const SCROLLBAR = `<style>
+html,body{scrollbar-width:thin !important;scrollbar-color:rgba(128,128,128,.14) transparent !important}
+::-webkit-scrollbar{width:4px !important;height:4px !important}
+::-webkit-scrollbar-thumb{background:rgba(128,128,128,.14) !important;border:1px solid transparent !important;background-clip:padding-box !important;border-radius:99px !important}
+::-webkit-scrollbar-track{background:transparent !important}
+</style>`;
+
 export function wrapHtmlForPreview(html: string): string {
-  if (/<head[\s>]/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${RUNNER}`);
-  return `${RUNNER}${html}`;
+  const withRunner = /<head[\s>]/i.test(html)
+    ? html.replace(/<head([^>]*)>/i, `<head$1>${RUNNER}`)
+    : `${RUNNER}${html}`;
+  if (/<\/head>/i.test(withRunner)) return withRunner.replace(/<\/head>/i, `${SCROLLBAR}</head>`);
+  return `${SCROLLBAR}${withRunner}`;
 }
 
 /** A web address, or a short local one like localhost:3000. */

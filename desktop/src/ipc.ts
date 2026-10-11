@@ -213,6 +213,14 @@ export function teamupsAccountStatus(): Promise<TeamupsAccountStatus> {
   return invoke("teamups_account_status_command");
 }
 
+export function teamupsChannelConnected(): Promise<boolean> {
+  return invoke("teamups_channel_connected_command");
+}
+
+export function teamupsChannelReply(id: string, text: string, ok: boolean): Promise<void> {
+  return invoke("teamups_channel_reply_command", { id, text, ok });
+}
+
 export function signOutTeamups(): Promise<TeamupsAccountStatus> {
   return invoke("sign_out_teamups_command");
 }
@@ -857,6 +865,14 @@ export function islandSetContentHeight(height: number): Promise<void> {
 
 export function islandHideWhenIdle(): Promise<boolean> {
   return invoke("island_hide_when_idle_command");
+}
+
+export function islandEnabled(): Promise<boolean> {
+  return invoke("island_enabled_command");
+}
+
+export function islandSetEnabled(enabled: boolean): Promise<void> {
+  return invoke("island_set_enabled_command", { enabled });
 }
 
 export function islandSetHideWhenIdle(hide: boolean): Promise<void> {

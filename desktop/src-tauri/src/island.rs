@@ -153,6 +153,8 @@ struct Inner {
     dirty: bool,
     /// Whether the saved idle-hide choice has been read.
     pref_loaded: bool,
+    /// The person can turn the top bar off in settings. On until they say otherwise.
+    enabled: bool,
     /// Last placed size and screen origin, so status text can update without resizing.
     placed: HashMap<String, (i32, i32, i32, i32)>,
     /// Monitor work-area origins, so a new screen gets its own notch.
@@ -176,6 +178,7 @@ impl Default for Inner {
             applying: false,
             dirty: false,
             pref_loaded: false,
+            enabled: true,
             placed: HashMap::new(),
             screen_sig: Vec::new(),
             last_view: IslandView {
@@ -305,6 +308,41 @@ fn write_hide_pref(app: &AppHandle, hide: bool) {
     let _ = std::fs::write(path, if hide { "1" } else { "0" });
 }
 
+fn enabled_pref_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("island-enabled"))
+}
+
+fn read_enabled_pref(app: &AppHandle) -> Option<bool> {
+    let raw = std::fs::read_to_string(enabled_pref_path(app)?).ok()?;
+    match raw.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn write_enabled_pref(app: &AppHandle, enabled: bool) {
+    let Some(path) = enabled_pref_path(app) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, if enabled { "1" } else { "0" });
+}
+
+/// Off means the bar stays away, even while a turn is running.
+pub(crate) fn chrome_if_enabled(enabled: bool, chrome: Chrome) -> Chrome {
+    if enabled {
+        chrome
+    } else {
+        Chrome::Hidden
+    }
+}
+
 fn ensure_hide_pref_loaded(app: &AppHandle) {
     let host = app.state::<IslandHost>();
     let mut guard = host.inner.lock().expect("island");
@@ -314,6 +352,9 @@ fn ensure_hide_pref_loaded(app: &AppHandle) {
     guard.pref_loaded = true;
     if let Some(hide) = read_hide_pref(app) {
         guard.snapshot.hide_when_idle = hide;
+    }
+    if let Some(enabled) = read_enabled_pref(app) {
+        guard.enabled = enabled;
     }
 }
 
@@ -422,21 +463,26 @@ fn apply_once(app: &AppHandle) {
             guard.folded = false;
         }
         let awake = island_awake(&guard.snapshot);
+        let enabled = guard.enabled;
         #[cfg(not(windows))]
         let attention = pending_opens_card(guard.snapshot.pending.as_ref());
         #[cfg(windows)]
-        let chrome = windows_status_chrome(ask_in_front, awake);
+        let chrome = chrome_if_enabled(enabled, windows_status_chrome(ask_in_front, awake));
         #[cfg(not(windows))]
-        let chrome = island_chrome(
-            guard.hovering,
-            attention,
-            guard.snapshot.composing,
-            guard.folded,
-            guard.opened,
-            guard.snapshot.hide_when_idle,
-            awake,
+        let chrome = chrome_if_enabled(
+            enabled,
+            island_chrome(
+                guard.hovering,
+                attention,
+                guard.snapshot.composing,
+                guard.folded,
+                guard.opened,
+                guard.snapshot.hide_when_idle,
+                awake,
+            ),
         );
-        let park = cfg!(target_os = "macos")
+        let park = enabled
+            && cfg!(target_os = "macos")
             && should_park_windows(
                 guard.snapshot.active,
                 guard.snapshot.browser,
@@ -1613,6 +1659,37 @@ pub fn island_hide_when_idle_command(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
+pub fn island_enabled_command(app: AppHandle) -> bool {
+    ensure_hide_pref_loaded(&app);
+    app.state::<IslandHost>()
+        .inner
+        .lock()
+        .expect("island")
+        .enabled
+}
+
+#[tauri::command]
+pub fn island_set_enabled_command(app: AppHandle, enabled: bool) -> Result<(), String> {
+    hop(&app, move |app| {
+        {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            guard.pref_loaded = true;
+            guard.enabled = enabled;
+            if !enabled {
+                guard.hovering = false;
+                guard.opened = false;
+                guard.reading = false;
+                guard.folded = false;
+            }
+        }
+        write_enabled_pref(app, enabled);
+        apply(app);
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub fn island_set_hide_when_idle_command(app: AppHandle, hide: bool) -> Result<(), String> {
     hop(&app, move |app| {
         {
@@ -1640,8 +1717,9 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 #[cfg(test)]
 mod tests {
     use super::{
-        island_chrome, island_frame, peek_height, pending_opens_card, should_park_windows,
-        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor,
+        chrome_if_enabled, island_chrome, island_frame, peek_height, pending_opens_card,
+        should_park_windows, windows_status_chrome, windows_status_frame, Chrome, IslandPending,
+        TopAnchor,
     };
 
     #[test]
@@ -1731,6 +1809,13 @@ mod tests {
             island_chrome(false, false, false, false, true, true, false),
             Chrome::Peek
         );
+    }
+
+    #[test]
+    fn turning_the_bar_off_hides_it() {
+        assert_eq!(chrome_if_enabled(false, Chrome::Pill), Chrome::Hidden);
+        assert_eq!(chrome_if_enabled(false, Chrome::Peek), Chrome::Hidden);
+        assert_eq!(chrome_if_enabled(true, Chrome::Pill), Chrome::Pill);
     }
 
     #[test]

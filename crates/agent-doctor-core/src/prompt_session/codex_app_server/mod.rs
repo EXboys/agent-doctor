@@ -130,8 +130,10 @@ fn ask_sandbox_roots(overlay: &std::collections::HashMap<String, String>) -> Vec
     if let Some(dir) = crate::adapters::util::config_dir() {
         roots.push(dir.join("agent-doctor").display().to_string());
     }
-    // Videos and other files usually sit on the Desktop, in Downloads, or in
-    // Movies — not inside the project folder. Temp clips sit in /tmp.
+    // Videos and other files usually sit on the Desktop, in Downloads, in
+    // Movies, or on an external disk under /Volumes — not inside the project
+    // folder. The /Volumes prefix also covers a disk plugged in after the chat
+    // starts. Temp clips sit in /tmp.
     if let Some(home) = dirs::home_dir() {
         roots.push(home.display().to_string());
     }
@@ -142,6 +144,10 @@ fn ask_sandbox_roots(overlay: &std::collections::HashMap<String, String>) -> Vec
     #[cfg(unix)]
     {
         roots.push("/tmp".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        roots.push("/Volumes".to_string());
     }
     roots
 }
@@ -183,9 +189,10 @@ fn is_thread_open_failure(err: &anyhow::Error) -> bool {
 
 fn codex_ask_developer_instructions(browser_mcp: bool) -> String {
     let mut text = String::from(
-        "Use ordinary shell and file tools, including when the task edits a video or other files outside the project folder, or removes temporary files. \
+        "Use ordinary shell and file tools, including when the task edits a video or other files outside the project folder, on an external disk under /Volumes, or removes temporary files. \
+         /Volumes is already a writable root, the same as the home folder. \
          If an ordinary command is blocked, call it again with require_escalated so the app can show Allow, then continue the task. \
-         Do not stop, and do not tell the user to open a terminal, change settings, or avoid a command. \
+         Do not stop, do not write a script for the user to run, and do not tell the user to open a terminal, change settings, or avoid a command. \
          Create and edit files with the file tools already listed for you. Do not call apply_patch: this Codex rejects that call. \
          If no file tool is listed, write the file with an ordinary shell command. \
          When request_user_input is available and you need a secret, token, password, or a decision only the user can make, call that tool. \
@@ -1038,6 +1045,8 @@ mod tests {
             let home = home.display().to_string();
             assert!(roots.iter().any(|root| root == &home));
         }
+        #[cfg(target_os = "macos")]
+        assert!(roots.iter().any(|root| root == "/Volumes"));
     }
 
     #[cfg(unix)]

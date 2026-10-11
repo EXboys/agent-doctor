@@ -1,3 +1,4 @@
+import { noteApprovalRemembered, sessionSkipsApproval } from "./confirm-pref";
 import { t } from "../i18n";
 import { resolvePermissionSession } from "../ipc";
 import {
@@ -174,7 +175,7 @@ function notePermission(
     payload.input_mode === "secret" || payload.input_mode === "line" || payload.input_mode === "options"
       ? payload.input_mode
       : "choice";
-  if (inputMode === "choice" && ctx.autoApprove()) {
+  if (inputMode === "choice" && (ctx.autoApprove() || sessionSkipsApproval(session))) {
     void resolvePermissionSession({
       sessionId: payload.session_id,
       requestId: payload.request_id,
@@ -216,6 +217,9 @@ function resolveStoredPermission(session: ChatSession, run: LiveRun, requestId: 
   const message = session.messages.find(
     (item) => item.role === "permission" && item.permission?.requestId === requestId,
   );
-  if (message?.permission) message.permission.allowed = allowed;
+  if (message?.permission) {
+    message.permission.allowed = allowed;
+    if (allowed) noteApprovalRemembered(session, message.permission.inputMode);
+  }
   run.pendingPermissions = run.pendingPermissions.filter((item) => item.requestId !== requestId);
 }

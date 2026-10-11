@@ -292,7 +292,6 @@ export function createSendController(deps: SendDeps) {
     }
 
     const elevated = deps.elevatedEl.checked;
-    if (elevated && !draft.fromVoice && !opts?.draft && !window.confirm(t("chat.elevatedConfirm"))) return;
 
     const chatSessionId = draft.sessionId || deps.getStore().activeId;
     const foreground = chatSessionId === deps.getStore().activeId;

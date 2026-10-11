@@ -9,6 +9,7 @@ mod resolve;
 mod sync_router;
 mod teamups;
 mod teamups_auth;
+mod teamups_channel;
 
 pub use install::{
     install_local_skills, remove_local_skill, skill_roots, SkillInstallError, SkillInstallReport,
@@ -27,6 +28,10 @@ pub use teamups_auth::{
     poll_teamups_login, sign_out_teamups, start_teamups_login, teamups_account_status,
     TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
     TeamupsOfficialStatus,
+};
+pub use teamups_channel::{
+    parse_teamups_channel_job, teamups_channel_auth, teamups_channel_hello, teamups_channel_reply,
+    teamups_channel_ws_url, TeamupsChannelJob,
 };
 
 use anyhow::Result;

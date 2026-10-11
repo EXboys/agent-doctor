@@ -68,7 +68,7 @@ pub struct TeamupsOfficialStatus {
     pub period: Option<String>,
 }
 
-fn mall_base_url() -> Result<String> {
+pub(crate) fn mall_base_url() -> Result<String> {
     let store = open_settings_store()?;
     let configured = store.get_skills_source_settings()?;
     let kind = configured.source.unwrap_or(SkillsSourceKind::Teamups);

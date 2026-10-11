@@ -207,6 +207,12 @@
 
         <section id="chat-settings" class="chat-settings" hidden aria-hidden="true">
           <aside class="chat-settings-nav">
+            <button id="chat-settings-back" type="button" class="chat-settings-back">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M14.5 6.5 9 12l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span data-i18n="chat.settingsBack">返回</span>
+            </button>
             <label class="chat-settings-search">
               <span class="chat-settings-search-icon" aria-hidden="true">⌕</span>
               <input
@@ -222,9 +228,17 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.5v2.2M12 18.3v2.2M4.8 6.2l1.6 1.6M17.6 16.2l1.6 1.6M4.8 17.8l1.6-1.6M17.6 7.8l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                 <span data-i18n="chat.settingsAppearance">外观</span>
               </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="conversation">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 7.5h12M6 12h8M6 16.5H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M5 4.75h14A1.75 1.75 0 0 1 20.75 6.5v8.2a1.75 1.75 0 0 1-1.75 1.75H9.2L5.5 19.5v-3.05H5A1.75 1.75 0 0 1 3.25 14.7V6.5A1.75 1.75 0 0 1 5 4.75Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                <span data-i18n="chat.settingsConversation">对话</span>
+              </button>
               <button type="button" class="chat-settings-nav-item" data-settings-nav="language">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h10M9 6c0 6-2.5 9.5-6 12M9 6c1.2 2.4 2.2 4.2 2.8 6.2M14 18l2.2-6L18.5 18M15.1 16h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <span data-i18n="chat.settingsLanguage">语言</span>
+              </button>
+              <button type="button" class="chat-settings-nav-item" data-settings-nav="about">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5M12 8h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <span data-i18n="chat.settingsAbout">关于</span>
               </button>
             </nav>
           </aside>
@@ -238,11 +252,53 @@
                     <strong data-i18n="chat.settingsTheme">颜色</strong>
                     <span data-i18n="chat.settingsThemeHint">问答页面的明暗</span>
                   </div>
-                  <select id="chat-settings-theme" class="chat-settings-select" aria-label="颜色">
-                    <option value="light" data-i18n="chat.themeLight">浅色</option>
-                    <option value="dark" data-i18n="chat.themeDark">深色</option>
-                    <option value="system" data-i18n="chat.settingsThemeSystem">和电脑一样</option>
-                  </select>
+                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="颜色">
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-theme="light" data-i18n="chat.themeLight">浅色</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-theme="dark" data-i18n="chat.themeDark">深色</button>
+                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-theme="system" aria-selected="true" data-i18n="chat.settingsThemeSystem">跟随系统</button>
+                  </div>
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsIsland">灵动岛</strong>
+                    <span data-i18n="chat.settingsIslandHint">屏幕最上方的黑条。关掉后，对话进行时也不再出现。</span>
+                  </div>
+                  <input
+                    id="chat-settings-island"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    checked
+                    aria-label="灵动岛"
+                  />
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsHideIdle">空闲时隐藏</strong>
+                    <span data-i18n="chat.settingsHideIdleHint">没有对话在进行时，顶部黑条会消失。</span>
+                  </div>
+                  <input
+                    id="chat-settings-island-idle"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="空闲时隐藏"
+                  />
+                </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="conversation" hidden>
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsConfirm">改文件时</strong>
+                    <span id="chat-settings-confirm-hint">每一步都会停下来，等你点允许。</span>
+                  </div>
+                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="改文件时">
+                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-confirm="ask" aria-selected="true" data-i18n="chat.settingsConfirmAsk">每次都问我</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-confirm="session" aria-selected="false" data-i18n="chat.settingsConfirmSession">这场对话问一次</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-confirm="auto" aria-selected="false" data-i18n="chat.settingsConfirmAuto">不用问</button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -253,10 +309,28 @@
                     <strong data-i18n="chat.settingsLanguageLabel">界面文字</strong>
                     <span data-i18n="chat.settingsLanguageHint">按钮和说明用哪种文字</span>
                   </div>
-                  <select id="chat-settings-locale" class="chat-settings-select">
-                    <option value="zh">中文</option>
-                    <option value="en">English</option>
-                  </select>
+                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="界面文字">
+                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-locale="zh" aria-selected="true">中文</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-locale="en">English</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="chat-settings-panel" data-settings-panel="about" hidden>
+              <div class="chat-settings-card">
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsVersion">当前版本</strong>
+                    <span id="chat-settings-version">v—</span>
+                  </div>
+                  <button id="chat-settings-update" type="button" class="chat-settings-action" data-i18n="update.check">检查更新</button>
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsChannel">飞书</strong>
+                    <span data-i18n="chat.settingsChannelHint">手机飞书里发来的话，会在这台电脑上做。</span>
+                  </div>
+                  <span id="chat-settings-channel" class="chat-settings-status">还没连上</span>
                 </div>
               </div>
             </section>
@@ -608,6 +682,8 @@
                   </button>
                   <div id="chat-model-menu" class="chat-model-menu" hidden role="listbox"></div>
                 </div>
+                <input id="chat-elevated" type="checkbox" hidden />
+                <span id="chat-elevated-label" hidden></span>
                 <div class="chat-tune-wrap">
                   <button
                     id="chat-tune"
@@ -627,14 +703,6 @@
                     <span class="chat-tune-dot" aria-hidden="true"></span>
                   </button>
                   <div id="chat-tune-menu" class="chat-tune-menu" hidden>
-                    <div class="chat-tune-item">
-                      <label class="chat-elevated" title="关闭自动审批时，需要确认的操作会在输入框上方弹出选择。">
-                        <input id="chat-elevated" type="checkbox" />
-                        <span id="chat-elevated-label" class="chat-elevated-text" data-i18n="chat.elevatedClaude">自动审批</span>
-                        <span class="chat-elevated-switch" aria-hidden="true"></span>
-                      </label>
-                      <p class="chat-tune-hint" data-i18n="chat.tuneElevatedHint">打开后，要你点「允许」的操作会直接做。</p>
-                    </div>
                     <div class="chat-tune-item">
                       <label
                         id="chat-read-image-wrap"

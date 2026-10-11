@@ -1,5 +1,10 @@
 import { getLocale, t } from "../i18n";
+import { islandEnabled, islandHideWhenIdle, islandSetEnabled, islandSetHideWhenIdle } from "../ipc";
 import { publishLocale } from "../locale-sync";
+import { checkForAppUpdates, readAppVersion } from "../updater";
+import { confirmHintKey, readConfirmMode, writeConfirmMode, type ConfirmMode } from "./confirm-pref";
+import { elevatedEl } from "../chat-dom";
+import { chatState } from "../chat-state";
 import {
   closeKnowledgePage,
   closeResourcesMainPage,
@@ -16,13 +21,20 @@ const shellEl = () => document.querySelector<HTMLElement>("#chat-shell");
 const mainEl = () => document.querySelector<HTMLElement>("#chat-main");
 const pageEl = () => document.querySelector<HTMLElement>("#chat-settings");
 const openEl = () => document.querySelector<HTMLButtonElement>("#chat-settings-open");
+const backEl = () => document.querySelector<HTMLButtonElement>("#chat-settings-back");
 const searchEl = () => document.querySelector<HTMLInputElement>("#chat-settings-search");
 const headingEl = () => document.querySelector<HTMLElement>("#chat-settings-heading");
 const emptyEl = () => document.querySelector<HTMLElement>("#chat-settings-empty");
-const themeEl = () => document.querySelector<HTMLSelectElement>("#chat-settings-theme");
-const localeEl = () => document.querySelector<HTMLSelectElement>("#chat-settings-locale");
+function markChoice(attr: "settingsTheme" | "settingsLocale" | "settingsConfirm", value: string): void {
+  const name = attr === "settingsTheme" ? "settings-theme" : attr === "settingsLocale" ? "settings-locale" : "settings-confirm";
+  document.querySelectorAll<HTMLButtonElement>(`[data-${name}]`).forEach((button) => {
+    const on = button.dataset[attr] === value;
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
 
-const SECTIONS = ["appearance", "language"] as const;
+const SECTIONS = ["appearance", "conversation", "language", "about"] as const;
 type SettingsSection = (typeof SECTIONS)[number];
 
 let activeSection: SettingsSection = "appearance";
@@ -61,7 +73,10 @@ export function openChatSettings(): void {
 }
 
 function sectionTitle(section: SettingsSection): string {
-  return section === "language" ? t("chat.settingsLanguage") : t("chat.settingsAppearance");
+  if (section === "language") return t("chat.settingsLanguage");
+  if (section === "conversation") return t("chat.settingsConversation");
+  if (section === "about") return t("chat.settingsAbout");
+  return t("chat.settingsAppearance");
 }
 
 function sectionMatches(section: SettingsSection, query: string): boolean {
@@ -108,13 +123,61 @@ function showSection(section: SettingsSection): void {
   if (empty) empty.hidden = true;
 }
 
+const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island");
+const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
+const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
+const confirmHintEl = () => document.querySelector<HTMLElement>("#chat-settings-confirm-hint");
+
+export function refreshConfirmCopy(): void {
+  applyConfirmMode(readConfirmMode(), false);
+}
+
+function applyConfirmMode(mode: ConfirmMode, approveNow: boolean): void {
+  const hint = confirmHintEl();
+  if (hint) hint.textContent = t(confirmHintKey(mode));
+  elevatedEl.checked = mode === "auto";
+  if (approveNow && mode === "auto") {
+    void chatState.permissions?.approvePendingChoices();
+  }
+}
+
+function syncIslandSwitch(): void {
+  const input = islandEl();
+  const idle = islandIdleEl();
+  if (input) input.setAttribute("aria-label", t("chat.settingsIsland"));
+  if (idle) idle.setAttribute("aria-label", t("chat.settingsHideIdle"));
+  void Promise.all([islandEnabled(), islandHideWhenIdle()])
+    .then(([on, hide]) => {
+      if (input) input.checked = on;
+      if (idle) {
+        idle.checked = hide;
+        idle.disabled = !on;
+      }
+    })
+    .catch(() => {
+      if (input) input.checked = true;
+      if (idle) idle.disabled = false;
+    });
+}
+
+function syncAbout(): void {
+  const version = versionEl();
+  if (!version) return;
+  void readAppVersion().then((value) => {
+    version.textContent = t("update.version", { version: value });
+  });
+}
+
 function syncChatSettings(): void {
   const search = searchEl();
   if (search) search.placeholder = t("chat.settingsSearch");
-  const theme = themeEl();
-  if (theme) theme.value = readThemePreference();
-  const locale = localeEl();
-  if (locale) locale.value = getLocale();
+  markChoice("settingsTheme", readThemePreference());
+  markChoice("settingsLocale", getLocale());
+  const confirmMode = readConfirmMode();
+  markChoice("settingsConfirm", confirmMode);
+  applyConfirmMode(confirmMode, false);
+  syncIslandSwitch();
+  syncAbout();
   showSection(activeSection);
 }
 
@@ -123,20 +186,55 @@ export function bindChatSettings(applyI18n: () => void): void {
     if (isChatSettingsOpen()) closeChatSettings();
     else openChatSettings();
   });
+  backEl()?.addEventListener("click", () => closeChatSettings());
   document.querySelector(".chat-settings-menu")?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-nav]");
     const next = button?.dataset.settingsNav;
-    if (next === "appearance" || next === "language") showSection(next);
+    if (next === "appearance" || next === "conversation" || next === "language" || next === "about") showSection(next);
   });
   searchEl()?.addEventListener("input", () => showSection(activeSection));
-  themeEl()?.addEventListener("change", () => {
-    const next = themeEl()?.value;
-    if (next === "light" || next === "dark" || next === "system") {
-      applyThemePreference(next as ChatThemePreference);
+  islandEl()?.addEventListener("change", () => {
+    const input = islandEl();
+    if (!input) return;
+    const on = input.checked;
+    const idle = islandIdleEl();
+    if (idle) idle.disabled = !on;
+    void islandSetEnabled(on).catch(() => {
+      input.checked = !on;
+      if (idle) idle.disabled = on;
+    });
+  });
+  islandIdleEl()?.addEventListener("change", () => {
+    const input = islandIdleEl();
+    if (!input) return;
+    const hide = input.checked;
+    void islandSetHideWhenIdle(hide).catch(() => {
+      input.checked = !hide;
+    });
+  });
+  document.querySelector("[data-settings-panel='conversation']")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-confirm]");
+    const next = button?.dataset.settingsConfirm;
+    if (next === "ask" || next === "session" || next === "auto") {
+      writeConfirmMode(next);
+      markChoice("settingsConfirm", next);
+      applyConfirmMode(next, true);
     }
   });
-  localeEl()?.addEventListener("change", () => {
-    const next = localeEl()?.value;
+  document.querySelector("#chat-settings-update")?.addEventListener("click", () => {
+    void checkForAppUpdates({ interactive: true });
+  });
+  document.querySelector("[data-settings-panel='appearance']")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-theme]");
+    const next = button?.dataset.settingsTheme;
+    if (next === "light" || next === "dark" || next === "system") {
+      applyThemePreference(next as ChatThemePreference);
+      markChoice("settingsTheme", next);
+    }
+  });
+  document.querySelector("[data-settings-panel='language']")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-locale]");
+    const next = button?.dataset.settingsLocale;
     if (next === "zh" || next === "en") {
       void publishLocale(next).then(() => {
         applyI18n();

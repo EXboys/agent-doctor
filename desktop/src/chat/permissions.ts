@@ -1,4 +1,5 @@
 
+import { noteApprovalRemembered, sessionSkipsApproval } from "./confirm-pref";
 import { t } from "../i18n";
 import {
   cleanToolLabel,
@@ -312,7 +313,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
         : "choice";
     // A running turn was started before the switch was on, so each tool still asks.
     // Allow those here. A question still needs an answer.
-    if (!needsTypedReply(inputMode) && deps.autoApprove()) {
+    if (!needsTypedReply(inputMode) && (deps.autoApprove() || sessionSkipsApproval(deps.runTargetSession()))) {
       void resolvePermissionSession({
         sessionId: payload.session_id,
         requestId: payload.request_id,
@@ -950,6 +951,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
     );
     if (message?.permission) {
       message.permission.allowed = allowed;
+      if (allowed) noteApprovalRemembered(session, message.permission.inputMode);
       deps.touchSession(session);
       deps.saveStore();
     }
