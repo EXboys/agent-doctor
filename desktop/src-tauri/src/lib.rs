@@ -558,6 +558,7 @@ pub fn run() {
             knowledge_delete_page_command,
             knowledge_clear_command,
             knowledge_context_command,
+            knowledge_sync_command,
             list_remote_hosts_command,
             list_remote_host_rows_command,
             list_remote_projects_command,
@@ -626,6 +627,7 @@ pub fn run() {
             channel_link::teamups_channel_connected_command,
             channel_link::teamups_channel_pref_command,
             channel_link::teamups_channel_set_enabled_command,
+            channel_link::teamups_channel_ask_command,
             channel_link::teamups_channel_reply_command
         ])
         .build(tauri::generate_context!())

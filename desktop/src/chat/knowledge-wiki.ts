@@ -21,6 +21,7 @@ import {
 import { renderMarkdown } from "../markdown";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import type { PromptSessionEvent } from "./types";
+import { syncKnowledgeFolder } from "./knowledge-sync";
 import { wikiRunProgress } from "./wiki-progress";
 
 /** Chat ignores prompt-session events whose client run id starts with this. */
@@ -310,6 +311,7 @@ async function deletePage(scope: WikiScope, path: string, confirmed = false): Pr
     await reloadPages(scope);
     if (!state.pages.length) await loadStarters(scope, depsFor(scope));
     state.notice = { tone: "muted", text: t("chat.wikiDeleted") };
+    syncKnowledgeFolder(scope.projectPath);
   } catch (error) {
     state.notice = { tone: "warn", text: String(error) };
   }
@@ -566,6 +568,7 @@ async function runIngest(
   }
   state.notice = notice;
   rerender();
+  syncKnowledgeFolder(scope.projectPath);
   if (state.selected && isMounted(scope)) void openPage(scope, state.selected);
 }
 
@@ -627,6 +630,7 @@ async function clearKnowledge(scope: WikiScope): Promise<void> {
     state.pendingDelete = null;
     state.starters = null;
     state.notice = { tone: "muted", text: t("chat.wikiDeletedAll") };
+    syncKnowledgeFolder(scope.projectPath);
     await loadStarters(scope, depsFor(scope));
   } catch (error) {
     state.notice = { tone: "warn", text: String(error) };
@@ -1007,6 +1011,7 @@ export async function migrateLegacyNotes(
   } catch {
     return false;
   }
+  syncKnowledgeFolder(scope.projectPath);
   stateFor(scope.key).loaded = false;
   return true;
 }

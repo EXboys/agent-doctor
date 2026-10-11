@@ -8,6 +8,7 @@ import {
 import { assistantMsgWrap, bubblePlainText } from "./copy-ui";
 import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from "./types";
 import { resolvePermissionSession } from "../ipc";
+import { noteChannelAsk } from "./channel-ask";
 
 function permissionToolLabel(name: string): string {
   const key = name.trim().toLowerCase();
@@ -350,6 +351,15 @@ export function createPermissionsController(deps: PermissionsDeps) {
     } else {
       deps.setStatus(t("chat.waitingPermissionElsewhere"), "warn");
     }
+    noteChannelAsk({
+      chatSessionId: deps.runTargetSession().id,
+      requestId: payload.request_id,
+      backendSessionId: payload.session_id,
+      toolName: payload.tool_name,
+      detail: payload.detail,
+      inputMode,
+      inputJson: payload.input_json,
+    });
     const persisted = deps.persistMessage("permission", payload.detail.trim() || payload.tool_name, {
       permission: {
         requestId: payload.request_id,

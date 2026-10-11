@@ -1,6 +1,7 @@
 import { getLocale, t, tNamed } from "../i18n";
 import { listAgentMemory } from "../ipc";
 import { migrateLegacyNotes, mountWiki, wikiPromptSection, type WikiScope } from "./knowledge-wiki";
+import { syncKnowledgeFolder, watchKnowledgeSync } from "./knowledge-sync";
 import {
   closeKnowledgePage,
   closeResourcesMainPage,
@@ -339,6 +340,7 @@ function paintContent(): void {
         ? tNamed("chat.knowledgeScopeProject", projectPick)
         : tNamed("chat.knowledgeScopeAgent", agentLabel(agentPick));
   if (tab === "agent") {
+    watchKnowledgeSync(undefined);
     const docsBlock = agentReadonlyBlock(t("chat.knowledgeDocs"), t("chat.knowledgeAgentDocsHint"), "docs");
     const memBlock = agentReadonlyBlock(t("chat.knowledgeMemories"), t("chat.knowledgeAgentMemHint"), "memories");
     host.append(docsBlock, memBlock);
@@ -348,9 +350,11 @@ function paintContent(): void {
   }
   const wikiScope = activeWikiScope();
   if (!wikiScope) {
+    watchKnowledgeSync(undefined);
     host.append(el("p", "chat-knowledge-empty", t("chat.wikiProjectMissing")));
     return;
   }
+  watchKnowledgeSync(wikiScope.projectPath);
   const wikiHost = el("div", "chat-knowledge-wiki");
   host.append(wikiHost);
   mountWiki(wikiHost, wikiScope, {
@@ -358,6 +362,7 @@ function paintContent(): void {
     chatTranscript: () => deps.chatTranscript(),
     chats: () => deps.chats(),
   });
+  syncKnowledgeFolder(wikiScope.projectPath);
   void migrateScope(wikiScope);
 }
 

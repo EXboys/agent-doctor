@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import { resolvePermissionSession } from "../ipc";
+import { noteChannelAsk } from "./channel-ask";
 import {
   activityKind,
   isQuietPhase,
@@ -208,6 +209,15 @@ function notePermission(
   ctx.touchSession(session);
   ctx.scheduleStorePersist();
   ctx.setStatus(t("chat.waitingPermissionElsewhere"), "warn");
+  noteChannelAsk({
+    chatSessionId: session.id,
+    requestId: payload.request_id,
+    backendSessionId: payload.session_id,
+    toolName: payload.tool_name,
+    detail: payload.detail,
+    inputMode,
+    inputJson: payload.input_json,
+  });
   ctx.scheduleSessionListRender();
 }
 

@@ -1,5 +1,6 @@
 mod deep_diagnose;
 mod knowledge;
+mod knowledge_sync;
 mod locale;
 mod mcp;
 mod ocr;
@@ -14,6 +15,7 @@ mod workspace_files;
 
 pub use deep_diagnose::*;
 pub use knowledge::*;
+pub use knowledge_sync::*;
 pub use locale::*;
 pub use mcp::*;
 pub use ocr::*;

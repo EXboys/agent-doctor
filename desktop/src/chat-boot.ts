@@ -80,12 +80,14 @@ import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
 import { teamupsChannelConnected, teamupsChannelPref, teamupsChannelReply, teamupsChannelSetEnabled } from "./ipc";
+import { applyChannelAnswer, beginChannelJob, endChannelJob } from "./chat/channel-ask";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
 import { bindResourcesPage } from "./chat/resources-page";
 import { bindSchedule } from "./chat/schedule-page";
 import { orderedProjectNames } from "./chat/project-order";
+import { syncKnowledgeFolder } from "./chat/knowledge-sync";
 import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
 import { wireChatControllers } from "./chat-wire";
@@ -194,6 +196,10 @@ export function bootChat(): void {
   void setupFileDrop();
   void (async () => {
     await loadAskResources();
+    syncKnowledgeFolder(null);
+    const projectName = sessionWorkspaceName(activeSession(), chatState.workspaceDoc);
+    const projectPath = projectName ? chatState.workspaceDoc?.workspaces[projectName]?.path?.trim() : "";
+    if (projectPath) syncKnowledgeFolder(projectPath);
     syncSessionWorkspaceUi();
     renderSessionList();
     applyVerifyDraftIfAny();
@@ -497,21 +503,42 @@ export function bootChat(): void {
       fail(t("chat.channelBusy"));
       return;
     }
+    beginChannelJob(id, sessionId);
     const started = Date.now();
+    const draft = () => {
+      const session = chatState.store?.sessions.find((item) => item.id === sessionId);
+      return [...(session?.messages ?? [])]
+        .reverse()
+        .find((message) => message.role === "assistant" && message.at >= started - 2000)
+        ?.content.trim() ?? "";
+    };
+    let sent = "";
+    const pump = window.setInterval(() => {
+      const text = draft();
+      if (!text || text === sent) return;
+      sent = text;
+      void teamupsChannelReply(id, text, true, false).catch(() => {});
+    }, 400);
     try {
       await chatState.send.sendAsk({
         draft: { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] },
       });
     } catch {
+      window.clearInterval(pump);
+      endChannelJob();
       fail(t("chat.channelFailed"));
       return;
     }
-    const session = chatState.store?.sessions.find((item) => item.id === sessionId);
-    const reply = [...(session?.messages ?? [])]
-      .reverse()
-      .find((message) => message.role === "assistant" && message.at >= started - 2000);
-    void teamupsChannelReply(id, reply?.content.trim() || t("chat.channelDone"), true).catch(() => {});
+    window.clearInterval(pump);
+    endChannelJob();
+    void teamupsChannelReply(id, draft() || t("chat.channelDone"), true, true).catch(() => {});
   }
+  void listen<{ requestId?: string; text?: string }>("teamups-channel-answer", (event) => {
+    const requestId = event.payload?.requestId?.trim() ?? "";
+    const text = event.payload?.text?.trim() ?? "";
+    if (!requestId || !text) return;
+    void applyChannelAnswer(requestId, text).catch(() => {});
+  });
   void listen<{ sessionId?: string; text?: string }>("island-send-text", (event) => {
     const text = event.payload?.text?.trim() ?? "";
     const sessionId = event.payload?.sessionId || chatState.store?.activeId || "";

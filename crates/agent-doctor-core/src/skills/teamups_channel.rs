@@ -166,9 +166,9 @@ fn computer_lan_ip() -> String {
     }
 }
 
-pub fn teamups_channel_reply(id: &str, text: &str, ok: bool) -> String {
+pub fn teamups_channel_reply(id: &str, text: &str, ok: bool, done: bool) -> String {
     let text: String = text.chars().take(6000).collect();
-    json!({ "type": "reply", "id": id, "ok": ok, "text": text }).to_string()
+    json!({ "type": "reply", "id": id, "ok": ok, "text": text, "done": done }).to_string()
 }
 
 pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn a_reply_names_the_same_job() {
-        let raw = teamups_channel_reply("a", "做完了", true);
+        let raw = teamups_channel_reply("a", "做完了", true, true);
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["type"], "reply");
         assert_eq!(value["id"], "a");

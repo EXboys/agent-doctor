@@ -223,6 +223,9 @@ export function assignActiveSessionWorkspace(name: string): boolean {
   syncSessionWorkspaceUi(session);
   renderSessionList();
   setStatus(t("chat.sessionWorkspaceChanged", { name }), "ok");
+  if (path) {
+    void import("./chat/knowledge-sync").then(({ syncKnowledgeFolder }) => syncKnowledgeFolder(path));
+  }
   return true;
 }
 export function clearActiveSession(): void {

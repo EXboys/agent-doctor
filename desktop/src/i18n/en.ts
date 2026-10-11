@@ -279,6 +279,12 @@ export const en = {
     "chat.knowledgeProject": "Project",
     "chat.knowledgeAgent": "Agent",
     "chat.knowledgeScopeGlobal": "Every project and every agent uses this. The next question will use it.",
+    "chat.knowledgeSyncSynced": "Synced to your account. Last time {time}",
+    "chat.knowledgeSyncOff": "Sync is off on your account. Turn it on from your account page.",
+    "chat.knowledgeSyncSignedOut": "Sign in and this knowledge base follows your account to another computer.",
+    "chat.knowledgeSyncTooBig": "This knowledge base is over 100MB, so it was not synced.",
+    "chat.knowledgeSyncHeld": "The copy on your account was deleted. Turn sync back on from your account page.",
+    "chat.knowledgeSyncFailed": "This did not sync to your account.",
     "chat.knowledgeScopeProject": "Only {name} uses this. Every agent in this project will use it.",
     "chat.knowledgeScopeAgent":
       "This is {name}’s memory on your Mac — the same files the agent reads in chat. Nothing extra is stored here.",

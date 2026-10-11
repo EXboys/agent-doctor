@@ -6,6 +6,7 @@ pub mod edition;
 pub mod evotown;
 pub mod exec;
 pub mod install;
+pub mod knowledge_sync;
 pub mod lifecycle;
 pub mod presets;
 pub mod probe;
@@ -57,6 +58,7 @@ pub use install::{
     build_explain_input, execute_install, execute_install_with_progress, needs_binary_install,
     InstallOptions, InstallProgressEvent, InstallReport,
 };
+pub use knowledge_sync::{sync_knowledge, KnowledgeSyncReport};
 pub use lifecycle::{
     deepseek_harness_install_shell_command, deepseek_harness_shell_command,
     deepseek_harness_update_shell_command, hermes_shell_command, openclaw_shell_command,

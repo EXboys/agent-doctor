@@ -225,8 +225,12 @@ export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
   return invoke("teamups_channel_set_enabled_command", { enabled });
 }
 
-export function teamupsChannelReply(id: string, text: string, ok: boolean): Promise<void> {
-  return invoke("teamups_channel_reply_command", { id, text, ok });
+export function teamupsChannelReply(id: string, text: string, ok: boolean, done = true): Promise<void> {
+  return invoke("teamups_channel_reply_command", { id, text, ok, done });
+}
+
+export function teamupsChannelAsk(id: string, requestId: string, text: string, wait = true): Promise<void> {
+  return invoke("teamups_channel_ask_command", { id, requestId, text, wait });
 }
 
 export function signOutTeamups(): Promise<TeamupsAccountStatus> {
@@ -538,6 +542,17 @@ export function knowledgeClear(args: { projectPath: string | null }): Promise<vo
 
 export function knowledgeContext(args: { projectPath: string | null }): Promise<KnowledgeContext | null> {
   return invoke("knowledge_context_command", args);
+}
+
+export type KnowledgeSyncReport = {
+  state: "synced" | "off" | "signed_out" | "too_big" | "held" | "failed" | "idle" | string;
+  syncedAtMs: number | null;
+  detail: string;
+};
+
+/** Upload and download one knowledge folder for the signed-in account. */
+export function knowledgeSync(args: { projectPath: string | null }): Promise<KnowledgeSyncReport> {
+  return invoke("knowledge_sync_command", args);
 }
 
 export function initWorkspace(args: {

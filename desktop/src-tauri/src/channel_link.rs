@@ -11,6 +11,7 @@ use agent_doctor_core::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
+use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::{
@@ -32,6 +33,13 @@ pub struct ChannelPref {
 #[derive(Clone, Serialize)]
 struct JobPayload {
     id: String,
+    text: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AnswerPayload {
+    #[serde(rename = "requestId")]
+    request_id: String,
     text: String,
 }
 
@@ -127,6 +135,8 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                 "teamups-channel-job",
                                 JobPayload { id: job.id, text: job.text },
                             );
+                        } else if let Some(answer) = parse_channel_answer(&text) {
+                            let _ = app.emit("teamups-channel-answer", answer);
                         }
                     }
                     Some(Ok(Message::Ping(data))) => {
@@ -173,8 +183,9 @@ pub fn teamups_channel_reply_command(
     id: String,
     text: String,
     ok: bool,
+    done: Option<bool>,
 ) -> Result<(), String> {
-    let frame = teamups_channel_reply(&id, &text, ok);
+    let frame = teamups_channel_reply(&id, &text, ok, done.unwrap_or(true));
     let outbound = app
         .try_state::<Outbound>()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
@@ -183,4 +194,49 @@ pub fn teamups_channel_reply_command(
         .as_ref()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
     tx.send(frame).map_err(|_| "回复没送回官网。".to_string())
+}
+
+#[tauri::command]
+pub fn teamups_channel_ask_command(
+    app: AppHandle,
+    id: String,
+    request_id: String,
+    text: String,
+    wait: Option<bool>,
+) -> Result<(), String> {
+    let frame = json!({
+        "type": "ask",
+        "id": id,
+        "requestId": request_id,
+        "text": text,
+        "wait": wait.unwrap_or(true),
+    })
+    .to_string();
+    let outbound = app
+        .try_state::<Outbound>()
+        .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
+    let guard = outbound.0.lock().expect("channel");
+    let tx = guard
+        .as_ref()
+        .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
+    tx.send(frame).map_err(|_| "确认没送到飞书。".to_string())
+}
+
+fn parse_channel_answer(frame: &str) -> Option<AnswerPayload> {
+    let value: serde_json::Value = serde_json::from_str(frame).ok()?;
+    if value.get("type").and_then(|item| item.as_str()) != Some("answer") {
+        return None;
+    }
+    let request_id = value
+        .get("requestId")
+        .and_then(|item| item.as_str())?
+        .trim();
+    let text = value.get("text").and_then(|item| item.as_str())?.trim();
+    if request_id.is_empty() || text.is_empty() {
+        return None;
+    }
+    Some(AnswerPayload {
+        request_id: request_id.to_string(),
+        text: text.to_string(),
+    })
 }

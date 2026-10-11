@@ -9,9 +9,9 @@ function parseEdition(raw: string | undefined): ProductEdition {
   return "personal";
 }
 
-/** Frontend edition from Vite (`VITE_AGENT_DOCTOR_EDITION` / `AGENT_DOCTOR_EDITION`). */
+/** Frontend edition from Vite (`VITE_AGENT_DOCTOR_EDITION`). Node tests have no Vite env. */
 export function productEdition(): ProductEdition {
-  return parseEdition(import.meta.env.VITE_AGENT_DOCTOR_EDITION);
+  return parseEdition(import.meta.env?.VITE_AGENT_DOCTOR_EDITION);
 }
 
 export function isPersonalEdition(): boolean {
