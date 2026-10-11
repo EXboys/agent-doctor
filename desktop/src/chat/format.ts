@@ -488,6 +488,28 @@ export function stripMarkdown(text: string): string {
     .trim();
 }
 
+/** Folded preview: drop the marks, keep each paragraph on its own line. */
+export function foldPreview(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(^|[\s])\*([^*\n]+)\*(?=$|[\s])/g, "$1$2")
+    .replace(/`/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/[ \t]+/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
 export function preferPlainSummary(summary: string): string {
   const trimmed = summary.trim();
   if (!trimmed) return "";

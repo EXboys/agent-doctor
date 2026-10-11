@@ -26,7 +26,6 @@ export type FilesPanelDeps = {
   treeEl: HTMLButtonElement;
   breadcrumbEl: HTMLElement;
   fileNameEl: HTMLElement;
-  languageEl: HTMLElement;
   placeholderEl: HTMLElement;
   previewEl: HTMLPreElement;
   editorEl: HTMLTextAreaElement;
@@ -34,7 +33,6 @@ export type FilesPanelDeps = {
   imageEl: HTMLElement;
   sheetEl: HTMLElement;
   noticeEl: HTMLElement;
-  saveEl: HTMLButtonElement;
   emptyEl: HTMLElement;
   getRoot: () => string;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
@@ -58,6 +56,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   let openFileRelative = "";
   let openFileLanguage = "text";
   let dirty = false;
+  let saveTimer = 0;
   const diffEl = deps.panelEl.querySelector<HTMLElement>("#chat-files-diff");
   const modeEl = deps.panelEl.querySelector<HTMLElement>("#chat-files-mode");
   const modePreviewEl = deps.panelEl.querySelector<HTMLButtonElement>("#chat-files-mode-preview");
@@ -119,7 +118,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     if (pick) pick.textContent = t(treeCollapsed ? "chat.filesPickOneFolded" : "chat.filesPickOne");
   }
 
-  /** The corner button opens the list; a file in the chat opens the file with the list folded. */
+  /** A file from the chat folds the list. A folder from the chat opens it. */
   function rememberTree(collapsed: boolean): void {
     treeCollapsed = collapsed;
     localStorage.setItem(TREE_KEY, collapsed ? "hidden" : "shown");
@@ -278,9 +277,12 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     if (browserBackEl) browserBackEl.disabled = pageAt <= 0;
     if (browserForwardEl) browserForwardEl.disabled = pageAt < 0 || pageAt >= pageStops.length - 1;
     const stop = pageStops[pageAt];
-    if (browserAddressEl && document.activeElement !== browserAddressEl) {
-      browserAddressEl.value = stop?.kind === "url" ? stop.url : deps.fileNameEl.textContent?.trim() || "";
+    const onUrl = stop?.kind === "url";
+    if (browserAddressEl) {
+      browserAddressEl.hidden = !onUrl;
+      if (onUrl && document.activeElement !== browserAddressEl) browserAddressEl.value = stop.url;
     }
+    deps.fileNameEl.hidden = onUrl;
   }
 
   function loadPageStop(): void {
@@ -304,8 +306,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     pageStops = [{ kind: "file" }];
     pageAt = 0;
     if (browserEl) browserEl.hidden = false;
-    if (uiEl) uiEl.hidden = false;
-    paintUiSteps();
+    if (uiEl) uiEl.hidden = true;
     loadPageStop();
   }
 
@@ -373,6 +374,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       openHtmlPage(content);
     } else {
       if (browserEl) browserEl.hidden = true;
+      deps.fileNameEl.hidden = false;
       paintPageChecks(null);
       renderedFrameEl.removeAttribute("srcdoc");
       renderedDocEl.innerHTML = renderMarkdown(content);
@@ -425,8 +427,6 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       showEditableFile(content, language);
       deps.editorEl.hidden = !editable;
     }
-    deps.saveEl.hidden = !editable;
-    deps.saveEl.classList.remove("is-dirty");
     if (!rows) {
       deps.editorEl.scrollTop = resetScroll ? 0 : top;
       deps.editorEl.scrollLeft = resetScroll ? 0 : left;
@@ -578,18 +578,46 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.previewEl.scrollTop = deps.editorEl.scrollTop;
   }
 
+  function scheduleSave(): void {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => void saveFile(false), 500);
+  }
+
+  async function saveFile(announce: boolean): Promise<boolean> {
+    window.clearTimeout(saveTimer);
+    if (!dirty || !openFileRelative) return true;
+    const root = rootOrWarn();
+    if (!root) return false;
+    const relative = openFileRelative;
+    let written = deps.editorEl.value;
+    try {
+      await writeWorkspaceFile({ root, relative, content: written });
+      if (openFileRelative === relative && deps.editorEl.value !== written) {
+        written = deps.editorEl.value;
+        await writeWorkspaceFile({ root, relative, content: written });
+      }
+    } catch (error) {
+      deps.setStatus(String(error ?? t("chat.filesSaveFailed")), "error");
+      return false;
+    }
+    if (openFileRelative === relative && deps.editorEl.value === written) dirty = false;
+    else if (openFileRelative === relative) scheduleSave();
+    if (announce && !dirty) deps.setStatus(t("chat.filesSaved"), "ok");
+    return true;
+  }
+
   async function openFile(
     relative: string,
     row?: HTMLElement,
     change?: FileChangePreview,
   ): Promise<void> {
+    if (!(await saveFile(false))) return;
     const root = rootOrWarn();
     if (!root) return;
     try {
       const file = await readWorkspaceFile({ root, relative });
       openFileRelative = file.relativePath;
       openFileLanguage = file.language;
-      previewOn = false;
       dirty = false;
       deps.viewEl.hidden = false;
       deps.placeholderEl.hidden = true;
@@ -608,41 +636,23 @@ export function createFilesPanel(deps: FilesPanelDeps) {
           img.removeAttribute("src");
         }
       }
+      deps.fileNameEl.hidden = false;
       deps.fileNameEl.textContent = file.name;
-      deps.languageEl.hidden = !file.editable;
-      deps.languageEl.textContent = file.language.toUpperCase();
       deps.breadcrumbEl.textContent = file.relativePath;
       const shown = hasFileChange(change) ? change : fileChangeFor(file.relativePath);
+      previewOn = canPreview(file.language);
       if (diffEl) diffEl.hidden = true;
       deps.listEl.querySelectorAll(".chat-files-item.is-active").forEach((item) => {
         item.classList.remove("is-active");
       });
       row?.classList.add("is-active");
       paintFile(file.content, file.language, file.editable, true, shown);
-      if (file.editable && !deps.codeEl.classList.contains("is-inline-diff")) {
+      if (file.editable && !previewOn && !deps.codeEl.classList.contains("is-inline-diff")) {
         deps.editorEl.focus();
         revealLines(file.content, shown?.lineStart, shown?.lineEnd);
       }
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesLoadFailed")), "error");
-    }
-  }
-
-  async function saveFile(): Promise<void> {
-    const root = rootOrWarn();
-    if (!root || !openFileRelative) return;
-    try {
-      await writeWorkspaceFile({
-        root,
-        relative: openFileRelative,
-        content: deps.editorEl.value,
-      });
-      dirty = false;
-      deps.saveEl.classList.remove("is-dirty");
-      paintFile(deps.editorEl.value, openFileLanguage, true);
-      deps.setStatus(t("chat.filesSaved"), "ok");
-    } catch (error) {
-      deps.setStatus(String(error ?? t("chat.filesSaveFailed")), "error");
     }
   }
 
@@ -695,7 +705,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
         }
         layout = "split";
         localStorage.setItem(LAYOUT_KEY, layout);
-        rememberTree(true);
+        rememberTree(!match.isDir);
         setOpen(true);
         if (match.isDir) {
           listRelative = relative;
@@ -762,21 +772,20 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     showEditableFile(deps.editorEl.value, openFileLanguage);
     deps.editorEl.focus();
   });
-  deps.saveEl.addEventListener("click", () => void saveFile());
   deps.editorEl.addEventListener("scroll", () => {
     deps.previewEl.scrollTop = deps.editorEl.scrollTop;
     deps.previewEl.scrollLeft = deps.editorEl.scrollLeft;
   });
   deps.editorEl.addEventListener("input", () => {
     dirty = true;
-    deps.saveEl.classList.add("is-dirty");
+    scheduleSave();
     const code = deps.previewEl.querySelector("code");
     if (code) code.innerHTML = highlightCode(deps.editorEl.value, openFileLanguage);
   });
   deps.editorEl.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      void saveFile();
+      void saveFile(true);
       return;
     }
     if (event.key === "Tab") {
@@ -792,8 +801,8 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     applyI18n() {
       deps.toggleEl.title = t("chat.filesToggleHint");
       deps.toggleEl.setAttribute("aria-label", t("chat.filesToggle"));
-      deps.closeEl.textContent = t("chat.filesClose");
-      deps.saveEl.textContent = t("chat.filesSave");
+      deps.closeEl.title = t("chat.filesClose");
+      deps.closeEl.setAttribute("aria-label", t("chat.filesClose"));
       if (modeEl) modeEl.setAttribute("aria-label", t("chat.filesPreview"));
       if (modePreviewEl) modePreviewEl.textContent = t("chat.filesPreview");
       if (modeSourceEl) modeSourceEl.textContent = t("chat.filesSource");

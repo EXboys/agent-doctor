@@ -60,7 +60,6 @@ import {
   filesTreeEl,
   filesBreadcrumbEl,
   filesNameEl,
-  filesLanguageEl,
   filesPlaceholderEl,
   filesPreviewEl,
   filesEditorEl,
@@ -68,7 +67,6 @@ import {
   filesImageEl,
   filesSheetEl,
   filesNoticeEl,
-  filesSaveEl,
   filesEmptyEl,
 } from "./chat-dom";
 import { createFilesPanel } from "./chat/files-panel";
@@ -742,7 +740,6 @@ const askFilesPanel = createFilesPanel({
   treeEl: filesTreeEl,
   breadcrumbEl: filesBreadcrumbEl,
   fileNameEl: filesNameEl,
-  languageEl: filesLanguageEl,
   placeholderEl: filesPlaceholderEl,
   previewEl: filesPreviewEl,
   editorEl: filesEditorEl,
@@ -750,7 +747,6 @@ const askFilesPanel = createFilesPanel({
   imageEl: filesImageEl,
   sheetEl: filesSheetEl,
   noticeEl: filesNoticeEl,
-  saveEl: filesSaveEl,
   emptyEl: filesEmptyEl,
   getRoot: () => {
     const cwd = displayCwd();

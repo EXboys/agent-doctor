@@ -2,7 +2,7 @@ import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
 import { bindLocaleSync } from "../locale-sync";
-import { stripMarkdown } from "../chat/format";
+import { foldPreview, stripMarkdown } from "../chat/format";
 import { renderMarkdown } from "../markdown";
 import { doingText, planProgress, renderPlanCard } from "../plan";
 import {
@@ -630,7 +630,7 @@ function appendReply(body: HTMLElement, rowId: string, reply: string): void {
     button.className = "island-reply-fold";
     const preview = document.createElement("span");
     preview.className = "island-reply-preview";
-    preview.textContent = stripMarkdown(reply);
+    preview.textContent = foldPreview(reply);
     const label = document.createElement("span");
     label.className = "island-reply-toggle";
     label.textContent = t("island.expandReply");

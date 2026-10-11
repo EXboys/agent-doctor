@@ -750,8 +750,9 @@ textarea.island-reply {
 }
 
 .island-reply-fold {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 12px;
   width: 100%;
   margin: 0;
@@ -765,15 +766,16 @@ textarea.island-reply {
 }
 
 .island-reply-preview {
-  flex: 1 1 auto;
   min-width: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
   overflow: hidden;
   white-space: pre-wrap;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.6;
+  max-height: calc(1.6em * 4);
   color: rgba(255, 255, 255, 0.92);
 }
 

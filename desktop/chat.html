@@ -418,20 +418,36 @@
                 <rect x="4" y="5" width="16" height="14" rx="1.8" stroke="currentColor" stroke-width="1.7"/>
               </svg>
             </button>
-            <button id="chat-files-close" type="button" class="chat-files-close" data-i18n="chat.filesClose">关闭</button>
+            <button
+              id="chat-files-close"
+              type="button"
+              class="chat-files-icon-btn"
+              data-i18n-title="chat.filesClose"
+              aria-label="关闭"
+              title="关闭"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="1.25" y="2.25" width="13.5" height="11.5" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+                <path d="M6 2.25v11.5" stroke="currentColor" stroke-width="1.2"/>
+              </svg>
+            </button>
           </header>
           <div class="chat-files-banner">
             <div class="chat-files-view-head">
               <div class="chat-files-title">
                 <strong id="chat-files-name" class="chat-files-name" data-i18n="chat.filesPreviewTitle">文件预览</strong>
-                <span class="chat-files-language" id="chat-files-language">—</span>
               </div>
               <div class="chat-files-view-actions">
-                <div id="chat-files-mode" class="chat-files-mode" hidden role="group" aria-label="预览">
-                  <button type="button" id="chat-files-mode-preview" class="chat-files-mode-btn" aria-pressed="false">预览</button>
-                  <button type="button" id="chat-files-mode-source" class="chat-files-mode-btn is-on" aria-pressed="true">原文</button>
+                <div id="chat-files-browser" class="chat-files-browser" hidden>
+                  <button type="button" id="chat-files-browser-back" class="chat-files-browser-btn" aria-label="后退">←</button>
+                  <button type="button" id="chat-files-browser-forward" class="chat-files-browser-btn" aria-label="前进">→</button>
+                  <button type="button" id="chat-files-browser-reload" class="chat-files-browser-btn" aria-label="刷新">↻</button>
+                  <input id="chat-files-browser-address" class="chat-files-browser-address" type="text" spellcheck="false" placeholder="网页地址，例如本机打开的页面" hidden />
                 </div>
-                <button id="chat-files-save" type="button" class="chat-files-save" hidden data-i18n="chat.filesSave">保存</button>
+                <div id="chat-files-mode" class="chat-files-mode" hidden role="group" aria-label="预览">
+                  <button type="button" id="chat-files-mode-preview" class="chat-files-mode-btn is-on" aria-pressed="true">预览</button>
+                  <button type="button" id="chat-files-mode-source" class="chat-files-mode-btn" aria-pressed="false">原文</button>
+                </div>
               </div>
             </div>
             <button id="chat-files-tree" type="button" class="chat-files-tree" aria-pressed="false" aria-label="收起文件夹" title="先只看这个文件">
@@ -457,12 +473,6 @@
             </div>
             <div id="chat-files-diff" class="chat-files-diff" hidden></div>
             <div id="chat-files-rendered" class="chat-files-rendered" hidden>
-              <div id="chat-files-browser" class="chat-files-browser" hidden>
-                <button type="button" id="chat-files-browser-back" class="chat-files-browser-btn" aria-label="后退">←</button>
-                <button type="button" id="chat-files-browser-forward" class="chat-files-browser-btn" aria-label="前进">→</button>
-                <button type="button" id="chat-files-browser-reload" class="chat-files-browser-btn" aria-label="刷新">↻</button>
-                <input id="chat-files-browser-address" class="chat-files-browser-address" type="text" spellcheck="false" placeholder="网页地址，例如本机打开的页面" />
-              </div>
               <div id="chat-files-ui" class="chat-files-ui" hidden>
                 <div id="chat-files-ui-steps" class="chat-files-ui-steps"></div>
                 <div class="chat-files-ui-bar">
