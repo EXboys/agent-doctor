@@ -328,7 +328,7 @@ where
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if clock.expired() {
+        if clock.expired() || clock.stalled() {
             timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);

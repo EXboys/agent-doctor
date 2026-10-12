@@ -1,12 +1,13 @@
 //! Outbound socket to the TeamUps site. Feishu messages arrive as jobs.
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_doctor_core::{
-    parse_teamups_channel_job, set_teamups_channel_enabled, teamups_channel_auth,
-    teamups_channel_enabled, teamups_channel_hello, teamups_channel_reply,
+    parse_teamups_channel_job, set_teamups_channel_enabled, settings_db_path, teamups_channel_auth,
+    teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello, teamups_channel_reply,
     teamups_channel_signed_in,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -20,6 +21,47 @@ use tokio_tungstenite::{
 };
 
 static CONNECTED: AtomicBool = AtomicBool::new(false);
+static LOG_LOCK: Mutex<()> = Mutex::new(());
+
+/// Ask the site every so often. A line that answers nothing for `SILENT_LIMIT`
+/// is gone, even when the operating system still calls it open.
+const BEAT_EVERY: Duration = Duration::from_secs(25);
+const SILENT_LIMIT: Duration = Duration::from_secs(70);
+const LOG_MAX_BYTES: u64 = 1_000_000;
+
+/// One line per step a Feishu message takes on this computer.
+/// `<config>/logs/channel.log`. Starts over past `LOG_MAX_BYTES`.
+pub fn note(line: &str) {
+    let Some(dir) = settings_db_path().and_then(|p| p.parent().map(|d| d.join("logs"))) else {
+        return;
+    };
+    let _guard = LOG_LOCK.lock();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("channel.log");
+    let reset = std::fs::metadata(&path)
+        .map(|meta| meta.len() > LOG_MAX_BYTES)
+        .unwrap_or(false);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(!reset)
+        .truncate(reset)
+        .open(&path);
+    if let Ok(mut file) = file {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(file, "{stamp} {line}");
+    }
+}
+
+fn clip(text: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    flat.chars().take(40).collect()
+}
 
 struct Outbound(Mutex<Option<mpsc::UnboundedSender<String>>>);
 struct Wake(Arc<Notify>);
@@ -34,6 +76,7 @@ pub struct ChannelPref {
 struct JobPayload {
     id: String,
     text: String,
+    chat: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -57,6 +100,7 @@ pub fn spawn(app: &AppHandle) {
                         if err != "stopped" {
                             eprintln!("[channel] {err}");
                         }
+                        note(&format!("line down: {err}"));
                         set_connected(&app, false);
                         tokio::select! {
                             _ = wake.notified() => {}
@@ -107,10 +151,24 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
         *outbound.0.lock().expect("channel") = Some(tx);
     }
     set_connected(app, true);
+    note("line up");
     let wake = app.state::<Wake>().0.clone();
     let mut open = true;
+    let mut heard = Instant::now();
+    let mut beat = tokio::time::interval(BEAT_EVERY);
+    beat.tick().await;
     while open {
         tokio::select! {
+            _ = beat.tick() => {
+                if heard.elapsed() > SILENT_LIMIT {
+                    note("line silent, reconnecting");
+                    open = false;
+                    continue;
+                }
+                if write.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    open = false;
+                }
+            }
             outgoing = rx.recv() => {
                 let Some(frame) = outgoing else {
                     open = false;
@@ -128,12 +186,32 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                 }
             }
             incoming = read.next() => {
+                if matches!(incoming, Some(Ok(_))) {
+                    heard = Instant::now();
+                }
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         if let Some(job) = parse_teamups_channel_job(&text) {
+                            note(&format!(
+                                "job {} in chat={} text={}",
+                                job.id,
+                                if job.chat.is_empty() { "-" } else { job.chat.as_str() },
+                                clip(&job.text)
+                            ));
+                            if write
+                                .send(Message::Text(teamups_channel_heard(&job.id).into()))
+                                .await
+                                .is_err()
+                            {
+                                open = false;
+                            }
                             let _ = app.emit(
                                 "teamups-channel-job",
-                                JobPayload { id: job.id, text: job.text },
+                                JobPayload {
+                                    id: job.id,
+                                    text: job.text,
+                                    chat: job.chat,
+                                },
                             );
                         } else if let Some(answer) = parse_channel_answer(&text) {
                             let _ = app.emit("teamups-channel-answer", answer);
@@ -185,15 +263,27 @@ pub fn teamups_channel_reply_command(
     ok: bool,
     done: Option<bool>,
 ) -> Result<(), String> {
-    let frame = teamups_channel_reply(&id, &text, ok, done.unwrap_or(true));
+    let done = done.unwrap_or(true);
+    note(&format!(
+        "job {id} reply ok={ok} done={done} text={}",
+        clip(&text)
+    ));
+    let frame = teamups_channel_reply(&id, &text, ok, done);
     let outbound = app
         .try_state::<Outbound>()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
     let guard = outbound.0.lock().expect("channel");
-    let tx = guard
-        .as_ref()
-        .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
+    let tx = guard.as_ref().ok_or_else(|| {
+        note(&format!("job {id} reply dropped: line down"));
+        "飞书这条线还没连上。".to_string()
+    })?;
     tx.send(frame).map_err(|_| "回复没送回官网。".to_string())
+}
+
+/// Steps the chat window takes for one Feishu message, for `channel.log`.
+#[tauri::command]
+pub fn teamups_channel_note_command(id: String, step: String) {
+    note(&format!("job {} {}", clip(&id), clip(&step)));
 }
 
 #[tauri::command]

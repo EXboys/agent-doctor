@@ -10,6 +10,8 @@ export type FollowDraft = {
   mentions: MentionRef[];
   fromVoice?: boolean;
   verifyMcp?: boolean;
+  /** Set when this sentence came from Feishu, so the reply can find the job. */
+  channelJobId?: string;
 };
 
 const queues = new Map<string, FollowDraft[]>();

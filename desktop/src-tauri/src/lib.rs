@@ -628,7 +628,8 @@ pub fn run() {
             channel_link::teamups_channel_pref_command,
             channel_link::teamups_channel_set_enabled_command,
             channel_link::teamups_channel_ask_command,
-            channel_link::teamups_channel_reply_command
+            channel_link::teamups_channel_reply_command,
+            channel_link::teamups_channel_note_command
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

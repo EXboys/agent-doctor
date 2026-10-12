@@ -13,17 +13,20 @@ type PendingAsk = {
   question: string;
 };
 
-let active: { jobId: string; sessionId: string } | null = null;
-let pending: PendingAsk | null = null;
+const jobsBySession = new Map<string, string>();
+const pendingByRequest = new Map<string, PendingAsk>();
 
 export function beginChannelJob(jobId: string, sessionId: string): void {
-  active = { jobId, sessionId };
-  pending = null;
+  jobsBySession.set(sessionId, jobId);
 }
 
-export function endChannelJob(): void {
-  active = null;
-  pending = null;
+export function endChannelJob(sessionId: string): void {
+  const jobId = jobsBySession.get(sessionId);
+  jobsBySession.delete(sessionId);
+  if (!jobId) return;
+  for (const [requestId, ask] of pendingByRequest) {
+    if (ask.jobId === jobId) pendingByRequest.delete(requestId);
+  }
 }
 
 type ChannelAskInput = {
@@ -37,10 +40,11 @@ type ChannelAskInput = {
 };
 
 export function noteChannelAsk(input: ChannelAskInput): void {
-  if (!active || active.sessionId !== input.chatSessionId) return;
+  const jobId = jobsBySession.get(input.chatSessionId);
+  if (!jobId) return;
   if (input.inputMode === "secret") {
     void teamupsChannelAsk(
-      active.jobId,
+      jobId,
       input.requestId,
       "这一步要在电脑上填，飞书里填不安全。",
       false,
@@ -49,7 +53,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
   }
   const questions = parseQuestions(input.inputJson);
   if (input.inputMode === "options" && questions.length > 1) {
-    void teamupsChannelAsk(active.jobId, input.requestId, "有好几件事要选，请在电脑上点。", false).catch(() => {});
+    void teamupsChannelAsk(jobId, input.requestId, "有好几件事要选，请在电脑上点。", false).catch(() => {});
     return;
   }
   const question = questions[0];
@@ -60,21 +64,21 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     : input.inputMode === "line"
       ? `请直接回复：\n${summary}`
       : `要确认这一步：\n${summary}\n\n回复 1 允许\n回复 2 拒绝`;
-  pending = {
-    jobId: active.jobId,
+  pendingByRequest.set(input.requestId, {
+    jobId,
     chatSessionId: input.chatSessionId,
     requestId: input.requestId,
     backendSessionId: input.backendSessionId,
     mode: input.inputMode === "options" ? "options" : input.inputMode === "line" ? "line" : "choice",
     options,
     question: question?.question || summary,
-  };
-  void teamupsChannelAsk(active.jobId, input.requestId, prompt, true).catch(() => {});
+  });
+  void teamupsChannelAsk(jobId, input.requestId, prompt, true).catch(() => {});
 }
 
 export async function applyChannelAnswer(requestId: string, text: string): Promise<void> {
-  const current = pending;
-  if (!current || current.requestId !== requestId) return;
+  const current = pendingByRequest.get(requestId);
+  if (!current) return;
   const raw = text.trim();
   if (!raw) return;
   if (current.mode === "choice") {
@@ -84,7 +88,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
       void teamupsChannelAsk(current.jobId, current.requestId, "没看懂。回复 1 允许，回复 2 拒绝。", true).catch(() => {});
       return;
     }
-    pending = null;
+    pendingByRequest.delete(requestId);
     await resolvePermissionSession({
       sessionId: current.backendSessionId,
       requestId: current.requestId,
@@ -103,7 +107,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
       ).catch(() => {});
       return;
     }
-    pending = null;
+    pendingByRequest.delete(requestId);
     await resolvePermissionSession({
       sessionId: current.backendSessionId,
       requestId: current.requestId,
@@ -112,7 +116,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
     });
     return;
   }
-  pending = null;
+  pendingByRequest.delete(requestId);
   await resolvePermissionSession({
     sessionId: current.backendSessionId,
     requestId: current.requestId,

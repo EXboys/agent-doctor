@@ -12,11 +12,15 @@ use crate::exec::{command_for_path, kill_process_tree};
 
 use super::{PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 
+/// Quiet this long with no step running and nobody asked anything: the turn is stuck.
+const STALL_LIMIT: Duration = Duration::from_secs(10 * 60);
+
 /// Wall clock for one ask turn.
 ///
-/// Quiet time does not stop the turn. A build that prints nothing keeps
-/// running, the same as the agent's own window. `limit` is only the hard stop
-/// from the start of the turn, so a stuck process does not run forever.
+/// Quiet time alone does not stop the turn. A build that prints nothing keeps
+/// running, the same as the agent's own window. `limit` is the hard stop from
+/// the start of the turn. [`SessionClock::stalled`] ends a turn that went quiet
+/// with no step open, so one chat does not hold its queue until `limit`.
 pub(crate) struct SessionClock {
     started: Instant,
     last_activity: Instant,
@@ -46,6 +50,12 @@ impl SessionClock {
 
     pub(crate) fn expired(&self) -> bool {
         Instant::now() >= self.started + self.absolute
+    }
+
+    /// Only for runtimes that report their open steps through `set_tool_running`.
+    /// Callers touch the clock while a question waits on the user.
+    pub(crate) fn stalled(&self) -> bool {
+        !self.tool_running && self.last_activity.elapsed() >= STALL_LIMIT
     }
 
     pub(crate) fn timeout_note(&self, last_tool: &str) -> super::TimeoutNote {
@@ -734,6 +744,18 @@ mod tests {
         clock.last_activity -= Duration::from_secs(10_000);
         clock.set_tool_running(true);
         assert!(!clock.expired());
+        assert!(!clock.stalled());
+    }
+
+    #[test]
+    fn a_quiet_turn_with_no_open_step_is_stalled() {
+        let mut clock = SessionClock::new(86_400);
+        assert!(!clock.stalled());
+        clock.last_activity -= STALL_LIMIT;
+        assert!(clock.stalled());
+        assert_eq!(clock.timeout_note("").kind, "idle");
+        clock.touch();
+        assert!(!clock.stalled());
     }
 
     #[test]

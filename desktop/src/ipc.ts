@@ -229,6 +229,11 @@ export function teamupsChannelReply(id: string, text: string, ok: boolean, done 
   return invoke("teamups_channel_reply_command", { id, text, ok, done });
 }
 
+/** One step of a Feishu message, written to this computer's channel log. */
+export function teamupsChannelNote(id: string, step: string): void {
+  void invoke("teamups_channel_note_command", { id, step }).catch(() => {});
+}
+
 export function teamupsChannelAsk(id: string, requestId: string, text: string, wait = true): Promise<void> {
   return invoke("teamups_channel_ask_command", { id, requestId, text, wait });
 }

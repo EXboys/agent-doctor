@@ -7,9 +7,13 @@
 //! `wss://<site>/api/v1/doctor/channel`
 //! `Authorization: Bearer <license>`
 //!
-//! Client: `{"type":"hello","name":"...","os":"...","ip":"..."}`
+//! Client: `{"type":"hello","name":"...","os":"...","ip":"...","resume":true}`
+//! Client: `{"type":"heard","id":"..."}` as soon as a job frame arrives
 //! Client: `{"type":"reply","id":"...","ok":true,"text":"..."}`
-//! Server: `{"type":"job","id":"...","text":"..."}`
+//! Server: `{"type":"job","id":"...","text":"...","chat":"..."}`
+//! `chat` is the Feishu conversation. Empty means one shared Feishu chat.
+//! `resume` means the server may send an unfinished job again after a
+//! reconnect; the same `id` comes back and the computer must not run it twice.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -22,6 +26,9 @@ use crate::store::default_teamups_base_url;
 pub struct TeamupsChannelJob {
     pub id: String,
     pub text: String,
+    /// Which Feishu conversation this sentence belongs to. Empty when the site
+    /// did not say, so every such job stays in one desktop chat.
+    pub chat: String,
 }
 
 pub fn teamups_channel_ws_url(http_base: &str) -> String {
@@ -90,8 +97,13 @@ fn channel_hello_frame(name: &str, os: &str, ip: &str) -> String {
         "name": clip_field(name, 80),
         "os": clip_field(os, 40),
         "ip": clip_field(ip, 64),
+        "resume": true,
     })
     .to_string()
+}
+
+pub fn teamups_channel_heard(id: &str) -> String {
+    json!({ "type": "heard", "id": id }).to_string()
 }
 
 fn clip_field(value: &str, max: usize) -> String {
@@ -181,9 +193,15 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
     if id.is_empty() || text.is_empty() {
         return None;
     }
+    let chat = value
+        .get("chat")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     Some(TeamupsChannelJob {
         id: id.to_string(),
         text: text.to_string(),
+        chat: chat.chars().take(128).collect(),
     })
 }
 
@@ -212,6 +230,11 @@ mod tests {
             parse_teamups_channel_job(r#"{"type":"job","id":"a","text":"打开项目"}"#).unwrap();
         assert_eq!(job.id, "a");
         assert_eq!(job.text, "打开项目");
+        assert_eq!(job.chat, "");
+        let named =
+            parse_teamups_channel_job(r#"{"type":"job","id":"b","text":"下一句","chat":"oc_123"}"#)
+                .unwrap();
+        assert_eq!(named.chat, "oc_123");
         assert!(parse_teamups_channel_job(r#"{"type":"hello"}"#).is_none());
         assert!(parse_teamups_channel_job(r#"{"type":"job","id":"","text":"hi"}"#).is_none());
     }
@@ -224,6 +247,7 @@ mod tests {
         assert_eq!(value["name"], "MacBook Pro");
         assert_eq!(value["os"], "macOS");
         assert_eq!(value["ip"], "192.168.1.8");
+        assert_eq!(value["resume"], true);
     }
 
     #[test]

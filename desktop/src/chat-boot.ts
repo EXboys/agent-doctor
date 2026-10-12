@@ -26,6 +26,7 @@ import {
 
 import {
   renderSessionList,
+  saveStore,
   ensureRuntimeSession,
   addProjectFromAsk,
   compactActiveSession,
@@ -79,8 +80,29 @@ import { applyThemePreference, readThemePreference, watchSystemTheme } from "./c
 import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
-import { teamupsChannelConnected, teamupsChannelPref, teamupsChannelReply, teamupsChannelSetEnabled } from "./ipc";
-import { applyChannelAnswer, beginChannelJob, endChannelJob } from "./chat/channel-ask";
+import {
+  teamupsChannelConnected,
+  teamupsChannelNote,
+  teamupsChannelPref,
+  teamupsChannelReply,
+  teamupsChannelSetEnabled,
+} from "./ipc";
+import { applyChannelAnswer } from "./chat/channel-ask";
+import {
+  assistantForChannelTurn,
+  channelQueueLength,
+  enqueueChannelJob,
+  setChannelSessionIdle,
+  takeNextChannelJob,
+  unshiftChannelJob,
+  type ChannelQueued,
+} from "./chat/channel-lane";
+import { channelSessionTitle, placeChannelSession } from "./chat/channel-route";
+import { createChannelLedger } from "./chat/channel-ledger";
+import { createEmptySession } from "./chat/store";
+import { defaultWorkspaceName } from "./chat/session-workspace";
+import { MAX_SESSIONS } from "./chat/types";
+import type { SendAskResult } from "./chat/send";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
@@ -485,53 +507,146 @@ export function bootChat(): void {
     })
     .catch(() => paintChannel());
   loadChannelPref();
-  void listen<{ id?: string; text?: string }>("teamups-channel-job", (event) => {
+  const channelLedger = createChannelLedger(
+    (() => {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    })(),
+  );
+  function finishChannel(id: string, text: string, ok: boolean): void {
+    channelLedger.finish(id, text, ok);
+    void teamupsChannelReply(id, text, ok, true).catch(() => {});
+  }
+  setChannelSessionIdle((sessionId) => {
+    const next = takeNextChannelJob(sessionId);
+    if (!next) return;
+    void runChannelTurn(next);
+  });
+  void listen<{ id?: string; text?: string; chat?: string }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
     const text = event.payload?.text?.trim() ?? "";
-    void runChannelJob(id, text);
+    const chat = event.payload?.chat?.trim() ?? "";
+    void runChannelJob(id, text, chat);
   });
-  async function runChannelJob(id: string, text: string): Promise<void> {
-    const sessionId = chatState.store?.activeId ?? "";
-    const fail = (message: string) => {
-      void teamupsChannelReply(id, message, false).catch(() => {});
-    };
-    if (!id || !text || !chatState.send || !sessionId) {
-      fail(t("chat.channelNotReady"));
-      return;
+  function sessionForChannel(chat: string, text: string): string {
+    const store = chatState.store;
+    const placed = placeChannelSession(store.sessions, chat, () => {
+      const session = createEmptySession(
+        selectedRuntime(),
+        defaultWorkspaceName(chatState.workspaceDoc),
+      );
+      session.title = channelSessionTitle(text);
+      return session;
+    });
+    if (placed.created) {
+      store.sessions = placed.sessions.slice(0, MAX_SESSIONS);
+      saveStore();
+      renderSessionList();
     }
-    if (isChatRunning(sessionId) || runningCount() >= MAX_PARALLEL_RUNS) {
-      fail(t("chat.channelBusy"));
-      return;
+    return placed.session.id;
+  }
+  function tellChannelQueued(job: ChannelQueued): void {
+    if (job.noticed) return;
+    job.noticed = true;
+    teamupsChannelNote(job.id, `queued in ${job.sessionId}`);
+    if (chatState.store.activeId === job.sessionId) {
+      setStatus(t("chat.channelQueued"), "muted");
     }
-    beginChannelJob(id, sessionId);
+    void teamupsChannelReply(job.id, t("chat.channelQueued"), true, false).catch(() => {});
+  }
+  async function runChannelTurn(job: ChannelQueued): Promise<void> {
+    teamupsChannelNote(job.id, `start in ${job.sessionId}`);
+    void teamupsChannelReply(job.id, t("chat.channelStarted"), true, false).catch(() => {});
     const started = Date.now();
-    const draft = () => {
-      const session = chatState.store?.sessions.find((item) => item.id === sessionId);
-      return [...(session?.messages ?? [])]
-        .reverse()
-        .find((message) => message.role === "assistant" && message.at >= started - 2000)
-        ?.content.trim() ?? "";
+    const replyText = () => {
+      const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
+      return assistantForChannelTurn(session?.messages ?? [], started, job.text);
     };
     let sent = "";
     const pump = window.setInterval(() => {
-      const text = draft();
+      const text = replyText();
       if (!text || text === sent) return;
       sent = text;
-      void teamupsChannelReply(id, text, true, false).catch(() => {});
+      void teamupsChannelReply(job.id, text, true, false).catch(() => {});
     }, 400);
+    let result: SendAskResult = "empty";
+    channelLedger.start(job.id);
     try {
-      await chatState.send.sendAsk({
-        draft: { id: crypto.randomUUID(), sessionId, text, attachments: [], mentions: [] },
+      result = await chatState.send.sendAsk({
+        lane: "channel",
+        draft: {
+          id: crypto.randomUUID(),
+          sessionId: job.sessionId,
+          text: job.text,
+          attachments: [],
+          mentions: [],
+          channelJobId: job.id,
+        },
       });
-    } catch {
+    } catch (error) {
       window.clearInterval(pump);
-      endChannelJob();
-      fail(t("chat.channelFailed"));
+      teamupsChannelNote(job.id, `failed ${String(error)}`);
+      finishChannel(job.id, t("chat.channelFailed"), false);
       return;
     }
     window.clearInterval(pump);
-    endChannelJob();
-    void teamupsChannelReply(id, draft() || t("chat.channelDone"), true, true).catch(() => {});
+    if (result === "queued") {
+      channelLedger.unstart(job.id);
+      tellChannelQueued(job);
+      unshiftChannelJob(job);
+      return;
+    }
+    if (result !== "started") {
+      teamupsChannelNote(job.id, `not started ${result}`);
+      finishChannel(job.id, t("chat.channelFailed"), false);
+      return;
+    }
+    const answer = replyText();
+    const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
+    const stopped = Boolean(session?.interrupted && session.interrupted.at >= started);
+    teamupsChannelNote(job.id, stopped ? "stopped" : "done");
+    const final = answer || (stopped ? t("chat.channelFailed") : t("chat.channelDone"));
+    finishChannel(job.id, final, Boolean(answer) || !stopped);
+  }
+  async function runChannelJob(id: string, text: string, chat: string): Promise<void> {
+    teamupsChannelNote(id, "reached chat window");
+    if (!id || !text || !chatState.send || !chatState.store) {
+      teamupsChannelNote(id, "chat window not ready");
+      void teamupsChannelReply(id, t("chat.channelNotReady"), false).catch(() => {});
+      return;
+    }
+    const seen = channelLedger.seen(id);
+    if (seen.kind === "here") {
+      teamupsChannelNote(id, "sent again, already here");
+      return;
+    }
+    if (seen.kind === "done") {
+      teamupsChannelNote(id, "sent again, reply again");
+      void teamupsChannelReply(id, seen.reply || t("chat.channelDone"), seen.ok, true).catch(() => {});
+      return;
+    }
+    if (seen.kind === "cut") {
+      teamupsChannelNote(id, "sent again, was cut off");
+      finishChannel(id, t("chat.channelCut"), false);
+      return;
+    }
+    channelLedger.take(id);
+    try {
+      const sessionId = sessionForChannel(chat, text);
+      const job: ChannelQueued = { id, sessionId, text, noticed: false };
+      if (isChatRunning(sessionId) || channelQueueLength(sessionId) > 0) {
+        tellChannelQueued(job);
+        enqueueChannelJob(job);
+        return;
+      }
+      await runChannelTurn(job);
+    } catch (error) {
+      teamupsChannelNote(id, `failed ${String(error)}`);
+      finishChannel(id, t("chat.channelFailed"), false);
+    }
   }
   void listen<{ requestId?: string; text?: string }>("teamups-channel-answer", (event) => {
     const requestId = event.payload?.requestId?.trim() ?? "";

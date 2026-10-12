@@ -144,6 +144,8 @@ export interface ChatSession {
   rememberApprovals?: boolean;
   /** This chat's auto-approve switch. Missing means off. */
   autoApprove?: boolean;
+  /** Feishu conversation this chat belongs to. One conversation, one chat. */
+  channelKey?: string | null;
 }
 
 export interface SessionStore {

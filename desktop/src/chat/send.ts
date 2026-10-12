@@ -26,6 +26,8 @@ import type {
 } from "./types";
 import { noteIslandUserText } from "../island/publish";
 import { askImageSupport, cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import { beginChannelJob, endChannelJob } from "./channel-ask";
+import { notifyChannelSessionIdle } from "./channel-lane";
 import { MAX_PARALLEL_RUNS } from "./live-runs";
 import { planPictures, type PictureInput, type PictureTurn } from "./picture-route";
 import {
@@ -118,6 +120,8 @@ export type SendDeps = {
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
+
+export type SendAskResult = "started" | "queued" | "empty" | "capped";
 
 function appendUserOnSession(
   session: ChatSession,
@@ -260,27 +264,31 @@ export function createSendController(deps: SendDeps) {
     verifyMcp?: boolean;
     fromVoice?: boolean;
     draft?: FollowDraft;
-  }): Promise<void> {
+    /** Feishu keeps its own queue and may run beside other chats. */
+    lane?: "channel";
+  }): Promise<SendAskResult> {
     const targetId = opts?.draft?.sessionId || deps.getStore().activeId;
+    const channel = opts?.lane === "channel";
     if (targetIsRunning(targetId)) {
+      if (channel) return "queued";
       if (!opts?.draft) {
         const queued = draftFromComposer(opts);
         if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
           deps.setStatus(t("chat.emptyPrompt"), "warn");
-          return;
+          return "empty";
         }
         enqueueFollowUp(targetId, queued);
         clearComposer();
         deps.setStatus(t("chat.queuedStatus"), "muted");
         deps.refreshComposer();
-        return;
+        return "queued";
       }
       enqueueFollowUp(opts.draft.sessionId, opts.draft);
-      return;
+      return "queued";
     }
-    if ((deps.runningCount?.() ?? 0) >= MAX_PARALLEL_RUNS) {
+    if (!channel && (deps.runningCount?.() ?? 0) >= MAX_PARALLEL_RUNS) {
       deps.setStatus(t("chat.tooManyRunning", { n: String(MAX_PARALLEL_RUNS) }), "warn");
-      return;
+      return "capped";
     }
 
     const draft = opts?.draft ?? draftFromComposer(opts);
@@ -288,7 +296,7 @@ export function createSendController(deps: SendDeps) {
     const attachments = draft.attachments;
     if (!text && attachments.length === 0 && draft.mentions.length === 0) {
       deps.setStatus(t("chat.emptyPrompt"), "warn");
-      return;
+      return "empty";
     }
 
     const chatSessionId = draft.sessionId || deps.getStore().activeId;
@@ -343,6 +351,7 @@ export function createSendController(deps: SendDeps) {
     // Claim this chat before the first await, so a second send sees it and queues.
     deps.setBusy(true, chatSessionId);
     try {
+    if (channel && draft.channelJobId) beginChannelJob(draft.channelJobId, chatSessionId);
     if (foreground) {
       deps.clearQuickReplies();
       deps.setAssistantBubble(null);
@@ -413,7 +422,7 @@ export function createSendController(deps: SendDeps) {
 
       // Stop during picture reading clears this chat's run before it exists.
       // Starting anyway would ignore that click.
-      if (!stillGoing()) return;
+      if (!stillGoing()) return "started";
       let report = await startRound(pictures);
       if (pictures?.sendPaths.length && rejectedPictures(report)) {
         // The provider said no to pictures. Send the words once instead.
@@ -501,6 +510,7 @@ export function createSendController(deps: SendDeps) {
       // Yield so any trailing `completed` / delta events from this invoke are
       // handled before we tear down this chat's run (avoids dropping the rest of the turn).
       await Promise.resolve();
+      if (channel) endChannelJob(chatSessionId);
       deps.setBusy(false, chatSessionId);
       if (here()) deps.expireLivePermissionCards();
       deps.settleRunRouting(chatSessionId);
@@ -519,14 +529,22 @@ export function createSendController(deps: SendDeps) {
         }
       }
       const intent = consumeDrainIntent();
+      let continued = false;
       if (intent !== "hold") {
         const merged = mergedFollowUp(takeFollowUps(chatSessionId));
         if (merged) {
-          await sendAsk({ draft: merged, fromVoice: merged.fromVoice, verifyMcp: merged.verifyMcp });
+          const nested = await sendAsk({
+            draft: merged,
+            fromVoice: merged.fromVoice,
+            verifyMcp: merged.verifyMcp,
+          });
+          continued = nested === "started" || nested === "queued";
         }
       }
+      if (!continued) notifyChannelSessionIdle(chatSessionId);
       deps.refreshComposer();
     }
+    return "started";
   }
 
   return { cancelAsk, sendAsk };

@@ -673,7 +673,7 @@ where
             exit_code = None;
             break;
         }
-        if clock.expired() {
+        if clock.expired() || clock.stalled() {
             timeout_note = Some(clock.timeout_note(state.tools.last_label()));
             force_stop_child(child, pid);
             status = PromptSessionStatus::TimedOut;
