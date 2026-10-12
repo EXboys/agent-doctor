@@ -19,6 +19,25 @@ function slim(step: ToolStep): ToolStep {
  * Put a step on this turn's tool messages. A result merges into the message with the
  * same id; a new step takes over the plain status message just saved for it.
  */
+/** Hang a runtime log on the latest tool row of this turn. */
+export function appendRuntimeLog(messages: ChatMessage[], text: string): boolean {
+  const detail = text.trim();
+  if (!detail) return false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === "user") return false;
+    if (message?.role === "tool" && message.step) {
+      const prev = message.step.output?.trim();
+      message.step = slim({
+        ...message.step,
+        output: prev ? `${prev}\n${detail}` : detail,
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
 export function storeToolStep(
   messages: ChatMessage[],
   step: ToolStep,

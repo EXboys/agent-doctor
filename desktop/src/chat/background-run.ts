@@ -5,12 +5,14 @@ import {
   activityKind,
   isQuietPhase,
   isQuietStderr,
+  isRuntimeLog,
   preferPlainSummary,
+  stripLogAnsi,
   splitToolActivity,
   toolSignature,
 } from "./format";
 import { liveRun, type LiveRun } from "./live-runs";
-import { storeToolStep } from "./tool-records";
+import { appendRuntimeLog, storeToolStep } from "./tool-records";
 import { uid } from "./store";
 import type { ChatMessage, ChatSession, PendingPermission, PromptSessionEvent } from "./types";
 
@@ -61,8 +63,13 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       ctx.scheduleStorePersist();
       return;
     case "stderr_line": {
-      const text = payload.line.trim();
+      const text = stripLogAnsi(payload.line).trim();
       if (!text || isQuietStderr(text)) return;
+      if (isRuntimeLog(payload.line) && appendRuntimeLog(session.messages, text)) {
+        ctx.touchSession(session);
+        ctx.scheduleStorePersist();
+        return;
+      }
       session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
       ctx.touchSession(session);
       ctx.scheduleStorePersist();

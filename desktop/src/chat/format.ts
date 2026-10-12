@@ -1,6 +1,48 @@
 import { t, type MessageKey } from "../i18n";
 import type { ToolStep } from "./types";
 
+const LOG_COLOR = /\u001b\[[0-9;]*[A-Za-z]|\[[0-9;]+m/g;
+
+/** Drop terminal color codes, including leftovers after the ESC byte is gone. */
+export function stripLogAnsi(raw: string): string {
+  return raw.replace(LOG_COLOR, "");
+}
+
+/** A runtime log record, recognized by shape rather than by the error text. */
+export function isRuntimeLog(raw: string): boolean {
+  if (/\u001b\[[0-9;]*[A-Za-z]|\[[0-9;]+m/.test(raw)) return true;
+  const text = stripLogAnsi(raw).trim();
+  return /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(text) && /\b(ERROR|WARN|WARNING|INFO|DEBUG)\b/.test(text);
+}
+
+/** Original text worth keeping behind a collapsed row. */
+export function failedCommandScript(raw: string): string | null {
+  if (!isRuntimeLog(raw)) return null;
+  const text = stripLogAnsi(raw).trim();
+  const quoted = text.match(/`([\s\S]+)`\s*$/);
+  return quoted?.[1]?.trim() || text;
+}
+
+/** Short line, with the original script collapsed. */
+export function mountFailedCommand(parent: HTMLElement, raw: string): boolean {
+  const script = failedCommandScript(raw);
+  if (!script) return false;
+  parent.replaceChildren();
+  const summary = document.createElement("div");
+  summary.className = "chat-activity-text";
+  summary.textContent = t("chat.commandFailed");
+  const more = document.createElement("details");
+  more.className = "chat-permission-more";
+  const moreSummary = document.createElement("summary");
+  moreSummary.textContent = t("chat.permissionExpand");
+  const detail = document.createElement("pre");
+  detail.className = "chat-permission-detail";
+  detail.textContent = script;
+  more.append(moreSummary, detail);
+  parent.append(summary, more);
+  return true;
+}
+
 /** One sentence for a command the user should allow without reading a shell line. */
 export function plainPermissionSummary(raw: string): string | null {
   const lower = raw.toLowerCase();
@@ -538,6 +580,7 @@ export function preferPlainSummary(summary: string): string {
     }
     return "";
   }
+  if (/^[\w.-]+ ask ended \([^)]*\) with no captured output$/i.test(trimmed)) return "";
   if (/^claude-code (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   if (/^codex (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";
   if (/^hermes (completed|failed|cancelled|timed out)$/i.test(trimmed)) return "";

@@ -405,10 +405,10 @@ fn clip_tool_detail(text: &str) -> String {
     format!("{clipped}…")
 }
 
-pub(crate) fn summarize(combined: &str, status: &PromptSessionStatus, runtime: &str) -> String {
+pub(crate) fn summarize(combined: &str, _status: &PromptSessionStatus, _runtime: &str) -> String {
     let trimmed = combined.trim();
     if trimmed.is_empty() {
-        return format!("{runtime} ask ended ({status:?}) with no captured output");
+        return String::new();
     }
     if trimmed.chars().count() <= SUMMARY_CHARS {
         return trimmed.to_string();
@@ -569,10 +569,43 @@ pub(crate) fn strip_runtime_stderr_noise(raw: &str) -> String {
 }
 
 /// Map Codex app-server / policy jargon into short Chinese UI copy.
+fn strip_log_ansi(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            i += 2;
+            while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        // ESC is often dropped before the log reaches the UI, leaving `[2m`.
+        if bytes[i] == b'[' {
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == b';') {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'm' && j > i + 1 {
+                i = j + 1;
+                continue;
+            }
+        }
+        let ch = raw[i..].chars().next().unwrap_or('\u{FFFD}');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 pub(crate) fn humanize_runtime_error(raw: &str) -> String {
-    let t = raw.trim();
+    let t = strip_log_ansi(raw).trim().to_string();
     if t.is_empty() {
-        return t.to_string();
+        return t;
     }
     let lower = t.to_ascii_lowercase();
 
@@ -666,7 +699,24 @@ mod tests {
             "Rejected(\"`/bin/zsh -c \\\"rm -rf /tmp/clips\\\"` rejected: rm -f style commands are not permitted. Use a safer approach\")",
         );
         assert!(msg.contains("允许"));
+        assert!(msg.contains("临时文件"));
         assert!(!msg.contains("rm -f style"));
+    }
+
+    #[test]
+    fn empty_turn_is_not_a_status_sentence() {
+        let msg = summarize("", &PromptSessionStatus::Succeeded, "claude-code");
+        assert!(msg.is_empty());
+    }
+
+    #[test]
+    fn keeps_failed_command_script_without_ansi() {
+        let msg = humanize_runtime_error(
+            "\u{1b}[2m2026-10-11T10:12:15Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m codex_core::tools::router: error=exec_command failed for `/bin/zsh -lc 'rm -rf /tmp/x'`",
+        );
+        assert!(msg.contains("exec_command failed for `/bin/zsh -lc 'rm -rf /tmp/x'`"));
+        assert!(!msg.contains('\u{1b}'));
+        assert!(!msg.contains("[31m"));
     }
 
     #[test]

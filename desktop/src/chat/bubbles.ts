@@ -6,13 +6,14 @@ import {
   cleanToolLabel,
   formatPermissionDetail,
   looksLikeToolPayloadJson,
+  mountFailedCommand,
   splitToolActivity,
   toolSignature,
 } from "./format";
 import { renderToolHistoryGroup } from "./activity";
 import { renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
-import { storeToolStep } from "./tool-records";
+import { appendRuntimeLog, storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
 import {
   assistantMsgWrap,
@@ -265,6 +266,12 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.touchSession(session);
     deps.scheduleStorePersist();
   }
+  function rememberRuntimeLog(text: string): void {
+    const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    if (!appendRuntimeLog(session.messages, text)) return;
+    deps.touchSession(session);
+    deps.scheduleStorePersist();
+  }
   function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
     const message = session.messages.find((m) => m.id === id);
@@ -379,7 +386,7 @@ export function createBubblesController(deps: BubblesDeps) {
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${kind}`;
     if (opts?.id) bubble.dataset.messageId = opts.id;
-    bubble.textContent = text;
+    if (!mountFailedCommand(bubble, text)) bubble.textContent = text;
     const strip = renderAttachmentStrip(opts?.attachments);
     if (strip) bubble.appendChild(strip);
     deps.logEl.appendChild(bubble);
@@ -480,6 +487,8 @@ export function createBubblesController(deps: BubblesDeps) {
           const live =
             deps.getBusy() && deps.isViewingRunningSession() && i >= messages.length;
           if (live) {
+            const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
+            if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
             const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
             const label = lastThink?.querySelector<HTMLElement>(".chat-thinking-label");
             if (lastThink && label) {
@@ -560,7 +569,7 @@ export function createBubblesController(deps: BubblesDeps) {
           const bubble = document.createElement("div");
           bubble.className = `chat-bubble ${message.role}`;
           bubble.dataset.messageId = message.id;
-          bubble.textContent = message.content;
+          if (!mountFailedCommand(bubble, message.content)) bubble.textContent = message.content;
           const strip = renderAttachmentStrip(message.attachments);
           if (strip) bubble.appendChild(strip);
           deps.logEl.appendChild(bubble);
@@ -602,6 +611,7 @@ export function createBubblesController(deps: BubblesDeps) {
     persistMessage,
     rememberTool,
     rememberToolStep,
+    rememberRuntimeLog,
     updateAssistantMessage,
     assistantMarkdownSource,
     syncAssistantCopyButton,

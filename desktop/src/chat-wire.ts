@@ -202,6 +202,7 @@ export function wireChatControllers(): void {
     },
     rememberTool: (text) => chatState.bubbles.rememberTool(text),
     rememberToolStep: (step) => chatState.bubbles.rememberToolStep(step),
+    rememberRuntimeLog: (text) => chatState.bubbles.rememberRuntimeLog(text),
     toolRecordsForTurn: () => {
       const session = chatState.busy ? runTargetSession() : activeSession();
       const messages = session.messages;

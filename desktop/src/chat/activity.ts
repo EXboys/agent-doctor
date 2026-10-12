@@ -5,7 +5,11 @@ import {
   activityKind,
   isQuietPhase,
   isQuietStderr,
+  failedCommandScript,
+  isRuntimeLog,
   mergeToolStep,
+  mountFailedCommand,
+  stripLogAnsi,
   readRowStep,
   rowActivityInfo,
   splitToolActivity,
@@ -37,6 +41,8 @@ export type ActivityDeps = {
   rememberTool: (text: string) => void;
   /** Keep a structured step on the session, merged by id. */
   rememberToolStep: (step: ToolStep) => void;
+  /** Keep a runtime log on the latest tool row so a redraw stays collapsed. */
+  rememberRuntimeLog: (text: string) => void;
   /** Tool notes saved since the latest user message. */
   toolRecordsForTurn: () => ToolRecord[];
   /** First critical connection failure this turn (GLM / geo block). */
@@ -231,10 +237,10 @@ export function createToolRowElement(text: string, step?: ToolStep): HTMLDetails
 export type ToolRecord = string | { text: string; step?: ToolStep };
 
 /** Collapsed history of one turn's tool calls. Click a row for the command. */
-export function renderToolHistoryGroup(records: ToolRecord[]): HTMLDetailsElement {
+export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTMLDetailsElement {
   const group = document.createElement("details");
   group.className = "chat-tool-group";
-  group.open = true;
+  group.open = open;
   const count = records.length;
   const summary = document.createElement("summary");
   summary.className = "chat-tool-group-summary";
@@ -403,20 +409,54 @@ export function createActivityController(deps: ActivityDeps) {
     );
     if (stray) {
       parent.insertBefore(stray, block);
-      if (stray instanceof HTMLDetailsElement) stray.open = true;
+      if (stray instanceof HTMLDetailsElement) stray.open = false;
       return;
     }
     if (texts.length === 0) return;
     parent.insertBefore(renderToolHistoryGroup(texts), block);
   }
 
+  function attachLogToLastTool(detail: string): boolean {
+    const rows = deps.logEl.querySelectorAll<HTMLDetailsElement>(".chat-tool-row");
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const cmd = row.querySelector<HTMLElement>(".chat-tool-cmd");
+    if (!cmd) return false;
+    const prev = cmd.textContent?.trim() ?? "";
+    cmd.textContent = prev ? `${prev}\n\n${detail}` : detail;
+    cmd.hidden = false;
+    row.dataset.expandable = "1";
+    const chevron = row.querySelector<HTMLElement>(".chat-tool-chevron");
+    if (chevron) chevron.hidden = false;
+    return true;
+  }
+
   function appendStderrLine(line: string): void {
     if (!deps.isViewingRunningSession()) return;
     const text = line.trim();
     if (!text || isQuietStderr(text)) return;
-    pushChatTurnError(text);
-    const explain = explainChatFailure(text);
-    const display = explain ? formatChatFailureLine(explain) : text;
+    const cleaned = stripLogAnsi(text).trim();
+    pushChatTurnError(cleaned || text);
+    if (isRuntimeLog(text)) {
+      const detail = failedCommandScript(text);
+      if (detail && attachLogToLastTool(detail)) {
+        deps.rememberRuntimeLog(detail);
+        return;
+      }
+    }
+    const explain = explainChatFailure(cleaned || text);
+    if (!explain && failedCommandScript(text)) {
+      const row = document.createElement("div");
+      row.className = "chat-activity kind-log";
+      row.dataset.kind = "log";
+      row.dataset.stderr = "1";
+      row.dataset.command = "1";
+      mountFailedCommand(row, text);
+      deps.logEl.appendChild(row);
+      deps.logEl.scrollTop = deps.logEl.scrollHeight;
+      return;
+    }
+    const display = explain ? formatChatFailureLine(explain) : cleaned || text;
     if (
       explain &&
       (explain.kind === "glm_codex_url" || explain.kind === "geo_blocked") &&
@@ -425,7 +465,7 @@ export function createActivityController(deps: ActivityDeps) {
       deps.onChatConnectionFailure(explain);
     }
     const last = deps.logEl.lastElementChild as HTMLElement | null;
-    if (last?.dataset.kind === "log" && last.dataset.stderr === "1") {
+    if (last?.dataset.kind === "log" && last.dataset.stderr === "1" && last.dataset.command !== "1") {
       const label = last.querySelector<HTMLElement>(".chat-activity-text");
       if (label) {
         label.textContent = `${label.textContent}\n${display}`;

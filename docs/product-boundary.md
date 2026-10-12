@@ -15,6 +15,8 @@ Design and copy are for that person.
 3. After the click, show the result in the same place they clicked. If the warning is still there, say why in one plain sentence and what to tap next.
 4. Commands, paths, and raw English errors are never the only explanation. Those can sit behind a details control.
 
+Chat failures are diagnosed with [chat-experience.md](zh-CN/chat-experience.md). Do not add a special case for one error string.
+
 ## Shared core
 
 | Capability | Meaning |

@@ -3554,6 +3554,12 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   overflow-wrap: anywhere;
 }
 
+.chat-activity.kind-log .chat-permission-more,
+.chat-bubble.meta .chat-permission-more {
+  margin-top: 4px;
+  white-space: normal;
+}
+
 .chat-activity.kind-error {
   display: block;
   width: min(640px, 92%);

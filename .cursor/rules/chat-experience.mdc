@@ -1,0 +1,13 @@
+---
+description: Diagnose chat error screens with the experience spec, not a new error-string branch
+alwaysApply: true
+---
+
+# Chat experience
+
+When a chat screenshot shows a raw log, a script, or a duplicated failure, follow `docs/zh-CN/chat-experience.md`.
+
+- One fact lives on the surface that already owns it (the tool row, the confirm card, or a single failure sentence).
+- The original text stays, collapsed by default.
+- Strip terminal color codes before display, including leftover `[31m` / `[0m`.
+- Classify a runtime log by shape (color codes, or a timestamp plus a severity). Do not add a branch for one error string, app, or folder.
