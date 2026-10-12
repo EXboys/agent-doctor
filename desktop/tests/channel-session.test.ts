@@ -5,6 +5,8 @@
 
 import {
   assistantForChannelTurn,
+  settleChannelAnswer,
+  channelConfirmAction,
   enqueueChannelJob,
   notifyChannelSessionIdle,
   setChannelSessionIdle,
@@ -61,5 +63,35 @@ assert(
   "the next sentence gets its own reply",
 );
 assert(assistantForChannelTurn(messages, 19, "第一句") === "", "an old sentence is not the new reply");
+
+let growing = "";
+const frames = ["先看一眼", "先看一眼。", "先看一眼。\n\n桌面上有这些项目。"];
+const settled = await settleChannelAnswer(
+  () => growing,
+  {
+    flush: () => {
+      if (frames.length) growing = frames.shift() ?? growing;
+    },
+    wait: async () => {},
+  },
+);
+assert(settled === "先看一眼。\n\n桌面上有这些项目。", "the last body is sent after it stops growing");
+
+assert(
+  channelConfirmAction({ confirmToken: true, pendingChoices: 2, busy: true }) === "confirm",
+  "one reply confirms every step still waiting",
+);
+assert(
+  channelConfirmAction({ confirmToken: true, pendingChoices: 0, busy: true }) === "repeat",
+  "a second 1 is not a new sentence",
+);
+assert(
+  channelConfirmAction({ confirmToken: false, pendingChoices: 0, busy: true }) === "queue",
+  "a real sentence still waits its turn",
+);
+assert(
+  channelConfirmAction({ confirmToken: false, pendingChoices: 0, busy: false }) === "run",
+  "an idle chat starts now",
+);
 
 console.log("channel-session ok");

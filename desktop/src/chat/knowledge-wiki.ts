@@ -1016,17 +1016,29 @@ export async function migrateLegacyNotes(
   return true;
 }
 
-/** One knowledge base as prompt text, or null when it has no pages. */
+/** One knowledge base as prompt text, or null when it has nothing to read. */
 export async function wikiPromptSection(label: string, projectPath: string | null): Promise<string | null> {
   try {
     const context = await knowledgeContext({ projectPath });
     if (!context) return null;
-    if (context.full) return `${label}\n${context.full}`;
-    const where =
-      getLocale() === "en"
-        ? `(pages live in ${context.wiki}; open the ones you need)`
-        : `（页面在 ${context.wiki}，需要细节时打开对应页面）`;
-    return `${label} ${where}\n${context.index}`;
+    const zh = getLocale() !== "en";
+    const sourcesOnly = Boolean(context.rawDir) && context.wiki === context.rawDir && !context.full;
+    if (sourcesOnly) {
+      const lead = zh
+        ? "这些资料还没整理成页面。回答前先读："
+        : "These files are not pages yet. Read them before you answer:";
+      return `${label}\n${lead}\n${context.index}`;
+    }
+    const raw = context.rawDir
+      ? zh
+        ? `\n还没写进页面的资料在 ${context.rawDir}。页面里没有的内容，先读这里。`
+        : `\nFiles not on a page yet are in ${context.rawDir}. Read them when the pages do not answer.`
+      : "";
+    if (context.full) return `${label}\n${context.full}${raw}`;
+    const where = zh
+      ? `（页面在 ${context.wiki}，需要细节时打开对应页面）`
+      : `(pages live in ${context.wiki}; open the ones you need)`;
+    return `${label} ${where}\n${context.index}${raw}`;
   } catch {
     return null;
   }

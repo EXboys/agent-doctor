@@ -374,6 +374,32 @@ export function createPermissionsController(deps: PermissionsDeps) {
     showPendingPermission(payload, persisted);
   }
 
+  async function denyPendingChoices(): Promise<boolean> {
+    const session = deps.runTargetSession();
+    const waiting = pendingPermissionBatch.filter((item) => {
+      const message = session.messages.find((entry) => entry.id === item.messageId);
+      return !needsTypedReply(message?.permission?.inputMode);
+    });
+    const needsAnswer = pendingPermissionBatch.some((item) => {
+      const message = session.messages.find((entry) => entry.id === item.messageId);
+      return needsTypedReply(message?.permission?.inputMode);
+    });
+    if (waiting.length === 0 || needsAnswer) return false;
+    for (const item of waiting) {
+      try {
+        await resolvePermissionSession({
+          sessionId: item.sessionId,
+          requestId: item.requestId,
+          allow: false,
+        });
+      } catch {
+        /* The new sentence still starts. The card is closed below. */
+      }
+      markPermissionResolved(item.requestId, false);
+    }
+    return true;
+  }
+
   async function approvePendingChoices(): Promise<void> {
     const session = deps.runTargetSession();
     const items = pendingPermissionBatch.filter((item) => {
@@ -1051,5 +1077,6 @@ export function createPermissionsController(deps: PermissionsDeps) {
     renderPermissionGroup,
     markPermissionResolved,
     approvePendingChoices,
+    denyPendingChoices,
   };
 }

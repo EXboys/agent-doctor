@@ -69,6 +69,14 @@ pub fn install_local_skills(
             installed.push(id);
         }
     }
+    // The copy above is the only real folder. Links into each assistant are
+    // replaced afterwards so an older duplicate does not hide it.
+    if !cfg!(test) && (scope == "global" || scope == "project") {
+        for id in installed.iter().chain(replaced.iter()) {
+            super::publish::forget_skill_links(scope, project_name, runtime, id);
+        }
+        relink_after_change(scope, project_name);
+    }
     Ok(SkillInstallReport {
         installed,
         replaced,
@@ -97,10 +105,34 @@ pub fn remove_local_skill(
             removed += remove_skill_tree(&layout.skills_dir, skill_id)?;
         }
     }
+    if !cfg!(test) {
+        removed += super::publish::forget_skill_links(scope, project_name, runtime, skill_id);
+        relink_after_change(scope, project_name);
+    }
     if removed == 0 {
         Err(SkillInstallError::NotFound)
     } else {
         Ok(removed)
+    }
+}
+
+fn relink_after_change(scope: &str, project_name: Option<&str>) {
+    super::publish::repair_skill_links_at_launch();
+    if scope != "project" {
+        return;
+    }
+    let Some(name) = project_name.map(str::trim).filter(|name| !name.is_empty()) else {
+        return;
+    };
+    for runtime in [
+        "claude-code",
+        "codex",
+        "cursor",
+        "hermes",
+        "openclaw",
+        "deepseek-harness",
+    ] {
+        let _ = super::publish::publish_skills_for_turn(runtime, Some(name));
     }
 }
 
@@ -150,14 +182,7 @@ fn destinations(
     skill_id: &str,
 ) -> Result<Vec<PathBuf>, SkillInstallError> {
     match scope {
-        "global" => {
-            let targets = global_targets(skill_id);
-            if targets.is_empty() {
-                Err(SkillInstallError::NoAgent)
-            } else {
-                Ok(targets)
-            }
-        }
+        "global" => Ok(vec![global_store().join(skill_id)]),
         "agent" => {
             let runtime = runtime.unwrap_or("");
             match agent_target(runtime, skill_id) {
@@ -180,24 +205,11 @@ fn destinations(
     }
 }
 
-fn global_targets(skill_id: &str) -> Vec<PathBuf> {
-    let homes = [
-        (".claude", ".claude/skills"),
-        (".codex", ".codex/skills"),
-        (".cursor", ".cursor/skills"),
-        (".hermes", ".hermes/skills"),
-        (".openclaw", ".openclaw/skills"),
-    ];
-    let mut targets = Vec::new();
-    for (home, skills) in homes {
-        if home_join(home).is_dir() {
-            targets.push(home_join(skills).join(skill_id));
-        }
-    }
-    if DeepSeekHarnessAdapter::home().is_dir() {
-        targets.push(DeepSeekHarnessAdapter::home().join("skills").join(skill_id));
-    }
-    targets
+/// The one real global skills folder. Assistants see it through links.
+fn global_store() -> PathBuf {
+    crate::skills::load_local_skills_layout()
+        .map(|layout| layout.skills_dir)
+        .unwrap_or_else(|_| crate::store::default_skills_cache_dir())
 }
 
 fn agent_target(runtime: &str, skill_id: &str) -> Option<PathBuf> {
@@ -221,18 +233,7 @@ fn agent_target(runtime: &str, skill_id: &str) -> Option<PathBuf> {
 }
 
 fn project_targets(entry: &WorkspaceEntry, skill_id: &str) -> Vec<PathBuf> {
-    let mut targets = vec![
-        entry.path.join(".claude/skills").join(skill_id),
-        entry.path.join(".cursor/skills").join(skill_id),
-        entry.path.join(".dsh/skills").join(skill_id),
-    ];
-    if entry.openclaw_workspace.components().count() > 0 {
-        targets.push(entry.openclaw_workspace.join("skills").join(skill_id));
-    }
-    if entry.codex_home.components().count() > 0 {
-        targets.push(entry.codex_home.join("skills").join(skill_id));
-    }
-    targets
+    vec![entry.path.join(".agent-doctor/skills").join(skill_id)]
 }
 
 /// A skill folder contains `SKILL.md`. A parent folder (or an unpacked zip) may hold several.
@@ -508,18 +509,10 @@ mod tests {
             openclaw_workspace: root.join("openclaw"),
         };
         let targets = project_targets(&entry, "demo");
-        assert!(targets
-            .iter()
-            .any(|path| path.ends_with(".claude/skills/demo")));
-        assert!(targets
-            .iter()
-            .any(|path| path.ends_with(".dsh/skills/demo")));
-        assert!(targets
-            .iter()
-            .any(|path| path.ends_with("openclaw/skills/demo")));
-        assert!(targets
-            .iter()
-            .any(|path| path.ends_with("codex/skills/demo")));
+        assert_eq!(
+            targets,
+            vec![root.join("repo").join(".agent-doctor/skills/demo")]
+        );
     }
 
     #[test]

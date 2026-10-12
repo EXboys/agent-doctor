@@ -478,6 +478,7 @@ pub fn run() {
             tray::setup_tray(app);
             channel_link::spawn(app.handle());
             seed_default_workspace_in_background();
+            spawn_skill_link_repair();
             // Pre-create Ask on the UI thread at startup. Creating it on first
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
@@ -658,6 +659,18 @@ fn seed_default_workspace_in_background() {
             // Warm inventory in this thread so later “Resources” clicks reuse it
             // instead of statting Documents / Chrome again.
             let _ = list_mcp_inventory();
+        });
+}
+
+/// Skill links run on their own thread. The window is already up, and a missing
+/// folder or a denied permission must not surface as a startup error.
+fn spawn_skill_link_repair() {
+    let _ = std::thread::Builder::new()
+        .name("ad-skill-links".into())
+        .spawn(|| {
+            let _ = std::panic::catch_unwind(|| {
+                agent_doctor_core::skills::repair_skill_links_at_launch();
+            });
         });
 }
 

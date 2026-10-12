@@ -76,24 +76,54 @@ export function noteChannelAsk(input: ChannelAskInput): void {
   void teamupsChannelAsk(jobId, input.requestId, prompt, true).catch(() => {});
 }
 
+/** 1 / 允许, or 2 / 拒绝. Anything else is a normal sentence. */
+export function choiceVerdict(text: string): boolean | null {
+  const raw = text.trim();
+  if (/^(1|允许|好|可以|是)$/.test(raw)) return true;
+  if (/^(2|拒绝|不|不行|否)$/.test(raw)) return false;
+  return null;
+}
+
+export function pendingChoiceCount(sessionId: string): number {
+  let count = 0;
+  for (const ask of pendingByRequest.values()) {
+    if (ask.chatSessionId === sessionId && ask.mode === "choice") count += 1;
+  }
+  return count;
+}
+
+/** One Feishu reply covers every still-open 允许/拒绝 for this chat. */
+export async function takePendingChoices(sessionId: string, text: string): Promise<number> {
+  const allow = choiceVerdict(text);
+  if (allow === null) return 0;
+  const matches = [...pendingByRequest.values()].filter(
+    (ask) => ask.chatSessionId === sessionId && ask.mode === "choice",
+  );
+  if (matches.length === 0) return 0;
+  for (const ask of matches) pendingByRequest.delete(ask.requestId);
+  await Promise.all(
+    matches.map((ask) =>
+      resolvePermissionSession({
+        sessionId: ask.backendSessionId,
+        requestId: ask.requestId,
+        allow,
+      }),
+    ),
+  );
+  return matches.length;
+}
+
 export async function applyChannelAnswer(requestId: string, text: string): Promise<void> {
   const current = pendingByRequest.get(requestId);
   if (!current) return;
   const raw = text.trim();
   if (!raw) return;
   if (current.mode === "choice") {
-    const allow = /^(1|允许|好|可以|是)$/.test(raw);
-    const deny = /^(2|拒绝|不|不行|否)$/.test(raw);
-    if (!allow && !deny) {
+    if (choiceVerdict(raw) === null) {
       void teamupsChannelAsk(current.jobId, current.requestId, "没看懂。回复 1 允许，回复 2 拒绝。", true).catch(() => {});
       return;
     }
-    pendingByRequest.delete(requestId);
-    await resolvePermissionSession({
-      sessionId: current.backendSessionId,
-      requestId: current.requestId,
-      allow,
-    });
+    await takePendingChoices(current.chatSessionId, raw);
     return;
   }
   if (current.mode === "options") {

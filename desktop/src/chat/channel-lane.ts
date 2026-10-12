@@ -20,6 +20,21 @@ export function channelQueueLength(sessionId: string): number {
   return queues.get(sessionId)?.length ?? 0;
 }
 
+/**
+ * A Feishu "1" / "2" while steps are still waiting confirms them.
+ * The same word sent again must not become a new queued sentence.
+ */
+export function channelConfirmAction(opts: {
+  confirmToken: boolean;
+  pendingChoices: number;
+  busy: boolean;
+}): "confirm" | "repeat" | "queue" | "run" {
+  if (opts.confirmToken && opts.pendingChoices > 0) return "confirm";
+  if (opts.confirmToken && opts.busy) return "repeat";
+  if (opts.busy) return "queue";
+  return "run";
+}
+
 export function enqueueChannelJob(job: ChannelQueued): void {
   const list = queues.get(job.sessionId) ?? [];
   list.push(job);
@@ -66,4 +81,31 @@ export function assistantForChannelTurn(
     if (message.role === "assistant") assistant = message.content.trim();
   }
   return assistant;
+}
+
+/**
+ * The last words sit in a paint frame after the turn returns.
+ * Wait until the text stops growing, then send that to Feishu.
+ */
+export async function settleChannelAnswer(
+  read: () => string,
+  opts?: { flush?: () => void; wait?: (ms: number) => Promise<void> },
+): Promise<string> {
+  const wait = opts?.wait ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let last = "";
+  let same = 0;
+  for (let i = 0; i < 20; i += 1) {
+    opts?.flush?.();
+    const now = read();
+    if (now && now === last) {
+      same += 1;
+      if (same >= 2) return now;
+    } else {
+      last = now;
+      same = 0;
+    }
+    await wait(50);
+  }
+  opts?.flush?.();
+  return last || read();
 }

@@ -18,7 +18,7 @@ export const PRESET_MODELS_BY_ID: Record<string, string[]> = {
   // https://www.alibabacloud.com/help/en/model-studio/models
   qwen: ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash"],
   // Zhipu BigModel
-  glm: ["glm-5.3", "glm-5.2", "glm-4.6"],
+  glm: ["glm-5.3", "glm-5.2", "glm-5.3-flash", "glm-4.6"],
   // MiniMax Open Platform
   minimax: ["MiniMax-M3", "MiniMax-M2.5", "MiniMax-M2.1"],
   // Moonshot / Kimi

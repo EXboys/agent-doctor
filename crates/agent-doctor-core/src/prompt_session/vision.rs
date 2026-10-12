@@ -83,6 +83,7 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
         "qwen3-vl",
         "glm-4v",
         "glm-4.5v",
+        "glm-5.3-flash",
         "kimi-vl",
         "pixtral",
     ];
@@ -308,6 +309,8 @@ mod tests {
         assert!(!model_sees_images("deepseek-reasoner"));
         assert!(model_sees_images("openai/gpt-5.6-terra"));
         assert!(model_sees_images("gemini-3.8-flash"));
+        assert!(model_sees_images("glm-5.3-flash"));
+        assert!(!model_sees_images("glm-5.3"));
         assert!(!model_sees_images("some-unknown-model"));
         assert!(!model_sees_images(""));
     }

@@ -751,6 +751,7 @@ export function wireChatControllers(): void {
     renderSessionList: () => renderSessionList(),
     readImageTextEnabled: () => readImageTextEnabled(),
     refreshComposer: () => syncComposerUi(),
+    releaseUnansweredSteps: () => chatState.permissions.denyPendingChoices(),
     providerTag: () => {
       const session = chatState.store?.sessions ? activeSession() : null;
       const pinned = session?.providerId

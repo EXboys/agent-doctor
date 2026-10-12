@@ -500,6 +500,8 @@ export type KnowledgeContext = {
   wiki: string;
   index: string;
   full?: string | null;
+  /** Uploaded files that are not wiki pages yet. */
+  rawDir?: string | null;
 };
 
 /** `projectPath` null means the global knowledge base in the home folder. */

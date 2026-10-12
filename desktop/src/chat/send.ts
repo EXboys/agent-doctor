@@ -115,6 +115,11 @@ export type SendDeps = {
   renderSessionList: () => void;
   readImageTextEnabled: () => boolean;
   refreshComposer: () => void;
+  /**
+   * Stop unanswered Allow cards so a new sentence is not stuck behind them.
+   * Returns false when a card still needs something typed.
+   */
+  releaseUnansweredSteps?: () => Promise<boolean>;
   /** Which provider answers now; empty when the app does not choose one. */
   providerTag?: () => string;
 };
@@ -271,20 +276,31 @@ export function createSendController(deps: SendDeps) {
     const channel = opts?.lane === "channel";
     if (targetIsRunning(targetId)) {
       if (channel) return "queued";
-      if (!opts?.draft) {
-        const queued = draftFromComposer(opts);
-        if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
-          deps.setStatus(t("chat.emptyPrompt"), "warn");
-          return "empty";
+      const released = (await deps.releaseUnansweredSteps?.()) === true;
+      if (!released) {
+        if (!opts?.draft) {
+          const queued = draftFromComposer(opts);
+          if (!queued.text && queued.attachments.length === 0 && queued.mentions.length === 0) {
+            deps.setStatus(t("chat.emptyPrompt"), "warn");
+            return "empty";
+          }
+          enqueueFollowUp(targetId, queued);
+          clearComposer();
+          deps.setStatus(t("chat.queuedStatus"), "muted");
+          deps.refreshComposer();
+          return "queued";
         }
-        enqueueFollowUp(targetId, queued);
-        clearComposer();
-        deps.setStatus(t("chat.queuedStatus"), "muted");
-        deps.refreshComposer();
+        enqueueFollowUp(opts.draft.sessionId, opts.draft);
         return "queued";
       }
-      enqueueFollowUp(opts.draft.sessionId, opts.draft);
-      return "queued";
+      try {
+        await cancelPromptSession(targetId);
+      } catch {
+        /* The new sentence still starts. */
+      }
+      deps.setBusy(false, targetId);
+      deps.expireLivePermissionCards();
+      deps.settleRunRouting(targetId);
     }
     if (!channel && (deps.runningCount?.() ?? 0) >= MAX_PARALLEL_RUNS) {
       deps.setStatus(t("chat.tooManyRunning", { n: String(MAX_PARALLEL_RUNS) }), "warn");
@@ -350,6 +366,7 @@ export function createSendController(deps: SendDeps) {
     if (foreground) deps.allowQuickRepliesAgain();
     // Claim this chat before the first await, so a second send sees it and queues.
     deps.setBusy(true, chatSessionId);
+    const turnGen = deps.getBusyGen();
     try {
     if (channel && draft.channelJobId) beginChannelJob(draft.channelJobId, chatSessionId);
     if (foreground) {
@@ -500,6 +517,10 @@ export function createSendController(deps: SendDeps) {
         }
       }
     } finally {
+      if (turnGen !== 0 && deps.getBusyGen() !== turnGen) {
+        if (channel) endChannelJob(chatSessionId);
+        return "started";
+      }
       if (foreground && here()) {
         deps.applyVerifyEvidenceFromAssistant();
         if (deps.getVerifySawBrowserNavigate()) {

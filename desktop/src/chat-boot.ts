@@ -62,6 +62,7 @@ import {
   applyVerifyDraftIfAny,
   cancelAsk,
   sendAsk,
+  flushPendingTextSync,
   offerBackupRestoreIfNeeded,
   askResources,
   mentionMenu,
@@ -87,9 +88,11 @@ import {
   teamupsChannelReply,
   teamupsChannelSetEnabled,
 } from "./ipc";
-import { applyChannelAnswer } from "./chat/channel-ask";
+import { applyChannelAnswer, choiceVerdict, pendingChoiceCount, takePendingChoices } from "./chat/channel-ask";
 import {
   assistantForChannelTurn,
+  settleChannelAnswer,
+  channelConfirmAction,
   channelQueueLength,
   enqueueChannelJob,
   setChannelSessionIdle,
@@ -604,10 +607,10 @@ export function bootChat(): void {
       finishChannel(job.id, t("chat.channelFailed"), false);
       return;
     }
-    const answer = replyText();
+    const answer = await settleChannelAnswer(replyText, { flush: flushPendingTextSync });
     const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
     const stopped = Boolean(session?.interrupted && session.interrupted.at >= started);
-    teamupsChannelNote(job.id, stopped ? "stopped" : "done");
+    teamupsChannelNote(job.id, stopped ? "stopped" : `done chars=${answer.length}`);
     const final = answer || (stopped ? t("chat.channelFailed") : t("chat.channelDone"));
     finishChannel(job.id, final, Boolean(answer) || !stopped);
   }
@@ -637,7 +640,31 @@ export function bootChat(): void {
     try {
       const sessionId = sessionForChannel(chat, text);
       const job: ChannelQueued = { id, sessionId, text, noticed: false };
-      if (isChatRunning(sessionId) || channelQueueLength(sessionId) > 0) {
+      const busy = isChatRunning(sessionId) || channelQueueLength(sessionId) > 0;
+      const action = channelConfirmAction({
+        confirmToken: choiceVerdict(text) !== null,
+        pendingChoices: pendingChoiceCount(sessionId),
+        busy,
+      });
+      if (action === "confirm") {
+        const taken = await takePendingChoices(sessionId, text);
+        if (taken === 0) {
+          finishChannel(id, t("chat.channelAlreadyConfirmed"), true);
+          return;
+        }
+        const allow = choiceVerdict(text) === true;
+        const reply =
+          taken > 1
+            ? t(allow ? "chat.channelAllowedAll" : "chat.channelDeniedAll")
+            : t(allow ? "chat.channelAllowed" : "chat.channelDenied");
+        finishChannel(id, reply, true);
+        return;
+      }
+      if (action === "repeat") {
+        finishChannel(id, t("chat.channelAlreadyConfirmed"), true);
+        return;
+      }
+      if (action === "queue") {
         tellChannelQueued(job);
         enqueueChannelJob(job);
         return;

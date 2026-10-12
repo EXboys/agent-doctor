@@ -87,6 +87,8 @@ pub struct KnowledgeContext {
     wiki: String,
     index: String,
     full: Option<String>,
+    /// Folder of uploaded files that are not wiki pages yet.
+    raw_dir: Option<String>,
 }
 
 fn knowledge_root(project_path: Option<&str>) -> Result<PathBuf, String> {
@@ -629,7 +631,68 @@ pub fn knowledge_clear_command(project_path: Option<String>) -> Result<(), Strin
     fs::remove_dir_all(&root).map_err(|_| "知识库没能删掉，请再试一次。".to_string())
 }
 
-/// What a chat turn should know about this wiki; `None` when it has no pages yet.
+const MAX_RAW_FILES: usize = 40;
+
+fn raw_listing(root: &Path) -> Option<(PathBuf, String)> {
+    let raw = root.join("raw");
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    collect_raw_files(&raw, &raw, &mut lines, &mut truncated, MAX_RAW_FILES);
+    if lines.is_empty() {
+        return None;
+    }
+    if truncated {
+        lines.push("- …".to_string());
+    }
+    Some((raw, lines.join("\n")))
+}
+
+fn collect_raw_files(
+    dir: &Path,
+    base: &Path,
+    out: &mut Vec<String>,
+    truncated: &mut bool,
+    limit: usize,
+) {
+    if out.len() >= limit {
+        *truncated = true;
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    for path in paths {
+        if out.len() >= limit {
+            *truncated = true;
+            return;
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if skip_name(name) {
+            continue;
+        }
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            collect_raw_files(&path, base, out, truncated, limit);
+        } else if meta.is_file() {
+            let rel = rel_string(base, &path);
+            if !rel.is_empty() {
+                out.push(format!("- {rel}"));
+            }
+        }
+    }
+}
+
+/// What a chat turn should know. Wiki pages when they exist, otherwise the uploaded files.
 #[tauri::command]
 pub fn knowledge_context_command(
     project_path: Option<String>,
@@ -642,8 +705,17 @@ pub fn knowledge_context_command(
         .into_iter()
         .filter(|page| page.path != "log.md")
         .collect();
+    let raw = raw_listing(&root);
     if pages.is_empty() {
-        return Ok(None);
+        let Some((raw_path, index)) = raw else {
+            return Ok(None);
+        };
+        return Ok(Some(KnowledgeContext {
+            wiki: display(&raw_path),
+            index,
+            full: None,
+            raw_dir: Some(display(&raw_path)),
+        }));
     }
     let index = fs::read_to_string(wiki.join("index.md")).unwrap_or_default();
     let mut catalog = clip_chars(index.trim(), MAX_INDEX_CHARS);
@@ -675,6 +747,7 @@ pub fn knowledge_context_command(
         wiki: display(&wiki),
         index: catalog,
         full: (!full.is_empty()).then(|| full.trim_end().to_string()),
+        raw_dir: raw.map(|(path, _)| display(&path)),
     }))
 }
 
@@ -721,9 +794,12 @@ mod tests {
         assert!(root.join("AGENTS.md").is_file());
         assert!(root.join(&report.sources[1]).join("inner/b.txt").is_file());
 
-        assert!(knowledge_context_command(project_str.clone())
+        let pending = knowledge_context_command(project_str.clone())
             .unwrap()
-            .is_none());
+            .unwrap();
+        assert!(pending.full.is_none());
+        assert!(pending.index.contains("a.md"));
+        assert!(pending.raw_dir.unwrap().ends_with("raw"));
         knowledge_save_page_command(
             project_str.clone(),
             "guides/start.md".into(),

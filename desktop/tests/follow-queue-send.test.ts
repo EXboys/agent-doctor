@@ -118,7 +118,7 @@ function ok(condition: boolean, what: string): void {
 const roundCalls = () => invokes.filter((call) => call.cmd === "start_prompt_session_command");
 const cancelCalls = () => invokes.filter((call) => call.cmd === "cancel_prompt_session_command");
 
-function newController(sessionId: string, opts?: { readImages?: boolean }) {
+function newController(sessionId: string, opts?: { readImages?: boolean; release?: () => Promise<boolean> }) {
   const session = { id: sessionId, runtimeThreadId: null as string | null };
   const store = { activeId: sessionId } as never;
   const promptEl = { value: "" } as HTMLTextAreaElement;
@@ -203,6 +203,7 @@ function newController(sessionId: string, opts?: { readImages?: boolean }) {
     refreshComposer: () => {
       state.refreshed += 1;
     },
+    releaseUnansweredSteps: opts?.release,
   };
   const api = createSendController(deps as never);
   return { api, state, promptEl };
@@ -229,6 +230,28 @@ await check("Enter during a round queues the note instead of sending it", async 
   eq(state.statuses.at(-1), { text: t("chat.queuedStatus"), tone: "muted" }, "status");
   eq(state.refreshed, 1, "composer refresh");
   takeFollowUps("w-busy");
+});
+
+await check("a new sentence stops unanswered Allow cards instead of queueing", async () => {
+  invokes.length = 0;
+  let released = 0;
+  const { api, state, promptEl } = newController("w-allow", {
+    release: async () => {
+      released += 1;
+      return true;
+    },
+  });
+  state.busy = true;
+  promptEl.value = "改去数桌面上的项目";
+
+  await api.sendAsk();
+
+  eq(released, 1, "unanswered steps released");
+  eq(followUpsFor("w-allow").length, 0, "should not queue");
+  eq(invokes.some((call) => call.cmd === "cancel_prompt_session_command"), true, "waiting round stopped");
+  eq(roundCalls().length, 1, "the new sentence starts");
+  eq(roundCalls()[0].args.prompt, "改去数桌面上的项目", "prompt");
+  eq(promptEl.value, "", "composer should be cleared");
 });
 
 await check("Enter during a round with an empty composer warns instead of queueing", async () => {

@@ -5,6 +5,7 @@ mod evotown_source;
 mod install;
 pub(crate) mod local;
 mod mall;
+mod publish;
 mod resolve;
 mod sync_router;
 mod teamups;
@@ -15,6 +16,7 @@ pub use install::{
     install_local_skills, remove_local_skill, skill_roots, SkillInstallError, SkillInstallReport,
 };
 pub use mall::{install_teamups_mall_item, list_teamups_mall_catalog};
+pub use publish::{publish_skills_for_turn, repair_skill_links, repair_skill_links_at_launch};
 pub use resolve::{
     load_local_skills_layout, resolve_cached_skill_dir, resolve_skills_source,
     save_skills_source_override, LocalSkillsLayout, ResolvedSkillsSource,
