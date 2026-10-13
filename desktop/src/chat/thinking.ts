@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { durationLabel } from "./activity";
+import { durationLabel, followChatLog } from "./activity";
 import { noteThinkingLive, placeProcessBlock } from "./work-trail";
 import type { ChatMessage } from "./types";
 
@@ -94,7 +94,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     const body = block.querySelector<HTMLElement>(".chat-thinking-body")!;
     body.textContent = text;
     body.scrollTop = body.scrollHeight;
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
   }
 
   function seal(): void {

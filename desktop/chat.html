@@ -295,6 +295,16 @@
               <div class="chat-settings-card">
                 <div class="chat-settings-row">
                   <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsVoice">语音</strong>
+                    <span id="chat-settings-voice-hint">在这台电脑上听和读。</span>
+                  </div>
+                  <div class="chat-mode chat-settings-tabs" role="tablist" aria-label="语音">
+                    <button type="button" class="chat-mode-btn is-on" role="tab" data-settings-voice="local" aria-selected="true">这台电脑</button>
+                    <button type="button" class="chat-mode-btn" role="tab" data-settings-voice="cloud" aria-selected="false">云端（更准）</button>
+                  </div>
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
                     <strong data-i18n="chat.settingsAutoApprove">自动审批</strong>
                     <span data-i18n="chat.settingsAutoApproveHint">新建对话时默认关闭。打开后，以后新建的对话会开着。已经有的对话不变。</span>
                   </div>

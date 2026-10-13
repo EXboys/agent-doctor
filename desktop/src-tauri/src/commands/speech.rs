@@ -7,13 +7,19 @@ pub fn speech_capability_command() -> SpeechCapabilityDto {
     speech::capability()
 }
 
+#[tauri::command]
+pub fn voice_cloud_ready_command() -> bool {
+    speech::cloud_ready()
+}
+
 /// One-shot dictation. Emits `speech-event` for partial/final/error while running.
 #[tauri::command]
 pub async fn speech_dictate_command(
     app: AppHandle,
     language: Option<String>,
+    route: Option<String>,
 ) -> Result<SpeechResultDto, String> {
-    tauri::async_runtime::spawn_blocking(move || speech::dictate(app, language))
+    tauri::async_runtime::spawn_blocking(move || speech::dictate(app, language, route))
         .await
         .map_err(|e| format!("speech.failed:join error: {e}"))?
         .map_err(|e| e.to_command_error())
@@ -29,8 +35,9 @@ pub fn speech_cancel_dictation_command() {
 pub async fn voice_listen_start_command(
     app: AppHandle,
     language: Option<String>,
+    route: Option<String>,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || speech::listen(app, language))
+    tauri::async_runtime::spawn_blocking(move || speech::listen(app, language, route))
         .await
         .map_err(|e| format!("speech.failed:join error: {e}"))?
         .map_err(|e| e.to_command_error())
@@ -42,8 +49,12 @@ pub fn voice_listen_stop_command() {
 }
 
 #[tauri::command]
-pub async fn voice_speak_command(text: String, language: Option<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || speech::speak(text, language))
+pub async fn voice_speak_command(
+    text: String,
+    language: Option<String>,
+    route: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || speech::speak(text, language, route))
         .await
         .map_err(|e| format!("speech.failed:join error: {e}"))?
         .map_err(|e| e.to_command_error())

@@ -3,6 +3,8 @@ import { islandEnabled, islandHideWhenIdle, islandSetEnabled, islandSetHideWhenI
 import { publishLocale } from "../locale-sync";
 import { checkForAppUpdates, readAppVersion } from "../updater";
 import { readAutoApproveDefault, writeAutoApproveDefault } from "./confirm-pref";
+import { readVoiceRoute, writeVoiceRoute, type VoiceRoute } from "./voice/route";
+import { teamupsAccountStatus, voiceCloudReady } from "../ipc";
 import {
   closeKnowledgePage,
   closeResourcesMainPage,
@@ -126,6 +128,8 @@ const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-
 const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
 const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
 const autoApproveDefaultEl = () => document.querySelector<HTMLInputElement>("#chat-settings-auto-approve");
+const voiceHintEl = () => document.querySelector<HTMLElement>("#chat-settings-voice-hint");
+let voiceLoggedOut = false;
 
 export function refreshConfirmCopy(): void {
   const input = autoApproveDefaultEl();
@@ -161,12 +165,58 @@ function syncAbout(): void {
   });
 }
 
+function markVoice(route: VoiceRoute, cloudEnabled: boolean): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-settings-voice]").forEach((button) => {
+    const value = button.dataset.settingsVoice;
+    const on = value === route;
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-selected", on ? "true" : "false");
+    button.disabled = value === "cloud" && !cloudEnabled;
+    button.textContent =
+      value === "cloud" ? t("chat.settingsVoiceCloud") : t("chat.settingsVoiceLocal");
+  });
+  const hint = voiceHintEl();
+  if (!hint) return;
+  if (voiceLoggedOut) hint.textContent = t("chat.settingsVoiceLoggedOut");
+  else if (!cloudEnabled && route !== "cloud") {
+    hint.textContent = t("chat.settingsVoiceSignedOut");
+  } else if (route === "cloud") hint.textContent = t("chat.settingsVoiceCloudHint");
+  else hint.textContent = t("chat.settingsVoiceLocalHint");
+}
+
+function syncVoiceChoice(): void {
+  void Promise.all([teamupsAccountStatus().catch(() => null), voiceCloudReady().catch(() => false)]).then(
+    ([account, ready]) => {
+      const signedIn = account?.signed_in === true;
+      if (account && !account.signed_in && readVoiceRoute() === "cloud") {
+        writeVoiceRoute("local");
+        voiceLoggedOut = true;
+      } else if (signedIn) {
+        voiceLoggedOut = false;
+      }
+      const cloudEnabled = signedIn && ready;
+      if (!cloudEnabled && readVoiceRoute() === "cloud") {
+        writeVoiceRoute("local");
+      }
+      const route = readVoiceRoute();
+      if (signedIn && !ready && !voiceLoggedOut) {
+        const hint = voiceHintEl();
+        markVoice(route, false);
+        if (hint) hint.textContent = t("chat.settingsVoiceUnready");
+        return;
+      }
+      markVoice(route, cloudEnabled);
+    },
+  );
+}
+
 function syncChatSettings(): void {
   const search = searchEl();
   if (search) search.placeholder = t("chat.settingsSearch");
   markChoice("settingsTheme", readThemePreference());
   markChoice("settingsLocale", getLocale());
   refreshConfirmCopy();
+  syncVoiceChoice();
   syncIslandSwitch();
   syncAbout();
   showSection(activeSection);
@@ -202,6 +252,16 @@ export function bindChatSettings(applyI18n: () => void): void {
     void islandSetHideWhenIdle(hide).catch(() => {
       input.checked = !hide;
     });
+  });
+  document.querySelector("[data-settings-panel='conversation']")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-voice]");
+    const next = button?.dataset.settingsVoice;
+    if (button?.disabled) return;
+    if (next === "local" || next === "cloud") {
+      writeVoiceRoute(next);
+      voiceLoggedOut = false;
+      syncVoiceChoice();
+    }
   });
   autoApproveDefaultEl()?.addEventListener("change", () => {
     const input = autoApproveDefaultEl();

@@ -18,6 +18,8 @@ mod live_ctrl;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
+mod macos_pcm;
+#[cfg(target_os = "macos")]
 mod macos_playback;
 mod policy;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -136,6 +138,41 @@ pub fn listen_session(
             thread::sleep(Duration::from_millis(200));
         }
     })
+}
+
+/// Microphone audio as 16 kHz mono s16le. `on_audio` also receives the buffer loudness.
+pub fn capture_pcm16_mono(
+    on_audio: &dyn Fn(&[u8], f32),
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), SpeechError> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::capture_pcm16_mono(on_audio, should_cancel)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (on_audio, should_cancel);
+        Err(SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            "cloud voice capture is unavailable",
+        ))
+    }
+}
+
+/// Play 16 kHz mono s16le. Returns when the buffer finishes or `should_cancel` is set.
+pub fn play_pcm16_mono(pcm: &[u8], should_cancel: &dyn Fn() -> bool) -> Result<(), SpeechError> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_pcm::play_pcm16_mono(pcm, should_cancel)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (pcm, should_cancel);
+        Err(SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            "cloud voice playback is unavailable",
+        ))
+    }
 }
 
 pub fn speak(

@@ -16,7 +16,9 @@ use objc2::sel;
 
 use super::activity::{EchoCleanedActivity, SpeechActivity};
 use super::barge::{self, BargeAction};
-use super::macos::{buffer_rms, guard_audio_call, install_input_tap, on_main, require_class};
+use super::macos::{
+    buffer_rms, guard_audio_call, ignore_audio_exception, install_input_tap, on_main, require_class,
+};
 use super::types::{SpeechError, SpeechErrorCode};
 use objc2_foundation::NSString;
 
@@ -509,9 +511,15 @@ fn stop_engine(playback: &Playback) {
         let engine = engine as *mut AnyObject;
         let input = input as *mut AnyObject;
         let format = format as *mut AnyObject;
-        let _: () = msg_send![player, stop];
-        let _: () = msg_send![engine, stop];
-        let _: () = msg_send![input, removeTapOnBus: 0usize];
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![player, stop];
+        }));
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![engine, stop];
+        }));
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![input, removeTapOnBus: 0usize];
+        }));
         let _: () = msg_send![player, release];
         let _: () = msg_send![engine, release];
         let _: () = msg_send![format, release];
@@ -576,8 +584,12 @@ impl BleedWatch {
         on_main(move || unsafe {
             let engine = engine as *mut AnyObject;
             let input = input as *mut AnyObject;
-            let _: () = msg_send![engine, stop];
-            let _: () = msg_send![input, removeTapOnBus: 0usize];
+            ignore_audio_exception(AssertUnwindSafe(|| {
+                let _: () = msg_send![engine, stop];
+            }));
+            ignore_audio_exception(AssertUnwindSafe(|| {
+                let _: () = msg_send![input, removeTapOnBus: 0usize];
+            }));
             let _: () = msg_send![engine, release];
         });
     }
@@ -645,7 +657,9 @@ pub(super) fn start_bleed_watch() -> Result<BleedWatch, SpeechError> {
         let started: bool = msg_send![engine, startAndReturnError: &mut engine_error];
         if !started {
             eprintln!("[voice] barge watch failed: {}", error_text(engine_error));
-            let _: () = msg_send![input, removeTapOnBus: 0usize];
+            ignore_audio_exception(AssertUnwindSafe(|| {
+                let _: () = msg_send![input, removeTapOnBus: 0usize];
+            }));
             let _: () = msg_send![engine, release];
             return Err(unavailable());
         }

@@ -117,6 +117,8 @@ export interface ChatMessage {
   permission?: PermissionMeta;
   /** Structured tool call for `role: "tool"`. Older messages only have `content`. */
   step?: ToolStep;
+  /** Earlier steps of this turn that were dropped so the page stays small. */
+  skippedTools?: number;
 }
 
 export interface ChatSession {

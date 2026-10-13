@@ -324,6 +324,65 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamupsVoiceTicket {
+    pub app_id: String,
+    pub spark_url: String,
+    pub tts_url: String,
+}
+
+/// Signed iFlytek sockets from the TeamUps server. The API secret stays there.
+pub fn teamups_voice_ticket() -> Result<TeamupsVoiceTicket> {
+    let Some((base, license)) = saved_teamups_provider_credentials()? else {
+        bail!("cloud_unready");
+    };
+    let url = format!("{base}/api/v1/doctor/voice");
+    let resp = status_http_client()?
+        .get(&url)
+        .header("Accept", "application/json")
+        .header("Authorization", format!("Bearer {license}"))
+        .send()
+        .context("cloud_down")?;
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    if status.as_u16() == 401 || status.as_u16() == 403 || status.as_u16() == 503 {
+        bail!("cloud_unready");
+    }
+    if !status.is_success() {
+        bail!("cloud_down");
+    }
+    let value: Value = serde_json::from_str(&body).context("cloud_down")?;
+    if value.get("error").and_then(Value::as_str) == Some("cloud_unready") {
+        bail!("cloud_unready");
+    }
+    let app_id = value
+        .get("appId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let spark_url = value
+        .get("sparkUrl")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let tts_url = value
+        .get("ttsUrl")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if app_id.is_empty() || !spark_url.starts_with("wss://") || !tts_url.starts_with("wss://") {
+        bail!("cloud_unready");
+    }
+    Ok(TeamupsVoiceTicket {
+        app_id,
+        spark_url,
+        tts_url,
+    })
+}
+
 pub fn sign_out_teamups() -> Result<TeamupsAccountStatus> {
     let store = open_settings_store()?;
     store.clear_teamups_license()?;

@@ -197,20 +197,24 @@ export function loadStore(fallbackRuntime: AskRuntime): SessionStore {
 export function persistStore(store: SessionStore): SessionStore {
   const previous = localStorage.getItem(STORAGE_KEY);
   if (previous) backupStoreRaw(previous);
-  let next = store;
-  let payload = JSON.stringify(next);
-  if (payload.length > CHAT_STORE_MAX_BYTES) {
-    next = finalizeSessionStore(trimStoreForSize(next));
-    payload = JSON.stringify(next);
-  }
+  let payload = "";
   try {
-    localStorage.setItem(STORAGE_KEY, payload);
+    payload = JSON.stringify(store);
   } catch (error) {
     console.warn("Ask: saveStore failed, trimming history", error);
-    next = finalizeSessionStore(trimStoreForSize(next));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
-  return next;
+  const disk =
+    !payload || payload.length > CHAT_STORE_MAX_BYTES
+      ? finalizeSessionStore(trimStoreForSize(store))
+      : store;
+  try {
+    localStorage.setItem(STORAGE_KEY, disk === store ? payload : JSON.stringify(disk));
+  } catch (error) {
+    console.warn("Ask: saveStore failed, trimming history", error);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(finalizeSessionStore(trimStoreForSize(store))));
+  }
+  // The open chat keeps every step so scrolling up can load them. Disk may keep less.
+  return store;
 }
 
 export function hasRestorableChatBackup(): boolean {

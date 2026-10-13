@@ -28,8 +28,8 @@ pub use teamups::{
 pub(crate) use teamups_auth::saved_teamups_provider_credentials;
 pub use teamups_auth::{
     poll_teamups_login, sign_out_teamups, start_teamups_login, teamups_account_status,
-    TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart,
-    TeamupsOfficialStatus,
+    teamups_voice_ticket, TeamupsAccountStatus, TeamupsLoginPoll, TeamupsLoginPollStatus,
+    TeamupsLoginStart, TeamupsOfficialStatus, TeamupsVoiceTicket,
 };
 pub use teamups_channel::{
     parse_teamups_channel_job, set_teamups_channel_enabled, teamups_channel_auth,

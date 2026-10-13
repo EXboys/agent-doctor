@@ -128,9 +128,9 @@ function rememberTool(session: ChatSession, run: LiveRun, text: string): void {
   const toolMessage: ChatMessage = { id: uid(), role: "tool", content: text, at: Date.now() };
   if (tail?.role === "assistant" && tail.id === run.assistantMessageId) {
     messages.splice(messages.length - 1, 0, toolMessage);
-    return;
+  } else {
+    messages.push(toolMessage);
   }
-  messages.push(toolMessage);
 }
 
 function upsertAssistant(session: ChatSession, run: LiveRun, extra: string): void {

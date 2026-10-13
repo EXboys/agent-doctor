@@ -23,6 +23,8 @@ const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod channel_link;
 mod commands;
+#[cfg(target_os = "macos")]
+mod drag_pasteboard;
 mod island;
 mod speech;
 mod state;
@@ -444,6 +446,10 @@ fn resolve_permission_session_command(
 }
 
 pub fn run() {
+    // File drags reach the window library before our page. A missing or
+    // odd filenames list used to abort the process on the main thread.
+    #[cfg(target_os = "macos")]
+    drag_pasteboard::keep_file_drags_from_aborting();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -599,6 +605,7 @@ pub fn run() {
             cancel_prompt_session_command,
             resolve_permission_session_command,
             speech_capability_command,
+            voice_cloud_ready_command,
             speech_dictate_command,
             speech_cancel_dictation_command,
             voice_listen_start_command,

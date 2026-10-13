@@ -14,6 +14,7 @@ use objc2_foundation::NSString;
 use std::ffi::CStr;
 use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -60,6 +61,12 @@ pub(crate) fn on_main<R: Send + 'static, F: FnOnce() -> R + Send + 'static>(work
 
 /// An audio-format mismatch is thrown as an Objective-C exception. Catch it
 /// here so the app stays open and speech can fall back.
+/// Teardown calls such as `removeTapOnBus:` throw instead of returning an
+/// error. Swallow that so stopping the microphone does not quit the app.
+pub(crate) fn ignore_audio_exception(work: impl FnOnce() + UnwindSafe) {
+    let _ = catch(work);
+}
+
 pub(crate) fn guard_audio_call(work: impl FnOnce() + UnwindSafe) -> Result<(), SpeechError> {
     match catch(work) {
         Ok(()) => Ok(()),
@@ -320,6 +327,121 @@ fn rms_samples<T>(samples: &[T], step: usize, sample: impl Fn(&T) -> f32) -> f32
     } else {
         (sum / n as f32).sqrt()
     }
+}
+
+struct Downsample {
+    phase: f64,
+    ratio: f64,
+}
+
+/// Keep the microphone open and hand 16 kHz mono s16le frames to `on_audio`.
+pub(crate) fn capture_pcm16_mono(
+    on_audio: &dyn Fn(&[u8], f32),
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), SpeechError> {
+    let (tx, rx) = sync_channel::<(Vec<u8>, f32)>(48);
+    let setup: Result<(usize, usize), SpeechError> = on_main(move || unsafe {
+        let engine_class = require_class(c"AVAudioEngine")?;
+        let audio_engine: *mut AnyObject = msg_send![engine_class, new];
+        if audio_engine.is_null() {
+            return Err(SpeechError::new(
+                SpeechErrorCode::Failed,
+                "failed to create AVAudioEngine",
+            ));
+        }
+        let input_node: *mut AnyObject = msg_send![audio_engine, inputNode];
+        if input_node.is_null() {
+            return Err(SpeechError::new(
+                SpeechErrorCode::Failed,
+                "microphone input is unavailable",
+            ));
+        }
+        let recording_format: *mut AnyObject = msg_send![input_node, outputFormatForBus: 0usize];
+        let sample_rate: f64 = if recording_format.is_null() {
+            0.0
+        } else {
+            msg_send![recording_format, sampleRate]
+        };
+        if sample_rate < 1.0 {
+            return Err(SpeechError::new(
+                SpeechErrorCode::Failed,
+                "microphone format is empty",
+            ));
+        }
+        let downsample = Arc::new(Mutex::new(Downsample {
+            phase: 0.0,
+            ratio: sample_rate / 16_000.0,
+        }));
+        let downsample_tap = downsample.clone();
+        let tap_block = StackBlock::new(move |buffer: *mut AnyObject, _when: *mut AnyObject| {
+            let frames: usize = msg_send![buffer, frameLength];
+            if frames == 0 {
+                return;
+            }
+            let mut mono = Vec::with_capacity(frames);
+            let float_channels: *mut *mut f32 = msg_send![buffer, floatChannelData];
+            if !float_channels.is_null() && !(*float_channels).is_null() {
+                let samples = std::slice::from_raw_parts(*float_channels, frames);
+                mono.extend_from_slice(samples);
+            } else {
+                let int_channels: *mut *mut i16 = msg_send![buffer, int16ChannelData];
+                if int_channels.is_null() || (*int_channels).is_null() {
+                    return;
+                }
+                let samples = std::slice::from_raw_parts(*int_channels, frames);
+                mono.extend(samples.iter().map(|sample| *sample as f32 / 32768.0));
+            }
+            let mut step = downsample_tap.lock().unwrap_or_else(|err| err.into_inner());
+            let mut pcm = Vec::new();
+            let mut cursor = step.phase;
+            let ratio = step.ratio.max(1.0);
+            while cursor < mono.len() as f64 {
+                let sample = mono[cursor as usize].clamp(-1.0, 1.0);
+                pcm.extend_from_slice(&((sample * 32767.0) as i16).to_le_bytes());
+                cursor += ratio;
+            }
+            step.phase = cursor - mono.len() as f64;
+            drop(step);
+            let _ = tx.try_send((pcm, buffer_rms(buffer)));
+        });
+        let tap_block = tap_block.copy();
+        install_input_tap(input_node, &tap_block)?;
+        let mut engine_error: *mut AnyObject = std::ptr::null_mut();
+        let started: bool = msg_send![audio_engine, startAndReturnError: &mut engine_error];
+        if !started {
+            return Err(SpeechError::new(
+                SpeechErrorCode::PermissionDenied,
+                "microphone unavailable or permission denied",
+            ));
+        }
+        Ok((audio_engine as usize, input_node as usize))
+    });
+    let (engine_bits, input_bits) = setup?;
+
+    while !should_cancel() {
+        match rx.recv_timeout(Duration::from_millis(40)) {
+            Ok((pcm, rms)) => {
+                if !pcm.is_empty() {
+                    on_audio(&pcm, rms);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    on_main(move || unsafe {
+        let audio_engine = engine_bits as *mut AnyObject;
+        let input_node = input_bits as *mut AnyObject;
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![audio_engine, stop];
+        }));
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![input_node, removeTapOnBus: 0usize];
+        }));
+        let _: () = msg_send![audio_engine, release];
+    });
+    Ok(())
 }
 
 fn classify_recognition_nserror(detail: &str) -> SpeechErrorCode {
@@ -679,12 +801,20 @@ fn recognize_from_microphone(
         let input_node = input_bits as *mut AnyObject;
         let request = request_bits as *mut AnyObject;
         let task = task_bits as *mut AnyObject;
-        let _: () = msg_send![audio_engine, stop];
-        let _: () = msg_send![input_node, removeTapOnBus: 0usize];
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![audio_engine, stop];
+        }));
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![input_node, removeTapOnBus: 0usize];
+        }));
         if !end_audio_sent {
-            let _: () = msg_send![request, endAudio];
+            ignore_audio_exception(AssertUnwindSafe(|| {
+                let _: () = msg_send![request, endAudio];
+            }));
         }
-        let _: () = msg_send![task, cancel];
+        ignore_audio_exception(AssertUnwindSafe(|| {
+            let _: () = msg_send![task, cancel];
+        }));
         let _: () = msg_send![task, release];
         let _: () = msg_send![request, release];
         let _: () = msg_send![audio_engine, release];

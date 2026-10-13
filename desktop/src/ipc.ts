@@ -809,7 +809,14 @@ export function speechCapability(): Promise<SpeechCapability> {
   return invoke("speech_capability_command");
 }
 
-export function speechDictate(args: { language?: string | null }): Promise<SpeechResult> {
+export function voiceCloudReady(): Promise<boolean> {
+  return invoke("voice_cloud_ready_command");
+}
+
+export function speechDictate(args: {
+  language?: string | null;
+  route?: "local" | "cloud" | null;
+}): Promise<SpeechResult> {
   return invoke("speech_dictate_command", args);
 }
 
@@ -817,7 +824,10 @@ export function speechCancelDictation(): Promise<void> {
   return invoke("speech_cancel_dictation_command");
 }
 
-export function voiceListenStart(args: { language?: string | null }): Promise<void> {
+export function voiceListenStart(args: {
+  language?: string | null;
+  route?: "local" | "cloud" | null;
+}): Promise<void> {
   return invoke("voice_listen_start_command", args);
 }
 
@@ -825,7 +835,11 @@ export function voiceListenStop(): Promise<void> {
   return invoke("voice_listen_stop_command");
 }
 
-export function voiceSpeak(args: { text: string; language?: string | null }): Promise<void> {
+export function voiceSpeak(args: {
+  text: string;
+  language?: string | null;
+  route?: "local" | "cloud" | null;
+}): Promise<void> {
   return invoke("voice_speak_command", args);
 }
 

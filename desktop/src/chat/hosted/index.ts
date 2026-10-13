@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { formatPermissionDetail } from "../format";
 import { getLocale, t } from "../../i18n";
 import { voiceHostedReduce, voiceTurnEnd, voiceListenStart, voiceListenStop, voiceSpeak, voiceSpeakStop, resolvePermissionSession, speechCapability } from "../../ipc";
+import { activeVoiceRoute, type VoiceRoute } from "../voice/route";
 
 type HostedState = {
   active: boolean;
@@ -36,7 +37,8 @@ type SpeechEventDto =
   | { type: "partial"; text: string }
   | { type: "final"; text: string; confidence?: number }
   | { type: "error"; code: string; detail: string }
-  | { type: "cancelled" };
+  | { type: "cancelled" }
+  | { type: "barge" };
 
 export type HostedDeps = {
   mainEl: HTMLElement;
@@ -123,9 +125,11 @@ function permissionBrief(summary: string, command: string): string {
   return "It wants to run a few checks that only look. Risk is low. Allowing is fine. Say allow or deny.";
 }
 
-function failureCopy(raw: string): string {
+function failureCopy(raw: string, cloud = false): string {
+  if (cloud && /cloud_unready/i.test(raw)) return t("chat.hostedCloudUnready");
+  if (cloud && /cloud_down|failed/i.test(raw)) return t("chat.hostedCloudRetry");
   if (/permission_denied/i.test(raw)) return t("chat.hostedPermission");
-  if (/unavailable/i.test(raw)) return t("chat.hostedUnavailable");
+  if (/unavailable/i.test(raw)) return cloud ? t("chat.hostedCloudRetry") : t("chat.hostedUnavailable");
   if (/no_speech|no speech|no match/i.test(raw)) return t("chat.hostedNoSpeech");
   if (/busy/i.test(raw)) return t("chat.hostedBusy");
   if (/not found|unknown command|command .* not/i.test(raw)) return t("chat.hostedNeedRestart");
@@ -140,6 +144,7 @@ export function createHostedController(deps: HostedDeps) {
   let lastUtterance = "";
   let queue: HostedInput[] = [];
   let pumping = false;
+  let sessionRoute: VoiceRoute = "local";
   let listenEpoch = 0;
   let listenPromise: Promise<void> | null = null;
   let speakEpoch = 0;
@@ -327,6 +332,15 @@ export function createHostedController(deps: HostedDeps) {
     void (async () => {
       let hold = 0;
       let toSend = text;
+      if (sessionRoute === "cloud") {
+        partialTimer = window.setTimeout(() => {
+          partialTimer = null;
+          if (gen !== holdGen || partial.trim() !== text.trim()) return;
+          if (!toSend.trim()) return;
+          commitUtterance(toSend);
+        }, 0);
+        return;
+      }
       try {
         const decision = await voiceTurnEnd({ text });
         // The microphone stayed open for this pause. The sentence on screen is already the whole listen.
@@ -367,7 +381,7 @@ export function createHostedController(deps: HostedDeps) {
     } catch (error) {
       console.error("voice chat failed", error);
       asking = false;
-      islandError = failureCopy(String(error));
+      islandError = failureCopy(String(error), sessionRoute === "cloud");
       if (!state.active) entering = false;
       render();
       if (state.active && !state.modelBusy && !state.speaking) {
@@ -389,6 +403,11 @@ export function createHostedController(deps: HostedDeps) {
     sessionUnlisten = await listen<SpeechEventDto>("speech-event", (event) => {
       if (epoch !== listenEpoch) return;
       const payload = event.payload;
+      if (payload?.type === "barge") {
+        void voiceSpeakStop();
+        return;
+      }
+      if (state.speaking) return;
       if (payload?.type === "partial" && typeof payload.text === "string") {
         rememberSpeech(payload.text, false);
         return;
@@ -403,7 +422,7 @@ export function createHostedController(deps: HostedDeps) {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         if (epoch !== listenEpoch) return;
         try {
-          await voiceListenStart({ language: speechLanguage() });
+          await voiceListenStart({ language: speechLanguage(), route: sessionRoute });
           if (epoch === listenEpoch && state.active) {
             islandError = "";
             render();
@@ -420,9 +439,11 @@ export function createHostedController(deps: HostedDeps) {
       .catch((error: unknown) => {
         console.error("voice listen failed", error);
         if (epoch !== listenEpoch || !state.active) return;
-        islandError = failureCopy(String(error));
+        const raw = String(error);
+        islandError = failureCopy(raw, sessionRoute === "cloud");
         render();
-        window.setTimeout(() => enqueue({ type: "listenFailed" }), 0);
+        if (sessionRoute === "cloud" && /cloud_unready|capture is unavailable/i.test(raw)) return;
+        window.setTimeout(() => enqueue({ type: "listenFailed" }), sessionRoute === "cloud" ? 700 : 0);
       })
       .finally(() => {
         if (detach) {
@@ -440,6 +461,7 @@ export function createHostedController(deps: HostedDeps) {
   }
 
   async function stopListen(): Promise<void> {
+    if (sessionRoute === "cloud" && state.active) return;
     listenEpoch += 1;
     cancelHold();
     partial = "";
@@ -457,11 +479,14 @@ export function createHostedController(deps: HostedDeps) {
   async function speak(text: string): Promise<void> {
     const epoch = ++speakEpoch;
     try {
-      await voiceSpeak({ text, language: speechLanguage() });
+      await voiceSpeak({ text, language: speechLanguage(), route: sessionRoute });
     } catch (error) {
       const raw = String(error);
       if (epoch === speakEpoch && !/cancelled/i.test(raw) && state.active && !state.awaitingPermission) {
-        deps.setStatus(t("chat.hostedFailed"), "warn");
+        deps.setStatus(
+          sessionRoute === "cloud" ? t("chat.hostedCloudRetry") : t("chat.hostedFailed"),
+          "warn",
+        );
       }
     }
     if (epoch === speakEpoch && state.active) enqueue({ type: "speakFinished" });
@@ -510,7 +535,7 @@ export function createHostedController(deps: HostedDeps) {
       /* ignore */
     }
     try {
-      await voiceSpeak({ text: script, language: speechLanguage() });
+      await voiceSpeak({ text: script, language: speechLanguage(), route: sessionRoute });
     } catch (error) {
       console.error("voice confirm failed", error);
     }
@@ -554,7 +579,7 @@ export function createHostedController(deps: HostedDeps) {
         break;
       case "leave":
         if (failDetail) {
-          deps.setStatus(failureCopy(failDetail), "warn");
+          deps.setStatus(failureCopy(failDetail, sessionRoute === "cloud"), "warn");
           failDetail = "";
         }
         cancelHold();
@@ -573,6 +598,7 @@ export function createHostedController(deps: HostedDeps) {
       deps.setStatus(t("chat.hostedUnavailable"), "warn");
       return;
     }
+    sessionRoute = await activeVoiceRoute();
     entering = true;
     enterGuardUntil = Date.now() + 800;
     deps.hideChoice();

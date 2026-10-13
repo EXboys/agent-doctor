@@ -84,4 +84,7 @@ pub enum SpeechEvent {
     Error { code: String, detail: String },
     #[serde(rename = "cancelled")]
     Cancelled,
+    /// The person started talking while a reply was playing.
+    #[serde(rename = "barge")]
+    Barge,
 }

@@ -22,8 +22,15 @@ import { rememberFileChange } from "./file-changes";
 import { interleaveLines } from "./file-diff";
 import { fileLinkRoot } from "./file-links";
 import type { ToolStep } from "./types";
+import { clipStepForPage, earlierToolRange, laterToolRange, MAX_SHOWN_TOOL_ROWS, MAX_TOOL_DOM_ROWS } from "./tool-records";
 import { pushChatTurnError } from "./turn-errors";
 import { placeProcessBlock, sealWorkTrail } from "./work-trail";
+
+const PAGE_LOG_CHARS = 8_000;
+
+function capPageText(text: string): string {
+  return text.length > PAGE_LOG_CHARS ? `${text.slice(0, PAGE_LOG_CHARS)}\n…` : text;
+}
 
 export type ActivityDeps = {
   logEl: HTMLElement;
@@ -98,12 +105,14 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
   if (text) {
     const { summary, detail } = splitToolActivity(text);
     row.dataset.summary = summary;
-    row.dataset.detail = detail;
+    row.dataset.detail = capPageText(detail);
     row.dataset.signature = toolSignature(text);
   }
   if (step) {
+    step = clipStepForPage(step);
     row.dataset.step = JSON.stringify(step);
     row.dataset.toolId = step.id;
+    row.dataset.toolKey = `id:${step.id}`;
   }
   const current = readRowStep(row);
   const info = rowActivityInfo(row);
@@ -234,14 +243,62 @@ export function createToolRowElement(text: string, step?: ToolStep): HTMLDetails
   return row;
 }
 
-export type ToolRecord = string | { text: string; step?: ToolStep };
+export type ToolRecord = string | { text: string; step?: ToolStep; skipped?: number };
+
+const heldToolRecords = new WeakMap<HTMLDetailsElement, ToolRecord[]>();
+let ignoreLogScroll = 0;
+
+function recordSkipped(record: ToolRecord): number {
+  return typeof record === "string" ? 0 : record.skipped ?? 0;
+}
+
+export function toolRecordKey(record: ToolRecord): string {
+  if (typeof record !== "string" && record.step?.id) return `id:${record.step.id}`;
+  const text = typeof record === "string" ? record : record.text;
+  return `t:${toolSignature(text)}`;
+}
+
+function holdToolRecords(group: HTMLDetailsElement, records: ToolRecord[]): void {
+  heldToolRecords.set(group, records);
+  group.dataset.toolTotal = String(records.length + records.reduce((n, record) => n + recordSkipped(record), 0));
+}
+
+function mountToolRecord(record: ToolRecord): HTMLDetailsElement {
+  const row = typeof record === "string" ? createToolRowElement(record) : createToolRowElement(record.text, record.step);
+  row.dataset.toolKey = toolRecordKey(record);
+  return row;
+}
+
+function withoutLogJump(work: () => void): void {
+  ignoreLogScroll += 1;
+  work();
+  queueMicrotask(() => {
+    ignoreLogScroll = Math.max(0, ignoreLogScroll - 1);
+  });
+}
+
+/** Jump to the latest line. Opening a chat or sending a message starts here. */
+export function pinChatLog(logEl: HTMLElement): void {
+  logEl.dataset.pin = "1";
+  withoutLogJump(() => {
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+}
+
+/** Stay put when the reader has scrolled up to look at earlier steps. */
+export function followChatLog(logEl: HTMLElement): void {
+  if (logEl.dataset.pin === "0") return;
+  pinChatLog(logEl);
+}
 
 /** Collapsed history of one turn's tool calls. Click a row for the command. */
 export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTMLDetailsElement {
   const group = document.createElement("details");
   group.className = "chat-tool-group";
   group.open = open;
-  const count = records.length;
+  holdToolRecords(group, records);
+  const shown = records.slice(-MAX_SHOWN_TOOL_ROWS);
+  const count = records.length + records.reduce((n, record) => n + recordSkipped(record), 0);
   const summary = document.createElement("summary");
   summary.className = "chat-tool-group-summary";
   summary.innerHTML = `<span class="chat-tool-group-icon" aria-hidden="true">$</span><span class="chat-tool-group-label"></span><span class="chat-tool-group-chevron" aria-hidden="true"></span>`;
@@ -251,13 +308,7 @@ export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTM
   }
   const list = document.createElement("div");
   list.className = "chat-tool-list";
-  for (const record of records) {
-    list.appendChild(
-      typeof record === "string"
-        ? createToolRowElement(record)
-        : createToolRowElement(record.text, record.step),
-    );
-  }
+  for (const record of shown) list.appendChild(mountToolRecord(record));
   group.append(summary, list);
   return group;
 }
@@ -281,17 +332,128 @@ export function createActivityController(deps: ActivityDeps) {
     deps.setLifecycleActivityEl(null);
   }
 
+  function liveRecords(group: HTMLDetailsElement): ToolRecord[] {
+    const records = deps.toolRecordsForTurn();
+    holdToolRecords(group, records);
+    return records;
+  }
+
+  function recordsFor(group: HTMLDetailsElement): ToolRecord[] {
+    if (group === deps.getToolGroupEl()) return liveRecords(group);
+    return heldToolRecords.get(group) ?? [];
+  }
+
+  /** The on-screen list still ends at the newest step, or the one just before it. */
+  function windowShowsTail(records: ToolRecord[], list: HTMLElement): boolean {
+    const last = list.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
+    if (!last || records.length === 0) return true;
+    const key = last.dataset.toolKey || "";
+    if (key === toolRecordKey(records[records.length - 1]!)) return true;
+    return records.length >= 2 && key === toolRecordKey(records[records.length - 2]!);
+  }
+
+  function dropRow(row: HTMLElement): void {
+    if (deps.getActivityEl() === row) deps.setActivityEl(null);
+    row.remove();
+  }
+
+  /** While following the task, keep only the latest page of rows. */
+  function trimLiveToolRows(group: HTMLDetailsElement): void {
+    const list = group.querySelector<HTMLElement>(".chat-tool-list");
+    if (!list) return;
+    const rows = [...list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row")];
+    const extra = rows.length - MAX_SHOWN_TOOL_ROWS;
+    if (extra <= 0) return;
+    for (const row of rows.slice(0, extra)) dropRow(row);
+  }
+
+  /** Drop rows that sit outside the chat, so a long scroll never paints every step. */
+  function dropOffscreenRows(list: HTMLElement, edge: "top" | "bottom"): void {
+    const log = deps.logEl;
+    const logRect = log.getBoundingClientRect();
+    while (list.querySelectorAll(":scope > .chat-tool-row").length > MAX_TOOL_DOM_ROWS) {
+      const row =
+        edge === "top"
+          ? list.querySelector<HTMLElement>(":scope > .chat-tool-row")
+          : list.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
+      if (!row) return;
+      const rect = row.getBoundingClientRect();
+      const outside = edge === "top" ? rect.bottom < logRect.top + 4 : rect.top > logRect.bottom - 4;
+      if (!outside) return;
+      const height = row.offsetHeight;
+      dropRow(row);
+      if (edge === "top" && height) {
+        withoutLogJump(() => {
+          log.scrollTop = Math.max(0, log.scrollTop - height);
+        });
+      }
+    }
+  }
+
+  function revealEarlier(group: HTMLDetailsElement): void {
+    const records = recordsFor(group);
+    const list = group.querySelector<HTMLElement>(".chat-tool-list");
+    const first = list?.querySelector<HTMLElement>(":scope > .chat-tool-row");
+    if (!list || !first?.dataset.toolKey) return;
+    const start = records.findIndex((record) => toolRecordKey(record) === first.dataset.toolKey);
+    const range = earlierToolRange(start);
+    if (!range) return;
+    const log = deps.logEl;
+    const before = log.scrollHeight;
+    const top = log.scrollTop;
+    for (let i = range.to - 1; i >= range.from; i -= 1) {
+      list.insertBefore(mountToolRecord(records[i]!), list.firstChild);
+    }
+    dropOffscreenRows(list, "bottom");
+    withoutLogJump(() => {
+      log.scrollTop = top + (log.scrollHeight - before);
+    });
+    updateToolGroupSummary(group, group === deps.getToolGroupEl());
+  }
+
+  function revealLater(group: HTMLDetailsElement): void {
+    const records = recordsFor(group);
+    const list = group.querySelector<HTMLElement>(".chat-tool-list");
+    const last = list?.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
+    if (!list || !last?.dataset.toolKey) return;
+    const lastIndex = records.findIndex((record) => toolRecordKey(record) === last.dataset.toolKey);
+    const range = laterToolRange(lastIndex, records.length);
+    if (!range) return;
+    for (let i = range.from; i < range.to; i += 1) list.appendChild(mountToolRecord(records[i]!));
+    dropOffscreenRows(list, "top");
+    updateToolGroupSummary(group, group === deps.getToolGroupEl());
+  }
+
+  deps.logEl.addEventListener("scroll", () => {
+    if (ignoreLogScroll > 0) return;
+    const log = deps.logEl;
+    const gap = log.scrollHeight - log.scrollTop - log.clientHeight;
+    log.dataset.pin = gap < 64 ? "1" : "0";
+    const logRect = log.getBoundingClientRect();
+    for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
+      if (!group.open) continue;
+      const list = group.querySelector<HTMLElement>(".chat-tool-list");
+      if (!list) continue;
+      const rect = list.getBoundingClientRect();
+      if (rect.height < 1) continue;
+      if (rect.top > logRect.top - 24 && rect.top < logRect.top + 200) revealEarlier(group);
+      if (rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24) revealLater(group);
+    }
+  });
+
   function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
     const rows = group.querySelectorAll<HTMLElement>(
       ".chat-tool-list > .chat-tool-row, .chat-permission-stack > .chat-tool-row",
     );
     const label = group.querySelector<HTMLElement>(".chat-tool-group-label");
     if (!label) return;
-    const summary = summarizeToolActivities([...rows].map(rowActivityInfo));
+    const total = Number(group.dataset.toolTotal || "0");
+    const count = total > rows.length ? total : rows.length;
+    const summary = count > rows.length ? "" : summarizeToolActivities([...rows].map(rowActivityInfo));
     label.textContent =
       summary || (live
-        ? t("chat.toolsLive", { count: String(rows.length) })
-        : t("chat.permissionGroupTools", { count: String(rows.length) }));
+        ? t("chat.toolsLive", { count: String(count) })
+        : t("chat.permissionGroupTools", { count: String(count) }));
     group.classList.toggle("is-live", live);
   }
 
@@ -332,6 +494,7 @@ export function createActivityController(deps: ActivityDeps) {
   function finishToolGroup(_collapse = true): void {
     const group = deps.getToolGroupEl();
     if (!group) return;
+    liveRecords(group);
     const activity = deps.getActivityEl();
     if (activity && group.contains(activity)) settleActivity();
     updateToolGroupSummary(group, false);
@@ -423,7 +586,7 @@ export function createActivityController(deps: ActivityDeps) {
     const cmd = row.querySelector<HTMLElement>(".chat-tool-cmd");
     if (!cmd) return false;
     const prev = cmd.textContent?.trim() ?? "";
-    cmd.textContent = prev ? `${prev}\n\n${detail}` : detail;
+    cmd.textContent = capPageText(prev ? `${prev}\n\n${detail}` : detail);
     cmd.hidden = false;
     row.dataset.expandable = "1";
     const chevron = row.querySelector<HTMLElement>(".chat-tool-chevron");
@@ -453,7 +616,7 @@ export function createActivityController(deps: ActivityDeps) {
       row.dataset.command = "1";
       mountFailedCommand(row, text);
       deps.logEl.appendChild(row);
-      deps.logEl.scrollTop = deps.logEl.scrollHeight;
+      followChatLog(deps.logEl);
       return;
     }
     const display = explain ? formatChatFailureLine(explain) : cleaned || text;
@@ -468,8 +631,8 @@ export function createActivityController(deps: ActivityDeps) {
     if (last?.dataset.kind === "log" && last.dataset.stderr === "1" && last.dataset.command !== "1") {
       const label = last.querySelector<HTMLElement>(".chat-activity-text");
       if (label) {
-        label.textContent = `${label.textContent}\n${display}`;
-        deps.logEl.scrollTop = deps.logEl.scrollHeight;
+        label.textContent = capPageText(`${label.textContent}\n${display}`);
+        followChatLog(deps.logEl);
         return;
       }
     }
@@ -482,7 +645,7 @@ export function createActivityController(deps: ActivityDeps) {
     label.textContent = display;
     row.appendChild(label);
     deps.logEl.appendChild(row);
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
   }
 
   /** Render progress / tool calls inline in the chat stream (not a side panel). */
@@ -516,7 +679,7 @@ export function createActivityController(deps: ActivityDeps) {
         const label = lifecycle.querySelector<HTMLElement>(".chat-activity-text");
         if (label) label.textContent = text;
         deps.setActivityEl(lifecycle);
-        deps.logEl.scrollTop = deps.logEl.scrollHeight;
+        followChatLog(deps.logEl);
         return;
       }
     } else {
@@ -536,6 +699,7 @@ export function createActivityController(deps: ActivityDeps) {
     if (known) {
       applyToolRow(known, "", mergeToolStep(readRowStep(known), step));
       const group = known.closest<HTMLDetailsElement>(".chat-tool-group");
+      if (group && group === deps.getToolGroupEl()) liveRecords(group);
       if (group) updateToolGroupSummary(group, group === deps.getToolGroupEl());
       if (step.status !== "running" && deps.getActivityEl() === known) settleActivity();
       return;
@@ -560,6 +724,7 @@ export function createActivityController(deps: ActivityDeps) {
 
     const group = ensureToolGroup();
     const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
+    liveRecords(group);
     const parts = splitToolActivity(text);
     const signature = toolSignature(text);
     const last = list.querySelector<HTMLElement>(".chat-activity.kind-tool:last-child");
@@ -575,7 +740,14 @@ export function createActivityController(deps: ActivityDeps) {
       last.classList.remove("is-done");
       deps.setActivityEl(last);
       updateToolGroupSummary(group, true);
+      if (!last.dataset.toolKey) last.dataset.toolKey = `t:${signature}`;
       return last;
+    }
+
+    const records = liveRecords(group);
+    if (deps.logEl.dataset.pin === "0" && !windowShowsTail(records, list)) {
+      updateToolGroupSummary(group, true);
+      return null;
     }
 
     settleActivity();
@@ -583,10 +755,13 @@ export function createActivityController(deps: ActivityDeps) {
     row.classList.add("is-live");
     row.classList.remove("is-done");
     row.dataset.phase = phase;
+    row.dataset.toolKey = `t:${signature}`;
     list.appendChild(row);
+    if (deps.logEl.dataset.pin !== "0") trimLiveToolRows(group);
+    else dropOffscreenRows(list, "top");
     deps.setActivityEl(row);
     updateToolGroupSummary(group, true);
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
     return row;
   }
 
@@ -619,7 +794,7 @@ export function createActivityController(deps: ActivityDeps) {
       const label = activity.querySelector<HTMLElement>(".chat-activity-text");
       if (label) label.textContent = text;
     }
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
   }
 
   function settleActivity(): void {

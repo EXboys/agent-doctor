@@ -216,7 +216,11 @@ export function wireChatControllers(): void {
       return messages
         .slice(start)
         .filter((message) => message.role === "tool")
-        .map((message) => (message.step ? { text: message.content, step: message.step } : message.content));
+        .map((message) =>
+          message.step || message.skippedTools
+            ? { text: message.content, step: message.step, skipped: message.skippedTools }
+            : message.content,
+        );
     },
     onChatConnectionFailure: (explain) => showChatFailureBubble(explain),
   });

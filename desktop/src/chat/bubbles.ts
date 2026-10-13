@@ -10,7 +10,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
-import { renderToolHistoryGroup } from "./activity";
+import { followChatLog, pinChatLog, renderToolHistoryGroup } from "./activity";
 import { renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRuntimeLog, storeToolStep } from "./tool-records";
@@ -187,7 +187,7 @@ export function createBubblesController(deps: BubblesDeps) {
     if (!bubble.isConnected) return;
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);
     setAssistantMarkdown(bubble, deps.getAssistantRaw());
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
   }
   function persistMessage(
     role: ChatRole,
@@ -370,7 +370,7 @@ export function createBubblesController(deps: BubblesDeps) {
       const { wrap, bubble } = createAssistantBubbleEl({ id: opts?.id });
       setAssistantMarkdown(bubble, text);
       deps.logEl.appendChild(wrap);
-      deps.logEl.scrollTop = deps.logEl.scrollHeight;
+      followChatLog(deps.logEl);
       return bubble;
     }
     if (kind === "user") {
@@ -380,7 +380,7 @@ export function createBubblesController(deps: BubblesDeps) {
         attachments: opts?.attachments,
       });
       deps.logEl.appendChild(wrap);
-      deps.logEl.scrollTop = deps.logEl.scrollHeight;
+      pinChatLog(deps.logEl);
       return bubble;
     }
     const bubble = document.createElement("div");
@@ -390,7 +390,7 @@ export function createBubblesController(deps: BubblesDeps) {
     const strip = renderAttachmentStrip(opts?.attachments);
     if (strip) bubble.appendChild(strip);
     deps.logEl.appendChild(bubble);
-    deps.logEl.scrollTop = deps.logEl.scrollHeight;
+    followChatLog(deps.logEl);
     return bubble;
   }
   /** Tools saved after the reply still belong above that reply. */
@@ -469,7 +469,11 @@ export function createBubblesController(deps: BubblesDeps) {
               }
               rows.push(
                 renderToolHistoryGroup(
-                  run.map((item) => (item.step ? { text: item.content, step: item.step } : item.content)),
+                  run.map((item) =>
+                    item.step || item.skippedTools
+                      ? { text: item.content, step: item.step, skipped: item.skippedTools }
+                      : item.content,
+                  ),
                 ),
               );
               i += run.length;
@@ -577,7 +581,7 @@ export function createBubblesController(deps: BubblesDeps) {
         i += 1;
       }
       paintChatPlan(deps.logEl, session.plan);
-      deps.logEl.scrollTop = deps.logEl.scrollHeight;
+      pinChatLog(deps.logEl);
       deps.updateContextMeter();
     } catch (error) {
       console.error("Ask: failed to render messages", error);

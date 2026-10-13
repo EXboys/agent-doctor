@@ -326,13 +326,21 @@ pub fn permission_sentence(zh: bool) -> String {
 
 /// Lead-in plus a short spoken body. Code blocks and tables stay on screen.
 pub fn spoken_reply(markdown: &str, zh: bool) -> String {
-    let (prose, had_code, had_table) = strip_markdown(markdown);
+    let (prose, had_fenced, had_name, had_table) = strip_markdown(markdown);
+    let (prose, dropped_name) = drop_code_tokens(&prose);
+    let had_name = had_name || dropped_name;
     let mut body = prose;
-    if had_code {
-        let note = if zh {
-            "这里有一段代码，完整内容在屏幕上。"
+    if had_fenced || had_name {
+        let note = if had_fenced {
+            if zh {
+                "这里有一段代码，完整内容在屏幕上。"
+            } else {
+                "There is some code. The full text is on the screen."
+            }
+        } else if zh {
+            "这个名字在屏幕上。"
         } else {
-            "There is some code. The full text is on the screen."
+            "That name is on the screen."
         };
         body = if body.is_empty() {
             note.to_string()
@@ -373,27 +381,29 @@ fn clip_chars(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-fn strip_markdown(input: &str) -> (String, bool, bool) {
+fn strip_markdown(input: &str) -> (String, bool, bool, bool) {
     let mut prose = String::new();
     let mut in_code = false;
-    let mut had_code = false;
+    let mut had_fenced = false;
+    let mut had_name = false;
     let mut had_table = false;
     for line in input.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             in_code = !in_code;
-            had_code = true;
+            had_fenced = true;
             continue;
         }
         if in_code {
-            had_code = true;
+            had_fenced = true;
             continue;
         }
         if is_table_line(trimmed) {
             had_table = true;
             continue;
         }
-        let inline = strip_inline(trimmed);
+        let (inline, named) = strip_inline(trimmed);
+        had_name |= named;
         if inline.is_empty() {
             continue;
         }
@@ -402,7 +412,65 @@ fn strip_markdown(input: &str) -> (String, bool, bool) {
         }
         prose.push_str(&inline);
     }
-    (prose, had_code, had_table)
+    (prose, had_fenced, had_name, had_table)
+}
+
+/// Function names, paths, and other code-shaped tokens are not spoken aloud.
+fn token_is_code(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| {
+        matches!(
+            c,
+            ',' | '.'
+                | '。'
+                | '，'
+                | ';'
+                | '；'
+                | ':'
+                | '：'
+                | '!'
+                | '！'
+                | '?'
+                | '？'
+                | '"'
+                | '\''
+                | '“'
+                | '”'
+                | '（'
+                | '）'
+                | '('
+                | ')'
+        )
+    });
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains('_')
+        || trimmed.contains("::")
+        || trimmed.contains('\\')
+        || trimmed.contains('/')
+    {
+        return true;
+    }
+    if trimmed.contains('.') && trimmed.chars().any(|c| c.is_ascii_alphabetic()) {
+        return true;
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    chars
+        .windows(2)
+        .any(|pair| pair[0].is_ascii_lowercase() && pair[1].is_ascii_uppercase())
+}
+
+fn drop_code_tokens(prose: &str) -> (String, bool) {
+    let mut kept = Vec::new();
+    let mut dropped = false;
+    for token in prose.split_whitespace() {
+        if token_is_code(token) {
+            dropped = true;
+            continue;
+        }
+        kept.push(token);
+    }
+    (kept.join(" "), dropped)
 }
 
 fn is_table_line(trimmed: &str) -> bool {
@@ -413,9 +481,10 @@ fn is_table_line(trimmed: &str) -> bool {
     trimmed.contains('|') && dashes >= 3
 }
 
-fn strip_inline(line: &str) -> String {
+fn strip_inline(line: &str) -> (String, bool) {
     let without_heading = line.trim_start_matches('#').trim();
     let mut out = String::new();
+    let mut named = false;
     let chars: Vec<char> = without_heading.chars().collect();
     let mut i = 0;
     while i < chars.len() {
@@ -426,8 +495,11 @@ fn strip_inline(line: &str) -> String {
             }
             if j < chars.len() {
                 let inner: String = chars[i + 1..j].iter().collect();
-                if inner.chars().count() <= 40 {
-                    out.push_str(inner.trim());
+                let inner = inner.trim();
+                if token_is_code(inner) || inner.chars().count() > 40 {
+                    named = true;
+                } else if !inner.is_empty() {
+                    out.push_str(inner);
                 }
                 i = j + 1;
                 continue;
@@ -457,7 +529,7 @@ fn strip_inline(line: &str) -> String {
         out.push(chars[i]);
         i += 1;
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    (out.split_whitespace().collect::<Vec<_>>().join(" "), named)
 }
 
 struct LinkEnd {
@@ -778,6 +850,17 @@ mod tests {
         assert!(spoken.starts_with("先说结论"));
         assert!(spoken.contains("这里有一段代码"));
         assert!(!spoken.contains("fn main"));
+
+        let named = spoken_reply("改一下 `speak_text`，文件在 src/voice.rs。", true);
+        assert!(named.contains("改一下"));
+        assert!(named.contains("文件在"));
+        assert!(named.contains("这个名字在屏幕上"));
+        assert!(!named.contains("speak_text"));
+        assert!(!named.contains("src/voice.rs"));
+
+        let word = spoken_reply("请说`允许`。", true);
+        assert!(word.contains("允许"));
+        assert!(!word.contains("这个名字在屏幕上"));
 
         let long = "字".repeat(400);
         let spoken_long = spoken_reply(&long, true);

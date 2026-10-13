@@ -560,6 +560,7 @@ export function createSessionsController(deps: SessionsDeps) {
       );
       deps.pushActivity("think", t("chat.typing"));
     }
+    deps.logEl.dataset.pin = "1";
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
   }
 

@@ -25,7 +25,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { stepActivityInfo, mergeToolStep } = await import("../src/chat/format");
-const { storeToolStep } = await import("../src/chat/tool-records");
+const { earlierToolRange, laterToolRange, storeToolStep } = await import("../src/chat/tool-records");
 type ChatMessage = import("../src/chat/types").ChatMessage;
 
 let failures = 0;
@@ -89,6 +89,21 @@ check(
 );
 
 check("a result for an unknown step is ignored", !storeToolStep(messages, { id: "zzz", status: "done" }, null, newId));
+
+const longTask: ChatMessage[] = [{ id: "u2", role: "user", content: "做完", at: 10 }];
+for (let i = 0; i < 50; i += 1) {
+  storeToolStep(longTask, { id: `t${i}`, kind: "terminal", status: "done", command: `echo ${i}` }, null, newId);
+}
+const kept = longTask.filter((message) => message.role === "tool");
+check("a long task keeps every step so scrolling can load it", kept.length === 50, kept.length);
+check("the first step is still there", kept[0]?.step?.id === "t0" && kept[49]?.step?.id === "t49");
+const earlier = earlierToolRange(60);
+check("scrolling up loads the previous page", earlier?.from === 20 && earlier?.to === 60, earlier);
+check("the top of the list has nothing older", earlierToolRange(0) === null);
+const later = laterToolRange(39, 100);
+check("scrolling back down loads the next page", later?.from === 40 && later?.to === 80, later);
+check("the newest page has nothing after it", laterToolRange(49, 50) === null);
+check("the previous reply is untouched", messages.filter((message) => message.role === "tool").length === 2);
 
 if (failures > 0) {
   console.log(`${failures} failed`);

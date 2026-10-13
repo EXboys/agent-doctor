@@ -3,22 +3,63 @@ import type { ChatMessage, ToolStep } from "./types";
 
 const SAVED_OUTPUT_CHARS = 1_500;
 const SAVED_LINES = 80;
+const SAVED_LINE_CHARS = 400;
+
+/** How many tool rows a turn shows before the reader scrolls. */
+export const MAX_SHOWN_TOOL_ROWS = 40;
+/** Upper bound on rows kept in the page while scrolling through a long turn. */
+export const MAX_TOOL_DOM_ROWS = 80;
+
+/** The previous page of steps when `firstIndex` is the first row on screen. */
+export function earlierToolRange(firstIndex: number): { from: number; to: number } | null {
+  if (firstIndex <= 0) return null;
+  return { from: Math.max(0, firstIndex - MAX_SHOWN_TOOL_ROWS), to: firstIndex };
+}
+
+/** The next page of steps when `lastIndex` is the last row on screen. */
+export function laterToolRange(lastIndex: number, count: number): { from: number; to: number } | null {
+  const from = lastIndex + 1;
+  if (from >= count) return null;
+  return { from, to: Math.min(count, from + MAX_SHOWN_TOOL_ROWS) };
+}
+
+const PAGE_TEXT_CHARS = 4_000;
+const PAGE_DIFF_LINES = 40;
+
+function capText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n…` : text;
+}
 
 /** The saved copy keeps the row and a taste of the output, not the whole log. */
 function slim(step: ToolStep): ToolStep {
   const out = { ...step };
-  if (out.output && out.output.length > SAVED_OUTPUT_CHARS) {
-    out.output = `${out.output.slice(0, SAVED_OUTPUT_CHARS)}\n…`;
+  if (out.output) out.output = capText(out.output, SAVED_OUTPUT_CHARS);
+  if (out.command) out.command = capText(out.command, SAVED_OUTPUT_CHARS);
+  if (out.query) out.query = capText(out.query, SAVED_OUTPUT_CHARS);
+  if (out.added_lines) {
+    out.added_lines = out.added_lines.slice(0, SAVED_LINES).map((line) => capText(line, SAVED_LINE_CHARS));
   }
-  if (out.added_lines) out.added_lines = out.added_lines.slice(0, SAVED_LINES);
-  if (out.deleted_lines) out.deleted_lines = out.deleted_lines.slice(0, SAVED_LINES);
+  if (out.deleted_lines) {
+    out.deleted_lines = out.deleted_lines.slice(0, SAVED_LINES).map((line) => capText(line, SAVED_LINE_CHARS));
+  }
   return out;
 }
 
-/**
- * Put a step on this turn's tool messages. A result merges into the message with the
- * same id; a new step takes over the plain status message just saved for it.
- */
+/** What one row may hold in the page. The full step can be megabytes; the row cannot. */
+export function clipStepForPage(step: ToolStep): ToolStep {
+  const out = { ...step };
+  if (out.output) out.output = capText(out.output, PAGE_TEXT_CHARS);
+  if (out.command) out.command = capText(out.command, PAGE_TEXT_CHARS);
+  if (out.query) out.query = capText(out.query, PAGE_TEXT_CHARS);
+  if (out.added_lines) {
+    out.added_lines = out.added_lines.slice(0, PAGE_DIFF_LINES).map((line) => capText(line, SAVED_LINE_CHARS));
+  }
+  if (out.deleted_lines) {
+    out.deleted_lines = out.deleted_lines.slice(0, PAGE_DIFF_LINES).map((line) => capText(line, SAVED_LINE_CHARS));
+  }
+  return out;
+}
+
 /** Hang a runtime log on the latest tool row of this turn. */
 export function appendRuntimeLog(messages: ChatMessage[], text: string): boolean {
   const detail = text.trim();
@@ -38,6 +79,10 @@ export function appendRuntimeLog(messages: ChatMessage[], text: string): boolean
   return false;
 }
 
+/**
+ * Put a step on this turn's tool messages. A result merges into the message with the
+ * same id; a new step takes over the plain status message just saved for it.
+ */
 export function storeToolStep(
   messages: ChatMessage[],
   step: ToolStep,
@@ -59,20 +104,22 @@ export function storeToolStep(
     }
   }
   if (!step.kind) return false;
+  const stored = slim(step);
   const tailAt = messages.length - 1;
   const tail = messages[tailAt];
   const anchorAt = tail?.role === "assistant" ? tailAt - 1 : tailAt;
   const anchor = messages[anchorAt];
   if (anchorAt > userAt && anchor?.role === "tool" && !anchor.step) {
-    anchor.step = slim(step);
+    anchor.step = stored;
+    anchor.content = toolStepText(stored);
     return true;
   }
   const message: ChatMessage = {
     id: newId(),
     role: "tool",
-    content: toolStepText(step),
+    content: toolStepText(stored),
     at: Date.now(),
-    step: slim(step),
+    step: stored,
   };
   if (tail?.role === "assistant" && tail.id === streamingAssistantId) {
     messages.splice(tailAt, 0, message);

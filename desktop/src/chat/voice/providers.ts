@@ -8,6 +8,7 @@ import type {
   VoiceStartOptions,
 } from "./types";
 import { speechCapability, speechDictate, speechCancelDictation } from "../../ipc";
+import { activeVoiceRoute } from "./route";
 
 type SpeechEventDto =
   | { type: "partial"; text: string }
@@ -55,6 +56,7 @@ export function createNativeVoiceProvider(): VoiceProvider {
         }
         const result = await speechDictate({
           language: options.language ?? null,
+          route: await activeVoiceRoute(),
         });
         return {
           text: result.text ?? "",
