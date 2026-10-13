@@ -227,12 +227,14 @@ unsafe fn utf8_bytes<'a>(object: *mut AnyObject) -> Option<&'a [u8]> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CStr;
+
     use super::*;
 
-    fn pasteboard() -> *mut AnyObject {
+    fn pasteboard(name: &CStr) -> *mut AnyObject {
         keep_file_drags_from_aborting();
         let class = AnyClass::get(c"NSPasteboard").expect("NSPasteboard");
-        let name = unsafe { ns_string(c"agent-doctor.drag-test") }.expect("name");
+        let name = unsafe { ns_string(name) }.expect("name");
         let board: *mut AnyObject = unsafe { msg_send![class, pasteboardWithName: name] };
         assert!(!board.is_null());
         unsafe {
@@ -264,14 +266,14 @@ mod tests {
 
     #[test]
     fn missing_filenames_list_is_an_empty_array() {
-        let board = pasteboard();
+        let board = pasteboard(c"agent-doctor.drag-test.missing");
         let paths = unsafe { list_paths(board) };
         assert!(paths.is_empty());
     }
 
     #[test]
     fn existing_filenames_list_is_kept() {
-        let board = pasteboard();
+        let board = pasteboard(c"agent-doctor.drag-test.existing");
         unsafe {
             let kind = filenames_kind();
             let path = ns_string(c"/tmp/agent-doctor-drag.txt").expect("path");
@@ -287,7 +289,7 @@ mod tests {
 
     #[test]
     fn file_url_drag_becomes_a_path_list() {
-        let board = pasteboard();
+        let board = pasteboard(c"agent-doctor.drag-test.url");
         unsafe {
             let path = ns_string(c"/tmp/agent-doctor-drag.txt").expect("path");
             let url_class = AnyClass::get(c"NSURL").expect("NSURL");
