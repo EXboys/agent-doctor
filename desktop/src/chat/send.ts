@@ -25,10 +25,19 @@ import type {
   SessionStore,
 } from "./types";
 import { noteIslandUserText } from "../island/publish";
-import { askImageSupport, cancelPromptSession, readImageTexts, startPromptSession } from "../ipc";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  askImageSupport,
+  cancelPromptSession,
+  listPromptRuns,
+  readImageTexts,
+  replayPromptAsks,
+  startPromptSession,
+  type PromptSessionFinished,
+} from "../ipc";
 import { beginChannelJob, endChannelJob } from "./channel-ask";
 import { notifyChannelSessionIdle } from "./channel-lane";
-import { MAX_PARALLEL_RUNS } from "./live-runs";
+import { bindBackendSession, MAX_PARALLEL_RUNS } from "./live-runs";
 import { planPictures, type PictureInput, type PictureTurn } from "./picture-route";
 import {
   consumeDrainIntent,
@@ -489,14 +498,25 @@ export function createSendController(deps: SendDeps) {
           deps.autoResizePrompt();
         }
       } else if (/already running/i.test(message)) {
-        try {
-          await cancelPromptSession(chatSessionId);
-        } catch {
-          /* ignore */
-        }
-        deps.setStatus(t("chat.forceStopped"), "warn");
-        if (deps.getStore().activeId === chatSessionId) {
-          deps.appendBubble("meta", t("chat.forceStopped"), { persist: false });
+        // This page lost track of a turn that is still going. Pick it back up;
+        // stopping it here is what cut long turns off halfway.
+        const adoptedHere = (await adoptLiveRuns({ only: chatSessionId, force: true })) > 0;
+        if (adoptedHere) {
+          deps.setStatus(t("chat.resumedRunBusy"), "warn");
+          if (!deps.promptEl.value.trim()) {
+            deps.promptEl.value = text;
+            deps.autoResizePrompt();
+          }
+        } else {
+          try {
+            await cancelPromptSession(chatSessionId);
+          } catch {
+            /* ignore */
+          }
+          deps.setStatus(t("chat.forceStopped"), "warn");
+          if (deps.getStore().activeId === chatSessionId) {
+            deps.appendBubble("meta", t("chat.forceStopped"), { persist: false });
+          }
         }
       } else {
         pushChatTurnError(message);
@@ -549,24 +569,104 @@ export function createSendController(deps: SendDeps) {
           deps.setVerifyMcpTurn(false);
         }
       }
-      const intent = consumeDrainIntent();
-      let continued = false;
-      if (intent !== "hold") {
-        const merged = mergedFollowUp(takeFollowUps(chatSessionId));
-        if (merged) {
-          const nested = await sendAsk({
-            draft: merged,
-            fromVoice: merged.fromVoice,
-            verifyMcp: merged.verifyMcp,
-          });
-          continued = nested === "started" || nested === "queued";
-        }
-      }
-      if (!continued) notifyChannelSessionIdle(chatSessionId);
-      deps.refreshComposer();
+      await sendFollowUps(chatSessionId);
     }
     return "started";
   }
 
-  return { cancelAsk, sendAsk };
+  async function sendFollowUps(chatSessionId: string): Promise<void> {
+    const intent = consumeDrainIntent();
+    let continued = false;
+    if (intent !== "hold") {
+      const merged = mergedFollowUp(takeFollowUps(chatSessionId));
+      if (merged) {
+        const nested = await sendAsk({
+          draft: merged,
+          fromVoice: merged.fromVoice,
+          verifyMcp: merged.verifyMcp,
+        });
+        continued = nested === "started" || nested === "queued";
+      }
+    }
+    if (!continued) notifyChannelSessionIdle(chatSessionId);
+    deps.refreshComposer();
+  }
+
+  /** Turns this page picked back up after a reload. Their `startPromptSession` reply went to the old page. */
+  const adopted = new Set<string>();
+  let finishListener: Promise<void> | null = null;
+
+  function listenForFinished(): Promise<void> {
+    finishListener ??= Promise.resolve()
+      .then(() =>
+        getCurrentWebviewWindow().listen<PromptSessionFinished>("prompt-session-finished", (event) => {
+          void settleAdopted(event.payload);
+        }),
+      )
+      .then(() => undefined)
+      .catch(() => {
+        finishListener = null;
+      });
+    return finishListener;
+  }
+
+  async function settleAdopted(done: PromptSessionFinished): Promise<void> {
+    const chatSessionId = done.client_run_id;
+    if (!adopted.delete(chatSessionId)) return;
+    const session = deps.sessionById(chatSessionId);
+    if (session) {
+      session.interrupted =
+        done.status === "succeeded" ? null : { status: done.status, at: Date.now() };
+      const threadId = done.runtime_thread_id?.trim();
+      if (threadId) {
+        session.runtimeThreadId = threadId;
+        session.providerTag = deps.providerTag?.() || null;
+      }
+      deps.touchSession(session);
+      deps.saveStore();
+    }
+    // `completed` normally ended the run already; a failed start sends none.
+    if (deps.isChatRunning?.(chatSessionId)) deps.setBusy(false, chatSessionId);
+    if (deps.getStore().activeId === chatSessionId) deps.expireLivePermissionCards();
+    deps.settleRunRouting(chatSessionId);
+    deps.renderSessionList();
+    await sendFollowUps(chatSessionId);
+  }
+
+  /**
+   * Pick up turns the backend is still running for this window, e.g. after the
+   * page reloaded. Returns how many were taken over.
+   */
+  async function adoptLiveRuns(opts?: { only?: string; force?: boolean }): Promise<number> {
+    await Promise.all([deps.ensureListener(), listenForFinished()]);
+    let runs;
+    try {
+      runs = (await listPromptRuns()) ?? [];
+    } catch {
+      return 0;
+    }
+    let count = 0;
+    for (const run of runs) {
+      const id = run.client_run_id;
+      if (opts?.only && id !== opts.only) continue;
+      if (!deps.sessionById(id)) continue;
+      if (!opts?.force && (adopted.has(id) || deps.isChatRunning?.(id))) continue;
+      adopted.add(id);
+      deps.setBusy(true, id);
+      if (run.session_id) bindBackendSession(id, run.session_id);
+      if (deps.getStore().activeId === id) {
+        deps.setStatus(t("chat.resumedRun"), "muted");
+        deps.pushActivity("think", t("chat.resumedRun"));
+      }
+      void replayPromptAsks(id).catch(() => {});
+      count += 1;
+    }
+    if (count > 0) {
+      deps.renderSessionList();
+      deps.refreshComposer();
+    }
+    return count;
+  }
+
+  return { adoptLiveRuns, cancelAsk, sendAsk };
 }

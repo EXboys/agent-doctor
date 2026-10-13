@@ -288,6 +288,9 @@ export function bootChat(): void {
   });
   promptEl.addEventListener("input", () => {
     autoResizePrompt();
+    // Menu and meter rewrite the DOM. Doing that while the input method is
+    // still painting marked text makes those characters jump or disappear.
+    if (promptEl.dataset.composing === "1") return;
     mentionMenu.renderMentionMenu();
     updateContextMeter();
   });
@@ -360,6 +363,9 @@ export function bootChat(): void {
     // Defer clear so the Enter that ends composition doesn't also send.
     window.setTimeout(() => {
       promptEl.dataset.composing = "0";
+      autoResizePrompt();
+      mentionMenu.renderMentionMenu();
+      updateContextMeter();
     }, 0);
   });
   document.addEventListener("click", (event) => {
@@ -437,6 +443,8 @@ export function bootChat(): void {
   });
 
   void ensureListener();
+  // A reload (or a recovered window) must not drop a turn that is still running.
+  void chatState.send.adoptLiveRuns();
   void refreshWiredProvider();
   autoResizePrompt();
   promptEl.focus();

@@ -41,7 +41,7 @@ use island::{
     island_set_enabled_command, island_set_hide_when_idle_command, island_set_hover_command,
     island_set_reading_command, publish_island_snapshot_command, IslandHost,
 };
-use state::{ActivePromptRun, PromptSessionState};
+use state::{ActivePromptRun, LivePromptRun, PromptSessionState};
 use windows::{
     close_ask_window_command, close_diagnose_window_command, close_resources_window_command,
     focus_main_tab_command, open_ask_window_command, open_diagnose_window_command,
@@ -318,11 +318,7 @@ async fn start_prompt_session_command(
     let control = PromptSessionControl::new();
     state.try_insert(
         client_key.clone(),
-        ActivePromptRun {
-            cancel: cancel.clone(),
-            control: control.clone(),
-            owner: owner_label.clone(),
-        },
+        ActivePromptRun::new(cancel.clone(), control.clone(), owner_label.clone()),
     )?;
 
     let options = PromptSessionOptions {
@@ -383,10 +379,11 @@ async fn start_prompt_session_command(
             control_for_run,
             |event: PromptSessionEvent| {
                 let event = stamp_client_run(event, &client_for_events);
-                if let Some(backend_id) = event_session_id(&event) {
-                    if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
+                if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
+                    if let Some(backend_id) = event_session_id(&event) {
                         sessions.note_backend(backend_id, &client_for_events);
                     }
+                    sessions.note_event(&client_for_events, &event);
                 }
                 // Only the window that started this run: Ask and Diagnose share the
                 // event name, and a broadcast made each one render the other's reply.
@@ -399,9 +396,48 @@ async fn start_prompt_session_command(
     state.release(&client_key);
 
     let report = result
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("{e:#}"))?;
-    Ok(report)
+        .map_err(|e| e.to_string())
+        .and_then(|run| run.map_err(|e| format!("{e:#}")));
+    // A page that reloaded mid-turn lost this call's reply; it learns the end here.
+    let finished = match &report {
+        Ok(report) => serde_json::json!({
+            "client_run_id": client_key,
+            "status": report.status,
+            "runtime_thread_id": report.runtime_thread_id,
+        }),
+        Err(_) => serde_json::json!({
+            "client_run_id": client_key,
+            "status": "failed",
+            "runtime_thread_id": null,
+        }),
+    };
+    let _ = app.emit_to(owner_label.as_str(), "prompt-session-finished", &finished);
+    report
+}
+
+/// Runs this window started that are still going, so a reloaded page can follow them.
+#[tauri::command]
+fn list_prompt_runs_command(
+    window: tauri::Window,
+    state: State<'_, PromptSessionState>,
+) -> Vec<LivePromptRun> {
+    state.live_runs(window.label())
+}
+
+/// Send the questions a reloaded page never saw. Returns how many.
+#[tauri::command]
+fn replay_prompt_asks_command(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, PromptSessionState>,
+    client_run_id: String,
+) -> usize {
+    let owner = window.label().to_string();
+    let asks = state.pending_asks(&owner, client_run_id.trim());
+    for ask in &asks {
+        let _ = app.emit_to(owner.as_str(), "prompt-session-event", ask);
+    }
+    asks.len()
 }
 
 #[tauri::command]
@@ -434,6 +470,7 @@ fn resolve_permission_session_command(
             .map_err(|e| format!("{e:#}"))?;
     }
     let allowed = sent_text.is_some() || allow;
+    state.forget_ask(&session_id, &request_id);
     let _ = app.emit_to(
         owner.as_str(),
         "prompt-session-event",
@@ -605,6 +642,8 @@ pub fn run() {
             resize_main_window_command,
             start_prompt_session_command,
             cancel_prompt_session_command,
+            list_prompt_runs_command,
+            replay_prompt_asks_command,
             resolve_permission_session_command,
             speech_capability_command,
             voice_cloud_ready_command,

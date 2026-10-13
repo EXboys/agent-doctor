@@ -99,26 +99,35 @@ export function createContextMeterController(deps: ContextMeterDeps) {
     const turns = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
     const hasContent = turns.length > 0 || Boolean(deps.promptEl.value.trim());
     // Always show the meter so a new empty chat can still open the tip panel.
-    deps.contextMeterEl.hidden = false;
+    if (deps.contextMeterEl.hidden) deps.contextMeterEl.hidden = false;
     const pct = hasContent ? deps.contextUsagePercent(session, deps.promptEl.value) : 0;
-    const offset = CONTEXT_RING_LENGTH * (1 - pct / 100);
-    deps.contextRingFillEl.style.strokeDasharray = String(CONTEXT_RING_LENGTH);
-    deps.contextRingFillEl.style.strokeDashoffset = String(offset);
-    deps.contextLabelEl.textContent = `${pct}%`;
-    deps.contextMeterEl.title = t("chat.contextMeterTitle");
+    const offset = String(CONTEXT_RING_LENGTH * (1 - pct / 100));
+    const ring = String(CONTEXT_RING_LENGTH);
+    if (deps.contextRingFillEl.style.strokeDasharray !== ring) {
+      deps.contextRingFillEl.style.strokeDasharray = ring;
+    }
+    if (deps.contextRingFillEl.style.strokeDashoffset !== offset) {
+      deps.contextRingFillEl.style.strokeDashoffset = offset;
+    }
+    const label = `${pct}%`;
+    if (deps.contextLabelEl.textContent !== label) deps.contextLabelEl.textContent = label;
+    const title = t("chat.contextMeterTitle");
+    if (deps.contextMeterEl.title !== title) deps.contextMeterEl.title = title;
     deps.contextMeterEl.classList.toggle("is-warn", pct >= 70 && pct < 90);
     deps.contextMeterEl.classList.toggle("is-full", pct >= 90);
-    if (deps.contextPopoverTitleEl) {
-      deps.contextPopoverTitleEl.textContent = hasContent
-        ? t("chat.contextPopoverTitle", { pct: String(pct) })
-        : t("chat.contextPopoverTitleEmpty");
+    const popoverTitle = hasContent
+      ? t("chat.contextPopoverTitle", { pct: String(pct) })
+      : t("chat.contextPopoverTitleEmpty");
+    if (deps.contextPopoverTitleEl && deps.contextPopoverTitleEl.textContent !== popoverTitle) {
+      deps.contextPopoverTitleEl.textContent = popoverTitle;
     }
-    if (deps.contextPopoverBodyEl) {
-      deps.contextPopoverBodyEl.textContent = !hasContent
-        ? t("chat.contextPopoverBodyEmpty")
-        : pct >= 70
-          ? t("chat.contextNearFull")
-          : t("chat.contextPopoverBody", { pct: String(pct) });
+    const popoverBody = !hasContent
+      ? t("chat.contextPopoverBodyEmpty")
+      : pct >= 70
+        ? t("chat.contextNearFull")
+        : t("chat.contextPopoverBody", { pct: String(pct) });
+    if (deps.contextPopoverBodyEl && deps.contextPopoverBodyEl.textContent !== popoverBody) {
+      deps.contextPopoverBodyEl.textContent = popoverBody;
     }
     if (deps.contextCompactEl) {
       const canCompact = turns.length > COMPACT_KEEP_TURNS && !deps.isComposerLocked();

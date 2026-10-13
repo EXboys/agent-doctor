@@ -304,10 +304,14 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     updateHealthStrip(installed, total);
     updateAgentsSecurityOverview(report);
 
-    setStatusBanner(
-      report.profile_env_exists ? "ok" : "warn",
-      report.profile_env_exists ? t("doctor.companyOk") : t("doctor.companyMissing"),
-    );
+    if (isPersonalEdition()) {
+      setStatusBanner("ok", t("doctor.scanOk"));
+    } else {
+      setStatusBanner(
+        report.profile_env_exists ? "ok" : "warn",
+        report.profile_env_exists ? t("doctor.companyOk") : t("doctor.companyMissing"),
+      );
+    }
 
     const hermesInstalled = report.runtimes.some(
       (runtime) => runtime.id === "hermes" && runtime.installed,

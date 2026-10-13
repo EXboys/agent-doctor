@@ -258,8 +258,6 @@ const ACTION_ICON = {
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 11h6M11 8v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   ask:
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 8h4M7 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  native:
-    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M7 9l3 3-3 3M12 15h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   uninstall:
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 } as const;
@@ -283,10 +281,6 @@ export function renderStandardRuntimeActions(_runtimeId: string): string {
     }),
     actionButton("secondary", "ask-session", ACTION_ICON.ask, t("runtime.ask"), {
       title: t("runtime.askHint"),
-    }),
-    actionButton("secondary", "open-session", ACTION_ICON.native, t("runtime.openTerminal"), {
-      title: t("runtime.openTerminalHint"),
-      extraAttrs: 'data-open-terminal="1"',
     }),
     actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
       title: t("runtime.uninstallHint"),
@@ -351,6 +345,7 @@ export function renderRuntimeCardActions(
       <summary>${escapeHtml(t("runtime.advanced"))}</summary>
       ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
       <div class="runtime-advanced-actions">
+        <button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${escapeHtml(t("runtime.openTerminal"))}</button>
         <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
         <button type="button" class="btn-ghost" data-action="force-reinstall-runtime" title="${escapeHtml(t("runtime.forceReinstallHint"))}">${t("runtime.forceReinstall")}</button>
       </div>

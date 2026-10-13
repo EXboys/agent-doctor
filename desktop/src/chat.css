@@ -138,6 +138,8 @@ html, body {
   background: transparent;
   cursor: col-resize;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   z-index: 20;
 }
 
@@ -3999,8 +4001,9 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   min-height: 0;
   min-width: 0;
   display: none;
-  --files-tree-w: 128px;
-  grid-template-columns: minmax(0, 1fr) var(--files-tree-w);
+  --files-tree-w: var(--files-tree-w-user, 128px);
+  --files-inner-split: var(--chat-splitter-w);
+  grid-template-columns: minmax(0, 1fr) var(--files-inner-split) var(--files-tree-w);
   grid-template-rows: auto auto minmax(0, 1fr);
   background: var(--main-bg);
 }
@@ -4130,22 +4133,40 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--files-tree-w);
+  grid-template-columns: minmax(0, 1fr) var(--files-inner-split) var(--files-tree-w);
   min-width: 0;
   overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: var(--main-bg);
 }
 
-.chat-files-tree-col {
+.chat-splitter-files-tree {
   grid-column: 2;
+  grid-row: 2 / 4;
+}
+
+/* Grab a little of the file and the list, so the line is not lost to text selection. */
+.chat-splitter-files-tree::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  right: -8px;
+}
+
+.chat-files-panel.is-tree-collapsed .chat-splitter-files-tree {
+  pointer-events: none;
+}
+
+.chat-files-tree-col {
+  grid-column: 3;
   grid-row: 3;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--line);
   background: var(--main-bg);
 }
 
@@ -4159,8 +4180,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   min-height: 48px;
   margin: 0;
   padding: 0 6px;
+  grid-column: 3;
   border: 0;
-  border-left: 1px solid var(--line);
   border-radius: 0;
   background: var(--main-bg);
   color: var(--faint);
@@ -4190,6 +4211,12 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-files-panel.is-tree-collapsed {
   --files-tree-w: 28px;
+  --files-inner-split: 0px;
+}
+
+.chat-files-panel.is-tree-collapsed .chat-files-tree,
+.chat-files-panel.is-tree-collapsed .chat-files-tree-col {
+  border-left: 1px solid var(--line);
 }
 
 .chat-files-panel.is-tree-collapsed .chat-files-list {
@@ -5453,9 +5480,78 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   cursor: default;
 }
 
+.chat-res-row.has-order {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.chat-res-grip {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 36px;
+  margin: 0 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: grab;
+}
+
+.chat-res-row:hover .chat-res-grip {
+  color: var(--text);
+}
+
+.chat-res-pin {
+  align-self: center;
+  margin: 0 0 0 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.chat-res-pin:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(47, 111, 237, 0.08);
+}
+
+.chat-res-pin.is-first {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.chat-res-row.is-shifting {
+  transition: transform 160ms ease;
+}
+
+.chat-res-row.is-dragging {
+  position: relative;
+  z-index: 3;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.chat-res-row.is-settling {
+  transition: transform 160ms ease;
+}
+
+body.chat-skill-dragging,
+body.chat-skill-dragging .chat-res-grip {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .chat-res-open {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
   min-width: 0;
@@ -5490,7 +5586,7 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-res-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
   width: 100%;
@@ -5601,13 +5697,10 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   overflow: hidden;
 }
 
-.chat-res-meta {
-  font-size: 0.66rem;
-  color: var(--faint);
-  text-align: right;
-  max-width: 72px;
+.chat-res-usage {
+  font-size: 0.68rem;
   line-height: 1.3;
-  padding-top: 2px;
+  color: var(--faint);
 }
 
 .chat-resources-empty,
@@ -7560,7 +7653,7 @@ html[data-theme="dark"] .chat-res-desc {
   color: #9d9d9d;
 }
 
-html[data-theme="dark"] .chat-res-meta {
+html[data-theme="dark"] .chat-res-usage {
   color: rgba(255, 255, 255, 0.5);
 }
 

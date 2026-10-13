@@ -1,6 +1,8 @@
 
 import { t } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
+import { attachSkillReorder } from "./chat/skill-drag";
+import { loadSkillOrder, orderBySaved } from "./chat/skill-order";
 import type {
   McpInventoryItem,
   SkillInventoryItem,
@@ -90,6 +92,16 @@ export function mcpChipLabel(server: McpInventoryItem): string {
   }
   if (server.is_browser) return `${server.name} · browser`;
   return server.name;
+}
+
+function skillUsageLine(skill: SkillInventoryItem): string {
+  const calls =
+    skill.call_count != null ? t("chat.skillUsageCalls", { count: String(skill.call_count) }) : "";
+  const rate =
+    skill.first_success_rate != null
+      ? t("chat.skillUsageRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
+      : "";
+  return [calls, rate].filter(Boolean).join(" · ");
 }
 
 export function skillMountedForRuntime(skill: SkillInventoryItem, runtime: AskRuntime): boolean {
@@ -391,16 +403,21 @@ export class AskResourcesController {
       query?: string;
       onDeleteSkill?: (skillId: string) => void;
       pendingDeleteId?: string;
+      onPinSkill?: (skillId: string) => void;
+      onReorderSkill?: (fromId: string, toId: string, position: "before" | "after") => void;
     },
   ): void {
     const q = (targets.query ?? this.resourcesQuery).trim().toLowerCase();
-    const skills = this.mountedSkills
+    const skills = orderBySaved(
+      this.mountedSkills
       .filter((skill) => skillMatchesScopeTab(skill, tab, projectName, runtime))
       .filter((skill) => {
         if (!q) return true;
         const hay = `${skill.name} ${skill.skill_id} ${skill.description ?? ""}`.toLowerCase();
         return hay.includes(q);
-      });
+      }),
+      loadSkillOrder(),
+    );
     const mcps = dedupeMcpsByName(
       this.enabledMcps
         .filter((server) => mcpMatchesScopeTab(server, tab, runtime))
@@ -422,45 +439,45 @@ export class AskResourcesController {
       targets.mcpEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty");
     }
 
-    for (const skill of skills) {
+    skills.forEach((skill, index) => {
       const title = skill.name || skill.skill_id;
-      const calls =
-        skill.call_count != null ? t("chat.resourcesCalls", { count: String(skill.call_count) }) : "";
-      const rate =
-        skill.first_success_rate != null
-          ? t("chat.resourcesRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
-          : "";
-      const meta = [calls, rate].filter(Boolean).join(" · ") || skill.metrics_source || "local";
+      const meta = skillUsageLine(skill);
       const removing = targets.pendingDeleteId === skill.skill_id;
-      targets.skillsListEl.appendChild(
-        this.buildResourceRow({
-          kind: "skill",
-          id: skill.skill_id,
-          title,
-          description: skill.description?.trim() || skill.skill_id,
-          badge: "Skill",
-          meta,
-          tone: "skill",
-          active: this.hasMention("skill", skill.skill_id),
-          onClick: () =>
-            this.toggleMention({
-              kind: "skill",
-              id: skill.skill_id,
-              label: title,
-            }),
-          onDelete: targets.onDeleteSkill ? () => targets.onDeleteSkill?.(skill.skill_id) : undefined,
-          deleteLabel: removing ? t("chat.skillDeleteConfirm") : t("chat.skillDelete"),
-          deleteArmed: removing,
-        }),
-      );
-    }
+      const canSort = Boolean(targets.onReorderSkill) && skills.length > 1;
+      const row = this.buildResourceRow({
+        kind: "skill",
+        id: skill.skill_id,
+        title,
+        description: skill.description?.trim() || skill.skill_id,
+        badge: "Skill",
+        meta,
+        tone: "skill",
+        active: this.hasMention("skill", skill.skill_id),
+        onClick: () =>
+          this.toggleMention({
+            kind: "skill",
+            id: skill.skill_id,
+            label: title,
+          }),
+        onDelete: targets.onDeleteSkill ? () => targets.onDeleteSkill?.(skill.skill_id) : undefined,
+        deleteLabel: removing ? t("chat.skillDeleteConfirm") : t("chat.skillDelete"),
+        deleteArmed: removing,
+        onPin: canSort && targets.onPinSkill ? () => targets.onPinSkill?.(skill.skill_id) : undefined,
+        pinFirst: index === 0,
+        sortable: canSort,
+      });
+      targets.skillsListEl.appendChild(row);
+      if (!canSort || !targets.onReorderSkill) return;
+      const grip = row.querySelector<HTMLElement>(".chat-res-grip");
+      if (grip) {
+        attachSkillReorder(targets.skillsListEl, grip, skill.skill_id, targets.onReorderSkill);
+      }
+    });
 
     for (const server of mcps) {
       const title = mcpChipLabel(server);
       const badge = server.is_browser ? "Browser" : "MCP";
-      const meta = server.healthy
-        ? `${server.scope}`
-        : server.issue || t("chat.resourcesUnhealthy");
+      const meta = server.healthy ? "" : server.issue || t("chat.resourcesUnhealthy");
       targets.mcpListEl.appendChild(
         this.buildResourceRow({
           kind: "mcp",
@@ -491,11 +508,14 @@ export class AskResourcesController {
     this.dom.mcpListEl.replaceChildren();
 
     const q = this.resourcesQuery;
-    const skills = this.mountedSkills.filter((skill) => {
-      if (!q) return true;
-      const hay = `${skill.name} ${skill.skill_id} ${skill.description ?? ""}`.toLowerCase();
-      return hay.includes(q);
-    });
+    const skills = orderBySaved(
+      this.mountedSkills.filter((skill) => {
+        if (!q) return true;
+        const hay = `${skill.name} ${skill.skill_id} ${skill.description ?? ""}`.toLowerCase();
+        return hay.includes(q);
+      }),
+      loadSkillOrder(),
+    );
     const mcps = this.enabledMcps.filter((server) => {
       if (!q) return true;
       const hay = `${server.name} ${server.scope} ${server.runtime_hint} ${server.issue ?? ""}`.toLowerCase();
@@ -533,13 +553,7 @@ export class AskResourcesController {
 
     for (const skill of skills) {
       const title = skill.name || skill.skill_id;
-      const calls =
-        skill.call_count != null ? t("chat.resourcesCalls", { count: String(skill.call_count) }) : "";
-      const rate =
-        skill.first_success_rate != null
-          ? t("chat.resourcesRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
-          : "";
-      const meta = [calls, rate].filter(Boolean).join(" · ") || skill.metrics_source || "local";
+      const meta = skillUsageLine(skill);
       this.dom.skillsListEl.appendChild(
         this.buildResourceRow({
           kind: "skill",
@@ -563,9 +577,7 @@ export class AskResourcesController {
     for (const server of mcps) {
       const title = mcpChipLabel(server);
       const badge = server.is_browser ? "Browser" : "MCP";
-      const meta = server.healthy
-        ? `${server.scope}`
-        : server.issue || t("chat.resourcesUnhealthy");
+      const meta = server.healthy ? "" : server.issue || t("chat.resourcesUnhealthy");
       this.dom.mcpListEl.appendChild(
         this.buildResourceRow({
           kind: "mcp",
@@ -606,10 +618,14 @@ export class AskResourcesController {
     onDelete?: () => void;
     deleteLabel?: string;
     deleteArmed?: boolean;
+    onPin?: () => void;
+    pinFirst?: boolean;
+    sortable?: boolean;
   }): HTMLElement {
     const btn = document.createElement(opts.onDelete ? "div" : "button");
     if (!opts.onDelete) (btn as HTMLButtonElement).type = "button";
     btn.className = opts.onDelete ? "chat-res-row has-delete" : "chat-res-row";
+    if (opts.sortable) btn.classList.add("has-order");
     btn.setAttribute("role", "listitem");
     btn.dataset.kind = opts.kind;
     btn.dataset.id = opts.id;
@@ -642,21 +658,23 @@ export class AskResourcesController {
     desc.textContent = opts.description;
 
     body.append(titleRow, desc);
-
-    const meta = document.createElement("span");
-    meta.className = "chat-res-meta";
-    meta.textContent = opts.meta;
+    if (opts.meta) {
+      const usage = document.createElement("span");
+      usage.className = "chat-res-usage";
+      usage.textContent = opts.meta;
+      body.append(usage);
+    }
 
     btn.title = opts.description;
     if (!opts.onDelete) {
-      btn.append(icon, body, meta);
+      btn.append(icon, body);
       btn.addEventListener("click", opts.onClick);
       return btn;
     }
     const open = document.createElement("button");
     open.type = "button";
     open.className = "chat-res-open";
-    open.append(icon, body, meta);
+    open.append(icon, body);
     open.addEventListener("click", opts.onClick);
     const remove = document.createElement("button");
     remove.type = "button";
@@ -667,12 +685,35 @@ export class AskResourcesController {
       event.stopPropagation();
       opts.onDelete?.();
     });
-    btn.append(open, remove);
+    if (!opts.sortable) {
+      btn.append(open, remove);
+      return btn;
+    }
+    const grip = document.createElement("button");
+    grip.type = "button";
+    grip.className = "chat-res-grip";
+    grip.title = t("chat.skillReorder");
+    grip.setAttribute("aria-label", t("chat.skillReorder"));
+    grip.innerHTML = `<svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="2" cy="10" r="1"/><circle cx="6" cy="10" r="1"/></svg>`;
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "chat-res-pin";
+    pin.classList.toggle("is-first", opts.pinFirst === true);
+    pin.textContent = t("chat.skillPin");
+    pin.title = t("chat.skillPinHint");
+    pin.disabled = opts.pinFirst === true;
+    pin.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (opts.pinFirst) return;
+      opts.onPin?.();
+    });
+    btn.append(grip, open, pin, remove);
     return btn;
   }
 
   mentionCandidates(): MentionRef[] {
-    const skills = this.mountedSkills.map((s) => ({
+    const skills = orderBySaved(this.mountedSkills, loadSkillOrder()).map((s) => ({
       kind: "skill" as const,
       id: s.skill_id,
       label: s.name || s.skill_id,
@@ -811,10 +852,13 @@ export class AskMentionMenuController {
   }
 
   hideMentionMenu(): void {
+    const menu = this.dom.mentionMenuEl;
+    const alreadyClosed = menu.hidden && this.mentionQuery === null && menu.childElementCount === 0;
     this.mentionQuery = null;
-    this.dom.mentionMenuEl.hidden = true;
-    this.dom.mentionMenuEl.replaceChildren();
-    this.dom.mentionMenuEl.classList.remove("is-slash");
+    if (alreadyClosed) return;
+    menu.hidden = true;
+    menu.replaceChildren();
+    menu.classList.remove("is-slash");
     this.onVisibilityChange?.(false);
   }
 

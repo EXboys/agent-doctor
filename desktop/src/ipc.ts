@@ -789,6 +789,27 @@ export function startPromptSession(args: StartPromptSessionArgs): Promise<Prompt
   return invoke("start_prompt_session_command", args);
 }
 
+export type LivePromptRun = {
+  client_run_id: string;
+  session_id: string | null;
+};
+
+/** Runs this window started that are still going (they outlive a page reload). */
+export function listPromptRuns(): Promise<LivePromptRun[]> {
+  return invoke("list_prompt_runs_command");
+}
+
+/** Show again the questions a reloaded page never saw. */
+export function replayPromptAsks(clientRunId: string): Promise<number> {
+  return invoke("replay_prompt_asks_command", { clientRunId });
+}
+
+export type PromptSessionFinished = {
+  client_run_id: string;
+  status: PromptSessionReport["status"];
+  runtime_thread_id: string | null;
+};
+
 export function cancelPromptSession(clientRunId?: string | null): Promise<boolean> {
   return invoke("cancel_prompt_session_command", { clientRunId: clientRunId ?? null });
 }

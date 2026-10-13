@@ -1,5 +1,6 @@
 //! Claude Code ask backend (`claude -p` + optional control_request permissions).
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -474,14 +475,24 @@ where
     let pid = child.id();
     let turn_done = Arc::new(AtomicBool::new(false));
     let mut plan_board = PlanBoard::default();
+    let mut background = BackgroundTasks::default();
     let mut tools = ToolWatch::default();
     let mut thinking = ThinkingLine::default();
-    let mut drain = |on_event: &mut F, tools: &mut ToolWatch, pipes: &LivePipes| -> bool {
+    let mut drain = |on_event: &mut F,
+                     tools: &mut ToolWatch,
+                     pipes: &LivePipes,
+                     background: &mut BackgroundTasks|
+     -> bool {
         let drained = pipes.drain();
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
                 let value = serde_json::from_str::<serde_json::Value>(&line).ok();
+                // A subagent's own text and tools share this stdout. They are not
+                // the reply, and landing them here cuts the sentence into pieces.
+                if value.as_ref().is_some_and(from_subagent) {
+                    continue;
+                }
                 if let Some(text) = value.as_ref().and_then(claude_thinking_delta) {
                     on_event(PromptSessionEvent::Thinking {
                         session_id: session_id.to_string(),
@@ -510,6 +521,7 @@ where
                     control,
                     Some(turn_done.as_ref()),
                     &mut plan_board,
+                    &mut *background,
                 ) {
                     on_event(event);
                 }
@@ -528,16 +540,18 @@ where
     let mut timeout_note = None;
     let mut still_running = false;
     let (status, exit_code) = loop {
-        let saw_output = drain(on_event, &mut tools, pipes);
+        let saw_output = drain(on_event, &mut tools, pipes, &mut background);
         if saw_output || control.is_some_and(PromptSessionControl::has_pending) {
             clock.touch();
         }
-        clock.set_tool_running(tools.running());
+        // A background agent keeps the turn alive after the model has stopped
+        // to wait. Quiet time and the short ask limit must not cut it off.
+        clock.set_tool_running(tools.running() || background.pending());
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if clock.expired() || clock.stalled() {
+        if clock.stalled() || (clock.expired() && !background.pending()) {
             timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
@@ -583,7 +597,7 @@ where
     if !still_running {
         pipes.join(Duration::from_millis(500));
     }
-    drain(on_event, &mut tools, pipes);
+    drain(on_event, &mut tools, pipes, &mut background);
 
     let (stdout, stderr) = pipes.take_output();
     Ok((status, exit_code, stdout, stderr, timeout_note))
@@ -833,12 +847,117 @@ fn claude_question_mode(input: &serde_json::Value) -> String {
     "line".to_string()
 }
 
+/// Live background agents. Claude keeps writing after the model pauses to wait
+/// for them; the first `result` is not the end of the turn while any remain.
+#[derive(Default)]
+struct BackgroundTasks {
+    /// `None` until `background_tasks_changed`. After that, each event replaces the set.
+    level: Option<HashSet<String>>,
+    launched: u32,
+    notified: u32,
+}
+
+impl BackgroundTasks {
+    fn pending(&self) -> bool {
+        if let Some(live) = &self.level {
+            return !live.is_empty();
+        }
+        self.launched > self.notified
+    }
+
+    fn saw_level(&mut self, live: HashSet<String>) {
+        self.level = Some(live);
+    }
+
+    fn note_text(&mut self, text: &str) {
+        if self.level.is_some() || text.is_empty() {
+            return;
+        }
+        if text.contains("Async agent launched successfully")
+            || text.contains("working in the background")
+        {
+            self.launched += 1;
+        }
+        if text.contains("<task-notification>") && background_task_finished(text) {
+            self.notified = self.notified.saturating_add(1);
+        }
+    }
+}
+
+fn background_task_finished(text: &str) -> bool {
+    [
+        "<status>completed</status>",
+        "<status>failed</status>",
+        "<status>killed</status>",
+        "<status>cancelled</status>",
+        "<status>canceled</status>",
+        "<status>timed_out</status>",
+    ]
+    .iter()
+    .any(|status| text.contains(status))
+}
+
+/// Subagent traffic on the same stdout. `parent_tool_use_id` is null for the reply.
+fn from_subagent(value: &serde_json::Value) -> bool {
+    value
+        .get("parent_tool_use_id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|id| !id.is_empty())
+}
+
+fn note_background(background: &mut BackgroundTasks, value: &serde_json::Value) {
+    let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if event_type == "system"
+        && value.get("subtype").and_then(|v| v.as_str()) == Some("background_tasks_changed")
+    {
+        let mut live = HashSet::new();
+        if let Some(tasks) = value.get("tasks").and_then(|v| v.as_array()) {
+            for task in tasks {
+                if let Some(id) = task
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|id| !id.is_empty())
+                {
+                    live.insert(id.to_string());
+                }
+            }
+        }
+        background.saw_level(live);
+        return;
+    }
+    if event_type != "user" {
+        return;
+    }
+    match value.pointer("/message/content") {
+        Some(serde_json::Value::String(text)) => background.note_text(text),
+        Some(serde_json::Value::Array(blocks)) => {
+            for block in blocks {
+                let text = match block.get("type").and_then(|v| v.as_str()) {
+                    Some("tool_result") => block
+                        .get("content")
+                        .map(tool_result_text)
+                        .unwrap_or_default(),
+                    Some("text") => block
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    _ => String::new(),
+                };
+                background.note_text(&text);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn parse_claude_stream_line(
     session_id: &str,
     line: &str,
     control: Option<&PromptSessionControl>,
     turn_done: Option<&AtomicBool>,
     plan_board: &mut PlanBoard,
+    background: &mut BackgroundTasks,
 ) -> Vec<PromptSessionEvent> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         if line.trim().is_empty() {
@@ -849,6 +968,11 @@ fn parse_claude_stream_line(
             line: line.to_string(),
         }];
     };
+
+    if from_subagent(&value) {
+        return Vec::new();
+    }
+    note_background(background, &value);
 
     let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match event_type {
@@ -1077,13 +1201,22 @@ fn parse_claude_stream_line(
         // applied after pump when live deltas were missing (avoids duplicating
         // assistant text that already streamed).
         "result" => {
-            if let Some(flag) = turn_done {
-                flag.store(true, Ordering::SeqCst);
-            }
             let is_error = value
                 .get("is_error")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            // The model can stop to wait for background agents. That envelope is
+            // not the answer; keep reading until those agents have reported back.
+            if !is_error && background.pending() {
+                return vec![PromptSessionEvent::Status {
+                    session_id: session_id.to_string(),
+                    phase: "thinking".into(),
+                    message: "还在等这几项做完".into(),
+                }];
+            }
+            if let Some(flag) = turn_done {
+                flag.store(true, Ordering::SeqCst);
+            }
             if is_error {
                 let msg = value
                     .get("result")
@@ -1274,6 +1407,7 @@ mod tests {
             None,
             None,
             &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
         );
         assert!(
             !events
@@ -1356,8 +1490,109 @@ mod tests {
             None,
             Some(&flag),
             &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
         );
         assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn result_waits_while_background_agents_are_still_out() {
+        let flag = AtomicBool::new(false);
+        let mut background = BackgroundTasks::default();
+        let launch = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"Async agent launched successfully. The agent is working in the background."}]}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            launch,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        let waiting = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"result","is_error":false,"result":"等它们完成"}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(!flag.load(Ordering::SeqCst));
+        assert!(waiting.iter().any(|event| matches!(
+            event,
+            PromptSessionEvent::Status { message, .. } if message == "还在等这几项做完"
+        )));
+
+        let note = r#"{"type":"user","message":{"content":"<task-notification><task-id>a</task-id><status>completed</status></task-notification>"}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            note,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"result","is_error":false,"result":"优化清单"}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn background_task_list_replaces_itself() {
+        let flag = AtomicBool::new(false);
+        let mut background = BackgroundTasks::default();
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"agent","description":"结构"}]}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"result","is_error":false,"result":"先等等"}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(!flag.load(Ordering::SeqCst));
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"result","is_error":false,"result":"清单"}"#,
+            None,
+            Some(&flag),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn subagent_tools_do_not_enter_the_reply() {
+        let events = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"assistant","parent_tool_use_id":"parent-1","message":{"content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"src/app.ts"}},{"type":"text","text":"子任务的句子"}]}}"#,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
+        );
+        assert!(events.is_empty());
     }
 
     #[test]
@@ -1381,6 +1616,7 @@ mod tests {
             None,
             None,
             &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
         );
         assert!(matches!(
             events.as_slice(),
@@ -1391,7 +1627,14 @@ mod tests {
     #[test]
     fn todo_write_emits_a_plan_instead_of_a_tool_chip() {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"改按钮","status":"in_progress"},{"content":"再试一次","status":"pending"}]}}]}}"#;
-        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
+        let events = parse_claude_stream_line(
+            "s1",
+            line,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
+        );
         assert!(events.iter().any(|event| matches!(
             event,
             PromptSessionEvent::Plan { items, .. }
@@ -1408,7 +1651,14 @@ mod tests {
     fn tool_use_and_result_share_one_step() {
         let mut board = PlanBoard::default();
         let start = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t9","name":"Bash","input":{"command":"echo hi >> notes.md","description":"记一笔"}}]}}"#;
-        let events = parse_claude_stream_line("s1", start, None, None, &mut board);
+        let events = parse_claude_stream_line(
+            "s1",
+            start,
+            None,
+            None,
+            &mut board,
+            &mut BackgroundTasks::default(),
+        );
         let step = events.iter().find_map(|event| match event {
             PromptSessionEvent::Tool { step, .. } => Some(step.clone()),
             _ => None,
@@ -1425,7 +1675,14 @@ mod tests {
         );
 
         let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t9","is_error":true,"content":[{"type":"text","text":"Exit code 1\nno space"}]}]}}"#;
-        let events = parse_claude_stream_line("s1", result, None, None, &mut board);
+        let events = parse_claude_stream_line(
+            "s1",
+            result,
+            None,
+            None,
+            &mut board,
+            &mut BackgroundTasks::default(),
+        );
         assert!(events.iter().any(|event| matches!(
             event,
             PromptSessionEvent::Tool { step, .. }
@@ -1437,8 +1694,14 @@ mod tests {
     fn parse_control_request_emits_permission() {
         let control = PromptSessionControl::new();
         let line = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls -la"}}}"#;
-        let events =
-            parse_claude_stream_line("s1", line, Some(&control), None, &mut PlanBoard::default());
+        let events = parse_claude_stream_line(
+            "s1",
+            line,
+            Some(&control),
+            None,
+            &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
+        );
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {
@@ -1457,7 +1720,14 @@ mod tests {
     #[test]
     fn open_secret_question_is_a_hidden_field() {
         let line = r#"{"type":"control_request","request_id":"req-s","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"把密钥贴在这里","kind":"text"}]}}}"#;
-        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
+        let events = parse_claude_stream_line(
+            "s1",
+            line,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
+        );
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {
@@ -1498,7 +1768,14 @@ mod tests {
     #[test]
     fn ask_user_question_is_an_option_prompt() {
         let line = r#"{"type":"control_request","request_id":"req-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"用哪种登录？","options":[{"label":"浏览器"},{"label":"密钥"}]}]}}}"#;
-        let events = parse_claude_stream_line("s1", line, None, None, &mut PlanBoard::default());
+        let events = parse_claude_stream_line(
+            "s1",
+            line,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut BackgroundTasks::default(),
+        );
         assert!(events.iter().any(|e| matches!(
             e,
             PromptSessionEvent::PermissionRequest {

@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AskResourcesController, AskRuntime, ResourcesScopeTab } from "../ask-resources";
+import { loadSkillOrder, pinSkillId, reorderSkillIds, saveSkillOrder } from "./skill-order";
 import { t, tNamed } from "../i18n";
 import { skillInstall, skillRemove } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
@@ -141,6 +142,17 @@ function paintContent(): void {
           return;
         }
         void removeSkill(skillId);
+      },
+      onPinSkill: (skillId) => {
+        saveSkillOrder(pinSkillId(loadSkillOrder(), skillId));
+        paintContent();
+      },
+      onReorderSkill: (fromId, toId, position) => {
+        const visible = [...skillsList.querySelectorAll<HTMLElement>('.chat-res-row[data-kind="skill"]')]
+          .map((row) => row.dataset.id ?? "")
+          .filter(Boolean);
+        saveSkillOrder(reorderSkillIds(loadSkillOrder(), visible, fromId, toId, position));
+        paintContent();
       },
     },
   );

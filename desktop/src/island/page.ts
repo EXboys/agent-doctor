@@ -1,3 +1,4 @@
+import { fitTextarea } from "../fit-textarea";
 import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
@@ -229,9 +230,7 @@ function questionsOf(pending: IslandPending): IslandQuestion[] {
 const REPLY_MAX_HEIGHT = 120;
 
 function fitReplyField(field: HTMLTextAreaElement): void {
-  field.style.height = "auto";
-  const next = Math.min(field.scrollHeight, REPLY_MAX_HEIGHT);
-  field.style.height = `${next}px`;
+  const next = fitTextarea(field, REPLY_MAX_HEIGHT);
   field.closest(".island-compose")?.classList.toggle("is-multiline", next > 40);
 }
 
@@ -254,6 +253,15 @@ function appendReplyField(
     event.stopPropagation();
     void islandClaimKeyboard().finally(() => field.focus());
   });
+  field.addEventListener("compositionstart", () => {
+    field.dataset.composing = "1";
+  });
+  field.addEventListener("compositionend", () => {
+    window.setTimeout(() => {
+      field.dataset.composing = "0";
+      if (field instanceof HTMLTextAreaElement) fitReplyField(field);
+    }, 0);
+  });
   field.addEventListener("input", () => {
     if (field instanceof HTMLTextAreaElement) fitReplyField(field);
     compose.classList.toggle("is-ready", field.value.trim().length > 0);
@@ -265,7 +273,14 @@ function appendReplyField(
   };
   field.addEventListener("keydown", (event) => {
     if (!(event instanceof KeyboardEvent)) return;
-    if (event.key !== "Enter" || event.isComposing || event.shiftKey) return;
+    if (
+      event.key !== "Enter" ||
+      event.isComposing ||
+      event.shiftKey ||
+      field.dataset.composing === "1"
+    ) {
+      return;
+    }
     event.preventDefault();
     send();
   });

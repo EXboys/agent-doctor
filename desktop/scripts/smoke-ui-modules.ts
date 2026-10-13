@@ -115,6 +115,13 @@ const actions = renderRuntimeCardActions(runtime, "<div>adv</div>", {
 });
 assert(actions.includes('data-action="apply-repair"'), "one-click repair button");
 assert(actions.includes('data-action="ask-session"'), "ask button");
+const nativeAt = actions.indexOf('data-open-terminal="1"');
+const moreAt = actions.indexOf('class="runtime-advanced"');
+assert(moreAt >= 0 && nativeAt > moreAt, "native open sits under more");
+assert(
+  actions.slice(0, moreAt).includes('data-action="uninstall-runtime"'),
+  "uninstall stays on the main row",
+);
 
 const card = renderRuntimeCard(
   runtime,

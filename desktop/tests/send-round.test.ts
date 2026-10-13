@@ -52,6 +52,7 @@ let confirmReply = true;
 let confirmAsked = 0;
 let startReply: () => Promise<Report> = async () => okReport();
 let cancelReply: () => Promise<boolean> = async () => true;
+let liveRuns: Array<{ client_run_id: string; session_id: string | null }> = [];
 
 function okReport(extra: Partial<Report> = {}): Report {
   return { cwd: "/tmp/round", status: "succeeded", duration_ms: 7, runtime_thread_id: null, ...extra };
@@ -75,6 +76,8 @@ Object.defineProperty(globalThis, "window", {
         invokes.push({ cmd, args });
         if (cmd === "start_prompt_session_command") return startReply();
         if (cmd === "cancel_prompt_session_command") return cancelReply();
+        if (cmd === "list_prompt_runs_command") return liveRuns;
+        if (cmd === "replay_prompt_asks_command") return 0;
         return null;
       },
     },
@@ -137,6 +140,7 @@ function reset(): void {
   confirmAsked = 0;
   startReply = async () => okReport();
   cancelReply = async () => true;
+  liveRuns = [];
   consumeDrainIntent();
 }
 
@@ -420,6 +424,38 @@ await check("the engine says this chat is already running: stop it and say so", 
   eq(cancelCalls().map((c) => c.args.clientRunId), ["s-stuck"], "stops this chat's run");
   eq(state.statuses.at(-1), { text: t("chat.forceStopped"), tone: "warn" }, "status");
   eq(state.busy, false, "busy released");
+});
+
+await check("the page reloaded while this chat was still working: pick it back up, do not stop it", async () => {
+  reset();
+  liveRuns = [{ client_run_id: "s-reloaded", session_id: "ps-9" }];
+  startReply = async () => {
+    throw new Error("another ask session is already running");
+  };
+  const { api, state, promptEl } = newController({ sessions: [makeSession("s-reloaded")] });
+  promptEl.value = "next step";
+
+  await api.sendAsk();
+
+  eq(cancelCalls().length, 0, "the running turn is left alone");
+  eq(state.statuses.at(-1), { text: t("chat.resumedRunBusy"), tone: "warn" }, "status");
+  eq(promptEl.value, "next step", "text back in the box");
+  eq(state.busy, true, "the chat still shows it is working");
+});
+
+await check("after a reload the page takes over turns that are still running", async () => {
+  reset();
+  liveRuns = [
+    { client_run_id: "s-live", session_id: "ps-3" },
+    { client_run_id: "s-gone", session_id: null },
+  ];
+  const { api, state } = newController({ sessions: [makeSession("s-live")] });
+
+  const n = await api.adoptLiveRuns();
+
+  eq(n, 1, "only a chat this page knows");
+  eq(state.busy, true, "shown as working");
+  ok(invokes.some((c) => c.cmd === "replay_prompt_asks_command" && c.args.clientRunId === "s-live"), "open questions asked again");
 });
 
 await check("the project folder is gone: say so in plain words", async () => {

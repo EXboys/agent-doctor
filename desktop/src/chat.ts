@@ -1,3 +1,4 @@
+import { fitTextarea } from "./fit-textarea";
 import { renderFollowQueue } from "./chat/follow-queue";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
@@ -331,17 +332,7 @@ export function restoreRunningView(): void {
 /** Expire leftover Allow/Deny cards when the ask ends (in place — do not reshuffle the log). */
 
 export function autoResizePrompt(): void {
-  promptEl.style.height = "auto";
-  const styles = window.getComputedStyle(promptEl);
-  const maxHeight = Number.parseFloat(styles.maxHeight);
-  const minHeight = Number.parseFloat(styles.minHeight);
-  const content = promptEl.scrollHeight;
-  let next = content;
-  if (Number.isFinite(minHeight)) next = Math.max(next, minHeight);
-  const capped = Number.isFinite(maxHeight) && content > maxHeight;
-  if (capped) next = maxHeight;
-  promptEl.style.height = `${next}px`;
-  promptEl.style.overflowY = capped ? "auto" : "hidden";
+  fitTextarea(promptEl);
 }
 
 export function selectedRuntime(): AskRuntime {
