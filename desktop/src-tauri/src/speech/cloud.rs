@@ -1324,8 +1324,10 @@ mod tests {
 
     #[test]
     fn refused_service_does_not_keep_its_words() {
-        let mut sentence = Sentence::default();
-        sentence.kept = "前面".into();
+        let mut sentence = Sentence {
+            kept: "前面".into(),
+            ..Default::default()
+        };
         sentence.apply(piece(1, "apd", None, "半句"));
         sentence.forget_session();
         assert_eq!(sentence.text(), "前面");
