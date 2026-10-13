@@ -99,6 +99,60 @@ PY"#
     .to_string()
 }
 
+/// `install.ps1` puts the program and the saved settings in the same folder
+/// (`%LOCALAPPDATA%\hermes`, or `HERMES_HOME`) and adds its launchers to the user
+/// PATH. `hermes uninstall` needs a terminal, which Windows cannot fake through a
+/// pipe, so remove the program parts here and keep config, keys and chats.
+const HERMES_WINDOWS_UNINSTALL_PS1: &str = r#"
+$ErrorActionPreference = 'Continue'
+$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
+$root = $root.TrimEnd('\')
+if (-not (Test-Path -LiteralPath $root)) { exit 3 }
+$prefix = $root + '\'
+Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 800
+$program = @('hermes-agent', 'bin', 'node', 'tools', 'git', 'python', 'uv', 'venv', 'runtime',
+             'hermes.cmd', 'hermes.exe', 'hermes.bat', 'hermes.ps1')
+foreach ($name in $program) {
+    $path = Join-Path $root $name
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($userPath) {
+    $kept = $userPath -split ';' | Where-Object {
+        $entry = $_.TrimEnd('\')
+        $entry -and -not ($entry -ieq $root -or $entry.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))
+    }
+    $joined = $kept -join ';'
+    if ($joined -ne $userPath) { [Environment]::SetEnvironmentVariable('Path', $joined, 'User') }
+}
+$left = $program | Where-Object { Test-Path -LiteralPath (Join-Path $root $_) }
+if ($left) { exit 2 }
+"#;
+
+fn uninstall_hermes_windows() -> Result<()> {
+    let capture = super::runner::run_shell_command_capturing(&super::powershell_encoded(
+        HERMES_WINDOWS_UNINSTALL_PS1,
+    ))?;
+    match capture.exit_code {
+        Some(0) => {}
+        Some(3) => {
+            bail!("没找到 Hermes 的安装文件夹。它可能是用别的方式装的，请用当时安装它的方式卸掉。")
+        }
+        Some(2) => {
+            bail!("有些文件正被占用，没删干净。关掉 Hermes 和正在用它的窗口，再点一次卸载。")
+        }
+        _ => bail!("卸不掉，系统没让删这些文件。重启电脑后再点一次卸载。"),
+    }
+    if !find_all_binaries("hermes").is_empty() {
+        bail!(
+            "这里装的那份已经卸掉了，但本机别处还有一份不是从这里装的。请用当时安装它的方式卸掉。"
+        );
+    }
+    Ok(())
+}
+
 fn uninstall_npm_package(package: &str, binary_name: &str) -> Result<()> {
     crate::lifecycle::nodejs::ensure_npm().map_err(|_| anyhow!("卸掉需要本机已安装 npm。"))?;
 
@@ -198,6 +252,7 @@ pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
             "codebuddy",
         ),
         "cursor" => uninstall_cursor_cli(),
+        "hermes" if cfg!(windows) => uninstall_hermes_windows(),
         "hermes" => {
             let command = hermes_uninstall_shell_command();
             run_shell_command(&command)
@@ -259,6 +314,35 @@ mod tests {
         assert!(cmd.contains("b\"1\\n\""));
         assert!(cmd.contains("b\"yes\\n\""));
         assert!(!cmd.contains("--full"));
+    }
+
+    #[test]
+    fn windows_hermes_uninstall_removes_the_program_and_keeps_settings() {
+        let script = HERMES_WINDOWS_UNINSTALL_PS1;
+        assert!(!script.contains("<<"), "cmd cannot run a heredoc");
+        for program in ["'hermes-agent'", "'bin'", "'node'", "'tools'"] {
+            assert!(script.contains(program), "{program}");
+        }
+        for kept in ["config.yaml", ".env", "sessions", "memories", "skills"] {
+            assert!(!script.contains(kept), "{kept} must stay");
+        }
+        assert!(script.contains("SetEnvironmentVariable('Path'"));
+    }
+
+    #[test]
+    fn powershell_gets_the_script_as_utf16_base64() {
+        use base64::Engine;
+        let line = super::super::powershell_encoded("Write-Output '卸载'");
+        let encoded = line.rsplit(' ').next().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "Write-Output '卸载'");
+        assert!(line.starts_with("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass"));
     }
 
     #[test]

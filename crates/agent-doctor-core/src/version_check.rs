@@ -24,14 +24,18 @@ const CODEX_NPM: &str = "@openai/codex";
 const DSH_NPM: &str = "@deepseek-ai/dsh";
 const HERMES_PYPROJECT_URL: &str =
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/pyproject.toml";
+const HERMES_LATEST_RELEASE_URL: &str =
+    "https://github.com/NousResearch/hermes-agent/releases/latest";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VersionCompareStatus {
     /// Local matches latest (or recommended pin when that is the policy).
     UpToDate,
-    /// Upstream differs — upgrade may break config.
+    /// Upstream differs — upgrade may break config. The installed copy still works here.
     UpdateAvailable,
+    /// Installed copy is older than the version this app can talk to.
+    BelowMinimum,
     /// Could not fetch or parse latest.
     Unknown,
 }
@@ -45,6 +49,8 @@ pub struct RuntimeVersionStatus {
     pub latest: Option<String>,
     /// Doctor-recommended pin (DeepSeek Harness), when applicable.
     pub recommended: Option<String>,
+    /// Oldest version this app can talk to, when this runtime has one.
+    pub minimum: Option<String>,
     pub status: VersionCompareStatus,
 }
 
@@ -102,11 +108,20 @@ fn build_status(
     if latest.is_none() && runtime_id == "deepseek-harness" {
         latest = Some(DEEPSEEK_HARNESS_VERSION.to_string());
     }
+    let minimum = client_minimum_version(runtime_id).map(str::to_string);
+    let below_minimum = installed
+        .as_deref()
+        .zip(minimum.as_deref())
+        .is_some_and(|(local, floor)| version_is_older(local, floor));
 
-    let status = match (&installed, &latest) {
-        (Some(local), Some(up)) if versions_match(local, up) => VersionCompareStatus::UpToDate,
-        (Some(_), Some(_)) => VersionCompareStatus::UpdateAvailable,
-        _ => VersionCompareStatus::Unknown,
+    let status = if below_minimum {
+        VersionCompareStatus::BelowMinimum
+    } else {
+        match (&installed, &latest) {
+            (Some(local), Some(up)) if versions_match(local, up) => VersionCompareStatus::UpToDate,
+            (Some(_), Some(_)) => VersionCompareStatus::UpdateAvailable,
+            _ => VersionCompareStatus::Unknown,
+        }
     };
 
     RuntimeVersionStatus {
@@ -114,14 +129,55 @@ fn build_status(
         installed,
         latest,
         recommended,
+        minimum,
         status,
     }
+}
+
+/// Oldest release this app can talk to. An older install already on the computer
+/// should be updated before chat. Runtimes without an entry keep working as-is.
+pub fn client_minimum_version(runtime_id: &str) -> Option<&'static str> {
+    match runtime_id {
+        // `hermes chat --format stream-json` landed after the 0.21.3 tag; git installs
+        // on main still report 0.21.3 and have it, so only older numbers are refused.
+        "hermes" => Some("0.21.3"),
+        _ => None,
+    }
+}
+
+/// True when `installed` is strictly older than `minimum`.
+pub fn version_is_older(installed: &str, minimum: &str) -> bool {
+    compare_version_parts(installed, minimum) == std::cmp::Ordering::Less
+}
+
+fn compare_version_parts(left: &str, right: &str) -> std::cmp::Ordering {
+    let left = version_numbers(left);
+    let right = version_numbers(right);
+    for index in 0..left.len().max(right.len()) {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        match a.cmp(&b) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+fn version_numbers(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+'])
+        .map_while(|part| part.parse::<u64>().ok())
+        .collect()
 }
 
 fn load_or_refresh_latest_cache() -> LatestCacheFile {
     if let Some(existing) = read_cache_file() {
         let age = now_unix().saturating_sub(existing.fetched_at_unix);
-        if age < CACHE_TTL_SECS && !existing.latest.is_empty() {
+        let placeholder = existing.latest.values().any(|v| is_placeholder_version(v));
+        if age < CACHE_TTL_SECS && !existing.latest.is_empty() && !placeholder {
             return existing;
         }
     }
@@ -183,14 +239,45 @@ fn fetch_npm_latest(package: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// `main` now carries a `0.0.0` placeholder in pyproject; the release tag is the
+/// version people install.
 fn fetch_hermes_latest() -> Option<String> {
-    let fetch_url = if use_china_mirrors() {
-        format!("https://gh-proxy.com/{HERMES_PYPROJECT_URL}")
-    } else {
-        HERMES_PYPROJECT_URL.to_string()
-    };
-    let body = http_get_text(&fetch_url)?;
-    parse_pyproject_version(&body)
+    fetch_hermes_release_tag().or_else(|| {
+        let fetch_url = if use_china_mirrors() {
+            format!("https://gh-proxy.com/{HERMES_PYPROJECT_URL}")
+        } else {
+            HERMES_PYPROJECT_URL.to_string()
+        };
+        let body = http_get_text(&fetch_url)?;
+        parse_pyproject_version(&body).filter(|v| !is_placeholder_version(v))
+    })
+}
+
+fn fetch_hermes_release_tag() -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("agent-doctor/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()?;
+    let response = client.get(HERMES_LATEST_RELEASE_URL).send().ok()?;
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)?
+        .to_str()
+        .ok()?;
+    release_tag_version(location)
+}
+
+fn release_tag_version(location: &str) -> Option<String> {
+    let tag = location.rsplit_once("/tag/")?.1.trim_end_matches('/');
+    let version = tag.trim_start_matches(['v', 'V']);
+    (!version_numbers(version).is_empty() && !is_placeholder_version(version))
+        .then(|| version.to_string())
+}
+
+fn is_placeholder_version(version: &str) -> bool {
+    version_numbers(version).iter().all(|part| *part == 0)
 }
 
 fn parse_pyproject_version(toml: &str) -> Option<String> {
@@ -354,5 +441,47 @@ mod tests {
     fn status_up_to_date_when_equal() {
         let status = build_status("openclaw", Some("OpenClaw 2026.9.5"), Some("2026.9.5"));
         assert_eq!(status.status, VersionCompareStatus::UpToDate);
+    }
+
+    #[test]
+    fn hermes_latest_comes_from_the_release_tag_not_a_placeholder() {
+        assert_eq!(
+            release_tag_version(
+                "https://github.com/NousResearch/hermes-agent/releases/tag/v0.21.7"
+            ),
+            Some("0.21.7".into())
+        );
+        assert_eq!(
+            release_tag_version("https://github.com/x/y/releases/tag/v0.0.0"),
+            None
+        );
+        assert_eq!(release_tag_version("https://github.com/x/y/releases"), None);
+        assert!(is_placeholder_version("0.0.0"));
+        assert!(!is_placeholder_version("0.21.7"));
+    }
+
+    #[test]
+    fn hermes_older_than_client_minimum_asks_for_an_update() {
+        let status = build_status("hermes", Some("Hermes Agent v0.20.1"), Some("0.22.0"));
+        assert_eq!(status.status, VersionCompareStatus::BelowMinimum);
+        assert_eq!(status.installed.as_deref(), Some("0.20.1"));
+        assert_eq!(status.minimum.as_deref(), Some("0.21.3"));
+    }
+
+    #[test]
+    fn hermes_at_the_client_minimum_can_stay() {
+        let status = build_status(
+            "hermes",
+            Some("Hermes Agent v0.21.3 (2026.9.14)"),
+            Some("0.22.0"),
+        );
+        assert_eq!(status.status, VersionCompareStatus::UpdateAvailable);
+    }
+
+    #[test]
+    fn a_runtime_without_a_floor_does_not_become_below_minimum() {
+        let status = build_status("codex", Some("0.1.0"), Some("0.9.0"));
+        assert_eq!(status.status, VersionCompareStatus::UpdateAvailable);
+        assert!(status.minimum.is_none());
     }
 }

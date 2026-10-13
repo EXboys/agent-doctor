@@ -1,0 +1,13 @@
+---
+description: Dev rebuilds must load the live Vite page, never the old packaged frontend
+alwaysApply: true
+---
+
+# Desktop dev frontend
+
+A normal `cargo build` of the desktop app embeds `desktop/dist`. That page is an old package. The window then rolls back to a previous UI. Do not do this while developing.
+
+- Rebuild the running dev app with `npm run tauri:dev:personal` in `desktop/`. That command uses `--no-default-features` and loads `http://127.0.0.1:1420`.
+- A hand build is allowed only as `cargo build -p agent-doctor-desktop --no-default-features`, and only while Vite is already serving port 1420.
+- Do not run `cargo build -p agent-doctor-desktop` with default features, and do not relaunch that binary. Default features turn on `custom-protocol` and bake in `frontendDist`.
+- Do not replace the open dev app with a freshly embedded build. The source under `desktop/src` is the page the user is looking at.

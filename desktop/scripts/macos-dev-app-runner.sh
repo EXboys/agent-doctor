@@ -36,6 +36,12 @@ case "$edition" in
 esac
 
 if [ -f "$1" ]; then
+  case "$1" in
+    *.app/Contents/MacOS/*)
+      echo "pass the cargo binary (target/<profile>/$BINARY_NAME), not the one inside the .app: $1" >&2
+      exit 64
+      ;;
+  esac
   binary="$1"
   shift
   app_args=("$@")
@@ -174,25 +180,28 @@ if command -v codesign >/dev/null 2>&1; then
   fi
 fi
 
-# FIFO pair so `tauri dev` still streams app stdout/stderr.
-log_dir="$(mktemp -d)"
-stdout_fifo="$log_dir/stdout"
-stderr_fifo="$log_dir/stderr"
-mkfifo "$stdout_fifo" "$stderr_fifo"
+# The app outlives this script (launchd is its parent), so its stdout/stderr
+# must be regular files: a FIFO whose reader is gone blocks the app's main
+# thread on the next log write and freezes the window.
+log_dir="${TMPDIR:-/tmp}/agent-doctor-dev"
+mkdir -p "$log_dir"
+stdout_log="$log_dir/${bundle_id}.stdout.log"
+stderr_log="$log_dir/${bundle_id}.stderr.log"
+touch "$stdout_log" "$stderr_log"
+
+tail -n 0 -F "$stdout_log" 2>/dev/null &
+tail_stdout_pid=$!
+tail -n 0 -F "$stderr_log" >&2 2>/dev/null &
+tail_stderr_pid=$!
 
 cleanup() {
-  rm -rf "$log_dir"
   if [ -n "${open_pid:-}" ] && kill -0 "$open_pid" 2>/dev/null; then
     kill "$open_pid" 2>/dev/null || true
   fi
+  kill "$tail_stdout_pid" "$tail_stderr_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
-trap 'kill $open_pid 2>/dev/null || true; exit 130' INT TERM
-
-cat "$stdout_fifo" &
-cat_stdout_pid=$!
-cat "$stderr_fifo" >&2 &
-cat_stderr_pid=$!
+trap 'exit 130' INT TERM
 
 env_args=()
 for var in AGENT_DOCTOR_EDITION RUST_LOG RUST_BACKTRACE TAURI_ENV_DEBUG TAURI_DEV_HOST; do
@@ -221,9 +230,12 @@ if pkill -f "$bundle_executable" 2>/dev/null; then
   done
   pkill -9 -f "$bundle_executable" 2>/dev/null || true
 fi
+: > "$stdout_log"
+: > "$stderr_log"
 
 echo "▸ Launching $bundle_dir via Launch Services (TCC-safe)"
-open_cmd=(open -W -a "$bundle_dir" --stdout "$stdout_fifo" --stderr "$stderr_fifo")
+echo "▸ App logs: $stderr_log"
+open_cmd=(open -W -a "$bundle_dir" --stdout "$stdout_log" --stderr "$stderr_log")
 if [ "${#env_args[@]}" -gt 0 ]; then
   open_cmd+=("${env_args[@]}")
 fi
@@ -233,9 +245,8 @@ fi
 "${open_cmd[@]}" &
 open_pid=$!
 
-wait "$open_pid"
-exit_code=$?
-
-wait "$cat_stdout_pid" "$cat_stderr_pid" 2>/dev/null || true
+exit_code=0
+wait "$open_pid" || exit_code=$?
+sleep 0.3
 
 exit "$exit_code"

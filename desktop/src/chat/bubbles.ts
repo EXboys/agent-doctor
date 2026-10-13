@@ -6,6 +6,8 @@ import {
   cleanToolLabel,
   formatPermissionDetail,
   looksLikeToolPayloadJson,
+  appendRunLog,
+  isLogMessage,
   mountFailedCommand,
   splitToolActivity,
   toolSignature,
@@ -13,7 +15,7 @@ import {
 import { followChatLog, pinChatLog, renderToolHistoryGroup } from "./activity";
 import { renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
-import { appendRuntimeLog, storeToolStep } from "./tool-records";
+import { appendRunLogMessage, storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
 import {
   assistantMsgWrap,
@@ -268,7 +270,13 @@ export function createBubblesController(deps: BubblesDeps) {
   }
   function rememberRuntimeLog(text: string): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
-    if (!appendRuntimeLog(session.messages, text)) return;
+    appendRunLogMessage(session.messages, text, uid);
+    deps.touchSession(session);
+    deps.scheduleStorePersist();
+  }
+  function rememberTurnNotice(text: string): void {
+    const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
     deps.touchSession(session);
     deps.scheduleStorePersist();
   }
@@ -569,6 +577,8 @@ export function createBubblesController(deps: BubblesDeps) {
             attachments: message.attachments,
           });
           deps.logEl.appendChild(wrap);
+        } else if (isLogMessage(message)) {
+          appendRunLog(deps.logEl, message.content);
         } else {
           const bubble = document.createElement("div");
           bubble.className = `chat-bubble ${message.role}`;
@@ -616,6 +626,7 @@ export function createBubblesController(deps: BubblesDeps) {
     rememberTool,
     rememberToolStep,
     rememberRuntimeLog,
+    rememberTurnNotice,
     updateAssistantMessage,
     assistantMarkdownSource,
     syncAssistantCopyButton,

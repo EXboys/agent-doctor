@@ -19,8 +19,8 @@ use super::control::PromptSessionControl;
 use super::env::{apply_overlay_env, collect_overlay_env_for_options, format_command_display};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize, tool_chip,
-    tool_input_detail, SessionClock,
+    format_tool_status, is_runtime_log_line, is_runtime_stderr_noise, join_reader, push_capped,
+    summarize, tool_chip, tool_input_detail, turn_error, SessionClock,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -178,11 +178,17 @@ fn run_openclaw(
                 &mut emit,
             );
 
+            let error = if reply.trim().is_empty() && status != PromptSessionStatus::Succeeded {
+                extract_openclaw_error_text(&stderr)
+                    .or_else(|| extract_openclaw_error_text(&stdout))
+            } else {
+                None
+            };
             let combined = if !reply.trim().is_empty() {
                 reply.clone()
             } else if status != PromptSessionStatus::Succeeded {
-                extract_openclaw_error_text(&stderr)
-                    .or_else(|| extract_openclaw_error_text(&stdout))
+                error
+                    .clone()
                     .unwrap_or_else(|| summarize_openclaw_failure(&stderr, &stdout))
             } else {
                 String::new()
@@ -193,14 +199,8 @@ fn run_openclaw(
                     session_id: session_id.clone(),
                     text: reply,
                 });
-            } else if status != PromptSessionStatus::Succeeded && !combined.trim().is_empty() {
-                let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
-                if display.trim().is_empty() {
-                    emit(PromptSessionEvent::Delta {
-                        session_id: session_id.clone(),
-                        text: combined.clone(),
-                    });
-                }
+            } else if let Some(message) = error {
+                emit(turn_error(&session_id, &message));
             }
 
             if let Some(usage) = parsed.as_ref().and_then(crate::usage::find_usage) {
@@ -240,6 +240,7 @@ fn run_openclaw(
             let _ = child.kill();
             let _ = child.wait();
             let summary = format!("{err:#}");
+            emit(turn_error(&session_id, &summary));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: PromptSessionStatus::Failed,
@@ -958,13 +959,18 @@ fn extract_openclaw_error_text(text: &str) -> Option<String> {
 
 fn summarize_openclaw_failure(stderr: &str, stdout: &str) -> String {
     let compact = combine_output(stderr, stdout);
-    let trimmed = compact.trim();
-    if trimmed.is_empty() {
+    let kept: Vec<&str> = compact
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_runtime_log_line(line))
+        .collect();
+    let text = kept.join("\n");
+    if text.is_empty() {
         "openclaw failed".into()
-    } else if trimmed.len() > 400 {
-        format!("{}…", &trimmed[..400])
+    } else if text.chars().count() > 400 {
+        format!("{}…", text.chars().take(400).collect::<String>())
     } else {
-        trimmed.to_string()
+        text
     }
 }
 
@@ -1003,7 +1009,8 @@ fn is_openclaw_stderr_noise(line: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     // Gateway secret lookup falls back to local files. The reply still arrives;
     // the multi-line notice is not an Ask failure.
-    if lower.starts_with("[secrets]")
+    // It reads like a connection failure, so a failed turn must not be blamed on it.
+    lower.starts_with("[secrets]")
         || lower.contains("secrets.resolve unavailable")
         || lower.contains("resolved command secrets locally")
         || lower.contains("openclaw gateway run")
@@ -1012,15 +1019,6 @@ fn is_openclaw_stderr_noise(line: &str) -> bool {
         || lower.starts_with("source: local loopback")
         || lower.starts_with("bind: loopback")
         || (lower.starts_with("config:") && lower.contains("openclaw.json"))
-    {
-        return true;
-    }
-    lower.starts_with("[agents/")
-        || lower.starts_with("[provider-")
-        || lower.starts_with("[model-")
-        || lower.contains("tool policy removed")
-        || lower.contains("model-fetch")
-        || lower.contains("provider-transport")
 }
 
 fn value_to_text(value: &Value) -> Option<String> {
@@ -1332,5 +1330,54 @@ Bind: loopback); resolved command secrets locally.";
         assert!(!evs
             .iter()
             .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_turn_keeps_its_logs_out_of_the_reply() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "fake-openclaw",
+            "#!/bin/bash\n\
+echo '[state-migrations] Plugin \"deepseek\" has pending state migrations' >&2\n\
+echo '[skills] Skipping escaped skill path outside its configured root: /tmp/x' >&2\n\
+echo 'warn: something odd happened' >&2\n\
+exit 1\n",
+        );
+        std::env::set_var("AGENT_DOCTOR_OPENCLAW_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = OpenClawAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "openclaw".into(),
+                    prompt: "你好啊".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 30,
+                    dangerously_skip_permissions: false,
+                    full_auto: true,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                },
+                PromptSessionCancel::new(),
+                None,
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_OPENCLAW_BIN");
+        assert_eq!(report.status, PromptSessionStatus::Failed);
+        let evs = events.lock().unwrap();
+        assert!(!evs
+            .iter()
+            .any(|e| matches!(e, PromptSessionEvent::Delta { .. })));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::StderrLine { line, .. } if line.starts_with("[skills]")
+        )));
     }
 }

@@ -24,13 +24,17 @@ use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
     format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
-    tool_activity_detail, tool_chip, SessionClock, ToolWatch,
+    tool_activity_detail, tool_chip, turn_error, SessionClock, ToolWatch,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use crate::session_launch::resolve_session_cwd;
+
+/// Shown instead of Hermes's usage dump when the installed copy is too old to chat.
+const HERMES_TOO_OLD: &str =
+    "这台电脑上的 Hermes 太旧，这里还用不了。点「更新」，换成这个软件能用的版本。";
 
 pub struct HermesAskBackend;
 
@@ -138,26 +142,37 @@ fn run_hermes(
                 .or_else(|| extract_hermes_session_id(&combine_output(&stdout, &stderr)))
                 .or_else(|| resume_session_id.map(str::to_string));
 
-            let combined = if !reply.trim().is_empty() {
-                reply.clone()
-            } else if status != PromptSessionStatus::Succeeded {
+            let failed = status != PromptSessionStatus::Succeeded;
+            let error = if failed && hermes_rejected_stream_format(&stderr, &stdout) {
+                Some((HERMES_TOO_OLD.to_string(), true))
+            } else if failed && reply.trim().is_empty() {
                 stream
                     .error
                     .or_else(|| extract_hermes_error_text(&stderr))
-                    .unwrap_or_else(|| {
-                        let fallback = combine_output(&stdout, &stderr);
-                        extract_hermes_reply(&fallback)
-                    })
+                    .map(|text| (text, false))
             } else {
-                String::new()
+                None
+            };
+            let combined = match &error {
+                Some((text, _)) => text.clone(),
+                None if !reply.trim().is_empty() => reply.clone(),
+                None if failed => combine_output(&stdout, &stderr),
+                None => String::new(),
             };
 
             let display = display_text.lock().map(|g| g.clone()).unwrap_or_default();
             // Live `text` deltas already filled the bubble — only fall back when nothing streamed.
-            if display.trim().is_empty() && !combined.trim().is_empty() {
+            if error.is_none() && display.trim().is_empty() && !reply.trim().is_empty() {
                 emit(PromptSessionEvent::Delta {
                     session_id: session_id.clone(),
-                    text: combined.clone(),
+                    text: reply.clone(),
+                });
+            }
+            if let Some((message, plain)) = error {
+                emit(PromptSessionEvent::TurnError {
+                    session_id: session_id.clone(),
+                    message,
+                    plain,
                 });
             }
 
@@ -186,6 +201,7 @@ fn run_hermes(
             let _ = child.kill();
             let _ = child.wait();
             let summary = format!("{err:#}");
+            emit(turn_error(&session_id, &summary));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: PromptSessionStatus::Failed,
@@ -208,6 +224,15 @@ fn run_hermes(
         }
     };
     Ok(report)
+}
+
+/// The installed Hermes predates `--format stream-json` and printed its usage instead.
+/// The version number cannot decide this: git installs between tags already have the flag.
+fn hermes_rejected_stream_format(stderr: &str, stdout: &str) -> bool {
+    [stderr, stdout].iter().any(|text| {
+        text.lines()
+            .any(|line| line.contains("unrecognized arguments") && line.contains("--format"))
+    })
 }
 
 fn build_hermes_command(
@@ -985,5 +1010,61 @@ exit 0
         let got = extract_hermes_stream_final(stdout);
         assert_eq!(got.text.as_deref(), Some("hello"));
         assert_eq!(got.session_id.as_deref(), Some("s1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_older_hermes_asks_to_update_instead_of_printing_usage() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "old-hermes",
+            r#"#!/bin/bash
+if [ "$1" = "--version" ]; then
+  echo "Hermes Agent v0.20.1"
+  exit 0
+fi
+echo "usage: hermes"
+echo "hermes: error: unrecognized arguments: --format stream-json" >&2
+exit 2
+"#,
+        );
+        std::env::set_var("AGENT_DOCTOR_HERMES_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = HermesAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "hermes".into(),
+                    prompt: "在吗".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 30,
+                    dangerously_skip_permissions: false,
+                    full_auto: false,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                },
+                PromptSessionCancel::new(),
+                None,
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_HERMES_BIN");
+        assert_eq!(report.status, PromptSessionStatus::Failed);
+        assert!(report.summary.contains("太旧"));
+        assert!(!report.summary.contains("unrecognized"));
+        assert!(!report.summary.contains("usage:"));
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|ev| matches!(
+            ev,
+            PromptSessionEvent::TurnError { message, plain: true, .. } if message.contains("太旧")
+        )));
+        assert!(!events
+            .iter()
+            .any(|ev| matches!(ev, PromptSessionEvent::Delta { .. })));
     }
 }

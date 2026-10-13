@@ -1,18 +1,17 @@
+import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
 import { t } from "../i18n";
 import { resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
 import {
   activityKind,
   isQuietPhase,
-  isQuietStderr,
-  isRuntimeLog,
   preferPlainSummary,
   stripLogAnsi,
   splitToolActivity,
   toolSignature,
 } from "./format";
 import { liveRun, type LiveRun } from "./live-runs";
-import { appendRuntimeLog, storeToolStep } from "./tool-records";
+import { appendRunLogMessage, storeToolStep } from "./tool-records";
 import { uid } from "./store";
 import type { ChatMessage, ChatSession, PendingPermission, PromptSessionEvent } from "./types";
 
@@ -64,13 +63,23 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       return;
     case "stderr_line": {
       const text = stripLogAnsi(payload.line).trim();
-      if (!text || isQuietStderr(text)) return;
-      if (isRuntimeLog(payload.line) && appendRuntimeLog(session.messages, text)) {
-        ctx.touchSession(session);
-        ctx.scheduleStorePersist();
-        return;
+      if (!text) return;
+      run.turnErrors.push(text);
+      appendRunLogMessage(session.messages, text, uid);
+      ctx.touchSession(session);
+      ctx.scheduleStorePersist();
+      return;
+    }
+    case "turn_error": {
+      const text = stripLogAnsi(payload.message).trim();
+      if (!text) return;
+      run.turnReports.push(text);
+      if (payload.plain) {
+        run.turnNoticeSaved = true;
+        session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
+      } else {
+        appendRunLogMessage(session.messages, text, uid);
       }
-      session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
       return;
@@ -94,9 +103,21 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       ctx.onPlan(chatId, payload);
       return;
     case "completed": {
-      if (!run.turnHadAssistantText && !run.assistantRaw.trim() && payload.summary?.trim()) {
-        const fallback = preferPlainSummary(payload.summary);
-        if (fallback) upsertAssistant(session, run, fallback);
+      const noReply = !run.turnHadAssistantText && !run.assistantRaw.trim();
+      if (noReply && payload.summary?.trim()) {
+        const leftover = preferPlainSummary(payload.summary);
+        if (leftover) {
+          run.turnErrors.push(leftover);
+          appendRunLogMessage(session.messages, leftover, uid);
+        }
+      }
+      const failed =
+        payload.status !== "succeeded" && payload.status !== "cancelled" && payload.status !== "timed_out";
+      if (failed && !run.turnNoticeSaved) {
+        const explain =
+          explainChatFailure(run.turnReports.join("\n")) ?? explainChatFailure(run.turnErrors.join("\n"));
+        const sentence = explain ? formatChatFailureLine(explain) : noReply ? t("chat.noReply") : "";
+        if (sentence) session.messages.push({ id: uid(), role: "meta", content: sentence, at: Date.now() });
       }
       ctx.touchSession(session);
       ctx.scheduleStorePersist();

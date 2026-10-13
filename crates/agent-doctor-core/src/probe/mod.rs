@@ -222,6 +222,18 @@ fn probe_upstream_version(
                 SensitivityLevel::Public,
             ));
         }
+        crate::version_check::VersionCompareStatus::BelowMinimum => {
+            let local = status.installed.unwrap_or_else(|| "unknown".into());
+            let floor = status.minimum.unwrap_or_else(|| "unknown".into());
+            checks.push(ProbeCheck::new(
+                "binary.client_version",
+                "Client version",
+                ProbeStatus::Fail,
+                ProbeSeverity::Error,
+                format!("Installed {local} is older than this app can use ({floor})"),
+                SensitivityLevel::Public,
+            ));
+        }
         crate::version_check::VersionCompareStatus::Unknown => {
             // Cache empty / offline — stay quiet so diagnose is not noisy.
         }

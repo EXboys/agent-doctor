@@ -119,27 +119,10 @@ fn live_skills(
     }
 }
 
+/// Project skills that every assistant may see. Another assistant's own folder
+/// stays with that assistant.
 fn project_skill_roots(entry: &WorkspaceEntry) -> Vec<PathBuf> {
-    let mut roots = vec![
-        entry.path.join(".agent-doctor/skills"),
-        entry.path.join(".claude/skills"),
-        entry.path.join(".cursor/skills"),
-        entry.path.join(".dsh/skills"),
-    ];
-    if !entry.openclaw_workspace.as_os_str().is_empty() {
-        roots.push(entry.openclaw_workspace.join("skills"));
-    }
-    if !entry.codex_home.as_os_str().is_empty() {
-        roots.push(entry.codex_home.join("skills"));
-    }
-    if !entry.hermes_profile.is_empty() {
-        roots.push(
-            home_join(".hermes/profiles")
-                .join(&entry.hermes_profile)
-                .join("skills"),
-        );
-    }
-    roots
+    vec![entry.path.join(".agent-doctor/skills")]
 }
 
 /// `user_skills` is that assistant's own global skills folder. `cache` is the shared
@@ -188,16 +171,21 @@ fn publish_with_roots(
             for id in project.keys() {
                 global_only.remove(id);
             }
-            link_map(&global_only, &root, &allowed) + link_map(&project, &root, &allowed)
+            let linked =
+                link_map(&global_only, &root, &allowed) + link_map(&project, &root, &allowed);
+            drop_links_outside(&root, &allowed);
+            linked
         }
         LiveSkills::Split {
             global: dest,
             project: project_dest,
         } => {
             let mut linked = link_map(&global, &dest, &allowed);
+            drop_links_outside(&dest, &allowed);
             if include_project {
                 if let Some(dest) = project_dest {
                     linked += link_map(&project, &dest, &allowed);
+                    drop_links_outside(&dest, &allowed);
                 }
             }
             linked
@@ -460,6 +448,42 @@ fn link_map(skills: &BTreeMap<String, PathBuf>, dest_root: &Path, allowed: &[Pat
     linked
 }
 
+/// Remove shortcuts in `dest` that point outside the skill stores this assistant
+/// may read. A real folder there is that assistant's own skill and stays.
+fn drop_links_outside(dest: &Path, allowed: &[PathBuf]) -> usize {
+    let Ok(entries) = fs::read_dir(dest) else {
+        return 0;
+    };
+    let dest_real = fs::canonicalize(dest).ok();
+    let allowed_real: Vec<PathBuf> = allowed
+        .iter()
+        .filter_map(|root| fs::canonicalize(root).ok())
+        .collect();
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.file_type().is_symlink() {
+            continue;
+        }
+        let keep = fs::canonicalize(&path).ok().is_some_and(|target| {
+            dest_real
+                .as_ref()
+                .is_some_and(|root| target.starts_with(root))
+                || allowed_real.iter().any(|root| target.starts_with(root))
+        });
+        if keep {
+            continue;
+        }
+        if fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn same_dir(a: &Path, b: &Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
@@ -556,7 +580,7 @@ mod tests {
 
         let workspace = entry(tmp.path(), &home);
         let linked = publish_with_roots("codex", Some(&workspace), Some(&user), Some(&cache), true);
-        assert_eq!(linked, 5);
+        assert_eq!(linked, 4);
         assert_eq!(
             fs::read_to_string(home.join("skills/shared/SKILL.md")).unwrap(),
             "# shared\n"
@@ -565,13 +589,10 @@ mod tests {
             fs::read_to_string(home.join("skills/mall/SKILL.md")).unwrap(),
             "# mall\n"
         );
-        assert_eq!(
-            fs::read_to_string(home.join("skills/local/SKILL.md")).unwrap(),
-            "# local\n"
-        );
+        assert!(!home.join("skills/local").exists());
         assert_eq!(
             fs::read_to_string(home.join("skills/calc/SKILL.md")).unwrap(),
-            "# project calc\n"
+            "# global calc\n"
         );
         assert_eq!(
             fs::read_to_string(home.join("skills/notes/SKILL.md")).unwrap(),
@@ -601,12 +622,62 @@ mod tests {
             Some(&cache),
             true,
         );
-        assert_eq!(linked, 2);
+        assert_eq!(linked, 1);
         assert!(user.join("mall/SKILL.md").is_file());
         assert!(!user.join("local").exists());
-        assert!(project.join(".claude/skills/local/SKILL.md").is_file());
+        assert!(!project.join(".claude/skills/local").exists());
         assert!(!project.join(".claude/skills/shared").exists());
         assert!(!project.join(".claude/skills/mall").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn openclaw_does_not_take_another_assistants_skills() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user = tmp.path().join("user-skills");
+        let cache = tmp.path().join("cache");
+        let project = tmp.path().join("proj");
+        let openclaw = tmp.path().join("openclaw-workspace");
+        let hermes = tmp.path().join("hermes-skills");
+        skill(&cache, "mall", "# mall\n");
+        skill(&project.join(".agent-doctor/skills"), "notes", "# notes\n");
+        skill(&hermes.join("productivity"), "box", "# box\n");
+        fs::create_dir_all(openclaw.join("skills")).unwrap();
+        std::os::unix::fs::symlink(hermes.join("productivity/box"), openclaw.join("skills/box"))
+            .unwrap();
+        skill(&openclaw.join("skills"), "own", "# own\n");
+
+        let workspace = WorkspaceEntry {
+            path: project,
+            hermes_profile: "desktop".into(),
+            codex_home: tmp.path().join("codex"),
+            openclaw_agent_id: String::new(),
+            openclaw_workspace: openclaw.clone(),
+        };
+        publish_with_roots(
+            "openclaw",
+            Some(&workspace),
+            Some(&user),
+            Some(&cache),
+            true,
+        );
+        assert_eq!(
+            fs::read_to_string(user.join("mall/SKILL.md")).unwrap(),
+            "# mall\n"
+        );
+        assert_eq!(
+            fs::read_to_string(openclaw.join("skills/notes/SKILL.md")).unwrap(),
+            "# notes\n"
+        );
+        assert!(!openclaw.join("skills/box").exists());
+        assert_eq!(
+            fs::read_to_string(openclaw.join("skills/own/SKILL.md")).unwrap(),
+            "# own\n"
+        );
+        assert_eq!(
+            fs::read_to_string(hermes.join("productivity/box/SKILL.md")).unwrap(),
+            "# box\n"
+        );
     }
 
     #[test]

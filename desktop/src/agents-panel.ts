@@ -539,6 +539,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
 
+    if (action === "update-runtime" && runtimeCard) {
+      void install.installRuntimeFromCard(runtimeCard, { update: true });
+      return;
+    }
+
     if (action === "force-reinstall-runtime" && runtimeCard) {
       void install.installRuntimeFromCard(runtimeCard, { force: true });
       return;

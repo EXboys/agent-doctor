@@ -12,21 +12,27 @@ export function stripLogAnsi(raw: string): string {
 export function isRuntimeLog(raw: string): boolean {
   if (/\u001b\[[0-9;]*[A-Za-z]|\[[0-9;]+m/.test(raw)) return true;
   const text = stripLogAnsi(raw).trim();
+  if (SUBSYSTEM_TAG.test(text)) return true;
   return /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(text) && /\b(ERROR|WARN|WARNING|INFO|DEBUG)\b/.test(text);
 }
+
+/** `[skills] …` / `[state-migrations] …`: a lowercase subsystem tag opening the line. */
+const SUBSYSTEM_TAG = /^\[[a-z][a-z0-9_./:-]*\]\s/;
+
+const COMMAND_TAIL = /`([\s\S]+)`\s*$/;
 
 /** Original text worth keeping behind a collapsed row. */
 export function failedCommandScript(raw: string): string | null {
   if (!isRuntimeLog(raw)) return null;
   const text = stripLogAnsi(raw).trim();
-  const quoted = text.match(/`([\s\S]+)`\s*$/);
+  const quoted = text.match(COMMAND_TAIL);
   return quoted?.[1]?.trim() || text;
 }
 
-/** Short line, with the original script collapsed. */
+/** Short line, with the original script collapsed. Only for a log that quotes a command. */
 export function mountFailedCommand(parent: HTMLElement, raw: string): boolean {
   const script = failedCommandScript(raw);
-  if (!script) return false;
+  if (!script || !COMMAND_TAIL.test(stripLogAnsi(raw).trim())) return false;
   parent.replaceChildren();
   const summary = document.createElement("div");
   summary.className = "chat-activity-text";
@@ -41,6 +47,56 @@ export function mountFailedCommand(parent: HTMLElement, raw: string): boolean {
   more.append(moreSummary, detail);
   parent.append(summary, more);
   return true;
+}
+
+/** A saved message that holds raw process output. Older saves only have the shape to go by. */
+export function isLogMessage(message: { role: string; content: string; log?: boolean }): boolean {
+  if (message.role !== "meta") return false;
+  if (message.log) return true;
+  return isRuntimeLog(message.content) && !COMMAND_TAIL.test(stripLogAnsi(message.content).trim());
+}
+
+const RUN_LOG_CHARS = 20_000;
+
+/** This turn's collapsed log row: after the last user message, if there is one yet. */
+function currentRunLog(logEl: HTMLElement): HTMLElement | null {
+  for (let el = logEl.lastElementChild as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
+    if (el.classList.contains("chat-msg-user")) return null;
+    if (el.dataset.runtimeLog === "1") return el;
+  }
+  return null;
+}
+
+/** Add raw output to this turn's collapsed log, starting one at the end if needed. */
+export function appendRunLog(logEl: HTMLElement, raw: string): HTMLElement | null {
+  const text = stripLogAnsi(raw).trim();
+  if (!text) return null;
+  const existing = currentRunLog(logEl);
+  const detail = existing?.querySelector<HTMLElement>(".chat-permission-detail");
+  if (existing && detail) {
+    const next = `${detail.textContent ?? ""}\n${text}`;
+    detail.textContent = next.length > RUN_LOG_CHARS ? next.slice(next.length - RUN_LOG_CHARS) : next;
+    return existing;
+  }
+  const row = document.createElement("div");
+  row.className = "chat-activity kind-log";
+  row.dataset.kind = "log";
+  row.dataset.stderr = "1";
+  row.dataset.runtimeLog = "1";
+  const summary = document.createElement("div");
+  summary.className = "chat-activity-text";
+  summary.textContent = t("chat.runtimeLog");
+  const more = document.createElement("details");
+  more.className = "chat-permission-more";
+  const moreSummary = document.createElement("summary");
+  moreSummary.textContent = t("chat.runtimeLogExpand");
+  const pre = document.createElement("pre");
+  pre.className = "chat-permission-detail";
+  pre.textContent = text;
+  more.append(moreSummary, pre);
+  row.append(summary, more);
+  logEl.appendChild(row);
+  return row;
 }
 
 /** One sentence for a command the user should allow without reading a shell line. */
@@ -455,39 +511,6 @@ export function cleanToolLabel(text: string): string {
 export function toolSignature(text: string): string {
   const { summary, detail } = splitToolActivity(text);
   return `${summary}\n${detail}`.toLocaleLowerCase();
-}
-
-export function isQuietStderr(line: string): boolean {
-  const text = line.trim();
-  const lower = text.toLowerCase();
-  return (
-    /^session_id:/i.test(text) ||
-    /^resume this session/i.test(text) ||
-    /resumed session/i.test(text) ||
-    lower.includes("unrecognized_model") ||
-    lower.includes("unrecognized model") ||
-    lower.startsWith("[agent/embedded]") ||
-    lower.includes("preserved orphaned user message") ||
-    lower.includes("network connection was interrupted") ||
-    lower.includes("transient same-model retry") ||
-    lower.startsWith("[secrets]") ||
-    lower.includes("secrets.resolve unavailable") ||
-    lower.includes("resolved command secrets locally") ||
-    (lower.includes("cua-driver") &&
-      (lower.includes("is available") ||
-        lower.includes("update with") ||
-        lower.includes("release notes") ||
-        lower.includes("mcp launched") ||
-        lower.includes("tcc") ||
-        lower.includes("auto-launching") ||
-        lower.includes("proxying mcp"))) ||
-    lower.includes("openclaw gateway run") ||
-    lower.includes("openclaw gateway status") ||
-    lower.startsWith("gateway target:") ||
-    lower.startsWith("source: local loopback") ||
-    lower.startsWith("bind: loopback") ||
-    (lower.startsWith("config:") && lower.includes("openclaw.json"))
-  );
 }
 
 /** A short closing question that is explicitly asking to continue. */

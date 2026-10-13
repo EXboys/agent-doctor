@@ -19,8 +19,8 @@ use super::env::{
 use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
-    is_runtime_stderr_noise, strip_runtime_stderr_noise, summarize, SessionClock, ThinkingLine,
-    ToolWatch,
+    is_runtime_stderr_noise, stderr_event, strip_runtime_stderr_noise, summarize, turn_error,
+    SessionClock, ThinkingLine, ToolWatch,
 };
 use super::warm::{self, LivePipes};
 use super::{
@@ -519,6 +519,7 @@ fn run_codex_app_server(
         }
         Err(err) => {
             let summary = humanize_runtime_error(&format!("{err:#}"));
+            emit(turn_error(&session_id, &format!("{err:#}")));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: PromptSessionStatus::Failed,
@@ -646,10 +647,7 @@ where
             if is_stdout {
                 handle_rpc_line(line, control, state, on_event)?;
             } else if !is_runtime_stderr_noise(&line) {
-                on_event(PromptSessionEvent::StderrLine {
-                    session_id: state.session_id.clone(),
-                    line: humanize_runtime_error(&line),
-                });
+                on_event(stderr_event(&state.session_id, &line));
             }
         }
         clock.set_tool_running(state.tools.running());
@@ -729,10 +727,7 @@ where
         if is_stdout {
             let _ = handle_rpc_line(line, control, state, on_event);
         } else if !is_runtime_stderr_noise(&line) {
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: state.session_id.clone(),
-                line: humanize_runtime_error(&line),
-            });
+            on_event(stderr_event(&state.session_id, &line));
         }
     }
 
@@ -899,7 +894,7 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             event,
-            PromptSessionEvent::StderrLine { line, .. } if line.contains("配额用完了")
+            PromptSessionEvent::TurnError { message, .. } if message.contains("配额用完了")
         )));
         assert!(events.iter().any(|event| matches!(
             event,
@@ -907,7 +902,7 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             event,
-            PromptSessionEvent::StderrLine { line, .. } if line.contains("这一轮失败了")
+            PromptSessionEvent::TurnError { message, .. } if message.contains("这一轮失败了")
         )));
         assert!(state.turn_done);
     }

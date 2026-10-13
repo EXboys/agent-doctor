@@ -21,8 +21,10 @@ use super::env::{
     apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env_for_options,
     format_command_display,
 };
+use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
-    command_from_cli, force_stop_child, is_runtime_stderr_noise, summarize, SessionClock,
+    command_from_cli, force_stop_child, format_tool_status, is_runtime_stderr_noise, summarize,
+    tool_activity_detail, turn_error, SessionClock,
 };
 use super::vision::{encode_image, turn_images, EncodedImage};
 use super::warm::{self, LivePipes};
@@ -171,6 +173,11 @@ fn run_deepseek_harness(
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
         Ok(turn) => {
+            if display.trim().is_empty() && turn.status != PromptSessionStatus::Succeeded {
+                if let Some(error) = turn.error.as_deref() {
+                    on_event(turn_error(&session_id, error));
+                }
+            }
             let readable = if display.trim().is_empty() {
                 turn.error.unwrap_or(turn.stderr)
             } else {
@@ -220,6 +227,7 @@ fn finish_failed(
     emit: &mut dyn FnMut(PromptSessionEvent),
 ) -> PromptSessionReport {
     let summary = summarize(error, &PromptSessionStatus::Failed, &runtime);
+    emit(turn_error(&session_id, error));
     emit(PromptSessionEvent::Completed {
         session_id: session_id.clone(),
         status: PromptSessionStatus::Failed,
@@ -285,6 +293,8 @@ struct AcpState {
     resume_target: Option<String>,
     /// toolCallId → (name, raw arguments). The permission request itself has no title.
     tools: HashMap<String, (String, String)>,
+    /// toolCallId → what the agent has said about that call so far.
+    calls: HashMap<String, AcpCall>,
     images: Vec<EncodedImage>,
     /// `initialize` said `promptCapabilities.image`.
     takes_images: bool,
@@ -319,6 +329,7 @@ where
         resume_rejected: false,
         resume_target: None,
         tools: HashMap::new(),
+        calls: HashMap::new(),
         images,
         takes_images: false,
     };
@@ -749,36 +760,180 @@ where
                 });
             }
         }
-        "tool_call" | "tool_call_update" => {
-            if let Some(id) = update.get("toolCallId").and_then(|v| v.as_str()) {
-                let entry = state
-                    .tools
-                    .entry(id.to_string())
-                    .or_insert_with(|| (String::new(), String::new()));
-                if let Some(title) = update
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .filter(|text| !text.is_empty())
-                {
-                    entry.0 = title.to_string();
-                }
-                if let Some(raw) = update.get("rawInput") {
-                    entry.1 = tool_arguments(raw);
-                }
-            }
-            let title = update
-                .get("title")
-                .and_then(|v| v.as_str())
-                .filter(|text| !text.is_empty())
-                .unwrap_or("正在使用工具");
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.to_string(),
-                phase: "tool".into(),
-                message: title.to_string(),
-            });
-        }
+        "tool_call" | "tool_call_update" => handle_tool_update(session_id, update, state, on_event),
         _ => {}
     }
+}
+
+/// Everything known so far about one ACP tool call. Updates only carry the fields that changed.
+#[derive(Default)]
+struct AcpCall {
+    title: String,
+    kind: String,
+    input: Value,
+    path: String,
+    /// `content` block `{type:"diff", path, oldText, newText}`.
+    diff: Option<(String, String, String)>,
+    shown: bool,
+    finished: bool,
+}
+
+/// One step per `toolCallId`: announced once, refreshed while any field changes, finished once.
+fn handle_tool_update<F>(session_id: &str, update: &Value, state: &mut AcpState, on_event: &mut F)
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let Some(id) = update
+        .get("toolCallId")
+        .and_then(|v| v.as_str())
+        .filter(|id| !id.is_empty())
+    else {
+        return;
+    };
+    let call = state.calls.entry(id.to_string()).or_default();
+    let changed = merge_acp_call(call, update);
+    let remembered = state.tools.entry(id.to_string()).or_default();
+    remembered.0 = call.title.clone();
+    if !call.input.is_null() {
+        remembered.1 = tool_arguments(&call.input);
+    }
+
+    let status = update.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let finished = matches!(status, "completed" | "failed");
+    if !call.shown {
+        call.shown = true;
+        let name = acp_tool_name(call);
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.to_string(),
+            phase: "tool".into(),
+            message: format_tool_status(name, &tool_activity_detail(name, &call.input)),
+        });
+        on_event(PromptSessionEvent::Tool {
+            session_id: session_id.to_string(),
+            step: Box::new(acp_step(id, call)),
+        });
+    } else if changed && !call.finished {
+        on_event(PromptSessionEvent::Tool {
+            session_id: session_id.to_string(),
+            step: Box::new(acp_step(id, call)),
+        });
+    }
+    if finished && !call.finished {
+        call.finished = true;
+        let output = update
+            .get("rawOutput")
+            .map(tool_result_text)
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| acp_content_text(update.get("content")));
+        on_event(PromptSessionEvent::Tool {
+            session_id: session_id.to_string(),
+            step: Box::new(tool_step_result(id, &output, status == "failed")),
+        });
+    }
+}
+
+/// Copy the fields this update carries. True when something that shapes the step changed.
+fn merge_acp_call(call: &mut AcpCall, update: &Value) -> bool {
+    let mut changed = false;
+    let text = |key: &str| {
+        update
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    if let Some(title) = text("title").filter(|t| *t != call.title) {
+        call.title = title.to_string();
+        changed = true;
+    }
+    if let Some(kind) = text("kind").filter(|k| *k != call.kind) {
+        call.kind = kind.to_string();
+        changed = true;
+    }
+    if let Some(raw) = update.get("rawInput").filter(|raw| !raw.is_null()) {
+        if *raw != call.input {
+            call.input = raw.clone();
+            changed = true;
+        }
+    }
+    if let Some(path) = update
+        .pointer("/locations/0/path")
+        .and_then(|v| v.as_str())
+        .filter(|p| !p.is_empty() && *p != call.path)
+    {
+        call.path = path.to_string();
+        changed = true;
+    }
+    let diff = update
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item.get("type").and_then(Value::as_str) == Some("diff"))
+        })
+        .map(|item| {
+            let field = |key: &str| {
+                item.get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            (field("path"), field("oldText"), field("newText"))
+        });
+    if diff.is_some() && diff != call.diff {
+        call.diff = diff;
+        changed = true;
+    }
+    changed
+}
+
+/// The tool name the steps know. A specific ACP `kind` wins; agents that leave it as
+/// `other` (DeepSeek Harness does) put the tool's own name in `title`.
+fn acp_tool_name(call: &AcpCall) -> &str {
+    match call.kind.as_str() {
+        "execute" => "bash",
+        "read" => "read",
+        "edit" => "edit",
+        "search" => "search",
+        "fetch" => "webfetch",
+        _ if !call.title.is_empty() => &call.title,
+        _ => "tool",
+    }
+}
+
+fn acp_step(id: &str, call: &AcpCall) -> super::tool_step::ToolStep {
+    let name = acp_tool_name(call);
+    let empty_input = call.input.as_object().map_or(true, |obj| obj.is_empty());
+    let mut step = match &call.diff {
+        Some((path, old, new)) if empty_input => tool_step(
+            id,
+            "edit",
+            &json!({"file_path": path, "old_string": old, "new_string": new}),
+        ),
+        _ => tool_step(id, name, &call.input),
+    };
+    if step.path.is_empty() && step.command.is_empty() {
+        step.path = call.path.clone();
+    }
+    if step.title.is_empty() && name != call.title {
+        step.title = call.title.clone();
+    }
+    step
+}
+
+/// Text blocks of an ACP tool result: `[{type:"content", content:{type:"text", text}}]`.
+fn acp_content_text(content: Option<&Value>) -> String {
+    content
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.pointer("/content/text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
 }
 
 fn acp_cwd(cwd: &Path) -> String {
@@ -811,6 +966,166 @@ mod tests {
     use crate::prompt_session::util::TEST_ENV_LOCK;
     use std::fs;
     use tempfile::tempdir;
+
+    use crate::prompt_session::tool_step::ToolStep;
+
+    fn empty_state() -> AcpState {
+        AcpState {
+            next_id: 1,
+            waiting: HashMap::new(),
+            acp_session: None,
+            prompt_done: false,
+            failed: None,
+            resume_rejected: false,
+            resume_target: None,
+            tools: HashMap::new(),
+            calls: HashMap::new(),
+            images: Vec::new(),
+            takes_images: false,
+        }
+    }
+
+    fn replay(updates: impl IntoIterator<Item = Value>) -> Vec<PromptSessionEvent> {
+        let mut state = empty_state();
+        let mut events = Vec::new();
+        for params in updates {
+            handle_update("s1", &params, &mut state, &mut |ev| events.push(ev));
+        }
+        events
+    }
+
+    fn tool_rows(events: &[PromptSessionEvent]) -> usize {
+        events
+            .iter()
+            .filter(|ev| matches!(ev, PromptSessionEvent::Status { phase, .. } if phase == "tool"))
+            .count()
+    }
+
+    /// Every step sent for one call, merged the way the chat merges them by id.
+    fn merged(events: &[PromptSessionEvent], id: &str) -> (ToolStep, usize) {
+        let mut out = ToolStep::default();
+        let mut finishes = 0;
+        for ev in events {
+            let PromptSessionEvent::Tool { step, .. } = ev else {
+                continue;
+            };
+            if step.id != id {
+                continue;
+            }
+            if step.status != "running" {
+                finishes += 1;
+                out.status = step.status.clone();
+                out.output = step.output.clone();
+                continue;
+            }
+            let output = std::mem::take(&mut out.output);
+            out = (**step).clone();
+            out.output = output;
+        }
+        (out, finishes)
+    }
+
+    #[test]
+    fn real_dsh_tool_calls_become_one_folded_step_each() {
+        let updates = include_str!("fixtures/dsh-acp-tools.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["params"].clone());
+        let events = replay(updates);
+        assert_eq!(tool_rows(&events), 4, "one row per tool call");
+
+        let ids: Vec<String> = events
+            .iter()
+            .filter_map(|ev| match ev {
+                PromptSessionEvent::Tool { step, .. } => Some(step.id.clone()),
+                _ => None,
+            })
+            .fold(Vec::new(), |mut ids, id| {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+                ids
+            });
+        assert_eq!(ids.len(), 4);
+
+        let (bash, done) = merged(&events, &ids[0]);
+        assert_eq!(bash.command, "ls -la");
+        assert!(bash.output.contains("notes.txt"));
+        assert_eq!(done, 1, "finished once");
+
+        let (read, _) = merged(&events, &ids[1]);
+        assert_eq!(read.kind, "read");
+        assert_eq!(read.path, "/tmp/work/notes.txt");
+
+        let (edit, _) = merged(&events, &ids[2]);
+        assert_eq!(edit.kind, "edit");
+        assert_eq!((edit.additions, edit.deletions), (1, 1));
+
+        let (grep, _) = merged(&events, &ids[3]);
+        assert_eq!(grep.kind, "search");
+        assert_eq!(grep.query, "second");
+        assert!(grep.output.contains("Line 2"));
+    }
+
+    #[test]
+    fn a_spec_shaped_agent_is_read_by_kind_diff_and_location() {
+        let update = |value: Value| json!({ "update": value });
+        let events = replay([
+            update(json!({"sessionUpdate": "tool_call", "toolCallId": "e1", "status": "pending"})),
+            update(
+                json!({"sessionUpdate": "tool_call_update", "toolCallId": "e1",
+                          "title": "Run the tests", "kind": "execute", "rawInput": {"command": "cargo test"}}),
+            ),
+            update(
+                json!({"sessionUpdate": "tool_call_update", "toolCallId": "e1", "status": "failed",
+                          "rawOutput": {"stdout": "1 failed"}}),
+            ),
+            update(
+                json!({"sessionUpdate": "tool_call", "toolCallId": "d1", "title": "Editing main.rs",
+                          "kind": "edit", "status": "in_progress",
+                          "locations": [{"path": "/w/main.rs", "line": 3}],
+                          "content": [{"type": "diff", "path": "/w/main.rs", "oldText": "a\nb", "newText": "a\nc\nd"}]}),
+            ),
+            update(
+                json!({"sessionUpdate": "tool_call_update", "toolCallId": "d1", "status": "completed"}),
+            ),
+        ]);
+        assert_eq!(tool_rows(&events), 2);
+
+        let (run, finishes) = merged(&events, "e1");
+        assert_eq!(
+            run.command, "cargo test",
+            "a sentence title still reads as a command"
+        );
+        assert_eq!(run.title, "Run the tests");
+        assert_eq!(run.status, "failed");
+        assert_eq!(run.output, "1 failed");
+        assert_eq!(finishes, 1);
+
+        let (edit, _) = merged(&events, "d1");
+        assert_eq!(edit.kind, "edit");
+        assert_eq!(edit.path, "/w/main.rs");
+        assert_eq!((edit.additions, edit.deletions), (3, 2));
+    }
+
+    #[test]
+    fn a_completing_update_still_keeps_the_command() {
+        let update = |value: Value| json!({ "update": value });
+        let events = replay([
+            update(json!({"sessionUpdate": "tool_call", "toolCallId": "e1", "status": "pending"})),
+            update(
+                json!({"sessionUpdate": "tool_call_update", "toolCallId": "e1",
+                          "title": "Run the tests", "kind": "execute", "status": "completed",
+                          "rawInput": {"command": "cargo test"},
+                          "rawOutput": {"stdout": "ok"}}),
+            ),
+        ]);
+        let (run, finishes) = merged(&events, "e1");
+        assert_eq!(run.command, "cargo test");
+        assert_eq!(run.title, "Run the tests");
+        assert_eq!(run.status, "done");
+        assert_eq!(run.output, "ok");
+        assert_eq!(finishes, 1);
+    }
 
     #[test]
     fn prompt_blocks_add_pictures_only_when_agent_takes_them() {

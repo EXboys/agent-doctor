@@ -1,11 +1,24 @@
 import { explainChatFailure, type ChatFailureExplain } from "../friendly-error";
 
+let reported: string[] = [];
 let turnLines: string[] = [];
 let failureBubbleShown = false;
+let noticeShown = false;
 
 export function resetChatTurnErrors(): void {
+  reported = [];
   turnLines = [];
   failureBubbleShown = false;
+  noticeShown = false;
+}
+
+/** A sentence for the person already says why this turn failed. */
+export function markTurnNoticeShown(): void {
+  noticeShown = true;
+}
+
+export function turnNoticeShown(): boolean {
+  return noticeShown;
 }
 
 export function pushChatTurnError(line: string): void {
@@ -14,13 +27,20 @@ export function pushChatTurnError(line: string): void {
   turnLines.push(text);
 }
 
+/** The runtime's own report of why the turn failed. Explained before the raw log. */
+export function pushChatTurnReport(message: string): void {
+  const text = message.trim();
+  if (!text) return;
+  reported.push(text);
+}
+
 export function turnErrorBlob(): string {
   return turnLines.join("\n");
 }
 
-/** Best explain for the current turn (stderr + API errors accumulated this run). */
+/** Best explain for the current turn: the runtime's report first, then the raw log. */
 export function explainCurrentChatTurnFailure(): ChatFailureExplain | null {
-  return explainChatFailure(turnErrorBlob());
+  return explainChatFailure(reported.join("\n")) ?? explainChatFailure(turnErrorBlob());
 }
 
 export function markChatFailureBubbleShown(): boolean {

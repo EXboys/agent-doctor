@@ -20,7 +20,7 @@ use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, format_tool_status,
-    is_runtime_stderr_noise, summarize, tool_activity_detail, tool_chip, SessionClock,
+    is_runtime_stderr_noise, summarize, tool_activity_detail, tool_chip, turn_error, SessionClock,
     ThinkingLine, ToolWatch, THINKING_AFTER_TOOL,
 };
 use super::warm::{self, LivePipes};
@@ -276,6 +276,7 @@ fn run_claude(
         }
         Err(err) => {
             let summary = format!("{err:#}");
+            emit(turn_error(&session_id, &summary));
             emit(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
                 status: PromptSessionStatus::Failed,
@@ -1089,17 +1090,7 @@ fn parse_claude_stream_line(
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .unwrap_or("Claude reported an error");
-                vec![
-                    PromptSessionEvent::Status {
-                        session_id: session_id.to_string(),
-                        phase: "error".into(),
-                        message: msg.to_string(),
-                    },
-                    PromptSessionEvent::StderrLine {
-                        session_id: session_id.to_string(),
-                        line: msg.to_string(),
-                    },
-                ]
+                vec![turn_error(session_id, msg)]
             } else {
                 vec![PromptSessionEvent::Status {
                     session_id: session_id.to_string(),
@@ -1383,7 +1374,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_result_error_emits_stderr() {
+    fn parse_result_error_emits_a_turn_error() {
         let events = parse_claude_stream_line(
             "s1",
             r#"{"type":"result","is_error":true,"result":"boom"}"#,
@@ -1391,10 +1382,10 @@ mod tests {
             None,
             &mut PlanBoard::default(),
         );
-        assert!(events.iter().any(|e| matches!(
-            e,
-            PromptSessionEvent::StderrLine { line, .. } if line == "boom"
-        )));
+        assert!(matches!(
+            events.as_slice(),
+            [PromptSessionEvent::TurnError { message, plain: false, .. }] if message == "boom"
+        ));
     }
 
     #[test]

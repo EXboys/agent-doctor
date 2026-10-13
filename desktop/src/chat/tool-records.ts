@@ -60,24 +60,23 @@ export function clipStepForPage(step: ToolStep): ToolStep {
   return out;
 }
 
-/** Hang a runtime log on the latest tool row of this turn. */
-export function appendRuntimeLog(messages: ChatMessage[], text: string): boolean {
+/** Add raw output to this turn's saved log message, starting one if needed. */
+export function appendRunLogMessage(messages: ChatMessage[], text: string, newId: () => string): void {
   const detail = text.trim();
-  if (!detail) return false;
+  if (!detail) return;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (message?.role === "user") return false;
-    if (message?.role === "tool" && message.step) {
-      const prev = message.step.output?.trim();
-      message.step = slim({
-        ...message.step,
-        output: prev ? `${prev}\n${detail}` : detail,
-      });
-      return true;
+    if (message?.role === "user") break;
+    if (message?.role === "meta" && message.log) {
+      const next = `${message.content}\n${detail}`;
+      message.content = next.length > SAVED_LOG_CHARS ? next.slice(next.length - SAVED_LOG_CHARS) : next;
+      return;
     }
   }
-  return false;
+  messages.push({ id: newId(), role: "meta", content: detail, at: Date.now(), log: true });
 }
+
+const SAVED_LOG_CHARS = 20_000;
 
 /**
  * Put a step on this turn's tool messages. A result merges into the message with the

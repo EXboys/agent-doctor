@@ -324,10 +324,18 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
     })
 }
 
+/// One signed dictation socket. `kind` is `spark_v2`, `spark_v1`, or `classic`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamupsIatUrl {
+    pub kind: String,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamupsVoiceTicket {
     pub app_id: String,
-    pub spark_url: String,
+    /// Best service first.
+    pub iat: Vec<TeamupsIatUrl>,
     pub tts_url: String,
 }
 
@@ -361,24 +369,33 @@ pub fn teamups_voice_ticket() -> Result<TeamupsVoiceTicket> {
         .unwrap_or("")
         .trim()
         .to_string();
-    let spark_url = value
-        .get("sparkUrl")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let iat: Vec<TeamupsIatUrl> = value
+        .get("iat")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let kind = item.get("kind")?.as_str()?.trim().to_string();
+                    let url = item.get("url")?.as_str()?.trim().to_string();
+                    (!kind.is_empty() && url.starts_with("wss://"))
+                        .then_some(TeamupsIatUrl { kind, url })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let tts_url = value
         .get("ttsUrl")
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
         .to_string();
-    if app_id.is_empty() || !spark_url.starts_with("wss://") || !tts_url.starts_with("wss://") {
+    if app_id.is_empty() || iat.is_empty() || !tts_url.starts_with("wss://") {
         bail!("cloud_unready");
     }
     Ok(TeamupsVoiceTicket {
         app_id,
-        spark_url,
+        iat,
         tts_url,
     })
 }

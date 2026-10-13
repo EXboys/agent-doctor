@@ -7,9 +7,12 @@ pub fn speech_capability_command() -> SpeechCapabilityDto {
     speech::capability()
 }
 
+/// Fetches a voice ticket over the network; keep it off the window thread.
 #[tauri::command]
-pub fn voice_cloud_ready_command() -> bool {
-    speech::cloud_ready()
+pub async fn voice_cloud_ready_command() -> bool {
+    tauri::async_runtime::spawn_blocking(speech::cloud_ready)
+        .await
+        .unwrap_or(false)
 }
 
 /// One-shot dictation. Emits `speech-event` for partial/final/error while running.

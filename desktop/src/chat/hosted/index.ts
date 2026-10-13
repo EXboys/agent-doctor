@@ -207,7 +207,8 @@ export function createHostedController(deps: HostedDeps) {
       detail = lastUtterance;
       deps.islandEl.classList.add("is-thinking");
     } else {
-      detail = t("chat.hostedWillSend");
+      detail =
+        sessionRoute === "cloud" ? t("chat.hostedCloudWillSend") : t("chat.hostedWillSend");
       deps.islandEl.classList.add("is-listening");
     }
     if (islandError && !state.speaking && !state.modelBusy && !asking) {
@@ -310,6 +311,13 @@ export function createHostedController(deps: HostedDeps) {
       render();
       return;
     }
+    if (sessionRoute === "cloud") {
+      partial = next;
+      islandError = "";
+      render();
+      commitUtterance(next);
+      return;
+    }
     kept = joinHeard(partial, next);
     partial = kept;
     islandError = "";
@@ -332,15 +340,6 @@ export function createHostedController(deps: HostedDeps) {
     void (async () => {
       let hold = 0;
       let toSend = text;
-      if (sessionRoute === "cloud") {
-        partialTimer = window.setTimeout(() => {
-          partialTimer = null;
-          if (gen !== holdGen || partial.trim() !== text.trim()) return;
-          if (!toSend.trim()) return;
-          commitUtterance(toSend);
-        }, 0);
-        return;
-      }
       try {
         const decision = await voiceTurnEnd({ text });
         // The microphone stayed open for this pause. The sentence on screen is already the whole listen.
@@ -393,9 +392,15 @@ export function createHostedController(deps: HostedDeps) {
     }
   }
 
+  let listenStarting = false;
+
   async function startListen(): Promise<void> {
-    if (listenPromise) return;
-    if ((state.modelBusy || state.speaking) && !state.awaitingPermission) return;
+    if (listenPromise || listenStarting) return;
+    listenStarting = true;
+    if ((state.modelBusy || state.speaking) && !state.awaitingPermission) {
+      listenStarting = false;
+      return;
+    }
     const epoch = ++listenEpoch;
     cancelHold();
     partial = "";
@@ -407,7 +412,6 @@ export function createHostedController(deps: HostedDeps) {
         void voiceSpeakStop();
         return;
       }
-      if (state.speaking) return;
       if (payload?.type === "partial" && typeof payload.text === "string") {
         rememberSpeech(payload.text, false);
         return;
@@ -457,6 +461,7 @@ export function createHostedController(deps: HostedDeps) {
           sessionUnlisten = null;
           listenPromise = null;
         }
+        listenStarting = false;
       });
   }
 
@@ -483,10 +488,13 @@ export function createHostedController(deps: HostedDeps) {
     } catch (error) {
       const raw = String(error);
       if (epoch === speakEpoch && !/cancelled/i.test(raw) && state.active && !state.awaitingPermission) {
-        deps.setStatus(
-          sessionRoute === "cloud" ? t("chat.hostedCloudRetry") : t("chat.hostedFailed"),
-          "warn",
-        );
+        const copy =
+          sessionRoute !== "cloud"
+            ? t("chat.hostedFailed")
+            : /cloud_unready/i.test(raw)
+              ? t("chat.hostedCloudVoiceUnready")
+              : t("chat.hostedCloudRetry");
+        deps.setStatus(copy, "warn");
       }
     }
     if (epoch === speakEpoch && state.active) enqueue({ type: "speakFinished" });

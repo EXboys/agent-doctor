@@ -228,6 +228,7 @@ export function sessionContextText(session: ChatSession, draft = ""): string {
     if (message.role !== "user" && message.role !== "assistant" && message.role !== "meta") {
       continue;
     }
+    if (message.log) continue;
     if (message.content.trim()) chunks.push(message.content);
     if (message.attachments?.length) {
       chunks.push(message.attachments.map((a) => a.name).join("\n"));

@@ -63,6 +63,9 @@ pub fn run(
             PromptSessionEvent::StderrLine { line, .. } => {
                 eprintln!("{line}");
             }
+            PromptSessionEvent::TurnError { message, .. } => {
+                eprintln!("error: {message}");
+            }
             PromptSessionEvent::Status { message, .. } => {
                 eprintln!("… {message}");
             }

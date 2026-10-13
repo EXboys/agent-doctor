@@ -21,6 +21,7 @@ pub fn run(
             repair_after,
             retry_count: retry,
             force: false,
+            update: false,
         },
     )?;
 

@@ -203,6 +203,7 @@ export function wireChatControllers(): void {
     rememberTool: (text) => chatState.bubbles.rememberTool(text),
     rememberToolStep: (step) => chatState.bubbles.rememberToolStep(step),
     rememberRuntimeLog: (text) => chatState.bubbles.rememberRuntimeLog(text),
+    rememberTurnNotice: (text) => chatState.bubbles.rememberTurnNotice(text),
     toolRecordsForTurn: () => {
       const session = chatState.busy ? runTargetSession() : activeSession();
       const messages = session.messages;
@@ -635,6 +636,7 @@ export function wireChatControllers(): void {
       isLive: () => chatState.thinking.isLive(),
     },
     appendStderrLine: (line) => appendStderrLine(line),
+    appendTurnError: (message, plain) => chatState.activity.appendTurnError(message, plain),
     pushPermissionCard: (payload) => pushPermissionCard(payload),
     markPermissionResolved: (requestId, allowed) => markPermissionResolved(requestId, allowed),
     isViewingRunningSession: () => isViewingRunningSession(),

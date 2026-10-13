@@ -20,6 +20,7 @@ type PromptSessionEvent =
   | { type: "delta"; session_id: string; text: string }
   | { type: "stdout_line"; session_id: string; line: string }
   | { type: "stderr_line"; session_id: string; line: string }
+  | { type: "turn_error"; session_id: string; message: string; plain?: boolean }
   | {
       type: "permission_request";
       session_id: string;
@@ -163,6 +164,9 @@ async function ensureListener(): Promise<void> {
         break;
       case "stderr_line":
         appendLog(payload.line, "err");
+        break;
+      case "turn_error":
+        appendLog(payload.message, "err");
         break;
       case "permission_request":
         appendLog(`[permission] ${payload.tool_name}: ${payload.detail}`, "meta");

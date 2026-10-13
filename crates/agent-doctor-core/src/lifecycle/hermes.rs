@@ -22,11 +22,55 @@ const HERMES_FETCH_UNIX: &str =
 const HERMES_FETCH_UNIX_CHINA: &str =
     "curl -fsSL --max-time 60 https://hermes-agent.nousresearch.com/install.sh -o $tmp";
 
-#[cfg(target_os = "windows")]
-const HERMES_INSTALL_WINDOWS: &str = r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://hermes-agent.nousresearch.com/install.ps1 | iex""#;
+/// Save the official `install.ps1` to a file (its GitHub copy through the proxy
+/// when the official host is unreachable) and run it as a script, so it can
+/// exit with a code and be retried.
+///
+/// In mainland China the installer still reaches GitHub twice on its own: the
+/// source clone and uv's Python download. Those two are pointed at the proxy;
+/// every other artifact already falls back to `hermes-assets.nousresearch.com`,
+/// and npm reads the mirror set by `apply_download_env`. The proxy rate-limits
+/// git, so a failed run is repeated once on the original addresses.
+const HERMES_WINDOWS_INSTALL_PS1: &str = r#"
+$sources = @('https://hermes-agent.nousresearch.com/install.ps1',
+             'https://gh-proxy.com/https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1')
+$script = Join-Path $env:TEMP ('hermes-install-' + [guid]::NewGuid().ToString('N') + '.ps1')
+$saved = $false
+foreach ($source in $sources) {
+    try {
+        Invoke-WebRequest -Uri $source -OutFile $script -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        $saved = $true
+        break
+    } catch {
+        Write-Output '安装脚本下载不下来，换一个地址再试…'
+    }
+}
+if (-not $saved) { exit 4 }
+$china = '__CHINA__' -eq '1'
+if ($china) {
+    $env:HERMES_REPO_URL = 'https://gh-proxy.com/https://github.com/NousResearch/hermes-agent.git'
+    $env:UV_PYTHON_INSTALL_MIRROR = 'https://gh-proxy.com/https://github.com/astral-sh/python-build-standalone/releases/download'
+}
+& powershell -NoProfile -ExecutionPolicy Bypass -File $script -NonInteractive
+$code = $LASTEXITCODE
+if ($code -ne 0 -and $china) {
+    Write-Output '国内地址装不上，改用原来的地址再试一次…'
+    foreach ($name in @('HERMES_REPO_URL', 'UV_PYTHON_INSTALL_MIRROR', 'GIT_CONFIG_COUNT',
+                        'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0')) {
+        Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+    }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $script -NonInteractive
+    $code = $LASTEXITCODE
+}
+Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue
+exit $code
+"#;
 
-#[cfg(target_os = "windows")]
-const HERMES_UPDATE_WINDOWS: &str = r#"hermes update || powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://hermes-agent.nousresearch.com/install.ps1 | iex""#;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn windows_install_shell_command(china: bool) -> String {
+    let script = HERMES_WINDOWS_INSTALL_PS1.replace("__CHINA__", if china { "1" } else { "0" });
+    super::powershell_encoded(&script)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HermesLifecycleAction {
@@ -53,8 +97,7 @@ pub fn hermes_update_shell_command() -> String {
 fn hermes_install_shell_command_routed(china: bool) -> String {
     #[cfg(target_os = "windows")]
     {
-        let _ = china;
-        HERMES_INSTALL_WINDOWS.to_string()
+        windows_install_shell_command(china)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -65,8 +108,7 @@ fn hermes_install_shell_command_routed(china: bool) -> String {
 fn hermes_update_shell_command_routed(china: bool) -> String {
     #[cfg(target_os = "windows")]
     {
-        let _ = china;
-        HERMES_UPDATE_WINDOWS.to_string()
+        format!("hermes update || {}", windows_install_shell_command(china))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -196,6 +238,43 @@ mod tests {
         assert!(!cmd.contains("jsdelivr.net"));
         assert!(cmd.contains("改用原来的地址再试一次"));
         assert!(cmd.contains("-o $tmp"));
+    }
+
+    fn decoded_windows_script(command: &str) -> String {
+        use base64::Engine as _;
+        let encoded = command.rsplit(' ').next().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        String::from_utf16(&units).unwrap()
+    }
+
+    #[test]
+    fn windows_install_in_china_proxies_github_and_retries_on_the_original_addresses() {
+        let script = decoded_windows_script(&windows_install_shell_command(true));
+        assert!(!script.contains("__CHINA__"));
+        assert!(script.contains("$china = '1' -eq '1'"));
+        assert!(script.contains("HERMES_REPO_URL = 'https://gh-proxy.com/"));
+        assert!(script.contains("UV_PYTHON_INSTALL_MIRROR"));
+        assert!(script.contains("改用原来的地址再试一次"));
+        assert!(script.contains(
+            "raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1"
+        ));
+        assert!(script.contains("-File $script -NonInteractive"));
+        assert!(
+            !script.contains("| iex"),
+            "a piped script cannot report failure"
+        );
+    }
+
+    #[test]
+    fn windows_install_elsewhere_uses_the_original_addresses() {
+        let script = decoded_windows_script(&windows_install_shell_command(false));
+        assert!(script.contains("$china = '0' -eq '1'"));
     }
 
     #[cfg(not(target_os = "windows"))]

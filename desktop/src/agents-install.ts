@@ -91,7 +91,7 @@ function paintLiveInstall(runtime: string): void {
       mountInstallReply(current, live.inputKind);
     }
   }
-  for (const action of ["install-runtime", "force-reinstall-runtime", "diagnose-runtime"]) {
+  for (const action of ["install-runtime", "update-runtime", "force-reinstall-runtime", "diagnose-runtime"]) {
     card
       ?.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)
       ?.setAttribute("disabled", "true");
@@ -137,9 +137,13 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
     }
   }
 
-  async function installRuntimeFromCard(card: HTMLElement, options: { force?: boolean } = {}) {
+  async function installRuntimeFromCard(
+    card: HTMLElement,
+    options: { force?: boolean; update?: boolean } = {},
+  ) {
     const runtime = card.dataset.runtime;
     const force = Boolean(options.force);
+    const update = Boolean(options.update) && !force;
     const installButton = card.querySelector<HTMLButtonElement>('[data-action="install-runtime"]');
     const forceButton = card.querySelector<HTMLButtonElement>(
       '[data-action="force-reinstall-runtime"]',
@@ -164,7 +168,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       }
     }
     liveInstalls.set(runtime, {
-      status: t("runtime.installing"),
+      status: update ? t("runtime.updating") : t("runtime.installing"),
       percent: 0,
       indeterminate: true,
       logLines: [],
@@ -224,27 +228,32 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       const report = await installRuntime({
         runtime,
         force,
+        update,
       });
       let nextHintHtml: string | null = null;
       let nextHintText: string | null = null;
+      const landed = update
+        ? report.install_succeeded
+        : report.install_succeeded || report.after_installed;
       if (!report.install_needed) {
         nextHintText = t("runtime.installAlready");
-      } else if (report.install_succeeded || report.after_installed) {
+      } else if (landed) {
         const last = liveInstalls.get(runtime)?.logLines.slice(-3).join("\n") ?? "";
-        nextHintHtml = `<div class="install-progress-done">${escapeHtml(t("runtime.installOk"))}<p class="footnote">${escapeHtml(
-          t("runtime.installWireNext"),
-        )}</p>${last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""}</div>`;
+        const done = update ? t("runtime.updateOk") : t("runtime.installOk");
+        const next = update ? "" : `<p class="footnote">${escapeHtml(t("runtime.installWireNext"))}</p>`;
+        nextHintHtml = `<div class="install-progress-done">${escapeHtml(done)}${next}${last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""}</div>`;
       } else {
+        const failed = update ? t("runtime.updateFailed") : t("runtime.installFailed");
         const detail =
           report.skipped.map((item) => item.reason).find(Boolean) ||
           report.manual_fallback[0] ||
-          t("runtime.installFailed");
-        nextHintText = `${t("runtime.installFailed")} ${detail}`;
+          failed;
+        nextHintText = `${failed} ${detail}`;
       }
       // refresh() re-renders cards and would wipe the in-card hint — keep sticky.
       let stickyHtml = nextHintHtml;
       let stickyText = nextHintText;
-      if (report.install_needed && !(report.install_succeeded || report.after_installed)) {
+      if (report.install_needed && !landed) {
         const logPath = report.install_log_path;
         if (logPath) {
           stickyHtml = `<div class="install-progress-done">${escapeHtml(
@@ -280,6 +289,9 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
         ?.removeAttribute("disabled");
       freshCard
         ?.querySelector<HTMLButtonElement>('[data-action="diagnose-runtime"]')
+        ?.removeAttribute("disabled");
+      freshCard
+        ?.querySelector<HTMLButtonElement>('[data-action="update-runtime"]')
         ?.removeAttribute("disabled");
       installButton?.removeAttribute("disabled");
       forceButton?.removeAttribute("disabled");

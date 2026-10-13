@@ -33,6 +33,15 @@ pub(crate) const HERMES_RULES: &[Rule] = &[
         fix: Fix::Auto(|_| run_hermes_lifecycle(HermesLifecycleAction::Install).map(|_| None)),
     },
     Rule {
+        id: "fix-hermes-update",
+        title: "Update Hermes Agent",
+        description: "The installed Hermes is older than this app can use. \
+            Run `hermes update` (official installer as fallback). Sessions and settings stay.",
+        check: CheckMatch::Is("binary.client_version", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|_| run_hermes_lifecycle(HermesLifecycleAction::Update).map(|_| None)),
+    },
+    Rule {
         id: "fix-hermes-env-permissions",
         title: "Tighten ~/.hermes/.env permissions",
         description: "Set .env to mode 600.",

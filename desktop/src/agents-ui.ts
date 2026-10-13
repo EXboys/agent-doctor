@@ -122,6 +122,19 @@ export function renderVersionCompareRow(
     return "";
   }
 
+  if (status?.status === "below_minimum") {
+    const name = runtimeListName(runtime);
+    return `
+    <div class="meta-row meta-row-version is-update">
+      <span class="meta-label">${t("meta.version")}</span>
+      <div class="meta-version-block">
+        <p class="meta-value">${escapeHtml(t("meta.versionTooOld", { name }))}</p>
+        <p class="meta-version-hint">${escapeHtml(t("meta.versionTooOldNext"))}</p>
+      </div>
+    </div>
+  `;
+  }
+
   if (!status || status.status === "unknown" || !status.latest) {
     return metaRow("meta.version", t("meta.versionUnknown", { local: localRaw }));
   }
@@ -290,9 +303,14 @@ export function renderRuntimeCardActions(
     return `<button type="button" class="btn-primary" data-action="install-runtime">${t("runtime.install")}</button>`;
   }
 
+  const updateButton =
+    appState.runtimeVersions.get(runtime.id)?.status === "below_minimum"
+      ? `<button type="button" class="btn-primary" data-action="update-runtime">${escapeHtml(t("runtime.update"))}</button>`
+      : "";
+
   if (!ctx.isAskRuntime) {
     if (canOpenSession(runtime.id)) {
-      return `<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`;
+      return `${updateButton}<button type="button" class="btn-primary" data-action="open-session">${t("runtime.open")}</button>`;
     }
     const actions = [
       actionButton("primary", "diagnose-runtime", ACTION_ICON.diagnose, t("runtime.diagnose"), {
@@ -306,10 +324,14 @@ export function renderRuntimeCardActions(
         }),
       );
     }
-    return actions.join("");
+    return `${updateButton}${actions.join("")}`;
   }
 
-  const parts: string[] = [renderStandardRuntimeActions(runtime.id)];
+  const parts: string[] = [];
+  if (updateButton) {
+    parts.push(updateButton);
+  }
+  parts.push(renderStandardRuntimeActions(runtime.id));
   const canRepair = Boolean(ctx.preview?.can_apply_repair);
   const detailOpenForThis = ctx.diagnoseOpenForRuntime;
 
@@ -388,6 +410,7 @@ export function renderHermesCard(
       : model.provider;
   const modelSummary = [providerLabel, model.model].filter(Boolean).join(" · ");
   const versionStatus = appState.runtimeVersions.get(runtime.id);
+  const tooOld = versionStatus?.status === "below_minimum";
   const summaryMeta = [
     renderVersionCompareRow(runtime, versionStatus),
     modelSummary ? metaRow("meta.model", modelSummary) : "",
@@ -395,10 +418,12 @@ export function renderHermesCard(
   ]
     .filter(Boolean)
     .join("");
-  const badgeClass = keyNeedsAttention ? "warn" : "ok";
-  const badgeText = keyNeedsAttention
-    ? t("runtime.configAttention")
-    : t("runtime.installed");
+  const badgeClass = tooOld || keyNeedsAttention ? "warn" : "ok";
+  const badgeText = tooOld
+    ? t("runtime.needsUpdate")
+    : keyNeedsAttention
+      ? t("runtime.configAttention")
+      : t("runtime.installed");
 
   return `
     <article class="runtime hermes${solo ? " is-solo" : ""}" data-runtime="hermes">
@@ -426,9 +451,17 @@ export function renderRuntimeCard(
     return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml, solo);
   }
 
-  const state = runtime.installed ? t("runtime.installed") : t("runtime.notInstalled");
-  const badgeClass = runtime.installed ? "ok" : "muted";
   const versionStatus = appState.runtimeVersions.get(runtime.id);
+  const state = !runtime.installed
+    ? t("runtime.notInstalled")
+    : versionStatus?.status === "below_minimum"
+      ? t("runtime.needsUpdate")
+      : t("runtime.installed");
+  const badgeClass = !runtime.installed
+    ? "muted"
+    : versionStatus?.status === "below_minimum"
+      ? "warn"
+      : "ok";
   const versionRow = renderVersionCompareRow(runtime, versionStatus);
   const summaryMeta = runtime.installed
     ? [
@@ -519,12 +552,14 @@ export function renderRuntimeTabs(
       const active = runtime.id === selectedId;
       const preview = lookupPreview(previews, runtime.id);
       const shortName = runtimeListName(runtime);
+      const versionStatus = appState.runtimeVersions.get(runtime.id);
       const stateLabel = !runtime.installed
         ? t("runtime.notInstalled")
-        : runtimeHasProblems(preview)
-          ? t("runtime.configAttention")
-          : t("runtime.installed");
-      const versionStatus = appState.runtimeVersions.get(runtime.id);
+        : versionStatus?.status === "below_minimum"
+          ? t("runtime.needsUpdate")
+          : runtimeHasProblems(preview)
+            ? t("runtime.configAttention")
+            : t("runtime.installed");
       const versionMeta = versionStatus?.installed || runtime.version;
       const tabMeta = [stateLabel, versionMeta].filter(Boolean).join(" · ");
       const displayMeta =

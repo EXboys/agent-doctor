@@ -319,8 +319,32 @@ fn drain_progress_chunks(pending: &mut Vec<u8>, queue: &Mutex<Vec<String>>, acc:
     }
 }
 
+/// `cmd` and most Windows tools print in the console code page (GBK on Chinese
+/// Windows), not UTF-8.
+fn decode_console_line(body: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(body) {
+        return text.to_string();
+    }
+    #[cfg(windows)]
+    {
+        use windows::Win32::Globalization::{
+            MultiByteToWideChar, CP_OEMCP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS,
+        };
+        let flags = MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0);
+        let len = unsafe { MultiByteToWideChar(CP_OEMCP, flags, body, None) };
+        if len > 0 {
+            let mut wide = vec![0u16; len as usize];
+            let written = unsafe { MultiByteToWideChar(CP_OEMCP, flags, body, Some(&mut wide)) };
+            if written > 0 {
+                return String::from_utf16_lossy(&wide[..written as usize]);
+            }
+        }
+    }
+    String::from_utf8_lossy(body).into_owned()
+}
+
 fn emit_progress_chunk(body: &[u8], queue: &Mutex<Vec<String>>, acc: &Mutex<String>) {
-    let line = String::from_utf8_lossy(body).trim().to_string();
+    let line = decode_console_line(body).trim().to_string();
     if line.is_empty() {
         return;
     }

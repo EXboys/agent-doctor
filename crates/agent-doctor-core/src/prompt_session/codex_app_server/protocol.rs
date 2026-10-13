@@ -4,9 +4,7 @@ use serde_json::{json, Value};
 use crate::prompt_session::control::{CodexReplyKind, PromptSessionControl};
 use crate::prompt_session::plan::{plan_from_item, plan_from_tool};
 use crate::prompt_session::tool_step::codex_tool_steps;
-use crate::prompt_session::util::{
-    humanize_runtime_error, tool_activity_detail, THINKING_AFTER_TOOL,
-};
+use crate::prompt_session::util::{tool_activity_detail, turn_error, THINKING_AFTER_TOOL};
 use crate::prompt_session::PromptSessionEvent;
 
 use super::*;
@@ -77,10 +75,7 @@ where
             state.thread_open_error = Some(msg.to_string());
             return Ok(());
         }
-        on_event(PromptSessionEvent::StderrLine {
-            session_id: state.session_id.clone(),
-            line: humanize_runtime_error(msg),
-        });
+        on_event(turn_error(&state.session_id, msg));
         if state.waiting_turn == id_num {
             state.turn_done = true;
         }
@@ -258,15 +253,7 @@ pub(crate) fn handle_notification<F>(
             if status == "failed" {
                 let msg =
                     codex_error_message(&params).unwrap_or_else(|| "Codex turn failed".into());
-                on_event(PromptSessionEvent::Status {
-                    session_id: state.session_id.clone(),
-                    phase: "error".into(),
-                    message: msg.clone(),
-                });
-                on_event(PromptSessionEvent::StderrLine {
-                    session_id: state.session_id.clone(),
-                    line: humanize_runtime_error(&msg),
-                });
+                on_event(turn_error(&state.session_id, &msg));
             } else {
                 let fallback = if state.saw_agent_delta {
                     None
@@ -294,10 +281,7 @@ pub(crate) fn handle_notification<F>(
                 .or_else(|| params.pointer("/turn/error/message"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Codex turn failed");
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: state.session_id.clone(),
-                line: humanize_runtime_error(msg),
-            });
+            on_event(turn_error(&state.session_id, msg));
         }
         // Current app-server uses camelCase. Older builds used snake_case.
         "item/agentMessage/delta" | "item/agent_message/delta" => {
@@ -457,10 +441,7 @@ pub(crate) fn handle_notification<F>(
                 }
                 "error" => {
                     if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
-                        on_event(PromptSessionEvent::StderrLine {
-                            session_id: state.session_id.clone(),
-                            line: humanize_runtime_error(msg),
-                        });
+                        on_event(turn_error(&state.session_id, msg));
                     }
                 }
                 _ => {}
@@ -468,10 +449,7 @@ pub(crate) fn handle_notification<F>(
         }
         "error" => {
             if let Some(msg) = codex_error_message(&params) {
-                on_event(PromptSessionEvent::StderrLine {
-                    session_id: state.session_id.clone(),
-                    line: humanize_runtime_error(&msg),
-                });
+                on_event(turn_error(&state.session_id, &msg));
             }
         }
         _ => {}

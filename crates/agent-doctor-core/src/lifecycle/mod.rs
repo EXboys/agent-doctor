@@ -13,6 +13,16 @@ pub mod workbuddy;
 
 pub use download_route::{use_china_mirrors, NPM_MIRROR};
 
+/// A PowerShell script passed whole, so `cmd /C` never parses its quotes or pipes.
+pub(crate) fn powershell_encoded(script: &str) -> String {
+    use base64::Engine;
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
+    format!(
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+    )
+}
+
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 
 pub use cursor::{cursor_install_shell_command, run_cursor_lifecycle, CursorLifecycleAction};
@@ -22,7 +32,8 @@ pub use deepseek_harness::{
     DeepSeekHarnessLifecycleAction,
 };
 pub use hermes::{
-    hermes_install_shell_command, hermes_shell_command, run_hermes_lifecycle, HermesLifecycleAction,
+    hermes_install_shell_command, hermes_shell_command, hermes_update_shell_command,
+    run_hermes_lifecycle, HermesLifecycleAction,
 };
 pub use npm_cli::{
     claude_code_install_shell_command, claude_code_update_shell_command,
@@ -31,7 +42,8 @@ pub use npm_cli::{
 };
 pub use openclaw::{
     openclaw_doctor_fix_shell_command, openclaw_install_shell_command, openclaw_shell_command,
-    run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClawLifecycleAction,
+    openclaw_update_shell_command, run_openclaw_doctor_fix, run_openclaw_lifecycle,
+    OpenClawLifecycleAction,
 };
 pub use qoder::{qoder_install_shell_command, run_qoder_lifecycle, QoderLifecycleAction};
 pub use runner::{

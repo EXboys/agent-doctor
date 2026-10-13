@@ -148,6 +148,12 @@ function familyCopy(family: string): FamilyCopy | null {
       badTitle: t("repair.check.versionBadTitle"),
       badMsg: t("repair.check.versionBadDesc"),
     },
+    "binary.client_version": {
+      okTitle: t("repair.check.versionOkTitle"),
+      okMsg: t("repair.check.versionOkDesc"),
+      badTitle: t("repair.check.clientVersionTitle"),
+      badMsg: t("repair.check.clientVersionDesc"),
+    },
     "binary.path_conflict": {
       okTitle: t("repair.check.pathConflictOkTitle"),
       okMsg: t("repair.check.pathConflictOkDesc"),
@@ -328,6 +334,7 @@ function inferFamilyFromTitle(check: RepairCheckLike): string {
   if (/Binary exists|not installed/i.test(blob)) return "binary.exists";
   if (/Multiple installs/i.test(blob)) return "binary.path_conflict";
   if (/Upstream version/i.test(blob)) return "binary.upstream_version";
+  if (/Client version/i.test(blob)) return "binary.client_version";
   if (/Version command/i.test(blob)) return "binary.version";
   if (/Config schema|schema/i.test(blob)) return "config.schema";
   if (/Config (exists|parse|read)/i.test(blob)) return "config.parse";

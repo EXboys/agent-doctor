@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::adapters::util::find_binary;
 use crate::exec::{command_for_path, kill_process_tree};
 
-use super::{PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
+use super::{PromptSessionEvent, PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 
 /// Quiet this long with no step running and nobody asked anything: the turn is stuck.
 const STALL_LIMIT: Duration = Duration::from_secs(10 * 60);
@@ -435,7 +435,10 @@ pub(crate) fn command_from_cli(bin: &str) -> Command {
     } else {
         find_binary(trimmed).unwrap_or_else(|| PathBuf::from(trimmed))
     };
-    command_for_path(&resolved)
+    let mut cmd = command_for_path(&resolved);
+    // Chat output is read by this app, not a terminal: no color codes.
+    cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
+    cmd
 }
 
 pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
@@ -492,6 +495,25 @@ pub(crate) fn join_reader(handle: thread::JoinHandle<()>, budget: Duration) {
     }
 }
 
+/// A runtime log record by shape: `[subsystem] message` with a lowercase tag.
+/// Not a reply, wherever it shows up.
+pub(crate) fn is_runtime_log_line(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('[') else {
+        return false;
+    };
+    let Some((tag, after)) = rest.split_once(']') else {
+        return false;
+    };
+    let mut chars = tag.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '/' | ':' | '-')
+        })
+        && after.starts_with(char::is_whitespace)
+}
+
+/// Harmless lines that read like errors. Dropped so a failed turn is not blamed on them;
+/// every other line reaches the collapsed log.
 pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     let t = line.trim();
     if t.is_empty() {
@@ -511,19 +533,6 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     if lower.contains("ignored unsupported project-local config") {
         return true;
     }
-    // cua-driver prints a TCC auto-launch note and an update banner on stderr.
-    // The tool still starts; this is not a failed reply.
-    if lower.contains("cua-driver")
-        && (lower.contains("is available")
-            || lower.contains("update with")
-            || lower.contains("release notes")
-            || lower.contains("mcp launched")
-            || lower.contains("tcc")
-            || lower.contains("auto-launching")
-            || lower.contains("proxying mcp"))
-    {
-        return true;
-    }
     // A tool whose program file is gone is removed before send. If one still
     // reports that, it is not a failure of this message.
     if (lower.contains("os error 2")
@@ -535,23 +544,7 @@ pub(crate) fn is_runtime_stderr_noise(line: &str) -> bool {
     }
     // Codex app-server logs this when the client has already finished reading
     // stdout (stdio JSON-RPC shutdown). The turn itself already completed.
-    if is_stdio_shutdown_noise(&lower) {
-        return true;
-    }
-    [
-        "openai codex",
-        "reading additional input from stdin",
-        "workdir:",
-        "approval:",
-        "model:",
-        "provider:",
-        "session id:",
-        "-------",
-        "user",
-        "assistant",
-    ]
-    .iter()
-    .any(|p| lower.starts_with(p) || lower == *p)
+    is_stdio_shutdown_noise(&lower)
 }
 
 /// `EPIPE` / Windows `ERROR_NO_DATA` from a stdio peer that already closed its
@@ -612,6 +605,28 @@ fn strip_log_ansi(raw: &str) -> String {
     out
 }
 
+/// A runtime's own error report. `plain` when the catalog below rewrote it for a person.
+pub(crate) fn turn_error(session_id: &str, raw: &str) -> PromptSessionEvent {
+    let message = humanize_runtime_error(raw);
+    let plain = message != strip_log_ansi(raw).trim();
+    PromptSessionEvent::TurnError {
+        session_id: session_id.to_string(),
+        message,
+        plain,
+    }
+}
+
+/// A raw stderr line stays a log unless the catalog below has words for it.
+pub(crate) fn stderr_event(session_id: &str, line: &str) -> PromptSessionEvent {
+    match turn_error(session_id, line) {
+        event @ PromptSessionEvent::TurnError { plain: true, .. } => event,
+        _ => PromptSessionEvent::StderrLine {
+            session_id: session_id.to_string(),
+            line: line.to_string(),
+        },
+    }
+}
+
 pub(crate) fn humanize_runtime_error(raw: &str) -> String {
     let t = strip_log_ansi(raw).trim().to_string();
     if t.is_empty() {
@@ -661,20 +676,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_subsystem_tagged_line_is_a_runtime_log() {
+        assert!(is_runtime_log_line(
+            "[skills] Skipping escaped skill path outside its configured root"
+        ));
+        assert!(is_runtime_log_line(
+            "[state-migrations] Plugin \"deepseek\" pending"
+        ));
+        assert!(is_runtime_log_line("[agents/main] ready"));
+        assert!(!is_runtime_log_line("[1] first item"));
+        assert!(!is_runtime_log_line("[OK] done"));
+        assert!(!is_runtime_log_line("你好，我是 OpenClaw"));
+    }
+
+    #[test]
     fn hides_missing_tool_startup_on_every_runtime() {
         assert!(is_runtime_stderr_noise(
             "MCP client for `node_repl` failed to start: MCP startup failed: No such file or directory (os error 2)"
         ));
         assert!(!is_runtime_stderr_noise("provider rejected the key"));
-        assert!(is_runtime_stderr_noise(
-            "cua-driver: mcp launched without CuaDriver.app's TCC grants; auto-launching the daemon"
-        ));
-        assert!(is_runtime_stderr_noise(
-            "cua-driver v0.30.4 is available (you have v0.28.2)."
-        ));
-        assert!(!is_runtime_stderr_noise(
-            "cua-driver failed: permission denied"
-        ));
         assert!(is_runtime_stderr_noise(
             "2026-09-28T09:19:04.710092Z ERROR codex_app_server_transport::transport::stdio: Failed to write to stdout: Broken pipe (os error 32)"
         ));

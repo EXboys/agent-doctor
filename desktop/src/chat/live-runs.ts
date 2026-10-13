@@ -14,6 +14,11 @@ export type LiveRun = {
   pendingPermissions: PendingPermission[];
   thinkingMessageId: string | null;
   thinkingText: string;
+  /** Raw output and the runtime's own failure reports, for the closing sentence. */
+  turnErrors: string[];
+  turnReports: string[];
+  /** A sentence for the person already says why this turn failed. */
+  turnNoticeSaved: boolean;
 };
 
 const runs = new Map<string, LiveRun>();
@@ -54,6 +59,9 @@ export function beginLiveRun(id: string): LiveRun {
     pendingPermissions: [],
     thinkingMessageId: null,
     thinkingText: "",
+    turnErrors: [],
+    turnReports: [],
+    turnNoticeSaved: false,
   };
   runs.set(id, run);
   return run;

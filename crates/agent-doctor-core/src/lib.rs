@@ -23,6 +23,19 @@ pub mod usage;
 pub mod version_check;
 pub mod workspace;
 
+/// Probing a broken program (a placeholder `.exe` left by a failed download)
+/// makes Windows pop a "16-bit application" dialog over the app. Children
+/// inherit this mode, so the start of a failed spawn becomes an error code.
+pub fn quiet_system_error_dialogs() {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Diagnostics::Debug::{
+            SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX,
+        };
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+    }
+}
+
 pub use adapter::{
     AdapterDiscovery, ApplyReport, RuntimeAdapter, RuntimeModelPreset, RuntimeModelState,
     RuntimeProfile,
@@ -154,9 +167,9 @@ pub use skills::{
     teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
     teamups_channel_ws_url, teamups_voice_ticket, LocalSkillsLayout, ResolvedSkillsSource,
     SkillInstallError, SkillInstallReport, SkillsSyncOptions, TeamupsAccountStatus,
-    TeamupsCatalogItem, TeamupsChannelJob, TeamupsClient, TeamupsLoginPoll, TeamupsLoginPollStatus,
-    TeamupsLoginStart, TeamupsMallCatalog, TeamupsOfficialStatus, TeamupsPackManifest,
-    TeamupsSkillEntry, TeamupsVoiceTicket,
+    TeamupsCatalogItem, TeamupsChannelJob, TeamupsClient, TeamupsIatUrl, TeamupsLoginPoll,
+    TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog, TeamupsOfficialStatus,
+    TeamupsPackManifest, TeamupsSkillEntry, TeamupsVoiceTicket,
 };
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,

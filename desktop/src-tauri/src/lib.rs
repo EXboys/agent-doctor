@@ -257,6 +257,7 @@ fn event_session_id(event: &PromptSessionEvent) -> Option<&str> {
         | PromptSessionEvent::Thinking { session_id, .. }
         | PromptSessionEvent::StdoutLine { session_id, .. }
         | PromptSessionEvent::StderrLine { session_id, .. }
+        | PromptSessionEvent::TurnError { session_id, .. }
         | PromptSessionEvent::PermissionRequest { session_id, .. }
         | PromptSessionEvent::PermissionResolved { session_id, .. }
         | PromptSessionEvent::Plan { session_id, .. }
@@ -450,6 +451,7 @@ pub fn run() {
     // odd filenames list used to abort the process on the main thread.
     #[cfg(target_os = "macos")]
     drag_pasteboard::keep_file_drags_from_aborting();
+    agent_doctor_core::quiet_system_error_dialogs();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

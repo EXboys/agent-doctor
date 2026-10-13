@@ -34,6 +34,8 @@ export type PromptSessionEvent =
   | { type: "thinking"; session_id: string; text: string }
   | { type: "stdout_line"; session_id: string; line: string }
   | { type: "stderr_line"; session_id: string; line: string }
+  /** Why the turn failed. `plain`: already written for a person; otherwise the runtime's words. */
+  | { type: "turn_error"; session_id: string; message: string; plain?: boolean }
   | {
       type: "permission_request";
       session_id: string;
@@ -119,6 +121,8 @@ export interface ChatMessage {
   step?: ToolStep;
   /** Earlier steps of this turn that were dropped so the page stays small. */
   skippedTools?: number;
+  /** `role: "meta"` holding raw process output. Shown collapsed, never as a reply. */
+  log?: boolean;
 }
 
 export interface ChatSession {

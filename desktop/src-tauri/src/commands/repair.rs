@@ -325,12 +325,14 @@ pub async fn install_runtime_command(
     app: AppHandle,
     runtime: String,
     force: Option<bool>,
+    update: Option<bool>,
 ) -> Result<InstallRuntimeResponse, String> {
     if !begin_install(&runtime) {
         return Err("正在安装，请等这一轮结束。".into());
     }
     let app_for_emit = app.clone();
     let force = force.unwrap_or(false);
+    let update = update.unwrap_or(false);
     let runtime_for_end = runtime.clone();
     let response = tauri::async_runtime::spawn_blocking(move || {
         let report = execute_install_with_progress(
@@ -341,6 +343,7 @@ pub async fn install_runtime_command(
                 repair_after: false,
                 retry_count: 0,
                 force,
+                update,
             },
             |event: InstallProgressEvent| {
                 let _ = app_for_emit.emit("install-progress", &event);

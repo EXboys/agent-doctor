@@ -6,9 +6,11 @@ import type { PlanStep } from "../plan";
 import { markTurnStarted } from "./activity";
 import { preferPlainSummary } from "./format";
 import {
+  chatFailureBubbleAlreadyShown,
   explainCurrentChatTurnFailure,
   markChatFailureBubbleShown,
   resetChatTurnErrors,
+  turnNoticeShown,
 } from "./turn-errors";
 import type { PromptSessionEvent, SessionStore, ToolStep } from "./types";
 
@@ -39,6 +41,7 @@ export type StreamDeps = {
   queueAssistantText: (text: string) => void;
   thinking: { append: (text: string) => void; seal: () => void; isLive: () => boolean };
   appendStderrLine: (line: string) => void;
+  appendTurnError: (message: string, plain: boolean) => void;
   pushPermissionCard: (payload: {
     session_id: string;
     request_id: string;
@@ -148,6 +151,9 @@ export function createStreamController(deps: StreamDeps) {
         case "stderr_line":
           deps.appendStderrLine(payload.line);
           break;
+        case "turn_error":
+          deps.appendTurnError(payload.message, payload.plain === true);
+          break;
         case "permission_request":
           deps.pushPermissionCard(payload);
           deps.noteVerifyBrowserSignal(payload.tool_name, "tool");
@@ -166,10 +172,14 @@ export function createStreamController(deps: StreamDeps) {
           const completedSessionId = chatId;
           const viewing = deps.getStore().activeId === completedSessionId;
           deps.flushPendingTextSync();
-          // Fallback only when this turn never streamed assistant text.
+          const failed =
+            payload.status !== "succeeded" &&
+            payload.status !== "cancelled" &&
+            payload.status !== "timed_out";
+          // The summary is process output, not a reply: the reply only comes from delta events.
           if (!deps.getTurnHadAssistantText() && !deps.getAssistantRaw().trim() && payload.summary?.trim()) {
-            const fallback = preferPlainSummary(payload.summary);
-            if (fallback) deps.appendAssistantChunk(fallback);
+            const leftover = preferPlainSummary(payload.summary);
+            if (leftover) deps.appendStderrLine(leftover);
           }
           deps.noteVerifyBrowserSignal(deps.getAssistantRaw(), "assistant");
           const hadAssistantText = deps.getTurnHadAssistantText();
@@ -179,18 +189,18 @@ export function createStreamController(deps: StreamDeps) {
           }
           deps.sealAssistantBubble();
           deps.expireLivePermissionCards();
+          let failureSaid = turnNoticeShown();
           if (viewing) {
             deps.hideDecisionDock();
             if (!hadAssistantText && payload.status === "succeeded") {
-              if (!showChatTurnFailure(deps)) {
+              if (!failureSaid && !showChatTurnFailure(deps)) {
                 deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
               }
-            } else if (
-              payload.status !== "succeeded" &&
-              payload.status !== "cancelled" &&
-              payload.status !== "timed_out"
-            ) {
-              showChatTurnFailure(deps);
+            } else if (failed && !failureSaid) {
+              failureSaid = showChatTurnFailure(deps);
+              if (!failureSaid && !hadAssistantText) {
+                deps.appendBubble("meta", t("chat.noReply"), { persist: false });
+              }
             }
           }
           deps.reportVerifyMcpIfNeeded();
@@ -210,23 +220,7 @@ export function createStreamController(deps: StreamDeps) {
             }
             deps.setStatus(notice, "warn");
           } else if (payload.status !== "succeeded") {
-            if (viewing) {
-              deps.appendBubble(
-                "meta",
-                t("chat.completed", {
-                  status: payload.status,
-                  code: payload.exit_code == null ? "—" : String(payload.exit_code),
-                }),
-                { persist: false },
-              );
-            }
-            deps.setStatus(
-              t("chat.completed", {
-                status: payload.status,
-                code: payload.exit_code == null ? "—" : String(payload.exit_code),
-              }),
-              "error",
-            );
+            if (!chatFailureBubbleAlreadyShown()) deps.setStatus(t("chat.turnFailedStatus"), "error");
           } else if (finalAssistantText.trim() && viewing) {
             deps.showQuickReplies(finalAssistantText);
           } else if (!viewing) {

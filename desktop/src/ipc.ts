@@ -715,6 +715,7 @@ export function runRepairRollback(args: {
 export function installRuntime(args: {
   runtime: string;
   force?: boolean | null;
+  update?: boolean | null;
 }): Promise<InstallRuntimeResponse> {
   return invoke("install_runtime_command", args);
 }

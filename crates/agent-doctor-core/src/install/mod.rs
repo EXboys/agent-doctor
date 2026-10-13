@@ -4,9 +4,11 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::lifecycle::{
-    claude_code_install_shell_command, codex_install_shell_command,
-    deepseek_harness_install_shell_command, hermes_install_shell_command,
-    openclaw_install_shell_command, run_shell_command_streaming, waiting_input_kind,
+    claude_code_install_shell_command, claude_code_update_shell_command,
+    codex_install_shell_command, codex_update_shell_command,
+    deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
+    hermes_install_shell_command, hermes_update_shell_command, openclaw_install_shell_command,
+    openclaw_update_shell_command, run_shell_command_streaming, waiting_input_kind,
     write_install_log,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
@@ -32,6 +34,8 @@ pub struct InstallOptions {
     pub retry_count: u8,
     /// Re-run the installer even when the binary already exists on PATH.
     pub force: bool,
+    /// Update an existing install to a release this app can use.
+    pub update: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +101,8 @@ where
     let has_rule_install = runtime_supports_lifecycle(runtime_id);
     let before_probe = probe_runtime(runtime_id)?;
     let binary_missing = needs_binary_install(&before_probe);
-    let install_needed = binary_missing || options.force;
+    let updating = options.update && !binary_missing && !options.force;
+    let install_needed = binary_missing || options.force || updating;
     let mut skipped_actions = Vec::new();
     let mut install_log_path = None;
     let mut install_attempts = 0u8;
@@ -110,7 +115,9 @@ where
             100,
         ));
     } else if has_rule_install {
-        if options.force && !binary_missing {
+        if updating {
+            on_progress(emit("installing", "Updating the installed copy…", 12));
+        } else if options.force && !binary_missing {
             on_progress(emit(
                 "installing",
                 "Force reinstall requested — re-running installer…",
@@ -125,7 +132,7 @@ where
                 &format!("Running installer (attempt {install_attempts}/{max_attempts})…"),
                 15,
             ));
-            match run_rule_install(runtime_id, &mut on_progress) {
+            match run_rule_install(runtime_id, updating, &mut on_progress) {
                 Ok(path) => {
                     install_log_path = Some(path.display().to_string());
                     // Installers update the user PATH in the OS; refresh this process
@@ -137,14 +144,18 @@ where
                         85,
                     ));
                     let after_attempt = probe_runtime(runtime_id)?;
-                    if !needs_binary_install(&after_attempt) {
+                    if install_attempt_ok(&after_attempt, updating) {
                         install_succeeded = true;
                         break;
                     }
+                    let reason = if updating && !needs_binary_install(&after_attempt) {
+                        "更新跑完了，但这份还是太旧，这里用不了。"
+                    } else {
+                        "install script finished but binary still not found on PATH"
+                    };
                     skipped_actions.push(SkippedRepairAction {
                         id: install_action_id(runtime_id).to_string(),
-                        reason: "install script finished but binary still not found on PATH"
-                            .to_string(),
+                        reason: reason.to_string(),
                     });
                 }
                 Err(error) => {
@@ -169,7 +180,7 @@ where
     on_progress(emit("verifying", "Re-probing runtime health…", 90));
     crate::adapters::util::refresh_managed_runtime_path();
     let mut after_probe = probe_runtime(runtime_id)?;
-    if install_needed && !install_succeeded && !needs_binary_install(&after_probe) {
+    if install_needed && !install_succeeded && install_attempt_ok(&after_probe, updating) {
         install_succeeded = true;
     }
     // npm/brew may finish linking a moment after the installer exits.
@@ -177,13 +188,13 @@ where
         std::thread::sleep(std::time::Duration::from_millis(750));
         crate::adapters::util::refresh_managed_runtime_path();
         after_probe = probe_runtime(runtime_id)?;
-        if !needs_binary_install(&after_probe) {
+        if install_attempt_ok(&after_probe, updating) {
             install_succeeded = true;
             skipped_actions.retain(|item| !is_install_failure_action(&item.id));
         }
     }
     if install_needed && !install_succeeded {
-        install_succeeded = !needs_binary_install(&after_probe);
+        install_succeeded = install_attempt_ok(&after_probe, updating);
     }
 
     let explain = if options.explain {
@@ -220,7 +231,7 @@ where
                 },
             )?;
             after_probe = loop_report.after_probe.clone();
-            install_succeeded = !install_needed || !needs_binary_install(&after_probe);
+            install_succeeded = !install_needed || install_attempt_ok(&after_probe, updating);
             Some(loop_report)
         }
         None => None,
@@ -258,12 +269,13 @@ struct InstallRunError {
 
 fn run_rule_install<F>(
     runtime_id: &str,
+    update: bool,
     on_progress: &mut F,
 ) -> std::result::Result<PathBuf, InstallRunError>
 where
     F: FnMut(InstallProgressEvent),
 {
-    let command = install_shell_command(runtime_id).ok_or_else(|| InstallRunError {
+    let command = lifecycle_shell_command(runtime_id, update).ok_or_else(|| InstallRunError {
         reason: format!("no install command for runtime '{runtime_id}'"),
         log_path: None,
     })?;
@@ -518,6 +530,24 @@ fn labeled_percent(line: &str, label: &str) -> Option<u8> {
     Some(pct.min(100))
 }
 
+fn lifecycle_shell_command(runtime_id: &str, update: bool) -> Option<String> {
+    if update {
+        return update_shell_command(runtime_id).or_else(|| install_shell_command(runtime_id));
+    }
+    install_shell_command(runtime_id)
+}
+
+fn update_shell_command(runtime_id: &str) -> Option<String> {
+    match runtime_id {
+        "hermes" => Some(hermes_update_shell_command()),
+        "openclaw" => Some(openclaw_update_shell_command()),
+        "claude-code" => Some(claude_code_update_shell_command()),
+        "codex" => Some(codex_update_shell_command()),
+        "deepseek-harness" => Some(deepseek_harness_update_shell_command()),
+        _ => None,
+    }
+}
+
 fn install_shell_command(runtime_id: &str) -> Option<String> {
     match runtime_id {
         "hermes" => Some(hermes_install_shell_command()),
@@ -545,6 +575,18 @@ pub fn needs_binary_install(probe: &RuntimeProbeReport) -> bool {
         .checks
         .iter()
         .any(|check| check.id == "binary.exists" && check.status == ProbeStatus::Fail)
+}
+
+fn client_still_too_old(probe: &RuntimeProbeReport) -> bool {
+    probe
+        .checks
+        .iter()
+        .any(|check| check.id == "binary.client_version" && check.status == ProbeStatus::Fail)
+}
+
+/// The program is on PATH. An update also has to pass the version this app can use.
+fn install_attempt_ok(probe: &RuntimeProbeReport, updating: bool) -> bool {
+    !needs_binary_install(probe) && !(updating && client_still_too_old(probe))
 }
 
 fn has_remaining_work(probe: &RuntimeProbeReport) -> bool {
@@ -756,6 +798,26 @@ mod tests {
             facts: Vec::new(),
         };
         assert!(needs_binary_install(&probe));
+    }
+
+    #[test]
+    fn an_update_that_leaves_the_copy_too_old_does_not_count_as_success() {
+        let probe = RuntimeProbeReport {
+            runtime_id: "hermes".to_string(),
+            display_name: "Hermes".to_string(),
+            binary_name: "hermes".to_string(),
+            checks: vec![ProbeCheck::new(
+                "binary.client_version",
+                "Client version",
+                ProbeStatus::Fail,
+                ProbeSeverity::Error,
+                "Installed 0.20.1 is older than this app can use (0.21.3)",
+                crate::repair::SensitivityLevel::Public,
+            )],
+            facts: Vec::new(),
+        };
+        assert!(!install_attempt_ok(&probe, true));
+        assert!(install_attempt_ok(&probe, false));
     }
 
     #[test]

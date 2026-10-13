@@ -156,9 +156,18 @@ pub enum PromptSessionEvent {
         session_id: String,
         line: String,
     },
+    /// Raw process output. A log, never a reply; the UI keeps it collapsed.
     StderrLine {
         session_id: String,
         line: String,
+    },
+    /// Why this turn failed, as the runtime reported it. `plain` means this app already
+    /// wrote it for a person; otherwise it is the runtime's own words.
+    TurnError {
+        session_id: String,
+        message: String,
+        #[serde(default)]
+        plain: bool,
     },
     /// Tool / command permission prompt (Claude control_request or Codex app-server).
     PermissionRequest {
@@ -376,11 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn filters_codex_banner_stderr() {
-        assert!(util::is_runtime_stderr_noise("OpenAI Codex v0.145.0"));
-        assert!(util::is_runtime_stderr_noise(
-            "Reading additional input from stdin..."
-        ));
+    fn filters_harmless_lines_that_read_like_errors() {
         assert!(util::is_runtime_stderr_noise(
             "Ignored unsupported project-local config keys in C:\\Users\\Admin\\.codex\\config.toml: openai_base_url, model_provider, model_providers. If you want these settings to apply, manually set them in your user-level config.toml."
         ));
