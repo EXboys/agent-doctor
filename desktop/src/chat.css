@@ -807,6 +807,7 @@ body.chat-is-resizing * {
 
 #chat-knowledge .chat-knowledge-head,
 #chat-knowledge .chat-knowledge-picks,
+#chat-knowledge .chat-knowledge-lead,
 #chat-knowledge .chat-knowledge-scope,
 #chat-knowledge .chat-knowledge-kind-tabs {
   flex: none;
@@ -927,11 +928,113 @@ body.chat-is-resizing * {
   border-color: var(--line-strong);
 }
 
+.chat-knowledge-lead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: -4px 0 0;
+}
+
+.chat-knowledge-lead .chat-knowledge-scope {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
 .chat-knowledge-scope {
   margin: -4px 0 10px;
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.45;
+}
+
+.chat-knowledge-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  max-width: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chat-knowledge-sync[hidden] {
+  display: none;
+}
+
+.chat-knowledge-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chat-knowledge-sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.chat-knowledge-sync[data-tone="ok"] .chat-knowledge-sync-pill {
+  color: var(--ok);
+}
+
+.chat-knowledge-sync[data-tone="warn"],
+.chat-knowledge-sync[data-tone="bad"] {
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--fill);
+  font-weight: 500;
+}
+
+.chat-knowledge-sync[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.chat-knowledge-sync[data-tone="bad"] {
+  color: var(--danger);
+}
+
+.chat-knowledge-sync-link {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-knowledge-sync-link:hover {
+  color: var(--text);
+}
+
+.chat-knowledge-sync time {
+  color: var(--muted);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-schedule-grid {
@@ -1393,17 +1496,113 @@ html[data-theme="dark"] .kw-progress {
 .kw-tree {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
   overflow: auto;
 }
 
 .kw-tree-folder {
-  margin: 14px 0 4px;
-  padding: 0 10px;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+  width: 100%;
+  margin: 6px 0 2px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--faint);
+  font: inherit;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kw-tree-folder:hover {
+  background: var(--fill);
+  color: var(--muted);
+}
+
+.kw-tree-folder[aria-expanded="false"] .kw-tree-arrow {
+  transform: rotate(-90deg);
+}
+
+.kw-tree-arrow {
+  transition: transform 120ms ease;
+}
+
+.kw-tree-folder-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
+
+.kw-tree-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.kw-tree-group[hidden] {
+  display: none;
+}
+
+.kw-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  border-radius: 8px;
+  transition: background 0.12s ease;
+}
+
+.kw-tree-row:has(.kw-tree-grip) {
+  grid-template-columns: 20px minmax(0, 1fr);
+}
+
+.kw-tree-grip {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--faint) 55%, transparent);
+  cursor: grab;
+}
+
+.kw-tree-row:hover .kw-tree-grip,
+.kw-tree-grip:focus-visible {
+  color: var(--faint);
+}
+
+.kw-tree-row:hover {
+  background: var(--fill);
+}
+
+.kw-tree-row:has(.kw-tree-item[aria-current="page"]) {
+  background: var(--fill);
+}
+
+.kw-tree-row.is-shifting,
+.kw-tree-row.is-settling {
+  transition: transform 160ms ease;
+}
+
+.kw-tree-row.is-dragging {
+  position: relative;
+  z-index: 3;
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+body.chat-knowledge-dragging,
+body.chat-knowledge-dragging .kw-tree-grip {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .kw-tree > * {
@@ -1429,17 +1628,17 @@ html[data-theme="dark"] .kw-progress {
 }
 
 .kw-tree-item:hover {
-  background: var(--fill);
+  background: transparent;
   color: var(--text);
 }
 
 .kw-tree-item[aria-current="page"] {
-  background: var(--fill);
+  background: transparent;
   color: var(--text);
   font-weight: 600;
 }
 
-html[data-theme="dark"] .kw-tree-item[aria-current="page"] {
+html[data-theme="dark"] .kw-tree-row:has(.kw-tree-item[aria-current="page"]) {
   background: rgba(255, 255, 255, 0.07);
 }
 
@@ -3552,8 +3751,14 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   border: 0;
   background: transparent;
   color: var(--faint);
-  white-space: pre-wrap;
+  white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* pre-wrap on a parent lets a closed <details> leak its text in the desktop webview. */
+.chat-activity.kind-log .chat-permission-more:not([open]) > :not(summary),
+.chat-bubble.meta .chat-permission-more:not([open]) > :not(summary) {
+  display: none;
 }
 
 .chat-activity.kind-log .chat-permission-more,
@@ -5475,6 +5680,58 @@ html[data-theme="dark"] .chat-theme-icon-sun {
   gap: 6px;
 }
 
+.chat-resource-categories {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-resource-categories[hidden] {
+  display: none;
+}
+
+.chat-resource-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-resource-category {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.chat-resource-category.is-on {
+  border-color: rgba(47, 111, 237, 0.32);
+  background: rgba(47, 111, 237, 0.08);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.chat-res-group {
+  margin: 12px 2px 2px;
+  color: var(--faint);
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.chat-res-group:first-child {
+  margin-top: 0;
+}
+
+.chat-res-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .chat-res-row.has-delete {
   grid-template-columns: minmax(0, 1fr) auto;
   cursor: default;
@@ -5482,6 +5739,11 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-res-row.has-order {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.chat-res-row.has-pin {
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
 }
 
@@ -5520,6 +5782,11 @@ html[data-theme="dark"] .chat-theme-icon-sun {
 
 .chat-res-pin:hover:not(:disabled) {
   color: var(--text);
+  background: rgba(47, 111, 237, 0.08);
+}
+
+.chat-res-pin.is-pinned {
+  color: var(--accent);
   background: rgba(47, 111, 237, 0.08);
 }
 
@@ -5745,8 +6012,15 @@ body.chat-skill-dragging .chat-res-grip {
 
 .chat-prompt-wrap {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-composer.is-mention-open .chat-prompt-wrap,
+.chat-composer-box.is-mention-open .chat-prompt-wrap {
+  overflow: visible;
 }
 
 .chat-mention-menu {
@@ -5825,10 +6099,61 @@ body.chat-skill-dragging .chat-res-grip {
   white-space: nowrap;
 }
 
+.chat-slash-categories {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.chat-slash-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-slash-category {
+  flex: none;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.chat-slash-category.is-pinned,
+.chat-slash-category.is-active {
+  color: var(--accent);
+}
+
+.chat-slash-category:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.chat-slash-category.is-active {
+  background: var(--accent-soft);
+}
+
 .chat-slash-list {
   min-height: 0;
   overflow: auto;
   padding: 4px;
+}
+
+.chat-slash-group-title {
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  padding: 7px 10px 4px;
+  background: var(--panel);
+  color: var(--faint);
+  font-size: 0.66rem;
+  font-weight: 650;
 }
 
 .chat-slash-empty {
@@ -6494,7 +6819,8 @@ body.chat-skill-dragging .chat-res-grip {
     var(--main-bg) 14px
   );
   flex-shrink: 0;
-  max-height: min(48vh, 340px);
+  min-height: 0;
+  /* The button row is part of this box. A max-height here used to cut that row in half. */
   overflow: visible;
 }
 
@@ -6600,6 +6926,8 @@ body.chat-skill-dragging .chat-res-grip {
 .chat-composer-box {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   border: 1px solid var(--line-strong);
   border-radius: 14px;
   background: var(--panel);
@@ -6666,6 +6994,7 @@ body.chat-skill-dragging .chat-res-grip {
 .chat-running {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 8px;
   min-height: 30px;
   padding: 6px 14px;
@@ -6809,7 +7138,8 @@ body.chat-skill-dragging .chat-res-grip {
   width: 100%;
   /* One line when empty. autoResizePrompt grows this with the text. */
   min-height: calc(1.45em + 14px);
-  max-height: min(36vh, 260px);
+  /* Cap the field only. The buttons under it stay in the window. */
+  max-height: min(200px, 32vh);
   overflow-x: hidden;
   overflow-y: hidden;
   white-space: pre-wrap;
@@ -7971,6 +8301,9 @@ html[data-theme="dark"] .chat-permission-deny {
 /* Composer toolbar: light chips, send stays bottom-right when tools wrap. */
 .chat-composer-bar {
   flex-wrap: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
   align-items: flex-end;
   gap: 8px;
   padding: 2px 8px 8px 6px;

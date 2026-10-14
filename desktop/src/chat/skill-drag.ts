@@ -13,11 +13,15 @@ export type SkillDropPosition = "before" | "after";
 
 type Slot = { el: HTMLElement; id: string; top: number; height: number };
 
-export function attachSkillReorder(
+export function attachPointerReorder(
   listEl: HTMLElement,
   handle: HTMLElement,
-  skillId: string,
+  itemId: string,
   onReorder: (from: string, to: string, position: SkillDropPosition) => void,
+  options: {
+    rowSelector: string;
+    bodyClass: string;
+  },
 ): void {
   handle.setAttribute("draggable", "false");
   handle.addEventListener("dragstart", (event) => event.preventDefault());
@@ -33,13 +37,14 @@ export function attachSkillReorder(
   let gap = 0;
   let others: Slot[] = [];
   let targetIndex = 0;
+  let lastClientY = 0;
 
   const rows = (): HTMLElement[] => [
-    ...listEl.querySelectorAll<HTMLElement>('.chat-res-row[data-kind="skill"]'),
-  ];
+    ...listEl.querySelectorAll<HTMLElement>(options.rowSelector),
+  ].filter((row) => row.getBoundingClientRect().height > 0);
 
   const startDrag = (): boolean => {
-    dragged = handle.closest<HTMLElement>('.chat-res-row[data-kind="skill"]');
+    dragged = handle.closest<HTMLElement>(options.rowSelector);
     if (!dragged) return false;
     const blocks = rows();
     draggedIndex = blocks.indexOf(dragged);
@@ -53,12 +58,17 @@ export function attachSkillReorder(
       .filter((el) => el !== dragged)
       .map((el) => {
         const box = el.getBoundingClientRect();
-        return { el, id: el.dataset.id ?? "", top: box.top, height: outerHeight(el) };
+        return {
+          el,
+          id: el.dataset.id ?? el.dataset.page ?? "",
+          top: box.top,
+          height: outerHeight(el),
+        };
       });
     targetIndex = draggedIndex;
     dragged.classList.add("is-dragging");
     for (const slot of others) slot.el.classList.add("is-shifting");
-    document.body.classList.add("chat-skill-dragging");
+    document.body.classList.add(options.bodyClass);
     return true;
   };
 
@@ -103,7 +113,7 @@ export function attachSkillReorder(
       dragged.classList.remove("is-dragging", "is-settling");
       dragged.style.transform = "";
     }
-    document.body.classList.remove("chat-skill-dragging");
+    document.body.classList.remove(options.bodyClass);
   };
 
   const onMove = (clientY: number, clientX: number): void => {
@@ -122,6 +132,7 @@ export function attachSkillReorder(
       }
       dragging = true;
     }
+    lastClientY = clientY;
     layout(clientY - startY);
   };
 
@@ -153,10 +164,19 @@ export function attachSkillReorder(
     }
     dragging = false;
 
-    const moved = targetIndex !== draggedIndex;
+    const hovered = others.find(
+      (slot) =>
+        lastClientY >= slot.top - gap / 2 &&
+        lastClientY <= slot.top + slot.height + gap / 2,
+    );
+    let moved = targetIndex !== draggedIndex;
     let to = "";
     let position: SkillDropPosition = "before";
-    if (moved) {
+    if (hovered) {
+      moved = true;
+      to = hovered.id;
+      position = lastClientY > hovered.top + hovered.height / 2 ? "after" : "before";
+    } else if (moved) {
       if (targetIndex < others.length) {
         to = others[targetIndex]!.id;
       } else {
@@ -172,7 +192,7 @@ export function attachSkillReorder(
       resetStyles();
       dragged = null;
       others = [];
-      if (moved && to) onReorder(skillId, to, position);
+      if (moved && to) onReorder(itemId, to, position);
     }, SETTLE_MS);
   }
 
@@ -197,5 +217,17 @@ export function attachSkillReorder(
   handle.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+  });
+}
+
+export function attachSkillReorder(
+  listEl: HTMLElement,
+  handle: HTMLElement,
+  skillId: string,
+  onReorder: (from: string, to: string, position: SkillDropPosition) => void,
+): void {
+  attachPointerReorder(listEl, handle, skillId, onReorder, {
+    rowSelector: '.chat-res-row[data-kind="skill"]',
+    bodyClass: "chat-skill-dragging",
   });
 }

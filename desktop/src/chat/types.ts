@@ -123,6 +123,8 @@ export interface ChatMessage {
   skippedTools?: number;
   /** `role: "meta"` holding raw process output. Shown collapsed, never as a reply. */
   log?: boolean;
+  /** Collapsed log row uses a failure sentence instead of the generic label. */
+  summary?: "commandFailed";
 }
 
 export interface ChatSession {

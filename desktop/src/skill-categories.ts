@@ -28,48 +28,48 @@ export const SKILL_CATEGORY_RULES: SkillCategoryDef[] = [
     id: "web",
     labelKey: "resources.catWeb",
     match:
-      /\b(browser|chrome|playwright|puppeteer|selenium|scrape|crawl|fetch\s*url|http\s*request|网页|浏览器|爬虫|抓取)\b/i,
+      /(?:\b(?:browser|chrome|playwright|puppeteer|selenium|scrape|crawl|fetch\s*url|http\s*request)\b|网页|浏览器|爬虫|抓取)/i,
   },
   {
     id: "data",
     labelKey: "resources.catData",
     match:
-      /\b(sql|database|postgres|mysql|sqlite|mongo|redis|excel|csv|dataframe|pandas|etl|数据|表格|数据库|统计|分析)\b/i,
+      /(?:\b(?:sql|database|postgres|mysql|sqlite|mongo|redis|excel|csv|dataframe|pandas|etl)\b|数据|表格|数据库|统计|分析)/i,
   },
   {
     id: "docs",
     labelKey: "resources.catDocs",
     match:
-      /\b(markdown|readme|doc(?:s|ument)?|pdf|notion|confluence|wiki|写作|文档|笔记|总结|摘要)\b/i,
+      /(?:\b(?:markdown|readme|doc(?:s|ument)?|pdf|notion|confluence|wiki)\b|写作|文档|笔记|总结|摘要)/i,
   },
   {
     id: "office",
     labelKey: "resources.catOffice",
     match:
-      /\b(email|mail|calendar|slack|teams|jira|linear|airtable|notion|apple[-_ ]?notes|reminders|办公|邮件|日历|会议|待办)\b/i,
+      /(?:\b(?:email|mail|calendar|slack|teams|jira|linear|airtable|notion|apple[-_ ]?notes|reminders)\b|办公|邮件|日历|会议|待办)/i,
   },
   {
     id: "design",
     labelKey: "resources.catDesign",
-    match: /\b(figma|design|ui|ux|image|svg|icon|画|设计|视觉|原型)\b/i,
+    match: /(?:\b(?:figma|design|ui|ux|image|svg|icon)\b|绘画|画图|设计|视觉|原型)/i,
   },
   {
     id: "ops",
     labelKey: "resources.catOps",
     match:
-      /\b(docker|k8s|kubernetes|ci|cd|deploy|monitor|log|sre|devops|运维|部署|监控|日志)\b/i,
+      /(?:\b(?:docker|k8s|kubernetes|ci|cd|deploy|monitor|log|sre|devops)\b|运维|部署|监控|日志)/i,
   },
   {
     id: "ai",
     labelKey: "resources.catAi",
     match:
-      /\b(llm|gpt|claude|embedding|rag|prompt|agent|model|ml|ai|模型|智能体|提示词)\b/i,
+      /(?:\b(?:llm|gpt|claude|embedding|rag|prompt|agent|model|ml|ai)\b|模型|智能体|提示词)/i,
   },
   {
     id: "dev",
     labelKey: "resources.catDev",
     match:
-      /\b(git|github|gitlab|code|debug|test|lint|npm|node|rust|python|typescript|api|sdk|refactor|开发|代码|编程|调试|测试)\b/i,
+      /(?:\b(?:git|github|gitlab|code|debug|test|lint|npm|node|rust|python|typescript|api|sdk|refactor)\b|开发|代码|编程|调试|测试)/i,
   },
   {
     id: "other",

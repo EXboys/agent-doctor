@@ -1,10 +1,25 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AskResourcesController, AskRuntime, ResourcesScopeTab } from "../ask-resources";
-import { loadSkillOrder, pinSkillId, reorderSkillIds, saveSkillOrder } from "./skill-order";
+import type {
+  AskResourcesController,
+  AskRuntime,
+  ResourcesScopeTab,
+  SkillListCategory,
+} from "../ask-resources";
+import {
+  loadPinnedSkillIds,
+  loadSkillOrder,
+  pinSkillId,
+  reorderSkillIds,
+  savePinnedSkillIds,
+  saveSkillOrder,
+  togglePinnedSkillId,
+} from "./skill-order";
 import { t, tNamed } from "../i18n";
 import { skillInstall, skillRemove } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import { closeKnowledgePage, closeResourcesMainPage, closeSchedulePage } from "./overlay-pages";
+import { SKILL_CATEGORY_ORDER } from "../skill-categories";
+import { saveSkillCategoryOverride } from "./skill-category-order";
 
 const AGENTS = ["codex", "claude-code", "hermes", "openclaw", "deepseek-harness"] as const;
 
@@ -38,6 +53,7 @@ let projectPick = "";
 let agentPick: string = AGENTS[0];
 let query = "";
 let resourceKind: "skills" | "mcp" = "skills";
+let skillCategory: SkillListCategory = "all";
 let installing = false;
 let pendingDelete = "";
 
@@ -93,6 +109,7 @@ function paintContent(): void {
   const mcpList = document.querySelector<HTMLElement>("#chat-resources-mcp-list");
   const skillsEmpty = document.querySelector<HTMLElement>("#chat-resources-skills-empty");
   const mcpEmpty = document.querySelector<HTMLElement>("#chat-resources-mcp-empty");
+  const skillCategories = document.querySelector<HTMLElement>("#chat-resources-skill-categories");
   if (!scope || !skillsList || !mcpList || !skillsEmpty || !mcpEmpty) return;
 
   const projects = deps.projects();
@@ -144,14 +161,47 @@ function paintContent(): void {
         void removeSkill(skillId);
       },
       onPinSkill: (skillId) => {
-        saveSkillOrder(pinSkillId(loadSkillOrder(), skillId));
+        const nextPins = togglePinnedSkillId(loadPinnedSkillIds(), skillId);
+        savePinnedSkillIds(nextPins);
+        if (nextPins.includes(skillId)) {
+          saveSkillOrder(pinSkillId(loadSkillOrder(), skillId));
+        }
         paintContent();
       },
       onReorderSkill: (fromId, toId, position) => {
-        const visible = [...skillsList.querySelectorAll<HTMLElement>('.chat-res-row[data-kind="skill"]')]
+        const sourceRow = skillsList.querySelector<HTMLElement>(
+          `.chat-res-row[data-kind="skill"][data-id="${CSS.escape(fromId)}"]`,
+        );
+        const targetRow = skillsList.querySelector<HTMLElement>(
+          `.chat-res-row[data-kind="skill"][data-id="${CSS.escape(toId)}"]`,
+        );
+        const targetCategory = targetRow?.dataset.category as
+          | Exclude<SkillListCategory, "all">
+          | undefined;
+        const pins = loadPinnedSkillIds();
+        if (targetCategory === "pinned") {
+          if (!pins.includes(fromId)) savePinnedSkillIds([fromId, ...pins]);
+        } else if (targetCategory && SKILL_CATEGORY_ORDER.includes(targetCategory)) {
+          if (pins.includes(fromId)) {
+            savePinnedSkillIds(pins.filter((id) => id !== fromId));
+          }
+          saveSkillCategoryOverride(fromId, targetCategory);
+        }
+        const group = targetRow?.closest<HTMLElement>(".chat-res-group-list")
+          ?? sourceRow?.closest<HTMLElement>(".chat-res-group-list")
+          ?? skillsList;
+        const visible = [...group.querySelectorAll<HTMLElement>('.chat-res-row[data-kind="skill"]')]
           .map((row) => row.dataset.id ?? "")
           .filter(Boolean);
+        if (!visible.includes(fromId)) visible.push(fromId);
         saveSkillOrder(reorderSkillIds(loadSkillOrder(), visible, fromId, toId, position));
+        paintContent();
+      },
+      skillCategory,
+      skillCategoriesEl: skillCategories,
+      onSkillCategory: (next) => {
+        skillCategory = next;
+        pendingDelete = "";
         paintContent();
       },
     },

@@ -19,8 +19,9 @@ export const PRESET_MODELS_BY_ID: Record<string, string[]> = {
   qwen: ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash"],
   // Zhipu BigModel
   glm: ["glm-5.3", "glm-5.2", "glm-5.3-flash", "glm-4.6"],
-  // MiniMax Open Platform
-  minimax: ["MiniMax-M3", "MiniMax-M2.5", "MiniMax-M2.1"],
+  // https://platform.minimax.io/docs/guides/models-intro
+  // M3.1 Flash Preview only answers on a subscription key (M Plan / MiniMax Code).
+  minimax: ["MiniMax-M3", "MiniMax-M3.1-Flash-Preview", "MiniMax-M2.5", "MiniMax-M2.1"],
   // Moonshot / Kimi
   moonshot: ["kimi-k2.6", "kimi-k2.5", "kimi-latest"],
   // https://developers.openai.com/api/docs/models

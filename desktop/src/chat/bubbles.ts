@@ -7,7 +7,12 @@ import {
   formatPermissionDetail,
   looksLikeToolPayloadJson,
   appendRunLog,
+  agentFailedLine,
+  coveredRunLogPointers,
   isLogMessage,
+  isRunLogPointer,
+  labelCurrentRunLog,
+  markTurnLogFailed,
   mountFailedCommand,
   splitToolActivity,
   toolSignature,
@@ -274,6 +279,15 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.touchSession(session);
     deps.scheduleStorePersist();
   }
+  /** A failed turn with only a log: one sentence on that row, original stays inside. */
+  function noteFailedRunLog(): boolean {
+    const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    if (!markTurnLogFailed(session.messages)) return false;
+    deps.touchSession(session);
+    deps.scheduleStorePersist();
+    if (deps.isViewingRunningSession()) labelCurrentRunLog(deps.logEl, agentFailedLine(session.runtime));
+    return true;
+  }
   function rememberTurnNotice(text: string): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
     session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
@@ -464,6 +478,7 @@ export function createBubblesController(deps: BubblesDeps) {
         return;
       }
       const messages = placeToolsBeforeReply(session.messages);
+      const covered = coveredRunLogPointers(messages);
       for (let i = 0; i < messages.length; ) {
         const message = messages[i];
         if (message.role === "tool" || message.role === "thinking") {
@@ -577,13 +592,23 @@ export function createBubblesController(deps: BubblesDeps) {
             attachments: message.attachments,
           });
           deps.logEl.appendChild(wrap);
+        } else if (covered.hidden.has(i)) {
+          i += 1;
+          continue;
         } else if (isLogMessage(message)) {
-          appendRunLog(deps.logEl, message.content);
+          appendRunLog(
+            deps.logEl,
+            message.content,
+            covered.failedLogs.has(i) ? agentFailedLine(session.runtime) : undefined,
+          );
         } else {
           const bubble = document.createElement("div");
           bubble.className = `chat-bubble ${message.role}`;
           bubble.dataset.messageId = message.id;
-          if (!mountFailedCommand(bubble, message.content)) bubble.textContent = message.content;
+          const shown = isRunLogPointer(message.content)
+            ? agentFailedLine(session.runtime)
+            : message.content;
+          if (!mountFailedCommand(bubble, shown)) bubble.textContent = shown;
           const strip = renderAttachmentStrip(message.attachments);
           if (strip) bubble.appendChild(strip);
           deps.logEl.appendChild(bubble);
@@ -626,6 +651,7 @@ export function createBubblesController(deps: BubblesDeps) {
     rememberTool,
     rememberToolStep,
     rememberRuntimeLog,
+    noteFailedRunLog,
     rememberTurnNotice,
     updateAssistantMessage,
     assistantMarkdownSource,

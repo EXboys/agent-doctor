@@ -133,9 +133,9 @@
             <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
           </button>
           <div class="chat-account-bar">
-            <button id="chat-account" type="button" class="chat-account" title="个人中心">
-              <span id="chat-account-avatar" class="chat-account-avatar" aria-hidden="true">个</span>
-              <span id="chat-account-name" class="chat-account-name">个人中心</span>
+            <button id="chat-account" type="button" class="chat-account" title="登录">
+              <span id="chat-account-avatar" class="chat-account-avatar" aria-hidden="true">登</span>
+              <span id="chat-account-name" class="chat-account-name">登录</span>
             </button>
             <button id="chat-update" type="button" class="chat-update" hidden data-i18n="chat.updateReady">更新</button>
             <button
@@ -316,6 +316,20 @@
                     aria-label="新建对话默认开启自动审批"
                   />
                 </div>
+                <div class="chat-settings-row" id="chat-settings-knowledge-sync-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsKnowledgeSync">同步到账号</strong>
+                    <span data-i18n="chat.settingsKnowledgeSyncHint">打开后，知识库会跟着账号到别的电脑。关掉后，这台电脑不再同步。已经在账号里的还会留着。</span>
+                  </div>
+                  <input
+                    id="chat-settings-knowledge-sync"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    checked
+                    aria-label="同步知识库到账号"
+                  />
+                </div>
               </div>
             </section>
             <section class="chat-settings-panel" data-settings-panel="language" hidden>
@@ -439,6 +453,7 @@
                 <div class="chat-knowledge-block-head">
                   <h3 data-i18n="chat.skillsTitle">Skills</h3>
                 </div>
+                <div id="chat-resources-skill-categories" class="chat-resource-categories" aria-label="Skill categories"></div>
                 <div id="chat-resources-skills-list" class="chat-res-list" role="list"></div>
                 <p id="chat-resources-skills-empty" class="chat-knowledge-empty" hidden data-i18n="chat.skillsEmpty">当前 Agent 还没有可用技能</p>
               </section>
@@ -475,8 +490,10 @@
               </div>
             </header>
             <div id="chat-knowledge-picks" class="chat-knowledge-picks" hidden></div>
-            <p id="chat-knowledge-scope" class="chat-knowledge-scope"></p>
-            <p id="chat-knowledge-sync" class="chat-knowledge-scope" hidden></p>
+            <div class="chat-knowledge-lead">
+              <p id="chat-knowledge-scope" class="chat-knowledge-scope"></p>
+              <p id="chat-knowledge-sync" class="chat-knowledge-sync" role="status" hidden></p>
+            </div>
             <div class="chat-resources-kind-tabs chat-knowledge-kind-tabs" role="tablist" aria-label="知识类型" hidden>
               <button
                 type="button"

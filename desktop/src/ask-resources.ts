@@ -1,8 +1,18 @@
 
-import { t } from "./i18n";
+import { t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { attachSkillReorder } from "./chat/skill-drag";
-import { loadSkillOrder, orderBySaved } from "./chat/skill-order";
+import { loadPinnedSkillIds, loadSkillOrder, orderBySaved } from "./chat/skill-order";
+import {
+  classifySkillCategory,
+  skillCategoryLabelKey,
+  SKILL_CATEGORY_ORDER,
+  type SkillCategoryId,
+} from "./skill-categories";
+import {
+  loadSkillCategoryOverrides,
+  type SkillCategoryOverrides,
+} from "./chat/skill-category-order";
 import type {
   McpInventoryItem,
   SkillInventoryItem,
@@ -22,6 +32,8 @@ export type MentionRef = {
   kind: MentionKind;
   id: string;
   label: string;
+  category?: SkillCategoryId;
+  pinned?: boolean;
 };
 
 export type WorkspaceDoc = {
@@ -102,6 +114,43 @@ function skillUsageLine(skill: SkillInventoryItem): string {
       ? t("chat.skillUsageRate", { rate: `${Math.round(skill.first_success_rate * 100)}%` })
       : "";
   return [calls, rate].filter(Boolean).join(" · ");
+}
+
+function skillCategory(
+  skill: SkillInventoryItem,
+  overrides: SkillCategoryOverrides = {},
+): SkillCategoryId {
+  return overrides[skill.skill_id] ?? classifySkillCategory({
+    id: skill.skill_id,
+    name: skill.name,
+    description: skill.description,
+  });
+}
+
+type MentionGroup = {
+  id: "pinned" | SkillCategoryId;
+  label: string;
+  options: MentionRef[];
+};
+
+function groupSkillMentions(options: MentionRef[]): MentionGroup[] {
+  const groups: MentionGroup[] = [];
+  const pinned = options.filter((option) => option.pinned);
+  if (pinned.length) {
+    groups.push({ id: "pinned", label: t("chat.skillPinned"), options: pinned });
+  }
+  for (const id of SKILL_CATEGORY_ORDER) {
+    const items = options.filter(
+      (option) => !option.pinned && (option.category ?? "other") === id,
+    );
+    if (!items.length) continue;
+    groups.push({
+      id,
+      label: t(skillCategoryLabelKey(id) as MessageKey),
+      options: items,
+    });
+  }
+  return groups;
 }
 
 export function skillMountedForRuntime(skill: SkillInventoryItem, runtime: AskRuntime): boolean {
@@ -217,6 +266,7 @@ export function ensureBrowserMention(
 
 export type ResourcesTab = "all" | "skills" | "mcp";
 export type ResourcesScopeTab = "global" | "project" | "agent";
+export type SkillListCategory = "all" | "pinned" | SkillCategoryId;
 
 const GLOBAL_MCP_SCOPES = new Set(["claude-user", "openclaw-global", "claude-settings-ignored"]);
 const PROJECT_MCP_SCOPES = new Set(["project", "openclaw-workspace"]);
@@ -405,10 +455,13 @@ export class AskResourcesController {
       pendingDeleteId?: string;
       onPinSkill?: (skillId: string) => void;
       onReorderSkill?: (fromId: string, toId: string, position: "before" | "after") => void;
+      skillCategory?: SkillListCategory;
+      skillCategoriesEl?: HTMLElement | null;
+      onSkillCategory?: (category: SkillListCategory) => void;
     },
   ): void {
     const q = (targets.query ?? this.resourcesQuery).trim().toLowerCase();
-    const skills = orderBySaved(
+    const scopedSkills = orderBySaved(
       this.mountedSkills
       .filter((skill) => skillMatchesScopeTab(skill, tab, projectName, runtime))
       .filter((skill) => {
@@ -417,6 +470,30 @@ export class AskResourcesController {
         return hay.includes(q);
       }),
       loadSkillOrder(),
+    );
+    const categoryOverrides = loadSkillCategoryOverrides();
+    const pinnedSkills = new Set(loadPinnedSkillIds());
+    const pinnedCount = scopedSkills.filter((skill) => pinnedSkills.has(skill.skill_id)).length;
+    const requestedCategory = targets.skillCategory ?? "all";
+    const category =
+      requestedCategory === "all" ||
+      scopedSkills.some((skill) =>
+        requestedCategory === "pinned"
+          ? pinnedSkills.has(skill.skill_id)
+          : !pinnedSkills.has(skill.skill_id) &&
+            skillCategory(skill, categoryOverrides) === requestedCategory,
+      )
+        ? requestedCategory
+        : "all";
+    const skills = scopedSkills.filter(
+      (skill) => {
+        if (category === "all") return true;
+        if (category === "pinned") return pinnedSkills.has(skill.skill_id);
+        return (
+          !pinnedSkills.has(skill.skill_id) &&
+          skillCategory(skill, categoryOverrides) === category
+        );
+      },
     );
     const mcps = dedupeMcpsByName(
       this.enabledMcps
@@ -439,11 +516,80 @@ export class AskResourcesController {
       targets.mcpEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty");
     }
 
-    skills.forEach((skill, index) => {
+    if (targets.skillCategoriesEl) {
+      targets.skillCategoriesEl.replaceChildren();
+      targets.skillCategoriesEl.setAttribute("aria-label", t("chat.skillCategories"));
+      const counts = new Map<SkillCategoryId, number>();
+      for (const skill of scopedSkills) {
+        if (pinnedSkills.has(skill.skill_id)) continue;
+        const id = skillCategory(skill, categoryOverrides);
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      const categories: SkillListCategory[] = [
+        "all",
+        ...(pinnedCount > 0 ? ["pinned" as const] : []),
+        ...SKILL_CATEGORY_ORDER.filter((id) => (counts.get(id) ?? 0) > 0),
+      ];
+      for (const id of categories) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-resource-category";
+        button.classList.toggle("is-on", id === category);
+        button.setAttribute("aria-pressed", id === category ? "true" : "false");
+        const label =
+          id === "all"
+            ? t("resources.filterAll")
+            : id === "pinned"
+              ? t("chat.skillPinned")
+              : t(skillCategoryLabelKey(id) as MessageKey);
+        const count =
+          id === "all"
+            ? scopedSkills.length
+            : id === "pinned"
+              ? pinnedCount
+              : counts.get(id) ?? 0;
+        button.textContent = `${label} ${count}`;
+        button.addEventListener("click", () => targets.onSkillCategory?.(id));
+        targets.skillCategoriesEl.append(button);
+      }
+      targets.skillCategoriesEl.hidden = scopedSkills.length === 0;
+    }
+
+    const groups = new Map<Exclude<SkillListCategory, "all">, SkillInventoryItem[]>();
+    for (const skill of skills) {
+      const id = pinnedSkills.has(skill.skill_id)
+        ? "pinned"
+        : skillCategory(skill, categoryOverrides);
+      groups.set(id, [...(groups.get(id) ?? []), skill]);
+    }
+    const shownGroups =
+      category === "all"
+        ? (["pinned", ...SKILL_CATEGORY_ORDER] as const).filter((id) => groups.has(id))
+        : [category];
+    for (const groupId of shownGroups) {
+      const group = groups.get(groupId) ?? [];
+      if (category === "all" && group.length) {
+        const heading = document.createElement("h4");
+        heading.className = "chat-res-group";
+        const label =
+          groupId === "pinned"
+            ? t("chat.skillPinned")
+            : t(skillCategoryLabelKey(groupId) as MessageKey);
+        heading.textContent = `${label} · ${group.length}`;
+        targets.skillsListEl.appendChild(heading);
+      }
+      const groupList = document.createElement("div");
+      groupList.className = "chat-res-group-list";
+      groupList.setAttribute("role", "list");
+      targets.skillsListEl.appendChild(groupList);
+      group.forEach((skill) => {
       const title = skill.name || skill.skill_id;
       const meta = skillUsageLine(skill);
       const removing = targets.pendingDeleteId === skill.skill_id;
-      const canSort = Boolean(targets.onReorderSkill) && skills.length > 1;
+      const canSort =
+        Boolean(targets.onReorderSkill) &&
+        !q &&
+        (category === "all" ? skills.length > 1 : group.length > 1);
       const row = this.buildResourceRow({
         kind: "skill",
         id: skill.skill_id,
@@ -462,17 +608,24 @@ export class AskResourcesController {
         onDelete: targets.onDeleteSkill ? () => targets.onDeleteSkill?.(skill.skill_id) : undefined,
         deleteLabel: removing ? t("chat.skillDeleteConfirm") : t("chat.skillDelete"),
         deleteArmed: removing,
-        onPin: canSort && targets.onPinSkill ? () => targets.onPinSkill?.(skill.skill_id) : undefined,
-        pinFirst: index === 0,
+        onPin: targets.onPinSkill ? () => targets.onPinSkill?.(skill.skill_id) : undefined,
+        pinned: pinnedSkills.has(skill.skill_id),
         sortable: canSort,
       });
-      targets.skillsListEl.appendChild(row);
+      row.dataset.category = groupId;
+      groupList.appendChild(row);
       if (!canSort || !targets.onReorderSkill) return;
       const grip = row.querySelector<HTMLElement>(".chat-res-grip");
       if (grip) {
-        attachSkillReorder(targets.skillsListEl, grip, skill.skill_id, targets.onReorderSkill);
+        attachSkillReorder(
+          category === "all" ? targets.skillsListEl : groupList,
+          grip,
+          skill.skill_id,
+          targets.onReorderSkill,
+        );
       }
-    });
+      });
+    }
 
     for (const server of mcps) {
       const title = mcpChipLabel(server);
@@ -619,13 +772,14 @@ export class AskResourcesController {
     deleteLabel?: string;
     deleteArmed?: boolean;
     onPin?: () => void;
-    pinFirst?: boolean;
+    pinned?: boolean;
     sortable?: boolean;
   }): HTMLElement {
     const btn = document.createElement(opts.onDelete ? "div" : "button");
     if (!opts.onDelete) (btn as HTMLButtonElement).type = "button";
     btn.className = opts.onDelete ? "chat-res-row has-delete" : "chat-res-row";
     if (opts.sortable) btn.classList.add("has-order");
+    else if (opts.onPin) btn.classList.add("has-pin");
     btn.setAttribute("role", "listitem");
     btn.dataset.kind = opts.kind;
     btn.dataset.id = opts.id;
@@ -685,8 +839,23 @@ export class AskResourcesController {
       event.stopPropagation();
       opts.onDelete?.();
     });
-    if (!opts.sortable) {
+    if (!opts.sortable && !opts.onPin) {
       btn.append(open, remove);
+      return btn;
+    }
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "chat-res-pin";
+    pin.classList.toggle("is-pinned", opts.pinned === true);
+    pin.textContent = t(opts.pinned ? "chat.skillUnpin" : "chat.skillPin");
+    pin.title = t(opts.pinned ? "chat.skillUnpinHint" : "chat.skillPinHint");
+    pin.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      opts.onPin?.();
+    });
+    if (!opts.sortable) {
+      btn.append(open, pin, remove);
       return btn;
     }
     const grip = document.createElement("button");
@@ -695,28 +864,19 @@ export class AskResourcesController {
     grip.title = t("chat.skillReorder");
     grip.setAttribute("aria-label", t("chat.skillReorder"));
     grip.innerHTML = `<svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="2" cy="10" r="1"/><circle cx="6" cy="10" r="1"/></svg>`;
-    const pin = document.createElement("button");
-    pin.type = "button";
-    pin.className = "chat-res-pin";
-    pin.classList.toggle("is-first", opts.pinFirst === true);
-    pin.textContent = t("chat.skillPin");
-    pin.title = t("chat.skillPinHint");
-    pin.disabled = opts.pinFirst === true;
-    pin.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (opts.pinFirst) return;
-      opts.onPin?.();
-    });
     btn.append(grip, open, pin, remove);
     return btn;
   }
 
   mentionCandidates(): MentionRef[] {
+    const overrides = loadSkillCategoryOverrides();
+    const pinned = new Set(loadPinnedSkillIds());
     const skills = orderBySaved(this.mountedSkills, loadSkillOrder()).map((s) => ({
       kind: "skill" as const,
       id: s.skill_id,
       label: s.name || s.skill_id,
+      category: skillCategory(s, overrides),
+      pinned: pinned.has(s.skill_id),
     }));
     const mcps = this.enabledMcps.map((s) => ({
       kind: "mcp" as const,
@@ -874,7 +1034,14 @@ export class AskMentionMenuController {
     }
 
     const isSlash = this.mentionQuery.trigger === "slash";
-    const options = this.filteredMentionOptions();
+    const filtered = this.filteredMentionOptions();
+    const skillGroups =
+      isSlash && this.slashTab === "skill"
+        ? groupSkillMentions(filtered.filter((option) => option.kind === "skill"))
+        : [];
+    const options = skillGroups.length
+      ? skillGroups.flatMap((group) => group.options)
+      : filtered;
 
     // Keep `/` menu open even when empty so tabs/empty hint stay visible.
     if (!isSlash && options.length === 0) {
@@ -920,6 +1087,33 @@ export class AskMentionMenuController {
 
       head.append(tabs, hint);
       this.dom.mentionMenuEl.appendChild(head);
+
+      if (skillGroups.length) {
+        const categories = document.createElement("div");
+        categories.className = "chat-slash-categories";
+        categories.setAttribute("aria-label", t("chat.skillCategories"));
+        skillGroups.forEach((group, index) => {
+          const category = document.createElement("button");
+          category.type = "button";
+          category.className = "chat-slash-category";
+          category.classList.toggle("is-pinned", group.id === "pinned");
+          category.classList.toggle("is-active", index === 0);
+          category.dataset.slashCategory = group.id;
+          category.textContent = `${group.label} ${group.options.length}`;
+          category.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            const target = this.dom.mentionMenuEl.querySelector<HTMLElement>(
+              `[data-slash-group="${group.id}"]`,
+            );
+            target?.scrollIntoView({ block: "start" });
+            categories.querySelectorAll<HTMLElement>(".chat-slash-category").forEach((item) => {
+              item.classList.toggle("is-active", item === category);
+            });
+          });
+          categories.append(category);
+        });
+        this.dom.mentionMenuEl.appendChild(categories);
+      }
     }
 
     const list = document.createElement("div");
@@ -933,7 +1127,7 @@ export class AskMentionMenuController {
         this.slashTab === "skill" ? t("chat.slashEmptySkills") : t("chat.slashEmptyTools");
       list.appendChild(empty);
     } else {
-      options.forEach((option, index) => {
+      const appendOption = (option: MentionRef, index: number) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `chat-mention-option${index === this.mentionMenuIndex ? " is-active" : ""}`;
@@ -941,14 +1135,49 @@ export class AskMentionMenuController {
         const title = document.createElement("strong");
         title.textContent = option.label;
         const sub = document.createElement("span");
-        sub.textContent =
-          option.kind === "skill" ? t("chat.slashKindSkill") : t("chat.slashKindTool");
+        sub.textContent = option.kind === "skill" && option.category
+          ? t(skillCategoryLabelKey(option.category) as MessageKey)
+          : option.kind === "skill"
+            ? t("chat.slashKindSkill")
+            : t("chat.slashKindTool");
         btn.append(title, sub);
         btn.addEventListener("mousedown", (event) => {
           event.preventDefault();
           this.applyMentionOption(option);
         });
         list.appendChild(btn);
+      };
+      if (skillGroups.length) {
+        let index = 0;
+        for (const group of skillGroups) {
+          const heading = document.createElement("div");
+          heading.className = "chat-slash-group-title";
+          heading.dataset.slashGroup = group.id;
+          heading.textContent = `${group.label} · ${group.options.length}`;
+          list.appendChild(heading);
+          for (const option of group.options) {
+            appendOption(option, index);
+            index += 1;
+          }
+        }
+      } else {
+        options.forEach(appendOption);
+      }
+    }
+
+    if (skillGroups.length) {
+      list.addEventListener("scroll", () => {
+        const top = list.getBoundingClientRect().top + 8;
+        const headings = [...list.querySelectorAll<HTMLElement>("[data-slash-group]")];
+        let active = headings[0]?.dataset.slashGroup;
+        for (const heading of headings) {
+          if (heading.getBoundingClientRect().top <= top) active = heading.dataset.slashGroup;
+        }
+        this.dom.mentionMenuEl
+          .querySelectorAll<HTMLElement>("[data-slash-category]")
+          .forEach((category) => {
+            category.classList.toggle("is-active", category.dataset.slashCategory === active);
+          });
       });
     }
 

@@ -1,4 +1,5 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
@@ -61,6 +62,7 @@ pub struct KnowledgePage {
     path: String,
     title: String,
     modified_ms: u64,
+    category: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,6 +70,14 @@ pub struct KnowledgePage {
 pub struct KnowledgePages {
     root: String,
     pages: Vec<KnowledgePage>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct KnowledgeUi {
+    version: u8,
+    page_order: HashMap<String, Vec<String>>,
+    page_category: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -417,6 +427,7 @@ fn collect_pages(wiki: &Path, dir: &Path, depth: usize, out: &mut Vec<KnowledgeP
             path: rel_string(wiki, &path),
             title: page_title(&path).unwrap_or(stem),
             modified_ms,
+            category: None,
         });
         if out.len() >= MAX_PAGES {
             return;
@@ -424,17 +435,48 @@ fn collect_pages(wiki: &Path, dir: &Path, depth: usize, out: &mut Vec<KnowledgeP
     }
 }
 
+fn page_folder(path: &str) -> &str {
+    path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
+}
+
+fn page_category(page: &KnowledgePage) -> &str {
+    page.category
+        .as_deref()
+        .unwrap_or_else(|| page_folder(&page.path))
+}
+
 fn list_pages(wiki: &Path) -> Vec<KnowledgePage> {
     let mut pages = Vec::new();
     collect_pages(wiki, wiki, 0, &mut pages);
+    let ui = wiki
+        .parent()
+        .and_then(|root| fs::read_to_string(root.join("ui.json")).ok())
+        .and_then(|raw| serde_json::from_str::<KnowledgeUi>(&raw).ok())
+        .unwrap_or_default();
+    for page in &mut pages {
+        page.category = ui.page_category.get(&page.path).cloned();
+    }
     let rank = |path: &str| match path {
         "index.md" => 0,
         "log.md" => 2,
         _ => 1,
     };
+    let ordered_at = |path: &str| {
+        let category = ui
+            .page_category
+            .get(path)
+            .map(String::as_str)
+            .unwrap_or_else(|| page_folder(path));
+        ui.page_order
+            .get(category)
+            .and_then(|paths| paths.iter().position(|saved| saved == path))
+            .unwrap_or(usize::MAX)
+    };
     pages.sort_by(|a, b| {
         rank(&a.path)
             .cmp(&rank(&b.path))
+            .then_with(|| page_category(a).cmp(page_category(b)))
+            .then_with(|| ordered_at(&a.path).cmp(&ordered_at(&b.path)))
             .then_with(|| a.path.cmp(&b.path))
     });
     pages
@@ -465,6 +507,52 @@ pub fn knowledge_pages_command(project_path: Option<String>) -> Result<Knowledge
         pages: list_pages(&root.join("wiki")),
         root: display(&root),
     })
+}
+
+#[tauri::command]
+pub fn knowledge_save_order_command(
+    project_path: Option<String>,
+    category: String,
+    page_paths: Vec<String>,
+    moved_path: Option<String>,
+) -> Result<(), String> {
+    if page_paths.len() < 2 && moved_path.is_none() {
+        return Ok(());
+    }
+    if category.len() > 200 || category.chars().any(char::is_control) {
+        return Err("这个知识分类不能使用。".to_string());
+    }
+    let root = knowledge_root(project_path.as_deref())?;
+    let wiki = root.join("wiki");
+    let valid = page_paths
+        .iter()
+        .chain(moved_path.iter())
+        .all(|path| resolve_page(&wiki, path).is_ok() && wiki.join(path).is_file());
+    if !valid {
+        return Err("这些知识页不能放在这个分类里。".to_string());
+    }
+    let config = root.join("ui.json");
+    let mut ui = fs::read_to_string(&config)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<KnowledgeUi>(&raw).ok())
+        .unwrap_or_default();
+    ui.version = 1;
+    if let Some(moved) = moved_path {
+        for paths in ui.page_order.values_mut() {
+            paths.retain(|path| path != &moved);
+        }
+        if page_folder(&moved) == category {
+            ui.page_category.remove(&moved);
+        } else {
+            ui.page_category.insert(moved, category.clone());
+        }
+    }
+    ui.page_order.insert(category, page_paths);
+    fs::create_dir_all(&root).map_err(|_| "没法保存知识页顺序。".to_string())?;
+    let temp = root.join("ui.json.tmp");
+    let raw = serde_json::to_vec_pretty(&ui).map_err(|_| "没法保存知识页顺序。".to_string())?;
+    fs::write(&temp, raw).map_err(|_| "没法保存知识页顺序。".to_string())?;
+    fs::rename(temp, config).map_err(|_| "没法保存知识页顺序。".to_string())
 }
 
 #[tauri::command]
@@ -806,9 +894,32 @@ mod tests {
             "# Start\nhi".into(),
         )
         .unwrap();
+        knowledge_save_page_command(
+            project_str.clone(),
+            "guides/advanced.md".into(),
+            "# Advanced\nmore".into(),
+        )
+        .unwrap();
+        knowledge_save_order_command(
+            project_str.clone(),
+            "guides".into(),
+            vec!["guides/start.md".into(), "guides/advanced.md".into()],
+            None,
+        )
+        .unwrap();
         let pages = knowledge_pages_command(project_str.clone()).unwrap().pages;
-        assert_eq!(pages.len(), 1);
+        assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].title, "Start");
+        assert_eq!(pages[1].title, "Advanced");
+        knowledge_save_order_command(
+            project_str.clone(),
+            "topics".into(),
+            vec!["guides/advanced.md".into()],
+            Some("guides/advanced.md".into()),
+        )
+        .unwrap();
+        let pages = knowledge_pages_command(project_str.clone()).unwrap().pages;
+        assert_eq!(pages[1].category.as_deref(), Some("topics"));
         let context = knowledge_context_command(project_str.clone())
             .unwrap()
             .unwrap();
@@ -816,6 +927,7 @@ mod tests {
         assert!(context.full.unwrap().contains("hi"));
 
         knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
+        knowledge_delete_page_command(project_str.clone(), "guides/advanced.md".into()).unwrap();
         assert!(knowledge_pages_command(project_str.clone())
             .unwrap()
             .pages

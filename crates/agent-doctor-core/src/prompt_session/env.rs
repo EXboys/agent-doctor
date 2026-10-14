@@ -354,6 +354,10 @@ pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, Strin
 pub(crate) fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let home = hermes_home_from_overlay(overlay);
     cmd.env("HERMES_HOME", &home);
+    // A profile home borrows the installed checkout. Hermes then builds a second
+    // Python environment for that home, and that build fails on Windows before
+    // any reply. The installer already has a working copy; use that.
+    cmd.env("HERMES_DISABLE_LAZY_INSTALLS", "1");
     if let Some((url, key, model)) = resolve_hermes_overlay(overlay) {
         cmd.env("OPENAI_BASE_URL", &url);
         cmd.env("OPENAI_API_KEY", &key);
@@ -815,6 +819,19 @@ mod tests {
             .get_envs()
             .any(|(key, _)| key == "CLAUDE_CODE_ENABLE_TODO_TOOLS");
         assert!(!overridden);
+    }
+
+    #[test]
+    fn hermes_chat_uses_the_installed_copy_instead_of_rebuilding_deps() {
+        let mut cmd = Command::new("hermes");
+        apply_hermes_env(&mut cmd, &HashMap::new());
+        let skip = cmd.get_envs().any(|(key, value)| {
+            key == "HERMES_DISABLE_LAZY_INSTALLS" && value.and_then(|v| v.to_str()) == Some("1")
+        });
+        assert!(
+            skip,
+            "a profile home must not start a second Python install"
+        );
     }
 
     #[test]

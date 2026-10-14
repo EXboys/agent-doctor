@@ -13,6 +13,7 @@ import {
   knowledgePrepare,
   knowledgeReadPage,
   knowledgeSavePage,
+  knowledgeSaveOrder,
   listWorkspaceDir,
   resolvePermissionSession,
   startPromptSession,
@@ -23,6 +24,8 @@ import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import type { PromptSessionEvent } from "./types";
 import { syncKnowledgeFolder } from "./knowledge-sync";
 import { wikiRunProgress } from "./wiki-progress";
+import { attachPointerReorder } from "./skill-drag";
+import { reorderPagePaths, type PageDropPosition } from "./knowledge-order";
 
 /** Chat ignores prompt-session events whose client run id starts with this. */
 export const KNOWLEDGE_RUN_PREFIX = "knowledge:";
@@ -77,6 +80,7 @@ type WikiState = {
   /** Second click on 删除知识库 removes this whole scope. */
   pendingClear: boolean;
   starters: Starter[] | null;
+  collapsedFolders: Set<string>;
 };
 
 const states = new Map<string, WikiState>();
@@ -100,6 +104,7 @@ function stateFor(key: string): WikiState {
       pendingDelete: null,
       pendingClear: false,
       starters: null,
+      collapsedFolders: new Set(),
     };
     states.set(key, state);
   }
@@ -787,6 +792,97 @@ function noticeLine(scope: WikiScope, state: WikiState): HTMLElement | null {
   return line;
 }
 
+async function reorderKnowledgePages(
+  scope: WikiScope,
+  state: WikiState,
+  targetCategory: string,
+  targetPaths: string[],
+  from: string,
+  to: string,
+  position: PageDropPosition,
+): Promise<void> {
+  const moved = state.pages.find((page) => page.path === from);
+  const target = state.pages.find((page) => page.path === to);
+  if (!moved || !target) return;
+  const sourceCategory = pageCategory(moved);
+  const seeded = targetPaths.includes(from) ? targetPaths : [...targetPaths, from];
+  const ordered = reorderPagePaths(seeded, from, to, position);
+  if (
+    sourceCategory === targetCategory &&
+    ordered.every((path, index) => path === targetPaths[index])
+  ) {
+    return;
+  }
+  const next = state.pages.filter((page) => page.path !== from);
+  let targetIndex = next.findIndex((page) => page.path === to);
+  if (targetIndex < 0) return;
+  if (position === "after") targetIndex += 1;
+  next.splice(targetIndex, 0, { ...moved, category: targetCategory });
+  state.pages = next;
+  rerender();
+  try {
+    await knowledgeSaveOrder({
+      projectPath: scope.projectPath,
+      category: targetCategory,
+      pagePaths: ordered,
+      movedPath: sourceCategory === targetCategory ? null : from,
+    });
+  } catch {
+    state.notice = { tone: "warn", text: t("chat.wikiOrderFailed") };
+    await reloadPages(scope).catch(() => {});
+    rerender();
+  }
+}
+
+type PageGroup = {
+  key: string;
+  label: string;
+  category: string;
+  pages: KnowledgePage[];
+  fixed: boolean;
+};
+
+function pageCategory(page: KnowledgePage): string {
+  return page.category ?? folderOf(page.path);
+}
+
+function groupedPages(pages: KnowledgePage[]): PageGroup[] {
+  const groups = new Map<string, PageGroup>();
+  const ensure = (key: string, label: string, category: string, fixed = false): PageGroup => {
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label, category, pages: [], fixed };
+      groups.set(key, group);
+    }
+    return group;
+  };
+  for (const page of pages) {
+    if (page.path === "index.md") {
+      ensure("!overview", t("chat.wikiCategoryOverview"), "", true).pages.push(page);
+      continue;
+    }
+    if (page.path === "log.md") {
+      ensure("~maintenance", t("chat.wikiCategoryMaintenance"), "", true).pages.push(page);
+      continue;
+    }
+    const category = pageCategory(page);
+    if (!category) {
+      ensure("}other", t("chat.wikiCategoryOther"), "").pages.push(page);
+      continue;
+    }
+    ensure(category, category.split("/").map(folderLabel).join(" / "), category).pages.push(page);
+  }
+  const rank = (group: PageGroup): number => {
+    if (group.key === "!overview") return 0;
+    if (group.key === "}other") return 2;
+    if (group.key === "~maintenance") return 3;
+    return 1;
+  };
+  return [...groups.values()].sort(
+    (a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
+  );
+}
+
 function navList(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTMLElement {
   const list = el("div", "kw-tree");
   const q = state.query.trim().toLowerCase();
@@ -797,25 +893,79 @@ function navList(m: { scope: WikiScope; deps: WikiDeps }, state: WikiState): HTM
     list.append(el("p", "kw-tree-empty", t("chat.resourcesNoMatch")));
     return list;
   }
-  const groups = new Map<string, KnowledgePage[]>();
-  for (const page of pages) {
-    const folder = folderOf(page.path);
-    groups.set(folder, [...(groups.get(folder) ?? []), page]);
-  }
-  const folders = [...groups.keys()].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
-  for (const folder of folders) {
-    if (folder) list.append(el("p", "kw-tree-folder", folder.split("/").map(folderLabel).join(" / ")));
-    for (const page of groups.get(folder) ?? []) {
+  const groups = groupedPages(pages);
+  const movableCount = groups
+    .filter((group) => !group.fixed)
+    .reduce((count, group) => count + group.pages.length, 0);
+  for (const group of groups) {
+    const section = el("section", "kw-tree-section");
+    const heading = button("", "kw-tree-folder", () => {
+      if (q) return;
+      if (state.collapsedFolders.has(group.key)) state.collapsedFolders.delete(group.key);
+      else state.collapsedFolders.add(group.key);
+      rerender();
+    });
+    const arrow = el("span", "kw-tree-arrow", "⌄");
+    const name = el("span", "kw-tree-folder-name", group.label);
+    const count = el("span", "kw-tree-folder-count", String(group.pages.length));
+    const collapsed = !q && state.collapsedFolders.has(group.key);
+    heading.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    heading.append(arrow, name, count);
+    section.append(heading);
+    const pageList = el("div", "kw-tree-group");
+    pageList.hidden = collapsed;
+    const paths = group.pages.map((page) => page.path);
+    for (const page of group.pages) {
+      const row = el("div", "kw-tree-row");
+      row.dataset.page = page.path;
+      row.dataset.id = page.path;
+      const sortable = !q && !group.fixed && movableCount > 1;
+      if (sortable) {
+        row.dataset.category = group.category;
+        const grip = button("⠿", "kw-tree-grip", () => {});
+        grip.title = t("chat.wikiReorder");
+        grip.setAttribute("aria-label", t("chat.wikiReorder"));
+        row.append(grip);
+        attachPointerReorder(
+          list,
+          grip,
+          page.path,
+          (from, to, position) => {
+            const targetPage = state.pages.find((item) => item.path === to);
+            if (!targetPage) return;
+            const targetCategory = pageCategory(targetPage);
+            const targetPaths =
+              groupedPages(state.pages)
+                .find((item) => !item.fixed && item.category === targetCategory)
+                ?.pages.map((item) => item.path) ?? paths;
+            void reorderKnowledgePages(
+              m.scope,
+              state,
+              targetCategory,
+              targetPaths,
+              from,
+              to,
+              position,
+            );
+          },
+          {
+            rowSelector: ".kw-tree-row[data-page][data-category]",
+            bodyClass: "chat-knowledge-dragging",
+          },
+        );
+      }
       const item = button(page.title, "kw-tree-item", () => void openPage(m.scope, page.path));
       item.title = page.title;
       item.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         openPageMenu(event.clientX, event.clientY, m.scope, m.deps, page.path);
       });
-      if (folder) item.classList.add("is-nested");
       item.setAttribute("aria-current", page.path === state.selected ? "page" : "false");
-      list.append(item);
+      row.append(item);
+      pageList.append(row);
     }
+    section.append(pageList);
+    list.append(section);
   }
   return list;
 }

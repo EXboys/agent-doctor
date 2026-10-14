@@ -830,6 +830,8 @@ fn session_env_from_entry(
         entry.path.display().to_string(),
     );
     map.insert("HERMES_HOME".into(), profile_home.display().to_string());
+    // Same reason as apply_hermes_env: don't rebuild Python deps into this profile.
+    map.insert("HERMES_DISABLE_LAZY_INSTALLS".into(), "1".into());
     map.insert("CODEX_HOME".into(), entry.codex_home.display().to_string());
     map.insert("OPENCLAW_AGENT_ID".into(), entry.openclaw_agent_id.clone());
     map.insert(

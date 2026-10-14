@@ -4,7 +4,9 @@ import { resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
 import {
   activityKind,
+  agentFailedLine,
   isQuietPhase,
+  markTurnLogFailed,
   preferPlainSummary,
   stripLogAnsi,
   splitToolActivity,
@@ -116,8 +118,11 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       if (failed && !run.turnNoticeSaved) {
         const explain =
           explainChatFailure(run.turnReports.join("\n")) ?? explainChatFailure(run.turnErrors.join("\n"));
-        const sentence = explain ? formatChatFailureLine(explain) : noReply ? t("chat.noReply") : "";
-        if (sentence) session.messages.push({ id: uid(), role: "meta", content: sentence, at: Date.now() });
+        if (explain) {
+          session.messages.push({ id: uid(), role: "meta", content: formatChatFailureLine(explain), at: Date.now() });
+        } else if (noReply && !markTurnLogFailed(session.messages)) {
+          session.messages.push({ id: uid(), role: "meta", content: agentFailedLine(session.runtime), at: Date.now() });
+        }
       }
       ctx.touchSession(session);
       ctx.scheduleStorePersist();

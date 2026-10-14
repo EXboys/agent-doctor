@@ -119,6 +119,7 @@ import {
   mentionMenu,
 } from "./chat";
 
+import { agentFailedLine } from "./chat/format";
 import { createPermissionsController } from "./chat/permissions";
 import { createSessionsController } from "./chat/sessions";
 import { createBubblesController } from "./chat/bubbles";
@@ -647,6 +648,15 @@ export function wireChatControllers(): void {
     expireLivePermissionCards: () => expireLivePermissionCards(),
     hideDecisionDock: () => hideDecisionDock(),
     appendBubble: (kind, text, opts) => appendBubble(kind, text, opts),
+    noteFailedRunLog: () => chatState.bubbles.noteFailedRunLog(),
+    agentFailedLine: () => {
+      const session = chatState.runningChatSessionId
+        ? chatState.store.sessions.find((item) => item.id === chatState.runningChatSessionId)
+        : undefined;
+      const runtime = session?.runtime ?? selectedRuntime();
+      return agentFailedLine(runtime);
+    },
+    rememberMeta: (text) => chatState.bubbles.rememberTurnNotice(text),
     appendChatFailure: (explain) => showChatFailureBubble(explain),
     reportVerifyMcpIfNeeded: () => reportVerifyMcpIfNeeded(),
     applyVerifyMcpFooter: () => applyVerifyMcpFooter(),

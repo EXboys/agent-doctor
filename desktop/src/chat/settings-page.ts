@@ -1,8 +1,11 @@
+import { isPersonalEdition } from "../edition";
 import { getLocale, t } from "../i18n";
 import { islandEnabled, islandHideWhenIdle, islandSetEnabled, islandSetHideWhenIdle } from "../ipc";
 import { publishLocale } from "../locale-sync";
 import { checkForAppUpdates, readAppVersion } from "../updater";
 import { readAutoApproveDefault, writeAutoApproveDefault } from "./confirm-pref";
+import { bindKnowledgeSyncSettings, refreshVisibleKnowledgeSync } from "./knowledge-sync";
+import { readKnowledgeSyncEnabled, writeKnowledgeSyncEnabled } from "./knowledge-sync-pref";
 import { readVoiceRoute, writeVoiceRoute, type VoiceRoute } from "./voice/route";
 import { teamupsAccountStatus, voiceCloudReady } from "../ipc";
 import {
@@ -55,7 +58,12 @@ export function closeChatSettings(): void {
   openEl()?.setAttribute("aria-pressed", "false");
 }
 
-export function openChatSettings(): void {
+export function openChatSettings(section?: SettingsSection): void {
+  if (section) {
+    activeSection = section;
+    const search = searchEl();
+    if (search) search.value = "";
+  }
   if (isKnowledgePageOpen()) closeKnowledgePage();
   closeResourcesMainPage();
   closeSchedulePage();
@@ -69,7 +77,10 @@ export function openChatSettings(): void {
   }
   openEl()?.classList.add("is-on");
   openEl()?.setAttribute("aria-pressed", "true");
-  searchEl()?.focus();
+  if (section === "conversation") {
+    document.querySelector<HTMLInputElement>("#chat-settings-knowledge-sync")?.focus();
+  }
+  else searchEl()?.focus();
 }
 
 function sectionTitle(section: SettingsSection): string {
@@ -128,6 +139,8 @@ const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-
 const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
 const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
 const autoApproveDefaultEl = () => document.querySelector<HTMLInputElement>("#chat-settings-auto-approve");
+const knowledgeSyncEl = () => document.querySelector<HTMLInputElement>("#chat-settings-knowledge-sync");
+const knowledgeSyncRowEl = () => document.querySelector<HTMLElement>("#chat-settings-knowledge-sync-row");
 const voiceHintEl = () => document.querySelector<HTMLElement>("#chat-settings-voice-hint");
 let voiceLoggedOut = false;
 
@@ -210,12 +223,22 @@ function syncVoiceChoice(): void {
   );
 }
 
+function syncKnowledgeSwitch(): void {
+  const row = knowledgeSyncRowEl();
+  const input = knowledgeSyncEl();
+  if (row) row.hidden = !isPersonalEdition();
+  if (!input) return;
+  input.checked = readKnowledgeSyncEnabled();
+  input.setAttribute("aria-label", t("chat.settingsKnowledgeSyncSwitch"));
+}
+
 function syncChatSettings(): void {
   const search = searchEl();
   if (search) search.placeholder = t("chat.settingsSearch");
   markChoice("settingsTheme", readThemePreference());
   markChoice("settingsLocale", getLocale());
   refreshConfirmCopy();
+  syncKnowledgeSwitch();
   syncVoiceChoice();
   syncIslandSwitch();
   syncAbout();
@@ -267,6 +290,13 @@ export function bindChatSettings(applyI18n: () => void): void {
     const input = autoApproveDefaultEl();
     if (!input) return;
     writeAutoApproveDefault(input.checked);
+  });
+  bindKnowledgeSyncSettings(() => openChatSettings("conversation"));
+  knowledgeSyncEl()?.addEventListener("change", () => {
+    const input = knowledgeSyncEl();
+    if (!input) return;
+    writeKnowledgeSyncEnabled(input.checked);
+    refreshVisibleKnowledgeSync();
   });
   document.querySelector("#chat-settings-update")?.addEventListener("click", () => {
     void checkForAppUpdates({ interactive: true });

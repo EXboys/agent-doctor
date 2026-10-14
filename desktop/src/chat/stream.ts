@@ -63,6 +63,9 @@ export type StreamDeps = {
     text: string,
     opts?: { id?: string; persist?: boolean },
   ) => HTMLElement;
+  noteFailedRunLog: () => boolean;
+  agentFailedLine: () => string;
+  rememberMeta: (text: string) => void;
   appendChatFailure: (explain: ChatFailureExplain) => void;
   reportVerifyMcpIfNeeded: () => void;
   applyVerifyMcpFooter: () => void;
@@ -198,8 +201,10 @@ export function createStreamController(deps: StreamDeps) {
               }
             } else if (failed && !failureSaid) {
               failureSaid = showChatTurnFailure(deps);
-              if (!failureSaid && !hadAssistantText) {
-                deps.appendBubble("meta", t("chat.noReply"), { persist: false });
+              if (!failureSaid && !hadAssistantText && !deps.noteFailedRunLog()) {
+                const sentence = deps.agentFailedLine();
+                deps.rememberMeta(sentence);
+                deps.appendBubble("meta", sentence, { persist: false });
               }
             }
           }

@@ -120,6 +120,7 @@ pub fn render_shell_env(shell: &str, report: &UseWorkspaceReport) -> Result<Stri
                 "export HERMES_HOME={}",
                 shell_single_quote(entry.hermes_profile_home())
             ));
+            lines.push("export HERMES_DISABLE_LAZY_INSTALLS=1".to_string());
             lines.push(format!(
                 "export CODEX_HOME={}",
                 shell_single_quote(&entry.codex_home)
@@ -146,6 +147,7 @@ pub fn render_shell_env(shell: &str, report: &UseWorkspaceReport) -> Result<Stri
                 "$env:HERMES_HOME={}",
                 powershell_single_quote(entry.hermes_profile_home())
             ));
+            lines.push("$env:HERMES_DISABLE_LAZY_INSTALLS='1'".to_string());
             lines.push(format!(
                 "$env:CODEX_HOME={}",
                 powershell_single_quote(&entry.codex_home)

@@ -6,7 +6,12 @@ function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
 }
 
-const { orderBySaved, pinSkillId, reorderSkillIds } = await import("../src/chat/skill-order.ts");
+const {
+  orderBySaved,
+  pinSkillId,
+  reorderSkillIds,
+  togglePinnedSkillId,
+} = await import("../src/chat/skill-order.ts");
 
 const items = ["a", "b", "c", "d"].map((skill_id) => ({ skill_id }));
 
@@ -18,6 +23,8 @@ assert(
 
 assert(pinSkillId(["c", "a"], "b").join(",") === "b,c,a", "pin moves an id to the front");
 assert(pinSkillId(["b", "c"], "b").join(",") === "b,c", "pinning the first id does not duplicate it");
+assert(togglePinnedSkillId([], "b").join(",") === "b", "pin list adds a skill");
+assert(togglePinnedSkillId(["b", "c"], "b").join(",") === "c", "pin list removes a pinned skill");
 
 const dragged = reorderSkillIds(["a", "b", "c", "d"], ["a", "c"], "c", "a", "before");
 assert(dragged.join(",") === "c,b,a,d", "dragging a visible skill leaves hidden ids in place");

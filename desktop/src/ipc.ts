@@ -486,6 +486,7 @@ export type KnowledgePage = {
   path: string;
   title: string;
   modifiedMs: number;
+  category?: string | null;
 };
 
 export type KnowledgeImport = {
@@ -509,6 +510,15 @@ export function knowledgePages(args: {
   projectPath: string | null;
 }): Promise<{ root: string; pages: KnowledgePage[] }> {
   return invoke("knowledge_pages_command", args);
+}
+
+export function knowledgeSaveOrder(args: {
+  projectPath: string | null;
+  category: string;
+  pagePaths: string[];
+  movedPath?: string | null;
+}): Promise<void> {
+  return invoke("knowledge_save_order_command", args);
 }
 
 export function knowledgeReadPage(args: { projectPath: string | null; path: string }): Promise<string> {

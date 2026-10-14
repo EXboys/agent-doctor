@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { appendRunLogMessage } = await import("../src/chat/tool-records");
-const { isLogMessage, isRuntimeLog } = await import("../src/chat/format");
+const { coveredRunLogPointers, isLogMessage, isRuntimeLog, markTurnLogFailed } = await import("../src/chat/format");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -54,5 +54,22 @@ assert(
 );
 assert(!isRuntimeLog("[1] 第一步"), "a numbered list item is not a log");
 assert(isRuntimeLog("\u001b[31mfailed\u001b[0m"), "color codes mark a log");
+
+const saved = [
+  user("你好"),
+  { id: "log", role: "meta" as const, content: "Installing Python dependencies failed", at: 0, log: true },
+  { id: "ptr", role: "meta" as const, content: "这次没有回话。运行记录收在上面，点开可以看原文。再发一次试试。", at: 1 },
+];
+const covered = coveredRunLogPointers(saved);
+assert(covered.failedLogs.has(1), "a log followed by the old pointer owns the failure");
+assert(covered.hidden.has(2), "the old sentence is not shown again");
+const onlyLog = coveredRunLogPointers([
+  user("你好"),
+  { id: "log2", role: "meta" as const, content: "Installing Python dependencies failed", at: 0, log: true },
+]);
+assert(onlyLog.failedLogs.has(1), "a log with no reply is the failure line");
+assert(markTurnLogFailed(saved), "marking finds this turn's log");
+assert(saved[1].summary === "commandFailed", "the log row keeps the failure sentence");
+assert(!markTurnLogFailed([user("只有一句")]), "a turn with no log is not marked");
 
 console.log("run log ok");

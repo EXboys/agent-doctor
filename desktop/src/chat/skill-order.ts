@@ -1,4 +1,5 @@
 const STORAGE_KEY = "agent-doctor.chat.skillOrder.v1";
+const PINNED_STORAGE_KEY = "agent-doctor.chat.skillPins.v1";
 
 export function loadSkillOrder(): string[] {
   try {
@@ -18,6 +19,34 @@ export function saveSkillOrder(order: string[]): void {
   } catch {
     /* quota */
   }
+}
+
+export function loadPinnedSkillIds(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PINNED_STORAGE_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0,
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function savePinnedSkillIds(ids: string[]): void {
+  try {
+    localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify([...new Set(ids.filter(Boolean))]));
+  } catch {
+    /* quota */
+  }
+}
+
+export function togglePinnedSkillId(ids: string[], id: string): string[] {
+  const trimmed = id.trim();
+  if (!trimmed) return ids;
+  return ids.includes(trimmed)
+    ? ids.filter((item) => item !== trimmed)
+    : [trimmed, ...ids.filter((item) => item !== trimmed)];
 }
 
 /** Saved ids stay in front. Skills that are new, or hidden by the current filter, keep their old relative order. */

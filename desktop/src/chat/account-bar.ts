@@ -13,19 +13,21 @@ function avatarLetter(name: string): string {
   return first ? first.toUpperCase() : "个";
 }
 
-function paintAccount(signedInName: string): void {
-  const signedIn = signedInName.trim();
-  const label = signedIn || t("chat.account");
+function paintAccount(signedInName: string, signedIn = false): void {
+  const name = signedInName.trim();
+  const label = name || (signedIn ? t("chat.account") : t("personal.officialLogin"));
   const nameEl = document.querySelector<HTMLElement>("#chat-account-name");
   const avatarEl = document.querySelector<HTMLElement>("#chat-account-avatar");
   const button = document.querySelector<HTMLButtonElement>("#chat-account");
   if (nameEl) {
     nameEl.textContent = label;
-    if (signedIn) nameEl.dataset.accountName = signedIn;
+    if (signedIn) nameEl.dataset.signedIn = "1";
+    else delete nameEl.dataset.signedIn;
+    if (name) nameEl.dataset.accountName = name;
     else delete nameEl.dataset.accountName;
   }
-  if (avatarEl) avatarEl.textContent = avatarLetter(label);
-  if (button) button.title = t("chat.accountHint");
+  if (avatarEl) avatarEl.textContent = avatarLetter(name || label);
+  if (button) button.title = signedIn ? t("chat.accountHint") : t("personal.officialLogin");
 }
 
 export function syncAccountBarLabels(): void {
@@ -40,7 +42,7 @@ export function syncAccountBarLabels(): void {
     settings.title = t("chat.settings");
     settings.setAttribute("aria-label", t("chat.settings"));
   }
-  paintAccount(nameEl?.dataset.accountName || "");
+  paintAccount(nameEl?.dataset.accountName || "", nameEl?.dataset.signedIn === "1");
 }
 
 export function bindAccountBar(): void {
@@ -59,10 +61,10 @@ export function bindAccountBar(): void {
     .then((status) => {
       setTeamupsBaseUrl(status.base_url);
       const name = status.signed_in ? status.name?.trim() || "" : "";
-      paintAccount(name);
+      paintAccount(name, status.signed_in);
     })
     .catch(() => {
-      paintAccount("");
+      paintAccount("", false);
     });
   window.setTimeout(() => {
     void probeAppUpdate().then((version) => {

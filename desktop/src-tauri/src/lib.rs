@@ -594,6 +594,7 @@ pub fn run() {
             read_workspace_file_command,
             write_workspace_file_command,
             knowledge_pages_command,
+            knowledge_save_order_command,
             knowledge_read_page_command,
             knowledge_prepare_command,
             knowledge_import_command,

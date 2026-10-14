@@ -1,5 +1,7 @@
+import type { AskRuntime } from "../ask-resources";
 import { t, type MessageKey } from "../i18n";
-import type { ToolStep } from "./types";
+import type { ChatMessage, ToolStep } from "./types";
+import { runtimeDisplayName } from "./runtime";
 
 const LOG_COLOR = /\u001b\[[0-9;]*[A-Za-z]|\[[0-9;]+m/g;
 
@@ -67,8 +69,81 @@ function currentRunLog(logEl: HTMLElement): HTMLElement | null {
   return null;
 }
 
+const OLD_NO_REPLY = new Set([
+  "这次没有回话。运行记录收在上面，点开可以看原文。再发一次试试。",
+  "No reply this time. The run notes are above; open them to see the original text. Try sending again.",
+]);
+
+/** Saved copies of the old “open the original above” line. That line is not shown again. */
+export function isRunLogPointer(text: string): boolean {
+  return OLD_NO_REPLY.has(text.trim());
+}
+
+/** What to say when the agent failed and wrote no reply. */
+export function agentFailedLine(runtime: AskRuntime): string {
+  return t("chat.agentFailed", { name: runtimeDisplayName(runtime) });
+}
+
+/**
+ * A failed turn that only left a log: the row carries the sentence, and the
+ * old "notes are above" line is not drawn again.
+ */
+export function coveredRunLogPointers(
+  messages: { role: string; content: string; log?: boolean; summary?: ChatMessage["summary"] }[],
+): { failedLogs: Set<number>; hidden: Set<number> } {
+  const failedLogs = new Set<number>();
+  const hidden = new Set<number>();
+  let logAt = -1;
+  let hadAssistant = false;
+  const finish = () => {
+    if (logAt >= 0 && !hadAssistant) failedLogs.add(logAt);
+  };
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i];
+    if (message.role === "user") {
+      finish();
+      logAt = -1;
+      hadAssistant = false;
+      continue;
+    }
+    if (message.role === "assistant" && message.content.trim()) hadAssistant = true;
+    if (isLogMessage(message)) {
+      logAt = i;
+      if (message.summary === "commandFailed") failedLogs.add(i);
+      continue;
+    }
+    if (logAt >= 0 && message.role === "meta" && isRunLogPointer(message.content)) {
+      failedLogs.add(logAt);
+      hidden.add(i);
+    }
+  }
+  finish();
+  return { failedLogs, hidden };
+}
+
+/** The log of this turn failed and never became a reply. Returns whether one was found. */
+export function markTurnLogFailed(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === "user") return false;
+    if (message?.role === "meta" && message.log) {
+      message.summary = "commandFailed";
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Point the open turn's log row at the failure sentence. */
+export function labelCurrentRunLog(logEl: HTMLElement, summaryText: string): boolean {
+  const label = currentRunLog(logEl)?.querySelector(".chat-activity-text");
+  if (!label) return false;
+  label.textContent = summaryText;
+  return true;
+}
+
 /** Add raw output to this turn's collapsed log, starting one at the end if needed. */
-export function appendRunLog(logEl: HTMLElement, raw: string): HTMLElement | null {
+export function appendRunLog(logEl: HTMLElement, raw: string, summaryText = t("chat.runtimeLog")): HTMLElement | null {
   const text = stripLogAnsi(raw).trim();
   if (!text) return null;
   const existing = currentRunLog(logEl);
@@ -76,6 +151,8 @@ export function appendRunLog(logEl: HTMLElement, raw: string): HTMLElement | nul
   if (existing && detail) {
     const next = `${detail.textContent ?? ""}\n${text}`;
     detail.textContent = next.length > RUN_LOG_CHARS ? next.slice(next.length - RUN_LOG_CHARS) : next;
+    const label = existing.querySelector(".chat-activity-text");
+    if (label && summaryText !== t("chat.runtimeLog")) label.textContent = summaryText;
     return existing;
   }
   const row = document.createElement("div");
@@ -85,7 +162,7 @@ export function appendRunLog(logEl: HTMLElement, raw: string): HTMLElement | nul
   row.dataset.runtimeLog = "1";
   const summary = document.createElement("div");
   summary.className = "chat-activity-text";
-  summary.textContent = t("chat.runtimeLog");
+  summary.textContent = summaryText;
   const more = document.createElement("details");
   more.className = "chat-permission-more";
   const moreSummary = document.createElement("summary");
