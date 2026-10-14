@@ -563,24 +563,71 @@ fn ask_still_at_create_size(window: &tauri::WebviewWindow) -> bool {
     (width - ASK_WINDOW_WIDTH).abs() < 8.0 && (height - ASK_WINDOW_HEIGHT).abs() < 8.0
 }
 
-/// Show Ask beside the main window without reloading the page.
-/// The first open uses the usual size. A size the person dragged is kept.
+/// Where the home window was before the island brought the conversation forward.
+#[derive(Clone, Copy)]
+pub(crate) enum MainWindowRest {
+    Absent,
+    /// Closed into the menu bar. `orderBack` would show it again.
+    Hidden,
+    Minimized,
+    Open,
+}
+
+pub(crate) fn main_window_rest(app: &AppHandle) -> MainWindowRest {
+    let Some(main) = app.get_webview_window("main") else {
+        return MainWindowRest::Absent;
+    };
+    if main.is_minimized().unwrap_or(false) {
+        return MainWindowRest::Minimized;
+    }
+    if !main.is_visible().unwrap_or(false) {
+        return MainWindowRest::Hidden;
+    }
+    MainWindowRest::Open
+}
+
+/// Put the home window back after the app is activated. Activation can unhide
+/// or unminimize it; the island only asked for the conversation.
+pub(crate) fn settle_main_window(app: &AppHandle, rest: MainWindowRest) {
+    apply_main_window_rest(app, rest);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        let again = app.clone();
+        let _ = app.run_on_main_thread(move || apply_main_window_rest(&again, rest));
+    });
+}
+
+fn apply_main_window_rest(app: &AppHandle, rest: MainWindowRest) {
+    let Some(main) = app.get_webview_window("main") else {
+        return;
+    };
+    match rest {
+        MainWindowRest::Absent => {}
+        MainWindowRest::Hidden => {
+            let _ = main.hide();
+        }
+        MainWindowRest::Minimized => {
+            let _ = main.minimize();
+        }
+        MainWindowRest::Open => {
+            #[cfg(target_os = "macos")]
+            order_window_back(&main);
+        }
+    }
+}
+
+/// Show the conversation only. A minimized or tray-hidden home window stays that way.
 pub(crate) fn present_ask_window(app: &AppHandle) {
     let Ok(window) = ensure_ask_window(app, "claude-code") else {
         return;
     };
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-    }
     let _ = window.set_skip_taskbar(false);
     let _ = window.unminimize();
     let place = ask_still_at_create_size(&window);
     let _ = window.show();
     if place {
-        layout_main_and_ask_side_by_side(app);
-        // Second pass after the title bar height is known.
-        layout_main_and_ask_side_by_side(app);
+        place_ask_alone(&window);
     } else if let Ok((width, height)) = main_window_logical_size(&window) {
         // The page keeps the width it had while hidden and its right edge gets cut off.
         // A real size change makes it lay out again at the window width.
@@ -588,6 +635,37 @@ pub(crate) fn present_ask_window(app: &AppHandle) {
         let _ = window.set_size(LogicalSize::new(width, height));
     }
     let _ = window.set_focus();
+}
+
+fn place_ask_alone(window: &tauri::WebviewWindow) {
+    let Some((work_x, work_y, work_w, work_h, scale)) = monitor_work_area(window) else {
+        return;
+    };
+    let deco_w = window_decoration_width(window, scale);
+    let deco_h = window_decoration_height(window, scale);
+    let inner_h = docked_inner_height(work_h, deco_h, ASK_WINDOW_MIN_HEIGHT);
+    let max_outer = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
+    let outer_w = max_outer.min(ASK_WINDOW_WIDTH + deco_w);
+    let inner_w = (outer_w - deco_w).max(360.0);
+    let x = work_x + work_w - MAIN_WINDOW_MARGIN - (inner_w + deco_w);
+    let y = work_y + MAIN_WINDOW_MARGIN;
+    let _ = window.set_size(LogicalSize::new(inner_w, inner_h));
+    let _ = window.set_position(LogicalPosition::new(x.max(work_x + MAIN_WINDOW_MARGIN), y));
+}
+
+#[cfg(target_os = "macos")]
+fn order_window_back(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::NSWindow;
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let ns: &NSWindow = &*ptr.cast();
+        ns.orderBack(None);
+    }
 }
 
 pub(crate) fn open_or_focus_ask_window(

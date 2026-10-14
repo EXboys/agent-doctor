@@ -358,6 +358,9 @@ export function bootChat(): void {
     event.preventDefault();
     void sendAsk();
   });
+  promptEl.addEventListener("focus", () => {
+    closeContextPopover();
+  });
   promptEl.addEventListener("compositionstart", () => {
     promptEl.dataset.composing = "1";
   });
@@ -372,7 +375,11 @@ export function bootChat(): void {
   });
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Node)) return;
-    if (mentionMenuEl.contains(event.target) || promptEl.contains(event.target)) return;
+    if (promptEl.contains(event.target)) {
+      closeContextPopover();
+      return;
+    }
+    if (mentionMenuEl.contains(event.target)) return;
     mentionMenu.hideMentionMenu();
     if (!modelBtnEl.contains(event.target) && !modelMenuEl.contains(event.target)) {
       closeModelMenu();

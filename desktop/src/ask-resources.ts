@@ -17,7 +17,7 @@ import type {
   McpInventoryItem,
   SkillInventoryItem,
 } from "./types";
-import { listSkillsInventory, listMcpInventory, listWorkspaces } from "./ipc";
+import { knowledgePages, listSkillsInventory, listMcpInventory, listWorkspaces } from "./ipc";
 
 export type ResourceEmptyAction = "skill" | "tool";
 
@@ -59,7 +59,7 @@ export type AskRuntime =
   | "openclaw"
   | "deepseek-harness";
 
-export type MentionKind = "skill" | "mcp";
+export type MentionKind = "skill" | "mcp" | "knowledge";
 
 export type MentionRef = {
   kind: MentionKind;
@@ -67,6 +67,8 @@ export type MentionRef = {
   label: string;
   category?: SkillCategoryId;
   pinned?: boolean;
+  /** Short scope line, such as 全局 or 这个项目. */
+  hint?: string;
 };
 
 export type WorkspaceDoc = {
@@ -85,7 +87,9 @@ export type MentionQuery = {
 
 export type SlashTab = MentionKind;
 
-const MENTION_TOKEN_RE = /@(?:skill|mcp):([^\s@]+)/gi;
+const MENTION_TOKEN_RE = /@(?:skill|mcp|knowledge):([^\s@]+)/gi;
+
+const MENTION_TABS: MentionKind[] = ["skill", "knowledge", "mcp"];
 
 export function mcpMatchesRuntime(server: McpInventoryItem, runtime: AskRuntime): boolean {
   const hint = server.runtime_hint.trim();
@@ -205,7 +209,12 @@ export function parseMentionsFromText(
     const raw = match[0];
     const id = (match[1] || "").trim();
     if (!id) continue;
-    const kind: MentionKind = raw.toLowerCase().startsWith("@mcp:") ? "mcp" : "skill";
+    const token = raw.toLowerCase();
+    const kind: MentionKind = token.startsWith("@mcp:")
+      ? "mcp"
+      : token.startsWith("@knowledge:")
+        ? "knowledge"
+        : "skill";
     const key = `${kind}:${id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -242,16 +251,74 @@ export function mergeMentionsForSend(
 
 export function buildMentionConstraint(mentions: MentionRef[]): string {
   if (mentions.length === 0) return "";
-  const list = mentions
-    .map((m) => {
-      if (m.kind === "skill") return `- Skill: ${m.label} (id: ${m.id})`;
-      if (m.id.toLowerCase() === "browser" || m.label.toLowerCase().includes("browser")) {
-        return `- MCP server: ${m.label} — use tools browser_navigate / browser_click / browser_screenshot (never shell open/curl)`;
+  const tools = mentions.filter((m) => m.kind !== "knowledge");
+  const pages = mentions.filter((m) => m.kind === "knowledge");
+  const parts: string[] = [];
+  if (tools.length) {
+    const list = tools
+      .map((m) => {
+        if (m.kind === "skill") return `- Skill: ${m.label} (id: ${m.id})`;
+        if (m.id.toLowerCase() === "browser" || m.label.toLowerCase().includes("browser")) {
+          return `- MCP server: ${m.label} — use tools browser_navigate / browser_click / browser_screenshot (never shell open/curl)`;
+        }
+        return `- MCP server: ${m.label}`;
+      })
+      .join("\n");
+    parts.push(t("chat.mentionHint", { list }));
+  }
+  if (pages.length) {
+    parts.push(
+      pages
+        .map((m) => t("chat.mentionKnowledgeUse", { name: m.label, path: m.id }))
+        .join("\n"),
+    );
+  }
+  return parts.join("\n\n");
+}
+
+/** Wiki pages the composer can attach. `index.md` and `log.md` are not choices. */
+export function knowledgeMentionsFromPages(
+  scopes: { hint: string; root: string; pages: { path: string; title: string }[] }[],
+): MentionRef[] {
+  const rows: MentionRef[] = [];
+  const seen = new Set<string>();
+  for (const scope of scopes) {
+    const root = scope.root.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!root) continue;
+    for (const page of scope.pages) {
+      const rel = page.path.replace(/\\/g, "/");
+      if (!rel || rel === "index.md" || rel === "log.md") continue;
+      const id = `${root}/wiki/${rel}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      rows.push({
+        kind: "knowledge",
+        id,
+        label: page.title.trim() || rel,
+        hint: scope.hint,
+      });
+    }
+  }
+  return rows;
+}
+
+export async function loadKnowledgeMentions(projectPath: string | null): Promise<MentionRef[]> {
+  const scopes: { hint: string; projectPath: string | null }[] = [
+    { hint: t("chat.knowledgeScopeMenuGlobal"), projectPath: null },
+  ];
+  const project = projectPath?.trim();
+  if (project) scopes.push({ hint: t("chat.knowledgeScopeMenuProject"), projectPath: project });
+  const loaded = await Promise.all(
+    scopes.map(async (scope) => {
+      try {
+        const report = await knowledgePages({ projectPath: scope.projectPath });
+        return { hint: scope.hint, root: report.root, pages: report.pages };
+      } catch {
+        return { hint: scope.hint, root: "", pages: [] as { path: string; title: string }[] };
       }
-      return `- MCP server: ${m.label}`;
-    })
-    .join("\n");
-  return t("chat.mentionHint", { list });
+    }),
+  );
+  return knowledgeMentionsFromPages(loaded);
 }
 
 export function promptRequestsBrowserMcp(text: string): boolean {
@@ -463,7 +530,9 @@ export class AskResourcesController {
       label.textContent =
         mention.kind === "skill"
           ? t("chat.mentionSkill", { name: mention.label })
-          : t("chat.mentionMcp", { name: mention.label });
+          : mention.kind === "knowledge"
+            ? t("chat.mentionKnowledge", { name: mention.label })
+            : t("chat.mentionMcp", { name: mention.label });
       const remove = document.createElement("button");
       remove.type = "button";
       remove.setAttribute("aria-label", t("chat.mentionRemove"));
@@ -976,6 +1045,7 @@ export class AskResourcesController {
         (mcpReport.servers ?? []).filter((server) => mcpMatchesRuntime(server, runtime)),
       );
       this.selectedMentions = this.selectedMentions.filter((m) => {
+        if (m.kind === "knowledge") return true;
         if (m.kind === "skill") return this.mountedSkills.some((s) => s.skill_id === m.id);
         return this.enabledMcps.some((s) => s.name === m.id);
       });
@@ -1005,7 +1075,11 @@ export class AskMentionMenuController {
     private upsertMention: (mention: MentionRef) => void,
     private autoResizePrompt: () => void,
     private onVisibilityChange?: (open: boolean) => void,
+    private loadKnowledge?: () => Promise<MentionRef[]>,
   ) {}
+
+  private knowledgeRefs: MentionRef[] = [];
+  private knowledgeGen = 0;
 
   detectMentionQuery(): MentionQuery | null {
     const value = this.dom.promptEl.value;
@@ -1019,7 +1093,7 @@ export class AskMentionMenuController {
       return { kind: this.slashTab, q, start, end: caret, trigger: "slash" };
     }
 
-    const match = before.match(/(?:^|\s)(@(?:skill:|mcp:)?([^\s@]*))$/i);
+    const match = before.match(/(?:^|\s)(@(?:skill:|mcp:|knowledge:)?([^\s@]*))$/i);
     if (!match || match.index == null) return null;
     const token = match[1];
     const q = match[2] || "";
@@ -1029,15 +1103,15 @@ export class AskMentionMenuController {
     const lower = token.toLowerCase();
     if (lower.startsWith("@skill:")) kind = "skill";
     else if (lower.startsWith("@mcp:")) kind = "mcp";
+    else if (lower.startsWith("@knowledge:")) kind = "knowledge";
     return { kind, q, start, end, trigger: "at" };
   }
 
   filteredMentionOptions(): MentionRef[] {
     if (!this.mentionQuery) return [];
     const q = this.mentionQuery.q.toLowerCase();
-    const kindFilter =
-      this.mentionQuery.trigger === "slash" ? this.slashTab : this.mentionQuery.kind;
-    return this.getCandidates().filter((item) => {
+    const kindFilter = this.mentionQuery.kind === "any" ? this.slashTab : this.mentionQuery.kind;
+    return [...this.getCandidates(), ...this.knowledgeRefs].filter((item) => {
       if (kindFilter !== "any" && item.kind !== kindFilter) return false;
       if (!q) return true;
       return item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
@@ -1052,7 +1126,7 @@ export class AskMentionMenuController {
   }
 
   cycleSlashTab(dir: 1 | -1): void {
-    const tabs: SlashTab[] = ["skill", "mcp"];
+    const tabs = MENTION_TABS;
     const idx = tabs.indexOf(this.slashTab);
     const next = tabs[(idx + dir + tabs.length) % tabs.length]!;
     this.setSlashTab(next);
@@ -1070,40 +1144,50 @@ export class AskMentionMenuController {
   }
 
   isSlashMenuOpen(): boolean {
-    return Boolean(this.mentionQuery?.trigger === "slash" && !this.dom.mentionMenuEl.hidden);
+    return Boolean(this.mentionQuery && !this.dom.mentionMenuEl.hidden);
+  }
+
+  private queueKnowledge(): void {
+    if (!this.loadKnowledge) return;
+    const gen = ++this.knowledgeGen;
+    void this.loadKnowledge()
+      .then((rows) => {
+        if (gen !== this.knowledgeGen) return;
+        const prev = this.knowledgeRefs.map((row) => row.id).join("\n");
+        const next = rows.map((row) => row.id).join("\n");
+        this.knowledgeRefs = rows;
+        if (prev !== next && this.mentionQuery) this.renderMentionMenu();
+      })
+      .catch(() => undefined);
   }
 
   renderMentionMenu(): void {
+    const previous = this.mentionQuery;
     this.mentionQuery = this.detectMentionQuery();
     if (!this.mentionQuery) {
       this.hideMentionMenu();
       return;
     }
+    if (!previous) this.queueKnowledge();
+    if (this.mentionQuery.kind !== "any") this.slashTab = this.mentionQuery.kind;
 
-    const isSlash = this.mentionQuery.trigger === "slash";
     const filtered = this.filteredMentionOptions();
     const skillGroups =
-      isSlash && this.slashTab === "skill"
+      this.slashTab === "skill"
         ? groupSkillMentions(filtered.filter((option) => option.kind === "skill"))
         : [];
     const options = skillGroups.length
       ? skillGroups.flatMap((group) => group.options)
       : filtered;
 
-    // Keep `/` menu open even when empty so tabs/empty hint stay visible.
-    if (!isSlash && options.length === 0) {
-      this.hideMentionMenu();
-      return;
-    }
-
     this.mentionMenuIndex = Math.max(
       0,
       Math.min(this.mentionMenuIndex, Math.max(options.length - 1, 0)),
     );
     this.dom.mentionMenuEl.replaceChildren();
-    this.dom.mentionMenuEl.classList.toggle("is-slash", isSlash);
+    this.dom.mentionMenuEl.classList.add("is-slash");
 
-    if (isSlash) {
+    {
       const head = document.createElement("div");
       head.className = "chat-slash-head";
 
@@ -1113,6 +1197,7 @@ export class AskMentionMenuController {
 
       for (const tab of [
         { id: "skill" as const, label: t("chat.slashTabSkills") },
+        { id: "knowledge" as const, label: t("chat.slashTabKnowledge") },
         { id: "mcp" as const, label: t("chat.slashTabTools") },
       ]) {
         const btn = document.createElement("button");
@@ -1170,8 +1255,13 @@ export class AskMentionMenuController {
     if (options.length === 0) {
       const empty = document.createElement("div");
       empty.className = "chat-slash-empty";
-      empty.textContent =
-        this.slashTab === "skill" ? t("chat.slashEmptySkills") : t("chat.slashEmptyTools");
+      empty.textContent = t(
+        this.slashTab === "skill"
+          ? "chat.slashEmptySkills"
+          : this.slashTab === "knowledge"
+            ? "chat.slashEmptyKnowledge"
+            : "chat.slashEmptyTools",
+      );
       list.appendChild(empty);
     } else {
       const appendOption = (option: MentionRef, index: number) => {
@@ -1182,11 +1272,14 @@ export class AskMentionMenuController {
         const title = document.createElement("strong");
         title.textContent = option.label;
         const sub = document.createElement("span");
-        sub.textContent = option.kind === "skill" && option.category
-          ? t(skillCategoryLabelKey(option.category) as MessageKey)
-          : option.kind === "skill"
-            ? t("chat.slashKindSkill")
-            : t("chat.slashKindTool");
+        sub.textContent =
+          option.kind === "knowledge"
+            ? option.hint || t("chat.slashKindKnowledge")
+            : option.kind === "skill" && option.category
+              ? t(skillCategoryLabelKey(option.category) as MessageKey)
+              : option.kind === "skill"
+                ? t("chat.slashKindSkill")
+                : t("chat.slashKindTool");
         btn.append(title, sub);
         btn.addEventListener("mousedown", (event) => {
           event.preventDefault();
@@ -1239,19 +1332,9 @@ export class AskMentionMenuController {
   applyMentionOption(option: MentionRef): void {
     if (!this.mentionQuery) return;
     const value = this.dom.promptEl.value;
-    const trigger = this.mentionQuery.trigger;
-
-    if (trigger === "slash") {
-      // Remove `/query` — selection lives in chips (beginner-friendly, no raw tokens).
-      this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${value.slice(this.mentionQuery.end)}`;
-      const next = this.mentionQuery.start;
-      this.dom.promptEl.setSelectionRange(next, next);
-    } else {
-      const token = `@${option.kind}:${option.id} `;
-      this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${token}${value.slice(this.mentionQuery.end)}`;
-      const next = this.mentionQuery.start + token.length;
-      this.dom.promptEl.setSelectionRange(next, next);
-    }
+    this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${value.slice(this.mentionQuery.end)}`;
+    const next = this.mentionQuery.start;
+    this.dom.promptEl.setSelectionRange(next, next);
 
     this.upsertMention(option);
     this.hideMentionMenu();

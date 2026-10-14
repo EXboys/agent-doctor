@@ -13,7 +13,6 @@ const MAX_IMPORT_FILES: usize = 3000;
 const MAX_PAGES: usize = 600;
 const MAX_PAGE_BYTES: u64 = 512 * 1024;
 const MAX_INDEX_CHARS: usize = 4000;
-const MAX_INLINE_WIKI_CHARS: usize = 12_000;
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -780,7 +779,7 @@ fn collect_raw_files(
     }
 }
 
-/// What a chat turn should know. Wiki pages when they exist, otherwise the uploaded files.
+/// Catalog a chat turn can look up. Page bodies stay on disk until the assistant opens one.
 #[tauri::command]
 pub fn knowledge_context_command(
     project_path: Option<String>,
@@ -819,22 +818,10 @@ pub fn knowledge_context_command(
         catalog.push_str(&unlisted.join("\n"));
     }
 
-    let mut full = String::new();
-    for page in &pages {
-        let Ok(text) = fs::read_to_string(wiki.join(&page.path)) else {
-            continue;
-        };
-        full.push_str(&format!("<<< {} >>>\n{}\n\n", page.path, text.trim()));
-        if full.chars().count() > MAX_INLINE_WIKI_CHARS {
-            full.clear();
-            break;
-        }
-    }
-
     Ok(Some(KnowledgeContext {
         wiki: display(&wiki),
         index: catalog,
-        full: (!full.is_empty()).then(|| full.trim_end().to_string()),
+        full: None,
         raw_dir: raw.map(|(path, _)| display(&path)),
     }))
 }
@@ -924,7 +911,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(context.index.contains("guides/start.md"));
-        assert!(context.full.unwrap().contains("hi"));
+        assert!(context.full.is_none());
 
         knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
         knowledge_delete_page_command(project_str.clone(), "guides/advanced.md".into()).unwrap();

@@ -1432,11 +1432,12 @@ fn restore_conversation(app: &AppHandle, pin: bool) {
         guard.parked_ask = false;
         guard.parked_main = false;
     }
-    // The notch sits above every window and does not activate the app, so the
-    // conversation has to be brought forward on purpose. Use the same placement
-    // as a normal open; a plain show keeps the smaller size from first create.
+    // Remember this before activation. Bringing the app forward can unhide or
+    // unminimize the home window; the island only asked for the conversation.
+    let main_rest = crate::windows::main_window_rest(app);
     activate_app();
     crate::windows::present_ask_window(app);
+    crate::windows::settle_main_window(app, main_rest);
     apply(app);
 }
 

@@ -76,6 +76,7 @@ import { bootChat } from "./chat-boot";
 import {
   AskMentionMenuController,
   AskResourcesController,
+  loadKnowledgeMentions,
   type AskRuntime,
   type WorkspaceDoc,
 } from "./ask-resources";
@@ -793,6 +794,7 @@ export const mentionMenu = new AskMentionMenuController(
     composerBoxEl.classList.toggle("is-mention-open", open);
     composerEl.classList.toggle("is-mention-open", open);
   },
+  () => loadKnowledgeMentions(sessionWorkspacePath(activeSession(), chatState.workspaceDoc)),
 );
 
 export function updateResourcesSummary(): void {

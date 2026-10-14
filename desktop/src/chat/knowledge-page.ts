@@ -108,10 +108,10 @@ export async function knowledgePromptBlock(project: string | null): Promise<stri
   const name = project?.trim() || null;
   const projectPath = name ? deps.projectPath(name) : null;
   const sections = await Promise.all([
-    scopeSection(zh ? "全局知识库（所有项目、所有助手都要遵守）：" : "Global knowledge (every project and every agent):", null, library.global),
+    scopeSection(zh ? "全局知识库：" : "Global knowledge:", null, library.global),
     name && projectPath
       ? scopeSection(
-          zh ? `项目「${name}」的知识库（只在这个项目遵守）：` : `Knowledge for project “${name}” (this project only):`,
+          zh ? `项目「${name}」的知识库：` : `Knowledge for project “${name}”:`,
           projectPath,
           library.projects[name],
         )
@@ -120,8 +120,8 @@ export async function knowledgePromptBlock(project: string | null): Promise<stri
   const parts = sections.filter((part): part is string => Boolean(part));
   if (!parts.length) return "";
   const lead = zh
-    ? "下面是知识库，回答时以它为准。"
-    : "Follow this knowledge base when you answer.";
+    ? "你有知识库。用得上再按目录打开对应页面，用不上就直接回答。"
+    : "You have a knowledge base. Open a listed page only when this message needs it. Otherwise answer directly.";
   return `${lead}\n\n${parts.join("\n\n")}`;
 }
 

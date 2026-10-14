@@ -1166,29 +1166,23 @@ export async function migrateLegacyNotes(
   return true;
 }
 
-/** One knowledge base as prompt text, or null when it has nothing to read. */
+/** Catalog and location for one knowledge base. The assistant opens a page only when the message needs it. */
 export async function wikiPromptSection(label: string, projectPath: string | null): Promise<string | null> {
   try {
     const context = await knowledgeContext({ projectPath });
-    if (!context) return null;
+    if (!context?.index.trim()) return null;
     const zh = getLocale() !== "en";
-    const sourcesOnly = Boolean(context.rawDir) && context.wiki === context.rawDir && !context.full;
+    const sourcesOnly = Boolean(context.rawDir) && context.wiki === context.rawDir;
     if (sourcesOnly) {
       const lead = zh
-        ? "这些资料还没整理成页面。回答前先读："
-        : "These files are not pages yet. Read them before you answer:";
+        ? `这些资料还没整理成页面，在 ${context.rawDir}。只有某个文件名和这句话对得上时，才打开那一个文件。不要把文件夹读完。`
+        : `These files are not pages yet. They are in ${context.rawDir}. Open one file only when its name matches this message. Do not read the whole folder.`;
       return `${label}\n${lead}\n${context.index}`;
     }
-    const raw = context.rawDir
-      ? zh
-        ? `\n还没写进页面的资料在 ${context.rawDir}。页面里没有的内容，先读这里。`
-        : `\nFiles not on a page yet are in ${context.rawDir}. Read them when the pages do not answer.`
-      : "";
-    if (context.full) return `${label}\n${context.full}${raw}`;
     const where = zh
-      ? `（页面在 ${context.wiki}，需要细节时打开对应页面）`
-      : `(pages live in ${context.wiki}; open the ones you need)`;
-    return `${label} ${where}\n${context.index}${raw}`;
+      ? `页面在 ${context.wiki}。下面是目录。只有这句话用得上某一页时，才打开那一页。用不上就直接回答，不要把文件夹翻一遍。`
+      : `Pages are in ${context.wiki}. The catalog is below. Open a page only when this message needs it. Otherwise answer directly, and do not browse the folder.`;
+    return `${label}\n${where}\n${context.index}`;
   } catch {
     return null;
   }
