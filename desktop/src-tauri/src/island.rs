@@ -88,6 +88,8 @@ pub struct IslandView {
 #[derive(Debug, Clone)]
 struct Snapshot {
     active: bool,
+    /// The page still reports a browser tool. Windows are not hidden for it.
+    #[allow(dead_code)]
     browser: bool,
     composing: bool,
     title: String,
@@ -145,7 +147,7 @@ struct Inner {
     hold_open: bool,
     /// User asked to keep the conversation window open until the turn ends.
     pinned: bool,
-    /// Ask was hidden so a browser tool could use the screen.
+    /// Ask was hidden by an older browser turn. The next update shows it again.
     parked_ask: bool,
     /// Main window was hidden for the same reason.
     parked_main: bool,
@@ -362,20 +364,6 @@ fn island_awake(snapshot: &Snapshot) -> bool {
     snapshot.active || snapshot.pending.is_some() || snapshot.lingering
 }
 
-/// Only a running browser tool hides the normal windows. The island does not.
-pub(crate) fn should_park_windows(
-    active: bool,
-    browser: bool,
-    composing: bool,
-    hold_open: bool,
-    pinned: bool,
-) -> bool {
-    if pinned || hold_open || composing {
-        return false;
-    }
-    active && browser
-}
-
 /// Tall enough for the conversations on screen, and no taller.
 pub(crate) fn peek_height(rows: u32, pending: bool) -> f64 {
     let count = rows.clamp(1, 6) as f64;
@@ -451,7 +439,7 @@ fn apply(app: &AppHandle) {
 fn apply_once(app: &AppHandle) {
     ensure_hide_pref_loaded(app);
     let ask_in_front = windows_ask_in_front(app);
-    let (chrome, snapshot, park, parked_ask, parked_main) = {
+    let (chrome, snapshot, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
         let mut guard = host.inner.lock().expect("island");
         // Coming back to the conversation closes the chip. The next time it
@@ -481,19 +469,9 @@ fn apply_once(app: &AppHandle) {
                 awake,
             ),
         );
-        let park = enabled
-            && cfg!(target_os = "macos")
-            && should_park_windows(
-                guard.snapshot.active,
-                guard.snapshot.browser,
-                guard.snapshot.composing,
-                guard.hold_open,
-                guard.pinned,
-            );
         (
             chrome,
             guard.snapshot.clone(),
-            park,
             guard.parked_ask,
             guard.parked_main,
         )
@@ -504,9 +482,9 @@ fn apply_once(app: &AppHandle) {
     } else {
         show_island(app, chrome);
     }
-    if park {
-        park_windows(app);
-    } else if parked_ask || parked_main {
+    // A browser tool used to hide the ask and main windows. Bring back any
+    // window that was hidden that way, and do not hide them again.
+    if parked_ask || parked_main {
         reveal_parked(app, false);
     }
 
@@ -525,28 +503,6 @@ fn apply_once(app: &AppHandle) {
         for window in island_windows(app) {
             let _ = window.emit("island-view", &view);
         }
-    }
-}
-
-fn park_windows(app: &AppHandle) {
-    park_one(app, "ask", true);
-    park_one(app, "main", false);
-}
-
-fn park_one(app: &AppHandle, label: &str, ask: bool) {
-    let Some(window) = app.get_webview_window(label) else {
-        return;
-    };
-    if !window.is_visible().unwrap_or(false) {
-        return;
-    }
-    let _ = window.hide();
-    let host = app.state::<IslandHost>();
-    let mut guard = host.inner.lock().expect("island");
-    if ask {
-        guard.parked_ask = true;
-    } else {
-        guard.parked_main = true;
     }
 }
 
@@ -1718,8 +1674,7 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 mod tests {
     use super::{
         chrome_if_enabled, island_chrome, island_frame, peek_height, pending_opens_card,
-        should_park_windows, windows_status_chrome, windows_status_frame, Chrome, IslandPending,
-        TopAnchor,
+        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor,
     };
 
     #[test]
@@ -1868,32 +1823,6 @@ mod tests {
             island_chrome(false, false, false, true, true, false, false),
             Chrome::Peek
         );
-    }
-
-    #[test]
-    fn browser_hides_the_windows() {
-        assert!(should_park_windows(true, true, false, false, false));
-    }
-
-    #[test]
-    fn staying_here_keeps_the_windows() {
-        assert!(!should_park_windows(true, false, false, false, false));
-        assert!(!should_park_windows(false, false, false, false, false));
-    }
-
-    #[test]
-    fn typing_keeps_the_windows() {
-        assert!(!should_park_windows(true, true, true, false, false));
-    }
-
-    #[test]
-    fn hold_open_suppresses_the_browser_reason() {
-        assert!(!should_park_windows(true, true, false, true, false));
-    }
-
-    #[test]
-    fn pin_keeps_the_windows() {
-        assert!(!should_park_windows(true, true, false, false, true));
     }
 
     #[test]

@@ -58,6 +58,35 @@ export function scoreLooksGood(score: DiagnoseScore): boolean {
   return score.fail === 0 && score.percent >= 80;
 }
 
+/** Main button when checks failed: only offer a settings write when one exists. */
+export function failurePrimary(
+  preview: { can_apply_repair: boolean; summary: { fail: number } },
+  autoFixTried: boolean,
+): "apply-settings" | "check-address" | null {
+  if (preview.summary.fail <= 0) {
+    return null;
+  }
+  if (preview.can_apply_repair && !autoFixTried) {
+    return "apply-settings";
+  }
+  return "check-address";
+}
+
+/** What a settings apply actually changed, so the button note does not claim a fix. */
+export function settingsApplyKind(report: {
+  summary: { fail: number };
+  last_execute: { executed: string[] } | null;
+}): "changed" | "still-fail" | "nothing" {
+  const changed = report.last_execute?.executed.some((id) => id.startsWith("fix-")) ?? false;
+  if (!changed) {
+    return "nothing";
+  }
+  if (report.summary.fail > 0) {
+    return "still-fail";
+  }
+  return "changed";
+}
+
 /** Pick the first incomplete step for the wizard. */
 export function pickInitialStep(input: {
   installed: boolean;

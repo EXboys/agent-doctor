@@ -27,7 +27,7 @@ function assert(cond: boolean, msg: string) {
 }
 
 async function main() {
-  const { explainChatFailure } = await import("../src/friendly-error");
+  const { explainChatFailure, missingProviderFieldsMessage } = await import("../src/friendly-error");
 
   const glm404 =
     "unexpected status 404 Not Found: Unknown error, url: https://open.bigmodel.cn/api/paas/v4/responses";
@@ -44,7 +44,7 @@ async function main() {
     "Error: error loading default config after config error: Operation not permitted (os error 1)";
   const mac = explainChatFailure(denied);
   assert(mac?.kind === "macos_denied", "codex eperm should map to macos_denied");
-  assert(mac!.actions.length === 0, "macos denied has no in-app fix button");
+  assert(mac!.actions.includes("privacy"), "macos denied offers system settings");
 
   const noise = explainChatFailure("session_id: abc");
   assert(noise === null, "benign stderr should not classify");
@@ -70,7 +70,51 @@ async function main() {
 
   const limited = explainChatFailure("LLM HTTP 429 Too Many Requests");
   assert(limited?.kind === "rate_limit", "bare 429 should be rate limit");
-  assert(limited!.actions.length === 0, "rate limit has no repair button");
+  assert(limited!.actions.includes("askAgain"), "rate limit offers ask again");
+  assert(missingProviderFieldsMessage(["url"]) === "还缺地址。", "only a missing address is named");
+  assert(
+    !missingProviderFieldsMessage(["url"]).includes("密钥"),
+    "address-only hint does not mention the key",
+  );
+
+  const unreachable = explainChatFailure("connect ECONNREFUSED 127.0.0.1:18789");
+  assert(
+    unreachable?.kind === "provider_url" || unreachable?.kind === "network",
+    "connection refused is an address problem",
+  );
+  assert(!unreachable!.actions.includes("repair"), "unreachable address does not offer a settings apply");
+  assert(unreachable!.actions.includes("provider"), "unreachable address offers the provider button");
+
+  const unknown = explainChatFailure("unexpected status 500 Internal Server Error");
+  assert(unknown?.kind === "unknown", "bare 500 stays unknown");
+  assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");
+
+  const { failurePrimary, settingsApplyKind } = await import("../src/diagnose-flow");
+  assert(
+    failurePrimary({ can_apply_repair: true, summary: { fail: 2 } }, false) === "apply-settings",
+    "auto-fixable failures offer a settings apply",
+  );
+  assert(
+    failurePrimary({ can_apply_repair: false, summary: { fail: 1 } }, false) === "check-address",
+    "gateway-only failures send the user to check the address",
+  );
+  assert(
+    failurePrimary({ can_apply_repair: true, summary: { fail: 0 } }, false) === null,
+    "no failures means no failure button",
+  );
+  assert(
+    settingsApplyKind({ summary: { fail: 1 }, last_execute: { executed: ["backup-runtime-configs"] } }) ===
+      "nothing",
+    "backup alone is not a settings change",
+  );
+  assert(
+    settingsApplyKind({ summary: { fail: 1 }, last_execute: { executed: ["fix-codex-url"] } }) === "still-fail",
+    "a write that leaves failures does not count as fixed",
+  );
+  assert(
+    settingsApplyKind({ summary: { fail: 0 }, last_execute: { executed: ["fix-codex-url"] } }) === "changed",
+    "a write that clears failures is a settings change",
+  );
 
   const { explainProviderFailure, accountBlockMessage } = await import("../src/friendly-error");
   const provider = explainProviderFailure(balanceRaw, { statusCode: 429 });

@@ -43,10 +43,11 @@
           </label>
 
           <div class="chat-workspace-block">
-            <label class="chat-workspace-label" for="chat-workspace-select" data-i18n="ask.workspaceSwitch">工作区</label>
+            <label class="chat-workspace-label" for="chat-workspace-select" data-i18n="ask.workspaceSwitch">项目</label>
             <div class="chat-workspace-row">
-              <select id="chat-workspace-select" class="chat-workspace-select" aria-label="Workspace"></select>
-              <button id="chat-workspace-activate" type="button" class="chat-workspace-activate" data-i18n="ask.workspaceActivate">激活</button>
+              <select id="chat-workspace-select" class="chat-workspace-select" aria-label="项目"></select>
+              <button id="chat-workspace-add" type="button" class="chat-workspace-activate" data-i18n="workspaces.register" hidden>添加项目</button>
+              <button id="chat-workspace-activate" type="button" class="chat-workspace-activate" data-i18n="ask.workspaceActivate">选用</button>
             </div>
             <div class="chat-workspace-meta">
               <p id="chat-cwd" class="chat-cwd" title="">—</p>
@@ -85,7 +86,7 @@
             </svg>
           </button>
         </div>
-        <button id="chat-new-workspace" type="button" class="btn-side btn-new" data-i18n="chat.newWorkspace">新建工作区</button>
+        <button id="chat-new-workspace" type="button" class="btn-side btn-new" data-i18n="chat.newWorkspace">添加项目</button>
         <div class="chat-session-block">
           <div class="chat-sessions-head">
             <p class="chat-session-label" data-i18n="chat.projects">项目</p>
@@ -698,7 +699,7 @@
                 id="chat-prompt"
                 class="chat-prompt"
                 rows="1"
-                placeholder="在当前工作区问一句… 输入 / 选用技能或工具"
+                placeholder="问一句… 输入 / 选用技能或工具"
                 spellcheck="false"
                 data-i18n-placeholder="chat.placeholder"
               ></textarea>

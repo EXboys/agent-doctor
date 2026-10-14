@@ -16,6 +16,7 @@ import {
   mentionMenuEl,
   newWorkspaceEl,
   workspaceSelectEl,
+  workspaceAddEl,
   workspaceActivateEl,
   workspaceHintEl,
   resourcesTabsEl,
@@ -269,6 +270,7 @@ export function bootChat(): void {
     event.stopPropagation();
     void openMainResources();
   });
+  workspaceAddEl.addEventListener("click", () => addProjectFromAsk());
   workspaceActivateEl.addEventListener("click", () => void activateSelectedWorkspace());
   workspaceSelectEl.addEventListener("change", () => {
     const name = workspaceSelectEl.value.trim();

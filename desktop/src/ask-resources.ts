@@ -19,6 +19,39 @@ import type {
 } from "./types";
 import { listSkillsInventory, listMcpInventory, listWorkspaces } from "./ipc";
 
+export type ResourceEmptyAction = "skill" | "tool";
+
+/** Empty skill/tool line plus a button. Search-with-no-match stays text only. */
+export function paintResourceEmpty(
+  el: HTMLElement,
+  text: string,
+  action: ResourceEmptyAction | null,
+): void {
+  if (typeof el.querySelector !== "function") {
+    el.textContent = text;
+    return;
+  }
+  let line = el.querySelector<HTMLElement>(":scope > .chat-empty-line");
+  if (!line) {
+    el.replaceChildren();
+    line = document.createElement("span");
+    line.className = "chat-empty-line";
+    el.append(line);
+  }
+  line.textContent = text;
+  const existing = el.querySelector<HTMLButtonElement>(":scope > .chat-empty-next");
+  if (!action) {
+    existing?.remove();
+    return;
+  }
+  const button = existing ?? document.createElement("button");
+  button.type = "button";
+  button.className = "chat-empty-next";
+  button.dataset.emptyAction = action;
+  button.textContent = action === "skill" ? t("chat.skillInstall") : t("chat.addTool");
+  if (!existing) el.append(button);
+}
+
 export type AskRuntime =
   | "claude-code"
   | "codex"
@@ -510,10 +543,18 @@ export class AskResourcesController {
     targets.skillsEmptyEl.hidden = skills.length > 0;
     targets.mcpEmptyEl.hidden = mcps.length > 0;
     if (skills.length === 0) {
-      targets.skillsEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.skillsEmpty");
+      paintResourceEmpty(
+        targets.skillsEmptyEl,
+        q ? t("chat.resourcesNoMatch") : t("chat.skillsEmpty"),
+        q ? null : "skill",
+      );
     }
     if (mcps.length === 0) {
-      targets.mcpEmptyEl.textContent = q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty");
+      paintResourceEmpty(
+        targets.mcpEmptyEl,
+        q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty"),
+        q ? null : "tool",
+      );
     }
 
     if (targets.skillCategoriesEl) {
@@ -692,16 +733,16 @@ export class AskResourcesController {
     this.dom.skillsEmptyEl.hidden = !showSkills || skills.length > 0;
     this.dom.mcpEmptyEl.hidden = !showMcp || mcps.length > 0;
     if (showSkills && skills.length === 0 && q) {
-      this.dom.skillsEmptyEl.textContent = t("chat.resourcesNoMatch");
+      paintResourceEmpty(this.dom.skillsEmptyEl, t("chat.resourcesNoMatch"), null);
       this.dom.skillsEmptyEl.hidden = false;
-    } else if (showSkills) {
-      this.dom.skillsEmptyEl.textContent = t("chat.skillsEmpty");
+    } else if (showSkills && skills.length === 0) {
+      paintResourceEmpty(this.dom.skillsEmptyEl, t("chat.skillsEmpty"), "skill");
     }
     if (showMcp && mcps.length === 0 && q) {
-      this.dom.mcpEmptyEl.textContent = t("chat.resourcesNoMatch");
+      paintResourceEmpty(this.dom.mcpEmptyEl, t("chat.resourcesNoMatch"), null);
       this.dom.mcpEmptyEl.hidden = false;
-    } else if (showMcp) {
-      this.dom.mcpEmptyEl.textContent = t("chat.mcpEmpty");
+    } else if (showMcp && mcps.length === 0) {
+      paintResourceEmpty(this.dom.mcpEmptyEl, t("chat.mcpEmpty"), "tool");
     }
 
     for (const skill of skills) {
@@ -900,12 +941,18 @@ export class AskResourcesController {
         const doc = await listWorkspaces();
         workspaceDoc = doc;
         opts.renderWorkspaceSwitcher(doc);
+        const projectNames = Object.keys(doc.workspaces);
         if (doc.active && doc.workspaces[doc.active]?.path) {
           workspaceCwd = doc.workspaces[doc.active].path;
           opts.cwdEl.dataset.workspace = doc.active;
           opts.setDisplayedCwd(workspaceCwd);
           opts.cwdEl.title = `${t("ask.workspaceActive", { name: doc.active })} · ${workspaceCwd}`;
           opts.workspaceHintEl.textContent = t("ask.workspaceHint");
+        } else if (projectNames.length === 0) {
+          opts.cwdEl.dataset.workspace = "";
+          opts.setDisplayedCwd("—");
+          opts.cwdEl.title = t("workspaces.none");
+          opts.workspaceHintEl.textContent = t("workspaces.noneHint");
         } else {
           opts.cwdEl.dataset.workspace = "";
           if (mcpReport.workspace_path) {

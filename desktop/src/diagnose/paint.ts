@@ -1,5 +1,6 @@
 import {
   computeDiagnoseScore,
+  failurePrimary,
   scoreLooksGood,
   type DiagnoseScore,
   stepStatesFor,
@@ -564,12 +565,16 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
         dom.primaryEl.hidden = false;
         dom.primaryEl.textContent = t("diagnose.flow.rescan");
         dom.secondaryEl.hidden = true;
-      } else if (session.preview && session.preview.summary.fail > 0) {
-        session.primaryAction = session.repairTried ? "ask-fix" : "deep-repair";
+      } else if (session.preview && failurePrimary(session.preview, session.autoFixTried)) {
+        const next = failurePrimary(session.preview, session.autoFixTried);
+        if (next === "apply-settings") {
+          session.primaryAction = "auto-fix";
+          dom.primaryEl.textContent = t("diagnose.flow.autoFixCta");
+        } else {
+          session.primaryAction = "open-provider";
+          dom.primaryEl.textContent = t("repair.gatewayUnreachableNext");
+        }
         dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = session.repairTried
-          ? t("diagnose.flow.askFixCta")
-          : t("repair.oneClick");
         dom.secondaryEl.hidden = false;
         dom.secondaryEl.textContent = t("diagnose.flow.rescan");
         dom.secondaryEl.dataset.fallback = "rescan";

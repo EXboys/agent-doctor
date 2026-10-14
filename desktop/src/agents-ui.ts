@@ -330,8 +330,12 @@ export function renderRuntimeCardActions(
   const detailOpenForThis = ctx.diagnoseOpenForRuntime;
 
   if (!ctx.hasActiveWorkspace) {
+    const hasProjects = Boolean(
+      appState.lastWorkspaces && Object.keys(appState.lastWorkspaces.workspaces).length > 0,
+    );
+    const label = hasProjects ? t("runtime.activateWorkspace") : t("workspaces.register");
     parts.push(
-      `<button type="button" class="btn-secondary" data-action="activate-workspace">${t("runtime.activateWorkspace")}</button>`,
+      `<button type="button" class="btn-secondary" data-action="activate-workspace">${label}</button>`,
     );
   }
   if (canRepair && !detailOpenForThis) {

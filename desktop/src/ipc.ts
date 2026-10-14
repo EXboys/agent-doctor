@@ -234,8 +234,20 @@ export function teamupsChannelNote(id: string, step: string): void {
   void invoke("teamups_channel_note_command", { id, step }).catch(() => {});
 }
 
-export function teamupsChannelAsk(id: string, requestId: string, text: string, wait = true): Promise<void> {
-  return invoke("teamups_channel_ask_command", { id, requestId, text, wait });
+export type TeamupsChannelQuestion = {
+  question: string;
+  options: { label: string; description?: string }[];
+  multiSelect: boolean;
+};
+
+export function teamupsChannelAsk(
+  id: string,
+  requestId: string,
+  text: string,
+  wait = true,
+  questions?: TeamupsChannelQuestion[],
+): Promise<void> {
+  return invoke("teamups_channel_ask_command", { id, requestId, text, wait, questions });
 }
 
 export function signOutTeamups(): Promise<TeamupsAccountStatus> {

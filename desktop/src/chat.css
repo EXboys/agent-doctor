@@ -5977,6 +5977,34 @@ body.chat-skill-dragging .chat-res-grip {
   color: var(--faint);
 }
 
+.chat-resources-empty,
+.chat-resources-page .chat-knowledge-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.chat-empty-next {
+  border: 1px solid rgba(47, 111, 237, 0.28);
+  border-radius: 9px;
+  padding: 4px 10px;
+  background: var(--accent-soft, rgba(47, 111, 237, 0.1));
+  color: var(--accent, #2f6fed);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-resources-page .chat-knowledge-empty .chat-empty-next {
+  margin-top: 2px;
+}
+
+.chat-resources-page .chat-knowledge-empty {
+  align-items: center;
+}
+
 .chat-mentions {
   display: flex;
   flex-wrap: wrap;
@@ -6761,6 +6789,27 @@ body.chat-skill-dragging .chat-res-grip {
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
+}
+
+.chat-failure-result {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--text);
+}
+
+.chat-failure-result[data-tone="ok"] {
+  color: var(--success, #166534);
+}
+
+.chat-failure-result[data-tone="warn"] {
+  color: var(--warn, #b45309);
+}
+
+.chat-failure-result[data-tone="muted"] {
+  color: var(--faint);
 }
 
 .chat-failure-btn {

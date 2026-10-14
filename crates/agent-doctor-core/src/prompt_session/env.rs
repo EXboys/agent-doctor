@@ -354,9 +354,9 @@ pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, Strin
 pub(crate) fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let home = hermes_home_from_overlay(overlay);
     cmd.env("HERMES_HOME", &home);
-    // A profile home borrows the installed checkout. Hermes then builds a second
-    // Python environment for that home, and that build fails on Windows before
-    // any reply. The installer already has a working copy; use that.
+    // Belt: even a profile under the installer home must not start a second
+    // Python install. The home itself has to be that installer folder; see
+    // `hermes_root`.
     cmd.env("HERMES_DISABLE_LAZY_INSTALLS", "1");
     if let Some((url, key, model)) = resolve_hermes_overlay(overlay) {
         cmd.env("OPENAI_BASE_URL", &url);

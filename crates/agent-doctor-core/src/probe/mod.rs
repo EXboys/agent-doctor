@@ -342,7 +342,7 @@ fn probe_binary(
         ),
     );
 
-    match read_version_result(&binaries[0]) {
+    match read_first_version(&binaries) {
         Ok(Some(version)) => {
             checks.push(ProbeCheck::new(
                 "binary.version",
@@ -375,6 +375,20 @@ fn probe_binary(
             SensitivityLevel::SensitiveLog,
         )),
     }
+}
+
+fn read_first_version(binaries: &[PathBuf]) -> std::result::Result<Option<String>, String> {
+    let mut last_error = None;
+    for binary in binaries {
+        match read_version_result(binary) {
+            Ok(Some(version)) => return Ok(Some(version)),
+            Ok(None) => {
+                last_error = Some("version command ran but returned no output".to_string());
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "version command failed".to_string()))
 }
 
 fn probe_configs(

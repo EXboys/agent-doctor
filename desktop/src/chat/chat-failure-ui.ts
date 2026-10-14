@@ -1,13 +1,20 @@
+import { settingsApplyKind } from "../diagnose-flow";
 import { focusMainTab, openSession, runRepairExecute } from "../ipc";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   formatChatFailureLine,
   type ChatFailureAction,
   type ChatFailureExplain,
 } from "../friendly-error";
 import { t } from "../i18n";
+
+const MAC_FILES_PRIVACY =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders";
+
 export type ChatFailureHandlers = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   selectedRuntime: () => string;
+  focusPrompt?: () => void;
 };
 
 export function mountChatFailureBubble(
@@ -32,9 +39,9 @@ export function mountChatFailureBubble(
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "chat-failure-btn";
-      btn.textContent = actionLabel(action);
+      btn.textContent = actionLabel(action, explain);
       btn.addEventListener("click", () => {
-        void runChatFailureAction(action, explain, handlers);
+        void runChatFailureAction(action, explain, handlers, actions);
       });
       actions.appendChild(btn);
     }
@@ -46,40 +53,108 @@ export function mountChatFailureBubble(
   return bubble;
 }
 
-function actionLabel(action: ChatFailureAction): string {
+function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): string {
   switch (action) {
     case "provider":
-      return t("chat.fail.actionProvider");
+      return explain.kind === "provider_url" ||
+        explain.kind === "network" ||
+        explain.kind === "unknown"
+        ? t("repair.gatewayUnreachableNext")
+        : t("chat.fail.actionProvider");
     case "repair":
-      return t("chat.fail.actionRepair");
+      return t("diagnose.flow.autoFixCta");
     case "native":
       return t("chat.fail.actionNative");
+    case "privacy":
+      return t("chat.fail.actionPrivacy");
+    case "askAgain":
+      return t("chat.fail.actionAskAgain");
   }
+}
+
+function writeActionResult(
+  actions: HTMLElement,
+  text: string,
+  tone: "ok" | "warn" | "muted",
+): void {
+  let note = actions.querySelector<HTMLElement>(".chat-failure-result");
+  if (!note) {
+    note = document.createElement("p");
+    note.className = "chat-failure-result";
+    actions.appendChild(note);
+  }
+  note.hidden = false;
+  note.dataset.tone = tone;
+  note.textContent = text;
+}
+
+function setActionsBusy(actions: HTMLElement, busy: boolean): void {
+  actions.querySelectorAll<HTMLButtonElement>("button").forEach((btn) => {
+    btn.disabled = busy;
+  });
 }
 
 async function runChatFailureAction(
   action: ChatFailureAction,
   explain: ChatFailureExplain,
   handlers: ChatFailureHandlers,
+  actions: HTMLElement,
 ): Promise<void> {
   if (action === "provider") {
+    setActionsBusy(actions, true);
     try {
       await focusMainTab({ tab: "provider" });
-      handlers.setStatus(t("chat.fail.openedProvider"), "muted");
-    } catch (error) {
-      handlers.setStatus(String(error), "error");
+      writeActionResult(
+        actions,
+        explain.kind === "provider_url" || explain.kind === "network" || explain.kind === "unknown"
+          ? t("chat.fail.openedAddress")
+          : t("chat.fail.openedProvider"),
+        "muted",
+      );
+    } catch {
+      writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+    } finally {
+      setActionsBusy(actions, false);
     }
     return;
   }
   if (action === "repair") {
+    setActionsBusy(actions, true);
+    writeActionResult(actions, t("chat.fail.repairRunning"), "muted");
     try {
-      await focusMainTab({ tab: "diagnose" });
-      handlers.setStatus(t("chat.fail.repairRunning"), "muted");
       const runtime = explain.kind === "glm_codex_url" ? "codex" : handlers.selectedRuntime();
-      await runRepairExecute({ runtime });
-      handlers.setStatus(t("chat.fail.repairDone"), "ok");
-    } catch (error) {
-      handlers.setStatus(t("chat.fail.repairFailed"), "warn");
+      const report = await runRepairExecute({ runtime });
+      const kind = settingsApplyKind(report);
+      writeActionResult(
+        actions,
+        kind === "nothing"
+          ? t("chat.fail.repairNothing")
+          : kind === "still-fail"
+            ? t("chat.fail.repairStillFail")
+            : t("chat.fail.repairChanged"),
+        kind === "changed" ? "ok" : "warn",
+      );
+    } catch {
+      writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+    } finally {
+      setActionsBusy(actions, false);
+    }
+    return;
+  }
+  if (action === "askAgain") {
+    handlers.focusPrompt?.();
+    writeActionResult(actions, t("chat.fail.askAgainReady"), "muted");
+    return;
+  }
+  if (action === "privacy") {
+    setActionsBusy(actions, true);
+    try {
+      await openUrl(MAC_FILES_PRIVACY);
+      writeActionResult(actions, t("chat.fail.privacyOpened"), "ok");
+    } catch {
+      writeActionResult(actions, t("chat.fail.privacyFailed"), "warn");
+    } finally {
+      setActionsBusy(actions, false);
     }
     return;
   }
@@ -90,8 +165,8 @@ async function runChatFailureAction(
       prompt: null,
       terminal: true,
     });
-    handlers.setStatus(t("chat.terminalOpened"), "ok");
+    writeActionResult(actions, t("chat.terminalOpened"), "ok");
   } catch {
-    handlers.setStatus(t("chat.terminalFailed"), "error");
+    writeActionResult(actions, t("chat.terminalFailed"), "warn");
   }
 }

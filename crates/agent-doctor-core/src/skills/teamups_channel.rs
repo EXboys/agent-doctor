@@ -7,7 +7,7 @@
 //! `wss://<site>/api/v1/doctor/channel`
 //! `Authorization: Bearer <license>`
 //!
-//! Client: `{"type":"hello","name":"...","os":"...","ip":"...","resume":true}`
+//! Client: `{"type":"hello","id":"...","name":"...","os":"...","ip":"...","resume":true}`
 //! Client: `{"type":"heard","id":"..."}` as soon as a job frame arrives
 //! Client: `{"type":"reply","id":"...","ok":true,"text":"..."}`
 //! Server: `{"type":"job","id":"...","text":"...","chat":"..."}`
@@ -48,6 +48,7 @@ pub fn teamups_channel_ws_url(http_base: &str) -> String {
 }
 
 const CHANNEL_ENABLED_KEY: &str = "teamups_channel_enabled";
+const CHANNEL_CLIENT_ID_KEY: &str = "teamups_channel_client_id";
 
 /// Whether this computer should keep the line open. Default is on.
 /// Logged-out computers still do not connect.
@@ -88,12 +89,41 @@ pub fn teamups_channel_signed_in() -> Result<bool> {
 }
 
 pub fn teamups_channel_hello() -> String {
-    channel_hello_frame(&computer_name(), &computer_os(), &computer_lan_ip())
+    channel_hello_frame(
+        &channel_client_id(),
+        &computer_name(),
+        &computer_os(),
+        &computer_lan_ip(),
+    )
 }
 
-fn channel_hello_frame(name: &str, os: &str, ip: &str) -> String {
+fn channel_client_id() -> String {
+    let Ok(store) = open_settings_store() else {
+        return new_client_id();
+    };
+    if let Ok(Some(existing)) = store.meta_get(CHANNEL_CLIENT_ID_KEY) {
+        let id = clip_field(&existing, 64);
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    let id = new_client_id();
+    let _ = store.meta_set(CHANNEL_CLIENT_ID_KEY, &id);
+    id
+}
+
+fn new_client_id() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    format!("ad-{now:x}")
+}
+
+fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str) -> String {
     json!({
         "type": "hello",
+        "id": clip_field(id, 64),
         "name": clip_field(name, 80),
         "os": clip_field(os, 40),
         "ip": clip_field(ip, 64),
@@ -241,9 +271,10 @@ mod tests {
 
     #[test]
     fn hello_names_this_computer() {
-        let raw = channel_hello_frame("MacBook Pro", "macOS", "192.168.1.8");
+        let raw = channel_hello_frame("ad-1", "MacBook Pro", "macOS", "192.168.1.8");
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["type"], "hello");
+        assert_eq!(value["id"], "ad-1");
         assert_eq!(value["name"], "MacBook Pro");
         assert_eq!(value["os"], "macOS");
         assert_eq!(value["ip"], "192.168.1.8");

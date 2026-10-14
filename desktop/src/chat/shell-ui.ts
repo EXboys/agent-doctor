@@ -10,6 +10,7 @@ export type ShellUiEls = {
   shellEl: HTMLElement;
   cwdEl: HTMLElement;
   workspaceSelectEl: HTMLSelectElement;
+  workspaceAddEl: HTMLButtonElement;
   workspaceActivateEl: HTMLButtonElement;
   workspaceHintEl: HTMLElement;
 };
@@ -61,11 +62,15 @@ export function createShellUiController(deps: ShellUiDeps) {
 
   function renderWorkspaceSwitcher(doc: WorkspaceDoc): void {
     const names = Object.keys(doc.workspaces).sort();
+    deps.workspaceSelectEl.setAttribute("aria-label", t("ask.workspaceSwitch"));
     deps.workspaceSelectEl.innerHTML = "";
-    if (names.length === 0) {
+    const empty = names.length === 0;
+    deps.workspaceAddEl.hidden = !empty;
+    deps.workspaceActivateEl.hidden = empty;
+    if (empty) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = t("ask.workspaceEmpty");
+      opt.textContent = t("workspaces.none");
       deps.workspaceSelectEl.appendChild(opt);
       deps.workspaceSelectEl.disabled = true;
       syncWorkspaceActivateButton(doc);

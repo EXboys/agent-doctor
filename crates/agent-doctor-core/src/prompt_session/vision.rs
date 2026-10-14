@@ -68,6 +68,27 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
             || id.contains("vision")
             || id.contains("-vl");
     }
+    // MiniMax: only M3 / M3.1 accept images. M2.x is text-only.
+    if id.starts_with("minimax") {
+        return id.starts_with("minimax-m3");
+    }
+    // Qwen: 3.5+ chat IDs are native multimodal. Older `qwen3-*` text MoE stays out.
+    if id.starts_with("qwen") {
+        return id.starts_with("qwen3.5")
+            || id.starts_with("qwen3.6")
+            || id.starts_with("qwen3.7")
+            || id.starts_with("qwen3.8")
+            || id.contains("vision")
+            || id.contains("-vl")
+            || id.contains("omni");
+    }
+    // Kimi: K2.5+ and K3 see pictures. Bare `kimi-k2` / `kimi-latest` stay text-only.
+    if id.starts_with("kimi") {
+        return id.starts_with("kimi-k2.")
+            || id.starts_with("kimi-k3")
+            || id.contains("vision")
+            || id.contains("-vl");
+    }
     const PREFIXES: &[&str] = &[
         "gpt-4o",
         "gpt-4.1",
@@ -78,13 +99,10 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
         "claude",
         "gemini",
         "grok-4",
-        "qwen-vl",
-        "qwen2.5-vl",
-        "qwen3-vl",
         "glm-4v",
         "glm-4.5v",
         "glm-5.3-flash",
-        "kimi-vl",
+        "llama-4",
         "pixtral",
     ];
     if PREFIXES.iter().any(|p| id.starts_with(p)) {
@@ -310,7 +328,24 @@ mod tests {
         assert!(model_sees_images("openai/gpt-5.6-terra"));
         assert!(model_sees_images("gemini-3.8-flash"));
         assert!(model_sees_images("glm-5.3-flash"));
+        assert!(model_sees_images("glm-5.3-flashx"));
         assert!(!model_sees_images("glm-5.3"));
+        assert!(model_sees_images("MiniMax-M3"));
+        assert!(model_sees_images("MiniMax-M3.1-Flash-Preview"));
+        assert!(!model_sees_images("MiniMax-M2.5"));
+        assert!(!model_sees_images("MiniMax-M2.1"));
+        assert!(model_sees_images("qwen3.8-max"));
+        assert!(model_sees_images("qwen3.7-plus"));
+        assert!(model_sees_images("qwen3-vl-plus"));
+        assert!(!model_sees_images("qwen3-235b-a22b"));
+        assert!(model_sees_images("kimi-k2.6"));
+        assert!(model_sees_images("kimi-k2.5"));
+        assert!(model_sees_images("kimi-k3"));
+        assert!(!model_sees_images("kimi-k2-instruct"));
+        assert!(!model_sees_images("kimi-latest"));
+        assert!(model_sees_images(
+            "meta-llama/llama-4-maverick-17b-128e-instruct"
+        ));
         assert!(!model_sees_images("some-unknown-model"));
         assert!(!model_sees_images(""));
     }

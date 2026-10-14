@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { appState } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
-import { formatProviderFailure, teamupsLoginFailure, withProviderFailure } from "../friendly-error";
+import { formatProviderFailure, missingProviderFieldsMessage, teamupsLoginFailure, withProviderFailure, type ProviderField } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
 import { PROVIDER_PRESETS } from "../provider-presets";
@@ -637,8 +637,13 @@ export function createPersonalController(deps: PersonalDeps) {
     const model = personalModelEl.value.trim();
     const protocol: ProviderProtocol =
       personalProtocolEl.value === "anthropic" ? "anthropic" : "openai";
-    if (!name || !url || !model || (requireKey && !key && !id)) {
-      setPersonalHint("error", t("personal.missingFields"));
+    const missing: ProviderField[] = [];
+    if (!name) missing.push("name");
+    if (!url) missing.push("url");
+    if (!model) missing.push("model");
+    if (requireKey && !key && !id) missing.push("key");
+    if (missing.length > 0) {
+      setPersonalHint("error", missingProviderFieldsMessage(missing));
       return null;
     }
     return { id, name, url, key, model, protocol };
@@ -656,11 +661,10 @@ export function createPersonalController(deps: PersonalDeps) {
   async function verifyPersonalProvider() {
     const values = personalFormValues(true);
     if (!values) {
-      setPersonalHint("error", t("personal.missingFields"));
       return;
     }
     if (!values.key) {
-      setPersonalHint("error", t("personal.missingFields"));
+      setPersonalHint("error", missingProviderFieldsMessage(["key"]));
       return;
     }
     setPersonalBusy(true);
@@ -708,7 +712,6 @@ export function createPersonalController(deps: PersonalDeps) {
     const editing = Boolean(personalIdEl.value.trim());
     const values = personalFormValues(!editing);
     if (!values) {
-      setPersonalHint("error", t("personal.missingFields"));
       return;
     }
     setPersonalBusy(true);

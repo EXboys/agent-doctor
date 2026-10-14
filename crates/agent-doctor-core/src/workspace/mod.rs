@@ -7,8 +7,6 @@ use std::sync::Mutex;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::adapters::util::home_join;
-
 use self::backends::{
     claude_mcp_summary_for_project, codex_home_from_env, hermes_active_profile,
     hermes_gateway_profiles, openclaw_agent_workspace, workspace_paths_match, RuntimeBindReport,
@@ -822,7 +820,7 @@ fn session_env_from_entry(
     entry: &WorkspaceEntry,
 ) -> std::collections::HashMap<String, String> {
     use std::collections::HashMap;
-    let profile_home = home_join(".hermes/profiles").join(&entry.hermes_profile);
+    let profile_home = crate::adapters::util::hermes_profile_dir(&entry.hermes_profile);
     let mut map = HashMap::new();
     map.insert("AGENT_DOCTOR_WORKSPACE".into(), name.to_string());
     map.insert(

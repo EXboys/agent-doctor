@@ -45,6 +45,7 @@ import {
 export interface AgentsPanelDeps {
   setMainTab: (tab: MainTabId) => void;
   loadWorkspaces: () => Promise<void>;
+  addProject: () => void;
   rewireCurrentMode: (hintEl?: HTMLElement | null) => Promise<void>;
   onDoctorReport: (report: DoctorReport) => Promise<void>;
 }
@@ -262,6 +263,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   const workspaceChip = createAgentsWorkspaceChip({
     setMainTab: (tab) => deps.setMainTab(tab),
     loadWorkspaces: () => deps.loadWorkspaces(),
+    addProject: () => deps.addProject(),
     refreshRuntimeCardActions: diagnose.refreshRuntimeCardActions,
     getActiveRuntimeId: () => appState.activeRuntimeId,
     getRuntimesEl: () => runtimesEl,
@@ -580,7 +582,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     if (action === "activate-workspace") {
       if (!appState.lastWorkspaces || Object.keys(appState.lastWorkspaces.workspaces).length === 0) {
-        deps.setMainTab("workspace");
+        deps.addProject();
         return;
       }
       workspaceChip.toggleAgentsWsPicker();
@@ -669,6 +671,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     setMainWindowWidth: diagnose.setMainWindowWidth,
     MAIN_COMPACT_WIDTH,
     reloadLocale: async () => {
+      if (appState.lastWorkspaces) {
+        workspaceChip.updateAgentsWorkspaceChip(appState.lastWorkspaces);
+      }
       if (appState.lastProfiles) {
         presets.renderProfiles(appState.lastProfiles);
       }

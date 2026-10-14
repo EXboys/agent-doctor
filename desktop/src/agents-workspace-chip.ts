@@ -8,6 +8,7 @@ import { useWorkspace } from "./ipc";
 export interface AgentsWorkspaceChipDeps {
   setMainTab: (tab: MainTabId) => void;
   loadWorkspaces: () => Promise<void>;
+  addProject: () => void;
   refreshRuntimeCardActions: (card: HTMLElement, runtimeId: string) => void;
   getActiveRuntimeId: () => string | null;
   getRuntimesEl: () => HTMLElement;
@@ -28,19 +29,22 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
 
   function renderAgentsWorkspaceQuickList(doc: WorkspacesDocument): void {
     const names = Object.keys(doc.workspaces).sort();
-    if (names.length === 0) {
+    const empty = names.length === 0;
+    agentsWsQuickEl.disabled = false;
+    agentsWsQuickEl.textContent = empty ? t("workspaces.register") : t("agents.wsQuickSwitch");
+    agentsWsListEl.setAttribute("aria-label", t("nav.workspace"));
+    if (empty) {
       agentsWsListEl.innerHTML = `
       <li class="ws-quick-item">
         <span class="ws-quick-item-main">
           <strong>${escapeHtml(t("workspaces.none"))}</strong>
+          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
         </span>
+        <button type="button" class="btn-primary btn-compact" data-agents-add ${appState.workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.register"))}</button>
       </li>
     `;
-      agentsWsQuickEl.disabled = true;
       return;
     }
-
-    agentsWsQuickEl.disabled = false;
     const active = doc.active ?? appState.selectedWorkspaceName;
     agentsWsListEl.innerHTML = names
       .map((name) => {
@@ -77,8 +81,10 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
   }
 
   function updateAgentsWorkspaceChip(doc: WorkspacesDocument): void {
+    const names = Object.keys(doc.workspaces);
     const active = doc.active ?? appState.selectedWorkspaceName ?? null;
-    agentsWsNameEl.textContent = active ?? t("workspaces.noActive");
+    agentsWsNameEl.textContent =
+      active ?? (names.length === 0 ? t("workspaces.none") : t("workspaces.noActive"));
     agentsWsChipEl.classList.toggle("is-empty", !doc.active);
     agentsWsChipEl.classList.toggle("needs-attention", !doc.active);
     renderAgentsWorkspaceQuickList(doc);
@@ -106,6 +112,12 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
   }
 
   agentsWsQuickEl.addEventListener("click", () => {
+    const empty =
+      !appState.lastWorkspaces || Object.keys(appState.lastWorkspaces.workspaces).length === 0;
+    if (empty) {
+      deps.addProject();
+      return;
+    }
     toggleAgentsWsPicker();
   });
 
@@ -115,6 +127,12 @@ export function createAgentsWorkspaceChip(deps: AgentsWorkspaceChipDeps) {
   });
 
   agentsWsListEl.addEventListener("click", (event) => {
+    const add = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-agents-add]");
+    if (add) {
+      closeAgentsWsPicker();
+      deps.addProject();
+      return;
+    }
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-agents-ws]");
     const name = button?.dataset.agentsWs;
     if (name) {

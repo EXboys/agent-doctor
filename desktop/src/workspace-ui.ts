@@ -89,12 +89,15 @@ function renderWorkspaceManageList(doc: WorkspacesDocument): void {
   const names = Object.keys(doc.workspaces).sort();
   appState.selectedWorkspaceName = doc.active ?? appState.selectedWorkspaceName;
 
+  workspaceRegisterEl.hidden = names.length === 0;
   if (names.length === 0) {
     workspaceListEl.innerHTML = `
       <li class="ws-manage-item">
         <div class="ws-manage-main">
           <strong>${escapeHtml(t("workspaces.none"))}</strong>
+          <span>${escapeHtml(t("workspaces.noneHint"))}</span>
         </div>
+        <button type="button" class="btn-primary btn-compact" data-workspace-action="register" ${appState.workspaceBusy ? "disabled" : ""}>${escapeHtml(t("workspaces.register"))}</button>
       </li>
     `;
     return;
@@ -138,8 +141,8 @@ function renderWorkspaces(doc: WorkspacesDocument) {
   renderWorkspaceManageList(doc);
 
   if (Object.keys(doc.workspaces).length === 0) {
-    workspaceStatusEl.textContent = t("workspaces.none");
-    workspaceHintEl.textContent = t("workspaces.noneHint");
+    workspaceStatusEl.textContent = "";
+    workspaceHintEl.textContent = "";
     return;
   }
 
@@ -186,6 +189,12 @@ async function registerWorkspace() {
     return;
   }
 
+  appState.workspaceBusy = true;
+  workspaceRegisterEl.disabled = true;
+  if (appState.lastWorkspaces) {
+    renderWorkspaceManageList(appState.lastWorkspaces);
+  }
+
   let selected: string | string[] | null;
   try {
     selected = await open({
@@ -195,16 +204,24 @@ async function registerWorkspace() {
     });
   } catch (error) {
     workspaceHintEl.textContent = withErrorDetail(t("workspaces.actionFailed"), error);
+    appState.workspaceBusy = false;
+    workspaceRegisterEl.disabled = false;
+    if (appState.lastWorkspaces) {
+      renderWorkspaceManageList(appState.lastWorkspaces);
+    }
     return;
   }
 
   const path = Array.isArray(selected) ? selected[0] : selected;
   if (!path) {
+    appState.workspaceBusy = false;
+    workspaceRegisterEl.disabled = false;
+    if (appState.lastWorkspaces) {
+      renderWorkspaceManageList(appState.lastWorkspaces);
+    }
     return;
   }
 
-  appState.workspaceBusy = true;
-  workspaceRegisterEl.disabled = true;
   workspaceHintEl.textContent = t("workspaces.registering");
   try {
     const report = await initWorkspace({
@@ -568,6 +585,7 @@ export interface WorkspaceUiApi {
   loadWorkspaces: () => Promise<void>;
   loadRemoteProjects: () => Promise<void>;
   renderWorkspaces: (doc: WorkspacesDocument) => void;
+  registerProject: () => Promise<void>;
   getLastWorkspaces: () => WorkspacesDocument | null;
   reloadLocale: () => void;
 }
@@ -586,6 +604,10 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     }
     const name = button.dataset.workspace;
     const action = button.dataset.workspaceAction;
+    if (action === "register") {
+      void registerWorkspace();
+      return;
+    }
     if (!name || !action) {
       return;
     }
@@ -762,6 +784,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     loadWorkspaces,
     loadRemoteProjects,
     renderWorkspaces,
+    registerProject: registerWorkspace,
     getLastWorkspaces: () => appState.lastWorkspaces,
     reloadLocale: () => {
       if (appState.lastWorkspaces) {

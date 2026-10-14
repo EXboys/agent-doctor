@@ -394,7 +394,7 @@ fn powershell_single_quote(value: impl AsRef<std::ffi::OsStr>) -> String {
 
 impl WorkspaceEntry {
     pub(crate) fn hermes_profile_home(&self) -> PathBuf {
-        crate::adapters::util::home_join(".hermes/profiles").join(&self.hermes_profile)
+        crate::adapters::util::hermes_profile_dir(&self.hermes_profile)
     }
 }
 

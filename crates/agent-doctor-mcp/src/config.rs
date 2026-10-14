@@ -125,9 +125,7 @@ fn resolve_hermes_home(explicit: Option<&Path>) -> Result<PathBuf> {
             return Ok(path);
         }
     }
-    home_dir()
-        .map(|home| home.join(".hermes"))
-        .context("Cannot resolve Hermes home (set HERMES_HOME or pass hermes_home)")
+    Ok(agent_doctor_core::adapters::hermes_root())
 }
 
 fn resolve_openclaw_config_path() -> Result<PathBuf> {

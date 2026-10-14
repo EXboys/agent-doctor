@@ -18,7 +18,7 @@ import type {
   RepairPreviewResponse,
   RepairStatusFilter,
 } from "./types";
-import { getPersonalProviderStatus, runRepairPreview, runDoctor, installRuntime, runRepairExecute, activatePersonalProvider } from "./ipc";
+import { getPersonalProviderStatus, runRepairPreview, runDoctor, installRuntime, runRepairExecute, activatePersonalProvider, openPath } from "./ipc";
 
 export interface FirstRunUiDeps {
   panelDiagnoseEl: HTMLElement;
@@ -50,6 +50,8 @@ let firstRunTarget: FirstRunTarget | null = null;
 let firstRunBusy = false;
 let firstRunAutoStarted = false;
 let firstRunError: string | null = null;
+/** Install log to open from the error card. Empty when this failure has no log. */
+let firstRunLogPath: string | null = null;
 /** Last action that failed — retry button re-runs this instead of a bare welcome scan. */
 let firstRunRetryKind: "scan" | "install" | "repair" | "apply" = "scan";
 
@@ -63,6 +65,7 @@ const firstRunPrimaryEl = document.querySelector<HTMLButtonElement>("#first-run-
 const firstRunPrimaryLabelEl = document.querySelector<HTMLElement>("#first-run-primary-label")!;
 const firstRunSpinnerEl = document.querySelector<HTMLElement>("#first-run-spinner")!;
 const firstRunSecondaryEl = document.querySelector<HTMLButtonElement>("#first-run-secondary")!;
+const firstRunLogEl = document.querySelector<HTMLButtonElement>("#first-run-log")!;
 const firstRunFootnoteEl = document.querySelector<HTMLElement>("#first-run-footnote")!;
 
 function firstRunCopy() {
@@ -73,11 +76,13 @@ function firstRunCopy() {
     }),
     needsRepair: (name: string, fail: number, warn: number, top?: string) => ({
       headline: t("firstRun.repairHeadline", { name }),
-      detail: t("firstRun.repairDetail", {
-        fail: String(fail),
-        warn: String(warn),
-        top: top ? t("firstRun.repairTop", { top }) : "",
-      }),
+      detail:
+        top ||
+        t("firstRun.repairDetail", {
+          fail: String(fail),
+          warn: String(warn),
+          top: "",
+        }),
     }),
     needsWiring: (name: string) => ({
       headline: t("firstRun.wiringHeadline", { name }),
@@ -104,8 +109,13 @@ function setFirstRunPhase(phase: FirstRunPhase): void {
   applyStaticI18n(firstRunEl);
 }
 
-function showError(message: string, retry: "scan" | "install" | "repair" | "apply"): void {
+function showError(
+  message: string,
+  retry: "scan" | "install" | "repair" | "apply",
+  logPath: string | null = null,
+): void {
   firstRunError = message;
+  firstRunLogPath = logPath;
   firstRunRetryKind = retry;
   firstRunBusy = false;
   firstRunPhase = "error";
@@ -115,6 +125,7 @@ function showError(message: string, retry: "scan" | "install" | "repair" | "appl
 
 function clearError(): void {
   firstRunError = null;
+  firstRunLogPath = null;
 }
 
 function renderFirstRunUi(): void {
@@ -132,6 +143,12 @@ function renderFirstRunUi(): void {
     firstRunPhase === "installing";
   firstRunSpinnerEl.hidden = !busy;
   firstRunPrimaryEl.disabled = busy;
+  const showInstallLog = firstRunPhase === "error" && Boolean(firstRunLogPath);
+  firstRunLogEl.hidden = !showInstallLog;
+  if (showInstallLog) {
+    firstRunLogEl.textContent = t("runtime.openInstallLog");
+    firstRunLogEl.disabled = busy;
+  }
   // Allow skip even while scanning so users are not trapped.
   firstRunSecondaryEl.disabled = false;
 
@@ -375,15 +392,17 @@ function installSucceeded(report: InstallRuntimeResponse): boolean {
   return report.install_succeeded || report.after_installed;
 }
 
-function installFailureDetail(report: InstallRuntimeResponse): string {
-  const reason =
-    report.skipped.map((item) => item.reason).find(Boolean) ||
-    report.manual_fallback[0] ||
-    "";
+function installFailureDetail(report: InstallRuntimeResponse): {
+  message: string;
+  logPath: string | null;
+} {
   if (report.install_log_path) {
-    return withErrorDetail(t("firstRun.installIncomplete"), reason || report.install_log_path);
+    return {
+      message: t("firstRun.installIncomplete"),
+      logPath: report.install_log_path,
+    };
   }
-  return withErrorDetail(t("firstRun.installFailed"), reason || "unknown");
+  return { message: t("firstRun.installFailed"), logPath: null };
 }
 
 async function runFirstRunInstall(target: FirstRunTarget): Promise<void> {
@@ -397,7 +416,8 @@ async function runFirstRunInstall(target: FirstRunTarget): Promise<void> {
       force: false,
     });
     if (!installSucceeded(report)) {
-      showError(installFailureDetail(report), "install");
+      const failure = installFailureDetail(report);
+      showError(failure.message, "install", failure.logPath);
       return;
     }
     invalidatePreview(target.runtimeId);
@@ -615,6 +635,13 @@ export function initFirstRunUi(d: FirstRunUiDeps): FirstRunUiApi {
   deps = d;
   firstRunPrimaryEl.addEventListener("click", () => {
     void runFirstRunPrimaryAction();
+  });
+  firstRunLogEl.addEventListener("click", () => {
+    const path = firstRunLogPath;
+    if (!path) return;
+    void openPath({ path }).catch((error) => {
+      deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
+    });
   });
   firstRunSecondaryEl.addEventListener("click", () => {
     if (firstRunBusy && firstRunPhase !== "error") {

@@ -6,14 +6,17 @@ import {
   computeDiagnoseScore,
   needsWiringFromPreview,
   scoreLooksGood,
+  settingsApplyKind,
   type DiagnoseStepId,
 } from "../diagnose-flow";
 import { isPersonalEdition } from "../edition";
 import {
   explainLlmAccountBlock,
+  missingProviderFieldsMessage,
   withErrorDetail,
   formatProviderFailure,
   withProviderFailure,
+  type ProviderField,
 } from "../friendly-error";
 import { isDesktopAppRuntimeId } from "../agents-ui";
 import { t } from "../i18n";
@@ -97,7 +100,15 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       session.preview = await runRepairExecute({
         runtime: session.runtimeId,
       });
-      paint.setResult("ok", t("diagnose.flow.autoFixOk"));
+      const kind = settingsApplyKind(session.preview);
+      const note =
+        kind === "nothing"
+          ? t("diagnose.flow.autoFixNoChange")
+          : kind === "still-fail"
+            ? t("diagnose.flow.autoFixStillFail")
+            : t("diagnose.flow.autoFixOk");
+      session.repairNotice = note;
+      paint.setResult(kind === "changed" ? "ok" : "warn", note);
       await deps.refreshState({ preferStep: "test" });
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("diagnose.flow.autoFixFailed"), error));
@@ -108,7 +119,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function runDeepRepair(): Promise<void> {
     const ok = await ask(t("diagnose.flow.deepRepairConfirm"), {
-      title: t("repair.oneClick"),
+      title: t("diagnose.flow.deepRepairCta"),
       kind: "info",
       okLabel: t("diagnose.flow.deepRepairOk"),
       cancelLabel: t("diagnose.flow.deepRepairCancel"),
@@ -148,8 +159,12 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     const protocol = (
       dom.protocolEl.value === "anthropic" ? "anthropic" : "openai"
     ) as ProviderProtocol;
-    if (!url || !key || !model) {
-      paint.setResult("error", t("diagnose.flow.missingFields"));
+    const missing: ProviderField[] = [];
+    if (!url) missing.push("url");
+    if (!key) missing.push("key");
+    if (!model) missing.push("model");
+    if (missing.length > 0) {
+      paint.setResult("error", missingProviderFieldsMessage(missing));
       return;
     }
 

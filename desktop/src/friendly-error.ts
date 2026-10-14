@@ -262,7 +262,7 @@ export type ChatFailureKind =
   | "network"
   | "unknown";
 
-export type ChatFailureAction = "provider" | "repair" | "native";
+export type ChatFailureAction = "provider" | "repair" | "native" | "privacy" | "askAgain";
 
 export type ChatFailureExplain = {
   kind: ChatFailureKind;
@@ -318,6 +318,27 @@ function isGeoBlockedService(lower: string): boolean {
   );
 }
 
+export type ProviderField = "name" | "url" | "key" | "model";
+
+/** One sentence that names only the fields that are still empty. */
+export function missingProviderFieldsMessage(missing: ProviderField[]): string {
+  const labels = missing.map((field) => {
+    switch (field) {
+      case "name":
+        return t("personal.fieldName");
+      case "url":
+        return t("personal.fieldUrl");
+      case "key":
+        return t("personal.fieldKey");
+      case "model":
+        return t("personal.fieldModel");
+    }
+  });
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return t("personal.missingOne", { field: labels[0] });
+  return t("personal.missingList", { fields: labels.join("、") });
+}
+
 /** Classify Codex / Ask stderr and API dumps for in-chat beginner copy. */
 export function explainChatFailure(raw: string): ChatFailureExplain | null {
   const text = raw.trim();
@@ -348,7 +369,7 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       kind: "rate_limit",
       message: t("chat.fail.rateLimit.message"),
       next: t("chat.fail.rateLimit.next"),
-      actions: [],
+      actions: ["askAgain"],
     };
   }
 
@@ -375,16 +396,13 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       kind: "macos_denied",
       message: t("chat.fail.macosDenied.message"),
       next: t("chat.fail.macosDenied.next"),
-      actions: [],
+      actions: ["privacy"],
     };
   }
 
   const provider = explainProviderFailure(text);
-  const actions: ChatFailureAction[] = ["provider"];
-  if (provider.kind === "url" || provider.kind === "unknown") {
-    actions.push("repair");
-  }
-  actions.push("native");
+  // Address and unknown failures cannot be rewritten here. Do not offer a settings apply.
+  const actions: ChatFailureAction[] = ["provider", "native"];
 
   let kind: ChatFailureKind = "unknown";
   if (provider.kind === "glm_plan") kind = "glm_coding_plan";

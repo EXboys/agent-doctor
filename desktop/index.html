@@ -61,7 +61,7 @@
         <button type="button" class="main-tab is-active" role="tab" aria-selected="true" data-main-tab="diagnose" data-i18n="nav.agents">Agent</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="resources" data-i18n="nav.resources">资源</button>
         <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="provider" data-i18n="nav.wiring">服务商</button>
-        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="workspace" data-i18n="nav.workspace">工作区</button>
+        <button type="button" class="main-tab" role="tab" aria-selected="false" data-main-tab="workspace" data-i18n="nav.workspace">项目</button>
       </nav>
 
       <div class="main-panels">
@@ -79,6 +79,7 @@
                   <span class="btn-label" id="first-run-primary-label" data-i18n="firstRun.scan">扫描环境</span>
                   <span class="spinner" id="first-run-spinner" hidden aria-hidden="true"></span>
                 </button>
+                <button type="button" class="btn-ghost btn-compact" id="first-run-log" data-i18n="runtime.openInstallLog" hidden>打开安装日志</button>
                 <button type="button" class="btn-ghost btn-compact" id="first-run-secondary" data-i18n="firstRun.skip">稍后再说</button>
               </div>
               <p class="first-run-footnote" id="first-run-footnote" data-i18n="firstRun.footnote">随时可用顶部「扫描」复查。</p>
@@ -87,7 +88,7 @@
             <div class="agents-main" id="agents-main">
             <div class="ws-chip" id="agents-ws-chip">
               <span class="ws-chip-label">
-                <span data-i18n="agents.wsCurrent">当前工作区</span>
+                <span data-i18n="agents.wsCurrent">当前项目</span>
                 <strong id="agents-ws-name">—</strong>
               </span>
               <span class="ws-chip-actions">
@@ -96,8 +97,8 @@
               </span>
             </div>
             <div class="ws-quick-picker" id="agents-ws-picker" hidden>
-              <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="Workspaces"></ul>
-              <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">快切工作区</p>
+              <ul id="agents-ws-list" class="ws-quick-list" role="listbox" aria-label="项目"></ul>
+              <p class="ws-quick-footnote" data-i18n="agents.wsQuickHint">切换项目</p>
             </div>
 
             <section class="health-card agents-security-overview" id="agents-security-overview" aria-live="polite">
@@ -392,9 +393,9 @@
           <section class="widget-section">
             <div class="section-label section-label-stack">
               <div class="section-heading">
-                <h2 data-i18n="workspaces.manageTitle">本机目录</h2>
+                <h2 data-i18n="workspaces.manageTitle">项目</h2>
               </div>
-              <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">添加</button>
+              <button id="workspace-register" type="button" class="btn-primary btn-compact" data-i18n="workspaces.register">添加项目</button>
             </div>
             <ul id="workspace-list" class="ws-manage-list" aria-live="polite"></ul>
             <p id="workspace-status" class="section-footnote"></p>

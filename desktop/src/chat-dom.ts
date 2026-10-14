@@ -63,6 +63,7 @@ export const decisionDetailEl = document.querySelector<HTMLElement>("#chat-decis
 export const decisionActionsEl = document.querySelector<HTMLElement>("#chat-decision-actions")!;
 export const cwdEl = document.querySelector<HTMLElement>("#chat-cwd")!;
 export const workspaceSelectEl = document.querySelector<HTMLSelectElement>("#chat-workspace-select")!;
+export const workspaceAddEl = document.querySelector<HTMLButtonElement>("#chat-workspace-add")!;
 export const workspaceActivateEl = document.querySelector<HTMLButtonElement>("#chat-workspace-activate")!;
 export const workspaceHintEl = document.querySelector<HTMLElement>("#chat-workspace-hint")!;
 export const titleEl = document.querySelector<HTMLElement>("#chat-title")!;

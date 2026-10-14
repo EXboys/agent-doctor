@@ -293,6 +293,7 @@ pub fn teamups_channel_ask_command(
     request_id: String,
     text: String,
     wait: Option<bool>,
+    questions: Option<serde_json::Value>,
 ) -> Result<(), String> {
     let frame = json!({
         "type": "ask",
@@ -300,6 +301,7 @@ pub fn teamups_channel_ask_command(
         "requestId": request_id,
         "text": text,
         "wait": wait.unwrap_or(true),
+        "questions": questions,
     })
     .to_string();
     let outbound = app

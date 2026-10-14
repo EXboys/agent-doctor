@@ -1,3 +1,4 @@
+import { plainRepairCheckCopy } from "./repair-plain";
 import type { DoctorReport, RepairPreviewResponse, RuntimeDoctorResult } from "./types";
 
 const STORAGE_KEY = "agent-doctor.personal-first-run.v1";
@@ -168,7 +169,9 @@ export function pickBiggestFirstRunTarget(
     const topWarn = preview.checks.find(
       (c) => c.status === "warn" && isFirstRunBlockingCheck(c),
     );
-    const top = topFail?.title ?? topWarn?.title;
+    const topCheck = topFail ?? topWarn;
+    const plain = topCheck ? plainRepairCheckCopy(topCheck) : null;
+    const top = plain?.message || undefined;
     const kind: FirstRunActionKind = preview.can_apply_repair
       ? "repair"
       : isCredentialWiringPreview(preview)
@@ -194,7 +197,7 @@ export function pickBiggestFirstRunTarget(
         fail: preview.summary.fail,
         warn: preview.summary.warn,
         canApply: preview.can_apply_repair,
-        topCheck: top,
+        topCheck: plain?.title,
       };
     }
   }

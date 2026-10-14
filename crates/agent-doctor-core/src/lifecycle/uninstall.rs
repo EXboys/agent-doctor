@@ -99,41 +99,153 @@ PY"#
     .to_string()
 }
 
-/// `install.ps1` puts the program and the saved settings in the same folder
-/// (`%LOCALAPPDATA%\hermes`, or `HERMES_HOME`) and adds its launchers to the user
-/// PATH. `hermes uninstall` needs a terminal, which Windows cannot fake through a
-/// pipe, so remove the program parts here and keep config, keys and chats.
-const HERMES_WINDOWS_UNINSTALL_PS1: &str = r#"
+/// `install.ps1` puts the program next to the saved settings and adds its
+/// launchers to the user PATH. On Windows that program is often
+/// `%LOCALAPPDATA%\hermes`, while the checkout itself is the sibling
+/// `%LOCALAPPDATA%\hermes-agent`. `HERMES_HOME` during a chat is the project
+/// profile, not that program folder. `hermes uninstall` also needs a terminal,
+/// which a pipe cannot provide. Remove the program folders we found and keep
+/// config, keys and chats.
+fn hermes_windows_uninstall_script(roots: &[std::path::PathBuf]) -> String {
+    let listed = roots
+        .iter()
+        .map(|path| format!("'{}'", path.display().to_string().replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"
 $ErrorActionPreference = 'Continue'
-$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
-$root = $root.TrimEnd('\')
-if (-not (Test-Path -LiteralPath $root)) { exit 3 }
-$prefix = $root + '\'
-Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
-    Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 800
+$roots = @({listed})
 $program = @('hermes-agent', 'bin', 'node', 'tools', 'git', 'python', 'uv', 'venv', 'runtime',
              'hermes.cmd', 'hermes.exe', 'hermes.bat', 'hermes.ps1')
-foreach ($name in $program) {
-    $path = Join-Path $root $name
-    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+$seen = $false
+foreach ($root in $roots) {{
+    if (-not $root) {{ continue }}
+    $root = $root.TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $root)) {{ continue }}
+    $seen = $true
+    $prefix = $root + '\'
+    Get-Process | Where-Object {{ $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }} |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}}
+if (-not $seen) {{ exit 3 }}
+Start-Sleep -Milliseconds 800
+foreach ($root in $roots) {{
+    if (-not $root) {{ continue }}
+    $root = $root.TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $root)) {{ continue }}
+    $prefix = $root + '\'
+    $leaf = Split-Path -Leaf $root
+    if ($leaf -ieq 'hermes-agent') {{
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }} else {{
+        foreach ($name in $program) {{
+            $path = Join-Path $root $name
+            if (Test-Path -LiteralPath $path) {{ Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }}
+        }}
+    }}
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($userPath) {{
+        $kept = $userPath -split ';' | Where-Object {{
+            $entry = $_.TrimEnd('\')
+            $entry -and -not ($entry -ieq $root -or $entry.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))
+        }}
+        $joined = $kept -join ';'
+        if ($joined -ne $userPath) {{ [Environment]::SetEnvironmentVariable('Path', $joined, 'User') }}
+    }}
+}}
+$left = @()
+foreach ($root in $roots) {{
+    if (-not $root) {{ continue }}
+    $root = $root.TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $root)) {{ continue }}
+    $leaf = Split-Path -Leaf $root
+    if ($leaf -ieq 'hermes-agent') {{ $left += $root; continue }}
+    foreach ($name in $program) {{
+        if (Test-Path -LiteralPath (Join-Path $root $name)) {{ $left += (Join-Path $root $name) }}
+    }}
+}}
+if ($left) {{ exit 2 }}
+"#
+    )
 }
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath) {
-    $kept = $userPath -split ';' | Where-Object {
-        $entry = $_.TrimEnd('\')
-        $entry -and -not ($entry -ieq $root -or $entry.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))
+
+/// Folders that hold the Hermes program, not a project profile.
+///
+/// A profile under `HERMES_HOME` only has settings. The command Windows
+/// actually runs often lives in `%LOCALAPPDATA%\hermes-agent`.
+fn hermes_program_roots(
+    home: &std::path::Path,
+    local_app_data: Option<&std::path::Path>,
+    binaries: &[std::path::PathBuf],
+) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    let mut push = |path: std::path::PathBuf| {
+        if !is_safe_hermes_program_root(&path, home, local_app_data) {
+            return;
+        }
+        if roots
+            .iter()
+            .any(|existing: &std::path::PathBuf| existing == &path)
+        {
+            return;
+        }
+        roots.push(path);
+    };
+    if let Some(local) = local_app_data {
+        let native = local.join("hermes");
+        if native.is_dir() {
+            push(native);
+        }
+        let checkout = local.join("hermes-agent");
+        if checkout.is_dir() {
+            push(checkout);
+        }
     }
-    $joined = $kept -join ';'
-    if ($joined -ne $userPath) { [Environment]::SetEnvironmentVariable('Path', $joined, 'User') }
+    let legacy = home.join(".hermes");
+    if crate::adapters::util::hermes_install_owns(&legacy) {
+        push(legacy);
+    }
+    for binary in binaries {
+        if let Some((data_root, checkout)) = crate::adapters::util::hermes_install_location(binary)
+        {
+            push(data_root);
+            if let Some(checkout) = checkout {
+                push(checkout);
+            }
+        }
+    }
+    roots
 }
-$left = $program | Where-Object { Test-Path -LiteralPath (Join-Path $root $_) }
-if ($left) { exit 2 }
-"#;
+
+fn is_safe_hermes_program_root(
+    path: &std::path::Path,
+    home: &std::path::Path,
+    _local_app_data: Option<&std::path::Path>,
+) -> bool {
+    if path == home || path.parent().is_none() {
+        return false;
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    !matches!(
+        name.to_ascii_lowercase().as_str(),
+        "users" | "appdata" | "local" | "localappdata" | "windows" | "program files"
+    )
+}
 
 fn uninstall_hermes_windows() -> Result<()> {
+    let home = crate::adapters::util::home_dir();
+    let local = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let binaries = find_all_binaries("hermes");
+    let roots = hermes_program_roots(&home, local.as_deref(), &binaries);
+    if roots.is_empty() {
+        bail!("没找到 Hermes 的安装文件夹。它可能是用别的方式装的，请用当时安装它的方式卸掉。");
+    }
     let capture = super::runner::run_shell_command_capturing(&super::powershell_encoded(
-        HERMES_WINDOWS_UNINSTALL_PS1,
+        &hermes_windows_uninstall_script(&roots),
     ))?;
     match capture.exit_code {
         Some(0) => {}
@@ -318,11 +430,32 @@ mod tests {
 
     #[test]
     fn windows_hermes_uninstall_removes_the_program_and_keeps_settings() {
-        let script = HERMES_WINDOWS_UNINSTALL_PS1;
-        assert!(!script.contains("<<"), "cmd cannot run a heredoc");
-        for program in ["'hermes-agent'", "'bin'", "'node'", "'tools'"] {
-            assert!(script.contains(program), "{program}");
-        }
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let local = temp.path().join("Local");
+        std::fs::create_dir_all(local.join("hermes")).unwrap();
+        let checkout = local.join("hermes-agent");
+        let command = checkout.join("venv").join("Scripts").join("hermes.exe");
+        std::fs::create_dir_all(command.parent().unwrap()).unwrap();
+        std::fs::write(&command, "").unwrap();
+        let profile = home.join(".hermes").join("profiles").join("default");
+        std::fs::create_dir_all(&profile).unwrap();
+        let roots = hermes_program_roots(&home, Some(&local), &[command]);
+        assert!(roots.iter().any(|path| path == &local.join("hermes")));
+        assert!(roots.iter().any(|path| path == &checkout));
+        assert!(!roots.iter().any(|path| path == &profile));
+
+        let custom = temp.path().join("Tools").join("MyHermes");
+        let custom_command = custom.join("bin").join("hermes.exe");
+        std::fs::create_dir_all(custom_command.parent().unwrap()).unwrap();
+        std::fs::write(&custom_command, "").unwrap();
+        std::fs::create_dir_all(custom.join("tools")).unwrap();
+        let custom_roots = hermes_program_roots(&home, Some(&local), &[custom_command]);
+        assert!(custom_roots.iter().any(|path| path == &custom));
+
+        let script = hermes_windows_uninstall_script(&roots);
+        assert!(!script.contains("HERMES_HOME"));
+        assert!(script.contains("hermes-agent"));
         for kept in ["config.yaml", ".env", "sessions", "memories", "skills"] {
             assert!(!script.contains(kept), "{kept} must stay");
         }

@@ -5,6 +5,7 @@ import type {
   ResourcesScopeTab,
   SkillListCategory,
 } from "../ask-resources";
+import { paintResourceEmpty } from "../ask-resources";
 import {
   loadPinnedSkillIds,
   loadSkillOrder,
@@ -119,8 +120,8 @@ function paintContent(): void {
     mcpList.replaceChildren();
     skillsEmpty.hidden = false;
     mcpEmpty.hidden = false;
-    skillsEmpty.textContent = t("chat.skillsEmpty");
-    mcpEmpty.textContent = t("chat.mcpEmpty");
+    paintResourceEmpty(skillsEmpty, t("chat.skillsEmpty"), "skill");
+    paintResourceEmpty(mcpEmpty, t("chat.mcpEmpty"), "tool");
     return;
   }
 
@@ -362,6 +363,23 @@ function openResourcesPage(): void {
 
 export function bindResourcesPage(next: Deps): void {
   deps = next;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement | null)?.closest?.<HTMLButtonElement>(
+      "[data-empty-action]",
+    );
+    if (!button) return;
+    if (button.dataset.emptyAction === "tool") {
+      deps.openManage();
+      return;
+    }
+    if (button.dataset.emptyAction !== "skill") return;
+    if (!isResourcesPageOpen()) openResourcesPage();
+    requestAnimationFrame(() => {
+      const menu = document.querySelector<HTMLElement>("#chat-resources-add-menu");
+      if (menu && !menu.hidden) return;
+      document.querySelector<HTMLButtonElement>("#chat-resources-add-skill")?.click();
+    });
+  });
   openEl()?.addEventListener("click", () => {
     if (isResourcesPageOpen()) closeResourcesPage();
     else openResourcesPage();

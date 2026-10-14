@@ -18,5 +18,5 @@ pub use deepseek_harness::{
 pub use hermes::{HermesAdapter, HermesSettings};
 pub use openclaw::{configured_base_url, OpenClawAdapter};
 pub use qoder::QoderAdapter;
-pub use util::refresh_managed_runtime_path;
+pub use util::{hermes_root, refresh_managed_runtime_path};
 pub use workbuddy::WorkbuddyAdapter;

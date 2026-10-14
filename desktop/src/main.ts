@@ -100,6 +100,10 @@ function applyMainLocale() {
 refs.agents = initAgentsPanel({
   setMainTab,
   loadWorkspaces: () => refs.workspace!.loadWorkspaces(),
+  addProject: () => {
+    setMainTab("workspace");
+    void refs.workspace?.registerProject();
+  },
   rewireCurrentMode: (hintEl) => refs.wiring!.rewireCurrentMode(hintEl),
   onDoctorReport: async (report) => {
     refs.resources?.updateResourcesHubSummary();

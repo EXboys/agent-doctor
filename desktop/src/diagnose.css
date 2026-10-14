@@ -930,7 +930,7 @@ html:has(.diagnose-page) body {
 
 .diagnose-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -951,6 +951,17 @@ html:has(.diagnose-page) body {
 .diagnose-actions .btn-secondary[hidden],
 .diagnose-actions .btn-primary[hidden],
 .diagnose-actions .diagnose-deep-entry[hidden] {
+  display: none !important;
+}
+
+.diagnose-actions > .diagnose-result {
+  flex: 1 0 100%;
+  width: 100%;
+  margin: 0;
+  min-height: 0;
+}
+
+.diagnose-actions > .diagnose-result.is-slot[hidden] {
   display: none !important;
 }
 

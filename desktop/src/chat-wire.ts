@@ -37,6 +37,7 @@ import {
   decisionActionsEl,
   cwdEl,
   workspaceSelectEl,
+  workspaceAddEl,
   workspaceActivateEl,
   workspaceHintEl,
   titleEl,
@@ -159,6 +160,7 @@ export function wireChatControllers(): void {
   const chatFailureHandlers = {
     setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => setStatus(text, tone),
     selectedRuntime: () => selectedRuntime(),
+    focusPrompt: () => promptEl.focus(),
   };
   const showChatFailureBubble = (explain: ChatFailureExplain) => {
     if (!markChatFailureBubbleShown()) return;
@@ -320,6 +322,7 @@ export function wireChatControllers(): void {
     shellEl,
     cwdEl,
     workspaceSelectEl,
+    workspaceAddEl,
     workspaceActivateEl,
     workspaceHintEl,
     askResources,

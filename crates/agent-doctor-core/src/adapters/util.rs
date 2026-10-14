@@ -29,7 +29,295 @@ pub fn home_dir() -> PathBuf {
 }
 
 pub fn home_join(relative: &str) -> PathBuf {
+    if relative == ".hermes" {
+        return hermes_root();
+    }
+    if let Some(rest) = relative.strip_prefix(".hermes/") {
+        return hermes_root().join(rest);
+    }
     home_dir().join(relative)
+}
+
+/// Data directory of the Hermes install that is actually on this computer.
+///
+/// A profile has to live inside that directory. Anywhere else, Hermes treats
+/// the launch as borrowed and builds a second Python environment, which fails
+/// on some Windows machines before any reply. The official installer uses
+/// `%LOCALAPPDATA%\hermes`; an install that already lives in `~\.hermes` stays
+/// there.
+pub fn hermes_root() -> PathBuf {
+    let root = hermes_root_path();
+    adopt_legacy_hermes_home(&root);
+    root
+}
+
+/// `HERMES_HOME` for one project profile, under [`hermes_root`].
+pub fn hermes_profile_dir(profile: &str) -> PathBuf {
+    hermes_root().join("profiles").join(profile)
+}
+
+fn hermes_root_path() -> PathBuf {
+    #[cfg(test)]
+    {
+        if TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_some()) {
+            return home_dir().join(".hermes");
+        }
+        // Unit tests must not scan or adopt the developer's real Hermes.
+        hermes_root_for(
+            cfg!(windows),
+            &home_dir(),
+            local_app_data_dir().as_deref(),
+            false,
+            false,
+            false,
+            false,
+        )
+    }
+    #[cfg(not(test))]
+    {
+        static CACHE: OnceLock<PathBuf> = OnceLock::new();
+        CACHE
+            .get_or_init(|| {
+                detect_hermes_root(
+                    cfg!(windows),
+                    &home_dir(),
+                    local_app_data_dir().as_deref(),
+                    find_binary("hermes").as_deref(),
+                )
+            })
+            .clone()
+    }
+}
+
+fn detect_hermes_root(
+    windows: bool,
+    home: &Path,
+    local_app_data: Option<&Path>,
+    binary: Option<&Path>,
+) -> PathBuf {
+    if windows {
+        if let Some(binary) = binary {
+            if let Some((root, _)) = hermes_install_location(binary) {
+                return root;
+            }
+        }
+    }
+    let native = windows_native_hermes_root(home, local_app_data);
+    let legacy = home.join(".hermes");
+    hermes_root_for(
+        windows,
+        home,
+        local_app_data,
+        hermes_install_owns(&native),
+        hermes_install_owns(&legacy),
+        binary.is_some_and(|path| path_is_inside(path, &native)),
+        binary.is_some_and(|path| path_is_inside(path, &legacy)),
+    )
+}
+
+/// The data directory that owns this `hermes` command, and the checkout folder
+/// when that checkout sits beside it.
+///
+/// Walks only the command's parent folders. A custom location such as
+/// `D:\Tools\MyHermes` counts when it contains `tools/`, `bin/hermes`, or a
+/// `hermes-agent` checkout. A folder that only has a failed `installs/` tree
+/// does not.
+pub(crate) fn hermes_install_location(binary: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
+    let mut checkout = None;
+    for ancestor in binary.ancestors().skip(1) {
+        if ancestor.parent().is_none() || is_broad_directory(ancestor) {
+            break;
+        }
+        if hermes_install_owns(ancestor) {
+            return Some((ancestor.to_path_buf(), checkout));
+        }
+        if checkout.is_none() && is_hermes_checkout(ancestor) {
+            checkout = Some(ancestor.to_path_buf());
+        }
+    }
+    let checkout = checkout?;
+    if let Some(parent) = checkout.parent() {
+        let sibling = parent.join("hermes");
+        if hermes_install_owns(&sibling) {
+            return Some((sibling, Some(checkout)));
+        }
+    }
+    Some((checkout.clone(), Some(checkout)))
+}
+
+fn is_hermes_checkout(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    name.eq_ignore_ascii_case("hermes-agent")
+        && (path.join("venv").is_dir()
+            || path.join(".git").is_dir()
+            || path.join("pyproject.toml").is_file())
+}
+
+fn is_broad_directory(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "users" | "appdata" | "local" | "localappdata" | "windows" | "program files"
+    )
+}
+
+fn windows_native_hermes_root(home: &Path, local_app_data: Option<&Path>) -> PathBuf {
+    if let Some(local) = local_app_data {
+        if !local.as_os_str().is_empty() {
+            return local.join("hermes");
+        }
+    }
+    home.join("AppData").join("Local").join("hermes")
+}
+
+/// The directory that published this install: launchers, `tools/`, or the checkout.
+/// A borrowed data root only has `installs/` from a failed rebuild, and does not count.
+pub(crate) fn hermes_install_owns(root: &Path) -> bool {
+    if root.join("tools").is_dir() || root.join("hermes-agent").is_dir() {
+        return true;
+    }
+    ["hermes.cmd", "hermes.exe", "hermes"]
+        .into_iter()
+        .any(|name| root.join("bin").join(name).is_file())
+}
+
+fn path_is_inside(path: &Path, root: &Path) -> bool {
+    let path = normalize_path_for_set(path);
+    let root = normalize_path_for_set(root);
+    let root = root.trim_end_matches(['\\', '/']);
+    path == root || path.starts_with(&format!("{root}/")) || path.starts_with(&format!("{root}\\"))
+}
+
+fn local_app_data_dir() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+/// Pick the install the running `hermes` belongs to.
+///
+/// `native_owns` / `legacy_owns` mean that directory published the program
+/// (`tools/`, `hermes-agent/`, or `bin/hermes`). A second folder that only
+/// contains a failed `installs/` tree is not an owner. When both own an
+/// install, the folder that contains the `hermes` command wins.
+pub(crate) fn hermes_root_for(
+    windows: bool,
+    home: &Path,
+    local_app_data: Option<&Path>,
+    native_owns: bool,
+    legacy_owns: bool,
+    binary_inside_native: bool,
+    binary_inside_legacy: bool,
+) -> PathBuf {
+    if !windows {
+        return home.join(".hermes");
+    }
+    let native = windows_native_hermes_root(home, local_app_data);
+    let legacy = home.join(".hermes");
+    if binary_inside_native && (native_owns || !legacy_owns) {
+        return native;
+    }
+    if binary_inside_legacy && (legacy_owns || !native_owns) {
+        return legacy;
+    }
+    if native_owns {
+        return native;
+    }
+    if legacy_owns {
+        return legacy;
+    }
+    native
+}
+
+fn adopt_legacy_hermes_home(root: &Path) {
+    #[cfg(test)]
+    {
+        if TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_none()) {
+            return;
+        }
+    }
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let legacy = home_dir().join(".hermes");
+        adopt_legacy_hermes_tree(&legacy, root);
+    });
+}
+
+/// Copy a pre-Windows-fix `~\.hermes` into the installer home without touching
+/// the Python environment that already lives there.
+pub(crate) fn adopt_legacy_hermes_tree(legacy: &Path, root: &Path) {
+    if paths_same(legacy, root) || !legacy.is_dir() {
+        return;
+    }
+    let _ = copy_hermes_tree(legacy, root);
+}
+
+fn paths_same(left: &Path, right: &Path) -> bool {
+    normalize_path_for_set(left) == normalize_path_for_set(right)
+}
+
+const HERMES_TREE_SKIP: &[&str] = &[
+    "installs",
+    "tools",
+    "venv",
+    "environments",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    "bin",
+    "python",
+    "uv",
+    "runtime",
+    "git",
+    "node",
+];
+
+fn copy_hermes_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_text = name.to_string_lossy();
+        if HERMES_TREE_SKIP
+            .iter()
+            .any(|skip| name_text.eq_ignore_ascii_case(skip))
+        {
+            continue;
+        }
+        let dest = to.join(&name);
+        if entry.path().is_dir() {
+            copy_hermes_tree(&entry.path(), &dest)?;
+        } else if !dest.exists() {
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// `claude.cmd` inside Hermes's own virtualenv is not Claude Code.
+fn is_foreign_venv_shim(path: &Path) -> bool {
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem == "hermes" || stem == "hermes-agent" {
+        return false;
+    }
+    let text = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    text.contains("/hermes-agent/venv/") || text.contains("/hermes/venv/")
 }
 
 /// Platform config directory (`~/Library/Application Support` on macOS).
@@ -143,12 +431,12 @@ fn find_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
             continue;
         }
         for candidate in windows_shim_candidates(dir, name) {
-            if path_is_file(&candidate) {
+            if path_is_file(&candidate) && !is_foreign_venv_shim(&candidate) {
                 return Some(candidate);
             }
         }
         let candidate = dir.join(name);
-        if path_is_file(&candidate) {
+        if path_is_file(&candidate) && !is_foreign_venv_shim(&candidate) {
             return Some(candidate);
         }
     }
@@ -163,12 +451,18 @@ fn find_all_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
             continue;
         }
         for candidate in windows_shim_candidates(dir, name) {
-            if path_is_file(&candidate) && seen.insert(normalize_path_for_set(&candidate)) {
+            if path_is_file(&candidate)
+                && !is_foreign_venv_shim(&candidate)
+                && seen.insert(normalize_path_for_set(&candidate))
+            {
                 found.push(candidate);
             }
         }
         let candidate = dir.join(name);
-        if path_is_file(&candidate) && seen.insert(normalize_path_for_set(&candidate)) {
+        if path_is_file(&candidate)
+            && !is_foreign_venv_shim(&candidate)
+            && seen.insert(normalize_path_for_set(&candidate))
+        {
             found.push(candidate);
         }
     }
@@ -632,6 +926,115 @@ mod tests {
         assert!(!drive_prefix_reachable(std::path::Path::new(
             r"\\nas\share\bin"
         )));
+    }
+
+    #[test]
+    fn windows_hermes_root_follows_the_install_that_owns_the_program() {
+        let home = PathBuf::from(r"C:\Users\Administrator");
+        let local = PathBuf::from(r"C:\Users\Administrator\AppData\Local");
+        let native = local.join("hermes");
+        let legacy = home.join(".hermes");
+        assert_eq!(
+            hermes_root_for(true, &home, Some(&local), true, false, true, false),
+            native
+        );
+        assert_eq!(
+            hermes_root_for(true, &home, Some(&local), false, true, false, true),
+            legacy,
+            "an install that already lives in the user directory stays there"
+        );
+        assert_eq!(
+            hermes_root_for(true, &home, Some(&local), false, false, false, false),
+            native
+        );
+        assert_eq!(
+            hermes_root_for(false, &home, Some(&local), true, true, true, true),
+            legacy
+        );
+    }
+
+    #[test]
+    fn failed_rebuild_directory_is_not_the_hermes_install() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let borrowed = home.join(".hermes");
+        fs::create_dir_all(borrowed.join("installs").join("dead")).unwrap();
+        assert!(!hermes_install_owns(&borrowed));
+        let local = temp.path().join("Local");
+        let owner = local.join("hermes");
+        fs::create_dir_all(owner.join("hermes-agent")).unwrap();
+        let command = owner.join("bin").join("hermes.cmd");
+        fs::create_dir_all(command.parent().unwrap()).unwrap();
+        fs::write(&command, "@echo off\n").unwrap();
+        assert!(hermes_install_owns(&owner));
+        assert_eq!(
+            detect_hermes_root(true, &home, Some(&local), Some(&command)),
+            owner
+        );
+    }
+
+    #[test]
+    fn custom_hermes_directory_is_the_install_that_owns_the_command() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let local = temp.path().join("Local");
+        let custom = temp.path().join("Tools").join("MyHermes");
+        let command = custom.join("bin").join("hermes.cmd");
+        fs::create_dir_all(command.parent().unwrap()).unwrap();
+        fs::write(&command, "@echo off\n").unwrap();
+        fs::create_dir_all(custom.join("tools")).unwrap();
+
+        assert_eq!(
+            detect_hermes_root(true, &home, Some(&local), Some(&command)),
+            custom
+        );
+    }
+
+    #[test]
+    fn adopts_legacy_profile_without_the_failed_python_env() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let legacy = temp.path().join(".hermes");
+        let profile = legacy.join("profiles").join("default");
+        fs::create_dir_all(profile.join("skills")).unwrap();
+        fs::write(profile.join("config.yaml"), "model: glm\n").unwrap();
+        fs::create_dir_all(legacy.join("installs").join("dead")).unwrap();
+        fs::write(
+            legacy.join("installs").join("dead").join("facts.json"),
+            "{}",
+        )
+        .unwrap();
+        let root = temp.path().join("Local").join("hermes");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.yaml"), "official: true\n").unwrap();
+
+        adopt_legacy_hermes_tree(&legacy, &root);
+
+        assert_eq!(
+            fs::read_to_string(root.join("profiles/default/config.yaml")).unwrap(),
+            "model: glm\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("config.yaml")).unwrap(),
+            "official: true\n"
+        );
+        assert!(!root.join("installs").exists());
+    }
+
+    #[test]
+    fn skips_claude_shim_inside_hermes_venv() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let shim_dir = temp.path().join("hermes-agent/venv/Scripts");
+        fs::create_dir_all(&shim_dir).unwrap();
+        write_executable(&shim_dir.join("claude"));
+        let real_dir = temp.path().join("Claude");
+        fs::create_dir_all(&real_dir).unwrap();
+        let real = real_dir.join("claude");
+        write_executable(&real);
+
+        let found = find_binary_in_dirs("claude", &[shim_dir.clone(), real_dir.clone()]);
+        assert_eq!(found, Some(real));
+        let all = find_all_binary_in_dirs("claude", &[shim_dir, real_dir]);
+        assert_eq!(all.len(), 1);
     }
 
     #[test]

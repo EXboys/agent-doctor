@@ -362,6 +362,11 @@ const biggest = pickBiggestFirstRunTarget(doctorReport, previews, firstRunCopy);
 assert(biggest.runtimeId === "hermes", "prefer higher-issue hermes over openclaw");
 assert(biggest.kind === "repair", "hermes target is repair");
 assert(biggest.canApply === true, "hermes can apply");
+assert(
+  !biggest.detail.includes("Hermes API key configured") &&
+    !biggest.detail.includes("Mode overlay vs live gateway"),
+  "first-run detail uses plain check copy",
+);
 
 const noneInstalled: DoctorReport = {
   ...doctorReport,
