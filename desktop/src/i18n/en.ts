@@ -397,7 +397,7 @@ export const en = {
     "chat.settingsComputerHintWindows": "Turning this on is enough to click other apps. This Windows PC has no extra switch in System Settings.",
     "chat.settingsComputerSwitch": "Use this computer",
     "chat.settingsComputerGuideAccessibility": "System Settings is open. Turn the switch on, then come back here.",
-    "chat.settingsComputerGuideScreen": "Accessibility is allowed. Under Screen Recording, turn this app on, then come back here.",
+    "chat.settingsComputerGuideScreen": "Accessibility is allowed. Under Screen Recording, turn this app on, then quit it completely and open it again.",
     "chat.settingsComputerReady": "This computer is allowed.",
     "chat.settingsComputerReadyWindows": "It is on. This Windows PC does not need another allow in System Settings. An app opened as administrator cannot be clicked. Open that app the normal way and try again.",
     "chat.handsComputerPending": "This computer is allowed. The assistant can see windows, click, and type.",

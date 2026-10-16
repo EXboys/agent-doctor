@@ -125,6 +125,7 @@ pub(crate) fn computer_use_tool_instructions() -> &'static str {
      - An open menu is listed as `menu <bar> <item> <x> <y>`. The picture often hides the dropdown. Use those lines. Clicking the same menu title again closes it.\n\
      - `mcp__computer__screen_type` takes `text`. `mcp__computer__screen_press` takes `key` such as return, escape, tab, space, or command+tab.\n\
      - Do not use Bash, `screencapture`, `osascript`, `cliclick`, or `open` to look at or click the screen.\n\
+     - If `screen_snapshot` fails, say its error in one sentence and stop. Do not click, type, or press keys after that. A missing screenshot means you cannot see the screen.\n\
      - If a click says the settings page is already open, say that in one sentence and stop. Do not retry the click, and do not describe an Allow dialog that is not on screen. If control is already allowed, never ask for it again.\n\
      - Ask the user before sending a message, paying, or deleting."
 }

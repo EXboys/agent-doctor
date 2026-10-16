@@ -1,13 +1,14 @@
 //! Clicks and keystrokes run in this app. macOS blocks `osascript` from sending
 //! them, even when this app is allowed to control the computer.
 
+use std::cell::Cell;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -55,11 +56,13 @@ fn serve() -> Result<()> {
         if reader.read_line(&mut line).unwrap_or(0) == 0 {
             continue;
         }
-        let reply = match handle_line(&line) {
-            Ok(result) => json!({ "ok": true, "result": result }),
-            Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-        };
-        let _ = writeln!(write_half, "{reply}");
+        thread::spawn(move || {
+            let reply = match handle_line(&line) {
+                Ok(result) => json!({ "ok": true, "result": result }),
+                Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
+            };
+            let _ = writeln!(write_half, "{reply}");
+        });
     }
     Ok(())
 }
@@ -161,40 +164,35 @@ extern "C" {
 }
 
 fn screen_look(app: &str) -> Result<Value> {
+    // A missing picture must fail the tool. Returning the menu names alone
+    // makes the assistant click without seeing the screen.
+    let shot = capture_png()?;
     let mut text = look_text(app)?;
     if text.chars().count() > 12000 {
         text.truncate(12000);
         text.push_str("\n…");
     }
-    match capture_png() {
-        Ok(shot) => {
-            text.push_str(&format!(
-                "\n\nScreenshot file: {}\nImage pixels: {}x{}. Scale: {}.\nClick x,y are points ({}x{}), not image pixels. Divide a pixel position by the scale.",
-                shot.path, shot.pixels.0, shot.pixels.1, shot.scale, shot.points.0, shot.points.1
-            ));
-            Ok(json!({
-                "text": text,
-                "image": shot.path,
-                "pixel_width": shot.pixels.0,
-                "pixel_height": shot.pixels.1,
-                "scale": shot.scale,
-                "point_width": shot.points.0,
-                "point_height": shot.points.1,
-            }))
-        }
-        Err(err) => {
-            text.push_str(&format!("\n\nScreenshot failed: {err:#}"));
-            Ok(json!({ "text": text }))
-        }
-    }
+    text.push_str(&format!(
+        "\n\nScreenshot file: {}\nImage pixels: {}x{}. Scale: {}.\nClick x,y are points ({}x{}), not image pixels. Divide a pixel position by the scale.",
+        shot.path, shot.pixels.0, shot.pixels.1, shot.scale, shot.points.0, shot.points.1
+    ));
+    Ok(json!({
+        "text": text,
+        "image": shot.path,
+        "pixel_width": shot.pixels.0,
+        "pixel_height": shot.pixels.1,
+        "scale": shot.scale,
+        "point_width": shot.points.0,
+        "point_height": shot.points.1,
+    }))
 }
 
 fn look_text(app: &str) -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        // Reading on the main thread deadlocks while a menu is open: the menu
-        // owns that thread, and the click channel waits behind the read.
-        unsafe { ax_look(app) }
+        // The other app's main thread owns an open menu and stops answering.
+        // Stop asking after a short budget so this read cannot hold the channel.
+        with_look_deadline(|| unsafe { ax_look(app) })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -414,7 +412,9 @@ fn capture_png() -> Result<Shot> {
             {
                 unsafe { CGRequestScreenCaptureAccess() };
             }
-            bail!("还没有允许录制屏幕。打开这一次之后就不会再问。");
+            bail!(
+                "还没有允许录制屏幕。打开系统设置里的「录屏与系统录音」，打开这个应用的开关，然后完全退出再打开。开关打开之前不要再点屏幕。"
+            );
         }
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -488,7 +488,7 @@ fn display_points() -> (i64, i64, f64) {
 fn menu_text() -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        unsafe { ax_menu_text() }
+        with_look_deadline(|| unsafe { ax_menu_text() })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -695,19 +695,45 @@ unsafe fn attr_bool(el: *const std::ffi::c_void, name: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
+thread_local! {
+    static LOOK_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+#[cfg(target_os = "macos")]
+fn with_look_deadline<T>(read: impl FnOnce() -> T) -> T {
+    LOOK_DEADLINE.with(|cell| cell.set(Some(Instant::now() + Duration::from_millis(1200))));
+    let value = read();
+    LOOK_DEADLINE.with(|cell| cell.set(None));
+    value
+}
+
+#[cfg(target_os = "macos")]
+fn look_budget_spent() -> bool {
+    LOOK_DEADLINE.with(|cell| {
+        cell.get()
+            .is_some_and(|deadline| Instant::now() >= deadline)
+    })
+}
+
+#[cfg(target_os = "macos")]
+const AX_MESSAGE_TIMEOUT: f32 = 0.2;
+
 #[cfg(target_os = "macos")]
 unsafe fn limit_element(el: *mut std::ffi::c_void) -> Option<*const std::ffi::c_void> {
     if el.is_null() {
         return None;
     }
-    AXUIElementSetMessagingTimeout(el, 0.8);
+    AXUIElementSetMessagingTimeout(el, AX_MESSAGE_TIMEOUT);
     Some(el)
 }
 
 #[cfg(target_os = "macos")]
 unsafe fn copy_attr(el: *const std::ffi::c_void, name: &str) -> Option<*const std::ffi::c_void> {
+    if look_budget_spent() {
+        return None;
+    }
     if !el.is_null() {
-        AXUIElementSetMessagingTimeout(el as *mut std::ffi::c_void, 0.8);
+        AXUIElementSetMessagingTimeout(el as *mut std::ffi::c_void, AX_MESSAGE_TIMEOUT);
     }
     let attr = cf_string(name)?;
     let mut value: *const std::ffi::c_void = std::ptr::null();

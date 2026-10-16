@@ -218,13 +218,16 @@ pub fn project_bundle(bundle: &EndpointBundle) -> Result<Vec<RuntimeSetupResult>
             result.effector = Some(effector_label(strategy.effector).to_string());
             if strategy.effector == EffectorKind::RestartGateway && result.applied {
                 let restarted = result.message.contains("restarted OpenClaw gateway");
+                let restarting = result.message.contains("restarting OpenClaw gateway");
                 let skipped = result.message.contains("gateway restart skipped");
                 if strategy.runtime_id == "openclaw" {
-                    result.effector_ok = Some(restarted || !skipped);
+                    result.effector_ok = Some(restarted || restarting || !skipped);
                     if skipped {
                         result.effector_detail = Some(result.message.clone());
                     } else if restarted {
                         result.effector_detail = Some("restarted".into());
+                    } else if restarting {
+                        result.effector_detail = Some("restarting".into());
                     } else {
                         result.effector_detail =
                             Some("key synced; restart may have been skipped".into());

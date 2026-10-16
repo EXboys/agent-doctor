@@ -129,19 +129,12 @@ pub fn apply_openclaw_slot(
             // address and model, so a kickstart here only delays the switch.
             message.push_str("; gateway already had this key");
         } else {
-            // Hot-reload picks up openclaw.json but NOT process env; restart so LaunchAgent
-            // re-sources service-env (stale sk_/evk_ keys cause Evotown 503).
-            match restart_openclaw_gateway_for_key_sync() {
-                Ok(detail) => {
-                    message.push_str("; ");
-                    message.push_str(&detail);
-                }
-                Err(err) => {
-                    message.push_str(&format!(
-                        "; gateway restart skipped ({err}) — run `openclaw gateway restart` if auth is stale"
-                    ));
-                }
-            }
+            // The gateway must reload process env, but the desktop switch cannot
+            // wait on launchctl. The key is already on disk; kickstart in the background.
+            let _ = std::thread::Builder::new()
+                .name("openclaw-gateway-restart".into())
+                .spawn(restart_openclaw_gateway_for_key_sync);
+            message.push_str("; restarting OpenClaw gateway");
         }
     }
 

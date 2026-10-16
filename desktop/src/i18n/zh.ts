@@ -397,7 +397,7 @@ export const zh = {
     "chat.settingsComputerHintWindows": "打开后就可以点其他软件。这台 Windows 不用再到系统设置里允许。",
     "chat.settingsComputerSwitch": "操作这台电脑",
     "chat.settingsComputerGuideAccessibility": "系统设置已经打开。把开关打开，再回到这里。",
-    "chat.settingsComputerGuideScreen": "辅助功能已经允许。再到「屏幕录制」里打开这个应用的开关，然后回到这里。",
+    "chat.settingsComputerGuideScreen": "辅助功能已经允许。再到「录屏与系统录音」里打开这个应用的开关，然后完全退出再打开。",
     "chat.settingsComputerReady": "已经允许操作这台电脑。",
     "chat.settingsComputerReadyWindows": "已经打开。这台 Windows 不用再到系统设置里允许。如果要点的软件是用管理员打开的，会点不了，用普通方式打开它再试。",
     "chat.handsComputerPending": "已经允许操作这台电脑。助手现在能看到窗口，也能点击和输入。",
