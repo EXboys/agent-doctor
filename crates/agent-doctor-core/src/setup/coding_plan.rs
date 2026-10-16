@@ -21,6 +21,17 @@ pub(crate) fn plan_endpoints(url: &str) -> Option<PlanEndpoints> {
         .or_else(|| volcengine_endpoints(url))
 }
 
+/// Whether a mode switch should ask the network which address this key belongs to.
+///
+/// MiniMax's site is chosen in the form. Rechecking the other hosts there holds
+/// the "使用" click until each request times out.
+pub(crate) fn plan_line_needs_live_check(url: &str) -> bool {
+    if minimax_other_hosts(url).is_some() {
+        return false;
+    }
+    !plan_openai_alternates(url).is_empty()
+}
+
 /// Other OpenAI addresses this key may belong to, in the order to try them.
 pub(crate) fn plan_openai_alternates(url: &str) -> Vec<String> {
     if let Some(hosts) = minimax_other_hosts(url) {
@@ -272,6 +283,17 @@ mod tests {
                 .map(String::as_str),
             Some("https://ark.cn-beijing.volces.com/api/coding/v3")
         );
+    }
+
+    #[test]
+    fn minimax_region_is_not_rechecked_on_switch() {
+        assert!(!plan_line_needs_live_check("https://api.minimax.cn/v1"));
+        assert!(!plan_line_needs_live_check(
+            "https://api.minimax.io/anthropic"
+        ));
+        assert!(plan_line_needs_live_check(
+            "https://open.bigmodel.cn/api/paas/v4"
+        ));
     }
 
     #[test]

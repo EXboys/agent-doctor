@@ -1,3 +1,4 @@
+pub mod browser_tools_gate;
 mod deep_diagnose;
 mod execute;
 mod explain;
@@ -12,6 +13,7 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 
+pub use browser_tools_gate::{browser_tools_allowed, HoldBrowserToolsOff};
 pub use deep_diagnose::{
     deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
     DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,

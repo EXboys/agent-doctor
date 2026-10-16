@@ -1,13 +1,30 @@
 import { isPersonalEdition } from "../edition";
 import { getLocale, t } from "../i18n";
-import { islandEnabled, islandHideWhenIdle, islandSetEnabled, islandSetHideWhenIdle } from "../ipc";
+import {
+  computerUseAccess,
+  type ComputerUseAccess,
+  islandEnabled,
+  islandHideWhenIdle,
+  islandSetEnabled,
+  islandSetHideWhenIdle,
+  teamupsAccountStatus,
+  voiceCloudReady,
+  wireBrowserMcp,
+} from "../ipc";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { publishLocale } from "../locale-sync";
 import { checkForAppUpdates, readAppVersion } from "../updater";
+import { isMac, openMacAccessibility } from "./computer-grant";
 import { readAutoApproveDefault, writeAutoApproveDefault } from "./confirm-pref";
 import { bindKnowledgeSyncSettings, refreshVisibleKnowledgeSync } from "./knowledge-sync";
+import {
+  readBrowserToolsEnabled,
+  readComputerUseEnabled,
+  writeBrowserToolsEnabled,
+  writeComputerUseEnabled,
+} from "./hands-pref";
 import { readKnowledgeSyncEnabled, writeKnowledgeSyncEnabled } from "./knowledge-sync-pref";
 import { readVoiceRoute, writeVoiceRoute, type VoiceRoute } from "./voice/route";
-import { teamupsAccountStatus, voiceCloudReady } from "../ipc";
 import {
   closeKnowledgePage,
   closeResourcesMainPage,
@@ -58,7 +75,10 @@ export function closeChatSettings(): void {
   openEl()?.setAttribute("aria-pressed", "false");
 }
 
-export function openChatSettings(section?: SettingsSection): void {
+export function openChatSettings(
+  section?: SettingsSection,
+  focus?: "knowledge" | "browser" | "computer",
+): void {
   if (section) {
     activeSection = section;
     const search = searchEl();
@@ -78,7 +98,13 @@ export function openChatSettings(section?: SettingsSection): void {
   openEl()?.classList.add("is-on");
   openEl()?.setAttribute("aria-pressed", "true");
   if (section === "conversation") {
-    document.querySelector<HTMLInputElement>("#chat-settings-knowledge-sync")?.focus();
+    const focusId =
+      focus === "browser"
+        ? "#chat-settings-browser"
+        : focus === "computer"
+          ? "#chat-settings-computer"
+          : "#chat-settings-knowledge-sync";
+    document.querySelector<HTMLInputElement>(focusId)?.focus();
   }
   else searchEl()?.focus();
 }
@@ -139,6 +165,11 @@ const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-
 const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
 const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
 const autoApproveDefaultEl = () => document.querySelector<HTMLInputElement>("#chat-settings-auto-approve");
+const browserEl = () => document.querySelector<HTMLInputElement>("#chat-settings-browser");
+const browserHintEl = () => document.querySelector<HTMLElement>("#chat-settings-browser-hint");
+const computerEl = () => document.querySelector<HTMLInputElement>("#chat-settings-computer");
+const computerHintEl = () => document.querySelector<HTMLElement>("#chat-settings-computer-hint");
+let offeredScreenGrant = false;
 const knowledgeSyncEl = () => document.querySelector<HTMLInputElement>("#chat-settings-knowledge-sync");
 const knowledgeSyncRowEl = () => document.querySelector<HTMLElement>("#chat-settings-knowledge-sync-row");
 const voiceHintEl = () => document.querySelector<HTMLElement>("#chat-settings-voice-hint");
@@ -232,12 +263,76 @@ function syncKnowledgeSwitch(): void {
   input.setAttribute("aria-label", t("chat.settingsKnowledgeSyncSwitch"));
 }
 
+function syncBrowserSwitch(): void {
+  const input = browserEl();
+  const hint = browserHintEl();
+  if (input) {
+    input.checked = readBrowserToolsEnabled();
+    input.setAttribute("aria-label", t("chat.settingsBrowserSwitch"));
+  }
+  if (hint) {
+    hint.textContent = input?.checked ? t("chat.settingsBrowserReady") : t("chat.settingsBrowserHint");
+  }
+}
+
+function openComputerGrant(access: ComputerUseAccess | null): void {
+  if (access?.trusted) return;
+  if (!access || access.step === "accessibility" || (isMac() && access.step !== "screen")) {
+    const hint = computerHintEl();
+    if (hint) hint.textContent = t("chat.settingsComputerGuideAccessibility");
+    void openMacAccessibility().catch(() => {
+      if (computerHintEl()) computerHintEl()!.textContent = t("chat.handsSystemFailed");
+    });
+    return;
+  }
+  const url = access.settings_url;
+  if (!url) return;
+  if (access.step === "screen") offeredScreenGrant = true;
+  void openUrl(url).catch(() => {
+    const hint = computerHintEl();
+    if (hint) hint.textContent = t("chat.handsSystemFailed");
+  });
+}
+
+function computerHint(access: ComputerUseAccess | null, on: boolean): string {
+  if (!on) {
+    if (access?.platform === "windows") return t("chat.settingsComputerHintWindows");
+    if (access?.platform === "macos") return t("chat.settingsComputerHintMac");
+    return t("chat.settingsComputerHint");
+  }
+  if (!access) return isMac() ? t("chat.settingsComputerGuideAccessibility") : t("chat.settingsComputerHint");
+  if (access.step === "accessibility") return t("chat.settingsComputerGuideAccessibility");
+  if (access.step === "screen") return t("chat.settingsComputerGuideScreen");
+  if (access.platform === "windows") return t("chat.settingsComputerReadyWindows");
+  if (!access.trusted) return t("chat.settingsComputerGuideAccessibility");
+  return t("chat.settingsComputerReady");
+}
+
+async function syncComputerSwitch(): Promise<ComputerUseAccess | null> {
+  const input = computerEl();
+  const hint = computerHintEl();
+  if (input) {
+    input.checked = readComputerUseEnabled();
+    input.setAttribute("aria-label", t("chat.settingsComputerSwitch"));
+  }
+  let access: ComputerUseAccess | null = null;
+  try {
+    access = await computerUseAccess();
+  } catch {
+    access = null;
+  }
+  if (hint) hint.textContent = computerHint(access, Boolean(input?.checked));
+  return access;
+}
+
 function syncChatSettings(): void {
   const search = searchEl();
   if (search) search.placeholder = t("chat.settingsSearch");
   markChoice("settingsTheme", readThemePreference());
   markChoice("settingsLocale", getLocale());
   refreshConfirmCopy();
+  syncBrowserSwitch();
+  void syncComputerSwitch();
   syncKnowledgeSwitch();
   syncVoiceChoice();
   syncIslandSwitch();
@@ -285,6 +380,48 @@ export function bindChatSettings(applyI18n: () => void): void {
       voiceLoggedOut = false;
       syncVoiceChoice();
     }
+  });
+  browserEl()?.addEventListener("change", () => {
+    const input = browserEl();
+    const hint = browserHintEl();
+    if (!input) return;
+    writeBrowserToolsEnabled(input.checked);
+    if (!input.checked) {
+      if (hint) hint.textContent = t("chat.settingsBrowserHint");
+      return;
+    }
+    if (hint) hint.textContent = t("chat.settingsBrowserReady");
+    void wireBrowserMcp()
+      .then((report) => {
+        if (!browserHintEl() || !readBrowserToolsEnabled()) return;
+        const failed = report.results.find((item) => !item.ok);
+        if (failed) browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
+      })
+      .catch(() => {
+        if (browserHintEl() && readBrowserToolsEnabled()) {
+          browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
+        }
+      });
+  });
+  computerEl()?.addEventListener("change", () => {
+    const input = computerEl();
+    if (!input) return;
+    writeComputerUseEnabled(input.checked);
+    if (!input.checked) {
+      offeredScreenGrant = false;
+      void syncComputerSwitch();
+      return;
+    }
+    void syncComputerSwitch().then((access) => {
+      if (!input.checked) return;
+      openComputerGrant(access);
+    });
+  });
+  window.addEventListener("focus", () => {
+    if (!isChatSettingsOpen() || !readComputerUseEnabled()) return;
+    void syncComputerSwitch().then((access) => {
+      if (access?.step === "screen" && !offeredScreenGrant) openComputerGrant(access);
+    });
   });
   autoApproveDefaultEl()?.addEventListener("change", () => {
     const input = autoApproveDefaultEl();

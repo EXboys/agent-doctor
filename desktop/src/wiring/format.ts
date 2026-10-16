@@ -1,9 +1,10 @@
+import { readBrowserToolsEnabled } from "../chat/hands-pref";
 import { t } from "../i18n";
 import type { ModeSwitchReport } from "../types";
 
-/** Always write Browser MCP when applying provider — no separate toggle. */
+/** Write browser tools only after the person turns on 操作网页. */
 export function wantsBrowserMcp(): boolean {
-  return true;
+  return readBrowserToolsEnabled();
 }
 
 export function formatBrowserMcpHint(report: ModeSwitchReport): string | null {

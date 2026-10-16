@@ -1,4 +1,5 @@
 
+import { readBrowserToolsEnabled } from "./chat/hands-pref";
 import { t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import { attachSkillReorder } from "./chat/skill-drag";
@@ -353,6 +354,11 @@ export function ensureBrowserMention(
   userText: string,
   enabledMcps: McpInventoryItem[],
 ): MentionRef[] {
+  if (!readBrowserToolsEnabled()) {
+    return mentions.filter(
+      (item) => !(item.kind === "mcp" && item.id.toLowerCase().includes("browser")),
+    );
+  }
   if (!promptRequestsBrowserMcp(userText)) return mentions;
   if (mentions.some((m) => m.kind === "mcp" && m.id.toLowerCase().includes("browser"))) {
     return mentions;

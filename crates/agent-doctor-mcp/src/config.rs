@@ -44,7 +44,7 @@ pub struct McpConfigureOptions {
 /// tries to start it. Strip the prefix at the write boundary so no caller can
 /// persist it. Paths that truly need the prefix (longer than MAX_PATH) cannot
 /// be started by Codex either way.
-pub(crate) fn command_path_for_runtime(path: &Path) -> String {
+pub fn command_path_for_runtime(path: &Path) -> String {
     let raw = path.to_string_lossy();
     if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");
@@ -413,17 +413,70 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
     Ok(())
 }
 
+/// Write one stdio MCP server (`computer`, and the same shape as browser).
+#[allow(clippy::too_many_arguments)]
+pub fn configure_stdio_mcp(
+    runtime: &str,
+    server_name: &str,
+    command: &str,
+    args: &[String],
+    project_path: Option<&Path>,
+    codex_home: Option<&Path>,
+    hermes_home: Option<&Path>,
+    openclaw_workspace: Option<&Path>,
+) -> Result<()> {
+    let config_path = mcp_servers_path_with_openclaw(
+        runtime,
+        project_path,
+        codex_home,
+        hermes_home,
+        openclaw_workspace,
+    )?;
+    match runtime {
+        "codex" => {
+            for path in codex_browser_config_paths(&config_path) {
+                write_mcp_servers_toml(&path, server_name, command, args)?;
+            }
+        }
+        "claude-code" | "claude" => {
+            write_claude_style_mcp(&config_path, server_name, command, args)?;
+        }
+        "hermes" => write_hermes_stdio_mcp(&config_path, server_name, command, args)?,
+        "deepseek-harness" | "dsh" => {
+            write_dsh_stdio_mcp(&config_path, server_name, command, args)?
+        }
+        "openclaw" => {
+            let global = resolve_openclaw_config_path()?;
+            write_openclaw_stdio_mcp(&global, server_name, command, args)?;
+            if openclaw_workspace.is_some() {
+                write_claude_style_mcp(&config_path, server_name, command, args)?;
+            }
+        }
+        other => anyhow::bail!("Unsupported runtime: {other}"),
+    }
+    Ok(())
+}
+
 fn write_claude_style_browser_mcp(
     config_path: &Path,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
+    write_claude_style_mcp(config_path, "browser", command, args)
+}
+
+fn write_claude_style_mcp(
+    config_path: &Path,
+    name: &str,
     command: &str,
     args: &[String],
 ) -> Result<()> {
     let mut servers = read_mcp_servers(config_path)?;
     let entry = json!({ "command": command, "args": args });
     if let Some(obj) = servers.as_object_mut() {
-        obj.insert("browser".to_string(), entry);
+        obj.insert(name.to_string(), entry);
     } else {
-        servers = json!({ "browser": entry });
+        servers = json!({ name: entry });
     }
     write_mcp_servers(config_path, &servers)
 }
@@ -431,13 +484,18 @@ fn write_claude_style_browser_mcp(
 const DSH_MCP_CLIENT: &str = "@deepseek-ai/dsh-mcp-client";
 const DSH_BROWSER_PLUGIN_ID: &str = "mcp-browser";
 
-fn dsh_browser_plugin_entry(command: &str, args: &[String]) -> serde_yaml::Value {
+fn dsh_browser_plugin_entry(
+    server_name: &str,
+    plugin_id: &str,
+    command: &str,
+    args: &[String],
+) -> serde_yaml::Value {
     use serde_yaml::{Mapping, Value as YamlValue};
 
     let mut config = Mapping::new();
     config.insert(
         YamlValue::String("serverName".into()),
-        YamlValue::String("browser".into()),
+        YamlValue::String(server_name.into()),
     );
     config.insert(
         YamlValue::String("transport".into()),
@@ -458,7 +516,7 @@ fn dsh_browser_plugin_entry(command: &str, args: &[String]) -> serde_yaml::Value
     let mut item = Mapping::new();
     item.insert(
         YamlValue::String("id".into()),
-        YamlValue::String(DSH_BROWSER_PLUGIN_ID.into()),
+        YamlValue::String(plugin_id.into()),
     );
     item.insert(
         YamlValue::String("name".into()),
@@ -471,14 +529,14 @@ fn dsh_browser_plugin_entry(command: &str, args: &[String]) -> serde_yaml::Value
     YamlValue::Mapping(item)
 }
 
-fn is_dsh_browser_plugin(value: &serde_yaml::Value) -> bool {
+fn is_dsh_browser_plugin(value: &serde_yaml::Value, plugin_id: &str, server_name: &str) -> bool {
     let Some(map) = value.as_mapping() else {
         return false;
     };
     if map
         .get(serde_yaml::Value::String("id".into()))
         .and_then(serde_yaml::Value::as_str)
-        == Some(DSH_BROWSER_PLUGIN_ID)
+        == Some(plugin_id)
     {
         return true;
     }
@@ -492,11 +550,19 @@ fn is_dsh_browser_plugin(value: &serde_yaml::Value) -> bool {
     map.get(serde_yaml::Value::String("config".into()))
         .and_then(|config| config.get("serverName"))
         .and_then(serde_yaml::Value::as_str)
-        == Some("browser")
+        == Some(server_name)
 }
 
-fn upsert_dsh_browser_seq(seq: &mut Vec<serde_yaml::Value>, entry: serde_yaml::Value) {
-    if let Some(index) = seq.iter().position(is_dsh_browser_plugin) {
+fn upsert_dsh_browser_seq(
+    seq: &mut Vec<serde_yaml::Value>,
+    plugin_id: &str,
+    server_name: &str,
+    entry: serde_yaml::Value,
+) {
+    if let Some(index) = seq
+        .iter()
+        .position(|value| is_dsh_browser_plugin(value, plugin_id, server_name))
+    {
         seq[index] = entry;
     } else {
         seq.push(entry);
@@ -504,6 +570,26 @@ fn upsert_dsh_browser_seq(seq: &mut Vec<serde_yaml::Value>, entry: serde_yaml::V
 }
 
 fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    write_dsh_plugin_mcp(config_path, "browser", DSH_BROWSER_PLUGIN_ID, command, args)
+}
+
+fn write_dsh_stdio_mcp(
+    config_path: &Path,
+    server_name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
+    let plugin_id = format!("mcp-{server_name}");
+    write_dsh_plugin_mcp(config_path, server_name, &plugin_id, command, args)
+}
+
+fn write_dsh_plugin_mcp(
+    config_path: &Path,
+    server_name: &str,
+    plugin_id: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
     use serde_yaml::Value as YamlValue;
 
     if let Some(parent) = config_path.parent() {
@@ -523,9 +609,9 @@ fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> 
         YamlValue::Sequence(Vec::new())
     };
 
-    let entry = dsh_browser_plugin_entry(command, args);
+    let entry = dsh_browser_plugin_entry(server_name, plugin_id, command, args);
     match &mut root {
-        YamlValue::Sequence(seq) => upsert_dsh_browser_seq(seq, entry),
+        YamlValue::Sequence(seq) => upsert_dsh_browser_seq(seq, plugin_id, server_name, entry),
         YamlValue::Mapping(map) => {
             let key = YamlValue::String("plugins".into());
             let seq = match map.get_mut(&key) {
@@ -537,7 +623,7 @@ fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> 
                         .expect("plugins sequence")
                 }
             };
-            upsert_dsh_browser_seq(seq, entry);
+            upsert_dsh_browser_seq(seq, plugin_id, server_name, entry);
         }
         _ => root = YamlValue::Sequence(vec![entry]),
     }
@@ -550,6 +636,15 @@ fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> 
 }
 
 fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    write_hermes_stdio_mcp(config_path, "browser", command, args)
+}
+
+fn write_hermes_stdio_mcp(
+    config_path: &Path,
+    name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
     use serde_yaml::{Mapping, Value as YamlValue};
 
     if let Some(parent) = config_path.parent() {
@@ -587,10 +682,7 @@ fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) 
         YamlValue::String("args".into()),
         YamlValue::Sequence(args_seq),
     );
-    servers.insert(
-        YamlValue::String("browser".into()),
-        YamlValue::Mapping(entry),
-    );
+    servers.insert(YamlValue::String(name.into()), YamlValue::Mapping(entry));
 
     fs::write(config_path, serde_yaml::to_string(&root)?)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
@@ -598,6 +690,15 @@ fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) 
 }
 
 fn write_openclaw_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
+    write_openclaw_stdio_mcp(config_path, "browser", command, args)
+}
+
+fn write_openclaw_stdio_mcp(
+    config_path: &Path,
+    name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
@@ -628,11 +729,11 @@ fn write_openclaw_browser_mcp(config_path: &Path, command: &str, args: &[String]
     let servers_obj = servers
         .as_object_mut()
         .context("openclaw.json mcp.servers must be an object")?;
-    servers_obj.insert("browser".to_string(), entry.clone());
+    servers_obj.insert(name.to_string(), entry.clone());
 
     // Compat: some community docs use top-level mcpServers
     if let Some(legacy) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        legacy.insert("browser".to_string(), entry);
+        legacy.insert(name.to_string(), entry);
     }
 
     let updated = serde_json::to_string_pretty(&doc)?;

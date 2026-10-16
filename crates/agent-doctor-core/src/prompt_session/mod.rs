@@ -81,6 +81,13 @@ pub struct PromptSessionOptions {
     /// Model for this chat. Empty keeps that provider's saved model.
     #[serde(default)]
     pub model: Option<String>,
+    /// Desktop "操作网页" switch. `None` keeps the old prompt detection (CLI).
+    /// `Some(false)` never wires browser tools for this turn.
+    #[serde(default)]
+    pub browser_tools_enabled: Option<bool>,
+    /// Desktop "操作这台电脑" switch. `Some(true)` wires the computer MCP tools.
+    #[serde(default)]
+    pub computer_use_enabled: Option<bool>,
 }
 
 fn default_timeout_sec() -> u64 {
@@ -353,6 +360,8 @@ mod tests {
                 workspace_name: None,
                 provider_id: None,
                 model: None,
+                browser_tools_enabled: None,
+                computer_use_enabled: None,
             },
             |_| {},
         )
@@ -373,6 +382,8 @@ mod tests {
                 workspace_name: None,
                 provider_id: None,
                 model: None,
+                browser_tools_enabled: None,
+                computer_use_enabled: None,
             },
             |_| {},
         )
@@ -441,6 +452,8 @@ time.sleep(30)
                 workspace_name: None,
                 provider_id: None,
                 model: None,
+                browser_tools_enabled: None,
+                computer_use_enabled: None,
             },
             cancel,
             None,

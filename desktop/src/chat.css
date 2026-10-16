@@ -6849,6 +6849,38 @@ body.chat-skill-dragging .chat-res-grip {
 .chat-typing span:nth-child(2) { animation-delay: 0.15s; }
 .chat-typing span:nth-child(3) { animation-delay: 0.3s; }
 
+.chat-hands-notice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(180, 120, 40, 0.12);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.chat-hands-notice[hidden] {
+  display: none !important;
+}
+
+.chat-hands-notice-btn {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #8a5a12;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+html[data-theme="dark"] .chat-hands-notice {
+  background: rgba(212, 160, 72, 0.16);
+}
+
 .chat-composer {
   display: flex;
   flex-direction: column;

@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::browser_wire::{
-    ensure_chrome_for_wire, wire_browser_mcp, WireBrowserMcpOptions, BROWSER_MCP_WIRE_RUNTIMES,
+    ensure_chrome_for_wire, wire_browser_mcp, wire_computer_mcp, WireBrowserMcpOptions,
+    BROWSER_MCP_WIRE_RUNTIMES,
 };
 
 use crate::workspace::{load_workspaces, resolve_agent_doctor_binary};
@@ -18,6 +19,9 @@ use super::PromptSessionOptions;
 
 /// True when this Ask turn should expose browser MCP tools.
 pub(crate) fn wants_browser_mcp(options: &PromptSessionOptions) -> bool {
+    if options.browser_tools_enabled == Some(false) {
+        return false;
+    }
     if options
         .selected_mcps
         .iter()
@@ -106,6 +110,43 @@ role|label|text|placeholder|testid (optional action=click|fill).\n\
      - Old `@eN` refs become stale after page changes — always re-snapshot before the next click/fill."
 }
 
+/// The desktop switch is on. The model must see real tools, not a skill note.
+pub(crate) fn wants_computer_use(options: &PromptSessionOptions) -> bool {
+    options.computer_use_enabled == Some(true)
+}
+
+pub(crate) fn computer_use_tool_instructions() -> &'static str {
+    "COMPUTER MCP REQUIRED for this turn:\n\
+     - The app switch for controlling this computer is ON. You have an MCP server named `computer`.\n\
+     - These are real tools. Call the exact names `mcp__computer__screen_apps`, `mcp__computer__screen_snapshot`, `mcp__computer__screen_click`, `mcp__computer__screen_type`, `mcp__computer__screen_press`.\n\
+     - Do not say computer use is only a skill, and do not say you only have browser MCP.\n\
+     - Workflow: `mcp__computer__screen_snapshot`, then Read the PNG path in that result, then `mcp__computer__screen_click` with x,y in points (divide image pixels by scale). Snapshot again after the screen changes.\n\
+     - The snapshot text lists `menubar <name> <x> <y>` in points. Click those coordinates. Do not guess a menu position from the picture.\n\
+     - An open menu is listed as `menu <bar> <item> <x> <y>`. The picture often hides the dropdown. Use those lines. Clicking the same menu title again closes it.\n\
+     - `mcp__computer__screen_type` takes `text`. `mcp__computer__screen_press` takes `key` such as return, escape, tab, space, or command+tab.\n\
+     - Do not use Bash, `screencapture`, `osascript`, `cliclick`, or `open` to look at or click the screen.\n\
+     - If a click says the settings page is already open, say that in one sentence and stop. Do not retry the click, and do not describe an Allow dialog that is not on screen. If control is already allowed, never ask for it again.\n\
+     - Ask the user before sending a message, paying, or deleting."
+}
+
+pub(crate) fn prepend_hand_instructions(prompt: &str, browser: bool, computer: bool) -> String {
+    let mut prefix = String::new();
+    if browser {
+        prefix.push_str(browser_mcp_tool_instructions());
+    }
+    if computer {
+        if !prefix.is_empty() {
+            prefix.push_str("\n\n");
+        }
+        prefix.push_str(computer_use_tool_instructions());
+    }
+    if prefix.is_empty() {
+        prompt.to_string()
+    } else {
+        format!("{prefix}\n\n{prompt}")
+    }
+}
+
 fn is_browser_mcp_name(name: &str) -> bool {
     let trimmed = name.trim().to_ascii_lowercase();
     trimmed == "browser" || trimmed.contains("browser")
@@ -175,6 +216,54 @@ pub(crate) fn ensure_browser_mcp_for_ask(
     }
 }
 
+pub(crate) fn ensure_computer_mcp_for_ask(
+    runtime: &str,
+    project_cwd: &Path,
+    overlay: &HashMap<String, String>,
+) -> Option<String> {
+    if !runtime_supports_browser_mcp(runtime) {
+        return Some(format!(
+            "computer MCP is not wired for runtime '{runtime}' yet (supported: {})",
+            BROWSER_MCP_WIRE_RUNTIMES.join(", ")
+        ));
+    }
+    let binary = match resolve_computer_mcp_binary() {
+        Ok(path) => path,
+        Err(err) => return Some(format!("computer MCP skipped: {err}")),
+    };
+    let (project_path, codex_home, hermes_home, openclaw_workspace) =
+        resolve_workspace_paths(project_cwd, overlay);
+    let mut options = WireBrowserMcpOptions::with_binary(binary);
+    options.project_path = project_path;
+    options.codex_home = codex_home;
+    options.hermes_home = hermes_home;
+    options.openclaw_workspace = openclaw_workspace;
+    options.runtimes = vec![runtime.to_string()];
+    let report = match wire_computer_mcp(&options) {
+        Ok(report) => report,
+        Err(err) => return Some(format!("computer MCP skipped: {err}")),
+    };
+    let notes: Vec<String> = report
+        .results
+        .into_iter()
+        .map(|item| {
+            if item.ok {
+                format!("computer MCP ready for {}", item.runtime)
+            } else {
+                format!(
+                    "computer MCP wire failed for {}: {}",
+                    item.runtime, item.message
+                )
+            }
+        })
+        .collect();
+    if notes.is_empty() {
+        None
+    } else {
+        Some(notes.join("; "))
+    }
+}
+
 fn resolve_workspace_paths(
     project_cwd: &Path,
     overlay: &HashMap<String, String>,
@@ -232,6 +321,60 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
+fn help_lists_computer(text: &str) -> bool {
+    text.lines().any(|line| {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("computer"))
+    })
+}
+
+fn binary_supports_computer(path: &Path) -> bool {
+    let Ok(output) = std::process::Command::new(path)
+        .args(["mcp", "--help"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    help_lists_computer(&text)
+}
+
+/// The installed CLI can be the same version number and still lack `mcp computer`.
+/// Use that CLI when it has the command; otherwise a newer binary next to this app.
+fn resolve_computer_mcp_binary() -> anyhow::Result<PathBuf> {
+    if let Ok(path) = resolve_mcp_binary() {
+        if binary_supports_computer(&path) {
+            return Ok(path);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(std::path::Path::to_path_buf);
+        for _ in 0..8 {
+            let Some(current) = dir else {
+                break;
+            };
+            let candidate = current.join(if cfg!(windows) {
+                "agent-doctor.exe"
+            } else {
+                "agent-doctor"
+            });
+            if candidate.is_file() && binary_supports_computer(&candidate) {
+                return Ok(candidate);
+            }
+            dir = current.parent().map(std::path::Path::to_path_buf);
+        }
+    }
+    anyhow::bail!("the installed Agent Doctor CLI does not include computer tools yet")
+}
+
 fn resolve_mcp_binary() -> anyhow::Result<PathBuf> {
     if let Ok(path) = std::env::var("AGENT_DOCTOR_BIN") {
         let path = PathBuf::from(path.trim());
@@ -263,6 +406,8 @@ mod tests {
             workspace_name: None,
             provider_id: None,
             model: None,
+            browser_tools_enabled: None,
+            computer_use_enabled: None,
         };
         assert!(wants_browser_mcp(&opts));
         opts.selected_mcps.clear();
@@ -276,5 +421,22 @@ mod tests {
         opts.prompt = "Conversation so far:\n\nUser: 打开浏览器访问百度\n\nAssistant: opened\n\nUser: 你好\n\nAssistant:".into();
         assert!(!wants_browser_mcp(&opts));
         assert_eq!(last_user_prompt_for_intent(&opts.prompt), "你好");
+        opts.browser_tools_enabled = Some(false);
+        opts.prompt = "打开浏览器访问百度".into();
+        opts.selected_mcps = vec!["browser".into()];
+        assert!(!wants_browser_mcp(&opts));
+        assert!(!wants_computer_use(&opts));
+        opts.computer_use_enabled = Some(true);
+        assert!(wants_computer_use(&opts));
+        let lined = prepend_hand_instructions("你好", false, true);
+        assert!(lined.contains("server named `computer`"));
+        assert!(lined.contains("mcp__computer__screen_snapshot"));
+        assert!(lined.contains("你好"));
+        assert!(help_lists_computer(
+            "Commands:\n  computer   Start computer MCP server\n  browser    Start browser MCP server\n"
+        ));
+        assert!(!help_lists_computer(
+            "Commands:\n  browser    Start browser MCP server\n"
+        ));
     }
 }

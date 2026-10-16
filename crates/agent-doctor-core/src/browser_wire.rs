@@ -73,6 +73,7 @@ impl WireBrowserMcpOptions {
 pub trait BrowserMcpWireBackend: Send + Sync {
     fn ensure_chrome(&self) -> Result<(), String>;
     fn wire(&self, options: &WireBrowserMcpOptions) -> BrowserMcpWireReport;
+    fn wire_computer(&self, options: &WireBrowserMcpOptions) -> BrowserMcpWireReport;
 }
 
 static BACKEND: OnceLock<&'static dyn BrowserMcpWireBackend> = OnceLock::new();
@@ -89,6 +90,12 @@ pub(crate) fn wire_browser_mcp(
     options: &WireBrowserMcpOptions,
 ) -> Result<BrowserMcpWireReport, String> {
     Ok(backend()?.wire(options))
+}
+
+pub(crate) fn wire_computer_mcp(
+    options: &WireBrowserMcpOptions,
+) -> Result<BrowserMcpWireReport, String> {
+    Ok(backend()?.wire_computer(options))
 }
 
 fn backend() -> Result<&'static dyn BrowserMcpWireBackend, String> {

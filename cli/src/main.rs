@@ -538,6 +538,8 @@ enum PolicyAction {
 
 #[derive(Subcommand)]
 enum McpAction {
+    /// Start computer MCP server (see and click this computer)
+    Computer,
     /// Start browser MCP server (connect Codex/Claude to Chrome)
     Browser {
         /// Chrome DevTools Protocol port
@@ -790,6 +792,7 @@ fn main() -> Result<()> {
             PolicyAction::Pull { json } => commands::policy::pull(json)?,
         },
         Commands::Mcp { action } => match action {
+            McpAction::Computer => commands::mcp::run_computer()?,
             McpAction::Browser {
                 port,
                 headless,

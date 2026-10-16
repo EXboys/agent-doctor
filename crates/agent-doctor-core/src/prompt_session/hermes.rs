@@ -77,8 +77,9 @@ fn run_hermes(
     let yolo = options.dangerously_skip_permissions || options.full_auto;
 
     let overlay = collect_overlay_env_for_options(options);
-    let mut prompt_text = prompt.to_string();
-    if super::mcp_ensure::wants_browser_mcp(options) {
+    let browser_mcp = super::mcp_ensure::wants_browser_mcp(options);
+    let computer_mcp = super::mcp_ensure::wants_computer_use(options);
+    if browser_mcp {
         if let Some(note) = super::mcp_ensure::ensure_browser_mcp_for_ask("hermes", &cwd, &overlay)
         {
             on_event(PromptSessionEvent::Status {
@@ -87,12 +88,19 @@ fn run_hermes(
                 message: note,
             });
         }
-        prompt_text = format!(
-            "{}\n\n{}",
-            super::mcp_ensure::browser_mcp_tool_instructions(),
-            prompt
-        );
     }
+    if computer_mcp {
+        if let Some(note) = super::mcp_ensure::ensure_computer_mcp_for_ask("hermes", &cwd, &overlay)
+        {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+    }
+    let prompt_text =
+        super::mcp_ensure::prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
 
     let mut cmd = build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo, &overlay)?;
     let command_display = format_command_display(&cmd);
@@ -942,6 +950,8 @@ exit 0
                     workspace_name: None,
                     provider_id: None,
                     model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -1047,6 +1057,8 @@ exit 2
                     workspace_name: None,
                     provider_id: None,
                     model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
                 },
                 PromptSessionCancel::new(),
                 None,

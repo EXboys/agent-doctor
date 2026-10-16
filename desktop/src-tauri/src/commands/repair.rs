@@ -227,8 +227,11 @@ pub async fn run_repair_preview_command(runtime: String) -> Result<RepairPreview
 pub async fn run_repair_execute_command(
     app: AppHandle,
     runtime: String,
+    allow_browser_tools: Option<bool>,
 ) -> Result<RepairPreviewResponse, String> {
+    let allow_browser_tools = allow_browser_tools.unwrap_or(true);
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _hold = (!allow_browser_tools).then(agent_doctor_core::HoldBrowserToolsOff::new);
         execute_repair(
             &runtime,
             &RepairExecuteOptions {

@@ -613,6 +613,10 @@ export function bootChat(): void {
       return;
     }
     window.clearInterval(pump);
+    if (result === "blocked") {
+      finishChannel(job.id, t("chat.handsBlockedChannel"), false);
+      return;
+    }
     if (result === "queued") {
       channelLedger.unstart(job.id);
       tellChannelQueued(job);

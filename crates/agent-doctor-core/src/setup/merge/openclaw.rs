@@ -120,19 +120,27 @@ pub fn apply_openclaw_slot(
         "set models.providers.{slot} baseUrl={gateway_url} model={model} (primary={slot}/{model}; additive)"
     );
     if !api_key.trim().is_empty() {
-        sync_openclaw_openai_api_key(api_key.trim())?;
+        let key = api_key.trim();
+        let already = openclaw_key_already_loaded(key);
+        sync_openclaw_openai_api_key(key)?;
         message.push_str("; synced OPENAI_API_KEY to ~/.openclaw/.env (+ service-env if present)");
-        // Hot-reload picks up openclaw.json but NOT process env; restart so LaunchAgent
-        // re-sources service-env (stale sk_/evk_ keys cause Evotown 503).
-        match restart_openclaw_gateway_for_key_sync() {
-            Ok(detail) => {
-                message.push_str("; ");
-                message.push_str(&detail);
-            }
-            Err(err) => {
-                message.push_str(&format!(
-                    "; gateway restart skipped ({err}) — run `openclaw gateway restart` if auth is stale"
-                ));
+        if already {
+            // Same key is already in the gateway env. openclaw.json hot-reloads the
+            // address and model, so a kickstart here only delays the switch.
+            message.push_str("; gateway already had this key");
+        } else {
+            // Hot-reload picks up openclaw.json but NOT process env; restart so LaunchAgent
+            // re-sources service-env (stale sk_/evk_ keys cause Evotown 503).
+            match restart_openclaw_gateway_for_key_sync() {
+                Ok(detail) => {
+                    message.push_str("; ");
+                    message.push_str(&detail);
+                }
+                Err(err) => {
+                    message.push_str(&format!(
+                        "; gateway restart skipped ({err}) — run `openclaw gateway restart` if auth is stale"
+                    ));
+                }
             }
         }
     }
@@ -158,6 +166,40 @@ pub(crate) fn infer_openclaw_slot(gateway_url: &str) -> &'static str {
     } else {
         OPENCLAW_PERSONAL_SLOT
     }
+}
+
+fn env_assignment_equals(line: &str, name: &str, expected: &str) -> bool {
+    let trimmed = line.trim();
+    let rest = trimmed
+        .strip_prefix("export ")
+        .map(str::trim)
+        .unwrap_or(trimmed);
+    let Some(value) = rest.strip_prefix(&format!("{name}=")) else {
+        return false;
+    };
+    let value = value.trim().trim_matches('"').trim_matches('\'');
+    value == expected
+}
+
+fn file_has_env_key(path: &std::path::Path, name: &str, expected: &str) -> bool {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    raw.lines()
+        .any(|line| env_assignment_equals(line, name, expected))
+}
+
+/// True when the gateway process would already see this key.
+fn openclaw_key_already_loaded(api_key: &str) -> bool {
+    let env_path = home_join(".openclaw/.env");
+    if !file_has_env_key(&env_path, "OPENAI_API_KEY", api_key) {
+        return false;
+    }
+    let service_env = home_join(".openclaw/service-env/ai.openclaw.gateway.env");
+    if !service_env.exists() {
+        return true;
+    }
+    file_has_env_key(&service_env, "OPENAI_API_KEY", api_key)
 }
 
 /// Keep OpenClaw's env-ref `OPENAI_API_KEY` in sync with the active Agent Doctor key.
@@ -454,5 +496,24 @@ mod openclaw_slot_tests {
             infer_openclaw_slot("https://api.deepseek.com/v1"),
             OPENCLAW_PERSONAL_SLOT
         );
+    }
+
+    #[test]
+    fn env_assignment_matches_plain_and_exported_keys() {
+        assert!(env_assignment_equals(
+            "OPENAI_API_KEY=sk-same",
+            "OPENAI_API_KEY",
+            "sk-same"
+        ));
+        assert!(env_assignment_equals(
+            "export OPENAI_API_KEY='sk-same'",
+            "OPENAI_API_KEY",
+            "sk-same"
+        ));
+        assert!(!env_assignment_equals(
+            "export OPENAI_API_KEY='sk-old'",
+            "OPENAI_API_KEY",
+            "sk-same"
+        ));
     }
 }

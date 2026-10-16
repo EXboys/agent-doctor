@@ -600,7 +600,10 @@ fn apply_npm_cli_playbook(
         apply_codex_api_key_scaffold(probe, only_ids, &mut result);
     }
 
-    if should_run(&browser_id, only_ids) && needs_browser_mcp_rewire(probe) {
+    if should_run(&browser_id, only_ids)
+        && needs_browser_mcp_rewire(probe)
+        && crate::repair::browser_tools_allowed()
+    {
         match wire_browser_mcp_for_runtime(runtime_id) {
             Ok(()) => result.executed.push(browser_id),
             Err(error) => result.skipped.push(SkippedRepairAction {
@@ -665,7 +668,10 @@ pub(crate) fn apply_browser_mcp_repair(
 ) -> Result<PlaybookApplyResult> {
     let mut result = PlaybookApplyResult::default();
     let browser_id = format!("fix-{runtime_id}-browser-mcp");
-    if should_run(&browser_id, only_ids) && needs_browser_mcp_rewire(probe) {
+    if should_run(&browser_id, only_ids)
+        && needs_browser_mcp_rewire(probe)
+        && crate::repair::browser_tools_allowed()
+    {
         match wire_browser_mcp_for_runtime(runtime_id) {
             Ok(()) => result.executed.push(browser_id),
             Err(error) => result.skipped.push(SkippedRepairAction {

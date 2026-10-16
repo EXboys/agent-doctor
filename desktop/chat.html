@@ -317,6 +317,32 @@
                     aria-label="新建对话默认开启自动审批"
                   />
                 </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsBrowser">操作网页</strong>
+                    <span id="chat-settings-browser-hint" data-i18n="chat.settingsBrowserHint">打开后，助手可以打开网页、点页面、填字。默认关着。</span>
+                  </div>
+                  <input
+                    id="chat-settings-browser"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="操作网页"
+                  />
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
+                    <strong data-i18n="chat.settingsComputer">操作这台电脑</strong>
+                    <span id="chat-settings-computer-hint" data-i18n="chat.settingsComputerHint">打开后，助手可以点这台电脑上的其他软件。默认关着。</span>
+                  </div>
+                  <input
+                    id="chat-settings-computer"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="操作这台电脑"
+                  />
+                </div>
                 <div class="chat-settings-row" id="chat-settings-knowledge-sync-row">
                   <div class="chat-settings-copy">
                     <strong data-i18n="chat.settingsKnowledgeSync">同步到账号</strong>
@@ -646,6 +672,7 @@
         </div>
 
         <footer class="chat-composer">
+          <div id="chat-hands-notice" class="chat-hands-notice" hidden></div>
           <div id="chat-decision-dock" class="chat-decision-dock" hidden role="region" aria-live="assertive">
             <div class="chat-decision-dock-body">
               <p id="chat-decision-kicker" class="chat-decision-kicker"></p>

@@ -5,6 +5,7 @@ use agent_doctor_core::{
 };
 
 use crate::browser::discover_chrome;
+use crate::config::{command_path_for_runtime, configure_stdio_mcp};
 use crate::wire::wire_browser_mcp;
 
 struct McpWireBackend;
@@ -14,6 +15,46 @@ impl BrowserMcpWireBackend for McpWireBackend {
         discover_chrome()
             .map(|_| ())
             .map_err(|error| error.to_string())
+    }
+
+    fn wire_computer(&self, options: &WireBrowserMcpOptions) -> BrowserMcpWireReport {
+        let args = vec!["mcp".to_string(), "computer".to_string()];
+        let command = command_path_for_runtime(&options.binary);
+        let runtimes: Vec<String> = if options.runtimes.is_empty() {
+            agent_doctor_core::BROWSER_MCP_WIRE_RUNTIMES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
+        } else {
+            options.runtimes.clone()
+        };
+        let mut results = Vec::new();
+        for runtime in runtimes {
+            match configure_stdio_mcp(
+                &runtime,
+                "computer",
+                &command,
+                &args,
+                options.project_path.as_deref(),
+                options.codex_home.as_deref(),
+                options.hermes_home.as_deref(),
+                options.openclaw_workspace.as_deref(),
+            ) {
+                Ok(()) => results.push(BrowserMcpWireResult {
+                    runtime,
+                    ok: true,
+                    config_path: None,
+                    message: "wrote computer MCP".into(),
+                }),
+                Err(err) => results.push(BrowserMcpWireResult {
+                    runtime,
+                    ok: false,
+                    config_path: None,
+                    message: err.to_string(),
+                }),
+            }
+        }
+        BrowserMcpWireReport { results }
     }
 
     fn wire(&self, options: &WireBrowserMcpOptions) -> BrowserMcpWireReport {

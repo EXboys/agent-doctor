@@ -16,7 +16,10 @@ use super::env::{
     apply_claude_env, apply_overlay_env, claude_provider_env, collect_overlay_env_for_options,
     format_command_display,
 };
-use super::mcp_ensure::{ensure_browser_mcp_for_ask, wants_browser_mcp};
+use super::mcp_ensure::{
+    ensure_browser_mcp_for_ask, ensure_computer_mcp_for_ask, prepend_hand_instructions,
+    wants_browser_mcp, wants_computer_use,
+};
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
 use super::util::{
@@ -83,16 +86,18 @@ fn run_claude(
             });
         }
     }
+    let computer_mcp = wants_computer_use(options);
+    if computer_mcp {
+        if let Some(note) = ensure_computer_mcp_for_ask("claude-code", &cwd, &overlay) {
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "mcp".into(),
+                message: note,
+            });
+        }
+    }
 
-    let effective_prompt = if browser_mcp {
-        format!(
-            "{}\n\n{}",
-            super::mcp_ensure::browser_mcp_tool_instructions(),
-            prompt
-        )
-    } else {
-        prompt.to_string()
-    };
+    let effective_prompt = prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
 
     let images: Vec<super::vision::EncodedImage> =
         super::vision::turn_images("claude-code", &options.image_paths, &overlay)
@@ -399,7 +404,8 @@ fn build_claude_command(
                     "WebFetch",
                     "WebSearch",
                     "AskUserQuestion",
-                    "mcp__browser__*"
+                    "mcp__browser__*",
+                    "mcp__computer__*"
                 ]
             }
         });
@@ -1923,6 +1929,8 @@ mod tests {
                     workspace_name: None,
                     provider_id: None,
                     model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
                 },
                 PromptSessionCancel::new(),
                 None,
@@ -1997,6 +2005,8 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
                     workspace_name: None,
                     provider_id: None,
                     model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
                 },
                 PromptSessionCancel::new(),
                 Some(control),

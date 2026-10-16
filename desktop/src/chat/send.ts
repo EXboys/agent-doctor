@@ -29,6 +29,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   askImageSupport,
   cancelPromptSession,
+  computerUseAccess,
   listPromptRuns,
   readImageTexts,
   replayPromptAsks,
@@ -36,6 +37,9 @@ import {
   type PromptSessionFinished,
 } from "../ipc";
 import { beginChannelJob, endChannelJob } from "./channel-ask";
+import { handsBlockForText, promptRequestsComputerUse } from "./hands-intent";
+import { hideHandsNotice, showHandsNotice } from "./hands-notice";
+import { readBrowserToolsEnabled, readComputerUseEnabled } from "./hands-pref";
 import { notifyChannelSessionIdle } from "./channel-lane";
 import { bindBackendSession, MAX_PARALLEL_RUNS } from "./live-runs";
 import { planPictures, type PictureInput, type PictureTurn } from "./picture-route";
@@ -135,7 +139,7 @@ export type SendDeps = {
 
 export type SendApi = ReturnType<typeof createSendController>;
 
-export type SendAskResult = "started" | "queued" | "empty" | "capped";
+export type SendAskResult = "started" | "queued" | "empty" | "capped" | "blocked";
 
 function appendUserOnSession(
   session: ChatSession,
@@ -348,6 +352,35 @@ export function createSendController(deps: SendDeps) {
       deps.setVerifyMcpReported(false);
       deps.setVerifyTurnText("");
     }
+
+    const earlyMentions = mergeMentionsForSend(
+      text,
+      draft.mentions,
+      deps.askResources.mountedSkills,
+      deps.askResources.enabledMcps,
+    );
+    const blocked = handsBlockForText(
+      text,
+      readBrowserToolsEnabled(),
+      readComputerUseEnabled(),
+      earlyMentions,
+    );
+    if (blocked) {
+      if (foreground) showHandsNotice(blocked);
+      return "blocked";
+    }
+    if (promptRequestsComputerUse(text) && readComputerUseEnabled()) {
+      const access = await computerUseAccess().catch(() => null);
+      if (access && !access.trusted && access.step === "accessibility") {
+        if (foreground) showHandsNotice("computer", "system", null, true);
+        return "blocked";
+      }
+      if (access && !access.trusted && access.settings_url) {
+        if (foreground) showHandsNotice("computer", "system", access.settings_url);
+        return "blocked";
+      }
+    }
+    if (foreground) hideHandsNotice();
 
     const mentions = ensureBrowserMention(
       mergeMentionsForSend(

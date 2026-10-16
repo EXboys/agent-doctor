@@ -18,7 +18,9 @@ use crate::profile::{
 };
 use crate::repair::mask_secret_value;
 use crate::runtime::all_adapters;
-use crate::setup::coding_plan::{models_list_is_public, plan_openai_alternates};
+use crate::setup::coding_plan::{
+    models_list_is_public, plan_line_needs_live_check, plan_openai_alternates,
+};
 use crate::setup::merge::{self, clear_codex_placeholder_auth};
 use crate::setup::zhipu::zhipu_plan_mismatch;
 use crate::setup::{normalize_gateway_url, RuntimeSetupResult};
@@ -543,9 +545,12 @@ fn verify_openai_models(
 /// If this key belongs to the other product line, return that OpenAI address.
 /// `None` means keep the saved address (already right, or not a plan mismatch).
 pub(crate) fn align_coding_plan_url(url: &str, api_key: &str) -> Option<String> {
-    let alternates = plan_openai_alternates(url);
     let api_key = api_key.trim();
-    if alternates.is_empty() || api_key.is_empty() {
+    if api_key.is_empty() || !plan_line_needs_live_check(url) {
+        return None;
+    }
+    let alternates = plan_openai_alternates(url);
+    if alternates.is_empty() {
         return None;
     }
     let client = reqwest::blocking::Client::builder()

@@ -12,6 +12,11 @@ use agent_doctor_mcp::{
 };
 use anyhow::{bail, Context, Result};
 
+pub fn run_computer() -> Result<()> {
+    eprintln!("Computer MCP server listening");
+    agent_doctor_mcp::run_computer_mcp_server()
+}
+
 pub fn run_browser(
     port: u16,
     headless: bool,

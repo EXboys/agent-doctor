@@ -171,12 +171,21 @@ if command -v xattr >/dev/null 2>&1; then
 fi
 
 entitlements="$SRC_TAURI/Entitlements.plist"
+# Ad-hoc signing (`-`) changes every rebuild, so macOS forgets Accessibility.
+# A stable Apple Development identity keeps that allow across relaunches.
+sign_identity="-"
+if command -v security >/dev/null 2>&1; then
+  found=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ { print $2; exit }')
+  if [ -n "${found:-}" ]; then
+    sign_identity="$found"
+  fi
+fi
 if command -v codesign >/dev/null 2>&1; then
-  echo "▸ Signing $bundle_dir"
+  echo "▸ Signing $bundle_dir ($sign_identity)"
   if [ -f "$entitlements" ]; then
-    codesign --force --deep --sign - --entitlements "$entitlements" "$bundle_dir"
+    codesign --force --deep --sign "$sign_identity" --entitlements "$entitlements" "$bundle_dir"
   else
-    codesign --force --deep --sign - "$bundle_dir"
+    codesign --force --deep --sign "$sign_identity" "$bundle_dir"
   fi
 fi
 

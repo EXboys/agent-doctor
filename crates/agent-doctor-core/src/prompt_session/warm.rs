@@ -374,6 +374,8 @@ mod tests {
                     workspace_name: None,
                     provider_id: None,
                     model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
                 },
                 cancel,
                 None,

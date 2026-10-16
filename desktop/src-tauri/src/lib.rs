@@ -23,6 +23,8 @@ const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod channel_link;
 mod commands;
+#[cfg(unix)]
+mod computer_hand;
 #[cfg(target_os = "macos")]
 mod drag_pasteboard;
 mod island;
@@ -305,6 +307,8 @@ async fn start_prompt_session_command(
     client_run_id: Option<String>,
     provider_id: Option<String>,
     model: Option<String>,
+    browser_tools_enabled: Option<bool>,
+    computer_use_enabled: Option<bool>,
 ) -> Result<PromptSessionReport, String> {
     let owner_label = window.label().to_string();
     // Chat sessions pass their own id so several can run together. Callers
@@ -353,6 +357,8 @@ async fn start_prompt_session_command(
         model: model
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
+        browser_tools_enabled,
+        computer_use_enabled,
     };
 
     // The window's Allow button writes through this control. DeepSeek always
@@ -511,6 +517,8 @@ pub fn run() {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
             agent_doctor_core::enable_warm_sessions();
+            #[cfg(unix)]
+            computer_hand::spawn();
             app.manage(DeepDiagnoseState::default());
             app.manage(IslandHost::default());
             // Paint the main window first. Seeding a workspace can hit macOS
@@ -557,6 +565,8 @@ pub fn run() {
             teamups_account_status_command,
             sign_out_teamups_command,
             install_teamups_mall_item_command,
+            computer_use_access_command,
+            computer_use_prompt_command,
             list_mcp_inventory_command,
             mcp_status_command,
             mcp_configure_command,

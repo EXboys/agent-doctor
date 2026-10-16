@@ -18,8 +18,8 @@ pub use browser::{
     BrowserFamily, ChromeInstance,
 };
 pub use config::{
-    browser_mcp_args, configure_for, generate_config_snippet, mcp_servers_path,
-    mcp_servers_path_with_openclaw, McpConfigureOptions, McpServerEntry,
+    browser_mcp_args, configure_for, configure_stdio_mcp, generate_config_snippet,
+    mcp_servers_path, mcp_servers_path_with_openclaw, McpConfigureOptions, McpServerEntry,
 };
 pub use mcp::{run_mcp_server, HandleResult, McpRequest, McpResponse, ToolDefinition};
 pub use session::{LazyBrowser, SharedBrowser};
@@ -27,6 +27,7 @@ pub use smoke::{parse_browser_family, smoke_browser_navigate, SmokeOptions, Smok
 pub use status::{
     browser_mcp_status, browser_mcp_status_with_probe, BrowserMcpStatus, DEFAULT_BROWSER_MCP_PORT,
 };
+pub use tools::computer::run_computer_mcp_server;
 pub use tools::BrowserContext;
 pub use wire::{
     wire_browser_mcp, wire_browser_mcp_defaults, wiring_next_steps_for_runtime,

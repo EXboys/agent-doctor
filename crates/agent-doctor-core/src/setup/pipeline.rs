@@ -512,6 +512,7 @@ fn resolve_personal_bundle(provider_id: Option<&str>) -> Result<EndpointBundle> 
 
     // Coding Plan keys (Pro / Lite / Max) fail with "no balance" on the pay-as-you-go
     // address. One models request picks the line this key actually belongs to.
+    // MiniMax skips this: its site is already chosen, and the probe blocks the click.
     if let Some(resolved) = align_coding_plan_url(&gateway_url, api_key) {
         let resolved = normalize_personal_gateway_url(&resolved).unwrap_or(resolved);
         if resolved.trim_end_matches('/') != gateway_url.trim_end_matches('/') {

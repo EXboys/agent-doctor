@@ -18,6 +18,8 @@ pub use knowledge::*;
 pub use knowledge_sync::*;
 pub use locale::*;
 pub use mcp::*;
+#[cfg(target_os = "macos")]
+pub(crate) use mcp::{prompt_accessibility, reveal_accessibility_settings};
 pub use ocr::*;
 pub use remote::*;
 pub use repair::*;

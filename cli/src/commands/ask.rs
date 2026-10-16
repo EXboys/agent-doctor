@@ -36,6 +36,8 @@ pub fn run(
         workspace_name: None,
         provider_id: None,
         model: None,
+        browser_tools_enabled: None,
+        computer_use_enabled: None,
     };
 
     let report = run_prompt_session_with_cancel(&options, cancel, None, |event| {

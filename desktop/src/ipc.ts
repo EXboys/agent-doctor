@@ -5,6 +5,7 @@
 //! against `generate_handler!`.
 
 import { invoke } from "@tauri-apps/api/core";
+import { readBrowserToolsEnabled, readComputerUseEnabled } from "./chat/hands-pref";
 import type { PromptSessionReport } from "./chat/types";
 import type {
   BrowserMcpDiagnoseWireReport,
@@ -138,6 +139,10 @@ export type StartPromptSessionArgs = {
   providerId?: string | null;
   /** Model for this chat. Empty keeps that provider's saved model. */
   model?: string | null;
+  /** Settings switch for opening web pages. Omitted uses the saved switch. */
+  browserToolsEnabled?: boolean | null;
+  /** Settings switch for controlling this computer. Omitted uses the saved switch. */
+  computerUseEnabled?: boolean | null;
 };
 
 export function getEvotownStatus(): Promise<EvotownStatus> {
@@ -703,7 +708,28 @@ export function runRepairPreview(args: { runtime: string }): Promise<RepairPrevi
 }
 
 export function runRepairExecute(args: { runtime: string }): Promise<RepairPreviewResponse> {
-  return invoke("run_repair_execute_command", args);
+  return invoke("run_repair_execute_command", {
+    ...args,
+    allowBrowserTools: readBrowserToolsEnabled(),
+  });
+}
+
+export type ComputerUseAccess = {
+  platform: "macos" | "windows" | "linux" | string;
+  trusted: boolean;
+  /** `accessibility`, `screen`, or `none`. */
+  step: string;
+  settings_url: string | null;
+};
+
+/** Grants still required to operate this computer. Windows has no extra switch. */
+export function computerUseAccess(): Promise<ComputerUseAccess> {
+  return invoke("computer_use_access_command");
+}
+
+/** macOS shows its own allow dialog and opens Accessibility. */
+export function computerUsePrompt(): Promise<boolean> {
+  return invoke("computer_use_prompt_command");
 }
 
 export function deepDiagnoseChat(args: {
@@ -808,7 +834,11 @@ export function resizeMainWindow(args: {
 }
 
 export function startPromptSession(args: StartPromptSessionArgs): Promise<PromptSessionReport> {
-  return invoke("start_prompt_session_command", args);
+  return invoke("start_prompt_session_command", {
+    ...args,
+    browserToolsEnabled: args.browserToolsEnabled ?? readBrowserToolsEnabled(),
+    computerUseEnabled: args.computerUseEnabled ?? readComputerUseEnabled(),
+  });
 }
 
 export type LivePromptRun = {

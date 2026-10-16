@@ -420,3 +420,192 @@ pub async fn install_teamups_mall_item_command(
     .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())
 }
+
+/// What the person still has to allow before this computer can be operated.
+#[derive(Debug, Clone, Serialize)]
+pub struct ComputerUseAccess {
+    /// `macos`, `windows`, or `linux`.
+    pub platform: String,
+    /// Every grant this system requires is already on.
+    pub trusted: bool,
+    /// `accessibility`, `screen`, or `none`.
+    pub step: String,
+    /// System Settings page for `step`. Empty when this system has no extra switch.
+    pub settings_url: Option<String>,
+}
+
+/// macOS needs Accessibility, then Screen Recording. Windows has no matching switch.
+#[tauri::command]
+pub fn computer_use_access_command() -> ComputerUseAccess {
+    #[cfg(target_os = "macos")]
+    {
+        let accessibility = unsafe { AXIsProcessTrusted() != 0 };
+        if !accessibility {
+            return ComputerUseAccess {
+                platform: "macos".into(),
+                trusted: false,
+                step: "accessibility".into(),
+                settings_url: Some(MAC_ACCESSIBILITY.into()),
+            };
+        }
+        let screen = unsafe { CGPreflightScreenCaptureAccess() };
+        if !screen {
+            return ComputerUseAccess {
+                platform: "macos".into(),
+                trusted: false,
+                step: "screen".into(),
+                settings_url: Some(MAC_SCREEN.into()),
+            };
+        }
+        ComputerUseAccess {
+            platform: "macos".into(),
+            trusted: true,
+            step: "none".into(),
+            settings_url: None,
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        ComputerUseAccess {
+            platform: "windows".into(),
+            trusted: true,
+            step: "none".into(),
+            settings_url: None,
+        }
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        ComputerUseAccess {
+            platform: "linux".into(),
+            trusted: true,
+            step: "none".into(),
+            settings_url: None,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+const MAC_ACCESSIBILITY: &str =
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
+#[cfg(target_os = "macos")]
+const MAC_SCREEN: &str =
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture";
+
+/// Ask macOS to show its own allow dialog and open the Accessibility page.
+#[tauri::command]
+pub fn computer_use_prompt_command() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if unsafe { AXIsProcessTrusted() != 0 } {
+            return Ok(true);
+        }
+        let trusted = prompt_accessibility();
+        if trusted {
+            return Ok(true);
+        }
+        open_system_settings(MAC_ACCESSIBILITY)?;
+        Ok(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn reveal_accessibility_settings() {
+    let _ = open_system_settings(MAC_ACCESSIBILITY);
+}
+
+#[cfg(target_os = "macos")]
+fn open_system_settings(url: &str) -> Result<(), String> {
+    if !url.starts_with("x-apple.systempreferences:") {
+        return Err("refused".into());
+    }
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg(url)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("open exited {status}"))
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn prompt_accessibility() -> bool {
+    unsafe {
+        if AXIsProcessTrusted() != 0 {
+            return true;
+        }
+        let key = kAXTrustedCheckOptionPrompt as *const std::ffi::c_void;
+        let value = kCFBooleanTrue as *const std::ffi::c_void;
+        let dict = CFDictionaryCreate(
+            std::ptr::null(),
+            &key,
+            &value,
+            1,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks,
+        );
+        if dict.is_null() {
+            return false;
+        }
+        let trusted = AXIsProcessTrustedWithOptions(dict);
+        CFRelease(dict as *const std::ffi::c_void);
+        trusted != 0
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> u8;
+    static kAXTrustedCheckOptionPrompt: *const std::ffi::c_void;
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct CFDictionaryKeyCallBacks {
+    version: isize,
+    retain: *const std::ffi::c_void,
+    release: *const std::ffi::c_void,
+    copy_description: *const std::ffi::c_void,
+    equal: *const std::ffi::c_void,
+    hash: *const std::ffi::c_void,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct CFDictionaryValueCallBacks {
+    version: isize,
+    retain: *const std::ffi::c_void,
+    release: *const std::ffi::c_void,
+    copy_description: *const std::ffi::c_void,
+    equal: *const std::ffi::c_void,
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    static kCFBooleanTrue: *const std::ffi::c_void;
+    static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
+    static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
+    fn CFDictionaryCreate(
+        allocator: *const std::ffi::c_void,
+        keys: *const *const std::ffi::c_void,
+        values: *const *const std::ffi::c_void,
+        num_values: isize,
+        key_callbacks: *const CFDictionaryKeyCallBacks,
+        value_callbacks: *const CFDictionaryValueCallBacks,
+    ) -> *mut std::ffi::c_void;
+    fn CFRelease(cf: *const std::ffi::c_void);
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+}
