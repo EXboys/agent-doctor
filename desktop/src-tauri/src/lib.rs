@@ -44,9 +44,10 @@ use commands::*;
 use island::{
     current_island_view_command, island_claim_keyboard_command, island_enabled_command,
     island_hide_when_idle_command, island_open_session_command, island_pin_command,
-    island_restore_command, island_send_text_command, island_set_content_height_command,
-    island_set_enabled_command, island_set_hide_when_idle_command, island_set_hover_command,
-    island_set_reading_command, publish_island_snapshot_command, IslandHost,
+    island_place_chip_command, island_restore_command, island_send_text_command,
+    island_set_content_height_command, island_set_enabled_command,
+    island_set_hide_when_idle_command, island_set_hover_command, island_set_reading_command,
+    publish_island_snapshot_command, IslandHost,
 };
 use state::{ActivePromptRun, LivePromptRun, PromptSessionState};
 use windows::{
@@ -675,6 +676,7 @@ pub fn run() {
             ask_image_support_command,
             publish_island_snapshot_command,
             island_set_hover_command,
+            island_place_chip_command,
             island_restore_command,
             island_pin_command,
             island_open_session_command,

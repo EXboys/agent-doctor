@@ -15,6 +15,7 @@ import {
   islandSetContentHeight,
   islandSetHideWhenIdle,
   islandHideWhenIdle,
+  islandPlaceChip,
   islandRestore,
   islandSetReading,
   resolvePermissionSession,
@@ -1130,6 +1131,121 @@ function syncScrollHint(): void {
   scrollHintEl.hidden = !moreBelow;
 }
 
+const CHIP_DRAG_SLOP = 5;
+
+function bindStatusChipDrag(root: HTMLElement | null): void {
+  if (!root || !document.documentElement.classList.contains("is-status-chip")) return;
+  let label = "";
+  let pending: { x: number; y: number; commit: boolean } | null = null;
+  let pumping = false;
+  let gesture: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    originX: number;
+    originY: number;
+    originReady: boolean;
+    moved: boolean;
+    done: boolean;
+  } | null = null;
+
+  function sendPlace(x: number, y: number, commit: boolean): void {
+    if (!label) return;
+    pending = pending?.commit === true ? pending : { x, y, commit };
+    if (pumping) return;
+    pumping = true;
+    void (async () => {
+      while (pending) {
+        const next = pending;
+        pending = null;
+        await islandPlaceChip(label, next.x, next.y, next.commit).catch(() => {});
+      }
+      pumping = false;
+    })();
+  }
+
+  function placeGesture(commit: boolean): void {
+    const current = gesture;
+    if (!current || !current.originReady) return;
+    sendPlace(
+      current.originX + (current.lastX - current.startX),
+      current.originY + (current.lastY - current.startY),
+      commit,
+    );
+  }
+
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, button, a, .island-row-body")) return;
+    const pointerId = event.pointerId;
+    gesture = {
+      pointerId,
+      startX: event.screenX,
+      startY: event.screenY,
+      lastX: event.screenX,
+      lastY: event.screenY,
+      originX: 0,
+      originY: 0,
+      originReady: false,
+      moved: false,
+      done: false,
+    };
+    root.setPointerCapture(pointerId);
+    void import("@tauri-apps/api/webviewWindow")
+      .then(async ({ getCurrentWebviewWindow }) => {
+        const win = getCurrentWebviewWindow();
+        label = win.label;
+        const pos = await win.outerPosition();
+        const scale = await win.scaleFactor();
+        const current = gesture;
+        if (!current || current.pointerId !== pointerId || scale <= 0) return;
+        current.originX = pos.x / scale;
+        current.originY = pos.y / scale;
+        current.originReady = true;
+        if (current.moved) placeGesture(current.done);
+        if (current.done) gesture = null;
+      })
+      .catch(() => {});
+  });
+
+  root.addEventListener("pointermove", (event) => {
+    const current = gesture;
+    if (!current || current.pointerId !== event.pointerId) return;
+    current.lastX = event.screenX;
+    current.lastY = event.screenY;
+    const dx = current.lastX - current.startX;
+    const dy = current.lastY - current.startY;
+    if (!current.moved && Math.hypot(dx, dy) < CHIP_DRAG_SLOP) return;
+    current.moved = true;
+    root.classList.add("is-dragging");
+    placeGesture(false);
+  });
+
+  function finishDrag(event: PointerEvent, restoreOnClick: boolean): void {
+    const current = gesture;
+    if (!current || current.pointerId !== event.pointerId) return;
+    current.lastX = event.screenX;
+    current.lastY = event.screenY;
+    current.done = true;
+    root.classList.remove("is-dragging");
+    if (!current.moved) {
+      gesture = null;
+      if (restoreOnClick) void islandRestore().catch(() => {});
+      return;
+    }
+    if (current.originReady) {
+      placeGesture(true);
+      gesture = null;
+    }
+  }
+
+  root.addEventListener("pointerup", (event) => finishDrag(event, true));
+  root.addEventListener("pointercancel", (event) => finishDrag(event, false));
+}
+
 function boot(): void {
   applyStaticI18n();
   bindLocaleSync(() => {
@@ -1183,14 +1299,12 @@ function boot(): void {
     // Cancelling mousedown also cancels the click, so buttons such as
     // 「查看更多」 would never run.
     if (!onControl) event.preventDefault();
-    // On Windows the short bar is a way back to the conversation. Buttons on
-    // the opened card, such as 允许, still act in place.
-    if (document.documentElement.classList.contains("is-status-chip") && !onControl) {
-      void islandRestore().catch(() => {});
-      return;
-    }
+    // Windows moves the chip with the pointer, and a click with almost no
+    // movement still returns to the conversation.
+    if (document.documentElement.classList.contains("is-status-chip")) return;
     setHover(true, true);
   });
+  bindStatusChipDrag(root);
   root?.addEventListener("mouseleave", () => setHover(false));
   hideIdleEl?.addEventListener("change", () => {
     void islandSetHideWhenIdle(hideIdleEl.checked).catch(() => {});

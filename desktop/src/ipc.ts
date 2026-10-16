@@ -961,6 +961,15 @@ export function islandRestore(): Promise<void> {
   return invoke("island_restore_command");
 }
 
+export function islandPlaceChip(
+  label: string,
+  x: number,
+  y: number,
+  commit: boolean,
+): Promise<void> {
+  return invoke("island_place_chip_command", { label, x, y, commit });
+}
+
 export function islandPin(): Promise<void> {
   return invoke("island_pin_command");
 }

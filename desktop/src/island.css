@@ -150,6 +150,12 @@ body {
 /* Windows has no camera housing, so the chip is a rounded bar with a gap above it. */
 html.is-status-chip .island {
   border-radius: 14px;
+  cursor: grab;
+}
+
+html.is-status-chip .island.is-dragging,
+html.is-status-chip .island.is-dragging * {
+  cursor: grabbing;
 }
 
 html.is-status-chip .island.is-expanded {

@@ -5,7 +5,9 @@
 //!
 //! On Windows there is no housing. A rounded chip sits just under the top of
 //! the work area, and only while a turn is running and the conversation window
-//! is not the one in front. It does not hide the other windows.
+//! is not the one in front. It does not hide the other windows. The person can
+//! drag that chip anywhere on its screen; the spot is remembered until it no
+//! longer fits.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -159,6 +161,13 @@ struct Inner {
     enabled: bool,
     /// Last placed size and screen origin, so status text can update without resizing.
     placed: HashMap<String, (i32, i32, i32, i32)>,
+    /// Whether the saved chip spots have been read.
+    chip_place_loaded: bool,
+    /// Logical top-left of a chip, keyed by the physical origin of its work area.
+    chip_place: HashMap<(i32, i32), (f64, f64)>,
+    /// Logical top-left while a drag is in progress, keyed by window label.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    chip_drag: HashMap<String, (f64, f64)>,
     /// Monitor work-area origins, so a new screen gets its own notch.
     screen_sig: Vec<(i32, i32)>,
     last_view: IslandView,
@@ -182,6 +191,9 @@ impl Default for Inner {
             pref_loaded: false,
             enabled: true,
             placed: HashMap::new(),
+            chip_place_loaded: false,
+            chip_place: HashMap::new(),
+            chip_drag: HashMap::new(),
             screen_sig: Vec::new(),
             last_view: IslandView {
                 shown: false,
@@ -345,6 +357,29 @@ pub(crate) fn chrome_if_enabled(enabled: bool, chrome: Chrome) -> Chrome {
     }
 }
 
+fn chip_place_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("island-chip-place"))
+}
+
+fn read_chip_place(app: &AppHandle) -> Option<HashMap<(i32, i32), (f64, f64)>> {
+    let raw = std::fs::read_to_string(chip_place_path(app)?).ok()?;
+    Some(parse_chip_place(&raw))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn write_chip_place(app: &AppHandle, map: &HashMap<(i32, i32), (f64, f64)>) {
+    let Some(path) = chip_place_path(app) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, format_chip_place(map));
+}
+
 fn ensure_hide_pref_loaded(app: &AppHandle) {
     let host = app.state::<IslandHost>();
     let mut guard = host.inner.lock().expect("island");
@@ -357,6 +392,18 @@ fn ensure_hide_pref_loaded(app: &AppHandle) {
     }
     if let Some(enabled) = read_enabled_pref(app) {
         guard.enabled = enabled;
+    }
+}
+
+fn ensure_chip_place_loaded(app: &AppHandle) {
+    let host = app.state::<IslandHost>();
+    let mut guard = host.inner.lock().expect("island");
+    if guard.chip_place_loaded {
+        return;
+    }
+    guard.chip_place_loaded = true;
+    if let Some(place) = read_chip_place(app) {
+        guard.chip_place = place;
     }
 }
 
@@ -438,6 +485,7 @@ fn apply(app: &AppHandle) {
 
 fn apply_once(app: &AppHandle) {
     ensure_hide_pref_loaded(app);
+    ensure_chip_place_loaded(app);
     let ask_in_front = windows_ask_in_front(app);
     let (chrome, snapshot, parked_ask, parked_main) = {
         let host = app.state::<IslandHost>();
@@ -584,8 +632,10 @@ fn show_island(app: &AppHandle, chrome: Chrome) {
         let Some((screen_x, screen_y, screen_w)) = status_origin(monitor) else {
             continue;
         };
-        let (width, height, x, y, notch_inset) =
+        let (width, height, default_x, default_y, notch_inset) =
             status_frame(chrome, screen_x, screen_y, screen_w, peek_height, monitor);
+        let (x, y) =
+            chip_position_on_monitor(app, monitor, &label, default_x, default_y, width, height);
         let place_key = (
             x.round() as i32,
             y.round() as i32,
@@ -796,6 +846,89 @@ pub(crate) fn windows_status_frame(
     }
 }
 
+/// One monitor's work area in logical pixels, the same space as the chip.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct WorkRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Slide the chip back so the whole bar stays inside the work area.
+pub(crate) fn clamp_chip_to_work(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    work: WorkRect,
+) -> (f64, f64) {
+    let max_x = work.x + (work.w - width).max(0.0);
+    let max_y = work.y + (work.h - height).max(0.0);
+    (x.clamp(work.x, max_x), y.clamp(work.y, max_y))
+}
+
+fn chip_fits_work(x: f64, y: f64, width: f64, height: f64, work: WorkRect) -> bool {
+    let (clamped_x, clamped_y) = clamp_chip_to_work(x, y, width, height, work);
+    (clamped_x - x).abs() < 0.5 && (clamped_y - y).abs() < 0.5
+}
+
+/// Where the chip should sit. A drag wins. A saved spot is used only while it
+/// still fits; otherwise the caller drops it and the chip returns to the top.
+pub(crate) fn windows_chip_origin(
+    drag: Option<(f64, f64)>,
+    saved: Option<(f64, f64)>,
+    default_x: f64,
+    default_y: f64,
+    width: f64,
+    height: f64,
+    work: WorkRect,
+) -> (f64, f64, bool) {
+    if let Some((x, y)) = drag {
+        let (x, y) = clamp_chip_to_work(x, y, width, height, work);
+        return (x, y, false);
+    }
+    if let Some((x, y)) = saved {
+        if chip_fits_work(x, y, width, height, work) {
+            return (x, y, false);
+        }
+        return (default_x, default_y, true);
+    }
+    (default_x, default_y, false)
+}
+
+fn parse_chip_place(raw: &str) -> HashMap<(i32, i32), (f64, f64)> {
+    let mut map = HashMap::new();
+    for line in raw.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(origin_x) = parts.next().and_then(|part| part.parse::<i32>().ok()) else {
+            continue;
+        };
+        let Some(origin_y) = parts.next().and_then(|part| part.parse::<i32>().ok()) else {
+            continue;
+        };
+        let Some(x) = parts.next().and_then(|part| part.parse::<f64>().ok()) else {
+            continue;
+        };
+        let Some(y) = parts.next().and_then(|part| part.parse::<f64>().ok()) else {
+            continue;
+        };
+        if x.is_finite() && y.is_finite() {
+            map.insert((origin_x, origin_y), (x, y));
+        }
+    }
+    map
+}
+
+fn format_chip_place(map: &HashMap<(i32, i32), (f64, f64)>) -> String {
+    let mut lines: Vec<String> = map
+        .iter()
+        .map(|((origin_x, origin_y), (x, y))| format!("{origin_x} {origin_y} {x} {y}"))
+        .collect();
+    lines.sort();
+    lines.join("\n")
+}
+
 fn status_frame(
     chrome: Chrome,
     screen_x: f64,
@@ -820,6 +953,134 @@ fn status_frame(
             peek_height,
             anchor.as_ref(),
         )
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn logical_work(monitor: &tauri::Monitor) -> Option<WorkRect> {
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 {
+        return None;
+    }
+    let work = monitor.work_area();
+    Some(WorkRect {
+        x: work.position.x as f64 / scale,
+        y: work.position.y as f64 / scale,
+        w: work.size.width as f64 / scale,
+        h: work.size.height as f64 / scale,
+    })
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn work_key(monitor: &tauri::Monitor) -> (i32, i32) {
+    let work = monitor.work_area();
+    (work.position.x, work.position.y)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn island_index(label: &str) -> Option<usize> {
+    if label == ISLAND_LABEL {
+        Some(0)
+    } else {
+        label
+            .strip_prefix(&format!("{ISLAND_LABEL}-"))
+            .and_then(|rest| rest.parse().ok())
+    }
+}
+
+fn chip_position_on_monitor(
+    app: &AppHandle,
+    monitor: &tauri::Monitor,
+    label: &str,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    #[cfg(not(windows))]
+    {
+        let _ = (app, monitor, label, width, height);
+        (x, y)
+    }
+    #[cfg(windows)]
+    {
+        let Some(work) = logical_work(monitor) else {
+            return (x, y);
+        };
+        let key = work_key(monitor);
+        let (drag, saved) = {
+            let host = app.state::<IslandHost>();
+            let guard = host.inner.lock().expect("island");
+            (
+                guard.chip_drag.get(label).copied(),
+                guard.chip_place.get(&key).copied(),
+            )
+        };
+        let (next_x, next_y, drop_saved) =
+            windows_chip_origin(drag, saved, x, y, width, height, work);
+        if drop_saved {
+            let map = {
+                let host = app.state::<IslandHost>();
+                let mut guard = host.inner.lock().expect("island");
+                guard.chip_place.remove(&key);
+                guard.chip_place.clone()
+            };
+            write_chip_place(app, &map);
+        }
+        (next_x, next_y)
+    }
+}
+
+/// Move the Windows chip. A commit remembers the spot; a drag only follows the pointer.
+fn place_status_chip(app: &AppHandle, label: &str, x: f64, y: f64, commit: bool) {
+    #[cfg(windows)]
+    {
+        if !is_island_label(label) || !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        let Some(index) = island_index(label) else {
+            return;
+        };
+        let monitors = monitors_for_island(app);
+        let Some(monitor) = monitors.get(index) else {
+            return;
+        };
+        let Some(work) = logical_work(monitor) else {
+            return;
+        };
+        let Some(window) = app.get_webview_window(label) else {
+            return;
+        };
+        let (x, y) = clamp_chip_to_work(x, y, CHIP_WIDTH, CHIP_HEIGHT, work);
+        let key = work_key(monitor);
+        let persist = {
+            let host = app.state::<IslandHost>();
+            let mut guard = host.inner.lock().expect("island");
+            if commit {
+                guard.chip_drag.remove(label);
+                guard.chip_place.insert(key, (x, y));
+            } else {
+                guard.chip_drag.insert(label.to_string(), (x, y));
+            }
+            guard.placed.insert(
+                label.to_string(),
+                (
+                    x.round() as i32,
+                    y.round() as i32,
+                    CHIP_WIDTH.round() as i32,
+                    CHIP_HEIGHT.round() as i32,
+                ),
+            );
+            commit.then(|| guard.chip_place.clone())
+        };
+        let _ = window.set_position(LogicalPosition::new(x, y));
+        if let Some(map) = persist {
+            write_chip_place(app, &map);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, label, x, y, commit);
     }
 }
 
@@ -1545,6 +1806,20 @@ pub fn island_restore_command(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn island_place_chip_command(
+    app: AppHandle,
+    label: String,
+    x: f64,
+    y: f64,
+    commit: bool,
+) -> Result<(), String> {
+    hop(&app, move |app| {
+        place_status_chip(app, &label, x, y, commit)
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub fn island_pin_command(app: AppHandle) -> Result<(), String> {
     hop(&app, move |app| restore_conversation(app, true));
     Ok(())
@@ -1674,8 +1949,9 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 #[cfg(test)]
 mod tests {
     use super::{
-        chrome_if_enabled, island_chrome, island_frame, peek_height, pending_opens_card,
-        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor,
+        chrome_if_enabled, clamp_chip_to_work, format_chip_place, island_chrome, island_frame,
+        parse_chip_place, peek_height, pending_opens_card, windows_chip_origin,
+        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor, WorkRect,
     };
 
     #[test]
@@ -1856,5 +2132,78 @@ mod tests {
         assert_eq!(card_y, 48.0);
         assert_eq!(card_h, 200.0);
         assert_eq!(card_inset, 0.0);
+    }
+
+    fn sample_work() -> WorkRect {
+        WorkRect {
+            x: 10.0,
+            y: 40.0,
+            w: 1280.0,
+            h: 800.0,
+        }
+    }
+
+    #[test]
+    fn a_dragged_chip_keeps_its_spot() {
+        let (x, y, drop_saved) = windows_chip_origin(
+            None,
+            Some((80.0, 700.0)),
+            562.0,
+            48.0,
+            156.0,
+            28.0,
+            sample_work(),
+        );
+        assert_eq!((x, y), (80.0, 700.0));
+        assert!(!drop_saved);
+    }
+
+    #[test]
+    fn a_chip_pulled_past_the_edge_slides_back_inside() {
+        let (x, y) = clamp_chip_to_work(5000.0, -20.0, 156.0, 28.0, sample_work());
+        assert_eq!(x, 10.0 + 1280.0 - 156.0);
+        assert_eq!(y, 40.0);
+    }
+
+    #[test]
+    fn a_saved_spot_that_no_longer_fits_returns_to_the_top() {
+        let (x, y, drop_saved) = windows_chip_origin(
+            None,
+            Some((4000.0, 4000.0)),
+            562.0,
+            48.0,
+            156.0,
+            28.0,
+            sample_work(),
+        );
+        assert_eq!((x, y), (562.0, 48.0));
+        assert!(drop_saved);
+    }
+
+    #[test]
+    fn a_drag_in_progress_stays_inside_without_forgetting_the_saved_spot() {
+        let (x, y, drop_saved) = windows_chip_origin(
+            Some((9000.0, 100.0)),
+            Some((80.0, 700.0)),
+            562.0,
+            48.0,
+            156.0,
+            28.0,
+            sample_work(),
+        );
+        assert_eq!(x, 10.0 + 1280.0 - 156.0);
+        assert_eq!(y, 100.0);
+        assert!(!drop_saved);
+    }
+
+    #[test]
+    fn chip_spots_round_trip_through_the_saved_file() {
+        let mut map = std::collections::HashMap::new();
+        map.insert((0, 0), (120.5, 40.0));
+        map.insert((1920, 0), (2000.0, 80.0));
+        let parsed = parse_chip_place(&format_chip_place(&map));
+        assert_eq!(parsed, map);
+        let broken = parse_chip_place("nope\n1 2 3\n4 5 nan 6\n");
+        assert!(broken.is_empty());
     }
 }
