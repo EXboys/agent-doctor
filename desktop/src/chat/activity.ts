@@ -4,6 +4,8 @@ import { getLocale, t } from "../i18n";
 import {
   activityKind,
   appendRunLog,
+  HAND_MISSING_PHASE,
+  handMissingNotice,
   isQuietPhase,
   isRuntimeLog,
   isTransportDump,
@@ -629,8 +631,31 @@ export function createActivityController(deps: ActivityDeps) {
     followChatLog(deps.logEl);
   }
 
+  /** One plain sentence in the chat; the original error stays in the collapsed log. */
+  function showHandMissing(message: string): void {
+    const { sentence, detail } = handMissingNotice(message);
+    deps.rememberTurnNotice(sentence);
+    if (detail) deps.rememberRuntimeLog(detail);
+    if (!deps.isViewingRunningSession()) return;
+    clearEmptyChatStart(deps.logEl);
+    const row = document.createElement("div");
+    row.className = "chat-activity kind-log";
+    row.dataset.kind = "log";
+    const label = document.createElement("span");
+    label.className = "chat-activity-text";
+    label.textContent = sentence;
+    row.appendChild(label);
+    deps.logEl.appendChild(row);
+    if (detail) appendRunLog(deps.logEl, detail);
+    followChatLog(deps.logEl);
+  }
+
   /** Render progress / tool calls inline in the chat stream (not a side panel). */
   function pushActivity(phase: string, message: string): void {
+    if (phase === HAND_MISSING_PHASE) {
+      showHandMissing(message);
+      return;
+    }
     const text = message.trim() || phase;
     if (!text) return;
     // A status that is really a log or an HTTP body stays in the collapsed record.

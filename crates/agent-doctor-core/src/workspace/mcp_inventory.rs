@@ -1025,18 +1025,33 @@ fn should_refresh_managed_cli(source: &Path, dest: &Path) -> bool {
     if !dest.is_file() || is_ephemeral_cli_path(source) {
         return true;
     }
-    match (cli_version_label(source), cli_version_label(dest)) {
-        (Some(src), Some(dst)) => cmp_version_labels(&src, &dst) == Ordering::Greater,
+    refresh_managed_cli(
+        cli_version_label(source).as_deref(),
+        cli_version_label(dest).as_deref(),
+        mtime_or_epoch(source) > mtime_or_epoch(dest),
+    )
+}
+
+/// A newer version replaces the managed copy. The same version does too when
+/// the source file is newer: a rebuild can add `mcp computer` without a bump.
+/// An older version never replaces it.
+fn refresh_managed_cli(source: Option<&str>, dest: Option<&str>, source_newer: bool) -> bool {
+    match (source, dest) {
+        (Some(source), Some(dest)) => match cmp_version_labels(source, dest) {
+            Ordering::Greater => true,
+            Ordering::Less => false,
+            Ordering::Equal => source_newer,
+        },
         (Some(_), None) => true,
-        _ => mtime_or_epoch(source) > mtime_or_epoch(dest),
+        _ => source_newer,
     }
 }
 
 /// Keep a stable MCP command path under the user config bin.
 ///
-/// Ephemeral Cursor/cargo builds are always copied. A newer resolved CLI also
-/// refreshes the managed copy so `~/.codex` does not stay stuck on an old
-/// `~/.local/bin/agent-doctor-cli` that rejects Codex resource probes.
+/// Ephemeral Cursor/cargo builds are always copied. A newer resolved CLI, or a
+/// newer file of the same version, refreshes the managed copy so it does not
+/// stay on a build that lacks a subcommand the app just started shipping.
 pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
     let Some(dest) = managed_cli_dest() else {
         return Ok(resolved.to_path_buf());
@@ -1144,6 +1159,15 @@ mod tests {
     fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
         let temp = tempdir().unwrap();
         crate::adapters::util::with_test_home(temp.path(), || f(temp.path()))
+    }
+
+    #[test]
+    fn managed_cli_refreshes_for_a_newer_file_of_the_same_version() {
+        assert!(refresh_managed_cli(Some("0.1.80"), Some("0.1.69"), false));
+        assert!(!refresh_managed_cli(Some("0.1.69"), Some("0.1.80"), true));
+        assert!(refresh_managed_cli(Some("0.1.80"), Some("0.1.80"), true));
+        assert!(!refresh_managed_cli(Some("0.1.80"), Some("0.1.80"), false));
+        assert!(refresh_managed_cli(Some("0.1.80"), None, false));
     }
 
     #[test]

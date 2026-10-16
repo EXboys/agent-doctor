@@ -16,10 +16,7 @@ use super::env::{
     apply_claude_env, apply_overlay_env, claude_provider_env, collect_overlay_env_for_options,
     format_command_display,
 };
-use super::mcp_ensure::{
-    ensure_browser_mcp_for_ask, ensure_computer_mcp_for_ask, prepend_hand_instructions,
-    wants_browser_mcp, wants_computer_use,
-};
+use super::mcp_ensure::wire_hands;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
 use super::util::{
@@ -76,28 +73,15 @@ fn run_claude(
         .filter(|s| !s.is_empty());
 
     let overlay = collect_overlay_env_for_options(options);
-    let browser_mcp = wants_browser_mcp(options);
-    if browser_mcp {
-        if let Some(note) = ensure_browser_mcp_for_ask("claude-code", &cwd, &overlay) {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    let computer_mcp = wants_computer_use(options);
-    if computer_mcp {
-        if let Some(note) = ensure_computer_mcp_for_ask("claude-code", &cwd, &overlay) {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
+    let hands = wire_hands("claude-code", options, &cwd, &overlay, |phase, message| {
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: phase.into(),
+            message,
+        })
+    });
 
-    let effective_prompt = prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
+    let effective_prompt = hands.prompt(prompt);
 
     let images: Vec<super::vision::EncodedImage> =
         super::vision::turn_images("claude-code", &options.image_paths, &overlay)

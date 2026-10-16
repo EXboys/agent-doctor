@@ -277,6 +277,23 @@ export function activityKind(phase: string): "tool" | "think" | "write" | "info"
   return "info";
 }
 
+/** A browser or computer tool could not be connected for this turn. */
+export const HAND_MISSING_PHASE = "hand_missing";
+
+/** `<hand>:<reason>` then the original error. One sentence for the person, the rest for the log. */
+export function handMissingNotice(message: string): { sentence: string; detail: string } {
+  const breakAt = message.indexOf("\n");
+  const head = (breakAt === -1 ? message : message.slice(0, breakAt)).trim();
+  const detail = breakAt === -1 ? "" : message.slice(breakAt + 1).trim();
+  const [hand, reason] = head.split(":");
+  const browser = hand === "browser";
+  let key: MessageKey;
+  if (browser && reason === "chrome") key = "chat.handBrowserNoChrome";
+  else if (reason === "cli") key = browser ? "chat.handBrowserOld" : "chat.handComputerOld";
+  else key = browser ? "chat.handBrowserMissing" : "chat.handComputerMissing";
+  return { sentence: t(key), detail };
+}
+
 /** Lifecycle chatter that belongs in the header live pill, not the transcript. */
 export function isQuietPhase(phase: string): boolean {
   return phase === "writing" || phase === "streaming" || phase === "info" || phase === "done";

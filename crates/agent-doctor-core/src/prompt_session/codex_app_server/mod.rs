@@ -16,10 +16,7 @@ use super::env::{
     collect_overlay_env_for_options, format_command_display, prepare_codex_home,
     resolve_codex_overlay, scrub_subscription_gateway_env,
 };
-use super::mcp_ensure::{
-    ensure_browser_mcp_for_ask, ensure_computer_mcp_for_ask, prepend_hand_instructions,
-    wants_browser_mcp, wants_computer_use,
-};
+use super::mcp_ensure::{wire_hands, Hands};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
     is_runtime_stderr_noise, stderr_event, strip_runtime_stderr_noise, summarize, turn_error,
@@ -190,7 +187,7 @@ fn is_thread_open_failure(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains("codex thread did not open")
 }
 
-fn codex_ask_developer_instructions(browser_mcp: bool, computer_mcp: bool) -> String {
+fn codex_ask_developer_instructions(hands: &Hands) -> String {
     let mut text = String::from(
         "Use ordinary shell and file tools, including when the task edits a video or other files outside the project folder, on an external disk under /Volumes, or removes temporary files. \
          /Volumes is already a writable root, the same as the home folder. \
@@ -201,13 +198,10 @@ fn codex_ask_developer_instructions(browser_mcp: bool, computer_mcp: bool) -> St
          When request_user_input is available and you need a secret, token, password, or a decision only the user can make, call that tool. \
          Do not ask the user to paste a secret into the chat.",
     );
-    if browser_mcp {
+    let hand_text = hands.instructions();
+    if !hand_text.is_empty() {
         text.push_str("\n\n");
-        text.push_str(super::mcp_ensure::browser_mcp_tool_instructions());
-    }
-    if computer_mcp {
-        text.push_str("\n\n");
-        text.push_str(super::mcp_ensure::computer_use_tool_instructions());
+        text.push_str(&hand_text);
     }
     text
 }
@@ -239,26 +233,13 @@ fn run_codex_app_server(
     let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(
         &cwd.join(".codex").join("config.toml"),
     );
-    let browser_mcp = wants_browser_mcp(options);
-    if browser_mcp {
-        if let Some(note) = ensure_browser_mcp_for_ask("codex", &cwd, &overlay) {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    let computer_mcp = wants_computer_use(options);
-    if computer_mcp {
-        if let Some(note) = ensure_computer_mcp_for_ask("codex", &cwd, &overlay) {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
+    let hands = wire_hands("codex", options, &cwd, &overlay, |phase, message| {
+        on_event(PromptSessionEvent::Status {
+            session_id: session_id.clone(),
+            phase: phase.into(),
+            message,
+        })
+    });
 
     let cmd = build_app_server_command(&cwd, &overlay)?;
     let command_display = format_command_display(&cmd);
@@ -287,8 +268,8 @@ fn run_codex_app_server(
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    let developer_instructions = if browser_mcp || interactive {
-        Some(codex_ask_developer_instructions(browser_mcp, computer_mcp))
+    let developer_instructions = if hands.any() || interactive {
+        Some(codex_ask_developer_instructions(&hands))
     } else {
         None
     };
@@ -315,7 +296,7 @@ fn run_codex_app_server(
         on_event(event);
     };
 
-    let agent_prompt = prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
+    let agent_prompt = hands.prompt(prompt);
     let prepared = super::vision::prepare_turn_images("codex", &options.image_paths, &overlay);
     let images: Vec<String> = prepared
         .paths

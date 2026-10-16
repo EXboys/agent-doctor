@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use anyhow::Context;
 
@@ -133,21 +135,128 @@ pub(crate) fn computer_use_tool_instructions() -> &'static str {
      - Ask the user before sending a message, paying, or deleting."
 }
 
-pub(crate) fn prepend_hand_instructions(prompt: &str, browser: bool, computer: bool) -> String {
-    let mut prefix = String::new();
-    if browser {
-        prefix.push_str(browser_mcp_tool_instructions());
+/// The app already showed the user one sentence about the missing tools.
+fn hand_missing_instructions(what: &str) -> String {
+    format!(
+        "{what} TOOLS ARE NOT CONNECTED this turn. The app already told the user why.\n\
+         - Do not explain it again, and do not work around it with shell commands, screenshots, or scripts.\n\
+         - If the request needs these tools, reply only 先按上面的提示处理，再发一次。 and stop."
+    )
+}
+
+/// Status phase for a hand that could not be wired. The message is
+/// `<hand>:<reason>`, then the original error on the next lines.
+pub const HAND_MISSING_PHASE: &str = "hand_missing";
+
+enum HandWire {
+    Ready(String),
+    Missing {
+        reason: &'static str,
+        detail: String,
+    },
+}
+
+/// Which hands this turn has, after wiring them into the runtime's config.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Hands {
+    pub browser: bool,
+    pub computer: bool,
+    browser_missing: bool,
+    computer_missing: bool,
+}
+
+impl Hands {
+    pub(crate) fn any(&self) -> bool {
+        self.browser || self.computer || self.browser_missing || self.computer_missing
     }
-    if computer {
-        if !prefix.is_empty() {
-            prefix.push_str("\n\n");
+
+    pub(crate) fn instructions(&self) -> String {
+        let mut blocks: Vec<String> = Vec::new();
+        if self.browser {
+            blocks.push(browser_mcp_tool_instructions().to_string());
         }
-        prefix.push_str(computer_use_tool_instructions());
+        if self.browser_missing {
+            blocks.push(hand_missing_instructions("BROWSER"));
+        }
+        if self.computer {
+            blocks.push(computer_use_tool_instructions().to_string());
+        }
+        if self.computer_missing {
+            blocks.push(hand_missing_instructions("COMPUTER"));
+        }
+        blocks.join("\n\n")
     }
-    if prefix.is_empty() {
-        prompt.to_string()
+
+    pub(crate) fn prompt(&self, prompt: &str) -> String {
+        let prefix = self.instructions();
+        if prefix.is_empty() {
+            prompt.to_string()
+        } else {
+            format!("{prefix}\n\n{prompt}")
+        }
+    }
+}
+
+/// Wire the browser and computer tools this turn asked for. `status` gets
+/// `(phase, message)`: quiet `info` when ready, [`HAND_MISSING_PHASE`] when not.
+pub(crate) fn wire_hands(
+    runtime: &str,
+    options: &PromptSessionOptions,
+    cwd: &Path,
+    overlay: &HashMap<String, String>,
+    mut status: impl FnMut(&'static str, String),
+) -> Hands {
+    let mut hands = Hands::default();
+    let mut report = |hand: &str, wire: HandWire| -> bool {
+        match wire {
+            HandWire::Ready(note) => {
+                if !note.is_empty() {
+                    status("info", note);
+                }
+                true
+            }
+            HandWire::Missing { reason, detail } => {
+                status(HAND_MISSING_PHASE, format!("{hand}:{reason}\n{detail}"));
+                false
+            }
+        }
+    };
+    if wants_browser_mcp(options) {
+        let ready = report("browser", ensure_browser_mcp_for_ask(runtime, cwd, overlay));
+        hands.browser = ready;
+        hands.browser_missing = !ready;
+    }
+    if wants_computer_use(options) {
+        let ready = report(
+            "computer",
+            ensure_computer_mcp_for_ask(runtime, cwd, overlay),
+        );
+        hands.computer = ready;
+        hands.computer_missing = !ready;
+    }
+    hands
+}
+
+fn wire_report(hand: &str, report: crate::browser_wire::BrowserMcpWireReport) -> HandWire {
+    let mut ready = Vec::new();
+    let mut failed = Vec::new();
+    for item in report.results {
+        if item.ok {
+            ready.push(format!("{hand} MCP ready for {}", item.runtime));
+        } else {
+            failed.push(format!(
+                "{hand} MCP wire failed for {}: {}",
+                item.runtime, item.message
+            ));
+        }
+    }
+    if failed.is_empty() {
+        HandWire::Ready(ready.join("; "))
     } else {
-        format!("{prefix}\n\n{prompt}")
+        HandWire::Missing {
+            reason: "other",
+            detail: failed.join("; "),
+        }
     }
 }
 
@@ -165,24 +274,35 @@ pub(crate) fn runtime_supports_browser_mcp(runtime: &str) -> bool {
 /// Upsert browser MCP into Claude / Codex / Hermes / OpenClaw config paths.
 ///
 /// Best-effort: failures are logged via the returned message but do not abort Ask.
-pub(crate) fn ensure_browser_mcp_for_ask(
+fn ensure_browser_mcp_for_ask(
     runtime: &str,
     project_cwd: &Path,
     overlay: &HashMap<String, String>,
-) -> Option<String> {
+) -> HandWire {
     if !runtime_supports_browser_mcp(runtime) {
-        return Some(format!(
-            "browser MCP is not wired for runtime '{runtime}' yet (supported: {})",
-            BROWSER_MCP_WIRE_RUNTIMES.join(", ")
-        ));
+        return HandWire::Missing {
+            reason: "runtime",
+            detail: format!(
+                "browser MCP is not wired for runtime '{runtime}' yet (supported: {})",
+                BROWSER_MCP_WIRE_RUNTIMES.join(", ")
+            ),
+        };
     }
 
     if let Err(err) = ensure_chrome_for_wire() {
-        return Some(format!("browser MCP skipped: Chrome not found ({err})"));
+        return HandWire::Missing {
+            reason: "chrome",
+            detail: format!("browser MCP skipped: Chrome not found ({err})"),
+        };
     }
     let binary = match resolve_mcp_binary() {
         Ok(path) => path,
-        Err(err) => return Some(format!("browser MCP skipped: {err}")),
+        Err(err) => {
+            return HandWire::Missing {
+                reason: "cli",
+                detail: format!("browser MCP skipped: {err}"),
+            }
+        }
     };
 
     let (project_path, codex_home, hermes_home, openclaw_workspace) =
@@ -194,46 +314,37 @@ pub(crate) fn ensure_browser_mcp_for_ask(
     options.openclaw_workspace = openclaw_workspace;
     options.runtimes = vec![runtime.to_string()];
 
-    let report = match wire_browser_mcp(&options) {
-        Ok(report) => report,
-        Err(err) => return Some(format!("browser MCP skipped: {err}")),
-    };
-    let mut notes = Vec::new();
-    for item in report.results {
-        if item.ok {
-            notes.push(format!(
-                "browser MCP ready for {} ({})",
-                item.runtime,
-                item.config_path.unwrap_or_else(|| "config".into())
-            ));
-        } else {
-            notes.push(format!(
-                "browser MCP wire failed for {}: {}",
-                item.runtime, item.message
-            ));
-        }
-    }
-    if notes.is_empty() {
-        None
-    } else {
-        Some(notes.join("; "))
+    match wire_browser_mcp(&options) {
+        Ok(report) => wire_report("browser", report),
+        Err(err) => HandWire::Missing {
+            reason: "other",
+            detail: format!("browser MCP skipped: {err}"),
+        },
     }
 }
 
-pub(crate) fn ensure_computer_mcp_for_ask(
+fn ensure_computer_mcp_for_ask(
     runtime: &str,
     project_cwd: &Path,
     overlay: &HashMap<String, String>,
-) -> Option<String> {
+) -> HandWire {
     if !runtime_supports_browser_mcp(runtime) {
-        return Some(format!(
-            "computer MCP is not wired for runtime '{runtime}' yet (supported: {})",
-            BROWSER_MCP_WIRE_RUNTIMES.join(", ")
-        ));
+        return HandWire::Missing {
+            reason: "runtime",
+            detail: format!(
+                "computer MCP is not wired for runtime '{runtime}' yet (supported: {})",
+                BROWSER_MCP_WIRE_RUNTIMES.join(", ")
+            ),
+        };
     }
     let binary = match resolve_computer_mcp_binary() {
         Ok(path) => path,
-        Err(err) => return Some(format!("computer MCP skipped: {err}")),
+        Err(err) => {
+            return HandWire::Missing {
+                reason: "cli",
+                detail: format!("computer MCP skipped: {err}"),
+            }
+        }
     };
     let (project_path, codex_home, hermes_home, openclaw_workspace) =
         resolve_workspace_paths(project_cwd, overlay);
@@ -243,28 +354,12 @@ pub(crate) fn ensure_computer_mcp_for_ask(
     options.hermes_home = hermes_home;
     options.openclaw_workspace = openclaw_workspace;
     options.runtimes = vec![runtime.to_string()];
-    let report = match wire_computer_mcp(&options) {
-        Ok(report) => report,
-        Err(err) => return Some(format!("computer MCP skipped: {err}")),
-    };
-    let notes: Vec<String> = report
-        .results
-        .into_iter()
-        .map(|item| {
-            if item.ok {
-                format!("computer MCP ready for {}", item.runtime)
-            } else {
-                format!(
-                    "computer MCP wire failed for {}: {}",
-                    item.runtime, item.message
-                )
-            }
-        })
-        .collect();
-    if notes.is_empty() {
-        None
-    } else {
-        Some(notes.join("; "))
+    match wire_computer_mcp(&options) {
+        Ok(report) => wire_report("computer", report),
+        Err(err) => HandWire::Missing {
+            reason: "other",
+            detail: format!("computer MCP skipped: {err}"),
+        },
     }
 }
 
@@ -333,7 +428,41 @@ fn help_lists_computer(text: &str) -> bool {
     })
 }
 
+type ComputerSupportKey = (String, Option<SystemTime>, u64);
+
+fn computer_support_cache() -> &'static Mutex<HashMap<ComputerSupportKey, bool>> {
+    static CACHE: OnceLock<Mutex<HashMap<ComputerSupportKey, bool>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn binary_supports_computer(path: &Path) -> bool {
+    let meta = std::fs::metadata(path).ok();
+    let key = meta.as_ref().map(|meta| {
+        (
+            path.to_string_lossy().into_owned(),
+            meta.modified().ok(),
+            meta.len(),
+        )
+    });
+    if let Some(key) = &key {
+        let cache = computer_support_cache()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if let Some(hit) = cache.get(key) {
+            return *hit;
+        }
+    }
+    let supports = probe_computer_support(path);
+    if let Some(key) = key {
+        computer_support_cache()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(key, supports);
+    }
+    supports
+}
+
+fn probe_computer_support(path: &Path) -> bool {
     let Ok(output) = std::process::Command::new(path)
         .args(["mcp", "--help"])
         .output()
@@ -353,6 +482,8 @@ fn binary_supports_computer(path: &Path) -> bool {
 
 /// The installed CLI can be the same version number and still lack `mcp computer`.
 /// Use that CLI when it has the command; otherwise a newer binary next to this app.
+/// A binary found beside the app is copied into the stable command path when it
+/// is newer, so the managed copy does not stay on a build without the tools.
 fn resolve_computer_mcp_binary() -> anyhow::Result<PathBuf> {
     if let Ok(path) = resolve_mcp_binary() {
         if binary_supports_computer(&path) {
@@ -371,6 +502,11 @@ fn resolve_computer_mcp_binary() -> anyhow::Result<PathBuf> {
                 "agent-doctor"
             });
             if candidate.is_file() && binary_supports_computer(&candidate) {
+                let stable = crate::workspace::ensure_stable_agent_doctor_cli(&candidate)
+                    .unwrap_or_else(|_| candidate.clone());
+                if binary_supports_computer(&stable) {
+                    return Ok(stable);
+                }
                 return Ok(candidate);
             }
             dir = current.parent().map(std::path::Path::to_path_buf);
@@ -432,12 +568,24 @@ mod tests {
         assert!(!wants_computer_use(&opts));
         opts.computer_use_enabled = Some(true);
         assert!(wants_computer_use(&opts));
-        let lined = prepend_hand_instructions("你好", false, true);
+        let hands = Hands {
+            computer: true,
+            ..Hands::default()
+        };
+        let lined = hands.prompt("你好");
         assert!(lined.contains("server named `computer`"));
         assert!(lined.contains("screen_snapshot"));
         assert!(lined.contains("mcp__computer__screen_snapshot"));
         assert!(lined.contains("computer__screen_snapshot"));
         assert!(lined.contains("你好"));
+        let missing = Hands {
+            computer_missing: true,
+            ..Hands::default()
+        };
+        let lined = missing.prompt("你好");
+        assert!(lined.contains("COMPUTER TOOLS ARE NOT CONNECTED"));
+        assert!(!lined.contains("server named `computer`"));
+        assert_eq!(Hands::default().prompt("你好"), "你好");
         assert!(help_lists_computer(
             "Commands:\n  computer   Start computer MCP server\n  browser    Start browser MCP server\n"
         ));

@@ -88,32 +88,15 @@ fn run_openclaw(
             message: note,
         });
     }
-    let browser_mcp = super::mcp_ensure::wants_browser_mcp(options);
-    let computer_mcp = super::mcp_ensure::wants_computer_use(options);
-    if browser_mcp {
-        if let Some(note) =
-            super::mcp_ensure::ensure_browser_mcp_for_ask("openclaw", &cwd, &overlay)
-        {
+    let hands =
+        super::mcp_ensure::wire_hands("openclaw", options, &cwd, &overlay, |phase, message| {
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    if computer_mcp {
-        if let Some(note) =
-            super::mcp_ensure::ensure_computer_mcp_for_ask("openclaw", &cwd, &overlay)
-        {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    let prompt_text =
-        super::mcp_ensure::prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
+                phase: phase.into(),
+                message,
+            })
+        });
+    let prompt_text = hands.prompt(prompt);
 
     let mut cmd = build_openclaw_command(
         &prompt_text,

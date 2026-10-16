@@ -433,11 +433,9 @@ pub fn configure_stdio_mcp(
         openclaw_workspace,
     )?;
     match runtime {
-        "codex" => {
-            for path in codex_browser_config_paths(&config_path) {
-                write_mcp_servers_toml(&path, server_name, command, args)?;
-            }
-        }
+        // Only the workspace CODEX_HOME. `computer` reaches the screen through
+        // the running desktop app, so it would fail in the user's own Codex.
+        "codex" => write_mcp_servers_toml(&config_path, server_name, command, args)?,
         "claude-code" | "claude" => {
             write_claude_style_mcp(&config_path, server_name, command, args)?;
         }

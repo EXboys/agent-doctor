@@ -77,30 +77,15 @@ fn run_hermes(
     let yolo = options.dangerously_skip_permissions || options.full_auto;
 
     let overlay = collect_overlay_env_for_options(options);
-    let browser_mcp = super::mcp_ensure::wants_browser_mcp(options);
-    let computer_mcp = super::mcp_ensure::wants_computer_use(options);
-    if browser_mcp {
-        if let Some(note) = super::mcp_ensure::ensure_browser_mcp_for_ask("hermes", &cwd, &overlay)
-        {
+    let hands =
+        super::mcp_ensure::wire_hands("hermes", options, &cwd, &overlay, |phase, message| {
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    if computer_mcp {
-        if let Some(note) = super::mcp_ensure::ensure_computer_mcp_for_ask("hermes", &cwd, &overlay)
-        {
-            on_event(PromptSessionEvent::Status {
-                session_id: session_id.clone(),
-                phase: "mcp".into(),
-                message: note,
-            });
-        }
-    }
-    let prompt_text =
-        super::mcp_ensure::prepend_hand_instructions(prompt, browser_mcp, computer_mcp);
+                phase: phase.into(),
+                message,
+            })
+        });
+    let prompt_text = hands.prompt(prompt);
 
     let mut cmd = build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo, &overlay)?;
     let command_display = format_command_display(&cmd);

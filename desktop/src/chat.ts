@@ -1,5 +1,6 @@
 import { fitTextarea } from "./fit-textarea";
 import { renderFollowQueue } from "./chat/follow-queue";
+import { HAND_MISSING_PHASE } from "./chat/format";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
 import { syncTuneLabels } from "./chat/tune-menu";
@@ -645,8 +646,10 @@ export function appendStderrLine(line: string): void {
   chatState.activity.appendStderrLine(line);
 }
 export function pushActivity(phase: string, message: string): void {
-  chatState.latestActivityText = message.trim();
-  chatState.running?.setText(message);
+  if (phase !== HAND_MISSING_PHASE) {
+    chatState.latestActivityText = message.trim();
+    chatState.running?.setText(message);
+  }
   chatState.activity.pushActivity(phase, message);
 }
 export function pushToolStep(step: ToolStep): void {

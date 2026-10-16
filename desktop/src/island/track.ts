@@ -1,4 +1,4 @@
-import { formatPermissionDetail, preferPlainSummary, stripMarkdown } from "../chat/format";
+import { formatPermissionDetail, HAND_MISSING_PHASE, preferPlainSummary, stripMarkdown } from "../chat/format";
 import type { PromptSessionEvent } from "../chat/types";
 import { looksLikeBrowserToolCall } from "../chat/verify";
 import { planShort, type PlanStep } from "../plan";
@@ -141,6 +141,7 @@ export function reduceIslandTrack(track: IslandTrack, event: PromptSessionEvent)
     case "started":
       return { ...track, active: true, browser: false, detail: "", spoken: "", pending: null };
     case "status": {
+      if (event.phase === HAND_MISSING_PHASE) return { ...track, active: true };
       const browser = track.browser || browserNoise(event.message);
       const nextDetail = browserNoise(event.message) ? track.detail : shorten(event.message);
       return {
