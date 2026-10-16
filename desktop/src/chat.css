@@ -1977,14 +1977,15 @@ html[data-theme="dark"] .kw-search.chat-knowledge-input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 20px;
+  gap: 16px;
   padding: 14px 16px;
 }
 
 .chat-settings-copy {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -2396,6 +2397,22 @@ html[data-theme="dark"] .chat-project-menu {
   text-overflow: ellipsis;
   white-space: nowrap;
   letter-spacing: 0.01em;
+}
+
+.chat-session-group-rename {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 4px;
+  margin: 0;
+  padding: 1px 4px;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: inherit;
+  color: var(--text, #111);
+  background: var(--panel, #fff);
+  box-shadow: inset 0 0 0 1px var(--line-strong, rgba(15, 23, 42, 0.14));
 }
 
 .chat-session-group-drag-handle,
@@ -5851,6 +5868,48 @@ body.chat-skill-dragging .chat-res-grip {
   background: rgba(214, 69, 69, 0.1);
 }
 
+.chat-res-row.is-hand {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: default;
+}
+
+.chat-slash-hands.has-more {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-slash-hand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.chat-slash-hand-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.chat-slash-hand-icon svg {
+  display: block;
+}
+
+.chat-slash-hand-copy {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
 .chat-res-row {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -5893,6 +5952,11 @@ body.chat-skill-dragging .chat-res-grip {
   font-weight: 750;
   color: #fff;
   background: #64748b;
+}
+
+.chat-res-icon[data-tone="hand"] {
+  background: var(--fill);
+  color: var(--text);
 }
 
 .chat-res-icon[data-tone="skill"] {
@@ -5983,6 +6047,11 @@ body.chat-skill-dragging .chat-res-grip {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+
+.chat-resources-empty[hidden],
+.chat-resources-page .chat-knowledge-empty[hidden] {
+  display: none;
 }
 
 .chat-empty-next {
@@ -8392,13 +8461,25 @@ html[data-theme="dark"] .chat-permission-deny {
   gap: 2px;
 }
 
-.chat-composer-tools .chat-model-wrap {
+.chat-composer-send .chat-model-wrap {
   flex: 0 1 auto;
   min-width: 0;
 }
 
-.chat-composer-tools .chat-model-btn {
-  max-width: 100%;
+.chat-composer-send .chat-model-btn {
+  max-width: min(148px, 28vw);
+  height: 30px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.chat-composer-send .chat-model-menu {
+  left: auto;
+  right: 0;
+}
+
+.chat-pick-skill svg {
+  display: block;
 }
 
 .chat-composer-box:has(.chat-tune-btn.is-open),

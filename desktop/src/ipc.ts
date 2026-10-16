@@ -330,6 +330,10 @@ export function useNativeSubscription(runtimeId: string): Promise<NativeAccountS
   return invoke("use_native_subscription_command", { runtimeId });
 }
 
+export function resignNativeSubscription(runtimeId: string): Promise<NativeAccountSwitch> {
+  return invoke("resign_native_subscription_command", { runtimeId });
+}
+
 export function useCurrentService(runtimeId: string): Promise<NativeAccountSwitch> {
   return invoke("use_current_service_command", { runtimeId });
 }
@@ -618,6 +622,10 @@ export function useWorkspace(args: { name: string }): Promise<void> {
 }
 
 /** Take a project off the list. The folder on disk stays. */
+export function setWorkspaceTitle(args: { name: string; title: string }): Promise<WorkspacesDocument> {
+  return invoke("set_workspace_title_command", args);
+}
+
 export function removeWorkspace(args: { name: string }): Promise<void> {
   return invoke("remove_workspace_command", args);
 }

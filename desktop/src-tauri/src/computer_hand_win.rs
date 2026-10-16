@@ -26,8 +26,8 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
+    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
@@ -79,8 +79,11 @@ fn serve() -> Result<()> {
         let pipe = unsafe {
             CreateNamedPipeW(
                 &name,
-                FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0 | 8),
-                PIPE_TYPE_BYTE,
+                FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
+                // 8 is PIPE_REJECT_REMOTE_CLIENTS. It belongs here.
+                // On the open mode, some Windows builds reject the pipe, so the
+                // tool hears "file not found". Builds that ignore the bit still work.
+                PIPE_TYPE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,

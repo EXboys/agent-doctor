@@ -16,6 +16,7 @@ import { publishLocale } from "../locale-sync";
 import { checkForAppUpdates, readAppVersion } from "../updater";
 import { isMac, openMacAccessibility } from "./computer-grant";
 import { readAutoApproveDefault, writeAutoApproveDefault } from "./confirm-pref";
+import { readImageTextEnabled, setReadImageTextEnabled } from "./image-text";
 import { bindKnowledgeSyncSettings, refreshVisibleKnowledgeSync } from "./knowledge-sync";
 import {
   readBrowserToolsEnabled,
@@ -165,6 +166,7 @@ const islandEl = () => document.querySelector<HTMLInputElement>("#chat-settings-
 const islandIdleEl = () => document.querySelector<HTMLInputElement>("#chat-settings-island-idle");
 const versionEl = () => document.querySelector<HTMLElement>("#chat-settings-version");
 const autoApproveDefaultEl = () => document.querySelector<HTMLInputElement>("#chat-settings-auto-approve");
+const readImageEl = () => document.querySelector<HTMLInputElement>("#chat-settings-read-image");
 const browserEl = () => document.querySelector<HTMLInputElement>("#chat-settings-browser");
 const browserHintEl = () => document.querySelector<HTMLElement>("#chat-settings-browser-hint");
 const computerEl = () => document.querySelector<HTMLInputElement>("#chat-settings-computer");
@@ -180,6 +182,13 @@ export function refreshConfirmCopy(): void {
   if (!input) return;
   input.checked = readAutoApproveDefault();
   input.setAttribute("aria-label", t("chat.settingsAutoApproveSwitch"));
+}
+
+function refreshReadImage(): void {
+  const input = readImageEl();
+  if (!input) return;
+  input.checked = readImageTextEnabled();
+  input.setAttribute("aria-label", t("chat.readImageText"));
 }
 
 function syncIslandSwitch(): void {
@@ -263,6 +272,36 @@ function syncKnowledgeSwitch(): void {
   input.setAttribute("aria-label", t("chat.settingsKnowledgeSyncSwitch"));
 }
 
+export function applyBrowserTools(on: boolean): void {
+  writeBrowserToolsEnabled(on);
+  syncBrowserSwitch();
+  if (!on) return;
+  void wireBrowserMcp()
+    .then((report) => {
+      if (!browserHintEl() || !readBrowserToolsEnabled()) return;
+      const failed = report.results.find((item) => !item.ok);
+      if (failed) browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
+    })
+    .catch(() => {
+      if (browserHintEl() && readBrowserToolsEnabled()) {
+        browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
+      }
+    });
+}
+
+export function applyComputerUse(on: boolean): void {
+  writeComputerUseEnabled(on);
+  if (!on) {
+    offeredScreenGrant = false;
+    void syncComputerSwitch();
+    return;
+  }
+  void syncComputerSwitch().then((access) => {
+    if (!readComputerUseEnabled()) return;
+    openComputerGrant(access);
+  });
+}
+
 function syncBrowserSwitch(): void {
   const input = browserEl();
   const hint = browserHintEl();
@@ -331,6 +370,7 @@ function syncChatSettings(): void {
   markChoice("settingsTheme", readThemePreference());
   markChoice("settingsLocale", getLocale());
   refreshConfirmCopy();
+  refreshReadImage();
   syncBrowserSwitch();
   void syncComputerSwitch();
   syncKnowledgeSwitch();
@@ -383,39 +423,13 @@ export function bindChatSettings(applyI18n: () => void): void {
   });
   browserEl()?.addEventListener("change", () => {
     const input = browserEl();
-    const hint = browserHintEl();
     if (!input) return;
-    writeBrowserToolsEnabled(input.checked);
-    if (!input.checked) {
-      if (hint) hint.textContent = t("chat.settingsBrowserHint");
-      return;
-    }
-    if (hint) hint.textContent = t("chat.settingsBrowserReady");
-    void wireBrowserMcp()
-      .then((report) => {
-        if (!browserHintEl() || !readBrowserToolsEnabled()) return;
-        const failed = report.results.find((item) => !item.ok);
-        if (failed) browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
-      })
-      .catch(() => {
-        if (browserHintEl() && readBrowserToolsEnabled()) {
-          browserHintEl()!.textContent = t("chat.settingsBrowserFailed");
-        }
-      });
+    applyBrowserTools(input.checked);
   });
   computerEl()?.addEventListener("change", () => {
     const input = computerEl();
     if (!input) return;
-    writeComputerUseEnabled(input.checked);
-    if (!input.checked) {
-      offeredScreenGrant = false;
-      void syncComputerSwitch();
-      return;
-    }
-    void syncComputerSwitch().then((access) => {
-      if (!input.checked) return;
-      openComputerGrant(access);
-    });
+    applyComputerUse(input.checked);
   });
   window.addEventListener("focus", () => {
     if (!isChatSettingsOpen() || !readComputerUseEnabled()) return;
@@ -427,6 +441,11 @@ export function bindChatSettings(applyI18n: () => void): void {
     const input = autoApproveDefaultEl();
     if (!input) return;
     writeAutoApproveDefault(input.checked);
+  });
+  readImageEl()?.addEventListener("change", () => {
+    const input = readImageEl();
+    if (!input) return;
+    setReadImageTextEnabled(input.checked);
   });
   bindKnowledgeSyncSettings(() => openChatSettings("conversation"));
   knowledgeSyncEl()?.addEventListener("change", () => {

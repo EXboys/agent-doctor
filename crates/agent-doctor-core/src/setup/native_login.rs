@@ -92,6 +92,9 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     if logged_in(runtime_id) {
         release_provider_override(runtime_id)?;
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
+        if runtime_id == CODEX_ID {
+            publish_codex_subscription_auth(None);
+        }
         return Ok(switch(runtime_id, true, "using", provider_name));
     }
     if discover_binary(binary_name(runtime_id))
@@ -109,7 +112,18 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     }
     release_provider_override(runtime_id)?;
     write_mode(runtime_id, MODE_SUBSCRIPTION)?;
+    if runtime_id == CODEX_ID {
+        publish_codex_subscription_auth(None);
+    }
     Ok(switch(runtime_id, true, "using", provider_name))
+}
+
+/// The saved sign-in can no longer refresh. Drop it and run the login again.
+pub fn resign_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> {
+    ensure_edition_allows_mode(MODE_PERSONAL)?;
+    let runtime_id = known_runtime(runtime_id)?;
+    forget_saved_login(runtime_id);
+    use_native_subscription(runtime_id)
 }
 
 pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
@@ -373,6 +387,53 @@ fn stash_codex_auth() {
     let _ = fs::write(dest, raw);
 }
 
+fn forget_saved_login(runtime_id: &str) {
+    if runtime_id == CODEX_ID {
+        let _ = fs::remove_file(home_join(".codex/auth.json"));
+        if let Some(path) = stash_path() {
+            let _ = fs::remove_file(path);
+        }
+        return;
+    }
+    let _ = fs::remove_file(home_join(".claude/.credentials.json"));
+}
+
+/// Replace a project Codex home's account file with the one just written to `~/.codex`.
+pub(crate) fn publish_codex_subscription_auth(codex_home: Option<&Path>) {
+    let src = home_join(".codex/auth.json");
+    if let Some(home) = codex_home {
+        copy_chatgpt_auth_file(&src, home);
+    }
+    let Ok(doc) = crate::workspace::load_workspaces() else {
+        return;
+    };
+    for entry in doc.workspaces.values() {
+        copy_chatgpt_auth_file(&src, &entry.codex_home);
+    }
+}
+
+pub(crate) fn copy_chatgpt_auth_file(src: &Path, dest_home: &Path) -> bool {
+    let Some(src_home) = src.parent() else {
+        return false;
+    };
+    if crate::workspace::path::paths_equal(src_home, dest_home) {
+        return false;
+    }
+    let Ok(raw) = fs::read_to_string(src) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    if !codex_auth_is_chatgpt(&value) {
+        return false;
+    }
+    if fs::create_dir_all(dest_home).is_err() {
+        return false;
+    }
+    fs::write(dest_home.join("auth.json"), raw).is_ok()
+}
+
 fn restore_codex_auth() {
     let Some(src) = stash_path() else {
         return;
@@ -404,6 +465,9 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     };
     let mut child = Command::new(&binary)
         .args(args)
+        // Sign-in must land in ~/.codex. A project CODEX_HOME would keep the new
+        // account away from the file the next chat copies in.
+        .env_remove("CODEX_HOME")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -511,6 +575,45 @@ mod tests {
             &json!({"claudeAiOauth": {"accessToken": "x"}})
         ));
         assert!(!claude_credentials_are_oauth(&json!({"note": "empty"})));
+    }
+
+    #[test]
+    fn chatgpt_auth_replaces_the_isolated_home_and_skips_an_api_key() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-doctor-auth-copy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let global = root.join("global");
+        let isolated = root.join("isolated");
+        fs::create_dir_all(&global).unwrap();
+        fs::create_dir_all(&isolated).unwrap();
+        let src = global.join("auth.json");
+        fs::write(
+            &src,
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"new"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            isolated.join("auth.json"),
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"old"}}"#,
+        )
+        .unwrap();
+        assert!(copy_chatgpt_auth_file(&src, &isolated));
+        let copied = fs::read_to_string(isolated.join("auth.json")).unwrap();
+        assert!(copied.contains("new"), "{copied}");
+        assert!(!copied.contains("old"));
+        fs::write(&src, r#"{"auth_mode":"apikey"}"#).unwrap();
+        assert!(!copy_chatgpt_auth_file(&src, &isolated));
+        assert!(fs::read_to_string(isolated.join("auth.json"))
+            .unwrap()
+            .contains("new"));
+        assert!(!copy_chatgpt_auth_file(&src, &global));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

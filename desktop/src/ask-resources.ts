@@ -1,4 +1,5 @@
 
+import { builtinHandRow, builtinHands } from "./chat/builtin-hands";
 import { readBrowserToolsEnabled } from "./chat/hands-pref";
 import { t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
@@ -74,7 +75,7 @@ export type MentionRef = {
 
 export type WorkspaceDoc = {
   active: string | null;
-  workspaces: Record<string, { path: string }>;
+  workspaces: Record<string, { path: string; title?: string }>;
 };
 
 export type MentionQuery = {
@@ -133,6 +134,12 @@ export function dedupeMcpsByName(servers: McpInventoryItem[]): McpInventoryItem[
     if (score(server) > score(prev)) best.set(key, server);
   }
   return [...best.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The client already shows these as 操作网页 / 操作这台电脑. */
+export function isBuiltinHandMcp(server: McpInventoryItem): boolean {
+  const name = server.name.trim().toLowerCase();
+  return server.is_browser || name === "browser" || name === "computer";
 }
 
 export function mcpChipLabel(server: McpInventoryItem): string {
@@ -605,6 +612,7 @@ export class AskResourcesController {
     );
     const mcps = dedupeMcpsByName(
       this.enabledMcps
+        .filter((server) => !isBuiltinHandMcp(server))
         .filter((server) => mcpMatchesScopeTab(server, tab, runtime))
         .filter((server) => {
           if (!q) return true;
@@ -613,10 +621,11 @@ export class AskResourcesController {
         }),
     );
 
+    const hands = tab === "global" ? builtinHands(q) : [];
     targets.skillsListEl.replaceChildren();
     targets.mcpListEl.replaceChildren();
     targets.skillsEmptyEl.hidden = skills.length > 0;
-    targets.mcpEmptyEl.hidden = mcps.length > 0;
+    targets.mcpEmptyEl.hidden = mcps.length > 0 || hands.length > 0;
     if (skills.length === 0) {
       paintResourceEmpty(
         targets.skillsEmptyEl,
@@ -624,7 +633,7 @@ export class AskResourcesController {
         q ? null : "skill",
       );
     }
-    if (mcps.length === 0) {
+    if (mcps.length === 0 && hands.length === 0) {
       paintResourceEmpty(
         targets.mcpEmptyEl,
         q ? t("chat.resourcesNoMatch") : t("chat.mcpEmpty"),
@@ -743,6 +752,10 @@ export class AskResourcesController {
       });
     }
 
+    for (const hand of hands) {
+      targets.mcpListEl.appendChild(builtinHandRow(hand, "page"));
+    }
+
     for (const server of mcps) {
       const title = mcpChipLabel(server);
       const badge = server.is_browser ? "Browser" : "MCP";
@@ -785,7 +798,7 @@ export class AskResourcesController {
       }),
       loadSkillOrder(),
     );
-    const mcps = this.enabledMcps.filter((server) => {
+    const mcps = this.enabledMcps.filter((server) => !isBuiltinHandMcp(server)).filter((server) => {
       if (!q) return true;
       const hay = `${server.name} ${server.scope} ${server.runtime_hint} ${server.issue ?? ""}`.toLowerCase();
       return hay.includes(q);
@@ -994,7 +1007,7 @@ export class AskResourcesController {
       category: skillCategory(s, overrides),
       pinned: pinned.has(s.skill_id),
     }));
-    const mcps = this.enabledMcps.map((s) => ({
+    const mcps = this.enabledMcps.filter((server) => !isBuiltinHandMcp(server)).map((s) => ({
       kind: "mcp" as const,
       id: s.name,
       label: s.name,
@@ -1138,6 +1151,27 @@ export class AskMentionMenuController {
     this.setSlashTab(next);
   }
 
+  /** Open the same list as typing `/`: skills, knowledge, then tools. */
+  openSkillPicker(): void {
+    const el = this.dom.promptEl;
+    const value = el.value;
+    const caret = el.selectionStart ?? value.length;
+    const before = value.slice(0, caret);
+    const after = value.slice(el.selectionEnd ?? caret);
+    this.slashTab = "skill";
+    this.mentionMenuIndex = 0;
+    if (!/(?:^|\s)\/[^\s/@]*$/.test(before)) {
+      const prefix = before.length > 0 && !/\s$/.test(before) ? " /" : "/";
+      const next = before + prefix + after;
+      const pos = before.length + prefix.length;
+      el.value = next;
+      el.setSelectionRange(pos, pos);
+    }
+    el.focus();
+    this.autoResizePrompt();
+    this.renderMentionMenu();
+  }
+
   hideMentionMenu(): void {
     const menu = this.dom.mentionMenuEl;
     const alreadyClosed = menu.hidden && this.mentionQuery === null && menu.childElementCount === 0;
@@ -1258,7 +1292,15 @@ export class AskMentionMenuController {
     list.className = "chat-slash-list";
     list.setAttribute("role", "listbox");
 
-    if (options.length === 0) {
+    const hands = this.slashTab === "mcp" ? builtinHands(this.mentionQuery?.q ?? "") : [];
+    if (hands.length) {
+      const group = document.createElement("div");
+      group.className = options.length ? "chat-slash-hands has-more" : "chat-slash-hands";
+      for (const hand of hands) group.appendChild(builtinHandRow(hand, "menu"));
+      list.appendChild(group);
+    }
+
+    if (options.length === 0 && hands.length === 0) {
       const empty = document.createElement("div");
       empty.className = "chat-slash-empty";
       empty.textContent = t(

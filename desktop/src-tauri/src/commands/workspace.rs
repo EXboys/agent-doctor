@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use agent_doctor_core::{
     ensure_default_workspace, init_workspace, list_runtime_agent_memory, load_workspaces,
-    remove_workspace, use_workspace_with_options, workspace_doctor, workspace_fix,
-    workspace_status, AgentMemoryReport, InitWorkspaceReport, UseWorkspaceOptions,
+    remove_workspace, set_workspace_title, use_workspace_with_options, workspace_doctor,
+    workspace_fix, workspace_status, AgentMemoryReport, InitWorkspaceReport, UseWorkspaceOptions,
     UseWorkspaceReport, WorkspaceDoctorReport, WorkspaceFixOptions, WorkspaceFixReport,
     WorkspaceStatusReport, WorkspacesDocument,
 };
@@ -59,6 +59,14 @@ pub fn use_workspace_command(
     rebuild_tray_menu(&app);
     let _ = app.emit("workspace-changed", &name);
     Ok(report)
+}
+
+#[tauri::command]
+pub fn set_workspace_title_command(
+    name: String,
+    title: String,
+) -> Result<WorkspacesDocument, String> {
+    set_workspace_title(&name, &title).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

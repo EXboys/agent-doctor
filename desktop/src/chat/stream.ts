@@ -192,7 +192,7 @@ export function createStreamController(deps: StreamDeps) {
           }
           deps.sealAssistantBubble();
           deps.expireLivePermissionCards();
-          let failureSaid = turnNoticeShown();
+          let failureSaid = turnNoticeShown() || chatFailureBubbleAlreadyShown();
           if (viewing) {
             deps.hideDecisionDock();
             if (!hadAssistantText && payload.status === "succeeded") {

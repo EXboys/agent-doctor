@@ -10,7 +10,13 @@ function iconSvg(runtimeId: string): string | undefined {
   if (!raw) return undefined;
   // Drop <title> so hovering a tab does not raise a native tooltip.
   const withoutTitle = raw.replace(/<title>[\s\S]*?<\/title>/g, "");
-  // Inline so fill="currentColor" follows the tile, not a broken <img>.
+  // Windows resolves fill="url(#…)" against the page, so the painted mark
+  // disappears and only a white tile is left. A separate image keeps the
+  // gradient inside the icon. Solid currentColor marks stay inline.
+  if (withoutTitle.includes("url(#")) {
+    const href = `data:image/svg+xml,${encodeURIComponent(withoutTitle)}`;
+    return `<img class="agent-brand-img" alt="" draggable="false" src="${href}" />`;
+  }
   return withoutTitle.replace(
     "<svg",
     '<svg class="agent-brand-img" focusable="false" aria-hidden="true"',

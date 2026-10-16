@@ -1,5 +1,5 @@
 import { settingsApplyKind } from "../diagnose-flow";
-import { focusMainTab, openSession, runRepairExecute } from "../ipc";
+import { focusMainTab, openSession, resignNativeSubscription, runRepairExecute } from "../ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   formatChatFailureLine,
@@ -69,6 +69,8 @@ function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): st
       return t("chat.fail.actionPrivacy");
     case "askAgain":
       return t("chat.fail.actionAskAgain");
+    case "relogin":
+      return t("chat.fail.actionRelogin");
   }
 }
 
@@ -136,6 +138,28 @@ async function runChatFailureAction(
       );
     } catch {
       writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+    } finally {
+      setActionsBusy(actions, false);
+    }
+    return;
+  }
+  if (action === "relogin") {
+    setActionsBusy(actions, true);
+    try {
+      const result = await resignNativeSubscription(handlers.selectedRuntime());
+      const text =
+        result.outcome === "using"
+          ? t("chat.fail.reloginDone")
+          : result.outcome === "unreachable"
+            ? t("native.unreachable")
+            : result.outcome === "missing_tool"
+              ? handlers.selectedRuntime() === "codex"
+                ? t("native.missingCodex")
+                : t("native.missingClaude")
+              : t("native.incomplete");
+      writeActionResult(actions, text, result.outcome === "using" ? "ok" : "warn");
+    } catch {
+      writeActionResult(actions, t("chat.fail.reloginFailed"), "warn");
     } finally {
       setActionsBusy(actions, false);
     }

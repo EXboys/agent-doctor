@@ -58,6 +58,8 @@ export interface WorkspaceEntry {
   codex_home: string;
   openclaw_agent_id: string;
   openclaw_workspace: string;
+  /** Name shown in the chat project list. Empty keeps the folder name. */
+  title?: string;
 }
 
 export interface WorkspacesDocument {

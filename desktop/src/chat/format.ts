@@ -18,6 +18,11 @@ export function isRuntimeLog(raw: string): boolean {
   return /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(text) && /\b(ERROR|WARN|WARNING|INFO|DEBUG)\b/.test(text);
 }
 
+/** An HTTP response body pasted into a status line. That is the original, not the sentence. */
+export function isTransportDump(raw: string): boolean {
+  return /HTTP\s+\d{3}\b/.test(raw) && raw.includes("{");
+}
+
 /** `[skills] …` / `[state-migrations] …`: a lowercase subsystem tag opening the line. */
 const SUBSYSTEM_TAG = /^\[[a-z][a-z0-9_./:-]*\]\s/;
 

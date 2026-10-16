@@ -198,6 +198,7 @@ mod tests {
         .unwrap();
 
         let entry = WorkspaceEntry {
+            title: String::new(),
             path: temp.clone(),
             hermes_profile: "demo".into(),
             codex_home: temp.join("codex"),

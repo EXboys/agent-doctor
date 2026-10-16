@@ -335,9 +335,7 @@ fn ask_hand_windows(line: &str) -> Result<String> {
             HANDLE::default(),
         )
     }
-    .context(
-        "the app is not ready to click. Keep Agent Doctor open, and allow it to control this computer.",
-    )?;
+    .map_err(|_| anyhow::anyhow!("操作这台电脑还没连上。请确认 Agent Doctor 开着，再试一次。"))?;
     let body = format!("{line}\n");
     let mut written = 0u32;
     let wrote = unsafe { WriteFile(pipe, Some(body.as_bytes()), Some(&mut written), None) };

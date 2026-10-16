@@ -306,6 +306,20 @@
                 </div>
                 <div class="chat-settings-row">
                   <div class="chat-settings-copy">
+                    <strong data-i18n="chat.readImageText">图中文字</strong>
+                    <span data-i18n="chat.readImageTextHint">打开后，先在这台电脑上认图里的字。字认得很清楚，就只把字发给助手，少花额度。认不准，就直接把图发出去。</span>
+                  </div>
+                  <input
+                    id="chat-settings-read-image"
+                    class="chat-settings-switch"
+                    type="checkbox"
+                    role="switch"
+                    checked
+                    aria-label="图中文字"
+                  />
+                </div>
+                <div class="chat-settings-row">
+                  <div class="chat-settings-copy">
                     <strong data-i18n="chat.settingsAutoApprove">自动审批</strong>
                     <span data-i18n="chat.settingsAutoApproveHint">新建对话时默认关闭。打开后，以后新建的对话会开着。已经有的对话不变。</span>
                   </div>
@@ -761,21 +775,19 @@
                     />
                   </svg>
                 </button>
-                <div class="chat-model-wrap">
-                  <button
-                    id="chat-model-btn"
-                    type="button"
-                    class="chat-model-btn"
-                    data-i18n-title="chat.modelPickHint"
-                    title="按主页已接服务商切换模型"
-                    aria-haspopup="listbox"
-                    aria-expanded="false"
-                  >
-                    <span id="chat-model-label">Claude Code</span>
-                    <span class="chat-model-chevron" aria-hidden="true"></span>
-                  </button>
-                  <div id="chat-model-menu" class="chat-model-menu" hidden role="listbox"></div>
-                </div>
+                <button
+                  id="chat-pick-skill"
+                  type="button"
+                  class="btn-composer-icon chat-pick-skill"
+                  data-i18n-title="chat.pickSkillHint"
+                  aria-label="选用技能或知识库"
+                  title="选用技能或知识库"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 6.2c-1.7-1.2-3.8-1.8-6.2-1.8H4.2v13.2h1.6c2.2 0 4.2.6 6.2 1.8 2-1.2 4-1.8 6.2-1.8h1.6V4.4h-1.6c-2.4 0-4.5.6-6.2 1.8z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                    <path d="M12 6.2v13.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                  </svg>
+                </button>
                 <div class="chat-tune-wrap">
                   <button
                     id="chat-tune"
@@ -807,19 +819,6 @@
                         <span class="chat-elevated-switch" aria-hidden="true"></span>
                       </label>
                       <p class="chat-tune-hint" data-i18n="chat.tuneAutoApproveHint">这一场对话里，改文件不用再点允许。</p>
-                    </div>
-                    <div class="chat-tune-item">
-                      <label
-                        id="chat-read-image-wrap"
-                        class="chat-elevated"
-                        data-i18n-title="chat.readImageTextHint"
-                        title="打开后，把图里的字带给模型。不能看图的模型也能用。关掉可少占对话位置。"
-                      >
-                        <input id="chat-read-image" type="checkbox" checked />
-                        <span id="chat-read-image-label" class="chat-elevated-text" data-i18n="chat.readImageText">图中文字</span>
-                        <span class="chat-elevated-switch" aria-hidden="true"></span>
-                      </label>
-                      <p class="chat-tune-hint" data-i18n="chat.tuneReadImageHint">把图里的字一起发给 AI，看不了图的模型也能用。</p>
                     </div>
                   </div>
                 </div>
@@ -860,6 +859,21 @@
                     <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
                   </svg>
                 </button>
+                <div class="chat-model-wrap">
+                  <button
+                    id="chat-model-btn"
+                    type="button"
+                    class="chat-model-btn"
+                    data-i18n-title="chat.modelPickHint"
+                    title="按主页已接服务商切换模型"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span id="chat-model-label">Claude Code</span>
+                    <span class="chat-model-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div id="chat-model-menu" class="chat-model-menu" hidden role="listbox"></div>
+                </div>
                 <button id="chat-action" type="button" class="btn-primary btn-send" data-i18n="chat.send">发送</button>
               </div>
             </div>

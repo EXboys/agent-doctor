@@ -22,7 +22,6 @@ import {
   elevatedEl,
   elevatedLabelEl,
   elevatedWrapEl,
-  readImageWrapEl,
   modelBtnEl,
   promptEl,
   followQueueEl,
@@ -84,7 +83,12 @@ import { getLocale, t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 
 import { registerProjectFromAsk } from "./chat/register-project";
-import { defaultWorkspaceName, sessionWorkspaceName, sessionWorkspacePath } from "./chat/session-workspace";
+import {
+  defaultWorkspaceName,
+  projectDisplayLabel,
+  sessionWorkspaceName,
+  sessionWorkspacePath,
+} from "./chat/session-workspace";
 import {
   ASK_VERIFY_DRAFT_KEY,
   MAX_SESSIONS,
@@ -120,7 +124,7 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
-import { openSession, removeWorkspace } from "./ipc";
+import { openSession, removeWorkspace, setWorkspaceTitle } from "./ipc";
 
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
@@ -444,10 +448,13 @@ export function applyI18n(): void {
   promptEl.placeholder = t(isComposerLocked() ? "chat.placeholderBusy" : "chat.placeholder");
   attachEl.title = t("chat.attach");
   attachEl.setAttribute("aria-label", t("chat.attach"));
-  newWorkspaceEl.title = t("chat.addProjectPick");
-  if (readImageWrapEl) {
-    readImageWrapEl.title = t("chat.readImageTextHint");
+  const pickSkillEl = document.querySelector<HTMLButtonElement>("#chat-pick-skill");
+  if (pickSkillEl) {
+    const pickLabel = t("chat.pickSkillHint");
+    pickSkillEl.title = pickLabel;
+    pickSkillEl.setAttribute("aria-label", pickLabel);
   }
+  newWorkspaceEl.title = t("chat.addProjectPick");
   chatState.voiceInput?.applyI18n();
   chatState.hosted?.applyI18n();
   if (resourcesSearchEl) {
@@ -817,6 +824,7 @@ export function syncAskChrome(showNewWorkspace: boolean): void {
 
 export async function removeProjectFromAsk(name: string): Promise<void> {
   try {
+    const shown = projectDisplayLabel(name, chatState.workspaceDoc);
     await removeWorkspace({ name });
     const store = chatState.store;
     if (store) {
@@ -834,9 +842,21 @@ export async function removeProjectFromAsk(name: string): Promise<void> {
       renderSessionList();
       syncSessionWorkspaceUi();
     }
-    setStatus(t("chat.removeProjectDone", { name }), "ok");
+    setStatus(t("chat.removeProjectDone", { name: shown }), "ok");
   } catch (error) {
     setStatus(withErrorDetail(t("chat.removeProjectFailed"), error), "error");
+  }
+}
+
+export async function renameProjectFromAsk(name: string, title: string): Promise<void> {
+  try {
+    await setWorkspaceTitle({ name, title });
+    await loadAskResources();
+    const shown = title.trim() || name;
+    setStatus(t("chat.projectRenameDone", { name: shown }), "ok");
+  } catch (error) {
+    setStatus(withErrorDetail(t("chat.projectRenameFailed"), error), "error");
+    renderSessionList();
   }
 }
 

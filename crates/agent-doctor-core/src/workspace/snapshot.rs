@@ -159,6 +159,7 @@ mod tests {
 
         let data_root = temp.join("data");
         let entry = WorkspaceEntry {
+            title: String::new(),
             path: project.clone(),
             hermes_profile: "demo".into(),
             codex_home: data_root.join("codex"),

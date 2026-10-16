@@ -2,8 +2,8 @@ use agent_doctor_core::{
     activate_personal_provider, browser_mcp_wire_options_for_active_workspace,
     delete_personal_provider, execute_personal_provider_setup, list_personal_providers,
     load_mode_status, load_personal_provider_status, native_account_status,
-    resolve_agent_doctor_binary, switch_to_personal_mode, switch_to_team_mode,
-    upsert_personal_provider, use_current_service, use_native_subscription,
+    resign_native_subscription, resolve_agent_doctor_binary, switch_to_personal_mode,
+    switch_to_team_mode, upsert_personal_provider, use_current_service, use_native_subscription,
     verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
     ModeSwitchReport, NativeAccountStatus, NativeAccountSwitch, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
@@ -232,8 +232,10 @@ pub async fn switch_to_team_mode_command(
 }
 
 #[tauri::command]
-pub fn wire_browser_mcp_command() -> Result<BrowserMcpWireReport, String> {
-    wire_browser_mcp_for_desktop()
+pub async fn wire_browser_mcp_command() -> Result<BrowserMcpWireReport, String> {
+    tauri::async_runtime::spawn_blocking(wire_browser_mcp_for_desktop)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -268,13 +270,36 @@ pub async fn native_account_status_command(probe: bool) -> NativeAccountStatus {
 
 #[tauri::command]
 pub async fn use_native_subscription_command(
+    app: tauri::AppHandle,
     runtime_id: String,
 ) -> Result<NativeAccountSwitch, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let switched = tauri::async_runtime::spawn_blocking(move || {
         use_native_subscription(&runtime_id).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    if switched.outcome == "using" {
+        notify_provider_changed(&app);
+    }
+    Ok(switched)
+}
+
+#[tauri::command]
+pub async fn resign_native_subscription_command(
+    app: tauri::AppHandle,
+    runtime_id: String,
+) -> Result<NativeAccountSwitch, String> {
+    let switched = tauri::async_runtime::spawn_blocking(move || {
+        resign_native_subscription(&runtime_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    // The parked chat still holds the expired account. The next send starts clean.
+    agent_doctor_core::retire_warm_sessions();
+    if switched.outcome == "using" {
+        notify_provider_changed(&app);
+    }
+    Ok(switched)
 }
 
 #[tauri::command]

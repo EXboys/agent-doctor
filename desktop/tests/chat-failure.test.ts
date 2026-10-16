@@ -85,6 +85,18 @@ async function main() {
   assert(!unreachable!.actions.includes("repair"), "unreachable address does not offer a settings apply");
   assert(unreachable!.actions.includes("provider"), "unreachable address offers the provider button");
 
+  const expired = explainChatFailure(
+    'HTTP 401: {"error":{"code":"token_expired","message":"Provided authentication token is expired. Please try signing in again."}}',
+  );
+  assert(expired?.kind === "session_expired", "an expired sign-in is not a pasted key");
+  assert(expired!.actions.length === 1 && expired!.actions[0] === "relogin", "expired sign-in offers signing in again");
+  assert(!expired!.message.includes("密钥") && !expired!.message.includes("401"), "expired sign-in stays one plain sentence");
+
+  const refresh = explainChatFailure(
+    "2026-10-16T13:21:46.927396Z ERROR auth::manager: Failed to refresh token: Your access token could not be refreshed.",
+  );
+  assert(refresh?.kind === "session_expired", "a failed token refresh is the same expired sign-in");
+
   const unknown = explainChatFailure("unexpected status 500 Internal Server Error");
   assert(unknown?.kind === "unknown", "bare 500 stays unknown");
   assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");

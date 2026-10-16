@@ -427,6 +427,10 @@ pub(crate) fn resolve_deepseek_harness_overlay(
 
 pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
     if crate::setup::is_native_subscription("codex") {
+        // Login writes ~/.codex/auth.json. A project home keeps the copy it was
+        // seeded with, so a later sign-in never reaches the chat until we replace it.
+        let home = overlay.get("CODEX_HOME").map(PathBuf::from);
+        crate::setup::publish_codex_subscription_auth(home.as_deref());
         return;
     }
     let _ = clear_codex_placeholder_auth();

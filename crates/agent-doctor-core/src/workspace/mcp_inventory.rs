@@ -1221,6 +1221,7 @@ mod tests {
             workspaces.insert(
                 "demo".into(),
                 WorkspaceEntry {
+                    title: String::new(),
                     path: project,
                     hermes_profile: "demo".into(),
                     codex_home: home.join("codex"),
@@ -1259,6 +1260,7 @@ mod tests {
             workspaces.insert(
                 "demo".into(),
                 WorkspaceEntry {
+                    title: String::new(),
                     path: project,
                     hermes_profile: "default".into(),
                     codex_home: home.join("codex"),
@@ -1343,6 +1345,7 @@ args = ["mcp", "browser", "--port", "9222"]
             workspaces.insert(
                 "demo".into(),
                 WorkspaceEntry {
+                    title: String::new(),
                     path: project,
                     hermes_profile: "default".into(),
                     codex_home,

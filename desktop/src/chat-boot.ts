@@ -115,7 +115,7 @@ import { bindSchedule } from "./chat/schedule-page";
 import { orderedProjectNames } from "./chat/project-order";
 import { syncKnowledgeFolder } from "./chat/knowledge-sync";
 import { sessionWorkspaceName } from "./chat/session-workspace";
-import { readImageTextEnabled, setReadImageTextEnabled } from "./chat/image-text";
+import { readImageTextEnabled } from "./chat/image-text";
 import { wireChatControllers } from "./chat-wire";
 
 function transcriptOf(session: ReturnType<typeof activeSession>): { title: string; text: string } | null {
@@ -285,8 +285,14 @@ export function bootChat(): void {
   elevatedEl.addEventListener("change", () => {
     setActiveSessionAutoApprove(elevatedEl.checked);
   });
-  readImageEl.addEventListener("change", () => {
-    setReadImageTextEnabled(readImageEl.checked);
+  document.querySelector("#chat-pick-skill")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (mentionMenu.isSlashMenuOpen()) {
+      mentionMenu.hideMentionMenu();
+      return;
+    }
+    mentionMenu.openSkillPicker();
   });
   promptEl.addEventListener("input", () => {
     autoResizePrompt();

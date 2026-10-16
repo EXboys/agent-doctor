@@ -194,7 +194,7 @@ export function attachProjectReorderPointer(
   const press = (event: MouseEvent): void => {
     if (event.button !== 0 || pressed) return;
     const target = event.target;
-    if (target instanceof Element && target.closest("button")) return;
+    if (target instanceof Element && target.closest("button, input, textarea")) return;
     event.preventDefault();
 
     pressed = true;

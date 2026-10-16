@@ -409,7 +409,8 @@ export function bindResourcesPage(next: Deps): void {
     kindTabs.querySelector<HTMLButtonElement>(`[data-resource-kind="${resourceKind}"]`)?.focus();
   });
   document.querySelector("#chat-resources-content")?.addEventListener("click", (event) => {
-    if (!(event.target as HTMLElement).closest(".chat-res-row")) return;
+    const row = (event.target as HTMLElement).closest(".chat-res-row");
+    if (!row || row.classList.contains("is-hand")) return;
     paintContent();
   });
   document.querySelector<HTMLInputElement>("#chat-resources-page-search")?.addEventListener("input", (event) => {

@@ -56,6 +56,9 @@ pub struct WorkspaceEntry {
     #[serde(default)]
     pub openclaw_agent_id: String,
     pub openclaw_workspace: PathBuf,
+    /// Name shown in the chat project list. Empty keeps the folder name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,6 +246,30 @@ pub fn ensure_default_workspace() -> Result<WorkspacesDocument> {
     load_workspaces()
 }
 
+const WORKSPACE_TITLE_MAX_CHARS: usize = 40;
+
+/// Collapse whitespace. An empty result means “show the folder name again”.
+pub fn normalize_workspace_title(raw: &str) -> Result<String> {
+    let title = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.chars().count() > WORKSPACE_TITLE_MAX_CHARS {
+        bail!("workspace title is longer than {WORKSPACE_TITLE_MAX_CHARS} characters");
+    }
+    Ok(title)
+}
+
+/// Change the name shown for a project. Does not rename the folder or the project key.
+pub fn set_workspace_title(name: &str, title: &str) -> Result<WorkspacesDocument> {
+    let title = normalize_workspace_title(title)?;
+    let mut doc = load_workspaces()?;
+    let entry = doc
+        .workspaces
+        .get_mut(name)
+        .with_context(|| format!("workspace '{name}' not found"))?;
+    entry.title = title;
+    save_workspaces(&doc)?;
+    Ok(doc)
+}
+
 pub fn save_workspaces(doc: &WorkspacesDocument) -> Result<PathBuf> {
     let path = workspaces_path()?;
     if let Some(parent) = path.parent() {
@@ -295,6 +322,7 @@ pub fn init_workspace(
 
     let snapshot = save_workspace_snapshot(
         &WorkspaceEntry {
+            title: String::new(),
             path: project_path.clone(),
             hermes_profile: hermes_profile.clone(),
             codex_home: codex_home.clone(),
@@ -307,6 +335,7 @@ pub fn init_workspace(
     doc.workspaces.insert(
         workspace_name.clone(),
         WorkspaceEntry {
+            title: String::new(),
             path: project_path.clone(),
             hermes_profile,
             codex_home,
@@ -903,6 +932,7 @@ mod tests {
         workspaces.insert(
             "foo".to_string(),
             WorkspaceEntry {
+                title: String::new(),
                 path: PathBuf::from("/tmp/foo"),
                 hermes_profile: "foo".into(),
                 codex_home: PathBuf::from("/tmp/foo/codex"),
@@ -935,5 +965,26 @@ mod tests {
             "'/Users/airlu/Library/Application Support/agent-doctor/workspaces/x/codex-home'"
         );
         assert_eq!(shell_quote_env("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn workspace_title_roundtrips_and_old_files_keep_the_folder_name() {
+        let raw = "\
+active: demo
+workspaces:
+  demo:
+    path: /tmp/demo
+    codex_home: /tmp/demo/codex
+    openclaw_workspace: /tmp/demo/oc
+";
+        let mut doc: WorkspacesDocument = serde_yaml::from_str(raw).unwrap();
+        assert!(doc.workspaces["demo"].title.is_empty());
+        doc.workspaces.get_mut("demo").unwrap().title =
+            normalize_workspace_title("  乐言   项目  ").unwrap();
+        let saved = serde_yaml::to_string(&doc).unwrap();
+        let again: WorkspacesDocument = serde_yaml::from_str(&saved).unwrap();
+        assert_eq!(again.workspaces["demo"].title, "乐言 项目");
+        assert!(normalize_workspace_title("").unwrap().is_empty());
+        assert!(normalize_workspace_title(&"项".repeat(41)).is_err());
     }
 }

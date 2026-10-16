@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { appendRunLogMessage } = await import("../src/chat/tool-records");
-const { coveredRunLogPointers, isLogMessage, isRuntimeLog, markTurnLogFailed } = await import("../src/chat/format");
+const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed } = await import("../src/chat/format");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -54,6 +54,11 @@ assert(
 );
 assert(!isRuntimeLog("[1] 第一步"), "a numbered list item is not a log");
 assert(isRuntimeLog("\u001b[31mfailed\u001b[0m"), "color codes mark a log");
+assert(
+  isTransportDump('MCP tool: failed (handshaking failed: HTTP 401: {"error":{"code":"token_expired"}})'),
+  "an HTTP body is a transport dump",
+);
+assert(!isTransportDump("HTTP 200 ok"), "a status code without a body is not a dump");
 
 const saved = [
   user("你好"),

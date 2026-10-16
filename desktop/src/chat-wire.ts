@@ -67,6 +67,7 @@ import {
   restoreRunningView,
   addProjectFromAsk,
   removeProjectFromAsk,
+  renameProjectFromAsk,
   syncAskChrome,
   settleRunRouting,
   autoResizePrompt,
@@ -576,6 +577,9 @@ export function wireChatControllers(): void {
     addProject: () => addProjectFromAsk(),
     removeProject: (name) => {
       void removeProjectFromAsk(name);
+    },
+    renameProject: (name, title) => {
+      void renameProjectFromAsk(name, title);
     },
     syncAskChrome: (showNewWorkspace) => syncAskChrome(showNewWorkspace),
   });

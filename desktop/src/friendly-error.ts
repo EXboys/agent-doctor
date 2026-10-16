@@ -256,13 +256,14 @@ export type ChatFailureKind =
   | "macos_denied"
   | "account_balance"
   | "rate_limit"
+  | "session_expired"
   | "provider_key"
   | "provider_url"
   | "provider_model"
   | "network"
   | "unknown";
 
-export type ChatFailureAction = "provider" | "repair" | "native" | "privacy" | "askAgain";
+export type ChatFailureAction = "provider" | "repair" | "native" | "privacy" | "askAgain" | "relogin";
 
 export type ChatFailureExplain = {
   kind: ChatFailureKind;
@@ -309,6 +310,16 @@ function isMacosFileDenied(lower: string): boolean {
   );
 }
 
+/** The signed-in account cannot refresh. A pasted key is a different failure. */
+function isExpiredSignIn(lower: string): boolean {
+  return (
+    /token[_\s-]*expired/.test(lower) ||
+    /authentication token is expired/.test(lower) ||
+    /could not be refreshed/.test(lower) ||
+    /failed to refresh token/.test(lower)
+  );
+}
+
 function isGeoBlockedService(lower: string): boolean {
   return (
     (/api\.anthropic\.com|auth\.openai\.com/.test(lower) &&
@@ -345,6 +356,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   if (!text) return null;
   const lower = text.toLowerCase();
   const account = explainLlmAccountBlock(text);
+
+  if (isExpiredSignIn(lower)) {
+    return {
+      kind: "session_expired",
+      message: t("chat.fail.sessionExpired.message"),
+      next: t("chat.fail.sessionExpired.next"),
+      actions: ["relogin"],
+    };
+  }
 
   if (isGlmCodingPlanOnPayg(text, lower)) {
     return {

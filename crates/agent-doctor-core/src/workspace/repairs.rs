@@ -122,6 +122,7 @@ mod tests {
 
     fn entry() -> WorkspaceEntry {
         WorkspaceEntry {
+            title: String::new(),
             path: PathBuf::from("/tmp/agent-doctor-repair-test"),
             hermes_profile: "demo".into(),
             codex_home: PathBuf::from("/tmp/agent-doctor-repair-test/codex"),

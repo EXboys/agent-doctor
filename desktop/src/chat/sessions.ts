@@ -7,6 +7,7 @@ import { createEmptySession, uid } from "./store";
 import {
   defaultWorkspaceName,
   listProjectGroupsForSidebar,
+  projectDisplayLabel,
   sessionWorkspaceName,
 } from "./session-workspace";
 import { attachProjectReorderPointer, consumeProjectDragClick } from "./project-drag";
@@ -98,6 +99,7 @@ export type SessionsDeps = {
   restoreRunningView: () => void;
   addProject: () => void;
   removeProject: (name: string) => void;
+  renameProject: (name: string, title: string) => void;
   syncAskChrome: (hasProjects: boolean) => void;
 };
 
@@ -252,6 +254,62 @@ export function createSessionsController(deps: SessionsDeps) {
   });
   void refreshInstalledAgents();
 
+  function beginProjectRename(label: HTMLElement, name: string): void {
+    if (label.querySelector("input")) return;
+    const current = projectDisplayLabel(name, deps.getWorkspaceDoc());
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "chat-session-group-rename";
+    input.value = current;
+    input.maxLength = 40;
+    input.setAttribute("aria-label", t("chat.projectMenuRename"));
+    input.spellcheck = false;
+    const stop = (event: Event) => event.stopPropagation();
+    input.addEventListener("pointerdown", stop);
+    input.addEventListener("mousedown", stop);
+    input.addEventListener("click", stop);
+    input.addEventListener("dblclick", stop);
+    input.addEventListener("contextmenu", (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        input.dataset.cancel = "1";
+        input.blur();
+      }
+    });
+    let finished = false;
+    input.addEventListener("blur", () => {
+      if (finished) return;
+      finished = true;
+      if (input.dataset.cancel === "1") {
+        renderSessionList();
+        return;
+      }
+      const next = input.value.trim().replace(/\s+/g, " ");
+      if ([...next].length > 40) {
+        deps.setStatus(t("chat.projectRenameTooLong"), "warn");
+        renderSessionList();
+        return;
+      }
+      if (next === current) {
+        renderSessionList();
+        return;
+      }
+      deps.renameProject(name, next === name ? "" : next);
+    });
+    label.replaceChildren(input);
+    input.focus();
+    input.select();
+    // select() scrolls a long folder name to the end, so the start disappears.
+    input.scrollLeft = 0;
+  }
+
   function openProjectMenu(x: number, y: number, name: string, sessions: ChatSession[]): void {
     closeProjectMenu();
     const menu = document.createElement("div");
@@ -275,12 +333,19 @@ export function createSessionsController(deps: SessionsDeps) {
     addItem(t("chat.projectMenuNew"), () => {
       void beginNewSessionInProject(name, { x, y });
     });
+    addItem(t("chat.projectMenuRename"), () => {
+      const label = deps.sessionListEl.querySelector(
+        `.chat-session-group[data-project-name="${CSS.escape(name)}"] .chat-session-group-label`,
+      );
+      if (label instanceof HTMLElement) beginProjectRename(label, name);
+    });
     addItem(t("chat.projectMenuRemove"), () => {
       if (sessions.some((session) => isChatRunning(session.id))) {
         deps.setStatus(t("chat.removeProjectBusy"), "warn");
         return;
       }
-      if (!window.confirm(t("chat.removeProjectConfirm", { name }))) return;
+      const shown = projectDisplayLabel(name, deps.getWorkspaceDoc());
+      if (!window.confirm(t("chat.removeProjectConfirm", { name: shown }))) return;
       deps.removeProject(name);
     });
 
@@ -388,6 +453,15 @@ export function createSessionsController(deps: SessionsDeps) {
       const label = document.createElement("span");
       label.className = "chat-session-group-label";
       label.textContent = group.label;
+      if (group.name) {
+        label.title = t("chat.projectRenameHint");
+        const projectName = group.name;
+        label.addEventListener("dblclick", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          beginProjectRename(label, projectName);
+        });
+      }
 
       head.append(fold, grip, label);
 

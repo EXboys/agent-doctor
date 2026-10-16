@@ -6,6 +6,8 @@ import {
   activityKind,
   agentFailedLine,
   isQuietPhase,
+  isRuntimeLog,
+  isTransportDump,
   markTurnLogFailed,
   preferPlainSummary,
   stripLogAnsi,
@@ -44,6 +46,15 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       if (isQuietPhase(payload.phase) || payload.phase === "writing" || payload.phase === "permission") return;
       if (activityKind(payload.phase) === "tool") {
         rememberTool(session, run, payload.message);
+        ctx.touchSession(session);
+        ctx.scheduleStorePersist();
+        return;
+      }
+      if (isRuntimeLog(payload.message) || isTransportDump(payload.message)) {
+        const text = stripLogAnsi(payload.message).trim();
+        if (!text) return;
+        run.turnErrors.push(text);
+        appendRunLogMessage(session.messages, text, uid);
         ctx.touchSession(session);
         ctx.scheduleStorePersist();
       }

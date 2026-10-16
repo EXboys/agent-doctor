@@ -556,6 +556,7 @@ mod tests {
 
     fn entry(tmp: &Path, codex_home: &Path) -> WorkspaceEntry {
         WorkspaceEntry {
+            title: String::new(),
             path: tmp.join("proj"),
             hermes_profile: String::new(),
             codex_home: codex_home.to_path_buf(),
@@ -648,6 +649,7 @@ mod tests {
         skill(&openclaw.join("skills"), "own", "# own\n");
 
         let workspace = WorkspaceEntry {
+            title: String::new(),
             path: project,
             hermes_profile: "desktop".into(),
             codex_home: tmp.path().join("codex"),

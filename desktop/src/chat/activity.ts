@@ -5,6 +5,8 @@ import {
   activityKind,
   appendRunLog,
   isQuietPhase,
+  isRuntimeLog,
+  isTransportDump,
   mergeToolStep,
   stripLogAnsi,
   readRowStep,
@@ -583,7 +585,9 @@ export function createActivityController(deps: ActivityDeps) {
     const explain = explainChatFailure(text);
     if (
       explain &&
-      (explain.kind === "glm_codex_url" || explain.kind === "geo_blocked") &&
+      (explain.kind === "glm_codex_url" ||
+        explain.kind === "geo_blocked" ||
+        explain.kind === "session_expired") &&
       deps.onChatConnectionFailure
     ) {
       deps.onChatConnectionFailure(explain);
@@ -629,6 +633,16 @@ export function createActivityController(deps: ActivityDeps) {
   function pushActivity(phase: string, message: string): void {
     const text = message.trim() || phase;
     if (!text) return;
+    // A status that is really a log or an HTTP body stays in the collapsed record.
+    if (
+      phase !== "tool" &&
+      phase !== "command" &&
+      phase !== "permission" &&
+      (isRuntimeLog(text) || isTransportDump(text))
+    ) {
+      appendStderrLine(text);
+      return;
+    }
     if (deps.isViewingRunningSession()) clearEmptyChatStart(deps.logEl);
 
     // The permission card that follows carries this state and its resolution.

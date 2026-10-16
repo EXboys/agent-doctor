@@ -26,6 +26,12 @@ export function sessionWorkspacePath(
   return path || null;
 }
 
+/** Name on the project folder. A custom title wins; otherwise the folder name. */
+export function projectDisplayLabel(name: string, doc: WorkspaceDoc | null): string {
+  const title = doc?.workspaces[name]?.title?.trim();
+  return title || name;
+}
+
 export function defaultWorkspaceName(doc: WorkspaceDoc | null): string | null {
   if (!doc) return null;
   const active = doc.active?.trim();
@@ -58,7 +64,7 @@ export function groupSessionsByWorkspace(
     .sort((a, b) => a.localeCompare(b));
   const groups: SessionWorkspaceGroup[] = named.map((name) => ({
     name,
-    label: name,
+    label: projectDisplayLabel(name, doc),
     sessions: (buckets.get(name) ?? []).sort((a, b) => b.updatedAt - a.updatedAt),
   }));
   const loose = buckets.get(null);
@@ -88,7 +94,7 @@ export function listProjectGroupsForSidebar(
   const names = orderedProjectNames(doc);
   const groups: SessionWorkspaceGroup[] = names.map((name) => ({
     name,
-    label: name,
+    label: projectDisplayLabel(name, doc),
     sessions: (sessionMap.get(name) ?? []).sort((a, b) => b.updatedAt - a.updatedAt),
   }));
   const loose = fromSessions.find((g) => g.name === null);

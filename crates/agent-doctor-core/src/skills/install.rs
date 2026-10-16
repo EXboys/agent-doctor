@@ -502,6 +502,7 @@ mod tests {
     fn project_targets_follow_the_project() {
         let root = temp("project");
         let entry = WorkspaceEntry {
+            title: String::new(),
             path: root.join("repo"),
             hermes_profile: String::new(),
             codex_home: root.join("codex"),
