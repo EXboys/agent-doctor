@@ -108,7 +108,8 @@ fn run_deepseek_harness(
 
     let mut cmd = build_command(&cwd, &overlay);
     let command_display = format_command_display(&cmd);
-    let fingerprint = warm::enabled().then(|| warm::fingerprint(&cmd, &[]));
+    let fingerprint = warm::enabled()
+        .then(|| warm::fingerprint(&cmd, &[crate::DeepSeekHarnessAdapter::cordis_patch_path()]));
 
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),

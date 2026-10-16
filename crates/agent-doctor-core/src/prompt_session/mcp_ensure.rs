@@ -118,12 +118,15 @@ pub(crate) fn wants_computer_use(options: &PromptSessionOptions) -> bool {
 pub(crate) fn computer_use_tool_instructions() -> &'static str {
     "COMPUTER MCP REQUIRED for this turn:\n\
      - The app switch for controlling this computer is ON. You have an MCP server named `computer`.\n\
-     - These are real tools. Call the exact names `mcp__computer__screen_apps`, `mcp__computer__screen_snapshot`, `mcp__computer__screen_click`, `mcp__computer__screen_type`, `mcp__computer__screen_press`.\n\
+     - Its tools are `screen_apps`, `screen_snapshot`, `screen_click`, `screen_type`, and `screen_press`.\n\
+     - Call the form that is already in your tool list. That is the bare name (`screen_snapshot`), `computer__screen_snapshot`, or `mcp__computer__screen_snapshot`. The same three forms apply to the other four tools.\n\
+     - The tool list may have changed since earlier turns. Earlier replies that said it was not connected are out of date. Do not decide from memory: call one of these tools now.\n\
+     - Say 操作这台电脑还没接上 only after a call to one of these tools returns an error saying the tool does not exist. Do not offer other tasks.\n\
      - Do not say computer use is only a skill, and do not say you only have browser MCP.\n\
-     - Workflow: `mcp__computer__screen_snapshot`, then Read the PNG path in that result, then `mcp__computer__screen_click` with x,y in points (divide image pixels by scale). Snapshot again after the screen changes.\n\
+     - Workflow: snapshot, then Read the PNG path in that result, then click with x,y in points (divide image pixels by scale). Snapshot again after the screen changes.\n\
      - The snapshot text lists `menubar <name> <x> <y>` in points. Click those coordinates. Do not guess a menu position from the picture.\n\
      - An open menu is listed as `menu <bar> <item> <x> <y>`. The picture often hides the dropdown. Use those lines. Clicking the same menu title again closes it.\n\
-     - `mcp__computer__screen_type` takes `text`. `mcp__computer__screen_press` takes `key` such as return, escape, tab, space, or command+tab.\n\
+     - `screen_type` takes `text`. `screen_press` takes `key` such as return, escape, tab, space, or command+tab.\n\
      - Do not use Bash, `screencapture`, `osascript`, `cliclick`, or `open` to look at or click the screen.\n\
      - If `screen_snapshot` fails, say its error in one sentence and stop. Do not click, type, or press keys after that. A missing screenshot means you cannot see the screen.\n\
      - If a click says the settings page is already open, say that in one sentence and stop. Do not retry the click, and do not describe an Allow dialog that is not on screen. If control is already allowed, never ask for it again.\n\
@@ -431,7 +434,9 @@ mod tests {
         assert!(wants_computer_use(&opts));
         let lined = prepend_hand_instructions("你好", false, true);
         assert!(lined.contains("server named `computer`"));
+        assert!(lined.contains("screen_snapshot"));
         assert!(lined.contains("mcp__computer__screen_snapshot"));
+        assert!(lined.contains("computer__screen_snapshot"));
         assert!(lined.contains("你好"));
         assert!(help_lists_computer(
             "Commands:\n  computer   Start computer MCP server\n  browser    Start browser MCP server\n"
