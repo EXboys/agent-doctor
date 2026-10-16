@@ -856,6 +856,7 @@ pub(crate) struct WorkRect {
 }
 
 /// Slide the chip back so the whole bar stays inside the work area.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn clamp_chip_to_work(
     x: f64,
     y: f64,
@@ -868,6 +869,7 @@ pub(crate) fn clamp_chip_to_work(
     (x.clamp(work.x, max_x), y.clamp(work.y, max_y))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn chip_fits_work(x: f64, y: f64, width: f64, height: f64, work: WorkRect) -> bool {
     let (clamped_x, clamped_y) = clamp_chip_to_work(x, y, width, height, work);
     (clamped_x - x).abs() < 0.5 && (clamped_y - y).abs() < 0.5
@@ -875,6 +877,7 @@ fn chip_fits_work(x: f64, y: f64, width: f64, height: f64, work: WorkRect) -> bo
 
 /// Where the chip should sit. A drag wins. A saved spot is used only while it
 /// still fits; otherwise the caller drops it and the chip returns to the top.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn windows_chip_origin(
     drag: Option<(f64, f64)>,
     saved: Option<(f64, f64)>,
