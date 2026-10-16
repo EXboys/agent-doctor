@@ -539,8 +539,8 @@ pub(crate) fn prompt_accessibility() -> bool {
         if AXIsProcessTrusted() != 0 {
             return true;
         }
-        let key = kAXTrustedCheckOptionPrompt as *const std::ffi::c_void;
-        let value = kCFBooleanTrue as *const std::ffi::c_void;
+        let key = kAXTrustedCheckOptionPrompt;
+        let value = kCFBooleanTrue;
         let dict = CFDictionaryCreate(
             std::ptr::null(),
             &key,

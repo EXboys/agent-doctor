@@ -194,7 +194,7 @@ fn look_text(app: &str) -> Result<String> {
     {
         // Reading on the main thread deadlocks while a menu is open: the menu
         // owns that thread, and the click channel waits behind the read.
-        return unsafe { ax_look(app) };
+        unsafe { ax_look(app) }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -388,7 +388,7 @@ fn app_names() -> Result<Vec<String>> {
         if names.is_empty() {
             bail!("could not see the open apps");
         }
-        return Ok(names);
+        Ok(names)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -448,12 +448,12 @@ fn capture_png() -> Result<Shot> {
         } else {
             display_scale
         };
-        return Ok(Shot {
+        Ok(Shot {
             path,
             pixels: (px_w, px_h),
             points: (pt_w, pt_h),
             scale,
-        });
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -488,7 +488,7 @@ fn display_points() -> (i64, i64, f64) {
 fn menu_text() -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        return unsafe { ax_menu_text() };
+        unsafe { ax_menu_text() }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -814,7 +814,7 @@ fn click_at(x: f64, y: f64) -> Result<()> {
                 CFRelease(source as *const std::ffi::c_void);
             }
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -845,7 +845,7 @@ fn press_key(key: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         unsafe { post_keycode(code, flags) };
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -931,7 +931,7 @@ fn type_text(text: &str) -> Result<()> {
             unsafe { post_unicode(ch) };
             thread::sleep(Duration::from_millis(8));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
