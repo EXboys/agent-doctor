@@ -1,11 +1,13 @@
 use agent_doctor_core::{
     activate_personal_provider, browser_mcp_wire_options_for_active_workspace,
     delete_personal_provider, execute_personal_provider_setup, list_personal_providers,
-    load_mode_status, load_personal_provider_status, resolve_agent_doctor_binary,
-    switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider,
+    load_mode_status, load_personal_provider_status, native_account_status,
+    resolve_agent_doctor_binary, switch_to_personal_mode, switch_to_team_mode,
+    upsert_personal_provider, use_current_service, use_native_subscription,
     verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
-    ModeSwitchReport, PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, UpsertPersonalProviderOptions,
+    ModeSwitchReport, NativeAccountStatus, NativeAccountSwitch, PersonalProviderOptions,
+    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
+    PersonalProvidersDocument, UpsertPersonalProviderOptions,
 };
 use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::{Deserialize, Serialize};
@@ -255,4 +257,33 @@ pub async fn rewire_current_mode_command(
             Err("Team edition: connect Evotown first, then rewire.".into())
         }
     }
+}
+
+#[tauri::command]
+pub async fn native_account_status_command(probe: bool) -> NativeAccountStatus {
+    tauri::async_runtime::spawn_blocking(move || native_account_status(probe))
+        .await
+        .unwrap_or(NativeAccountStatus { rows: Vec::new() })
+}
+
+#[tauri::command]
+pub async fn use_native_subscription_command(
+    runtime_id: String,
+) -> Result<NativeAccountSwitch, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use_native_subscription(&runtime_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn use_current_service_command(
+    runtime_id: String,
+) -> Result<NativeAccountSwitch, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use_current_service(&runtime_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

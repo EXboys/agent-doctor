@@ -1,6 +1,7 @@
 mod coding_plan;
 pub(crate) mod merge;
 mod mode;
+mod native_login;
 mod personal;
 mod pipeline;
 mod zhipu;
@@ -16,6 +17,10 @@ pub use mode::{
     adopt_live_gateway_as_overlay, load_mode_status, mode_overlay_ready_from_profile,
     switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport, MODE_PERSONAL,
     MODE_TEAM, MODE_UNSET,
+};
+pub use native_login::{
+    is_native_subscription, native_account_status, use_current_service, use_native_subscription,
+    NativeAccountRow, NativeAccountStatus, NativeAccountSwitch,
 };
 pub(crate) use personal::persist_personal_provider_model;
 pub use personal::{

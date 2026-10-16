@@ -6227,29 +6227,26 @@ body.chat-skill-dragging .chat-res-grip {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 18px 16px 72px;
-  --chat-log-fade: 44px;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0,
-    #000 calc(100% - var(--chat-log-fade)),
-    rgb(0 0 0 / 0.72) calc(100% - 24px),
-    rgb(0 0 0 / 0.28) calc(100% - 10px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    #000 0,
-    #000 calc(100% - var(--chat-log-fade)),
-    rgb(0 0 0 / 0.72) calc(100% - 24px),
-    rgb(0 0 0 / 0.28) calc(100% - 10px),
-    transparent 100%
-  );
+  padding: 18px 16px 12px;
+  -webkit-mask-image: none;
+  mask-image: none;
   display: flex;
   flex-direction: column;
   gap: 10px;
   border: none;
   box-shadow: none;
+}
+
+/* Spare room stays above the reply. The gap under it stops at one short breath. */
+.chat-log::before,
+.chat-log::after {
+  content: "";
+  flex: 1 0 0;
+  min-height: 0;
+}
+
+.chat-log::after {
+  max-height: 72px;
 }
 
 .chat-bubble {

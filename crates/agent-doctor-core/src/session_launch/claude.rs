@@ -39,9 +39,13 @@ pub(crate) fn open_claude_code(
     prompt: Option<&str>,
     prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
-    let refreshed = match resolve_claude_launch_env() {
-        Some((url, key)) => apply_claude_code(&url, &key).ok().map(|_| url),
-        None => None,
+    let refreshed = if crate::setup::is_native_subscription("claude-code") {
+        None
+    } else {
+        match resolve_claude_launch_env() {
+            Some((url, key)) => apply_claude_code(&url, &key).ok().map(|_| url),
+            None => None,
+        }
     };
 
     if prefer_deep_link {

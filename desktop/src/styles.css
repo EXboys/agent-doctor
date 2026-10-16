@@ -2200,8 +2200,44 @@ body.is-diagnose-open .diagnose-detail {
   gap: 8px;
 }
 
+.provider-list[hidden] {
+  display: none;
+}
+
 .provider-list:empty {
   display: none;
+}
+
+.native-fold {
+  margin-top: 4px;
+}
+
+.native-fold[hidden] {
+  display: none;
+}
+
+.native-fold summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 2px 4px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--text-soft);
+}
+
+.native-fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.native-fold summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-soft);
+}
+
+.native-fold[open] summary::before {
+  content: "⌄";
 }
 
 .provider-item {
@@ -2375,6 +2411,28 @@ body.is-diagnose-open .diagnose-detail {
   color: #fff;
   background: #64748b;
   flex-shrink: 0;
+}
+
+.provider-avatar.is-brand {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  color: #1f2937;
+  box-shadow: none;
+}
+
+.provider-avatar.is-brand[data-brand="official"] {
+  color: #2563eb;
+}
+
+.provider-avatar.is-brand .agent-brand-img,
+.provider-avatar.is-brand svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .provider-avatar[data-tone="0"] { background: #2563eb; }

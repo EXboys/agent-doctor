@@ -255,6 +255,15 @@ fn project_one_runtime(
     runtime_id: &str,
     display_name: &str,
 ) -> Result<RuntimeSetupResult> {
+    if crate::setup::is_native_subscription(runtime_id) {
+        return Ok(RuntimeSetupResult {
+            runtime_id: runtime_id.into(),
+            display_name: display_name.into(),
+            applied: false,
+            message: "skipped — this tool is using its own subscription login".into(),
+            ..Default::default()
+        });
+    }
     let protocol = bundle.protocol.as_str();
     match (protocol, runtime_id) {
         (PROTOCOL_OPENAI, "openclaw") => {

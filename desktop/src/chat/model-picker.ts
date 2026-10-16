@@ -2,8 +2,10 @@
 import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
-import { modelsForProviderUrl, providerChipForUrl } from "../provider-models";
+import { nativeAccountStatus } from "../ipc";
+import { modelsForPresetId, modelsForProviderUrl, providerChipForUrl } from "../provider-models";
 import type {
+  NativeAccountRow,
   PersonalProviderListItem,
 } from "../types";
 import { runtimeDisplayName } from "./runtime";
@@ -28,6 +30,7 @@ export type ModelPickerDeps = ModelPickerEls & {
   setProviders: (providers: PersonalProviderListItem[]) => void;
   activeSession: () => ChatSession | null;
   pinSessionModel: (provider: PersonalProviderListItem, model: string) => void;
+  pinSubscriptionModel: (model: string) => void;
   getModelMenuOpen: () => boolean;
   setModelMenuOpen: (open: boolean) => void;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
@@ -36,7 +39,38 @@ export type ModelPickerDeps = ModelPickerEls & {
 
 export type ModelPickerApi = ReturnType<typeof createModelPickerController>;
 
+type SubscriptionCatalog = {
+  models: string[];
+  label: string;
+};
+
 export function createModelPickerController(deps: ModelPickerDeps) {
+  let nativeRows: NativeAccountRow[] = [];
+
+  function subscriptionCatalog(): SubscriptionCatalog | null {
+    const runtime = deps.selectedRuntime();
+    if (runtime !== "codex" && runtime !== "claude-code") return null;
+    const row = nativeRows.find((item) => item.runtime_id === runtime);
+    if (!row?.using_subscription) return null;
+    const models = modelsForPresetId(runtime === "codex" ? "openai" : "anthropic");
+    if (models.length === 0) return null;
+    return {
+      models,
+      label: runtime === "codex" ? t("native.chatgpt") : t("native.claude"),
+    };
+  }
+
+  /** Keep this chat on an account model, and drop a saved service so the next message cannot use it. */
+  function alignSubscriptionSession(catalog: SubscriptionCatalog): string {
+    const session = deps.activeSession();
+    const current = session?.model?.trim() ?? "";
+    const model = catalog.models.includes(current) ? current : catalog.models[0];
+    if (session && (session.providerId || session.model !== model)) {
+      deps.pinSubscriptionModel(model);
+    }
+    return model;
+  }
+
   function closeModelMenu(): void {
     deps.setModelMenuOpen(false);
     deps.modelMenuEl.hidden = true;
@@ -89,6 +123,15 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   }
 
   function renderModelPickerLabel(): void {
+    const catalog = subscriptionCatalog();
+    if (catalog) {
+      const model = alignSubscriptionSession(catalog);
+      deps.modelLabelEl.textContent = model;
+      deps.modelBtnEl.disabled = deps.isComposerLocked();
+      deps.modelBtnEl.title = t("chat.modelSubscriptionHint");
+      deps.modelBtnEl.setAttribute("aria-label", model);
+      return;
+    }
     const runtimeName = runtimeDisplayName(deps.selectedRuntime());
     const chosen = chosenModel();
     if (chosen) {
@@ -112,8 +155,37 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     deps.modelBtnEl.setAttribute("aria-label", deps.modelLabelEl.textContent);
   }
 
+  function renderSubscriptionMenu(catalog: SubscriptionCatalog): void {
+    const model = alignSubscriptionSession(catalog);
+    const group = document.createElement("div");
+    group.className = "chat-model-group";
+    const label = document.createElement("div");
+    label.className = "chat-model-group-label";
+    label.textContent = catalog.label;
+    group.appendChild(label);
+    for (const id of catalog.models) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const active = model === id;
+      btn.className = `chat-model-option${active ? " is-active" : ""}`;
+      btn.role = "option";
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+      btn.textContent = id;
+      btn.addEventListener("click", () => {
+        selectSubscriptionModel(id);
+      });
+      group.appendChild(btn);
+    }
+    deps.modelMenuEl.appendChild(group);
+  }
+
   function renderModelMenu(): void {
     deps.modelMenuEl.replaceChildren();
+    const catalog = subscriptionCatalog();
+    if (catalog) {
+      renderSubscriptionMenu(catalog);
+      return;
+    }
     const providers = deps.getProviders();
     const wired = deps.getWiredProvider();
     if (providers.length === 0 && !wired) {
@@ -183,10 +255,12 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       return;
     }
     try {
-      const [status, doc] = await Promise.all([
+      const [status, doc, accounts] = await Promise.all([
         getPersonalProviderStatus(),
         listPersonalProviders(),
+        nativeAccountStatus(false).catch(() => null),
       ]);
+      if (accounts) nativeRows = accounts.rows;
       deps.setProviders(doc.providers);
       const active =
         doc.providers.find((p) => p.active) ||
@@ -220,6 +294,24 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     }
     renderModelPickerLabel();
     if (deps.getModelMenuOpen()) renderModelMenu();
+  }
+
+  function selectSubscriptionModel(model: string): void {
+    if (deps.isComposerLocked()) return;
+    const next = model.trim();
+    const catalog = subscriptionCatalog();
+    if (!next || !catalog?.models.includes(next)) {
+      closeModelMenu();
+      return;
+    }
+    const current = alignSubscriptionSession(catalog);
+    closeModelMenu();
+    if (current === next) return;
+    deps.pinSubscriptionModel(next);
+    renderModelPickerLabel();
+    deps.updateContextMeter();
+    deps.setStatus(t("chat.modelSwitched", { model: `${catalog.label} · ${next}` }), "ok");
+    deps.modelBtnEl.disabled = deps.isComposerLocked();
   }
 
   function selectSessionModel(provider: PersonalProviderListItem, model: string): void {
@@ -258,5 +350,9 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       selectSessionModel(wired, model);
     },
     updateRuntimeLabel,
+    hasChoices: () =>
+      subscriptionCatalog() !== null ||
+      deps.getProviders().length > 0 ||
+      Boolean(deps.getWiredProvider()),
   };
 }

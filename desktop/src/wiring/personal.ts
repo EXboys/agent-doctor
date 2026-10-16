@@ -1,18 +1,21 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { appState } from "../app-state";
+import { setAgentBrandIcon } from "../agent-brand";
+import { appState, applyNativeAccounts } from "../app-state";
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { formatProviderFailure, missingProviderFieldsMessage, teamupsLoginFailure, withProviderFailure, type ProviderField } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import { mergeLiveModels } from "../provider-models";
+import { setProviderBrandIcon } from "../provider-brand";
 import { PROVIDER_PRESETS } from "../provider-presets";
 import { DEFAULT_TEAMUPS_BASE_URL, setTeamupsBaseUrl } from "../teamups-site";
 import type {
   PersonalProviderListItem,
   PersonalProvidersDocument,
   PersonalProviderStatus,
+  NativeAccountSwitch,
   ProviderProtocol,
   TeamupsAccountStatus,
 } from "../types";
@@ -22,11 +25,14 @@ import {
   deletePersonalProvider,
   getPersonalProviderStatus,
   listPersonalProviders,
+  nativeAccountStatus,
   pollTeamupsLogin,
   signOutTeamups,
   startTeamupsLogin,
   teamupsAccountStatus,
   upsertPersonalProvider as upsertPersonalProviderCommand,
+  useCurrentService,
+  useNativeSubscription,
   verifyPersonalProvider as verifyPersonalProviderCommand,
 } from "../ipc";
 
@@ -40,6 +46,9 @@ const personalConnectedUrlEl = document.querySelector<HTMLElement>("#personal-co
 const personalConnectedMetaEl = document.querySelector<HTMLElement>("#personal-connected-meta");
 const personalListEl = document.querySelector<HTMLUListElement>("#personal-list")!;
 const personalListHintEl = document.querySelector<HTMLElement>("#personal-list-hint")!;
+const nativeFoldEl = document.querySelector<HTMLDetailsElement>("#native-accounts")!;
+const nativeFoldLabelEl = document.querySelector<HTMLElement>("#native-accounts-label")!;
+const nativeAccountListEl = document.querySelector<HTMLUListElement>("#native-account-list")!;
 const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
 const personalFormTitleEl = document.querySelector<HTMLElement>("#personal-form-title")!;
 const personalIdEl = document.querySelector<HTMLInputElement>("#personal-id")!;
@@ -224,9 +233,12 @@ export function createPersonalController(deps: PersonalDeps) {
 
       const avatar = document.createElement("span");
       avatar.className = "provider-avatar";
-      avatar.dataset.tone = String(avatarTone(officialProvider ? "official" : presetId || brand));
-      avatar.textContent = Array.from(brand.trim() || "?")[0].toUpperCase();
       avatar.setAttribute("aria-hidden", "true");
+      const brandKey = officialProvider ? "official" : presetId;
+      if (!setProviderBrandIcon(avatar, brandKey)) {
+        avatar.dataset.tone = String(avatarTone(brandKey || brand));
+        avatar.textContent = Array.from(brand.trim() || "?")[0].toUpperCase();
+      }
 
       const title = document.createElement("p");
       title.className = "provider-item-title";
@@ -353,6 +365,149 @@ export function createPersonalController(deps: PersonalDeps) {
     }
   }
 
+  let nativeBusyId: string | null = null;
+
+  function accountLabel(runtimeId: string): string {
+    return runtimeId === "codex" ? t("native.chatgpt") : t("native.claude");
+  }
+
+  function toolLabel(runtimeId: string): string {
+    return runtimeId === "codex" ? "Codex" : "Claude Code";
+  }
+
+  function applyOkText(name: string): string {
+    const kept = appState.nativeAccounts
+      .filter((row) => row.using_subscription)
+      .map((row) => toolLabel(row.runtime_id));
+    if (kept.length === 0) return t("personal.applyOk", { name });
+    const sep = getLocale() === "en" ? ", " : "、";
+    return t("personal.applyOkKept", { name, kept: kept.join(sep) });
+  }
+
+  function nativeOutcome(result: NativeAccountSwitch): string {
+    const tool = toolLabel(result.runtime_id);
+    const account = accountLabel(result.runtime_id);
+    const name = result.provider_name.trim() || t("native.revertCurrent");
+    switch (result.outcome) {
+      case "using":
+        return t("native.usingDone", { tool, account });
+      case "reverted":
+        return t("native.reverted", { tool, name, account });
+      case "unreachable":
+        return t("native.unreachable");
+      case "missing_tool":
+        return result.runtime_id === "codex" ? t("native.missingCodex") : t("native.missingClaude");
+      case "no_provider":
+        return t("native.noProvider");
+      case "unsupported":
+        return t("native.unsupported", { tool });
+      default:
+        return t("native.incomplete");
+    }
+  }
+
+  function renderNativeAccounts() {
+    if (!isPersonalEdition()) {
+      nativeFoldEl.hidden = true;
+      return;
+    }
+    const rows = appState.nativeAccounts.filter((row) => row.visible);
+    nativeFoldEl.hidden = rows.length === 0;
+    const using = rows.filter((row) => row.using_subscription).map((row) => toolLabel(row.runtime_id));
+    const sep = getLocale() === "en" ? ", " : "、";
+    nativeFoldLabelEl.textContent = using.length
+      ? t("native.foldUsing", { tools: using.join(sep) })
+      : t("native.group");
+    nativeAccountListEl.replaceChildren();
+    for (const row of rows) {
+      const account = accountLabel(row.runtime_id);
+      const busy = nativeBusyId === row.runtime_id;
+      const provider = row.provider_name.trim();
+      const li = document.createElement("li");
+      li.className = `provider-item${row.using_subscription ? " is-active" : ""}`;
+      const avatar = document.createElement("span");
+      avatar.className = "provider-avatar is-brand";
+      avatar.setAttribute("aria-hidden", "true");
+      setAgentBrandIcon(avatar, row.runtime_id);
+      const main = document.createElement("div");
+      main.className = "provider-item-main";
+      const title = document.createElement("p");
+      title.className = "provider-item-title";
+      const titleName = document.createElement("span");
+      titleName.className = "provider-item-name";
+      titleName.textContent = toolLabel(row.runtime_id);
+      title.appendChild(titleName);
+      const sub = document.createElement("p");
+      sub.className = "provider-item-sub";
+      const chip = document.createElement("span");
+      chip.className = "provider-item-meta";
+      chip.textContent = row.runtime_id === "codex" ? t("native.chipChatgpt") : t("native.chipClaude");
+      const note = document.createElement("span");
+      note.className = "provider-item-note";
+      const noteText = busy
+        ? t("native.loggingIn")
+        : row.using_subscription
+          ? t("native.using", { account })
+          : t("native.onlyTool");
+      note.textContent = noteText;
+      note.title = noteText;
+      sub.append(chip, note);
+      main.append(title, sub);
+      const actions = document.createElement("div");
+      actions.className = "provider-item-actions";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn-secondary btn-compact";
+      button.disabled = busy;
+      button.dataset.runtimeId = row.runtime_id;
+      button.dataset.action = row.using_subscription ? "use-service" : "use-subscription";
+      button.textContent = row.using_subscription
+        ? provider
+          ? t("native.revert", { name: provider })
+          : t("native.revertCurrent")
+        : row.runtime_id === "codex"
+          ? t("native.loginChatgpt")
+          : t("native.loginClaude");
+      actions.appendChild(button);
+      li.append(avatar, main, actions);
+      nativeAccountListEl.appendChild(li);
+    }
+  }
+
+  async function loadNativeAccounts(probe: boolean) {
+    if (!isPersonalEdition()) return;
+    try {
+      const status = await nativeAccountStatus(probe);
+      applyNativeAccounts(status.rows, probe);
+      renderNativeAccounts();
+    } catch {
+      nativeFoldEl.hidden = true;
+    }
+  }
+
+  async function onNativeAccountAction(runtimeId: string, action: "use-subscription" | "use-service") {
+    if (nativeBusyId) return;
+    nativeBusyId = runtimeId;
+    renderNativeAccounts();
+    personalListHintEl.hidden = false;
+    personalListHintEl.textContent =
+      action === "use-subscription" ? t("native.loggingIn") : t("personal.applying");
+    try {
+      const result =
+        action === "use-subscription"
+          ? await useNativeSubscription(runtimeId)
+          : await useCurrentService(runtimeId);
+      await loadNativeAccounts(false);
+      personalListHintEl.textContent = nativeOutcome(result);
+      settleAfterProviderSwitch();
+    } catch (error) {
+      personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
+    } finally {
+      nativeBusyId = null;
+      renderNativeAccounts();
+    }
+  }
+
   let switchInFlight = false;
   let switchingId: string | null = null;
 
@@ -377,6 +532,7 @@ export function createPersonalController(deps: PersonalDeps) {
     appState.personalProvidersDoc = doc;
     renderPersonalProviderStatus(status);
     renderPersonalProviderList(doc);
+    void loadNativeAccounts(true);
   }
 
   function officialBalanceKey(): string {
@@ -739,9 +895,7 @@ export function createPersonalController(deps: PersonalDeps) {
         personalKeyEl.value = "";
         await loadPersonalProviderList();
         personalListHintEl.hidden = false;
-        personalListHintEl.textContent = t("personal.applyOk", {
-          name: report.provider_name ?? values.name,
-        });
+        personalListHintEl.textContent = applyOkText(report.provider_name ?? values.name);
         resetPersonalForm();
         setPersonalHint("hide");
         showPersonalListView();
@@ -786,9 +940,7 @@ export function createPersonalController(deps: PersonalDeps) {
       });
       switchingId = null;
       await loadPersonalProviderList();
-      personalListHintEl.textContent = t("personal.applyOk", {
-        name: report.provider_name ?? id,
-      });
+      personalListHintEl.textContent = applyOkText(report.provider_name ?? id);
       settleAfterProviderSwitch();
     } catch (error) {
       personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
@@ -961,6 +1113,16 @@ export function createPersonalController(deps: PersonalDeps) {
         }
         return;
       }
+    });
+
+    nativeAccountListEl.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
+      const action = button?.dataset.action;
+      const runtimeId = button?.dataset.runtimeId;
+      if (!button || !runtimeId || (action !== "use-subscription" && action !== "use-service")) {
+        return;
+      }
+      void onNativeAccountAction(runtimeId, action);
     });
   }
 

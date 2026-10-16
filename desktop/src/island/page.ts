@@ -1133,8 +1133,9 @@ function syncScrollHint(): void {
 
 const CHIP_DRAG_SLOP = 5;
 
-function bindStatusChipDrag(root: HTMLElement | null): void {
-  if (!root || !document.documentElement.classList.contains("is-status-chip")) return;
+function bindStatusChipDrag(rootEl: HTMLElement | null): void {
+  if (!rootEl || !document.documentElement.classList.contains("is-status-chip")) return;
+  const root = rootEl;
   let label = "";
   let pending: { x: number; y: number; commit: boolean } | null = null;
   let pumping = false;

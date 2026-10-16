@@ -12,9 +12,9 @@ use serde_json::{json, Value};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_codex_env, apply_overlay_env, codex_provider_config_args,
+    apply_codex_env, apply_overlay_env, codex_provider_config_args, codex_subscription_model_args,
     collect_overlay_env_for_options, format_command_display, prepare_codex_home,
-    resolve_codex_overlay,
+    resolve_codex_overlay, scrub_subscription_gateway_env,
 };
 use super::mcp_ensure::{
     ensure_browser_mcp_for_ask, ensure_computer_mcp_for_ask, prepend_hand_instructions,
@@ -566,8 +566,17 @@ fn build_app_server_command(
     cmd.arg("app-server")
         .arg("-c")
         .arg("features.default_mode_request_user_input=true");
-    for arg in codex_provider_config_args(resolve_codex_overlay(overlay).as_ref()) {
-        cmd.arg(arg);
+    if crate::setup::is_native_subscription("codex") {
+        let model = overlay
+            .get(crate::setup::MODEL_ENV)
+            .map(|value| value.as_str());
+        for arg in codex_subscription_model_args(model) {
+            cmd.arg(arg);
+        }
+    } else {
+        for arg in codex_provider_config_args(resolve_codex_overlay(overlay).as_ref()) {
+            cmd.arg(arg);
+        }
     }
     cmd.current_dir(cwd)
         .stdin(Stdio::piped())
@@ -575,6 +584,9 @@ fn build_app_server_command(
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, overlay);
     apply_codex_env(&mut cmd, overlay);
+    if crate::setup::is_native_subscription("codex") {
+        scrub_subscription_gateway_env(&mut cmd);
+    }
     Ok(cmd)
 }
 

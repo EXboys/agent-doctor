@@ -29,7 +29,11 @@ pub(crate) fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSession
     // not enough — Codex 0.14x still routes via model_provider / openai_base_url in config.toml,
     // and without that it silently hits api.openai.com (401 with company keys).
     // Prefer isolated workspace CODEX_HOME when active (avoid project-local deny on ~/.codex).
-    let launch = resolve_codex_launch_env();
+    let launch = if crate::setup::is_native_subscription("codex") {
+        None
+    } else {
+        resolve_codex_launch_env()
+    };
     // ChatGPT login tokens in auth.json make Codex ignore gateway keys and hit api.openai.com.
     if launch.is_some() {
         let _ = clear_codex_chatgpt_auth_for_gateway();

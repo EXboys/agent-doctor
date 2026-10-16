@@ -558,7 +558,7 @@ export function syncComposerUi(): void {
   promptEl.readOnly = false;
   promptEl.placeholder = t(locked ? "chat.placeholderBusy" : "chat.placeholder");
   elevatedEl.disabled = false;
-  modelBtnEl.disabled = locked || chatState.personalProviders.length === 0 && !chatState.wiredProvider;
+  modelBtnEl.disabled = locked || !chatState.modelPicker?.hasChoices();
   chatState.modelPicker?.renderModelPickerLabel();
   if (locked) {
     closeModelMenu();

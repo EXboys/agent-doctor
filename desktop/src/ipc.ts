@@ -24,6 +24,8 @@ import type {
   PersonalProviderSetupReport,
   PersonalProviderStatus,
   PersonalProviderVerifyReport,
+  NativeAccountStatus,
+  NativeAccountSwitch,
   UsageDayRow,
   PersonalProvidersDocument,
   ProfilesDocument,
@@ -318,6 +320,18 @@ export function getPersonalProviderStatus(): Promise<PersonalProviderStatus> {
 
 export function listPersonalProviders(): Promise<PersonalProvidersDocument> {
   return invoke("list_personal_providers_command");
+}
+
+export function nativeAccountStatus(probe: boolean): Promise<NativeAccountStatus> {
+  return invoke("native_account_status_command", { probe });
+}
+
+export function useNativeSubscription(runtimeId: string): Promise<NativeAccountSwitch> {
+  return invoke("use_native_subscription_command", { runtimeId });
+}
+
+export function useCurrentService(runtimeId: string): Promise<NativeAccountSwitch> {
+  return invoke("use_current_service_command", { runtimeId });
 }
 
 export function upsertPersonalProvider(args: {

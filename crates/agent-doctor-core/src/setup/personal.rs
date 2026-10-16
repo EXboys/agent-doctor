@@ -718,6 +718,16 @@ pub fn execute_personal_provider_setup(
 
     let mut runtimes = Vec::new();
     for adapter in all_adapters() {
+        if crate::setup::is_native_subscription(adapter.id()) {
+            runtimes.push(RuntimeSetupResult {
+                runtime_id: adapter.id().to_string(),
+                display_name: adapter.display_name().to_string(),
+                applied: false,
+                message: "skipped — this tool is using its own subscription login".to_string(),
+                ..Default::default()
+            });
+            continue;
+        }
         let result = match (protocol.as_str(), adapter.id()) {
             (PROTOCOL_OPENAI, "openclaw") => {
                 merge::apply_openclaw(&gateway_url, api_key, Some(model))

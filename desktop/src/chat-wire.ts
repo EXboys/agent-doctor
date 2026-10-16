@@ -259,6 +259,18 @@ export function wireChatControllers(): void {
       touchSession(session);
       saveStore();
     },
+    pinSubscriptionModel: (model) => {
+      const session = activeSession();
+      const changed = session.model !== model || Boolean(session.providerId);
+      if (changed && session.runtimeThreadId) session.runtimeThreadId = null;
+      session.providerId = null;
+      session.providerTag = null;
+      session.model = model;
+      if (changed) {
+        touchSession(session);
+        saveStore();
+      }
+    },
     getModelMenuOpen: () => chatState.modelMenuOpen,
     setModelMenuOpen: (open) => {
       chatState.modelMenuOpen = open;

@@ -275,6 +275,18 @@ pub(crate) fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, Str
 }
 
 pub(crate) fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    if crate::setup::is_native_subscription("claude-code") {
+        if !overlay.contains_key("CLAUDE_CODE_ENABLE_TODO_TOOLS") {
+            cmd.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
+        }
+        for stale in CLAUDE_PROVIDER_ENV {
+            cmd.env_remove(stale);
+        }
+        if let Some(model_id) = claude_model(overlay) {
+            cmd.env("ANTHROPIC_MODEL", model_id);
+        }
+        return;
+    }
     // Claude Code only offers the checklist tools on some of its own models.
     // DeepSeek and other providers need this or the plan card never appears.
     if !overlay.contains_key("CLAUDE_CODE_ENABLE_TODO_TOOLS") {
@@ -324,6 +336,9 @@ fn claude_model(overlay: &HashMap<String, String>) -> Option<&str> {
 pub(crate) fn claude_provider_env(
     overlay: &HashMap<String, String>,
 ) -> Option<Vec<(&'static str, String)>> {
+    if crate::setup::is_native_subscription("claude-code") {
+        return None;
+    }
     let (url, key) = resolve_claude_overlay(overlay)?;
     let model = claude_model(overlay).unwrap_or_default().to_string();
     Some(
@@ -343,6 +358,10 @@ pub(crate) fn claude_provider_env(
 }
 
 pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    if crate::setup::is_native_subscription("codex") {
+        scrub_subscription_gateway_env(cmd);
+        return;
+    }
     if let Some((url, key, _, _)) = resolve_codex_overlay(overlay) {
         cmd.env("OPENAI_BASE_URL", url);
         cmd.env("OPENAI_API_KEY", &key);
@@ -407,6 +426,9 @@ pub(crate) fn resolve_deepseek_harness_overlay(
 }
 
 pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
+    if crate::setup::is_native_subscription("codex") {
+        return;
+    }
     let _ = clear_codex_placeholder_auth();
     if let Some((url, key, model, slot)) = resolve_codex_overlay(overlay) {
         let _ = clear_codex_chatgpt_auth_for_gateway();
@@ -738,6 +760,35 @@ pub(crate) fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// Gateway addresses and keys that would send a subscribed Codex or Claude Code
+/// turn to the saved service instead of the account.
+const SUBSCRIPTION_GATEWAY_ENV: &[&str] = &[
+    "OPENAI_BASE_URL",
+    "OPENAI_API_KEY",
+    GATEWAY_URL_ENV,
+    COMPANY_API_KEY_ENV,
+    EVOTOWN_URL_ENV,
+    EVOTOWN_API_KEY_ENV,
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+];
+
+pub(crate) fn scrub_subscription_gateway_env(cmd: &mut Command) {
+    for key in SUBSCRIPTION_GATEWAY_ENV {
+        cmd.env_remove(key);
+    }
+}
+
+/// ChatGPT login: pass only the chosen model. A provider table would send the
+/// turn to the saved service.
+pub(crate) fn codex_subscription_model_args(model: Option<&str>) -> Vec<String> {
+    let Some(model_id) = model.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+    vec!["-c".to_string(), format!("model={}", toml_string(model_id))]
+}
+
 /// `-c` overrides shared by Codex exec / app-server for company/personal gateway.
 pub(crate) fn codex_provider_config_args(
     launch: Option<&(String, String, Option<String>, String)>,
@@ -801,6 +852,16 @@ pub(crate) fn format_command_display(cmd: &Command) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn subscription_codex_args_name_only_the_model() {
+        let args = codex_subscription_model_args(Some("gpt-5.6-sol"));
+        assert_eq!(
+            args,
+            vec!["-c".to_string(), "model=\"gpt-5.6-sol\"".to_string()]
+        );
+        assert!(codex_subscription_model_args(Some("  ")).is_empty());
+    }
 
     #[test]
     fn claude_ask_enables_plan_tools_by_default() {

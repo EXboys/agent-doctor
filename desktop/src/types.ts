@@ -444,6 +444,26 @@ export interface UsageDayRow extends TokenUsage {
   turns: number;
 }
 
+export interface NativeAccountRow {
+  runtime_id: string;
+  using_subscription: boolean;
+  logged_in: boolean;
+  reachable: boolean;
+  visible: boolean;
+  provider_name: string;
+}
+
+export interface NativeAccountStatus {
+  rows: NativeAccountRow[];
+}
+
+export interface NativeAccountSwitch {
+  runtime_id: string;
+  using_subscription: boolean;
+  outcome: string;
+  provider_name: string;
+}
+
 export interface PersonalProviderSetupReport {
   profile_env_path: string;
   gateway_url: string;

@@ -295,7 +295,14 @@ fn suggest_npm_cli_repairs(
     }
 
     items.extend(suggest_browser_mcp_repairs(runtime_id, display, probe));
-    dedupe_repairs(items)
+    let items = dedupe_repairs(items);
+    if crate::setup::is_native_subscription(runtime_id) {
+        return items
+            .into_iter()
+            .filter(|item| !item.id.contains("from-mode") && !item.id.contains("api-key"))
+            .collect();
+    }
+    items
 }
 
 /// The API key fix is either a mode rewire or a placeholder, so it stays outside the rule table.

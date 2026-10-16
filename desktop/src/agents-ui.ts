@@ -71,6 +71,15 @@ function providerDisplayName(id: string, name: string): string {
   return trimmed || id;
 }
 
+function subscriptionServiceRow(runtimeId: string): string {
+  const row = appState.nativeAccounts.find(
+    (item) => item.runtime_id === runtimeId && item.using_subscription,
+  );
+  if (!row) return "";
+  const account = runtimeId === "codex" ? t("native.chatgpt") : t("native.claude");
+  return metaRow("meta.service", account);
+}
+
 /** The service this agent is actually pointed at, in words the person already used. */
 function serviceRow(gatewayUrl: string | null | undefined): string {
   const url = gatewayUrl?.trim();
@@ -462,10 +471,11 @@ export function renderRuntimeCard(
       ? "warn"
       : "ok";
   const versionRow = renderVersionCompareRow(runtime, versionStatus);
+  const subscription = subscriptionServiceRow(runtime.id);
   const summaryMeta = runtime.installed
     ? [
         versionRow,
-        runtime.profile.gateway_url ? serviceRow(runtime.profile.gateway_url) : "",
+        subscription || (runtime.profile.gateway_url ? serviceRow(runtime.profile.gateway_url) : ""),
       ]
         .filter(Boolean)
         .join("")

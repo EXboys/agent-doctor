@@ -2,7 +2,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import { isPersonalEdition } from "./edition";
-import { listPersonalProviders } from "./ipc";
+import { listPersonalProviders, nativeAccountStatus } from "./ipc";
 import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
 import {
@@ -17,6 +17,7 @@ import {
 import { renderRelatedResourcesHtml } from "./repair-ui";
 import {
   appState,
+  applyNativeAccounts,
   repairConfirmRuntimeIds,
   repairPreviewByRuntime,
 } from "./app-state";
@@ -326,7 +327,12 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     if (isPersonalEdition()) {
       try {
-        appState.personalProvidersDoc = await listPersonalProviders();
+        const [doc, accounts] = await Promise.all([
+          listPersonalProviders(),
+          nativeAccountStatus(false),
+        ]);
+        appState.personalProvidersDoc = doc;
+        applyNativeAccounts(accounts.rows, false);
       } catch {
         // The card can still name a known service from the address alone.
       }
