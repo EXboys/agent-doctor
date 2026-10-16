@@ -1118,7 +1118,7 @@ export class AskMentionMenuController {
     const q = this.mentionQuery.q.toLowerCase();
     const kindFilter = this.mentionQuery.kind === "any" ? this.slashTab : this.mentionQuery.kind;
     return [...this.getCandidates(), ...this.knowledgeRefs].filter((item) => {
-      if (kindFilter !== "any" && item.kind !== kindFilter) return false;
+      if (item.kind !== kindFilter) return false;
       if (!q) return true;
       return item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q);
     });
