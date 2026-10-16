@@ -73,6 +73,7 @@ dependencies = [
  "calamine",
  "dirs",
  "futures-util",
+ "image",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -88,6 +89,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tungstenite",
+ "windows 0.58.0",
  "zip 2.4.2",
 ]
 
@@ -105,6 +107,7 @@ dependencies = [
  "toml 0.8.2",
  "toml_edit 0.22.27",
  "tungstenite",
+ "windows 0.58.0",
 ]
 
 [[package]]

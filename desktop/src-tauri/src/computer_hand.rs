@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -166,7 +167,7 @@ extern "C" {
 fn screen_look(app: &str) -> Result<Value> {
     // A missing picture must fail the tool. Returning the menu names alone
     // makes the assistant click without seeing the screen.
-    let shot = capture_png()?;
+    let shot = capture_png(app)?;
     let mut text = look_text(app)?;
     if text.chars().count() > 12000 {
         text.truncate(12000);
@@ -281,11 +282,8 @@ unsafe fn append_controls(
                         _ => "text",
                     };
                     *seen += 1;
-                    out.push_str(&format!(
-                        "{kind}\t{label}\t{}\t{}\n",
-                        x.round() as i64,
-                        y.round() as i64
-                    ));
+                    let (x, y) = shot_point(x, y);
+                    out.push_str(&format!("{kind}\t{label}\t{x}\t{y}\n"));
                 }
             }
         }
@@ -401,7 +399,7 @@ struct Shot {
     scale: f64,
 }
 
-fn capture_png() -> Result<Shot> {
+fn capture_png(app: &str) -> Result<Shot> {
     #[cfg(target_os = "macos")]
     {
         if !unsafe { CGPreflightScreenCaptureAccess() } {
@@ -416,13 +414,21 @@ fn capture_png() -> Result<Shot> {
                 "还没有允许录制屏幕。打开系统设置里的「录屏与系统录音」，打开这个应用的开关，然后完全退出再打开。开关打开之前不要再点屏幕。"
             );
         }
+        let display = display_for_app(app);
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let path = format!("/tmp/agent-doctor-screen-{stamp}.png");
+        let rect = format!(
+            "{},{},{},{}",
+            display.origin_x.round() as i64,
+            display.origin_y.round() as i64,
+            display.width.round().max(1.0) as i64,
+            display.height.round().max(1.0) as i64
+        );
         let mut child = std::process::Command::new("/usr/sbin/screencapture")
-            .args(["-x", &path])
+            .args(["-x", "-R", &rect, &path])
             .spawn()
             .context("could not capture the screen")?;
         let started = std::time::Instant::now();
@@ -441,13 +447,17 @@ fn capture_png() -> Result<Shot> {
             thread::sleep(Duration::from_millis(40));
         }
         let (px_w, px_h) = png_size(&path).unwrap_or((0, 0));
-        let (pt_w, pt_h, display_scale) = display_points();
-        // CGDisplayPixelsWide reports points on Retina, so the file is the truth.
+        let pt_w = display.width.round().max(1.0) as i64;
+        let pt_h = display.height.round().max(1.0) as i64;
+        let display_scale = display_scale(display.id);
+        // The file is the truth when the capture succeeded. Points are this
+        // display, not the main display.
         let scale = if px_w > 0 && pt_w > 0 {
             px_w as f64 / pt_w as f64
         } else {
             display_scale
         };
+        remember_origin(display.origin_x, display.origin_y);
         Ok(Shot {
             path,
             pixels: (px_w, px_h),
@@ -457,6 +467,7 @@ fn capture_png() -> Result<Shot> {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = app;
         bail!("the screen is captured on macOS");
     }
 }
@@ -473,16 +484,142 @@ fn png_size(path: &str) -> Option<(i64, i64)> {
 }
 
 #[cfg(target_os = "macos")]
-fn display_points() -> (i64, i64, f64) {
+fn display_scale(id: u32) -> f64 {
     unsafe {
-        let id = CGMainDisplayID();
         let bounds = CGDisplayBounds(id);
         let pixels = CGDisplayPixelsWide(id) as f64;
         let width = bounds.size.width;
-        let height = bounds.size.height;
-        let scale = if width > 0.0 { pixels / width } else { 1.0 };
-        (width.round() as i64, height.round() as i64, scale)
+        if width > 0.0 {
+            pixels / width
+        } else {
+            1.0
+        }
     }
+}
+
+#[cfg(target_os = "macos")]
+struct MacDisplay {
+    id: u32,
+    origin_x: f64,
+    origin_y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[cfg(target_os = "macos")]
+fn display_for_app(app: &str) -> MacDisplay {
+    let anchor = unsafe { window_anchor(app) };
+    let displays = active_displays();
+    if let Some((x, y)) = anchor {
+        if let Some(display) = displays.iter().find(|display| display.contains(x, y)) {
+            return display.clone();
+        }
+    }
+    displays
+        .into_iter()
+        .find(|display| display.id == unsafe { CGMainDisplayID() })
+        .unwrap_or_else(main_display)
+}
+
+#[cfg(target_os = "macos")]
+fn active_displays() -> Vec<MacDisplay> {
+    let mut ids = [0u32; 16];
+    let mut count = 0u32;
+    let err = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) };
+    if err != 0 || count == 0 {
+        return vec![main_display()];
+    }
+    ids.iter()
+        .take(count as usize)
+        .map(|id| display_from(*id))
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn main_display() -> MacDisplay {
+    display_from(unsafe { CGMainDisplayID() })
+}
+
+#[cfg(target_os = "macos")]
+fn display_from(id: u32) -> MacDisplay {
+    let bounds = unsafe { CGDisplayBounds(id) };
+    MacDisplay {
+        id,
+        origin_x: bounds.origin.x,
+        origin_y: bounds.origin.y,
+        width: bounds.size.width,
+        height: bounds.size.height,
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl MacDisplay {
+    fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.origin_x
+            && y >= self.origin_y
+            && x < self.origin_x + self.width
+            && y < self.origin_y + self.height
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Clone for MacDisplay {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            origin_x: self.origin_x,
+            origin_y: self.origin_y,
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+/// Top-left of the display captured by the latest screenshot. Clicks from the
+/// model are points inside that picture, so they are shifted back to the desktop.
+#[cfg(target_os = "macos")]
+static LAST_ORIGIN: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+
+#[cfg(target_os = "macos")]
+fn remember_origin(x: f64, y: f64) {
+    *LAST_ORIGIN.lock().unwrap_or_else(|err| err.into_inner()) = (x, y);
+}
+
+#[cfg(target_os = "macos")]
+fn last_origin() -> (f64, f64) {
+    *LAST_ORIGIN.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+#[cfg(target_os = "macos")]
+fn shot_point(x: f64, y: f64) -> (i64, i64) {
+    let (origin_x, origin_y) = last_origin();
+    ((x - origin_x).round() as i64, (y - origin_y).round() as i64)
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn window_anchor(want: &str) -> Option<(f64, f64)> {
+    let app = if want.is_empty() {
+        front_app_element()
+    } else {
+        app_element_named(want).or_else(|| front_app_element())
+    }?;
+    let windows = copy_attr(app, "AXWindows");
+    let center = windows.and_then(|windows| {
+        let center = if CFArrayGetCount(windows) <= 0 {
+            None
+        } else {
+            let window = CFArrayGetValueAtIndex(windows, 0);
+            if window.is_null() {
+                None
+            } else {
+                attr_center(window)
+            }
+        };
+        CFRelease(windows);
+        center
+    });
+    CFRelease(app);
+    center
 }
 
 fn menu_text() -> Result<String> {
@@ -524,11 +661,8 @@ unsafe fn ax_menu_text() -> Result<String> {
             let Some((x, y)) = attr_center(item) else {
                 continue;
             };
-            out.push_str(&format!(
-                "menubar\t{name}\t{}\t{}\n",
-                x.round() as i64,
-                y.round() as i64
-            ));
+            let (x, y) = shot_point(x, y);
+            out.push_str(&format!("menubar\t{name}\t{x}\t{y}\n"));
             if attr_bool(item, "AXSelected") {
                 append_open_menu(&mut out, item, &name);
             }
@@ -603,6 +737,7 @@ unsafe fn append_open_menu(out: &mut String, item: *const std::ffi::c_void, bar_
             });
         }
         for (label, x, y) in place_menu_rows(&rows) {
+            let (x, y) = shot_point(x as f64, y as f64);
             out.push_str(&format!("menu\t{bar_name}\t{label}\t{x}\t{y}\n"));
         }
         CFRelease(entries);
@@ -823,7 +958,11 @@ fn trusted() -> bool {
 fn click_at(x: f64, y: f64) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let point = CGPoint { x, y };
+        let (origin_x, origin_y) = last_origin();
+        let point = CGPoint {
+            x: x + origin_x,
+            y: y + origin_y,
+        };
         unsafe {
             // A null source is treated as a private event. The menu bar only
             // highlights and never tracks the dropdown.
@@ -992,6 +1131,7 @@ extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
     fn CGMainDisplayID() -> u32;
+    fn CGGetActiveDisplayList(max_displays: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CGRect;
     fn CGDisplayPixelsWide(display: u32) -> usize;
     fn GetFrontProcess(psn: *mut ProcessSerialNumber) -> i32;

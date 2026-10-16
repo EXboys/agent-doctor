@@ -17,5 +17,13 @@ toml = "0.8"
 toml_edit.workspace = true
 tungstenite = { workspace = true, features = ["handshake"] }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+] }
+
 [dev-dependencies]
 tempfile = "3"

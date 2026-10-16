@@ -1,7 +1,7 @@
 //! Desktop computer tools. The model calls these the same way it calls browser tools.
 //!
-//! macOS reads the screen from the already-allowed app.
-//! Each `screen_snapshot` numbers the front window's controls as `@eN`.
+//! The desktop app does the click. macOS talks over a local socket. Windows talks
+//! over a named pipe. Each `screen_snapshot` numbers the front window's controls as `@eN`.
 
 #[cfg(unix)]
 use std::io::BufReader;
@@ -262,38 +262,120 @@ fn number_controls(text: &str) -> (String, Vec<Target>) {
 }
 
 fn ask_hand(tool: &str, args: &Value) -> Result<Value> {
-    #[cfg(not(unix))]
-    {
-        let _ = (tool, args);
-        bail!("clicking and typing run on macOS");
-    }
+    let line = json!({ "tool": tool, "args": args }).to_string();
     #[cfg(unix)]
     {
-        let dir = agent_doctor_core::store::agent_doctor_config_dir()
-            .context("could not find the app config folder")?;
-        let path = dir.join("computer.sock");
-        let stream = UnixStream::connect(&path).context(
+        let reply = ask_hand_unix(&line)?;
+        parse_hand_reply(&reply)
+    }
+    #[cfg(windows)]
+    {
+        let reply = ask_hand_windows(&line)?;
+        parse_hand_reply(&reply)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = line;
+        bail!("clicking and typing run on macOS");
+    }
+}
+
+fn parse_hand_reply(line: &str) -> Result<Value> {
+    let reply: Value = serde_json::from_str(line).context("empty reply from the app")?;
+    if reply.get("ok").and_then(Value::as_bool) == Some(true) {
+        Ok(reply.get("result").cloned().unwrap_or(json!({})))
+    } else {
+        bail!(
+            "{}",
+            reply
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("the click did not go through")
+        );
+    }
+}
+
+#[cfg(unix)]
+fn ask_hand_unix(line: &str) -> Result<String> {
+    let dir = agent_doctor_core::store::agent_doctor_config_dir()
+        .context("could not find the app config folder")?;
+    let path = dir.join("computer.sock");
+    let stream = UnixStream::connect(&path).context(
         "the app is not ready to click. Keep Agent Doctor open, and allow it to control this computer.",
     )?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(8)))?;
-        let mut writer = stream.try_clone()?;
-        writeln!(writer, "{}", json!({ "tool": tool, "args": args }))?;
-        let mut line = String::new();
-        BufReader::new(stream).read_line(&mut line)?;
-        let reply: Value = serde_json::from_str(&line).context("empty reply from the app")?;
-        if reply.get("ok").and_then(Value::as_bool) == Some(true) {
-            Ok(reply.get("result").cloned().unwrap_or(json!({})))
-        } else {
-            bail!(
-                "{}",
-                reply
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("the click did not go through")
-            );
-        }
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(8)))?;
+    let mut writer = stream.try_clone()?;
+    writeln!(writer, "{line}")?;
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply)?;
+    Ok(reply)
+}
+
+#[cfg(windows)]
+fn ask_hand_windows(line: &str) -> Result<String> {
+    use std::time::{Duration, Instant};
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+
+    let name = HSTRING::from(agent_doctor_core::COMPUTER_HAND_PIPE);
+    let pipe = unsafe {
+        CreateFileW(
+            &name,
+            GENERIC_READ.0 | GENERIC_WRITE.0,
+            FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0),
+            None,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            HANDLE::default(),
+        )
     }
+    .context(
+        "the app is not ready to click. Keep Agent Doctor open, and allow it to control this computer.",
+    )?;
+    let body = format!("{line}\n");
+    let mut written = 0u32;
+    let wrote = unsafe { WriteFile(pipe, Some(body.as_bytes()), Some(&mut written), None) };
+    if let Err(err) = wrote {
+        unsafe {
+            let _ = CloseHandle(pipe);
+        }
+        return Err(err).context("the click did not go through");
+    }
+    let mut reply = Vec::new();
+    let mut buf = [0u8; 4096];
+    let started = Instant::now();
+    let result = (|| {
+        while !reply.contains(&b'\n') && reply.len() < 1024 * 1024 {
+            if started.elapsed() > Duration::from_secs(8) {
+                bail!("the click did not go through");
+            }
+            let mut available = 0u32;
+            unsafe { PeekNamedPipe(pipe, None, 0, None, Some(&mut available), None) }
+                .context("empty reply from the app")?;
+            if available == 0 {
+                std::thread::sleep(Duration::from_millis(40));
+                continue;
+            }
+            let mut read = 0u32;
+            unsafe { ReadFile(pipe, Some(&mut buf), Some(&mut read), None) }
+                .context("empty reply from the app")?;
+            if read == 0 {
+                break;
+            }
+            reply.extend_from_slice(&buf[..read as usize]);
+        }
+        Ok(String::from_utf8_lossy(&reply).to_string())
+    })();
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+    result
 }
 
 fn screen_click(args: &Value) -> Result<Value> {

@@ -1,0 +1,135 @@
+//! Point math and key names shared by the Windows computer hand.
+//!
+//! The screenshot is physical pixels. The model clicks in points: pixels divided
+//! by `scale` (DPI / 96). `SendInput` then maps those pixels onto the virtual screen.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct KeyPress {
+    pub control: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub win: bool,
+    pub vk: u16,
+}
+
+pub(crate) fn scale_of(dpi: i32) -> f64 {
+    if dpi <= 96 {
+        1.0
+    } else {
+        dpi as f64 / 96.0
+    }
+}
+
+pub(crate) fn point_of(pixel: i32, origin: i32, scale: f64) -> i64 {
+    let scale = if scale <= 0.0 { 1.0 } else { scale };
+    ((pixel - origin) as f64 / scale).round() as i64
+}
+
+pub(crate) fn pixel_of(point: f64, origin: i32, scale: f64) -> i32 {
+    let scale = if scale <= 0.0 { 1.0 } else { scale };
+    origin.saturating_add((point * scale).round() as i32)
+}
+
+/// `SendInput` absolute axis: 0 at the virtual-screen origin, 65535 at the far edge.
+pub(crate) fn absolute_axis(pixel: i32, origin: i32, span: i32) -> i32 {
+    if span <= 1 {
+        return 0;
+    }
+    let delta = pixel.saturating_sub(origin).clamp(0, span - 1);
+    ((delta as i64) * 65535 / (span as i64 - 1)) as i32
+}
+
+pub(crate) fn control_line(role: &str, label: &str, x: i64, y: i64) -> String {
+    let label = label.replace(['\t', '\n', '\r'], " ");
+    format!("{role}\t{label}\t{x}\t{y}\n")
+}
+
+/// `command` is Ctrl here. The tool description says `command+a`, and on Windows that selects all.
+pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
+    let key = key.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return Err("key is empty".into());
+    }
+    let mut press = KeyPress {
+        control: false,
+        shift: false,
+        alt: false,
+        win: false,
+        vk: 0,
+    };
+    let mut token = String::new();
+    for part in key.split('+') {
+        match part.trim() {
+            "command" | "cmd" | "meta" | "control" | "ctrl" => press.control = true,
+            "shift" => press.shift = true,
+            "option" | "alt" => press.alt = true,
+            "win" | "windows" => press.win = true,
+            other if !other.is_empty() => token = other.to_string(),
+            _ => {}
+        }
+    }
+    press.vk = match token.as_str() {
+        "return" | "enter" => 0x0D,
+        "escape" | "esc" => 0x1B,
+        "tab" => 0x09,
+        "space" => 0x20,
+        "up" => 0x26,
+        "down" => 0x28,
+        "left" => 0x25,
+        "right" => 0x27,
+        other if other.len() == 1 && other.as_bytes()[0].is_ascii_lowercase() => {
+            other.as_bytes()[0].to_ascii_uppercase() as u16
+        }
+        other => return Err(format!("unknown key: {other}")),
+    };
+    Ok(press)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{absolute_axis, control_line, parse_key, pixel_of, point_of, scale_of};
+
+    #[test]
+    fn dpi_becomes_the_point_scale() {
+        assert_eq!(scale_of(96), 1.0);
+        assert_eq!(scale_of(0), 1.0);
+        assert!((scale_of(144) - 1.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn points_round_trip_through_pixels() {
+        let scale = 1.5;
+        assert_eq!(point_of(150, 0, scale), 100);
+        assert_eq!(pixel_of(100.0, 0, scale), 150);
+        assert_eq!(point_of(150, -100, scale), 167);
+        assert_eq!(pixel_of(100.0, -100, scale), 50);
+    }
+
+    #[test]
+    fn absolute_axis_spans_the_virtual_screen() {
+        assert_eq!(absolute_axis(0, 0, 1920), 0);
+        assert_eq!(absolute_axis(1919, 0, 1920), 65535);
+        assert_eq!(absolute_axis(-50, 0, 1920), 0);
+        assert_eq!(absolute_axis(10, 10, 100), 0);
+        // A monitor sitting left of the primary still maps through the whole virtual screen.
+        let pixel = pixel_of(100.0, -1920, 1.0);
+        assert_eq!(pixel, -1820);
+        assert_eq!(absolute_axis(pixel, -1920, 3840), (100 * 65535) / 3839);
+    }
+
+    #[test]
+    fn command_selects_with_ctrl() {
+        let key = parse_key("command+a").unwrap();
+        assert!(key.control);
+        assert_eq!(key.vk, b'A' as u16);
+        let enter = parse_key("ctrl+enter").unwrap();
+        assert!(enter.control);
+        assert_eq!(enter.vk, 0x0D);
+    }
+
+    #[test]
+    fn control_lines_keep_four_columns() {
+        let line = control_line("button", "Save\tme", 12, 34);
+        assert_eq!(line, "button\tSave me\t12\t34\n");
+    }
+}

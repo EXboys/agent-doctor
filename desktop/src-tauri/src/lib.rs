@@ -23,7 +23,12 @@ const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod channel_link;
 mod commands;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod computer_geom;
 #[cfg(unix)]
+mod computer_hand;
+#[cfg(windows)]
+#[path = "computer_hand_win.rs"]
 mod computer_hand;
 #[cfg(target_os = "macos")]
 mod drag_pasteboard;
@@ -517,7 +522,7 @@ pub fn run() {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
             agent_doctor_core::enable_warm_sessions();
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             computer_hand::spawn();
             app.manage(DeepDiagnoseState::default());
             app.manage(IslandHost::default());

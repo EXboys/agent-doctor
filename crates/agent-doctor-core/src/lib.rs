@@ -23,6 +23,9 @@ pub mod usage;
 pub mod version_check;
 pub mod workspace;
 
+/// Named pipe the desktop app serves. The computer tool connects here on Windows.
+pub const COMPUTER_HAND_PIPE: &str = r"\\.\pipe\agent-doctor-computer";
+
 /// Probing a broken program (a placeholder `.exe` left by a failed download)
 /// makes Windows pop a "16-bit application" dialog over the app. Children
 /// inherit this mode, so the start of a failed spawn becomes an error code.
