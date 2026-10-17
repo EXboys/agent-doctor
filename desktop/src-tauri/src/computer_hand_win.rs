@@ -980,11 +980,13 @@ fn crop_to_window(
     frame: (i32, i32, i32, i32),
 ) -> Option<(Desktop, Shot)> {
     let (x, y, width, height) = crop_pixels(
-        desk.origin_x as f64,
-        desk.origin_y as f64,
-        1.0,
-        shot.pixels.0,
-        shot.pixels.1,
+        crate::computer_geom::Picture {
+            origin_x: desk.origin_x as f64,
+            origin_y: desk.origin_y as f64,
+            scale: 1.0,
+            pixel_w: shot.pixels.0,
+            pixel_h: shot.pixels.1,
+        },
         frame.0 as f64,
         frame.1 as f64,
         frame.2 as f64,

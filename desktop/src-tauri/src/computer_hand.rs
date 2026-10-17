@@ -306,8 +306,7 @@ fn look_text(app: &str) -> Result<Look> {
     {
         // The other app's main thread owns an open menu and stops answering.
         // Stop asking after a short budget so this read cannot hold the channel.
-        let (text, frame) = with_look_deadline(|| unsafe { ax_look(app) })?;
-        Ok(Look { text, frame })
+        with_look_deadline(|| unsafe { ax_look(app) })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -317,7 +316,7 @@ fn look_text(app: &str) -> Result<Look> {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn ax_look(want: &str) -> Result<(String, Option<(f64, f64, f64, f64)>)> {
+unsafe fn ax_look(want: &str) -> Result<Look> {
     let app = if want.is_empty() {
         front_app_element()
     } else {
@@ -354,7 +353,7 @@ unsafe fn ax_look(want: &str) -> Result<(String, Option<(f64, f64, f64, f64)>)> 
             out.push_str(&menus);
         }
     }
-    Ok((out, frame))
+    Ok(Look { text: out, frame })
 }
 
 #[cfg(target_os = "macos")]
@@ -823,11 +822,13 @@ fn fit_window(shot: Shot, look: &Look) -> (Shot, bool) {
 fn crop_shot_to_window(shot: Shot, frame: (f64, f64, f64, f64)) -> (Shot, bool) {
     let (origin_x, origin_y) = last_origin();
     let Some((x, y, width, height)) = crop_pixels(
-        origin_x,
-        origin_y,
-        shot.scale,
-        shot.pixels.0,
-        shot.pixels.1,
+        crate::computer_geom::Picture {
+            origin_x,
+            origin_y,
+            scale: shot.scale,
+            pixel_w: shot.pixels.0,
+            pixel_h: shot.pixels.1,
+        },
         frame.0,
         frame.1,
         frame.2,

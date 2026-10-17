@@ -3,6 +3,17 @@
 //! The screenshot is physical pixels. The model clicks in points: pixels divided
 //! by `scale` (DPI / 96). `SendInput` then maps those pixels onto the virtual screen.
 
+/// Screenshot the crop is taken from. Coordinates are points unless `scale` is 1.
+#[derive(Clone, Copy)]
+pub(crate) struct Picture {
+    pub origin_x: f64,
+    pub origin_y: f64,
+    pub scale: f64,
+    pub pixel_w: i64,
+    pub pixel_h: i64,
+}
+
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct KeyPress {
     pub control: bool,
@@ -12,6 +23,7 @@ pub(crate) struct KeyPress {
     pub vk: u16,
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn scale_of(dpi: i32) -> f64 {
     if dpi <= 96 {
         1.0
@@ -20,17 +32,20 @@ pub(crate) fn scale_of(dpi: i32) -> f64 {
     }
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn point_of(pixel: i32, origin: i32, scale: f64) -> i64 {
     let scale = if scale <= 0.0 { 1.0 } else { scale };
     ((pixel - origin) as f64 / scale).round() as i64
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn pixel_of(point: f64, origin: i32, scale: f64) -> i32 {
     let scale = if scale <= 0.0 { 1.0 } else { scale };
     origin.saturating_add((point * scale).round() as i32)
 }
 
 /// `SendInput` absolute axis: 0 at the virtual-screen origin, 65535 at the far edge.
+#[cfg(any(windows, test))]
 pub(crate) fn absolute_axis(pixel: i32, origin: i32, span: i32) -> i32 {
     if span <= 1 {
         return 0;
@@ -75,33 +90,38 @@ pub(crate) fn picture_changed(before: &[u8], after: &[u8]) -> bool {
 /// or already fills it. `scale` turns window points into pixels; pass `1.0`
 /// when the window rect is already in pixels.
 pub(crate) fn crop_pixels(
-    shot_origin_x: f64,
-    shot_origin_y: f64,
-    scale: f64,
-    pixel_w: i64,
-    pixel_h: i64,
+    picture: Picture,
     win_x: f64,
     win_y: f64,
     win_w: f64,
     win_h: f64,
 ) -> Option<(u32, u32, u32, u32)> {
-    if scale <= 0.0 || pixel_w < 40 || pixel_h < 40 || win_w < 40.0 || win_h < 40.0 {
+    if picture.scale <= 0.0
+        || picture.pixel_w < 40
+        || picture.pixel_h < 40
+        || win_w < 40.0
+        || win_h < 40.0
+    {
         return None;
     }
-    let left = ((win_x - shot_origin_x) * scale).floor().max(0.0);
-    let top = ((win_y - shot_origin_y) * scale).floor().max(0.0);
-    let right = ((win_x + win_w - shot_origin_x) * scale)
+    let left = ((win_x - picture.origin_x) * picture.scale)
+        .floor()
+        .max(0.0);
+    let top = ((win_y - picture.origin_y) * picture.scale)
+        .floor()
+        .max(0.0);
+    let right = ((win_x + win_w - picture.origin_x) * picture.scale)
         .ceil()
-        .min(pixel_w as f64);
-    let bottom = ((win_y + win_h - shot_origin_y) * scale)
+        .min(picture.pixel_w as f64);
+    let bottom = ((win_y + win_h - picture.origin_y) * picture.scale)
         .ceil()
-        .min(pixel_h as f64);
+        .min(picture.pixel_h as f64);
     let width = right - left;
     let height = bottom - top;
     if width < 40.0 || height < 40.0 {
         return None;
     }
-    let shot_area = pixel_w * pixel_h;
+    let shot_area = picture.pixel_w * picture.pixel_h;
     let area = (width as i64) * (height as i64);
     if shot_area > 0 && area * 100 / shot_area >= 92 {
         return None;
@@ -109,12 +129,14 @@ pub(crate) fn crop_pixels(
     Some((left as u32, top as u32, width as u32, height as u32))
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn control_line(role: &str, label: &str, x: i64, y: i64) -> String {
     let label = label.replace(['\t', '\n', '\r'], " ");
     format!("{role}\t{label}\t{x}\t{y}\n")
 }
 
 /// `command` is Ctrl here. The tool description says `command+a`, and on Windows that selects all.
+#[cfg(any(windows, test))]
 pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
     let key = key.trim().to_ascii_lowercase();
     if key.is_empty() {
@@ -241,9 +263,16 @@ mod tests {
 
     #[test]
     fn a_window_crop_stays_inside_the_picture() {
-        let crop = crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 100.0, 80.0, 400.0, 300.0).unwrap();
+        let picture = super::Picture {
+            origin_x: 0.0,
+            origin_y: 0.0,
+            scale: 2.0,
+            pixel_w: 2000,
+            pixel_h: 1200,
+        };
+        let crop = crop_pixels(picture, 100.0, 80.0, 400.0, 300.0).unwrap();
         assert_eq!(crop, (200, 160, 800, 600));
-        assert!(crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 0.0, 0.0, 1000.0, 600.0).is_none());
-        assert!(crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 4000.0, 80.0, 100.0, 100.0).is_none());
+        assert!(crop_pixels(picture, 0.0, 0.0, 1000.0, 600.0).is_none());
+        assert!(crop_pixels(picture, 4000.0, 80.0, 100.0, 100.0).is_none());
     }
 }
