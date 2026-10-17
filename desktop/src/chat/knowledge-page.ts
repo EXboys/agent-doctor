@@ -407,6 +407,12 @@ export function syncKnowledgeLabels(): void {
   if (isKnowledgeOpen()) paint();
 }
 
+/** Open the knowledge page on the global library, where a new base can be added. */
+export function openKnowledgePage(): void {
+  tab = "global";
+  openKnowledge();
+}
+
 function openKnowledge(): void {
   const current = deps.currentAgent();
   if (AGENTS.includes(current as (typeof AGENTS)[number])) agentPick = current;

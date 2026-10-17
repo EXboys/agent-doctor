@@ -436,6 +436,14 @@ pub fn configure_stdio_mcp(
         // Only the workspace CODEX_HOME. `computer` reaches the screen through
         // the running desktop app, so it would fail in the user's own Codex.
         "codex" => write_mcp_servers_toml(&config_path, server_name, command, args)?,
+        "claude-code" | "claude" if server_name == "computer" => {
+            let path = agent_doctor_core::claude_computer_mcp_config_path()
+                .context("no config directory for the private computer MCP file")?;
+            write_claude_style_mcp(&path, server_name, command, args)?;
+            if let Some(project) = project_path {
+                let _ = agent_doctor_core::forget_project_computer_mcp(project);
+            }
+        }
         "claude-code" | "claude" => {
             write_claude_style_mcp(&config_path, server_name, command, args)?;
         }
@@ -446,8 +454,19 @@ pub fn configure_stdio_mcp(
         "openclaw" => {
             let global = resolve_openclaw_config_path()?;
             write_openclaw_stdio_mcp(&global, server_name, command, args)?;
-            if openclaw_workspace.is_some() {
-                write_claude_style_mcp(&config_path, server_name, command, args)?;
+            if let Some(workspace) = openclaw_workspace {
+                // `computer` only works while this app is open. Leave it out of
+                // the workspace file the person's own OpenClaw would read.
+                if server_name == "computer" {
+                    let _ = agent_doctor_core::forget_project_computer_mcp(workspace);
+                } else {
+                    write_claude_style_mcp(
+                        &workspace.join(".mcp.json"),
+                        server_name,
+                        command,
+                        args,
+                    )?;
+                }
             }
         }
         other => anyhow::bail!("Unsupported runtime: {other}"),

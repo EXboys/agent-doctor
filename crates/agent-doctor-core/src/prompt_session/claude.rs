@@ -82,6 +82,8 @@ fn run_claude(
     });
 
     let effective_prompt = hands.prompt(prompt);
+    // A computer server left in the project file shows up in the person's own Claude.
+    let _ = crate::forget_project_computer_mcp(&cwd);
 
     let images: Vec<super::vision::EncodedImage> =
         super::vision::turn_images("claude-code", &options.image_paths, &overlay)
@@ -96,6 +98,7 @@ fn run_claude(
         skip_permissions: options.dangerously_skip_permissions,
         interactive,
         stream_input,
+        computer_mcp: hands.computer,
         overlay: &overlay,
     };
     let mut cmd = build_claude_command(&effective_prompt, &launch, resume_session_id)?;
@@ -320,17 +323,23 @@ struct ClaudeLaunch<'a> {
     interactive: bool,
     /// Messages go in on stdin as stream-json instead of as an argument.
     stream_input: bool,
+    /// Pass the app-owned computer MCP file. The project `.mcp.json` never lists it.
+    computer_mcp: bool,
     overlay: &'a std::collections::HashMap<String, String>,
 }
 
 fn claude_config_files(cwd: &Path) -> Vec<std::path::PathBuf> {
     let home = crate::adapters::util::home_join(".claude");
-    vec![
+    let mut files = vec![
         home.join("settings.json"),
         cwd.join(".mcp.json"),
         cwd.join(".claude").join("settings.json"),
         cwd.join(".claude").join("settings.local.json"),
-    ]
+    ];
+    if let Some(path) = crate::claude_computer_mcp_config_path() {
+        files.push(path);
+    }
+    files
 }
 
 fn build_claude_command(
@@ -343,6 +352,7 @@ fn build_claude_command(
         skip_permissions,
         interactive: interactive_permissions,
         stream_input,
+        computer_mcp,
         overlay,
     } = *launch;
     let bin = std::env::var("AGENT_DOCTOR_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
@@ -362,6 +372,13 @@ fn build_claude_command(
     let mcp_config = cwd.join(".mcp.json");
     if mcp_config.is_file() {
         cmd.arg(format!("--mcp-config={}", mcp_config.display()));
+    }
+    if computer_mcp {
+        if let Some(path) = crate::claude_computer_mcp_config_path() {
+            if path.is_file() {
+                cmd.arg(format!("--mcp-config={}", path.display()));
+            }
+        }
     }
     if let Some(sid) = resume_session_id {
         cmd.arg("--resume").arg(sid);
@@ -1737,6 +1754,7 @@ mod tests {
             skip_permissions: false,
             interactive: true,
             stream_input: true,
+            computer_mcp: false,
             overlay: &overlay,
         };
         let cmd = build_claude_command("hi", &launch, None).unwrap();
@@ -1799,6 +1817,7 @@ mod tests {
                 skip_permissions: true,
                 interactive: false,
                 stream_input: false,
+                computer_mcp: false,
                 overlay: &overlay,
             };
             build_claude_command("hi", &launch, None).unwrap()
@@ -1861,6 +1880,7 @@ mod tests {
             skip_permissions: true,
             interactive: false,
             stream_input: false,
+            computer_mcp: false,
             overlay: &overlay,
         };
         let cmd = build_claude_command(prompt, &launch, None).unwrap();
@@ -1884,6 +1904,60 @@ mod tests {
         assert!(args[..dash]
             .iter()
             .any(|arg| arg == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn computer_mcp_is_a_second_config_outside_the_project() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join(".mcp.json"),
+            r#"{"mcpServers":{"computer":{"command":"old","args":["mcp","computer"]},"browser":{"command":"b","args":[]}}}"#,
+        )
+        .unwrap();
+        assert!(crate::forget_project_computer_mcp(&project));
+        let project_mcp = fs::read_to_string(project.join(".mcp.json")).unwrap();
+        assert!(!project_mcp.contains("computer"));
+        assert!(project_mcp.contains("browser"));
+
+        crate::adapters::util::with_test_home(dir.path(), || {
+            let private = crate::claude_computer_mcp_config_path().unwrap();
+            fs::create_dir_all(private.parent().unwrap()).unwrap();
+            fs::write(
+                &private,
+                r#"{"mcpServers":{"computer":{"command":"agent-doctor","args":["mcp","computer"]}}}"#,
+            )
+            .unwrap();
+            let overlay = std::collections::HashMap::new();
+            let launch = ClaudeLaunch {
+                cwd: &project,
+                skip_permissions: true,
+                interactive: false,
+                stream_input: false,
+                computer_mcp: true,
+                overlay: &overlay,
+            };
+            let cmd = build_claude_command("hi", &launch, None).unwrap();
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let configs: Vec<&String> = args
+                .iter()
+                .filter(|arg| arg.starts_with("--mcp-config="))
+                .collect();
+            assert!(
+                configs.iter().any(|arg| arg.ends_with("proj/.mcp.json")),
+                "project config stays: {configs:?}"
+            );
+            assert!(
+                configs
+                    .iter()
+                    .any(|arg| arg.ends_with("claude-computer-mcp.json")),
+                "computer config is the app file: {configs:?}"
+            );
+        });
     }
 
     #[cfg(unix)]

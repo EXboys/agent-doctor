@@ -1095,6 +1095,7 @@ export class AskMentionMenuController {
     private autoResizePrompt: () => void,
     private onVisibilityChange?: (open: boolean) => void,
     private loadKnowledge?: () => Promise<MentionRef[]>,
+    private onOpenManage?: (kind: "skill" | "knowledge") => void,
   ) {}
 
   private knowledgeRefs: MentionRef[] = [];
@@ -1303,13 +1304,32 @@ export class AskMentionMenuController {
     if (options.length === 0 && hands.length === 0) {
       const empty = document.createElement("div");
       empty.className = "chat-slash-empty";
-      empty.textContent = t(
+      const line = document.createElement("p");
+      line.textContent = t(
         this.slashTab === "skill"
           ? "chat.slashEmptySkills"
           : this.slashTab === "knowledge"
             ? "chat.slashEmptyKnowledge"
             : "chat.slashEmptyTools",
       );
+      empty.append(line);
+      if (this.slashTab === "skill" || this.slashTab === "knowledge") {
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "chat-empty-next";
+        action.textContent = t(
+          this.slashTab === "skill" ? "chat.slashManageSkills" : "chat.slashManageKnowledge",
+        );
+        action.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+        });
+        action.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.openManage(this.slashTab === "knowledge" ? "knowledge" : "skill");
+        });
+        empty.append(action);
+      }
       list.appendChild(empty);
     } else {
       const appendOption = (option: MentionRef, index: number) => {
@@ -1375,6 +1395,19 @@ export class AskMentionMenuController {
 
     const active = list.querySelector<HTMLElement>(".chat-mention-option.is-active");
     active?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Leave the picker and open the skills or knowledge page. */
+  private openManage(kind: "skill" | "knowledge"): void {
+    if (this.mentionQuery) {
+      const value = this.dom.promptEl.value;
+      const next = this.mentionQuery.start;
+      this.dom.promptEl.value = `${value.slice(0, this.mentionQuery.start)}${value.slice(this.mentionQuery.end)}`;
+      this.dom.promptEl.setSelectionRange(next, next);
+      this.autoResizePrompt();
+    }
+    this.hideMentionMenu();
+    this.onOpenManage?.(kind);
   }
 
   applyMentionOption(option: MentionRef): void {

@@ -39,6 +39,76 @@ pub(crate) fn absolute_axis(pixel: i32, origin: i32, span: i32) -> i32 {
     ((delta as i64) * 65535 / (span as i64 - 1)) as i32
 }
 
+pub(crate) fn window_has_control(text: &str) -> bool {
+    text.lines().any(|line| {
+        matches!(
+            line.split('\t').next().unwrap_or("").trim(),
+            "button" | "text field" | "text"
+        )
+    })
+}
+
+pub(crate) fn window_has_field(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.split('\t').next().unwrap_or("").trim() == "text field")
+}
+
+pub(crate) fn point_inside(x: f64, y: f64, width: f64, height: f64) -> bool {
+    width > 0.0 && height > 0.0 && x >= 0.0 && y >= 0.0 && x < width && y < height
+}
+
+/// A clock tick or a one-pixel shift is not a new screen. A control that
+/// moved or a window that opened is.
+pub(crate) fn picture_changed(before: &[u8], after: &[u8]) -> bool {
+    if before.len() != after.len() || before.is_empty() {
+        return true;
+    }
+    let changed = before
+        .iter()
+        .zip(after)
+        .filter(|(left, right)| left.abs_diff(**right) > 28)
+        .count();
+    changed >= 4
+}
+
+/// Pixel box of a window inside a screenshot. None when it misses the picture
+/// or already fills it. `scale` turns window points into pixels; pass `1.0`
+/// when the window rect is already in pixels.
+pub(crate) fn crop_pixels(
+    shot_origin_x: f64,
+    shot_origin_y: f64,
+    scale: f64,
+    pixel_w: i64,
+    pixel_h: i64,
+    win_x: f64,
+    win_y: f64,
+    win_w: f64,
+    win_h: f64,
+) -> Option<(u32, u32, u32, u32)> {
+    if scale <= 0.0 || pixel_w < 40 || pixel_h < 40 || win_w < 40.0 || win_h < 40.0 {
+        return None;
+    }
+    let left = ((win_x - shot_origin_x) * scale).floor().max(0.0);
+    let top = ((win_y - shot_origin_y) * scale).floor().max(0.0);
+    let right = ((win_x + win_w - shot_origin_x) * scale)
+        .ceil()
+        .min(pixel_w as f64);
+    let bottom = ((win_y + win_h - shot_origin_y) * scale)
+        .ceil()
+        .min(pixel_h as f64);
+    let width = right - left;
+    let height = bottom - top;
+    if width < 40.0 || height < 40.0 {
+        return None;
+    }
+    let shot_area = pixel_w * pixel_h;
+    let area = (width as i64) * (height as i64);
+    if shot_area > 0 && area * 100 / shot_area >= 92 {
+        return None;
+    }
+    Some((left as u32, top as u32, width as u32, height as u32))
+}
+
 pub(crate) fn control_line(role: &str, label: &str, x: i64, y: i64) -> String {
     let label = label.replace(['\t', '\n', '\r'], " ");
     format!("{role}\t{label}\t{x}\t{y}\n")
@@ -87,7 +157,10 @@ pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_axis, control_line, parse_key, pixel_of, point_of, scale_of};
+    use super::{
+        absolute_axis, control_line, crop_pixels, parse_key, picture_changed, pixel_of,
+        point_inside, point_of, scale_of, window_has_control, window_has_field,
+    };
 
     #[test]
     fn dpi_becomes_the_point_scale() {
@@ -131,5 +204,46 @@ mod tests {
     fn control_lines_keep_four_columns() {
         let line = control_line("button", "Save\tme", 12, 34);
         assert_eq!(line, "button\tSave me\t12\t34\n");
+    }
+
+    #[test]
+    fn a_drawn_window_has_no_named_control() {
+        let text = "front app: 微信\nwindow: 微信\n";
+        assert!(!window_has_control(text));
+        assert!(!window_has_field(text));
+        let field = "text field\t搜索\t12\t40\n";
+        assert!(window_has_control(field));
+        assert!(window_has_field(field));
+    }
+
+    #[test]
+    fn a_point_outside_the_picture_is_rejected() {
+        assert!(point_inside(10.0, 10.0, 100.0, 80.0));
+        assert!(!point_inside(100.0, 10.0, 100.0, 80.0));
+        assert!(!point_inside(-1.0, 10.0, 100.0, 80.0));
+        assert!(!point_inside(1.0, 1.0, 0.0, 80.0));
+    }
+
+    #[test]
+    fn a_still_picture_is_not_a_change() {
+        let still = vec![10u8; 48 * 48];
+        assert!(!picture_changed(&still, &still));
+        let mut flicker = still.clone();
+        flicker[0] = 255;
+        assert!(!picture_changed(&still, &flicker));
+        let mut moved = still.clone();
+        for pixel in moved.iter_mut().take(8) {
+            *pixel = 255;
+        }
+        assert!(picture_changed(&still, &moved));
+        assert!(picture_changed(&[], &still));
+    }
+
+    #[test]
+    fn a_window_crop_stays_inside_the_picture() {
+        let crop = crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 100.0, 80.0, 400.0, 300.0).unwrap();
+        assert_eq!(crop, (200, 160, 800, 600));
+        assert!(crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 0.0, 0.0, 1000.0, 600.0).is_none());
+        assert!(crop_pixels(0.0, 0.0, 2.0, 2000, 1200, 4000.0, 80.0, 100.0, 100.0).is_none());
     }
 }

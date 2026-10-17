@@ -2197,7 +2197,8 @@ html[data-theme="dark"] .chat-settings-tabs .chat-mode-btn.is-on {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   max-width: 520px;
-  margin: 28px auto;
+  margin: 0 auto;
+  flex: 0 0 auto;
 }
 
 .chat-start-card {
@@ -6254,11 +6255,19 @@ body.chat-skill-dragging .chat-res-grip {
 }
 
 .chat-slash-empty {
-  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 12px 16px;
   text-align: center;
   font-size: 0.78rem;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.chat-slash-empty p {
+  margin: 0;
 }
 
 .chat-mention-option {
@@ -6306,16 +6315,20 @@ body.chat-skill-dragging .chat-res-grip {
   box-shadow: none;
 }
 
-/* Spare room stays above the reply. The gap under it stops at one short breath. */
-.chat-log::before,
-.chat-log::after {
+/* A new chat lifts the two start cards into the open area, clear of the composer. */
+.chat-log:has(> .chat-start)::before,
+.chat-log:has(> .chat-start)::after {
   content: "";
-  flex: 1 0 0;
+  flex: 1 1 0;
   min-height: 0;
 }
 
-.chat-log::after {
-  max-height: 72px;
+.chat-log:has(> .chat-start)::before {
+  flex-grow: 0.42;
+}
+
+.chat-log:has(> .chat-start)::after {
+  flex-grow: 1.15;
 }
 
 .chat-bubble {
@@ -6489,6 +6502,24 @@ body.chat-skill-dragging .chat-res-grip {
 
 .chat-msg-copy[hidden] {
   display: none;
+}
+
+.chat-msg-time {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  line-height: 24px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.chat-msg-time[hidden] {
+  display: none;
+}
+
+.chat-msg-assistant.is-compact .chat-msg-time {
+  line-height: 1.2;
 }
 
 .chat-msg-copy svg {

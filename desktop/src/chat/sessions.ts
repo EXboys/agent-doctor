@@ -3,7 +3,7 @@ import { setAgentBrandIcon } from "../agent-brand";
 import { getLocale, t } from "../i18n";
 import { listInstalledAskAgents } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
-import { createEmptySession, uid } from "./store";
+import { createEmptySession, noteSessionDropped, uid } from "./store";
 import {
   defaultWorkspaceName,
   listProjectGroupsForSidebar,
@@ -710,6 +710,7 @@ export function createSessionsController(deps: SessionsDeps) {
       return;
     }
     if (!window.confirm(t("chat.deleteSessionConfirm"))) return;
+    noteSessionDropped(id);
     deps.getUnseenCompletedSessionIds().delete(id);
     const remaining = deps.getStore().sessions.filter((s) => s.id !== id);
     if (remaining.length === 0) {

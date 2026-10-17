@@ -30,6 +30,7 @@ import {
   renderAttachmentStrip,
   syncMessageCopyActions,
 } from "./copy-ui";
+import { paintReplyAge, refreshReplyAges } from "./reply-age";
 import { uid } from "./store";
 import type {
   ChatAttachment,
@@ -92,6 +93,11 @@ export type BubblesApi = ReturnType<typeof createBubblesController>;
 
 export function createBubblesController(deps: BubblesDeps) {
   let flushRaf = 0;
+  const refreshAges = () => refreshReplyAges(deps.logEl);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshAges();
+  });
+  window.setInterval(refreshAges, 30_000);
 
   function flushPendingTextSync(): void {
     if (flushRaf) {
@@ -128,7 +134,13 @@ export function createBubblesController(deps: BubblesDeps) {
         deps.flushStorePersist();
       }
       if (deps.getAssistantBubble()?.isConnected) {
-        syncAssistantCopyButton(deps.getAssistantBubble()!);
+        const bubble = deps.getAssistantBubble()!;
+        syncAssistantCopyButton(bubble);
+        const id = deps.getAssistantMessageId();
+        const stamped = id
+          ? deps.runTargetSession().messages.find((message) => message.id === id)
+          : undefined;
+        syncAssistantTime(bubble, stamped?.at, false);
       }
     }
     deps.setAssistantBubble(null);
@@ -328,6 +340,10 @@ export function createBubblesController(deps: BubblesDeps) {
       source,
     );
   }
+  function syncAssistantTime(bubble: HTMLElement, at: number | undefined, streaming: boolean): void {
+    const time = assistantMsgWrap(bubble).querySelector<HTMLTimeElement>(":scope > .chat-msg-actions time.chat-msg-time");
+    if (time) paintReplyAge(time, at, streaming);
+  }
   function createAssistantBubbleEl(opts?: { id?: string }): { wrap: HTMLElement; bubble: HTMLElement } {
     const wrap = document.createElement("div");
     wrap.className = "chat-msg chat-msg-assistant";
@@ -341,6 +357,10 @@ export function createBubblesController(deps: BubblesDeps) {
     actions.hidden = true;
     // Default copy = markdown source (better for paste/edit).
     actions.appendChild(createCopyActionButton("text", () => assistantMarkdownSource(bubble)));
+    const time = document.createElement("time");
+    time.className = "chat-msg-time";
+    time.hidden = true;
+    actions.appendChild(time);
     wrap.append(bubble, actions);
     return { wrap, bubble };
   }
@@ -579,11 +599,13 @@ export function createBubblesController(deps: BubblesDeps) {
             deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()
               ? deps.getAssistantRaw()
               : message.content;
-          setAssistantMarkdown(bubble, liveContent);
-          if (deps.getBusy() && message.id === deps.getAssistantMessageId()) {
+          const streaming = Boolean(deps.getBusy() && message.id === deps.getAssistantMessageId());
+          if (streaming) {
             bubble.classList.add("is-streaming");
             deps.setAssistantBubble(bubble);
           }
+          setAssistantMarkdown(bubble, liveContent);
+          syncAssistantTime(bubble, message.at, streaming);
           deps.logEl.appendChild(wrap);
         } else if (message.role === "user") {
           const { wrap } = createUserBubbleEl({

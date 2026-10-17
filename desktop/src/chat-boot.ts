@@ -47,6 +47,7 @@ import {
   pickAttachments,
   setupFileDrop,
   renderActiveMessages,
+  hydrateDurableChatStore,
   loadAskResources,
   syncWorkspaceActivateButton,
   activateSelectedWorkspace,
@@ -192,6 +193,7 @@ export function bootChat(): void {
   } catch (error) {
     console.error("Ask: early paint failed", error);
   }
+  void hydrateDurableChatStore();
   try {
     applyI18n();
   } catch (error) {

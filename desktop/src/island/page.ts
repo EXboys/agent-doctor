@@ -1103,7 +1103,10 @@ function render(view: IslandView): void {
   root.classList.toggle("is-expanded", view.expanded);
   root.classList.toggle("is-attention", view.attention);
   const toast = !view.expanded && lastResult && Date.now() < lastResult.until ? lastResult : null;
-  root.classList.toggle("is-done", Boolean(toast?.ok));
+  const tone = toast ? "" : view.tone || "";
+  root.dataset.tone = tone;
+  root.classList.toggle("is-done", Boolean(toast?.ok) || tone === "done");
+  root.classList.toggle("is-failed", tone === "failed");
   titleEl.textContent = toast ? toast.short : view.title || t("island.idle");
   activePending = view.expanded ? view.pending : null;
   renderDetail(view.detail);

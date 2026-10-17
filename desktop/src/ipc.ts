@@ -1028,6 +1028,15 @@ export function islandSetHideWhenIdle(hide: boolean): Promise<void> {
   return invoke("island_set_hide_when_idle_command", { hide });
 }
 
+/** Saved chat projection. `null` until the first successful save on this computer. */
+export function loadChatStore(): Promise<string | null> {
+  return invoke("load_chat_store_command");
+}
+
+export function saveChatStore(store: string): Promise<void> {
+  return invoke("save_chat_store_command", { store });
+}
+
 export function islandClaimKeyboard(): Promise<void> {
   return invoke("island_claim_keyboard_command");
 }

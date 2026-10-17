@@ -143,6 +143,18 @@ body {
   color: rgb(74, 222, 128);
 }
 
+.island[data-tone="working"] .island-mark {
+  background: #7fa8ff;
+}
+
+.island[data-tone="waiting"] .island-mark {
+  background: #ffba5c;
+}
+
+.island.is-failed .island-title {
+  color: #f87171;
+}
+
 .island.is-done .island-title::before {
   content: "✓ ";
 }

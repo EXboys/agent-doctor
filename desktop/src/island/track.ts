@@ -16,6 +16,12 @@ export type IslandPending = {
   tool?: string;
 };
 
+/** How the last turn ended. Empty while a turn is still going. */
+export type IslandOutcome = "" | "ok" | "failed" | "stopped";
+
+/** What the short top bar should emphasize. */
+export type IslandTone = "" | "working" | "waiting" | "done" | "failed" | "stopped";
+
 export type IslandTrack = {
   active: boolean;
   browser: boolean;
@@ -25,6 +31,7 @@ export type IslandTrack = {
   /** The last thing the user sent. Kept after the turn ends. */
   sent: string;
   pending: IslandPending | null;
+  outcome: IslandOutcome;
 };
 
 export type IslandLabels = {
@@ -49,6 +56,8 @@ export type IslandSnapshot = {
   hideWhenIdle: boolean;
   /** The turn just finished, so the bar stays a moment longer. */
   lingering: boolean;
+  /** working, waiting, done, failed, or stopped. Empty when idle. */
+  tone: IslandTone;
 };
 
 export type IslandView = {
@@ -58,10 +67,11 @@ export type IslandView = {
   detail: string;
   attention: boolean;
   pending: IslandPending | null;
+  tone?: IslandTone | string;
 };
 
 export function emptyIslandTrack(): IslandTrack {
-  return { active: false, browser: false, detail: "", spoken: "", sent: "", pending: null };
+  return { active: false, browser: false, detail: "", spoken: "", sent: "", pending: null, outcome: "" };
 }
 
 const READ_LIMIT = 4000;
@@ -139,7 +149,7 @@ function browserNoise(message: string): boolean {
 export function reduceIslandTrack(track: IslandTrack, event: PromptSessionEvent): IslandTrack {
   switch (event.type) {
     case "started":
-      return { ...track, active: true, browser: false, detail: "", spoken: "", pending: null };
+      return { ...track, active: true, browser: false, detail: "", spoken: "", pending: null, outcome: "" };
     case "status": {
       if (event.phase === HAND_MISSING_PHASE) return { ...track, active: true };
       const browser = track.browser || browserNoise(event.message);
@@ -197,6 +207,7 @@ export function reduceIslandTrack(track: IslandTrack, event: PromptSessionEvent)
         spoken: track.spoken || clipStart(preferPlainSummary(event.summary ?? "")),
         sent: track.sent,
         pending: null,
+        outcome: islandOutcome(event.status),
       };
     default:
       return track;
@@ -333,7 +344,8 @@ function rowRank(row: IslandRow): number {
 
 function chipTitle(track: IslandTrack, status: string, current: IslandRow | undefined): string {
   const who = current?.badge || current?.agent || "";
-  if (track.pending || track.active) return who ? `${who} · ${status}` : status;
+  // The Windows bar is one short line. Lead with the state so it is not cut off.
+  if (track.pending || track.active) return status;
   const bit = current?.preview ?? "";
   if (who && bit) {
     const short = bit.length > 10 ? `${bit.slice(0, 10)}…` : bit;
@@ -373,5 +385,30 @@ export function islandSnapshot(
     pending,
     hideWhenIdle: false,
     lingering: false,
+    tone: islandTone(track),
   };
+}
+
+export function islandOutcome(status: "succeeded" | "failed" | "cancelled" | "timed_out"): IslandOutcome {
+  if (status === "succeeded") return "ok";
+  if (status === "cancelled") return "stopped";
+  return "failed";
+}
+
+export function islandTone(track: IslandTrack): IslandTone {
+  if (track.pending) return "waiting";
+  if (track.active) return "working";
+  return "";
+}
+
+/** The sentence the bar keeps for a few seconds after a turn ends. */
+export function islandLinger(
+  track: IslandTrack,
+  done: string,
+  failed: string,
+  stopped: string,
+): { title: string; tone: IslandTone } {
+  if (track.outcome === "failed") return { title: failed, tone: "failed" };
+  if (track.outcome === "stopped") return { title: stopped, tone: "stopped" };
+  return { title: done, tone: "done" };
 }

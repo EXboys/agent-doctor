@@ -150,7 +150,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "screen_snapshot".into(),
-            description: "See the screen. Returns a PNG path plus point size. Read the PNG. Click x,y are points: divide image pixels by scale.".into(),
+            description: "See the screen. Returns a PNG path plus point size. Read the PNG. Click x,y are points: divide image pixels by scale. To open or switch to an app, call screen_open. Do not click the Dock, Spotlight, or Launchpad.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -160,11 +160,13 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "screen_click".into(),
-            description: "Click a control from the latest screen_snapshot, or a point.".into(),
+            description: "Click inside the app that is already open. To open or switch to an app, call screen_open instead of clicking the Dock, Spotlight, or Launchpad.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "ref": { "type": "string", "description": "@eN from screen_snapshot" },
+                    "label": { "type": "string", "description": "Control name from screen_state" },
+                    "app": { "type": "string" },
                     "x": { "type": "number" },
                     "y": { "type": "number" }
                 }
@@ -183,12 +185,77 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "screen_open".into(),
+            description: "Open an app by its exact name and bring it forward. Use this instead of clicking the Dock. 微信 is not 微信开发者工具.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "Exact app name, such as 微信 or WeChat." }
+                },
+                "required": ["app"]
+            }),
+        },
+        ToolDefinition {
+            name: "screen_scroll".into(),
+            description: "Scroll a list up or down when the row is not on screen. direction is up or down. x,y are points on that list. Do not open an app this way.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "description": "up or down" },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "amount": { "type": "integer" }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "screen_press".into(),
-            description: "Press a key: return, escape, tab, space, up, down, left, right, or command+a style.".into(),
+            description: "Press a key inside the current app, such as return, escape, tab, or command+a. Do not use this to open or switch apps; call screen_open.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "key": { "type": "string" } },
                 "required": ["key"]
+            }),
+        },
+        ToolDefinition {
+            name: "screen_windows".into(),
+            description: "List an app's window titles. Empty app uses the front app.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "app": { "type": "string" } }
+            }),
+        },
+        ToolDefinition {
+            name: "screen_state".into(),
+            description: "Read the front window's buttons and text fields, with screen points.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "app": { "type": "string" } }
+            }),
+        },
+        ToolDefinition {
+            name: "screen_set".into(),
+            description: "Write into a named text field from screen_state. If that window has no text field, click the place and use screen_type.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string" },
+                    "label": { "type": "string" },
+                    "text": { "type": "string" }
+                },
+                "required": ["label", "text"]
+            }),
+        },
+        ToolDefinition {
+            name: "screen_menu".into(),
+            description: "Open a menu by its names from the menu bar down, such as [\"文件\", \"新建\"]. Does not click a guessed point.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string" },
+                    "path": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["path"]
             }),
         },
     ]
@@ -197,16 +264,36 @@ fn tool_definitions() -> Vec<ToolDefinition> {
 fn execute(name: &str, args: &Value) -> Result<Value> {
     match name {
         "screen_apps" => screen_apps(),
+        "screen_open" => screen_open(args.get("app").and_then(Value::as_str).unwrap_or("")),
         "screen_snapshot" => screen_snapshot(args.get("app").and_then(Value::as_str).unwrap_or("")),
         "screen_click" => screen_click(args),
         "screen_type" => screen_type(args),
         "screen_press" => screen_press(args.get("key").and_then(Value::as_str).unwrap_or("")),
+        "screen_scroll" => screen_scroll(args),
+        "screen_windows" => ask_hand(
+            "screen_windows",
+            &json!({ "app": args.get("app").and_then(Value::as_str).unwrap_or("") }),
+        ),
+        "screen_state" => ask_hand(
+            "screen_state",
+            &json!({ "app": args.get("app").and_then(Value::as_str).unwrap_or("") }),
+        ),
+        "screen_set" => screen_set(args),
+        "screen_menu" => screen_menu(args),
         _ => bail!("Unknown tool: {name}"),
     }
 }
 
 fn screen_apps() -> Result<Value> {
     ask_hand("screen_apps", &json!({}))
+}
+
+fn screen_open(app: &str) -> Result<Value> {
+    let app = app.trim();
+    if app.is_empty() {
+        bail!("说一下要打开的应用名字。");
+    }
+    ask_hand("screen_open", &json!({ "app": app }))
 }
 
 fn screen_snapshot(app: &str) -> Result<Value> {
@@ -383,6 +470,20 @@ fn screen_click(args: &Value) -> Result<Value> {
     ) {
         return ask_hand("screen_click", &json!({ "x": x, "y": y }));
     }
+    if let Some(label) = args
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+    {
+        return ask_hand(
+            "screen_click_label",
+            &json!({
+                "app": args.get("app").and_then(Value::as_str).unwrap_or(""),
+                "label": label
+            }),
+        );
+    }
     let refer = args.get("ref").and_then(Value::as_str).unwrap_or("");
     let (x, y, label) = lookup(refer)?;
     ask_hand("screen_click", &json!({ "x": x, "y": y }))?;
@@ -402,6 +503,72 @@ fn screen_type(args: &Value) -> Result<Value> {
         screen_click(&json!({ "ref": refer }))?;
     }
     ask_hand("screen_type", &json!({ "text": text }))
+}
+
+fn screen_set(args: &Value) -> Result<Value> {
+    let label = args
+        .get("label")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+    if label.is_empty() {
+        bail!("说一下要填的名字。");
+    }
+    ask_hand(
+        "screen_set",
+        &json!({
+            "app": args.get("app").and_then(Value::as_str).unwrap_or(""),
+            "label": label,
+            "text": text
+        }),
+    )
+}
+
+fn screen_menu(args: &Value) -> Result<Value> {
+    let path = args
+        .get("path")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if path.is_empty() {
+        bail!("说一下菜单的名字。");
+    }
+    ask_hand(
+        "screen_menu",
+        &json!({
+            "app": args.get("app").and_then(Value::as_str).unwrap_or(""),
+            "path": path
+        }),
+    )
+}
+
+fn screen_scroll(args: &Value) -> Result<Value> {
+    let direction = args
+        .get("direction")
+        .and_then(Value::as_str)
+        .unwrap_or("down")
+        .trim()
+        .to_ascii_lowercase();
+    if direction != "up" && direction != "down" {
+        bail!("滑动方向用 up 或 down。");
+    }
+    ask_hand(
+        "screen_scroll",
+        &json!({
+            "direction": direction,
+            "x": args.get("x").and_then(Value::as_f64),
+            "y": args.get("y").and_then(Value::as_f64),
+            "amount": args.get("amount").and_then(Value::as_i64)
+        }),
+    )
 }
 
 fn screen_press(key: &str) -> Result<Value> {

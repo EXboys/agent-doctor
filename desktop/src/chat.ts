@@ -4,9 +4,9 @@ import { HAND_MISSING_PHASE } from "./chat/format";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
 import { syncTuneLabels } from "./chat/tune-menu";
-import { syncKnowledgeLabels } from "./chat/knowledge-page";
+import { openKnowledgePage, syncKnowledgeLabels } from "./chat/knowledge-page";
 import { KNOWLEDGE_RUN_PREFIX } from "./chat/knowledge-wiki";
-import { syncResourcesPageLabels } from "./chat/resources-page";
+import { openSkillsManagePage, syncResourcesPageLabels } from "./chat/resources-page";
 import { syncScheduleLabels } from "./chat/schedule-page";
 import type { PromptSessionEvent, ToolStep } from "./chat/types";
 import {
@@ -98,6 +98,7 @@ import {
   type ChatRole,
   type ChatSession,
   type ChatTheme,
+  type SessionStore,
   type PermissionMeta,
 } from "./chat/types";
 import {
@@ -111,10 +112,16 @@ import {
   runtimeFromLocation,
 } from "./chat/runtime";
 import {
+  chatStoreForDisk,
   createEmptySession,
+  isChatStoreDurableReady,
+  markChatStoreDurableReady,
+  mergeChatStores,
+  parseStoreRaw,
   persistStore,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
+import { diffChatWrite, memoryFromStore, type ChatWriteMemory } from "./chat/store-patch";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
   contextUsagePercent as contextUsagePercentBase,
@@ -125,14 +132,91 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
-import { openSession, removeWorkspace, setWorkspaceTitle } from "./ipc";
+import { loadChatStore, openSession, removeWorkspace, saveChatStore, setWorkspaceTitle } from "./ipc";
 
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
 }
 
+let durableSaveWarned = false;
+let durablePending: SessionStore | null = null;
+let durableDrain: Promise<void> | null = null;
+let chatWriteMemory: ChatWriteMemory | null = null;
+
 export function saveStore(): void {
-  chatState.store = persistStore(chatState.store);
+  try {
+    chatState.store = persistStore(chatState.store);
+  } catch (error) {
+    console.warn("Ask: local chat mirror failed", error);
+  }
+  if (!isChatStoreDurableReady()) return;
+  void persistDurableChatStore(chatState.store);
+}
+
+function persistDurableChatStore(store: SessionStore): Promise<void> {
+  durablePending = store;
+  if (!durableDrain) {
+    durableDrain = drainDurableWrites().finally(() => {
+      durableDrain = null;
+      if (durablePending) void persistDurableChatStore(durablePending);
+    });
+  }
+  return durableDrain;
+}
+
+async function drainDurableWrites(): Promise<void> {
+  while (durablePending) {
+    const snapshot = durablePending;
+    durablePending = null;
+    const projected = chatStoreForDisk(snapshot);
+    const diff = diffChatWrite(projected, chatWriteMemory);
+    if (!diff.patch) {
+      chatWriteMemory = diff.next;
+      continue;
+    }
+    try {
+      await saveChatStore(JSON.stringify(diff.patch));
+      chatWriteMemory = diff.next;
+      durableSaveWarned = false;
+    } catch (error) {
+      console.warn("Ask: chat db save failed", error);
+      if (!durableSaveWarned) {
+        durableSaveWarned = true;
+        setStatus(t("chat.historySaveFailed"), "warn");
+      }
+      if (!durablePending) break;
+    }
+  }
+}
+
+/** Pull the on-disk log, keep anything the browser copy still has, then write the union back. */
+export async function hydrateDurableChatStore(): Promise<void> {
+  let disk: SessionStore | null = null;
+  try {
+    const raw = await loadChatStore();
+    disk = raw ? parseStoreRaw(raw) : null;
+  } catch (error) {
+    console.warn("Ask: chat db unavailable", error);
+    markChatStoreDurableReady();
+    return;
+  }
+  const merged = mergeChatStores(disk, chatState.store);
+  chatWriteMemory = disk ? memoryFromStore(chatStoreForDisk(disk)) : null;
+  markChatStoreDurableReady();
+  if (merged) chatState.store = merged;
+  try {
+    chatState.store = persistStore(chatState.store);
+  } catch (error) {
+    console.warn("Ask: local chat mirror failed", error);
+  }
+  try {
+    renderSessionList();
+    renderActiveMessages();
+    titleEl.textContent = sessionTitle(activeSession());
+  } catch (error) {
+    console.warn("Ask: redraw after chat db load failed", error);
+  }
+  await persistDurableChatStore(chatState.store);
 }
 
 export function sessionTitle(session: ChatSession): string {
@@ -805,6 +889,10 @@ export const mentionMenu = new AskMentionMenuController(
     composerEl.classList.toggle("is-mention-open", open);
   },
   () => loadKnowledgeMentions(sessionWorkspacePath(activeSession(), chatState.workspaceDoc)),
+  (kind) => {
+    if (kind === "knowledge") openKnowledgePage();
+    else openSkillsManagePage();
+  },
 );
 
 export function updateResourcesSummary(): void {

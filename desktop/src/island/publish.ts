@@ -6,6 +6,7 @@ import { publishIslandSnapshot } from "../ipc";
 import {
   buildIslandRows,
   emptyIslandTrack,
+  islandLinger,
   islandSnapshot,
   rememberIslandSent,
   reduceIslandTrack,
@@ -21,7 +22,7 @@ function labels(): IslandLabels {
   return {
     idle: t("island.idle"),
     browser: t("island.browser"),
-    working: t("island.working"),
+    working: t("island.stateWorking"),
     needsConfirm: t("island.needsConfirm"),
     needsReply: t("island.needsReply"),
     needsAnswer: t("island.needsAnswer"),
@@ -82,7 +83,11 @@ export function startIslandPublisher(
       if (row) row.plan = livePlan.length ? livePlan : undefined;
     }
     const snap = islandSnapshot(track, labels(), composing, rows);
-    if (lingering && !working) snap.title = t("island.done");
+    if (lingering && !working) {
+      const linger = islandLinger(track, t("island.done"), t("island.turnFailed"), t("island.turnStopped"));
+      snap.title = linger.title;
+      snap.tone = linger.tone;
+    }
     snap.lingering = lingering;
     void publishIslandSnapshot(snap).catch(() => {});
     window.clearTimeout(typingTimer);

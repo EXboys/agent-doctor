@@ -341,6 +341,13 @@ export function syncResourcesPageLabels(): void {
   if (isResourcesPageOpen()) paint();
 }
 
+/** Open the in-chat skills page, where a skill can be installed. */
+export function openSkillsManagePage(): void {
+  resourceKind = "skills";
+  if (!isResourcesPageOpen()) openResourcesPage();
+  else paint();
+}
+
 function openResourcesPage(): void {
   const current = deps.currentAgent();
   if (AGENTS.includes(current as (typeof AGENTS)[number])) agentPick = current;

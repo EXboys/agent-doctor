@@ -3,10 +3,12 @@
 //! Default secrets backend: `secrets.json` (Unix) or DPAPI `secrets.dpapi` (Windows).
 //! Opt into OS keyring with `AGENT_DOCTOR_SECRETS_BACKEND=keyring`.
 
+pub mod chats;
 pub mod db;
 pub mod migrate;
 pub mod secrets;
 
+pub use chats::{chats_db_path, ChatLog};
 pub use db::{
     agent_doctor_config_dir, default_skills_cache_dir, default_skills_lock_path,
     default_teamups_base_url, legacy_evotown_skills_dir, open_settings_store,

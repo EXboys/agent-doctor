@@ -26,6 +26,40 @@ pub mod workspace;
 /// Named pipe the desktop app serves. The computer tool connects here on Windows.
 pub const COMPUTER_HAND_PIPE: &str = r"\\.\pipe\agent-doctor-computer";
 
+/// MCP config Claude reads only when this app launches it.
+///
+/// It stays out of the project `.mcp.json`, so Claude the person opens in that
+/// folder does not see a computer tool that only works while this app is open.
+pub fn claude_computer_mcp_config_path() -> Option<std::path::PathBuf> {
+    adapters::util::config_dir().map(|dir| {
+        dir.join("agent-doctor")
+            .join("ask")
+            .join("claude-computer-mcp.json")
+    })
+}
+
+/// Remove a `computer` server from a project `.mcp.json`. Other servers stay.
+/// A file that does not parse is left untouched.
+pub fn forget_project_computer_mcp(project_dir: &std::path::Path) -> bool {
+    let path = project_dir.join(".mcp.json");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    let Some(servers) = doc.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+        return false;
+    };
+    if servers.remove("computer").is_none() {
+        return false;
+    }
+    let Ok(updated) = serde_json::to_string_pretty(&doc) else {
+        return false;
+    };
+    std::fs::write(&path, format!("{updated}\n")).is_ok()
+}
+
 /// Probing a broken program (a placeholder `.exe` left by a failed download)
 /// makes Windows pop a "16-bit application" dialog over the app. Children
 /// inherit this mode, so the start of a failed spawn becomes an error code.

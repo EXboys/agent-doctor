@@ -194,24 +194,59 @@ export function loadStore(fallbackRuntime: AskRuntime): SessionStore {
   return { activeId: session.id, sessions: [session] };
 }
 
+const TOOL_TEXT_CAP = 16_000;
+
+function capDiskText(text: string): string {
+  if (text.length <= TOOL_TEXT_CAP) return text;
+  return `${text.slice(0, TOOL_TEXT_CAP)}\n…`;
+}
+
+/** What gets written down. User and assistant text stay whole; tool output is bounded. */
+export function chatStoreForDisk(store: SessionStore): SessionStore {
+  return {
+    ...store,
+    sessions: store.sessions.map((session) => ({
+      ...session,
+      messages: session.messages.map((message) => {
+        const isLog = message.role === "meta" && message.log === true;
+        let next = message;
+        if (message.role === "tool" || isLog) {
+          next = { ...next, content: capDiskText(next.content) };
+        }
+        if (next.step?.output && next.step.output.length > TOOL_TEXT_CAP) {
+          next = { ...next, step: { ...next.step, output: capDiskText(next.step.output) } };
+        }
+        if (next.permission?.detail && next.permission.detail.length > TOOL_TEXT_CAP) {
+          next = {
+            ...next,
+            permission: { ...next.permission, detail: capDiskText(next.permission.detail) },
+          };
+        }
+        return next;
+      }),
+    })),
+  };
+}
+
 export function persistStore(store: SessionStore): SessionStore {
   const previous = localStorage.getItem(STORAGE_KEY);
   if (previous) backupStoreRaw(previous);
+  const projected = chatStoreForDisk(store);
   let payload = "";
   try {
-    payload = JSON.stringify(store);
+    payload = JSON.stringify(projected);
   } catch (error) {
     console.warn("Ask: saveStore failed, trimming history", error);
   }
   const disk =
     !payload || payload.length > CHAT_STORE_MAX_BYTES
-      ? finalizeSessionStore(trimStoreForSize(store))
-      : store;
+      ? finalizeSessionStore(trimStoreForSize(projected))
+      : projected;
   try {
-    localStorage.setItem(STORAGE_KEY, disk === store ? payload : JSON.stringify(disk));
+    localStorage.setItem(STORAGE_KEY, disk === projected ? payload : JSON.stringify(disk));
   } catch (error) {
     console.warn("Ask: saveStore failed, trimming history", error);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(finalizeSessionStore(trimStoreForSize(store))));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(finalizeSessionStore(trimStoreForSize(projected))));
   }
   // The open chat keeps every step so scrolling up can load them. Disk may keep less.
   return store;
@@ -228,6 +263,123 @@ export function restoreChatStoreFromBackup(): SessionStore | null {
   if (!loaded) return null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
   return loaded;
+}
+
+const droppedBeforeDurable = new Set<string>();
+let durableReady = false;
+
+/** A delete that happens before the on-disk log has been read must not come back. */
+export function noteSessionDropped(id: string): void {
+  if (!durableReady) droppedBeforeDurable.add(id);
+}
+
+export function isChatStoreDurableReady(): boolean {
+  return durableReady;
+}
+
+export function markChatStoreDurableReady(): void {
+  durableReady = true;
+  droppedBeforeDurable.clear();
+}
+
+/**
+ * Union of the on-disk projection and a browser copy (v1, v2, or the backup key).
+ * Same message id keeps the later text, or the longer text when the time matches,
+ * so a trimmed browser copy does not erase a full disk copy.
+ */
+export function mergeChatStores(
+  disk: SessionStore | null,
+  local: SessionStore | null,
+  droppedIds?: ReadonlySet<string>,
+): SessionStore | null {
+  if (!disk && !local) return null;
+  if (!disk) return local;
+  if (!local) return disk;
+  if (isFreshEmptyWindow(local, disk)) return disk;
+  const dropped = droppedIds ?? droppedBeforeDurable;
+  const byId = new Map<string, ChatSession>();
+  const absorb = (session: ChatSession) => {
+    if (dropped.has(session.id) && !local.sessions.some((item) => item.id === session.id)) return;
+    const prev = byId.get(session.id);
+    byId.set(session.id, prev ? mergeChatSession(prev, session) : session);
+  };
+  for (const session of disk.sessions) absorb(session);
+  for (const session of local.sessions) absorb(session);
+  const sessions = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!sessions.length) return null;
+  const diskActive = disk.sessions.find((session) => session.id === disk.activeId);
+  const localActive = local.sessions.find((session) => session.id === local.activeId);
+  const preferLocal = (localActive?.updatedAt ?? 0) >= (diskActive?.updatedAt ?? 0);
+  const activeId = preferLocal ? local.activeId : disk.activeId;
+  return {
+    activeId: sessions.some((session) => session.id === activeId) ? activeId : sessions[0].id,
+    sessions,
+  };
+}
+
+function isFreshEmptyWindow(local: SessionStore, disk: SessionStore): boolean {
+  if (disk.sessions.length === 0 || local.sessions.length !== 1) return false;
+  const session = local.sessions[0];
+  if (disk.sessions.some((item) => item.id === session.id)) return false;
+  return (
+    session.messages.length === 0 &&
+    !session.title.trim() &&
+    !session.runtimeThreadId &&
+    !session.channelKey
+  );
+}
+
+function mergeChatSession(left: ChatSession, right: ChatSession): ChatSession {
+  const newer = right.updatedAt >= left.updatedAt ? right : left;
+  const older = newer === right ? left : right;
+  return {
+    ...older,
+    ...newer,
+    messages:
+      newer.updatedAt === older.updatedAt
+        ? unionMessages(older.messages ?? [], newer.messages ?? [])
+        : authoritativeMessages(older.messages ?? [], newer.messages ?? []),
+  };
+}
+
+/** Same clock: keep lines that exist on only one side. A newer save replaces the list. */
+function unionMessages(older: ChatMessage[], newer: ChatMessage[]): ChatMessage[] {
+  const newerById = new Map(newer.map((message) => [message.id, message]));
+  const seen = new Set(older.map((message) => message.id));
+  const merged = older.map((message) => {
+    const alt = newerById.get(message.id);
+    return alt ? preferChatMessage(message, alt) : message;
+  });
+  for (const message of newer) {
+    if (seen.has(message.id)) continue;
+    const index = merged.findIndex((item) => item.at > message.at);
+    if (index === -1) merged.push(message);
+    else merged.splice(index, 0, message);
+  }
+  return merged;
+}
+
+function authoritativeMessages(older: ChatMessage[], newer: ChatMessage[]): ChatMessage[] {
+  const olderById = new Map(older.map((message) => [message.id, message]));
+  return newer.map((message) => {
+    const prev = olderById.get(message.id);
+    return prev ? preferChatMessage(prev, message) : message;
+  });
+}
+
+function preferChatMessage(older: ChatMessage, newer: ChatMessage): ChatMessage {
+  if (newer.at > older.at) return newer;
+  if (older.at > newer.at) return older;
+  if (isCappedCopy(newer, older)) return newer;
+  if (isCappedCopy(older, newer)) return older;
+  return newer.content.length >= older.content.length ? newer : older;
+}
+
+/** Disk cap appends a newline and an ellipsis. That copy should stay capped. */
+function isCappedCopy(shorter: ChatMessage, longer: ChatMessage): boolean {
+  if (!shorter.content.endsWith("\n…") || shorter.content.length >= longer.content.length) return false;
+  const prefix = shorter.content.slice(0, -2);
+  return prefix.length >= TOOL_TEXT_CAP && longer.content.startsWith(prefix);
 }
 
 export function sessionTitle(session: ChatSession, untitled: string): string {

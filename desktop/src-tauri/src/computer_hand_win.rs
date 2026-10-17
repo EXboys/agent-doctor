@@ -4,6 +4,7 @@
 //! tool sends one JSON line and reads one JSON line back. An app opened as
 //! administrator sits above this process, so clicks to it are refused.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,26 +31,31 @@ use windows::Win32::System::Pipes::{
     PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    AttachThreadInput, GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken,
+    QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker,
-    UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_DocumentControlTypeId,
-    UIA_EditControlTypeId, UIA_MenuBarControlTypeId, UIA_MenuControlTypeId,
-    UIA_MenuItemControlTypeId, UIA_RadioButtonControlTypeId, UIA_TextControlTypeId,
+    IUIAutomationValuePattern, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId,
+    UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_MenuBarControlTypeId,
+    UIA_MenuControlTypeId, UIA_MenuItemControlTypeId, UIA_RadioButtonControlTypeId,
+    UIA_TextControlTypeId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, MOUSE_EVENT_FLAGS,
-    VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+    MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId,
-    IsWindowVisible, WindowFromPoint, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN,
+    EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow, WindowFromPoint,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
+};
+
+use crate::computer_geom::{
+    crop_pixels, picture_changed, point_inside, window_has_control, window_has_field,
 };
 
 use crate::computer_geom::{
@@ -60,6 +66,8 @@ const ADMIN_BLOCK: &str = "这个软件是用管理员打开的，点不了。�
 const CONTROLS_MISSING: &str = "控件名单没有读到。按图上的位置点。\n";
 
 static LAST_SCREEN: Mutex<Option<Desktop>> = Mutex::new(None);
+static LAST_PRINT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+static LAST_FIELD: AtomicBool = AtomicBool::new(false);
 
 pub fn spawn() {
     thread::Builder::new()
@@ -161,10 +169,55 @@ fn read_line(pipe: HANDLE) -> Result<String> {
     Ok(text.to_string())
 }
 
+fn try_cua(tool: &str, args: &Value) -> Option<Value> {
+    match tool {
+        "screen_apps" => {
+            let apps = crate::computer_contrl::cua::running_apps()?;
+            Some(json!({ "apps": apps }))
+        }
+        "screen_open" => {
+            let name = args.get("app").and_then(Value::as_str).unwrap_or("").trim();
+            if name.is_empty() || !crate::computer_contrl::cua::launch(None, name) {
+                return None;
+            }
+            Some(json!({ "opened": name }))
+        }
+        "screen_menu" => {
+            let names = args
+                .get("path")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            if names.is_empty() || !crate::computer_contrl::cua::menu(app, &names) {
+                return None;
+            }
+            Some(json!({ "menu": names }))
+        }
+        "screen_windows" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let windows = crate::computer_contrl::cua::windows(app)?;
+            Some(json!({ "windows": windows }))
+        }
+        _ => None,
+    }
+}
+
 fn handle_line(line: &str) -> Result<Value> {
     let req: Value = serde_json::from_str(line).context("bad request")?;
     let tool = req.get("tool").and_then(Value::as_str).unwrap_or("");
     let args = req.get("args").cloned().unwrap_or(json!({}));
+    if let Some(done) = try_cua(tool, &args) {
+        return Ok(done);
+    }
     match tool {
         "screen_click" => {
             let x = args.get("x").and_then(Value::as_f64).context("missing x")?;
@@ -187,6 +240,25 @@ fn handle_line(line: &str) -> Result<Value> {
         }
         "screen_menus" => Ok(json!({ "text": menu_text()? })),
         "screen_apps" => Ok(json!({ "apps": app_names()? })),
+        "screen_open" => open_named(args.get("app").and_then(Value::as_str).unwrap_or("")),
+        "screen_windows" => {
+            list_named_windows(args.get("app").and_then(Value::as_str).unwrap_or(""))
+        }
+        "screen_state" => window_controls(args.get("app").and_then(Value::as_str).unwrap_or("")),
+        "screen_click_label" => click_label(
+            args.get("app").and_then(Value::as_str).unwrap_or(""),
+            args.get("label").and_then(Value::as_str).unwrap_or(""),
+        ),
+        "screen_set" => set_labeled(
+            args.get("app").and_then(Value::as_str).unwrap_or(""),
+            args.get("label").and_then(Value::as_str).unwrap_or(""),
+            args.get("text").and_then(Value::as_str).unwrap_or(""),
+        ),
+        "screen_menu" => click_menu(
+            args.get("app").and_then(Value::as_str).unwrap_or(""),
+            string_list(args.get("path")),
+        ),
+        "screen_scroll" => scroll_view(&args),
         "screen_look" => {
             let app = args
                 .get("app")
@@ -210,24 +282,46 @@ struct Desktop {
 
 fn screen_look(app: &str) -> Result<Value> {
     let hwnd = window_for(app);
-    let desk = hwnd.map(monitor_of).unwrap_or_else(primary_monitor);
-    let shot = capture_png(&desk)?;
-    if let Ok(mut saved) = LAST_SCREEN.lock() {
-        *saved = Some(desk.clone());
-    }
-    let mut text = window_header(hwnd);
+    let mut desk = hwnd.map(monitor_of).unwrap_or_else(primary_monitor);
+    let mut shot = capture_png(&desk)?;
+    let mut body = String::new();
+    let mut cropped = false;
     if let Some(hwnd) = hwnd {
         if confirmed_elevated(hwnd) {
-            text.push_str(ADMIN_BLOCK);
-            text.push('\n');
-        } else if let Some(body) = read_controls(hwnd, &desk) {
-            text.push_str(&body);
+            body.push_str(ADMIN_BLOCK);
+            body.push('\n');
+        } else if let Some(controls) = read_controls(hwnd, &desk) {
+            body = controls;
         } else {
-            text.push_str(CONTROLS_MISSING);
+            body = CONTROLS_MISSING.to_string();
+        }
+        if !window_has_control(&body) {
+            if let Some(frame) = window_frame(hwnd) {
+                if let Some((next_desk, next_shot)) = crop_to_window(&shot, &desk, frame) {
+                    desk = next_desk;
+                    shot = next_shot;
+                    cropped = true;
+                }
+            }
         }
     } else {
-        text.push_str(CONTROLS_MISSING);
+        body = CONTROLS_MISSING.to_string();
     }
+    remember_field(window_has_field(&body));
+    if let Some(print) = shot_fingerprint(&shot.path) {
+        remember_print(print);
+    }
+    if let Ok(mut saved) = LAST_SCREEN.lock() {
+        *saved = Some(desk);
+    }
+    let mut text =
+        "Rows are @eN name x y. Click that @eN. If a row is not listed, call screen_scroll on the list.\n"
+            .to_string();
+    if cropped {
+        text.push_str("The picture is this app's window.\n");
+    }
+    text.push_str(&window_header(hwnd));
+    text.push_str(&body);
     if text.chars().count() > 12000 {
         text.truncate(12000);
         text.push_str("\n…");
@@ -781,7 +875,16 @@ fn token_elevated(process: HANDLE) -> Option<bool> {
 }
 
 fn click_at(x: f64, y: f64) -> Result<()> {
-    let desk = click_screen();
+    let desk = saved_screen()?;
+    let (point_w, point_h) = point_size(&desk);
+    if !point_inside(x, y, point_w, point_h) {
+        bail!("这个位置不在刚才的画面里。先看一眼屏幕，再用画面里的点。");
+    }
+    click_desk(&desk, x, y)?;
+    confirm_picture(&desk)
+}
+
+fn click_desk(desk: &Desktop, x: f64, y: f64) -> Result<()> {
     let (virt_x, virt_y, virt_w, virt_h) = virtual_screen();
     let px = pixel_of(x, desk.origin_x, desk.scale);
     let py = pixel_of(y, desk.origin_y, desk.scale);
@@ -800,25 +903,396 @@ fn click_at(x: f64, y: f64) -> Result<()> {
     Ok(())
 }
 
-fn click_screen() -> Desktop {
-    if let Ok(saved) = LAST_SCREEN.lock() {
-        if let Some(desk) = saved.clone() {
-            return desk;
+fn saved_screen() -> Result<Desktop> {
+    LAST_SCREEN
+        .lock()
+        .ok()
+        .and_then(|saved| saved.clone())
+        .context("先看一下屏幕，再说要点哪里。")
+}
+
+fn point_size(desk: &Desktop) -> (f64, f64) {
+    (
+        point_of(desk.origin_x + desk.width, desk.origin_x, desk.scale).max(1) as f64,
+        point_of(desk.origin_y + desk.height, desk.origin_y, desk.scale).max(1) as f64,
+    )
+}
+
+fn remember_print(print: Vec<u8>) {
+    *LAST_PRINT.lock().unwrap_or_else(|err| err.into_inner()) = print;
+}
+
+fn last_print() -> Vec<u8> {
+    LAST_PRINT
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
+}
+
+fn remember_field(yes: bool) {
+    LAST_FIELD.store(yes, Ordering::Relaxed);
+}
+
+fn last_has_field() -> bool {
+    LAST_FIELD.load(Ordering::Relaxed)
+}
+
+fn shot_fingerprint(path: &str) -> Option<Vec<u8>> {
+    let image = image::open(path).ok()?;
+    let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
+    Some(small.to_luma8().into_raw())
+}
+
+fn confirm_picture(desk: &Desktop) -> Result<()> {
+    let before = last_print();
+    if before.is_empty() {
+        return Ok(());
+    }
+    thread::sleep(Duration::from_millis(280));
+    let shot = match capture_png(desk) {
+        Ok(shot) => shot,
+        Err(_) => return Ok(()),
+    };
+    let after = shot_fingerprint(&shot.path).unwrap_or_default();
+    let _ = std::fs::remove_file(&shot.path);
+    if picture_changed(&before, &after) {
+        remember_print(after);
+        Ok(())
+    } else {
+        bail!("这一下没有点到。画面没有变化。先看一眼屏幕，再点一次。");
+    }
+}
+
+fn window_frame(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
+    let mut rect = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
+    let width = rect.right.saturating_sub(rect.left);
+    let height = rect.bottom.saturating_sub(rect.top);
+    if width < 40 || height < 40 {
+        return None;
+    }
+    Some((rect.left, rect.top, width, height))
+}
+
+fn crop_to_window(
+    shot: &Shot,
+    desk: &Desktop,
+    frame: (i32, i32, i32, i32),
+) -> Option<(Desktop, Shot)> {
+    let (x, y, width, height) = crop_pixels(
+        desk.origin_x as f64,
+        desk.origin_y as f64,
+        1.0,
+        shot.pixels.0,
+        shot.pixels.1,
+        frame.0 as f64,
+        frame.1 as f64,
+        frame.2 as f64,
+        frame.3 as f64,
+    )?;
+    let image = image::open(&shot.path).ok()?;
+    let cropped = image.crop_imm(x, y, width, height);
+    cropped.save(&shot.path).ok()?;
+    let desk = Desktop {
+        origin_x: desk.origin_x.saturating_add(x as i32),
+        origin_y: desk.origin_y.saturating_add(y as i32),
+        width: width as i32,
+        height: height as i32,
+        scale: desk.scale,
+    };
+    let (point_w, point_h) = point_size(&desk);
+    Some((
+        desk,
+        Shot {
+            path: shot.path.clone(),
+            pixels: (i64::from(width), i64::from(height)),
+            points: (point_w.round() as i64, point_h.round() as i64),
+            scale: shot.scale,
+        },
+    ))
+}
+
+fn string_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn open_named(app: &str) -> Result<Value> {
+    let app = app.trim();
+    if app.is_empty() {
+        bail!("说一下要打开的应用名字。");
+    }
+    if let Some(hwnd) = window_for(app) {
+        bring_forward(hwnd)?;
+        return Ok(json!({ "opened": app }));
+    }
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", app])
+        .status()
+        .context("没有找到这个应用。看一下它的名字再试。")?;
+    if !status.success() {
+        bail!("没有找到这个应用。看一下它的名字再试。");
+    }
+    Ok(json!({ "opened": app }))
+}
+
+fn bring_forward(hwnd: HWND) -> Result<()> {
+    refuse_if_higher(hwnd)?;
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let foreground = GetForegroundWindow();
+        let foreground_thread = GetWindowThreadProcessId(foreground, None);
+        let target_thread = GetWindowThreadProcessId(hwnd, None);
+        let current = GetCurrentThreadId();
+        let _ = AttachThreadInput(current, foreground_thread, true);
+        let _ = AttachThreadInput(current, target_thread, true);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = AttachThreadInput(current, target_thread, false);
+        let _ = AttachThreadInput(current, foreground_thread, false);
+    }
+    Ok(())
+}
+
+fn list_named_windows(app: &str) -> Result<Value> {
+    let want = app.trim();
+    let mut windows = Vec::new();
+    for hwnd in top_windows() {
+        if !want.is_empty() {
+            match process_name(hwnd) {
+                Some(name) if name.eq_ignore_ascii_case(want) => {}
+                _ => continue,
+            }
+        }
+        let title = window_title(hwnd);
+        if title.is_empty() {
+            continue;
+        }
+        windows.push(json!({
+            "app": process_name(hwnd).unwrap_or_default(),
+            "title": title,
+        }));
+    }
+    Ok(json!({ "windows": windows }))
+}
+
+fn window_controls(app: &str) -> Result<Value> {
+    let hwnd = window_for(app).context("没有看到窗口。")?;
+    let desk = monitor_of(hwnd);
+    let body = read_controls(hwnd, &desk).unwrap_or_default();
+    remember_field(window_has_field(&body));
+    let mut controls = Vec::new();
+    for line in body.lines() {
+        let mut parts = line.split('\t');
+        let role = parts.next().unwrap_or("").trim();
+        if !matches!(role, "button" | "text field" | "text") {
+            continue;
+        }
+        let label = parts.next().unwrap_or("").trim();
+        let x: f64 = parts
+            .next()
+            .unwrap_or("")
+            .trim()
+            .parse()
+            .unwrap_or(f64::NAN);
+        let y: f64 = parts
+            .next()
+            .unwrap_or("")
+            .trim()
+            .parse()
+            .unwrap_or(f64::NAN);
+        if label.is_empty() || !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        controls.push(json!({ "role": role, "label": label, "x": x, "y": y }));
+    }
+    Ok(json!({
+        "app": process_name(hwnd).unwrap_or_default(),
+        "window": window_title(hwnd),
+        "controls": controls,
+    }))
+}
+
+fn click_label(app: &str, label: &str) -> Result<Value> {
+    let label = label.trim();
+    if label.is_empty() {
+        bail!("说一下要点的名字。");
+    }
+    let hwnd = window_for(app).context("没有看到窗口。")?;
+    refuse_if_higher(hwnd)?;
+    let desk = saved_screen()?;
+    let (x, y) =
+        named_center(hwnd, &desk, label).ok_or_else(|| anyhow::anyhow!("没有找到「{label}」。"))?;
+    click_at(x, y)?;
+    Ok(json!({ "clicked": label }))
+}
+
+fn set_labeled(app: &str, label: &str, text: &str) -> Result<Value> {
+    let label = label.trim();
+    if label.is_empty() {
+        bail!("说一下要填的名字。");
+    }
+    if !last_has_field() {
+        bail!("这个窗口没有输入框。先点一下要填的地方，再用打字。");
+    }
+    let hwnd = window_for(app).context("没有看到窗口。")?;
+    refuse_if_higher(hwnd)?;
+    let Some(element) = named_element(hwnd, label, true) else {
+        bail!("没有这个输入框。先点一下要填的地方，再用打字。");
+    };
+    let pattern =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
+            .map_err(|_| anyhow::anyhow!("没有这个输入框。先点一下要填的地方，再用打字。"))?;
+    unsafe { pattern.SetValue(&BSTR::from(text)) }
+        .map_err(|_| anyhow::anyhow!("没有填进「{label}」。"))?;
+    Ok(json!({ "set": label }))
+}
+
+fn click_menu(app: &str, names: Vec<String>) -> Result<Value> {
+    if names.is_empty() {
+        bail!("说一下菜单的名字。");
+    }
+    let hwnd = window_for(app).context("没有看到窗口。")?;
+    refuse_if_higher(hwnd)?;
+    bring_forward(hwnd)?;
+    for name in &names {
+        let desk = saved_screen().unwrap_or_else(|_| monitor_of(hwnd));
+        let Some((x, y)) = named_center(hwnd, &desk, name) else {
+            bail!("没有找到菜单「{name}」。");
+        };
+        click_desk(&desk, x, y)?;
+        thread::sleep(Duration::from_millis(220));
+    }
+    Ok(json!({ "menu": names }))
+}
+
+fn scroll_view(args: &Value) -> Result<Value> {
+    let direction = args
+        .get("direction")
+        .and_then(Value::as_str)
+        .unwrap_or("down");
+    let amount = args
+        .get("amount")
+        .and_then(Value::as_i64)
+        .unwrap_or(4)
+        .clamp(1, 12);
+    let desk = saved_screen()?;
+    let (point_w, point_h) = point_size(&desk);
+    let (x, y) = match (
+        args.get("x").and_then(Value::as_f64),
+        args.get("y").and_then(Value::as_f64),
+    ) {
+        (Some(x), Some(y)) => (x, y),
+        _ => (point_w / 2.0, point_h / 2.0),
+    };
+    if !point_inside(x, y, point_w, point_h) {
+        bail!("这个位置不在刚才的画面里。先看一眼屏幕，再用画面里的点。");
+    }
+    let delta = if direction.eq_ignore_ascii_case("up") {
+        amount * 120
+    } else {
+        -amount * 120
+    };
+    let (virt_x, virt_y, virt_w, virt_h) = virtual_screen();
+    let px = pixel_of(x, desk.origin_x, desk.scale);
+    let py = pixel_of(y, desk.origin_y, desk.scale);
+    let ax = absolute_axis(px, virt_x, virt_w);
+    let ay = absolute_axis(py, virt_y, virt_h);
+    let move_flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
+    send_mouse(ax, ay, move_flags)?;
+    send_wheel(ax, ay, delta as i32)?;
+    Ok(json!({ "scrolled": direction, "x": x, "y": y, "amount": amount }))
+}
+
+fn named_center(hwnd: HWND, desk: &Desktop, label: &str) -> Option<(f64, f64)> {
+    let element = named_element(hwnd, label, false)?;
+    let (x, y) = element_center(&element, desk)?;
+    Some((x as f64, y as f64))
+}
+
+fn named_element(hwnd: HWND, label: &str, field_only: bool) -> Option<IUIAutomationElement> {
+    let auto = automation().ok()?;
+    let root = unsafe { auto.ElementFromHandle(hwnd) }.ok()?;
+    let walker = unsafe { auto.ControlViewWalker() }.ok()?;
+    let deadline = Instant::now() + Duration::from_millis(1200);
+    find_named(&walker, &root, label, field_only, 0, deadline)
+}
+
+fn find_named(
+    walker: &IUIAutomationTreeWalker,
+    element: &IUIAutomationElement,
+    label: &str,
+    field_only: bool,
+    depth: u8,
+    deadline: Instant,
+) -> Option<IUIAutomationElement> {
+    if depth > 6 || Instant::now() >= deadline {
+        return None;
+    }
+    let mut child = unsafe { walker.GetFirstChildElement(element) }.ok()?;
+    loop {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        let kind = control_type(&child);
+        let role_ok = !field_only || control_role(kind) == Some("text field");
+        if role_ok {
+            if let Some(name) = element_name(&child) {
+                if same_label(&name, label) {
+                    return Some(child);
+                }
+            }
+        }
+        if let Some(found) = find_named(walker, &child, label, field_only, depth + 1, deadline) {
+            return Some(found);
+        }
+        match unsafe { walker.GetNextSiblingElement(&child) } {
+            Ok(next) => child = next,
+            Err(_) => return None,
         }
     }
-    window_for("")
-        .map(monitor_of)
-        .unwrap_or_else(primary_monitor)
+}
+
+fn same_label(have: &str, want: &str) -> bool {
+    let want = want.trim();
+    if want.is_empty() {
+        return false;
+    }
+    have.eq_ignore_ascii_case(want)
+        || have
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .eq_ignore_ascii_case(want)
 }
 
 fn send_mouse(dx: i32, dy: i32, flags: MOUSE_EVENT_FLAGS) -> Result<()> {
+    send_input(dx, dy, 0, flags)
+}
+
+fn send_wheel(dx: i32, dy: i32, delta: i32) -> Result<()> {
+    let flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_WHEEL;
+    send_input(dx, dy, delta, flags)
+}
+
+fn send_input(dx: i32, dy: i32, data: i32, flags: MOUSE_EVENT_FLAGS) -> Result<()> {
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
                 dx,
                 dy,
-                mouseData: 0,
+                mouseData: data as u32,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,

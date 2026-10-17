@@ -120,15 +120,19 @@ pub(crate) fn wants_computer_use(options: &PromptSessionOptions) -> bool {
 pub(crate) fn computer_use_tool_instructions() -> &'static str {
     "COMPUTER MCP REQUIRED for this turn:\n\
      - The app switch for controlling this computer is ON. You have an MCP server named `computer`.\n\
-     - Its tools are `screen_apps`, `screen_snapshot`, `screen_click`, `screen_type`, and `screen_press`.\n\
-     - Call the form that is already in your tool list. That is the bare name (`screen_snapshot`), `computer__screen_snapshot`, or `mcp__computer__screen_snapshot`. The same three forms apply to the other four tools.\n\
+     - Its tools are `screen_apps`, `screen_open`, `screen_snapshot`, `screen_click`, `screen_type`, `screen_press`, `screen_scroll`, `screen_windows`, `screen_state`, `screen_set`, and `screen_menu`.\n\
+     - Call the form that is already in your tool list. That is the bare name (`screen_snapshot`), `computer__screen_snapshot`, or `mcp__computer__screen_snapshot`. The same three forms apply to the other computer tools.\n\
      - The tool list may have changed since earlier turns. Earlier replies that said it was not connected are out of date. Do not decide from memory: call one of these tools now.\n\
      - Say 操作这台电脑还没接上 only after a call to one of these tools returns an error saying the tool does not exist. Do not offer other tasks.\n\
      - Do not say computer use is only a skill, and do not say you only have browser MCP.\n\
-     - Workflow: snapshot, then Read the PNG path in that result, then click with x,y in points (divide image pixels by scale). Snapshot again after the screen changes.\n\
-     - The snapshot text lists `menubar <name> <x> <y>` in points. Click those coordinates. Do not guess a menu position from the picture.\n\
-     - An open menu is listed as `menu <bar> <item> <x> <y>`. The picture often hides the dropdown. Use those lines. Clicking the same menu title again closes it.\n\
-     - `screen_type` takes `text`. `screen_press` takes `key` such as return, escape, tab, space, or command+tab.\n\
+     - To open an app or switch to it, call `screen_open` with the exact name (`app`: 微信). This is the only way to open an app. Do not click the Dock, Launchpad, Spotlight, or a green icon. Do not press command+space or command+tab to open or switch apps. 微信 and 微信开发者工具 are different apps.\n\
+     - After `screen_open`, snapshot, then Read the PNG, then click inside that window.\n\
+     - If the row is not in the picture, call `screen_scroll` on that list (`direction`: down or up, `x` and `y` in points on the list). Do not stop just because the row is off screen.\n\
+     - A row in the snapshot is `@eN` plus its name. Click that ref. Do not invent a nearby point for a row that already has `@eN`.\n\
+     - One step, then look again. Snapshot, Read the PNG, then do the single next click, type, or key. After it returns, snapshot again before the next click. Click x,y are points inside that picture (divide image pixels by scale). If the picture is the app's window, click inside it. If a click says the picture did not change, snapshot and click once more. Do not type after that miss.\n\
+     - To open a menu, call `screen_menu` with `path` from the menu bar down, such as [\"文件\", \"新建\"]. Do not guess a menu point from the picture.\n\
+     - `screen_state` lists named buttons and text fields. `screen_set` writes a named text field from that list. If the window has no field, click the place and use `screen_type`. `screen_click` can take that `label` instead of x,y.\n\
+     - `screen_type` takes `text`. `screen_press` is only for a key inside the app, such as return, escape, or tab. It does not open or switch apps.\n\
      - Do not use Bash, `screencapture`, `osascript`, `cliclick`, or `open` to look at or click the screen.\n\
      - If `screen_snapshot` fails, say its error in one sentence and stop. Do not click, type, or press keys after that. A missing screenshot means you cannot see the screen.\n\
      - If a click says the settings page is already open, say that in one sentence and stop. Do not retry the click, and do not describe an Allow dialog that is not on screen. If control is already allowed, never ask for it again.\n\
@@ -462,6 +466,10 @@ fn binary_supports_computer(path: &Path) -> bool {
     supports
 }
 
+fn tool_list_has_screen_open(body: &str) -> bool {
+    body.contains("\"name\":\"screen_open\"") || body.contains("\"name\": \"screen_open\"")
+}
+
 fn probe_computer_support(path: &Path) -> bool {
     let Ok(output) = std::process::Command::new(path)
         .args(["mcp", "--help"])
@@ -477,7 +485,64 @@ fn probe_computer_support(path: &Path) -> bool {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    help_lists_computer(&text)
+    help_lists_computer(&text) && lists_screen_open(path)
+}
+
+/// `mcp computer` on an older CLI has clicks and no `screen_open`. That CLI
+/// must not win, or the model opens apps by clicking the Dock.
+fn lists_screen_open(path: &Path) -> bool {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    let mut child = match Command::new(path)
+        .args(["mcp", "computer"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return false;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        return false;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2024-11-05","capabilities":{{}},"clientInfo":{{"name":"probe","version":"0"}}}}}}"#
+        );
+        let _ = writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#
+        );
+        let _ = writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{{}}}}"#
+        );
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let mut found = false;
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            if tool_list_has_screen_open(&line) {
+                found = true;
+                break;
+            }
+            line.clear();
+        }
+        let _ = tx.send(found);
+    });
+    let found = rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false);
+    let _ = child.kill();
+    let _ = child.wait();
+    found
 }
 
 /// The installed CLI can be the same version number and still lack `mcp computer`.
@@ -591,6 +656,12 @@ mod tests {
         ));
         assert!(!help_lists_computer(
             "Commands:\n  browser    Start browser MCP server\n"
+        ));
+        assert!(tool_list_has_screen_open(
+            r#"{"result":{"tools":[{"name":"screen_open"}]}}"#
+        ));
+        assert!(!tool_list_has_screen_open(
+            r#"{"result":{"tools":[{"name":"screen_click"}]}}"#
         ));
     }
 }

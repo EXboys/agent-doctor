@@ -23,7 +23,8 @@ const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod channel_link;
 mod commands;
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(windows, allow(dead_code))]
+mod computer_contrl;
 mod computer_geom;
 #[cfg(unix)]
 mod computer_hand;
@@ -696,6 +697,8 @@ pub fn run() {
             current_island_view_command,
             get_app_locale_command,
             set_app_locale_command,
+            load_chat_store_command,
+            save_chat_store_command,
             channel_link::teamups_channel_connected_command,
             channel_link::teamups_channel_pref_command,
             channel_link::teamups_channel_set_enabled_command,

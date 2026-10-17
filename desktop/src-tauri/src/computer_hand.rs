@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
+use crate::computer_geom::{
+    crop_pixels, picture_changed, point_inside, window_has_control, window_has_field,
+};
+
 pub fn spawn() {
     thread::Builder::new()
         .name("computer-hand".into())
@@ -72,6 +76,9 @@ fn handle_line(line: &str) -> Result<Value> {
     let req: Value = serde_json::from_str(line).context("bad request")?;
     let tool = req.get("tool").and_then(Value::as_str).unwrap_or("");
     let args = req.get("args").cloned().unwrap_or(json!({}));
+    if let Some(done) = try_cua(tool, &args) {
+        return Ok(done);
+    }
     ensure_trusted()?;
     match tool {
         "screen_click" => {
@@ -85,6 +92,26 @@ fn handle_line(line: &str) -> Result<Value> {
             press_key(key)?;
             Ok(json!({ "pressed": key }))
         }
+        "screen_scroll" => {
+            let direction = args
+                .get("direction")
+                .and_then(Value::as_str)
+                .unwrap_or("down");
+            let amount = args
+                .get("amount")
+                .and_then(Value::as_i64)
+                .unwrap_or(4)
+                .clamp(1, 12) as i32;
+            let lines = if direction.eq_ignore_ascii_case("up") {
+                amount
+            } else {
+                -amount
+            };
+            let (x, y) = scroll_point(&args)?;
+            require_point(x, y)?;
+            scroll_at(x, y, lines)?;
+            Ok(json!({ "scrolled": direction, "x": x, "y": y, "amount": amount }))
+        }
         "screen_type" => {
             let text = args.get("text").and_then(Value::as_str).unwrap_or("");
             if text.is_empty() {
@@ -95,6 +122,73 @@ fn handle_line(line: &str) -> Result<Value> {
         }
         "screen_menus" => Ok(json!({ "text": menu_text()? })),
         "screen_apps" => Ok(json!({ "apps": app_names()? })),
+        "screen_open" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            open_named_app(app)
+        }
+        "screen_windows" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let windows = crate::computer_contrl::list_windows(app).map_err(anyhow::Error::msg)?;
+            Ok(json!({
+                "windows": windows
+                    .into_iter()
+                    .map(|window| json!({ "app": window.app, "title": window.title }))
+                    .collect::<Vec<_>>()
+            }))
+        }
+        "screen_state" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let state = crate::computer_contrl::window_state(app).map_err(anyhow::Error::msg)?;
+            remember_field(
+                state
+                    .controls
+                    .iter()
+                    .any(|control| control.role == "text field"),
+            );
+            Ok(json!({
+                "app": state.app,
+                "window": state.title,
+                "controls": state
+                    .controls
+                    .into_iter()
+                    .map(|control| json!({
+                        "role": control.role,
+                        "label": control.label,
+                        "x": control.x,
+                        "y": control.y
+                    }))
+                    .collect::<Vec<_>>()
+            }))
+        }
+        "screen_click_label" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let label = args.get("label").and_then(Value::as_str).unwrap_or("");
+            crate::computer_contrl::click_control(app, label).map_err(anyhow::Error::msg)?;
+            confirm_picture()?;
+            Ok(json!({ "clicked": label }))
+        }
+        "screen_set" => {
+            if !last_has_field() {
+                bail!("这个窗口没有输入框。先点一下要填的地方，再用打字。");
+            }
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let label = args.get("label").and_then(Value::as_str).unwrap_or("");
+            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+            crate::computer_contrl::set_value(app, label, text).map_err(|err| {
+                if err.contains("没有找到") {
+                    anyhow::anyhow!("没有这个输入框。先点一下要填的地方，再用打字。")
+                } else {
+                    anyhow::anyhow!(err)
+                }
+            })?;
+            Ok(json!({ "set": label }))
+        }
+        "screen_menu" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let names = string_list(args.get("path"));
+            crate::computer_contrl::invoke_menu(app, &names).map_err(anyhow::Error::msg)?;
+            Ok(json!({ "menu": names }))
+        }
         "screen_look" => {
             let app = args
                 .get("app")
@@ -164,11 +258,30 @@ extern "C" {
     );
 }
 
+fn one_line(label: &str) -> String {
+    label.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+struct Look {
+    text: String,
+    frame: Option<(f64, f64, f64, f64)>,
+}
+
 fn screen_look(app: &str) -> Result<Value> {
     // A missing picture must fail the tool. Returning the menu names alone
     // makes the assistant click without seeing the screen.
     let shot = capture_png(app)?;
-    let mut text = look_text(app)?;
+    let look = look_text(app)?;
+    remember_field(window_has_field(&look.text));
+    let (shot, cropped) = fit_window(shot, &look);
+    if let Some(print) = shot_fingerprint(&shot.path) {
+        remember_print(print);
+    }
+    let mut text = "Rows are @eN name x y. Click that @eN. If a row is not listed, call screen_scroll on the list.\n".to_string();
+    if cropped {
+        text.push_str("The picture is this app's window.\n");
+    }
+    text.push_str(&look.text);
     if text.chars().count() > 12000 {
         text.truncate(12000);
         text.push_str("\n…");
@@ -188,12 +301,13 @@ fn screen_look(app: &str) -> Result<Value> {
     }))
 }
 
-fn look_text(app: &str) -> Result<String> {
+fn look_text(app: &str) -> Result<Look> {
     #[cfg(target_os = "macos")]
     {
         // The other app's main thread owns an open menu and stops answering.
         // Stop asking after a short budget so this read cannot hold the channel.
-        with_look_deadline(|| unsafe { ax_look(app) })
+        let (text, frame) = with_look_deadline(|| unsafe { ax_look(app) })?;
+        Ok(Look { text, frame })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -203,7 +317,7 @@ fn look_text(app: &str) -> Result<String> {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn ax_look(want: &str) -> Result<String> {
+unsafe fn ax_look(want: &str) -> Result<(String, Option<(f64, f64, f64, f64)>)> {
     let app = if want.is_empty() {
         front_app_element()
     } else {
@@ -213,6 +327,7 @@ unsafe fn ax_look(want: &str) -> Result<String> {
         bail!("could not see the front app");
     };
     let mut out = String::new();
+    let mut frame = None;
     if let Some(name) = attr_string(app, "AXTitle").filter(|name| !name.is_empty()) {
         out.push_str(&format!("front app: {name}\n"));
     }
@@ -226,6 +341,7 @@ unsafe fn ax_look(want: &str) -> Result<String> {
             let title = attr_string(window, "AXTitle").unwrap_or_default();
             if i == 0 {
                 out.push_str(&format!("window: {title}\n"));
+                frame = attr_box(window);
                 let mut seen = 0;
                 append_controls(&mut out, window, 0, &mut seen);
             }
@@ -238,7 +354,7 @@ unsafe fn ax_look(want: &str) -> Result<String> {
             out.push_str(&menus);
         }
     }
-    Ok(out)
+    Ok((out, frame))
 }
 
 #[cfg(target_os = "macos")]
@@ -248,7 +364,7 @@ unsafe fn append_controls(
     depth: u8,
     seen: &mut i32,
 ) {
-    if depth > 4 || *seen >= 40 {
+    if depth > 6 || *seen >= 60 {
         return;
     }
     let Some(children) = copy_attr(el, "AXChildren") else {
@@ -256,7 +372,7 @@ unsafe fn append_controls(
     };
     let count = CFArrayGetCount(children);
     for i in 0..count {
-        if *seen >= 40 {
+        if *seen >= 60 {
             break;
         }
         let child = CFArrayGetValueAtIndex(children, i);
@@ -266,7 +382,7 @@ unsafe fn append_controls(
         let role = attr_string(child, "AXRole").unwrap_or_default();
         if matches!(
             role.as_str(),
-            "AXButton" | "AXTextField" | "AXStaticText" | "AXCheckBox"
+            "AXButton" | "AXTextField" | "AXTextArea" | "AXStaticText" | "AXCheckBox"
         ) {
             let label = attr_string(child, "AXTitle")
                 .filter(|label| !label.is_empty())
@@ -278,9 +394,10 @@ unsafe fn append_controls(
                 if let Some((x, y)) = attr_center(child) {
                     let kind = match role.as_str() {
                         "AXButton" | "AXCheckBox" => "button",
-                        "AXTextField" => "text field",
+                        "AXTextField" | "AXTextArea" => "text field",
                         _ => "text",
                     };
+                    let label = one_line(&label);
                     *seen += 1;
                     let (x, y) = shot_point(x, y);
                     out.push_str(&format!("{kind}\t{label}\t{x}\t{y}\n"));
@@ -332,64 +449,265 @@ unsafe fn app_element_named(name: &str) -> Option<*const std::ffi::c_void> {
     None
 }
 
+fn try_cua_open(args: &Value) -> Option<Value> {
+    let name = args.get("app").and_then(Value::as_str).unwrap_or("").trim();
+    if name.is_empty() || name.contains(['"', '\n', '\r']) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let apps = installed_apps(name);
+        let app = pick_named_app(name, &apps)?;
+        if !crate::computer_contrl::cua::launch(app.bundle_id.as_deref(), name) {
+            return None;
+        }
+        Some(json!({ "opened": name, "path": app.path, "bundleId": app.bundle_id }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if !crate::computer_contrl::cua::launch(None, name) {
+            return None;
+        }
+        Some(json!({ "opened": name }))
+    }
+}
+
+fn try_cua(tool: &str, args: &Value) -> Option<Value> {
+    match tool {
+        "screen_apps" => {
+            let apps = crate::computer_contrl::cua::running_apps()?;
+            Some(json!({ "apps": apps }))
+        }
+        "screen_open" => try_cua_open(args),
+        "screen_menu" => {
+            let names = string_list(args.get("path"));
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            if names.is_empty() || !crate::computer_contrl::cua::menu(app, &names) {
+                return None;
+            }
+            Some(json!({ "menu": names }))
+        }
+        "screen_windows" => {
+            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
+            let windows = crate::computer_contrl::cua::windows(app)?;
+            Some(json!({ "windows": windows }))
+        }
+        _ => None,
+    }
+}
+
+fn string_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn app_names() -> Result<Vec<String>> {
     #[cfg(target_os = "macos")]
     {
-        // Names come from the program path. Asking every app for its windows
-        // stalls the channel when one app is not responding.
-        let mut names = Vec::new();
-        let mut pids = vec![0i32; 1024];
-        let bytes = unsafe {
-            proc_listpids(
-                1,
-                0,
-                pids.as_mut_ptr() as *mut std::ffi::c_void,
-                (pids.len() * 4) as i32,
-            )
-        };
-        let count = if bytes > 0 {
-            (bytes as usize / 4).min(pids.len())
-        } else {
-            0
-        };
-        for pid in pids.into_iter().take(count) {
-            if pid <= 0 || names.len() >= 40 {
-                continue;
-            }
-            let mut buf = vec![0u8; 4096];
-            let n = unsafe {
-                proc_pidpath(
-                    pid,
-                    buf.as_mut_ptr() as *mut std::ffi::c_void,
-                    buf.len() as u32,
-                )
-            };
-            if n <= 0 {
-                continue;
-            }
-            let path = unsafe {
-                std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::ffi::c_char).to_string_lossy()
-            };
-            let Some(bundle) = path.split(".app/").next() else {
-                continue;
-            };
-            let Some(name) = bundle.rsplit('/').next() else {
-                continue;
-            };
-            if name.is_empty() || names.iter().any(|have| have == name) {
-                continue;
-            }
-            names.push(name.to_string());
-        }
-        if names.is_empty() {
-            bail!("could not see the open apps");
-        }
-        Ok(names)
+        crate::computer_contrl::list_apps().map_err(anyhow::Error::msg)
     }
     #[cfg(not(target_os = "macos"))]
     {
         bail!("apps are listed on macOS");
     }
+}
+
+struct NamedApp {
+    names: Vec<String>,
+    path: String,
+    bundle_id: Option<String>,
+}
+
+/// Exact name only. 微信 must not open 微信开发者工具.
+fn pick_named_app<'a>(query: &str, apps: &'a [NamedApp]) -> Option<&'a NamedApp> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+    let mut matches: Vec<&NamedApp> = apps
+        .iter()
+        .filter(|app| {
+            app.names
+                .iter()
+                .any(|name| name.trim().to_lowercase() == query)
+        })
+        .collect();
+    matches.sort_by_key(|app| {
+        let in_applications = if app.path.starts_with("/Applications/") {
+            0
+        } else {
+            1
+        };
+        (in_applications, app.path.len())
+    });
+    matches.into_iter().next()
+}
+
+fn open_named_app(name: &str) -> Result<Value> {
+    #[cfg(target_os = "macos")]
+    {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("说一下要打开的应用名字。");
+        }
+        if name.contains(['"', '\n', '\r']) {
+            bail!("应用名字里不要带引号。");
+        }
+        let apps = installed_apps(name);
+        let Some(app) = pick_named_app(name, &apps) else {
+            bail!("没有找到叫「{name}」的应用。");
+        };
+        let status = crate::computer_contrl::bring_to_front(app.bundle_id.as_deref(), &app.path)
+            .context("打不开这个应用")?;
+        if !status.success() {
+            bail!("没有打开「{name}」。");
+        }
+        Ok(json!({ "opened": name, "path": app.path, "bundleId": app.bundle_id }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = name;
+        bail!("按名字打开应用目前只在 Mac 上。");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn installed_apps(query: &str) -> Vec<NamedApp> {
+    let mut apps = Vec::new();
+    let mut push_path = |path: String| {
+        let path = path.trim().trim_end_matches('/').to_string();
+        if !path.ends_with(".app") || apps.iter().any(|app: &NamedApp| app.path == path) {
+            return;
+        }
+        let stem = path
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(".app")
+            .to_string();
+        let mut names = vec![stem];
+        if let Some(display) = spotlight_value(&path, "kMDItemDisplayName") {
+            if !names.iter().any(|name| name == &display) {
+                names.push(display);
+            }
+        }
+        let bundle_id = spotlight_value(&path, "kMDItemCFBundleIdentifier");
+        apps.push(NamedApp {
+            names,
+            path,
+            bundle_id,
+        });
+    };
+    for path in spotlight_apps(query) {
+        push_path(path);
+    }
+    for path in running_app_paths() {
+        push_path(path);
+    }
+    apps
+}
+
+#[cfg(target_os = "macos")]
+fn spotlight_apps(query: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let queries = [
+        format!(
+            "kMDItemContentTypeTree == 'com.apple.application-bundle' && kMDItemDisplayName == '{query}'cd"
+        ),
+        format!(
+            "kMDItemContentTypeTree == 'com.apple.application-bundle' && kMDItemFSName == '{query}.app'cd"
+        ),
+    ];
+    for query in queries {
+        let output = std::process::Command::new("/usr/bin/mdfind")
+            .arg(&query)
+            .output();
+        let Ok(output) = output else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let line = line.trim();
+            if line.ends_with(".app") {
+                found.push(line.to_string());
+            }
+        }
+    }
+    found
+}
+
+#[cfg(target_os = "macos")]
+fn spotlight_value(path: &str, field: &str) -> Option<String> {
+    let output = std::process::Command::new("/usr/bin/mdls")
+        .args(["-name", field, "-raw", path])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() || text == "(null)" {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn running_app_paths() -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut pids = vec![0i32; 1024];
+    let bytes = unsafe {
+        proc_listpids(
+            1,
+            0,
+            pids.as_mut_ptr() as *mut std::ffi::c_void,
+            (pids.len() * 4) as i32,
+        )
+    };
+    if bytes <= 0 {
+        return paths;
+    }
+    let count = (bytes as usize / 4).min(pids.len());
+    for pid in pids.into_iter().take(count) {
+        if pid <= 0 || paths.len() >= 80 {
+            continue;
+        }
+        let mut buf = vec![0u8; 4096];
+        let n = unsafe {
+            proc_pidpath(
+                pid,
+                buf.as_mut_ptr() as *mut std::ffi::c_void,
+                buf.len() as u32,
+            )
+        };
+        if n <= 0 {
+            continue;
+        }
+        let path = unsafe {
+            std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::ffi::c_char).to_string_lossy()
+        };
+        let Some(bundle) = path.split(".app/").next() else {
+            continue;
+        };
+        let app = format!("{bundle}.app");
+        if !paths.iter().any(|have| have == &app) {
+            paths.push(app);
+        }
+    }
+    paths
 }
 
 struct Shot {
@@ -415,61 +733,132 @@ fn capture_png(app: &str) -> Result<Shot> {
             );
         }
         let display = display_for_app(app);
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let path = format!("/tmp/agent-doctor-screen-{stamp}.png");
-        let rect = format!(
-            "{},{},{},{}",
-            display.origin_x.round() as i64,
-            display.origin_y.round() as i64,
-            display.width.round().max(1.0) as i64,
-            display.height.round().max(1.0) as i64
-        );
-        let mut child = std::process::Command::new("/usr/sbin/screencapture")
-            .args(["-x", "-R", &rect, &path])
-            .spawn()
-            .context("could not capture the screen")?;
-        let started = std::time::Instant::now();
-        loop {
-            if let Some(status) = child.try_wait().context("could not capture the screen")? {
-                if !status.success() {
-                    bail!("could not capture the screen");
-                }
-                break;
-            }
-            if started.elapsed() > Duration::from_secs(3) {
-                let _ = child.kill();
-                let _ = child.wait();
-                bail!("screenshot took too long");
-            }
-            thread::sleep(Duration::from_millis(40));
-        }
-        let (px_w, px_h) = png_size(&path).unwrap_or((0, 0));
-        let pt_w = display.width.round().max(1.0) as i64;
-        let pt_h = display.height.round().max(1.0) as i64;
-        let display_scale = display_scale(display.id);
-        // The file is the truth when the capture succeeded. Points are this
-        // display, not the main display.
-        let scale = if px_w > 0 && pt_w > 0 {
-            px_w as f64 / pt_w as f64
-        } else {
-            display_scale
-        };
+        let shot = capture_rect(
+            display.origin_x,
+            display.origin_y,
+            display.width,
+            display.height,
+            Some(display.id),
+        )?;
         remember_origin(display.origin_x, display.origin_y);
-        Ok(Shot {
-            path,
-            pixels: (px_w, px_h),
-            points: (pt_w, pt_h),
-            scale,
-        })
+        remember_size(display.width, display.height);
+        Ok(shot)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
         bail!("the screen is captured on macOS");
     }
+}
+
+#[cfg(target_os = "macos")]
+fn capture_rect(x: f64, y: f64, width: f64, height: f64, display_id: Option<u32>) -> Result<Shot> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = format!("/tmp/agent-doctor-screen-{stamp}.png");
+    let pt_w = width.round().max(1.0);
+    let pt_h = height.round().max(1.0);
+    let rect = format!(
+        "{},{},{},{}",
+        x.round() as i64,
+        y.round() as i64,
+        pt_w as i64,
+        pt_h as i64
+    );
+    let mut child = std::process::Command::new("/usr/sbin/screencapture")
+        .args(["-x", "-R", &rect, &path])
+        .spawn()
+        .context("could not capture the screen")?;
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().context("could not capture the screen")? {
+            if !status.success() {
+                bail!("could not capture the screen");
+            }
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(3) {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("screenshot took too long");
+        }
+        thread::sleep(Duration::from_millis(40));
+    }
+    let (px_w, px_h) = png_size(&path).unwrap_or((0, 0));
+    let display_scale = display_id.map(display_scale).unwrap_or(1.0);
+    let scale = if px_w > 0 && pt_w > 0.0 {
+        px_w as f64 / pt_w
+    } else {
+        display_scale
+    };
+    Ok(Shot {
+        path,
+        pixels: (px_w, px_h),
+        points: (pt_w as i64, pt_h as i64),
+        scale,
+    })
+}
+
+fn fit_window(shot: Shot, look: &Look) -> (Shot, bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if window_has_control(&look.text) {
+            return (shot, false);
+        }
+        let Some(frame) = look.frame else {
+            return (shot, false);
+        };
+        crop_shot_to_window(shot, frame)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = look;
+        (shot, false)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn crop_shot_to_window(shot: Shot, frame: (f64, f64, f64, f64)) -> (Shot, bool) {
+    let (origin_x, origin_y) = last_origin();
+    let Some((x, y, width, height)) = crop_pixels(
+        origin_x,
+        origin_y,
+        shot.scale,
+        shot.pixels.0,
+        shot.pixels.1,
+        frame.0,
+        frame.1,
+        frame.2,
+        frame.3,
+    ) else {
+        return (shot, false);
+    };
+    let Ok(image) = image::open(&shot.path) else {
+        return (shot, false);
+    };
+    let cropped = image.crop_imm(x, y, width, height);
+    if cropped.save(&shot.path).is_err() {
+        return (shot, false);
+    }
+    let scale = if shot.scale > 0.0 { shot.scale } else { 1.0 };
+    let vis_x = origin_x + f64::from(x) / scale;
+    let vis_y = origin_y + f64::from(y) / scale;
+    let vis_w = (f64::from(width) / scale).round().max(1.0);
+    let vis_h = (f64::from(height) / scale).round().max(1.0);
+    remember_origin(vis_x, vis_y);
+    remember_size(vis_w, vis_h);
+    let pixels = png_size(&shot.path).unwrap_or((i64::from(width), i64::from(height)));
+    (
+        Shot {
+            path: shot.path,
+            pixels,
+            points: (vis_w as i64, vis_h as i64),
+            scale,
+        },
+        true,
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -579,6 +968,7 @@ impl Clone for MacDisplay {
 /// model are points inside that picture, so they are shifted back to the desktop.
 #[cfg(target_os = "macos")]
 static LAST_ORIGIN: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+static LAST_SIZE: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 
 #[cfg(target_os = "macos")]
 fn remember_origin(x: f64, y: f64) {
@@ -588,6 +978,61 @@ fn remember_origin(x: f64, y: f64) {
 #[cfg(target_os = "macos")]
 fn last_origin() -> (f64, f64) {
     *LAST_ORIGIN.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn remember_size(width: f64, height: f64) {
+    *LAST_SIZE.lock().unwrap_or_else(|err| err.into_inner()) = (width, height);
+}
+
+static LAST_PRINT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+static LAST_FIELD: AtomicBool = AtomicBool::new(false);
+
+fn remember_print(print: Vec<u8>) {
+    *LAST_PRINT.lock().unwrap_or_else(|err| err.into_inner()) = print;
+}
+
+fn last_print() -> Vec<u8> {
+    LAST_PRINT
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
+}
+
+fn remember_field(yes: bool) {
+    LAST_FIELD.store(yes, Ordering::Relaxed);
+}
+
+fn last_has_field() -> bool {
+    LAST_FIELD.load(Ordering::Relaxed)
+}
+
+fn require_point(x: f64, y: f64) -> Result<()> {
+    let (width, height) = last_size();
+    if width <= 0.0 || height <= 0.0 {
+        bail!("先看一下屏幕，再说要点哪里。");
+    }
+    if !point_inside(x, y, width, height) {
+        bail!("这个位置不在刚才的画面里。先看一眼屏幕，再用画面里的点。");
+    }
+    Ok(())
+}
+
+fn shot_fingerprint(path: &str) -> Option<Vec<u8>> {
+    #[cfg(target_os = "macos")]
+    {
+        let image = image::open(path).ok()?;
+        let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
+        Some(small.to_luma8().into_raw())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+fn last_size() -> (f64, f64) {
+    *LAST_SIZE.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 #[cfg(target_os = "macos")]
@@ -917,7 +1362,35 @@ unsafe fn cf_string_value(value: *const std::ffi::c_void) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{place_menu_rows, MenuRow};
+    use super::{pick_named_app, place_menu_rows, MenuRow, NamedApp};
+
+    #[test]
+    fn an_exact_name_does_not_open_a_longer_one() {
+        let apps = vec![
+            NamedApp {
+                names: vec!["微信开发者工具".into(), "wechatwebdevtools".into()],
+                path: "/Applications/wechatwebdevtools.app".into(),
+                bundle_id: Some("com.tencent.wechatwebdevtools".into()),
+            },
+            NamedApp {
+                names: vec!["WeChat".into(), "微信".into()],
+                path: "/Applications/WeChat.app".into(),
+                bundle_id: Some("com.tencent.xinWeChat".into()),
+            },
+            NamedApp {
+                names: vec!["微信".into()],
+                path: "/Users/airlu/Applications/微信.app".into(),
+                bundle_id: Some("com.tencent.xinWeChat".into()),
+            },
+        ];
+        let picked = pick_named_app("微信", &apps).unwrap();
+        assert_eq!(picked.path, "/Applications/WeChat.app");
+        assert!(pick_named_app("微信开发者工具", &apps)
+            .unwrap()
+            .path
+            .contains("wechatwebdevtools"));
+        assert!(pick_named_app("扫描全能王", &apps).is_none());
+    }
 
     #[test]
     fn stacked_menu_items_do_not_share_a_row() {
@@ -955,169 +1428,104 @@ fn trusted() -> bool {
     }
 }
 
-fn click_at(x: f64, y: f64) -> Result<()> {
+fn scroll_point(args: &Value) -> Result<(f64, f64)> {
+    if let (Some(x), Some(y)) = (
+        args.get("x").and_then(Value::as_f64),
+        args.get("y").and_then(Value::as_f64),
+    ) {
+        return Ok((x, y));
+    }
+    let (width, height) = last_size();
+    if width <= 0.0 || height <= 0.0 {
+        bail!("先看一下屏幕，再说在哪里滑动。");
+    }
+    Ok((width / 2.0, height / 2.0))
+}
+
+fn scroll_at(x: f64, y: f64, lines: i32) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         let (origin_x, origin_y) = last_origin();
-        let point = CGPoint {
-            x: x + origin_x,
-            y: y + origin_y,
-        };
-        unsafe {
-            // A null source is treated as a private event. The menu bar only
-            // highlights and never tracks the dropdown.
-            let source = CGEventSourceCreate(1);
-            if !source.is_null() {
-                CGEventSourceSetLocalEventsSuppressionInterval(source, 0.0);
-            }
-            post_mouse(5, point, source);
-            thread::sleep(Duration::from_millis(20));
-            post_mouse(1, point, source);
-            thread::sleep(Duration::from_millis(80));
-            post_mouse(2, point, source);
-            if !source.is_null() {
-                CFRelease(source as *const std::ffi::c_void);
-            }
-        }
-        Ok(())
+        crate::computer_contrl::scroll_point(x + origin_x, y + origin_y, lines)
+            .map_err(anyhow::Error::msg)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (x, y);
+        let _ = (x, y, lines);
+        bail!("目前只在 Mac 上。");
+    }
+}
+
+fn click_at(x: f64, y: f64) -> Result<()> {
+    require_point(x, y)?;
+    #[cfg(target_os = "macos")]
+    {
+        let (origin_x, origin_y) = last_origin();
+        crate::computer_contrl::click_point(x + origin_x, y + origin_y)
+            .map_err(anyhow::Error::msg)?;
+        confirm_picture()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
         bail!("clicking runs on macOS");
     }
 }
 
-#[cfg(target_os = "macos")]
-unsafe fn post_mouse(kind: u32, point: CGPoint, source: *mut std::ffi::c_void) {
-    let event = CGEventCreateMouseEvent(source, kind, point, 0);
-    if !event.is_null() {
-        if kind == 1 || kind == 2 {
-            // kCGMouseEventClickState
-            CGEventSetIntegerValueField(event, 1, 1);
+fn confirm_picture() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let before = last_print();
+        if before.is_empty() {
+            return Ok(());
         }
-        CGEventPost(0, event);
-        CFRelease(event as *const std::ffi::c_void);
+        thread::sleep(Duration::from_millis(280));
+        let (origin_x, origin_y) = last_origin();
+        let (width, height) = last_size();
+        let shot = match capture_rect(origin_x, origin_y, width, height, None) {
+            Ok(shot) => shot,
+            Err(_) => return Ok(()),
+        };
+        let after = shot_fingerprint(&shot.path).unwrap_or_default();
+        let _ = fs::remove_file(&shot.path);
+        if picture_changed(&before, &after) {
+            remember_print(after);
+            Ok(())
+        } else {
+            bail!("这一下没有点到。画面没有变化。先看一眼屏幕，再点一次。");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
     }
 }
 
 fn press_key(key: &str) -> Result<()> {
-    let key = key.trim().to_ascii_lowercase();
-    if key.is_empty() {
-        bail!("key is empty");
-    }
-    let (flags, code) = parse_key(&key)?;
     #[cfg(target_os = "macos")]
     {
-        unsafe { post_keycode(code, flags) };
-        Ok(())
+        let key = key.trim();
+        if key.contains('+') {
+            crate::computer_contrl::hotkey(key).map_err(anyhow::Error::msg)
+        } else {
+            crate::computer_contrl::press(key).map_err(anyhow::Error::msg)
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (flags, code);
+        let _ = key;
         bail!("keys run on macOS");
-    }
-}
-
-fn parse_key(key: &str) -> Result<(u64, u16)> {
-    let mut flags = 0u64;
-    let mut token = String::new();
-    for part in key.split('+') {
-        match part.trim() {
-            "command" | "cmd" | "meta" => flags |= 0x0010_0000,
-            "shift" => flags |= 0x0002_0000,
-            "option" | "alt" => flags |= 0x0008_0000,
-            "control" | "ctrl" => flags |= 0x0004_0000,
-            other if !other.is_empty() => token = other.to_string(),
-            _ => {}
-        }
-    }
-    let code = match token.as_str() {
-        "return" | "enter" => 36,
-        "escape" | "esc" => 53,
-        "tab" => 48,
-        "space" => 49,
-        "up" => 126,
-        "down" => 125,
-        "left" => 123,
-        "right" => 124,
-        "a" => 0,
-        "b" => 11,
-        "c" => 8,
-        "d" => 2,
-        "e" => 14,
-        "f" => 3,
-        "g" => 5,
-        "h" => 4,
-        "i" => 34,
-        "j" => 38,
-        "k" => 40,
-        "l" => 37,
-        "m" => 46,
-        "n" => 45,
-        "o" => 31,
-        "p" => 35,
-        "q" => 12,
-        "r" => 15,
-        "s" => 1,
-        "t" => 17,
-        "u" => 32,
-        "v" => 9,
-        "w" => 13,
-        "x" => 7,
-        "y" => 16,
-        "z" => 6,
-        other => bail!("unknown key: {other}"),
-    };
-    Ok((flags, code))
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn post_keycode(code: u16, flags: u64) {
-    let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, true);
-    let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), code, false);
-    if !down.is_null() {
-        CGEventSetFlags(down, flags);
-        CGEventPost(0, down);
-        CFRelease(down as *const std::ffi::c_void);
-    }
-    thread::sleep(Duration::from_millis(20));
-    if !up.is_null() {
-        CGEventSetFlags(up, flags);
-        CGEventPost(0, up);
-        CFRelease(up as *const std::ffi::c_void);
     }
 }
 
 fn type_text(text: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        for ch in text.encode_utf16() {
-            unsafe { post_unicode(ch) };
-            thread::sleep(Duration::from_millis(8));
-        }
-        Ok(())
+        crate::computer_contrl::type_text(text).map_err(anyhow::Error::msg)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = text;
         bail!("typing runs on macOS");
-    }
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn post_unicode(ch: u16) {
-    let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), 0, true);
-    let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), 0, false);
-    if !down.is_null() {
-        CGEventKeyboardSetUnicodeString(down, 1, &ch);
-        CGEventPost(0, down);
-        CFRelease(down as *const std::ffi::c_void);
-    }
-    if !up.is_null() {
-        CGEventKeyboardSetUnicodeString(up, 1, &ch);
-        CGEventPost(0, up);
-        CFRelease(up as *const std::ffi::c_void);
     }
 }
 
@@ -1168,32 +1576,6 @@ struct CGSize {
 struct CGRect {
     origin: CGPoint,
     size: CGSize,
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGEventSourceCreate(state_id: u32) -> *mut std::ffi::c_void;
-    fn CGEventSourceSetLocalEventsSuppressionInterval(source: *mut std::ffi::c_void, seconds: f64);
-    fn CGEventSetIntegerValueField(event: *mut std::ffi::c_void, field: u32, value: i64);
-    fn CGEventCreateMouseEvent(
-        source: *mut std::ffi::c_void,
-        mouse_type: u32,
-        position: CGPoint,
-        button: u32,
-    ) -> *mut std::ffi::c_void;
-    fn CGEventCreateKeyboardEvent(
-        source: *mut std::ffi::c_void,
-        key: u16,
-        down: bool,
-    ) -> *mut std::ffi::c_void;
-    fn CGEventKeyboardSetUnicodeString(
-        event: *mut std::ffi::c_void,
-        length: usize,
-        chars: *const u16,
-    );
-    fn CGEventSetFlags(event: *mut std::ffi::c_void, flags: u64);
-    fn CGEventPost(tap: u32, event: *mut std::ffi::c_void);
 }
 
 #[cfg(target_os = "macos")]

@@ -66,6 +66,9 @@ pub struct IslandSnapshotInput {
     /// The turn just ended. Keep the bar up briefly, then let idle hiding apply.
     #[serde(default)]
     pub lingering: bool,
+    /// working, waiting, done, failed, or stopped. Empty when idle.
+    #[serde(default)]
+    pub tone: String,
 }
 
 fn default_true() -> bool {
@@ -85,6 +88,8 @@ pub struct IslandView {
     detail: String,
     attention: bool,
     pending: Option<IslandPending>,
+    #[serde(default)]
+    tone: String,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +105,7 @@ struct Snapshot {
     pending: Option<IslandPending>,
     hide_when_idle: bool,
     lingering: bool,
+    tone: String,
 }
 
 impl Default for Snapshot {
@@ -114,6 +120,7 @@ impl Default for Snapshot {
             pending: None,
             hide_when_idle: false,
             lingering: false,
+            tone: String::new(),
         }
     }
 }
@@ -130,6 +137,7 @@ impl From<IslandSnapshotInput> for Snapshot {
             pending: input.pending,
             hide_when_idle: input.hide_when_idle,
             lingering: input.lingering,
+            tone: input.tone,
         }
     }
 }
@@ -202,6 +210,7 @@ impl Default for Inner {
                 detail: String::new(),
                 attention: false,
                 pending: None,
+                tone: String::new(),
             },
         }
     }
@@ -247,11 +256,11 @@ pub(crate) fn island_chrome(
     }
 }
 
-/// Windows shows a short chip only when a turn needs to be seen and the
-/// conversation window is not the one in front. It does not grow into a card.
+/// Windows shows a short chip whenever a turn needs to be seen, including
+/// while the conversation window is in front. It does not grow into a card.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn windows_status_chrome(ask_in_front: bool, awake: bool) -> Chrome {
-    if ask_in_front || !awake {
+pub(crate) fn windows_status_chrome(_ask_in_front: bool, awake: bool) -> Chrome {
+    if !awake {
         Chrome::Hidden
     } else {
         Chrome::Pill
@@ -439,6 +448,7 @@ fn view_for(chrome: Chrome, snapshot: &Snapshot) -> IslandView {
         } else {
             None
         },
+        tone: snapshot.tone.clone(),
     }
 }
 
@@ -2106,8 +2116,8 @@ mod tests {
     }
 
     #[test]
-    fn windows_hides_the_chip_while_the_conversation_is_in_front() {
-        assert_eq!(windows_status_chrome(true, true), Chrome::Hidden);
+    fn windows_keeps_the_chip_while_the_conversation_is_in_front() {
+        assert_eq!(windows_status_chrome(true, true), Chrome::Pill);
     }
 
     #[test]
