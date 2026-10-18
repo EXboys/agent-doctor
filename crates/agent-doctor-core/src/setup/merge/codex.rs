@@ -89,6 +89,66 @@ const CODEX_PROJECT_DENIED_PROVIDER_KEYS: &[&str] = &[
     "model_providers",
 ];
 
+/// ChatGPT login rejects ids that belong to another vendor.
+pub fn codex_account_rejects_model(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    if model.is_empty() {
+        return false;
+    }
+    [
+        "glm", "deepseek", "qwen", "kimi", "moonshot", "minimax", "doubao", "claude", "gemini",
+        "ernie",
+    ]
+    .iter()
+    .any(|prefix| model.starts_with(prefix))
+}
+
+/// Make the account's config model match this chat.
+///
+/// A saved service leaves `model = "glm-5.3"`. Newer Codex loads that file as
+/// the project config when the chat folder is the home directory, and that
+/// value is what ChatGPT then refuses. An account model is written in its
+/// place; a vendor id is removed so Codex can use its own default.
+pub fn align_codex_subscription_model(
+    path: &std::path::Path,
+    chosen: Option<&str>,
+) -> AnyhowResult<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(path)?;
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+    let current = doc
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let chosen = chosen
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !codex_account_rejects_model(id));
+    let next = if let Some(chosen) = chosen {
+        if current == chosen {
+            return Ok(false);
+        }
+        Some(chosen.to_string())
+    } else if codex_account_rejects_model(&current) {
+        None
+    } else {
+        return Ok(false);
+    };
+    match next {
+        Some(id) => doc["model"] = toml_edit::value(id),
+        None => {
+            doc.remove("model");
+        }
+    }
+    fs::write(path, doc.to_string())?;
+    Ok(true)
+}
+
 /// Remove provider/auth routing keys from a Codex `config.toml`.
 ///
 /// Used when `~/.codex` would be loaded as project-local (cwd under `$HOME`)
@@ -264,6 +324,35 @@ pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
 mod codex_responses_tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn subscription_replaces_a_vendor_model_and_keeps_other_settings() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "model = \"glm-5.3\"\napproval_policy = \"on-request\"\n",
+        )
+        .unwrap();
+        assert!(align_codex_subscription_model(&path, Some("gpt-5.6-sol")).unwrap());
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("model = \"gpt-5.6-sol\""));
+        assert!(rendered.contains("approval_policy"));
+        assert!(!rendered.contains("glm-5.3"));
+        assert!(!align_codex_subscription_model(&path, Some("glm-5.3")).unwrap());
+        let kept = fs::read_to_string(&path).unwrap();
+        assert!(kept.contains("gpt-5.6-sol"));
+
+        fs::write(
+            &path,
+            "model = \"glm-5.3\"\napproval_policy = \"on-request\"\n",
+        )
+        .unwrap();
+        assert!(align_codex_subscription_model(&path, None).unwrap());
+        let cleared = fs::read_to_string(&path).unwrap();
+        assert!(!cleared.contains("model"));
+        assert!(cleared.contains("approval_policy"));
+    }
 
     #[test]
     fn strips_project_denied_provider_keys() {

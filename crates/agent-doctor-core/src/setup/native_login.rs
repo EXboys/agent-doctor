@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use crate::adapters::util::{discover_binary, home_join};
 use crate::edition::ensure_edition_allows_mode;
 use crate::setup::merge::{
-    apply_codex_slot, clear_codex_chatgpt_auth_for_gateway,
+    align_codex_subscription_model, apply_codex_slot, clear_codex_chatgpt_auth_for_gateway,
     strip_codex_project_denied_provider_keys, CODEX_PERSONAL_SLOT,
 };
 use crate::setup::{
@@ -306,6 +306,7 @@ fn release_provider_override(runtime_id: &str) -> Result<()> {
             if path.exists() {
                 let _ = backup_file(&path)?;
                 let _ = strip_codex_project_denied_provider_keys(&path);
+                let _ = align_codex_subscription_model(&path, None);
             }
         }
         return Ok(());

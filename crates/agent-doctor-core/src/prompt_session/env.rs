@@ -21,12 +21,57 @@ pub(crate) fn collect_overlay_env_for_options(
     options: &super::PromptSessionOptions,
 ) -> HashMap<String, String> {
     let mut env = collect_overlay_env_for_workspace(options.workspace_name.as_deref());
-    apply_ask_provider_choice(
-        &mut env,
-        options.provider_id.as_deref(),
-        options.model.as_deref(),
-    );
+    let runtime = crate::evotown::normalize_runtime(&options.runtime);
+    if crate::setup::is_native_subscription(&runtime) {
+        // The saved service stays checked for other tools. Its address must not
+        // rewrite the account model (gpt-5.6-sol on a GLM host becomes glm-5.3).
+        apply_subscription_model(&mut env, &runtime, options.model.as_deref());
+    } else {
+        apply_ask_provider_choice(
+            &mut env,
+            options.provider_id.as_deref(),
+            options.model.as_deref(),
+        );
+    }
     env
+}
+
+/// Keep the model this chat picked. Drop the saved service so its address and
+/// key cannot send the account turn somewhere else.
+fn apply_subscription_model(env: &mut HashMap<String, String>, runtime: &str, model: Option<&str>) {
+    for key in SUBSCRIPTION_GATEWAY_ENV {
+        env.remove(*key);
+    }
+    match subscription_model_for(runtime, model) {
+        Some(id) => {
+            env.insert(MODEL_ENV.to_string(), id.to_string());
+        }
+        None => {
+            env.remove(MODEL_ENV);
+        }
+    }
+}
+
+/// A ChatGPT or Claude login only answers for that account's own models.
+/// A saved GLM / DeepSeek id is dropped so the account can use its default.
+pub(crate) fn subscription_model_for<'a>(runtime: &str, model: Option<&'a str>) -> Option<&'a str> {
+    let model = model.map(str::trim).filter(|id| !id.is_empty())?;
+    let lower = model.to_ascii_lowercase();
+    let from_saved_service = [
+        "glm", "deepseek", "qwen", "kimi", "moonshot", "minimax", "doubao", "gemini", "ernie",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix));
+    let rejected = match runtime {
+        "codex" => from_saved_service || lower.starts_with("claude"),
+        "claude-code" => from_saved_service || lower.starts_with("gpt-"),
+        _ => false,
+    };
+    if rejected {
+        None
+    } else {
+        Some(model)
+    }
 }
 
 /// One chat can use a saved provider other than the checked default.
@@ -431,6 +476,19 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
         // seeded with, so a later sign-in never reaches the chat until we replace it.
         let home = overlay.get("CODEX_HOME").map(PathBuf::from);
         crate::setup::publish_codex_subscription_auth(home.as_deref());
+        // The file is also the project config when the chat folder is the home
+        // directory, so a leftover `model = "glm-5.3"` beats the picker.
+        let chosen = overlay.get(MODEL_ENV).map(String::as_str);
+        let _ = crate::setup::merge::align_codex_subscription_model(
+            &crate::adapters::util::home_join(".codex/config.toml"),
+            chosen,
+        );
+        if let Some(home) = home.as_deref() {
+            let _ = crate::setup::merge::align_codex_subscription_model(
+                &home.join("config.toml"),
+                chosen,
+            );
+        }
         return;
     }
     let _ = clear_codex_placeholder_auth();
@@ -856,6 +914,20 @@ pub(crate) fn format_command_display(cmd: &Command) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn subscription_keeps_the_account_model_and_drops_a_saved_service_id() {
+        assert_eq!(
+            subscription_model_for("codex", Some("gpt-5.6-sol")),
+            Some("gpt-5.6-sol")
+        );
+        assert_eq!(subscription_model_for("codex", Some("glm-5.3")), None);
+        assert_eq!(
+            subscription_model_for("claude-code", Some("claude-sonnet-5")),
+            Some("claude-sonnet-5")
+        );
+        assert_eq!(subscription_model_for("claude-code", Some("glm-5.3")), None);
+    }
 
     #[test]
     fn subscription_codex_args_name_only_the_model() {
