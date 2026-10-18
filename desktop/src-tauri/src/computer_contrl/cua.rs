@@ -88,7 +88,10 @@ fn call(tool: &str, args: &Value) -> Option<Value> {
             Ok(Some(_)) => break,
             Ok(None) if started.elapsed() >= ATTEMPT => {
                 let _ = child.kill();
-                let _ = child.wait();
+                // Waiting here blocks the hand if the driver ignores the kill.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 return None;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(30)),

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use windows::core::{IUnknown, BSTR, HSTRING, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
     GetMonitorInfoW, MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER,
@@ -50,10 +50,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT,
     MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
 };
+use windows::Win32::UI::Shell::{
+    ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow, WindowFromPoint,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
+    EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowThreadProcessId,
+    IsWindowVisible, SendMessageTimeoutW, SetForegroundWindow, ShowWindow, WindowFromPoint,
+    SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG, SMTO_ERRORONEXIT, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SW_SHOWNORMAL,
+    WM_GETTEXT,
 };
 
 use crate::computer_geom::{
@@ -83,7 +88,6 @@ pub fn spawn() {
 }
 
 fn serve() -> Result<()> {
-    let _com = ComInit::new();
     let name = HSTRING::from(agent_doctor_core::COMPUTER_HAND_PIPE);
     loop {
         let pipe = unsafe {
@@ -115,29 +119,45 @@ fn serve() -> Result<()> {
                 continue;
             }
         }
-        let reply =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match read_line(pipe) {
-                Ok(line) => match handle_line(&line) {
-                    Ok(result) => json!({ "ok": true, "result": result }),
-                    Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-                },
+        // Answer on another thread. A slow open must not stop the next listen,
+        // or the following screenshot reports that the computer is not connected.
+        let raw = pipe.0 as usize;
+        let started = thread::Builder::new()
+            .name("computer-hand-job".into())
+            .spawn(move || answer_pipe(HANDLE(raw as *mut core::ffi::c_void)));
+        if started.is_err() {
+            unsafe {
+                let _ = DisconnectNamedPipe(pipe);
+                let _ = CloseHandle(pipe);
+            }
+        }
+    }
+}
+
+fn answer_pipe(pipe: HANDLE) {
+    let _com = ComInit::new();
+    let reply =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match read_line(pipe) {
+            Ok(line) => match handle_line(&line) {
+                Ok(result) => json!({ "ok": true, "result": result }),
                 Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-            })) {
-                Ok(reply) => reply,
-                Err(_) => json!({ "ok": false, "error": "看屏幕这一步中断了。请再试一次。" }),
-            };
-        let body = format!("{reply}\n");
-        // DisconnectNamedPipe discards bytes still sitting in the pipe. Wait
-        // until the tool has closed its end. It does that only after reading.
-        if let Err(err) = write_pipe(pipe, body.as_bytes()) {
-            eprintln!("computer hand reply was not written: {err:#}");
-        } else if let Err(err) = wait_until_tool_closes(pipe) {
-            eprintln!("computer hand reply was not read: {err:#}");
-        }
-        unsafe {
-            let _ = DisconnectNamedPipe(pipe);
-            let _ = CloseHandle(pipe);
-        }
+            },
+            Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
+        })) {
+            Ok(reply) => reply,
+            Err(_) => json!({ "ok": false, "error": "看屏幕这一步中断了。请再试一次。" }),
+        };
+    let body = format!("{reply}\n");
+    // DisconnectNamedPipe discards bytes still sitting in the pipe. Wait
+    // until the tool has closed its end. It does that only after reading.
+    if let Err(err) = write_pipe(pipe, body.as_bytes()) {
+        eprintln!("computer hand reply was not written: {err:#}");
+    } else if let Err(err) = wait_until_tool_closes(pipe) {
+        eprintln!("computer hand reply was not read: {err:#}");
+    }
+    unsafe {
+        let _ = DisconnectNamedPipe(pipe);
+        let _ = CloseHandle(pipe);
     }
 }
 
@@ -830,12 +850,26 @@ unsafe extern "system" fn push_hwnd(hwnd: HWND, lparam: LPARAM) -> BOOL {
 }
 
 fn window_title(hwnd: HWND) -> String {
+    // GetWindowText waits on the other app's thread. One stuck window used to
+    // freeze this hand for the whole timeout, and then nothing could connect.
     let mut buf = [0u16; 512];
-    let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
-    if n <= 0 {
+    let mut copied = 0usize;
+    let answered = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            WPARAM(buf.len()),
+            LPARAM(buf.as_mut_ptr() as isize),
+            SEND_MESSAGE_TIMEOUT_FLAGS(SMTO_ABORTIFHUNG.0 | SMTO_ERRORONEXIT.0),
+            80,
+            Some(&mut copied),
+        )
+    };
+    if answered.0 == 0 || copied == 0 {
         return String::new();
     }
-    String::from_utf16_lossy(&buf[..n as usize])
+    let n = copied.min(buf.len());
+    String::from_utf16_lossy(&buf[..n])
 }
 
 fn process_name(hwnd: HWND) -> Option<String> {
@@ -1093,14 +1127,45 @@ fn open_named(app: &str) -> Result<Value> {
         bring_forward(hwnd)?;
         return Ok(json!({ "opened": app }));
     }
-    let status = std::process::Command::new("cmd")
-        .args(["/C", "start", "", app])
-        .status()
-        .context("没有找到这个应用。看一下它的名字再试。")?;
-    if !status.success() {
-        bail!("没有找到这个应用。看一下它的名字再试。");
-    }
+    let (file, params) = launch_target(app);
+    shell_open(&file, &params)?;
     Ok(json!({ "opened": app }))
+}
+
+fn launch_target(app: &str) -> (String, String) {
+    match app.trim().to_lowercase().as_str() {
+        "计算器" | "calculator" | "calc" | "calc.exe" => ("calc.exe".into(), String::new()),
+        "计算机" | "此电脑" | "我的电脑" | "this pc" | "my computer" => {
+            ("explorer.exe".into(), "shell:MyComputerFolder".into())
+        }
+        "记事本" | "notepad" | "notepad.exe" => ("notepad.exe".into(), String::new()),
+        "画图" | "paint" | "mspaint" | "mspaint.exe" => ("mspaint.exe".into(), String::new()),
+        "文件资源管理器" | "资源管理器" | "explorer" | "explorer.exe" => {
+            ("explorer.exe".into(), String::new())
+        }
+        "设置" | "settings" => ("ms-settings:".into(), String::new()),
+        _ => (app.trim().to_string(), String::new()),
+    }
+}
+
+fn shell_open(file: &str, params: &str) -> Result<()> {
+    let file = HSTRING::from(file);
+    let params = HSTRING::from(params);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        // NO_UI: a missing name must not pop a dialog that blocks this hand.
+        // NOASYNC: return when the launch has started, not when the app exits.
+        fMask: SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+        lpFile: windows::core::PCWSTR(file.as_ptr()),
+        lpParameters: if params.is_empty() {
+            windows::core::PCWSTR::null()
+        } else {
+            windows::core::PCWSTR(params.as_ptr())
+        },
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    unsafe { ShellExecuteExW(&mut info) }.context("没有找到这个应用。看一下它的名字再试。")
 }
 
 fn bring_forward(hwnd: HWND) -> Result<()> {
