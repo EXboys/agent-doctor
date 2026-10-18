@@ -448,7 +448,9 @@ export function toolActivityInfo(text: string): ToolActivityInfo {
   } else if (/^(write|writefile|createfile|addfile)$/.test(name)) {
     kind = "write";
   } else if (
-    /^(edit|multiedit|notebookedit|applypatch|filechange|workspacewrite)$/.test(name)
+    /^(edit|multiedit|notebookedit|applypatch|applydiff|filechange|workspacewrite|patch|strreplace|searchreplace)$/.test(
+      name,
+    )
   ) {
     kind = "edit";
   } else if (
@@ -460,26 +462,32 @@ export function toolActivityInfo(text: string): ToolActivityInfo {
   if (kind === "terminal" || kind === "other") {
     const action = shellFileAction(detail || summary);
     if (action) {
-      return {
-        kind: action.kind,
-        label: toolKindLabel(action.kind),
-        ...toolTarget(action.path),
-        additions: action.added.length,
-        deletions: 0,
-        addedLines: action.added,
-        deletedLines: [],
-      };
+      return presentTool(
+        {
+          kind: action.kind,
+          label: toolKindLabel(action.kind),
+          ...toolTarget(action.path),
+          additions: action.added.length,
+          deletions: 0,
+          addedLines: action.added,
+          deletedLines: [],
+        },
+        summary,
+      );
     }
   }
   const counts = changeCounts(detail);
   const target = toolTarget(detail || summary);
-  return {
-    kind,
-    label: toolKindLabel(kind),
-    ...target,
-    ...counts,
-    ...changedLines(detail),
-  };
+  return presentTool(
+    {
+      kind,
+      label: toolKindLabel(kind),
+      ...target,
+      ...counts,
+      ...changedLines(detail),
+    },
+    summary,
+  );
 }
 
 export function toolKindLabel(kind: ToolActivityKind): string {
@@ -492,6 +500,377 @@ export function toolKindLabel(kind: ToolActivityKind): string {
     other: "chat.toolOther",
   };
   return t(keys[kind]);
+}
+
+/** Built-in computer and browser tools, in words a beginner already has. */
+const TOOL_ALIASES: Record<string, MessageKey> = {
+  screen_apps: "chat.alias.screenApps",
+  screen_open: "chat.alias.screenOpen",
+  screen_snapshot: "chat.alias.screenSnapshot",
+  screen_click: "chat.alias.screenClick",
+  screen_type: "chat.alias.screenType",
+  screen_press: "chat.alias.screenPress",
+  screen_scroll: "chat.alias.screenScroll",
+  screen_windows: "chat.alias.screenWindows",
+  screen_state: "chat.alias.screenState",
+  screen_set: "chat.alias.screenSet",
+  screen_menu: "chat.alias.screenMenu",
+  browser_navigate: "chat.alias.browserOpen",
+  browser_snapshot: "chat.alias.browserLook",
+  browser_screenshot: "chat.alias.browserLook",
+  browser_click: "chat.alias.browserClick",
+  browser_fill: "chat.alias.browserFill",
+  browser_type: "chat.alias.browserType",
+  browser_find: "chat.alias.browserFind",
+  browser_scroll: "chat.alias.browserScroll",
+  browser_wait: "chat.alias.browserWait",
+  browser_get_text: "chat.alias.browserText",
+  browser_get_url: "chat.alias.browserUrl",
+  browser_get_html: "chat.alias.browserPage",
+  browser_evaluate: "chat.alias.browserPage",
+  browser_get_links: "chat.alias.browserLinks",
+  browser_new_tab: "chat.alias.browserTab",
+  browser_switch_tab: "chat.alias.browserTab",
+  browser_close_tab: "chat.alias.browserTab",
+  browser_list_tabs: "chat.alias.browserTabs",
+  browser_state_save: "chat.alias.browserRemember",
+  browser_state_load: "chat.alias.browserRemember",
+};
+
+const KIND_WORDS = new Set([
+  "read",
+  "readfile",
+  "view",
+  "write",
+  "writefile",
+  "edit",
+  "bash",
+  "shell",
+  "grep",
+  "glob",
+  "search",
+]);
+
+function bareToolName(raw: string): string {
+  const parts = raw
+    .split("__")
+    .flatMap((part) => part.split("/"))
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return (parts[parts.length - 1] ?? "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+}
+
+/** `mcp__computer__screen_snapshot` reads as `看屏幕`. Empty when there is no alias. */
+export function toolCallAlias(...parts: string[]): string {
+  for (const part of parts) {
+    const key = TOOL_ALIASES[bareToolName(part)];
+    if (key) return t(key);
+  }
+  return "";
+}
+
+function hideRawToolName(shown: string): boolean {
+  const text = shown.trim();
+  if (!text || /[\\/]/.test(text)) return false;
+  const bare = bareToolName(text);
+  return Boolean(TOOL_ALIASES[bare]) || text.includes("__") || KIND_WORDS.has(bare);
+}
+
+/** English names of apps that ship with the system, in words people already use. */
+const FAMILIAR_APPS: Record<string, MessageKey> = {
+  "system settings": "chat.app.systemSettings",
+  "system preferences": "chat.app.systemSettings",
+  "com.apple.systempreferences": "chat.app.systemSettings",
+  finder: "chat.app.finder",
+  "com.apple.finder": "chat.app.finder",
+  notes: "chat.app.notes",
+  "com.apple.notes": "chat.app.notes",
+  calendar: "chat.app.calendar",
+  "com.apple.ical": "chat.app.calendar",
+  mail: "chat.app.mail",
+  "com.apple.mail": "chat.app.mail",
+  messages: "chat.app.messages",
+  "com.apple.mobilesms": "chat.app.messages",
+  photos: "chat.app.photos",
+  "com.apple.photos": "chat.app.photos",
+  music: "chat.app.music",
+  "com.apple.music": "chat.app.music",
+  maps: "chat.app.maps",
+  "com.apple.maps": "chat.app.maps",
+  reminders: "chat.app.reminders",
+  "com.apple.reminders": "chat.app.reminders",
+  contacts: "chat.app.contacts",
+  "com.apple.addressbook": "chat.app.contacts",
+  preview: "chat.app.preview",
+  "com.apple.preview": "chat.app.preview",
+  textedit: "chat.app.textEdit",
+  "com.apple.textedit": "chat.app.textEdit",
+  terminal: "chat.app.terminal",
+  "com.apple.terminal": "chat.app.terminal",
+  "activity monitor": "chat.app.activityMonitor",
+  "com.apple.activitymonitor": "chat.app.activityMonitor",
+  "disk utility": "chat.app.diskUtility",
+  "com.apple.diskutility": "chat.app.diskUtility",
+  shortcuts: "chat.app.shortcuts",
+  "com.apple.shortcuts": "chat.app.shortcuts",
+  calculator: "chat.app.calculator",
+  "com.apple.calculator": "chat.app.calculator",
+  dictionary: "chat.app.dictionary",
+  "com.apple.dictionary": "chat.app.dictionary",
+  podcasts: "chat.app.podcasts",
+  "com.apple.podcasts": "chat.app.podcasts",
+  news: "chat.app.news",
+  "com.apple.news": "chat.app.news",
+  books: "chat.app.books",
+  "com.apple.ibooks": "chat.app.books",
+  "com.apple.ibooksx": "chat.app.books",
+  weather: "chat.app.weather",
+  "com.apple.weather": "chat.app.weather",
+  clock: "chat.app.clock",
+  "com.apple.clock": "chat.app.clock",
+  "voice memos": "chat.app.voiceMemos",
+  "com.apple.voicememos": "chat.app.voiceMemos",
+  "font book": "chat.app.fontBook",
+  "com.apple.fontbook": "chat.app.fontBook",
+  "keychain access": "chat.app.keychain",
+  "com.apple.keychainaccess": "chat.app.keychain",
+  "system information": "chat.app.systemInfo",
+  "com.apple.systemprofiler": "chat.app.systemInfo",
+  console: "chat.app.console",
+  "com.apple.console": "chat.app.console",
+  passwords: "chat.app.passwords",
+  "com.apple.passwords": "chat.app.passwords",
+  freeform: "chat.app.freeform",
+  "com.apple.freeform": "chat.app.freeform",
+  stickies: "chat.app.stickies",
+  "com.apple.stickies": "chat.app.stickies",
+  launchpad: "chat.app.launchpad",
+  "mission control": "chat.app.missionControl",
+  settings: "chat.app.settings",
+  "file explorer": "chat.app.explorer",
+  explorer: "chat.app.explorer",
+  notepad: "chat.app.notepad",
+  "task manager": "chat.app.taskManager",
+  "control panel": "chat.app.controlPanel",
+  paint: "chat.app.paint",
+  "snipping tool": "chat.app.snip",
+};
+
+function familiarApp(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  const id = FAMILIAR_APPS[key];
+  return id ? t(id) : raw.trim();
+}
+
+const ELEMENT_LINE =
+  /^@e\d+\s+(?:button|text field|text|link|image|checkbox|tab)\s+(.+)$/i;
+
+/**
+ * A screen row is `@e3 button 全部清除 315 582`. The row shows the words.
+ * A dumped list after an app name stays off the row.
+ */
+function surfaceName(text: string): string {
+  const raw = text.trim();
+  if (!raw) return "";
+  if (!/@e\d+\b/.test(raw) && !raw.includes("\\n")) return raw;
+  const flat = raw.replace(/\\n/g, "\n").replace(/\\t/g, " ").trim();
+  const only = flat.replace(/\s*\n\s*/g, " ").trim();
+  const element = !flat.includes("\n") ? only.match(ELEMENT_LINE) : null;
+  if (element) {
+    return element[1].replace(/\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s*$/, "").trim();
+  }
+  for (const line of flat.split("\n")) {
+    const row = line.trim();
+    if (!row || /^@e\d+\b/.test(row)) continue;
+    if (/^(rows are|screenshot file|image pixels|the picture|click x,y)\b/i.test(row)) continue;
+    const app = row.match(/^(?:front app|window)\s*:\s*(.+)$/i)?.[1]?.trim() ?? row;
+    const cut = app.split(/@e\d+\b/)[0]?.trim() ?? "";
+    if (cut) return cut;
+  }
+  return "";
+}
+
+function quoteName(text: string): string {
+  const clean = surfaceName(text).replace(/^「|」$/g, "");
+  return clean ? `「${oneLine(clean, 24)}」` : "";
+}
+
+function quoteApp(text: string): string {
+  return quoteName(familiarApp(text));
+}
+
+function seenApp(output: string): string {
+  const windowName = output.match(/window:\s*([^\n"]+)/)?.[1]?.trim() ?? "";
+  const app = output.match(/front app:\s*([^\n"]+)/)?.[1]?.trim() ?? "";
+  const opened = output.match(/"opened"\s*:\s*"([^"]+)"/)?.[1]?.trim() ?? "";
+  const bundle = output.match(/"bundleId"\s*:\s*"([^"]+)"/)?.[1]?.trim() ?? "";
+  return [opened, windowName, app, bundle].find((name) => name.length > 0) ?? "";
+}
+
+/** A computer-tool result that only repeats what the row already says. */
+export function isMachineToolDump(output: string): boolean {
+  const text = output.trim();
+  if (!text.startsWith("{")) return false;
+  try {
+    const value = JSON.parse(text) as Record<string, unknown>;
+    const keys = Object.keys(value);
+    if (keys.length === 0) return false;
+    const allowed = new Set([
+      "opened",
+      "bundleId",
+      "path",
+      "clicked",
+      "pressed",
+      "typed",
+      "scrolled",
+      "x",
+      "y",
+      "amount",
+      "set",
+      "menu",
+      "apps",
+    ]);
+    return keys.every((key) => allowed.has(key));
+  } catch {
+    return false;
+  }
+}
+
+function plainOutcome(output: string): string {
+  let body = output.trim();
+  if (!body) return "";
+  if (body.startsWith("{")) {
+    try {
+      const value = JSON.parse(body) as { text?: unknown; error?: unknown };
+      body = typeof value.text === "string" ? value.text : typeof value.error === "string" ? value.error : "";
+    } catch {
+      body = "";
+    }
+  }
+  const line = body
+    .split("\n")
+    .map((row) => row.trim())
+    .find((row) => {
+      if (!/[\u4e00-\u9fff]/.test(row) || row.includes("\t") || /@e\d+\b/.test(row)) return false;
+      return !/^(front app|window|rows are|screenshot|the picture)\b/i.test(row);
+    });
+  if (!line) return "";
+  const sentence = line.split(/[。！？]/)[0]?.trim() ?? "";
+  return sentence.length > 32 ? `${sentence.slice(0, 32)}…` : sentence;
+}
+
+function keyPhrase(raw: string): string {
+  const key = raw.trim().toLowerCase().replace(/\s+/g, "");
+  const known: Record<string, MessageKey> = {
+    return: "chat.key.return",
+    enter: "chat.key.return",
+    escape: "chat.key.escape",
+    esc: "chat.key.escape",
+    tab: "chat.key.tab",
+    space: "chat.key.space",
+    up: "chat.key.up",
+    down: "chat.key.down",
+    left: "chat.key.left",
+    right: "chat.key.right",
+    "command+a": "chat.key.selectAll",
+    "cmd+a": "chat.key.selectAll",
+    "ctrl+a": "chat.key.selectAll",
+    "command+c": "chat.key.copy",
+    "cmd+c": "chat.key.copy",
+    "ctrl+c": "chat.key.copy",
+    "command+v": "chat.key.paste",
+    "cmd+v": "chat.key.paste",
+    "ctrl+v": "chat.key.paste",
+    "command+z": "chat.key.undo",
+    "cmd+z": "chat.key.undo",
+    "ctrl+z": "chat.key.undo",
+  };
+  const id = known[key];
+  return id ? t(id) : raw.trim();
+}
+
+function scrollPhrase(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  if (key === "up" || raw === "向上") return t("chat.key.up");
+  if (key === "down" || raw === "向下") return t("chat.key.down");
+  return raw.trim();
+}
+
+/** One sentence a beginner can read. Empty when this is not a screen or page tool. */
+function actionLine(leaf: string, subject: string, output: string): string {
+  const named = surfaceName(subject);
+  const seen = named || surfaceName(seenApp(output));
+  const quoted = quoteName(named);
+  const seenQuoted = quoteApp(seen);
+  switch (leaf) {
+    case "screen_snapshot":
+      return seenQuoted ? t("chat.line.lookApp", { name: seenQuoted }) : t("chat.line.look");
+    case "screen_open": {
+      const opened = quoteApp(named || seenApp(output));
+      return opened ? t("chat.line.open", { name: opened }) : t("chat.line.openAny");
+    }
+    case "screen_click":
+    case "browser_click":
+      return quoted ? t("chat.line.click", { name: quoteApp(named) }) : t("chat.line.clickSpot");
+    case "screen_type":
+    case "browser_type":
+    case "browser_fill":
+      return quoted ? t("chat.line.type", { name: quoted }) : t("chat.line.typeAny");
+    case "screen_press":
+      return t("chat.line.press", { name: named ? keyPhrase(named) : t("chat.key.return") });
+    case "screen_scroll":
+    case "browser_scroll":
+      return named ? t("chat.line.scroll", { name: scrollPhrase(named) }) : t("chat.line.scrollAny");
+    case "screen_windows":
+      return seenQuoted ? t("chat.line.windows", { name: seenQuoted }) : t("chat.line.windowsAny");
+    case "screen_state":
+      return seenQuoted ? t("chat.line.state", { name: seenQuoted }) : t("chat.line.stateAny");
+    case "screen_set":
+      return quoted ? t("chat.line.set", { name: quoted }) : t("chat.line.setAny");
+    case "screen_menu":
+      return quoted ? t("chat.line.menu", { name: quoted }) : t("chat.line.menuAny");
+    case "screen_apps":
+      return t("chat.line.apps");
+    case "browser_navigate":
+      return quoted ? t("chat.line.page", { name: quoted }) : t("chat.line.pageAny");
+    case "browser_snapshot":
+    case "browser_screenshot":
+      return t("chat.line.pageLook");
+    case "browser_find":
+      return quoted ? t("chat.line.find", { name: quoted }) : t("chat.line.find", { name: "" }).trim();
+    case "browser_wait":
+      return t("chat.line.wait");
+    default:
+      return "";
+  }
+}
+
+/** The row says what happened. The raw tool id stays off the surface. */
+function presentTool(info: ToolActivityInfo, rawName: string, output = ""): ToolActivityInfo {
+  const subject = info.target && hideRawToolName(info.target) ? "" : info.target;
+  const line = actionLine(bareToolName(rawName) || bareToolName(info.target), subject, output);
+  if (line && !info.path) {
+    const outcome = plainOutcome(output);
+    const label = outcome && !line.includes(outcome) ? `${line} · ${outcome}` : line;
+    return { ...info, label, target: "" };
+  }
+  const alias = toolCallAlias(rawName, info.target);
+  if (alias && !info.path) return { ...info, label: alias, target: subject };
+  if (subject !== info.target && !info.path) return { ...info, target: subject };
+  return info;
+}
+
+/** How many times each row should show. `0` means it repeats the row before it. */
+export function repeatRuns(faces: string[]): number[] {
+  const counts = faces.map(() => 0);
+  let index = 0;
+  while (index < faces.length) {
+    let next = index + 1;
+    while (next < faces.length && faces[next] === faces[index]) next += 1;
+    counts[index] = next - index;
+    index = next;
+  }
+  return counts;
 }
 
 const STEP_KINDS: ToolActivityKind[] = ["read", "write", "edit", "terminal", "search", "other"];
@@ -521,18 +900,22 @@ export function stepActivityInfo(step: ToolStep): ToolActivityInfo {
   } else {
     target = oneLine(step.title || step.command || step.query || step.name || "");
   }
-  return {
-    kind,
-    label: toolKindLabel(kind),
-    target,
-    path: fileKind ? path : "",
-    lineStart,
-    lineEnd,
-    additions: step.additions ?? 0,
-    deletions: step.deletions ?? 0,
-    addedLines: step.added_lines ?? [],
-    deletedLines: step.deleted_lines ?? [],
-  };
+  return presentTool(
+    {
+      kind,
+      label: toolKindLabel(kind),
+      target,
+      path: fileKind ? path : "",
+      lineStart,
+      lineEnd,
+      additions: step.additions ?? 0,
+      deletions: step.deletions ?? 0,
+      addedLines: step.added_lines ?? [],
+      deletedLines: step.deleted_lines ?? [],
+    },
+    step.name || step.title || "",
+    step.output ?? "",
+  );
 }
 
 /** A result update only carries what it adds. Keep the rest from the start. */
@@ -576,12 +959,16 @@ export function rowActivityInfo(row: HTMLElement): ToolActivityInfo {
 export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
   const counts = new Map<ToolActivityKind, number>();
   const files = new Map<ToolActivityKind, Set<string>>();
+  const named = new Map<string, number>();
+  const genericOther = toolKindLabel("other");
   for (const info of infos) {
     if (info.kind === "read" || info.kind === "write" || info.kind === "edit") {
       const seen = files.get(info.kind) ?? new Set<string>();
       seen.add(info.target || `${info.kind}-${seen.size}`);
       files.set(info.kind, seen);
       counts.set(info.kind, seen.size);
+    } else if (info.kind === "other" && info.label !== genericOther) {
+      named.set(info.label, (named.get(info.label) ?? 0) + 1);
     } else {
       counts.set(info.kind, (counts.get(info.kind) ?? 0) + 1);
     }
@@ -596,6 +983,9 @@ export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
   add("edit", "chat.workEditedFiles");
   add("search", "chat.workSearches");
   add("terminal", "chat.workCommands");
+  for (const [name, count] of named) {
+    parts.push(count > 1 ? t("chat.workAliasCount", { name, count: String(count) }) : name);
+  }
   add("other", "chat.workOtherActions");
   const additions = infos.reduce((sum, info) => sum + info.additions, 0);
   const deletions = infos.reduce((sum, info) => sum + info.deletions, 0);

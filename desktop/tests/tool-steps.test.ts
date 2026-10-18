@@ -24,7 +24,7 @@ Object.defineProperty(globalThis, "navigator", {
   value: { language: "zh-CN" },
 });
 
-const { stepActivityInfo, mergeToolStep } = await import("../src/chat/format");
+const { repeatRuns, stepActivityInfo, mergeToolStep, summarizeToolActivities } = await import("../src/chat/format");
 const { earlierToolRange, laterToolRange, storeToolStep } = await import("../src/chat/tool-records");
 type ChatMessage = import("../src/chat/types").ChatMessage;
 
@@ -55,6 +55,108 @@ check("a read names its lines", read.target.includes("send.ts") && read.target.i
 
 const shell = stepActivityInfo({ id: "s", kind: "terminal", status: "running", title: "查看改动", command: "git status" });
 check("a command shows its plain description first", shell.target === "查看改动", shell);
+
+const look = stepActivityInfo({
+  id: "c",
+  kind: "other",
+  status: "done",
+  name: "mcp__computer__screen_snapshot",
+});
+check("a computer look says what was seen", look.label === "看了一眼屏幕" && look.target === "", look);
+
+const looked = stepActivityInfo({
+  id: "c2",
+  kind: "other",
+  status: "done",
+  name: "screen_snapshot",
+  output: "front app: 微信\nwindow: 微信\n",
+});
+check("a look names the app it saw", looked.label === "看了一眼「微信」", looked);
+
+const opened = stepActivityInfo({
+  id: "o",
+  kind: "other",
+  status: "done",
+  name: "mcp__computer__screen_open",
+  title: "微信",
+});
+check("opening an app names the app", opened.label === "打开了「微信」" && opened.target === "", opened);
+
+const settings = stepActivityInfo({
+  id: "settings",
+  kind: "other",
+  status: "done",
+  name: "screen_open",
+  output: '{\n  "bundleId": "com.apple.systempreferences",\n  "opened": "System Settings",\n  "path": "/System/Applications/System Settings.app"\n}',
+});
+check("system settings is named in plain words", settings.label === "打开了「系统设置」", settings);
+
+const finder = stepActivityInfo({
+  id: "finder",
+  kind: "other",
+  status: "done",
+  name: "screen_open",
+  title: "Finder",
+});
+check("finder is named in plain words", finder.label === "打开了「访达」", finder);
+
+const clicked = stepActivityInfo({
+  id: "k",
+  kind: "other",
+  status: "done",
+  name: "screen_click",
+  title: "发送",
+});
+check("a click names the button", clicked.label === "点了「发送」", clicked);
+
+const dumped = stepActivityInfo({
+  id: "dump",
+  kind: "other",
+  status: "done",
+  name: "screen_snapshot",
+  title: "计算器\\n@e1 text 789×45 12 34",
+  output: "front app: 计算器\n@e1 text 789×45 12 34\n@e3 button 全部清除 315 582\n",
+});
+check("a look keeps the app and hides element rows", dumped.label === "看了一眼「计算器」", dumped);
+
+const clickRef = stepActivityInfo({
+  id: "ref",
+  kind: "other",
+  status: "done",
+  name: "screen_click",
+  title: "@e3 button 全部清除 315 582",
+});
+check("a click keeps the button name and drops the element code", clickRef.label === "点了「全部清除」", clickRef);
+
+const spot = stepActivityInfo({
+  id: "p",
+  kind: "other",
+  status: "failed",
+  name: "screen_click",
+  output: "这一下没有点到。画面没有变化。",
+});
+check("a missed click says so", spot.label === "在画面上点了一下 · 这一下没有点到", spot);
+
+const typed = stepActivityInfo({
+  id: "y",
+  kind: "other",
+  status: "done",
+  name: "screen_press",
+  title: "command+a",
+});
+check("a key press uses a plain name", typed.label === "按下了全选", typed);
+
+const runs = repeatRuns(["点一下", "点一下", "点一下", "打开应用\n微信", "打开应用\n微信"]);
+check("identical rows fold into one count", runs.join(",") === "3,0,0,2,0", runs);
+
+const bareRead = stepActivityInfo({ id: "rd", kind: "read", status: "done", name: "Read" });
+check("a read without a file does not repeat the English name", bareRead.label === "查阅" && bareRead.target === "", bareRead);
+
+const summary = summarizeToolActivities([
+  stepActivityInfo({ id: "f", kind: "read", status: "done", path: "notes.md" }),
+  look,
+]);
+check("the group names the look instead of other", summary.includes("看了一眼屏幕") && !summary.includes("其他"), summary);
 
 const merged = mergeToolStep(
   { id: "s", kind: "terminal", status: "running", command: "git status" },

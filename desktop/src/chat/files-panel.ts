@@ -14,6 +14,13 @@ import { fileChangeFor, hasFileChange, type FileChangePreview } from "./file-cha
 import { inlineFileDiff, type DiffLine } from "./file-diff";
 import { pageAddress, wrapHtmlForPreview, type UiStep, type UiStepKind } from "./page-preview";
 import { syncChatFilesSplitter } from "./layout-resize";
+import {
+  closeOpenTab,
+  parentFolder,
+  rememberOpenTab,
+  tabKey,
+  type OpenFileTab,
+} from "./files-open-tabs";
 
 export type FilesPanelDeps = {
   mainEl: HTMLElement;
@@ -53,6 +60,8 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   let layout: FilesLayout = readFilesLayout();
   let treeCollapsed = localStorage.getItem(TREE_KEY) === "hidden";
   let listRelative = "";
+  let listedRoot = "";
+  let listGeneration = 0;
   let openFileRelative = "";
   let openFileLanguage = "text";
   let dirty = false;
@@ -84,6 +93,11 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   let uiResultHandler: ((event: MessageEvent) => void) | null = null;
   /** Folder of a file opened from outside the project, such as /tmp. */
   let outsideRoot: string | null = null;
+  let openTabs: OpenFileTab[] = [];
+  const tabsEl = document.createElement("div");
+  tabsEl.className = "chat-files-tabs";
+  tabsEl.setAttribute("role", "tablist");
+  deps.breadcrumbEl.before(tabsEl);
 
   function rootOrWarn(): string | null {
     if (outsideRoot) return outsideRoot;
@@ -118,10 +132,108 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     if (pick) pick.textContent = t(treeCollapsed ? "chat.filesPickOneFolded" : "chat.filesPickOne");
   }
 
-  /** A file from the chat folds the list. A folder from the chat opens it. */
   function rememberTree(collapsed: boolean): void {
     treeCollapsed = collapsed;
     localStorage.setItem(TREE_KEY, collapsed ? "hidden" : "shown");
+  }
+
+  function currentRootKey(): string {
+    return outsideRoot ?? deps.getRoot().trim();
+  }
+
+  function paintTabs(): void {
+    const active = tabKey(currentRootKey(), openFileRelative);
+    tabsEl.replaceChildren();
+    for (const tab of openTabs) {
+      const item = document.createElement("div");
+      item.className = `chat-files-tab${tab.key === active ? " is-on" : ""}`;
+      item.setAttribute("role", "tab");
+      item.setAttribute("aria-selected", tab.key === active ? "true" : "false");
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "chat-files-tab-open";
+      open.textContent = tab.name;
+      open.title = tab.relative;
+      open.addEventListener("click", () => activateTab(tab));
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "chat-files-tab-x";
+      close.textContent = "×";
+      close.title = t("chat.filesTabClose");
+      close.setAttribute("aria-label", t("chat.filesTabClose"));
+      close.addEventListener("click", (event) => {
+        event.stopPropagation();
+        dismissTab(tab.key);
+      });
+      item.append(open, close);
+      tabsEl.append(item);
+    }
+  }
+
+  function noteOpenTab(name: string, relative: string): void {
+    const root = currentRootKey();
+    openTabs = rememberOpenTab(openTabs, {
+      key: tabKey(root, relative),
+      name,
+      relative,
+      root,
+      external: Boolean(outsideRoot),
+    });
+    paintTabs();
+  }
+
+  function clearOpenFile(): void {
+    openFileRelative = "";
+    dirty = false;
+    deps.viewEl.hidden = true;
+    deps.placeholderEl.hidden = false;
+    deps.fileNameEl.hidden = true;
+    deps.codeEl.hidden = true;
+    deps.imageEl.hidden = true;
+    deps.sheetEl.hidden = true;
+    if (renderedEl) renderedEl.hidden = true;
+    syncPreviewMode();
+  }
+
+  function activateTab(tab: OpenFileTab): void {
+    outsideRoot = tab.external ? tab.root : null;
+    rememberTree(false);
+    syncTreeButton();
+    void openFile(tab.relative);
+  }
+
+  function dismissTab(key: string): void {
+    const active = tabKey(currentRootKey(), openFileRelative);
+    const result = closeOpenTab(openTabs, key);
+    openTabs = result.tabs;
+    paintTabs();
+    if (key !== active) return;
+    if (!result.next) {
+      clearOpenFile();
+      showList();
+      return;
+    }
+    activateTab(result.next);
+  }
+
+  function markActiveFile(): void {
+    deps.listEl.querySelectorAll<HTMLElement>(".chat-files-item").forEach((item) => {
+      const on = !item.classList.contains("is-dir") && item.dataset.path === openFileRelative;
+      item.classList.toggle("is-active", on);
+    });
+  }
+
+  /** The folder list on the right shows the files next to the one that is open. */
+  function ensureFolderListed(relative: string): void {
+    const folder = parentFolder(relative);
+    const root = currentRootKey();
+    const missing = deps.listEl.querySelector(".chat-files-item") == null;
+    if (folder !== listRelative || root !== listedRoot || missing) {
+      listRelative = folder;
+      showList();
+      return;
+    }
+    markActiveFile();
   }
 
   function setOpen(open: boolean): void {
@@ -508,12 +620,15 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       setOpen(false);
       return;
     }
+    const generation = ++listGeneration;
     deps.breadcrumbEl.textContent = breadcrumbLabel(listRelative);
-    for (const item of deps.listEl.querySelectorAll(".chat-files-item")) item.remove();
+    listedRoot = currentRootKey();
+    for (const item of deps.listEl.querySelectorAll(".chat-files-item, .chat-files-nest")) item.remove();
     deps.emptyEl.hidden = true;
 
     try {
       const entries = await listWorkspaceDir({ root, relative: listRelative || null });
+      if (generation !== listGeneration) return;
       if (listRelative) {
         const up = document.createElement("button");
         up.type = "button";
@@ -554,13 +669,42 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     btn.innerHTML = `<span class="chat-files-item-icon" aria-hidden="true">${icon}</span><span class="chat-files-item-name">${escapeHtml(entry.name)}</span>${entry.isDir ? `<span class="chat-files-item-chevron" aria-hidden="true">›</span>` : ""}`;
     btn.addEventListener("click", () => {
       if (entry.isDir) {
-        listRelative = entry.relativePath;
-        showList();
+        void toggleFolder(btn, entry.relativePath);
         return;
       }
       void openFile(entry.relativePath, btn);
     });
     return btn;
+  }
+
+  async function toggleFolder(btn: HTMLElement, relative: string): Promise<void> {
+    const nested = btn.nextElementSibling;
+    if (nested?.classList.contains("chat-files-nest")) {
+      nested.remove();
+      btn.classList.remove("is-open");
+      return;
+    }
+    const root = rootOrWarn();
+    if (!root) return;
+    btn.classList.add("is-open");
+    try {
+      const entries = await listWorkspaceDir({ root, relative });
+      if (!btn.isConnected) return;
+      const nest = document.createElement("div");
+      nest.className = "chat-files-nest";
+      if (entries.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "chat-files-empty";
+        empty.textContent = t("chat.filesEmpty");
+        nest.append(empty);
+      } else {
+        for (const entry of entries) nest.append(renderEntry(entry));
+      }
+      btn.after(nest);
+    } catch (error) {
+      btn.classList.remove("is-open");
+      deps.setStatus(String(error ?? t("chat.filesLoadFailed")), "error");
+    }
   }
 
   function revealLines(content: string, start = 0, end = start): void {
@@ -651,6 +795,8 @@ export function createFilesPanel(deps: FilesPanelDeps) {
         deps.editorEl.focus();
         revealLines(file.content, shown?.lineStart, shown?.lineEnd);
       }
+      noteOpenTab(file.name, file.relativePath);
+      ensureFolderListed(file.relativePath);
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesLoadFailed")), "error");
     }
@@ -680,6 +826,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   deps.treeEl.addEventListener("click", () => {
     rememberTree(!treeCollapsed);
     syncTreeButton();
+    if (!treeCollapsed) showList();
   });
 
   window.addEventListener("chat-open-workspace-file", (event) => {
@@ -705,7 +852,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
         }
         layout = "split";
         localStorage.setItem(LAYOUT_KEY, layout);
-        rememberTree(!match.isDir);
+        rememberTree(false);
         setOpen(true);
         if (match.isDir) {
           listRelative = relative;
@@ -816,6 +963,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       if (uiEl && !uiEl.hidden) paintUiSteps();
       syncLayoutButton();
       syncTreeButton();
+      paintTabs();
     },
     isOpen: () => mode !== "closed",
     close: () => setOpen(false),

@@ -116,17 +116,27 @@ export function syncMessageCopyActions(
   bubble: HTMLElement,
   streaming: boolean,
   layoutSource: string,
+  showCopy = true,
 ): void {
   const hasText = layoutSource.trim().length > 0;
   const show = hasText && !streaming;
   const actions = wrap.querySelector<HTMLElement>(":scope > .chat-msg-actions");
   const btn = actions?.querySelector<HTMLButtonElement>(".chat-msg-copy");
+  const time = actions?.querySelector<HTMLTimeElement>("time.chat-msg-time");
+  // The time belongs on the same fragment as the copy: the end of the turn.
+  if (time) {
+    if (!show || !showCopy) time.hidden = true;
+    else if (time.dataset.at) time.hidden = false;
+  }
   if (btn) {
     const kind: CopyIdleKind = btn.dataset.copyKind === "code" ? "code" : "text";
-    btn.hidden = !show;
-    if (show) setCopyButtonState(btn, "idle", kind);
+    const visible = show && showCopy;
+    btn.hidden = !visible;
+    if (visible) setCopyButtonState(btn, "idle", kind);
   }
-  if (actions) actions.hidden = !show;
+  const copyVisible = Boolean(btn && !btn.hidden);
+  const timeVisible = Boolean(time && !time.hidden);
+  if (actions) actions.hidden = !copyVisible && !timeVisible;
   wrap.classList.toggle("is-compact", show && isShortCopyLayout(bubble, layoutSource));
 }
 

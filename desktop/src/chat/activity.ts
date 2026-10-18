@@ -6,12 +6,14 @@ import {
   appendRunLog,
   HAND_MISSING_PHASE,
   handMissingNotice,
+  isMachineToolDump,
   isQuietPhase,
   isRuntimeLog,
   isTransportDump,
   mergeToolStep,
   stripLogAnsi,
   readRowStep,
+  repeatRuns,
   rowActivityInfo,
   splitToolActivity,
   summarizeToolActivities,
@@ -55,6 +57,8 @@ export type ActivityDeps = {
   rememberTurnNotice: (text: string) => void;
   /** Tool notes saved since the latest user message. */
   toolRecordsForTurn: () => ToolRecord[];
+  /** Put the latest reply's file card back at the end after a new step lands. */
+  syncReplyChangeCard?: () => void;
   /** First critical connection failure this turn (GLM / geo block). */
   onChatConnectionFailure?: (explain: ChatFailureExplain) => void;
 };
@@ -200,7 +204,8 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
   if (current) {
     const head = current.command ? `$ ${current.command}` : (current.query ?? "");
     if (!fileAction || info.kind === "read") {
-      body = [info.kind === "read" ? "" : head, current.output ?? ""].filter(Boolean).join("\n\n");
+      const output = current.output && !isMachineToolDump(current.output) ? current.output : "";
+      body = [info.kind === "read" ? "" : head, output].filter(Boolean).join("\n\n");
     }
   } else {
     const legacy = row.dataset.detail ?? "";
@@ -238,7 +243,7 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
 export function createToolRowElement(text: string, step?: ToolStep): HTMLDetailsElement {
   const row = document.createElement("details");
   row.className = "chat-activity is-done kind-tool chat-tool-row";
-  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
+  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-tool-repeat" hidden></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
   row.querySelector("summary")?.addEventListener("click", (event) => {
     if (!row.dataset.expandable) event.preventDefault();
   });
@@ -313,7 +318,36 @@ export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTM
   list.className = "chat-tool-list";
   for (const record of shown) list.appendChild(mountToolRecord(record));
   group.append(summary, list);
+  foldRepeatedToolRows(list);
   return group;
+}
+
+function rowFace(row: HTMLElement): string {
+  const name = row.querySelector(".chat-tool-name")?.textContent ?? "";
+  const preview = row.querySelector(".chat-tool-preview");
+  const shown = preview && !preview.hidden ? (preview.textContent ?? "") : "";
+  const failed = row.classList.contains("is-failed") ? "failed" : "";
+  const live = row.classList.contains("is-live") ? "live" : "";
+  return [live, failed, name, shown].join("\n");
+}
+
+/** Consecutive rows that say the same thing become one line with a count. */
+export function foldRepeatedToolRows(list: HTMLElement): void {
+  const rows = [...list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row")];
+  const counts = repeatRuns(rows.map(rowFace));
+  rows.forEach((row, index) => {
+    const count = counts[index] ?? 0;
+    row.hidden = count === 0;
+    const badge = row.querySelector<HTMLElement>(".chat-tool-repeat");
+    if (!badge) return;
+    if (count > 1) {
+      badge.hidden = false;
+      badge.textContent = t("chat.toolTimes", { count: String(count) });
+    } else {
+      badge.hidden = true;
+      badge.textContent = "";
+    }
+  });
 }
 
 export function createActivityController(deps: ActivityDeps) {
@@ -445,6 +479,8 @@ export function createActivityController(deps: ActivityDeps) {
   });
 
   function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
+    const list = group.querySelector<HTMLElement>(".chat-tool-list");
+    if (list) foldRepeatedToolRows(list);
     const rows = group.querySelectorAll<HTMLElement>(
       ".chat-tool-list > .chat-tool-row, .chat-permission-stack > .chat-tool-row",
     );
@@ -536,6 +572,7 @@ export function createActivityController(deps: ActivityDeps) {
     const lastAssistant = assistants[assistants.length - 1];
     if (lastAssistant) deps.collapseResolvedPermissionsBeforeAssistant(lastAssistant);
     ensureTurnToolsVisible(lastAssistant ?? null, keptTools);
+    deps.syncReplyChangeCard?.();
   }
 
   function isToolGroupEl(el: Element | null): el is HTMLElement {
@@ -718,18 +755,26 @@ export function createActivityController(deps: ActivityDeps) {
       if (group && group === deps.getToolGroupEl()) liveRecords(group);
       if (group) updateToolGroupSummary(group, group === deps.getToolGroupEl());
       if (step.status !== "running" && deps.getActivityEl() === known) settleActivity();
+      deps.syncReplyChangeCard?.();
       return;
     }
-    if (!step.kind) return;
+    if (!step.kind) {
+      deps.syncReplyChangeCard?.();
+      return;
+    }
     const group = deps.getToolGroupEl();
     const last = group?.isConnected
       ? group.querySelector<HTMLElement>(".chat-tool-list > .chat-tool-row:last-child")
       : null;
     const row = last && !last.dataset.toolId ? last : showToolRow("tool", toolStepText(step));
-    if (!row) return;
+    if (!row) {
+      deps.syncReplyChangeCard?.();
+      return;
+    }
     applyToolRow(row, "", step);
     const owner = row.closest<HTMLDetailsElement>(".chat-tool-group");
     if (owner) updateToolGroupSummary(owner, true);
+    deps.syncReplyChangeCard?.();
   }
 
   function showToolRow(phase: string, text: string): HTMLElement | null {
@@ -778,6 +823,7 @@ export function createActivityController(deps: ActivityDeps) {
     deps.setActivityEl(row);
     updateToolGroupSummary(group, true);
     followChatLog(deps.logEl);
+    deps.syncReplyChangeCard?.();
     return row;
   }
 

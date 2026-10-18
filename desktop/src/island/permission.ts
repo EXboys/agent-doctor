@@ -1,4 +1,4 @@
-import { plainPermissionSummary } from "../chat/format";
+import { plainPermissionSummary, toolCallAlias } from "../chat/format";
 import { t } from "../i18n";
 import type { IslandPending } from "./track";
 
@@ -136,7 +136,7 @@ export function permissionView(pending: IslandPending): PermissionView {
               ? t("island.toolWeb")
               : kind === "browser"
                 ? t("island.toolBrowser")
-                : t("island.toolOther", { tool: friendlyTool(tool) });
+                : toolCallAlias(tool) || t("island.toolOther", { tool: friendlyTool(tool) });
 
   const summary = pending.detail.trim();
   if (!target && summary && summary !== description) target = summary;

@@ -1,5 +1,6 @@
 import { focusMainTab } from "./ipc";
 import { applyBackgroundEvent } from "./chat/background-run";
+import { mountReplyChangeCard } from "./chat/reply-changes";
 import { isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 import { normalizePlanItems, paintChatPlan } from "./plan";
@@ -206,6 +207,12 @@ export function wireChatControllers(): void {
     },
     rememberTool: (text) => chatState.bubbles.rememberTool(text),
     rememberToolStep: (step) => chatState.bubbles.rememberToolStep(step),
+    syncReplyChangeCard: () => {
+      const onScreen = activeSession();
+      const source = chatState.busy && isViewingRunningSession() ? runTargetSession() : onScreen;
+      if (source.id !== onScreen.id) return;
+      mountReplyChangeCard(logEl, source.messages);
+    },
     rememberRuntimeLog: (text) => chatState.bubbles.rememberRuntimeLog(text),
     rememberTurnNotice: (text) => chatState.bubbles.rememberTurnNotice(text),
     toolRecordsForTurn: () => {

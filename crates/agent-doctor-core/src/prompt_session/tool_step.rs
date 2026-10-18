@@ -217,7 +217,72 @@ pub(crate) fn tool_step(id: &str, name: &str, input: &Value) -> ToolStep {
             step.query = text(obj, &["pattern", "query", "url"]);
         }
     }
+    if step.title.is_empty() {
+        step.title = action_subject(name, obj);
+    }
     step
+}
+
+/// App, button, or words for a computer or browser tool. Coordinates stay off the row.
+fn action_subject(name: &str, obj: &serde_json::Map<String, Value>) -> String {
+    let leaf = name.rsplit("__").next().unwrap_or(name);
+    let leaf = leaf.rsplit(['/', '.']).next().unwrap_or(leaf);
+    match key(leaf).as_str() {
+        "screenopen" | "screensnapshot" | "screenwindows" | "screenstate" => text(obj, &["app"]),
+        "screenclick" | "browserclick" => click_subject(obj),
+        "screentype" | "browserfill" | "browsertype" => short_words(&text(obj, &["text", "label"])),
+        "screenset" => {
+            let label = text(obj, &["label"]);
+            if label.is_empty() {
+                short_words(&text(obj, &["text"]))
+            } else {
+                label
+            }
+        }
+        "screenpress" => text(obj, &["key"]),
+        "screenscroll" => match text(obj, &["direction"]).as_str() {
+            "up" => "向上".to_string(),
+            "down" => "向下".to_string(),
+            other => other.to_string(),
+        },
+        "screenmenu" => obj
+            .get("path")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|item| !item.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            })
+            .unwrap_or_default(),
+        "browsernavigate" => text(obj, &["url"]),
+        "browserfind" => text(obj, &["text", "query"]),
+        _ => String::new(),
+    }
+}
+
+fn click_subject(obj: &serde_json::Map<String, Value>) -> String {
+    let label = text(obj, &["label", "element"]);
+    if !label.is_empty() {
+        return short_words(&label);
+    }
+    let named = text(obj, &["text"]);
+    if !named.is_empty() && !named.starts_with("@e") {
+        return short_words(&named);
+    }
+    text(obj, &["app"])
+}
+
+fn short_words(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let count = flat.chars().count();
+    if count <= 24 {
+        return flat;
+    }
+    let kept: String = flat.chars().take(24).collect();
+    format!("{kept}…")
 }
 
 /// A result-only update for a step that already started.
@@ -656,6 +721,17 @@ mod tests {
             (edit.kind.as_str(), edit.additions, edit.deletions),
             ("edit", 3, 2)
         );
+
+        let open = tool_step("o", "mcp__computer__screen_open", &json!({"app": "微信"}));
+        assert_eq!(open.title, "微信");
+        let click = tool_step(
+            "c",
+            "screen_click",
+            &json!({"label": "发送", "x": 12, "y": 40}),
+        );
+        assert_eq!(click.title, "发送");
+        let point = tool_step("p", "screen_click", &json!({"x": 12, "y": 40}));
+        assert!(point.title.is_empty());
 
         let titled = tool_step(
             "b",

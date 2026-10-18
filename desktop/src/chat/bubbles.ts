@@ -30,7 +30,9 @@ import {
   renderAttachmentStrip,
   syncMessageCopyActions,
 } from "./copy-ui";
+import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
 import { paintReplyAge, refreshReplyAges } from "./reply-age";
+import { mountReplyChangeCard } from "./reply-changes";
 import { uid } from "./store";
 import type {
   ChatAttachment,
@@ -143,6 +145,7 @@ export function createBubblesController(deps: BubblesDeps) {
         syncAssistantTime(bubble, stamped?.at, false);
       }
     }
+    syncTurnCopyButtons();
     deps.setAssistantBubble(null);
     deps.setAssistantMessageId(null);
     deps.setAssistantRaw("");
@@ -206,6 +209,7 @@ export function createBubblesController(deps: BubblesDeps) {
     if (!bubble.isConnected) return;
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);
     setAssistantMarkdown(bubble, deps.getAssistantRaw());
+    syncReplyChangeCard();
     followChatLog(deps.logEl);
   }
   function persistMessage(
@@ -331,14 +335,59 @@ export function createBubblesController(deps: BubblesDeps) {
     if (bubble === deps.getAssistantBubble() && deps.getAssistantRaw().trim()) return deps.getAssistantRaw();
     return bubblePlainText(bubble);
   }
+  function turnCopySource(bubble: HTMLElement): string {
+    const wrap = assistantMsgWrap(bubble);
+    const log = wrap.parentElement;
+    if (!log) return assistantMarkdownSource(bubble);
+    const children = Array.from(log.children);
+    const index = children.indexOf(wrap);
+    if (index < 0) return assistantMarkdownSource(bubble);
+    let start = index;
+    while (start > 0 && !children[start - 1].classList.contains("chat-msg-user")) start -= 1;
+    let end = index;
+    while (end + 1 < children.length && !children[end + 1].classList.contains("chat-msg-user")) end += 1;
+    const parts: string[] = [];
+    for (let i = start; i <= end; i++) {
+      const child = children[i];
+      if (!child.classList.contains("chat-msg-assistant")) continue;
+      const node = child.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
+      if (!node) continue;
+      const text = assistantMarkdownSource(node).trim();
+      if (text) parts.push(text);
+    }
+    return joinAssistantTurnCopy(parts);
+  }
+  function syncTurnCopyButtons(): void {
+    const children = Array.from(deps.logEl.children);
+    const roles = children.map((child) => {
+      if (child.classList.contains("chat-msg-user")) return "user";
+      if (child.classList.contains("chat-msg-assistant")) return "assistant";
+      return "other";
+    });
+    const owners = assistantTurnCopyOwners(roles);
+    children.forEach((child, index) => {
+      if (roles[index] !== "assistant") return;
+      const bubble = child.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
+      if (!bubble) return;
+      syncMessageCopyActions(
+        child as HTMLElement,
+        bubble,
+        bubble.classList.contains("is-streaming"),
+        assistantMarkdownSource(bubble),
+        owners[index] === true,
+      );
+    });
+  }
+  function syncReplyChangeCard(): void {
+    const onScreen = deps.activeSession();
+    const source = deps.getBusy() && deps.isViewingRunningSession() ? deps.runTargetSession() : onScreen;
+    if (source.id !== onScreen.id) return;
+    mountReplyChangeCard(deps.logEl, source.messages);
+  }
   function syncAssistantCopyButton(bubble: HTMLElement): void {
-    const source = assistantMarkdownSource(bubble);
-    syncMessageCopyActions(
-      assistantMsgWrap(bubble),
-      bubble,
-      bubble.classList.contains("is-streaming"),
-      source,
-    );
+    // A bubble that is not in the transcript yet is picked up after it is appended.
+    if (!assistantMsgWrap(bubble).isConnected) return;
+    syncTurnCopyButtons();
   }
   function syncAssistantTime(bubble: HTMLElement, at: number | undefined, streaming: boolean): void {
     const time = assistantMsgWrap(bubble).querySelector<HTMLTimeElement>(":scope > .chat-msg-actions time.chat-msg-time");
@@ -355,8 +404,8 @@ export function createBubblesController(deps: BubblesDeps) {
     const actions = document.createElement("div");
     actions.className = "chat-msg-actions";
     actions.hidden = true;
-    // Default copy = markdown source (better for paste/edit).
-    actions.appendChild(createCopyActionButton("text", () => assistantMarkdownSource(bubble)));
+    // One button copies the whole turn, not just this fragment.
+    actions.appendChild(createCopyActionButton("text", () => turnCopySource(bubble)));
     const time = document.createElement("time");
     time.className = "chat-msg-time";
     time.hidden = true;
@@ -412,6 +461,8 @@ export function createBubblesController(deps: BubblesDeps) {
       const { wrap, bubble } = createAssistantBubbleEl({ id: opts?.id });
       setAssistantMarkdown(bubble, text);
       deps.logEl.appendChild(wrap);
+      syncTurnCopyButtons();
+      syncReplyChangeCard();
       followChatLog(deps.logEl);
       return bubble;
     }
@@ -422,6 +473,7 @@ export function createBubblesController(deps: BubblesDeps) {
         attachments: opts?.attachments,
       });
       deps.logEl.appendChild(wrap);
+      syncReplyChangeCard();
       pinChatLog(deps.logEl);
       return bubble;
     }
@@ -637,6 +689,8 @@ export function createBubblesController(deps: BubblesDeps) {
         }
         i += 1;
       }
+      syncReplyChangeCard();
+      syncTurnCopyButtons();
       paintChatPlan(deps.logEl, session.plan);
       pinChatLog(deps.logEl);
       deps.updateContextMeter();
