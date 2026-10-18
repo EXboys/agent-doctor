@@ -368,7 +368,8 @@ fn ask_hand(tool: &str, args: &Value) -> Result<Value> {
 }
 
 fn parse_hand_reply(line: &str) -> Result<Value> {
-    let reply: Value = serde_json::from_str(line).context("empty reply from the app")?;
+    let reply: Value =
+        serde_json::from_str(line.trim()).context("操作这台电脑没有返回结果。请再试一次。")?;
     if reply.get("ok").and_then(Value::as_bool) == Some(true) {
         Ok(reply.get("result").cloned().unwrap_or(json!({})))
     } else {
@@ -405,7 +406,7 @@ fn ask_hand_windows(line: &str) -> Result<String> {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE};
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE, FILE_SHARE_READ,
+        CreateFileW, ReadFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE, FILE_SHARE_READ,
         FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows::Win32::System::Pipes::PeekNamedPipe;
@@ -436,44 +437,66 @@ fn ask_hand_windows(line: &str) -> Result<String> {
     let pipe = pipe.ok_or_else(|| {
         anyhow::anyhow!("操作这台电脑还没连上。请确认 Agent Doctor 开着，再试一次。")
     })?;
+    let broke = || anyhow::anyhow!("操作这台电脑的连接断了。请确认 Agent Doctor 开着，再试一次。");
     let body = format!("{line}\n");
-    let mut written = 0u32;
-    let wrote = unsafe { WriteFile(pipe, Some(body.as_bytes()), Some(&mut written), None) };
-    if let Err(err) = wrote {
+    if let Err(err) = write_pipe(pipe, body.as_bytes()).map_err(|_| broke()) {
         unsafe {
             let _ = CloseHandle(pipe);
         }
-        return Err(err).context("the click did not go through");
+        return Err(err);
     }
     let mut reply = Vec::new();
     let mut buf = [0u8; 4096];
     let started = Instant::now();
     let result = (|| {
         while !reply.contains(&b'\n') && reply.len() < 1024 * 1024 {
-            if started.elapsed() > Duration::from_secs(8) {
-                bail!("the click did not go through");
+            if started.elapsed() > Duration::from_secs(20) {
+                bail!("操作这台电脑没有回应。请再试一次。");
             }
             let mut available = 0u32;
             unsafe { PeekNamedPipe(pipe, None, 0, None, Some(&mut available), None) }
-                .context("empty reply from the app")?;
+                .map_err(|_| broke())?;
             if available == 0 {
                 std::thread::sleep(Duration::from_millis(40));
                 continue;
             }
             let mut read = 0u32;
             unsafe { ReadFile(pipe, Some(&mut buf), Some(&mut read), None) }
-                .context("empty reply from the app")?;
+                .map_err(|_| broke())?;
             if read == 0 {
                 break;
             }
             reply.extend_from_slice(&buf[..read as usize]);
         }
-        Ok(String::from_utf8_lossy(&reply).to_string())
+        let text = String::from_utf8_lossy(&reply).to_string();
+        if text.trim().is_empty() {
+            return Err(broke());
+        }
+        // One extra byte tells the app this reply was read. Closing the pipe
+        // does the same if that write does not land. Either way the app must
+        // not disconnect while these bytes are still in the pipe.
+        let _ = write_pipe(pipe, b"\n");
+        Ok(text)
     })();
     unsafe {
         let _ = CloseHandle(pipe);
     }
     result
+}
+
+#[cfg(windows)]
+fn write_pipe(pipe: windows::Win32::Foundation::HANDLE, bytes: &[u8]) -> Result<()> {
+    use windows::Win32::Storage::FileSystem::WriteFile;
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let mut written = 0u32;
+        unsafe { WriteFile(pipe, Some(&bytes[offset..]), Some(&mut written), None) }?;
+        if written == 0 {
+            bail!("short write");
+        }
+        offset += written as usize;
+    }
+    Ok(())
 }
 
 fn screen_click(args: &Value) -> Result<Value> {
@@ -627,6 +650,17 @@ fn err_response(id: Option<Value>, code: i64, message: String) -> McpResponse {
             message,
             data: None,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hand_reply;
+
+    #[test]
+    fn reply_line_parses_with_newline() {
+        let value = parse_hand_reply("{\"ok\":true,\"result\":{\"clicked\":\"point\"}}\n").unwrap();
+        assert_eq!(value["clicked"], "point");
     }
 }
 

@@ -1,8 +1,10 @@
 //! Clicks, typing, and screenshots on Windows.
 //!
 //! The desktop app listens on [`agent_doctor_core::COMPUTER_HAND_PIPE`]. The computer
-//! tool sends one JSON line and reads one JSON line back. An app opened as
-//! administrator sits above this process, so clicks to it are refused.
+//! tool sends one JSON line and reads one JSON line back. The reply stays in the
+//! pipe until that tool closes it. Disconnecting sooner throws the reply away, and
+//! the tool hears "管道的另一端上无任何进程". An app opened as administrator sits
+//! above this process, so clicks to it are refused.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -27,7 +29,7 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PeekNamedPipe, PIPE_TYPE_BYTE,
     PIPE_UNLIMITED_INSTANCES,
 };
 use windows::Win32::System::Threading::{
@@ -113,19 +115,74 @@ fn serve() -> Result<()> {
                 continue;
             }
         }
-        let reply = match read_line(pipe) {
-            Ok(line) => match handle_line(&line) {
-                Ok(result) => json!({ "ok": true, "result": result }),
+        let reply =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match read_line(pipe) {
+                Ok(line) => match handle_line(&line) {
+                    Ok(result) => json!({ "ok": true, "result": result }),
+                    Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
+                },
                 Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-            },
-            Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-        };
+            })) {
+                Ok(reply) => reply,
+                Err(_) => json!({ "ok": false, "error": "看屏幕这一步中断了。请再试一次。" }),
+            };
         let body = format!("{reply}\n");
-        let mut written = 0u32;
+        // DisconnectNamedPipe discards bytes still sitting in the pipe. Wait
+        // until the tool has closed its end. It does that only after reading.
+        if let Err(err) = write_pipe(pipe, body.as_bytes()) {
+            eprintln!("computer hand reply was not written: {err:#}");
+        } else if let Err(err) = wait_until_tool_closes(pipe) {
+            eprintln!("computer hand reply was not read: {err:#}");
+        }
         unsafe {
-            let _ = WriteFile(pipe, Some(body.as_bytes()), Some(&mut written), None);
             let _ = DisconnectNamedPipe(pipe);
             let _ = CloseHandle(pipe);
+        }
+    }
+}
+
+fn write_pipe(pipe: HANDLE, bytes: &[u8]) -> Result<()> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let mut written = 0u32;
+        unsafe { WriteFile(pipe, Some(&bytes[offset..]), Some(&mut written), None) }
+            .context("could not answer the computer tool")?;
+        if written == 0 {
+            bail!("could not answer the computer tool");
+        }
+        offset += written as usize;
+    }
+    Ok(())
+}
+
+fn wait_until_tool_closes(pipe: HANDLE) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut buf = [0u8; 32];
+    loop {
+        let mut available = 0u32;
+        match unsafe { PeekNamedPipe(pipe, None, 0, None, Some(&mut available), None) } {
+            Ok(()) => {
+                if available > 0 {
+                    let mut read = 0u32;
+                    unsafe { ReadFile(pipe, Some(&mut buf), Some(&mut read), None) }
+                        .context("could not finish the computer reply")?;
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    bail!("computer tool left the reply unread");
+                }
+                thread::sleep(Duration::from_millis(15));
+            }
+            Err(err) => {
+                // The tool closed this end. 109 broken pipe, 232 no data,
+                // 233 not connected — the same 0x800700E9 the tool used to see
+                // when we disconnected first.
+                let code = err.code().0 as u32 & 0xFFFF;
+                if matches!(code, 109 | 232 | 233) {
+                    return Ok(());
+                }
+                return Err(err).context("could not finish the computer reply");
+            }
         }
     }
 }
@@ -311,9 +368,7 @@ fn screen_look(app: &str) -> Result<Value> {
     if let Some(print) = shot_fingerprint(&shot.path) {
         remember_print(print);
     }
-    if let Ok(mut saved) = LAST_SCREEN.lock() {
-        *saved = Some(desk);
-    }
+    *LAST_SCREEN.lock().unwrap_or_else(|err| err.into_inner()) = Some(desk);
     let mut text =
         "Rows are @eN name x y. Click that @eN. If a row is not listed, call screen_scroll on the list.\n"
             .to_string();
@@ -906,8 +961,8 @@ fn click_desk(desk: &Desktop, x: f64, y: f64) -> Result<()> {
 fn saved_screen() -> Result<Desktop> {
     LAST_SCREEN
         .lock()
-        .ok()
-        .and_then(|saved| saved.clone())
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
         .context("先看一下屏幕，再说要点哪里。")
 }
 
