@@ -264,44 +264,129 @@ pub fn usage_by_day(since_ts: i64, tz_offset_sec: i64) -> Result<Vec<UsageDayRow
     usage_by_day_at(&path, since_ts, tz_offset_sec)
 }
 
-/// The service this turn was billed to: id, name and saved model.
-fn active_service() -> (String, String, String) {
-    let Ok(status) = crate::setup::load_mode_status() else {
-        return Default::default();
-    };
-    if status.mode == crate::setup::MODE_TEAM {
-        let label = status.active_label.unwrap_or_else(|| "team".into());
-        return (String::new(), label, String::new());
+/// Which saved service a finished turn should be counted under.
+///
+/// A chat can use a provider other than the checked one. DeepSeek Harness
+/// always talks to a saved DeepSeek provider. A ChatGPT or Claude login is
+/// that account, not the checked service.
+fn billed_service(
+    runtime: &str,
+    provider_id: Option<&str>,
+    reported_model: Option<&str>,
+    team_label: Option<&str>,
+    subscription: bool,
+    providers: &[crate::setup::PersonalProviderListItem],
+) -> (String, String, String) {
+    let reported = reported_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    if let Some(label) = team_label.map(str::trim).filter(|label| !label.is_empty()) {
+        return (
+            String::new(),
+            label.to_string(),
+            reported.unwrap_or("").to_string(),
+        );
     }
-    let model = crate::setup::list_personal_providers()
-        .ok()
-        .and_then(|doc| {
-            let id = doc.active_id?;
-            doc.providers
-                .into_iter()
-                .find(|p| p.id == id)
-                .map(|p| p.model)
+    if subscription {
+        let name = if runtime == "codex" {
+            "ChatGPT"
+        } else {
+            "Claude"
+        };
+        return (
+            String::new(),
+            name.to_string(),
+            reported.unwrap_or("").to_string(),
+        );
+    }
+    if runtime == crate::DEEPSEEK_HARNESS_RUNTIME_ID {
+        let deepseek = providers
+            .iter()
+            .filter(|provider| {
+                provider
+                    .url
+                    .to_ascii_lowercase()
+                    .contains("api.deepseek.com")
+            })
+            .max_by_key(|provider| provider.active);
+        return match deepseek {
+            Some(provider) => (
+                provider.id.clone(),
+                provider.name.clone(),
+                reported
+                    .map(str::to_string)
+                    .unwrap_or_else(|| provider.model.clone()),
+            ),
+            None => (
+                String::new(),
+                "DeepSeek".to_string(),
+                reported.unwrap_or("").to_string(),
+            ),
+        };
+    }
+    let pinned = provider_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .and_then(|id| providers.iter().find(|provider| provider.id == id));
+    let chosen = pinned.or_else(|| providers.iter().find(|provider| provider.active));
+    match chosen {
+        Some(provider) => (
+            provider.id.clone(),
+            provider.name.clone(),
+            reported
+                .map(str::to_string)
+                .unwrap_or_else(|| provider.model.clone()),
+        ),
+        None => (
+            String::new(),
+            String::new(),
+            reported.unwrap_or("").to_string(),
+        ),
+    }
+}
+
+fn resolve_billed_service(
+    runtime: &str,
+    provider_id: Option<&str>,
+    reported_model: Option<&str>,
+) -> (String, String, String) {
+    let status = crate::setup::load_mode_status().ok();
+    let team_label = status.as_ref().and_then(|status| {
+        (status.mode == crate::setup::MODE_TEAM).then(|| {
+            status
+                .active_label
+                .clone()
+                .unwrap_or_else(|| "team".to_string())
         })
+    });
+    let providers = crate::setup::list_personal_providers()
+        .map(|doc| doc.providers)
         .unwrap_or_default();
-    (
-        status.personal_active_id.unwrap_or_default(),
-        status.personal_active_name.unwrap_or_default(),
-        model,
+    billed_service(
+        runtime,
+        provider_id,
+        reported_model,
+        team_label.as_deref(),
+        crate::setup::is_native_subscription(runtime),
+        &providers,
     )
 }
 
-/// Store one finished turn. `model` is what the runtime said it used, if it said.
-pub fn record_turn(runtime: &str, model: Option<&str>, usage: &TokenUsage) -> Result<()> {
+/// Store one finished turn.
+///
+/// `provider_id` is the saved service this chat used. Empty means the checked
+/// one. `model` is what the runtime reported, or the model this chat selected.
+pub fn record_turn(
+    runtime: &str,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    usage: &TokenUsage,
+) -> Result<()> {
     if usage.is_empty() {
         return Ok(());
     }
     let path = usage_db_path().context("could not resolve agent-doctor config dir")?;
-    let (provider_id, provider, saved_model) = active_service();
-    let model = model
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-        .map(str::to_string)
-        .unwrap_or(saved_model);
+    let (provider_id, provider, model) = resolve_billed_service(runtime, provider_id, model);
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -445,6 +530,150 @@ mod tests {
         assert_eq!(
             (rows[0].provider_id.as_str(), rows[0].provider.as_str()),
             ("", "GLM")
+        );
+    }
+
+    fn provider(
+        id: &str,
+        name: &str,
+        url: &str,
+        model: &str,
+        active: bool,
+    ) -> crate::setup::PersonalProviderListItem {
+        crate::setup::PersonalProviderListItem {
+            id: id.into(),
+            name: name.into(),
+            url: url.into(),
+            model: model.into(),
+            protocol: "openai".into(),
+            api_key_hint: String::new(),
+            active,
+        }
+    }
+
+    #[test]
+    fn counts_a_chat_under_the_service_it_used() {
+        let providers = vec![
+            provider(
+                "glm",
+                "GLM",
+                "https://open.bigmodel.cn/api/paas/v4",
+                "glm-5.3",
+                true,
+            ),
+            provider(
+                "ds",
+                "DeepSeek",
+                "https://api.deepseek.com/v1",
+                "deepseek-v4-flash",
+                false,
+            ),
+        ];
+
+        let (id, name, model) = billed_service(
+            "claude-code",
+            Some("ds"),
+            Some("deepseek-v4-flash"),
+            None,
+            false,
+            &providers,
+        );
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("ds", "DeepSeek", "deepseek-v4-flash")
+        );
+
+        // Codex often omits the model. The chat's choice still wins over the checked GLM model.
+        let (id, name, model) = billed_service(
+            "codex",
+            Some("ds"),
+            Some("deepseek-v4-pro"),
+            None,
+            false,
+            &providers,
+        );
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("ds", "DeepSeek", "deepseek-v4-pro")
+        );
+
+        let (id, name, model) = billed_service("claude-code", None, None, None, false, &providers);
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("glm", "GLM", "glm-5.3")
+        );
+    }
+
+    #[test]
+    fn deepseek_harness_is_not_billed_to_the_checked_service() {
+        let providers = vec![
+            provider(
+                "glm",
+                "GLM",
+                "https://open.bigmodel.cn/api/paas/v4",
+                "glm-5.3",
+                true,
+            ),
+            provider(
+                "ds",
+                "DeepSeek",
+                "https://api.deepseek.com/v1",
+                "deepseek-v4-flash",
+                false,
+            ),
+        ];
+        let (id, name, model) = billed_service(
+            crate::DEEPSEEK_HARNESS_RUNTIME_ID,
+            Some("glm"),
+            None,
+            None,
+            false,
+            &providers,
+        );
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("ds", "DeepSeek", "deepseek-v4-flash")
+        );
+
+        let (id, name, model) = billed_service(
+            crate::DEEPSEEK_HARNESS_RUNTIME_ID,
+            None,
+            None,
+            None,
+            false,
+            &[providers[0].clone()],
+        );
+        assert_eq!((id.as_str(), name.as_str()), ("", "DeepSeek"));
+        assert!(model.is_empty());
+    }
+
+    #[test]
+    fn subscription_and_team_are_not_the_checked_service() {
+        let providers = vec![provider(
+            "glm",
+            "GLM",
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-5.3",
+            true,
+        )];
+        let (id, name, model) = billed_service(
+            "codex",
+            Some("glm"),
+            Some("gpt-5.6-sol"),
+            None,
+            true,
+            &providers,
+        );
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("", "ChatGPT", "gpt-5.6-sol")
+        );
+
+        let (id, name, model) =
+            billed_service("claude-code", None, None, Some("公司"), false, &providers);
+        assert_eq!(
+            (id.as_str(), name.as_str(), model.as_str()),
+            ("", "公司", "")
         );
     }
 }

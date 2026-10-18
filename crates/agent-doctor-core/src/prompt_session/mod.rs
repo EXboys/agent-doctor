@@ -318,7 +318,20 @@ where
     if !used.is_empty() {
         report.usage = Some(used);
         if !cfg!(test) {
-            let _ = crate::usage::record_turn(&runtime, used_model.as_deref(), &used);
+            // DeepSeek Harness ignores the chat's saved model and talks only to
+            // DeepSeek. A GLM model left on the chat must not be written down.
+            let harness = runtime == crate::DEEPSEEK_HARNESS_RUNTIME_ID;
+            let model = if harness {
+                used_model.as_deref()
+            } else {
+                used_model.as_deref().or(options.model.as_deref())
+            };
+            let provider_id = if harness {
+                None
+            } else {
+                options.provider_id.as_deref()
+            };
+            let _ = crate::usage::record_turn(&runtime, provider_id, model, &used);
         }
     }
     Ok(report)
