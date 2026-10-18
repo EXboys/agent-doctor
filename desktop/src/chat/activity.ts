@@ -324,7 +324,7 @@ export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTM
 
 function rowFace(row: HTMLElement): string {
   const name = row.querySelector(".chat-tool-name")?.textContent ?? "";
-  const preview = row.querySelector(".chat-tool-preview");
+  const preview = row.querySelector<HTMLElement>(".chat-tool-preview");
   const shown = preview && !preview.hidden ? (preview.textContent ?? "") : "";
   const failed = row.classList.contains("is-failed") ? "failed" : "";
   const live = row.classList.contains("is-live") ? "live" : "";
