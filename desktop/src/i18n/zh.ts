@@ -538,6 +538,8 @@ export const zh = {
     "chat.filesTreeHideHint": "先只看这个文件",
     "chat.filesTreeShow": "展开文件夹",
     "chat.filesTreeShowHint": "把文件夹列表显示在右边",
+    "chat.imageZoom": "点一下看大图",
+    "chat.imageClose": "关闭",
     "chat.filesPickOne": "从右边选择一个文件，打开后直接修改",
     "chat.filesPickOneFolded": "文件夹列表已收起。点右边的箭头再打开。",
     "chat.sessions": "会话记录",

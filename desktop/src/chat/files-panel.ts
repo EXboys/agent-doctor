@@ -775,6 +775,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
       if (img) {
         if (file.isImage) {
           img.alt = file.name;
+          img.title = t("chat.imageZoom");
           img.src = convertFileSrc(file.absolutePath);
         } else {
           img.removeAttribute("src");

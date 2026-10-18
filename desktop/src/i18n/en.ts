@@ -538,6 +538,8 @@ export const en = {
     "chat.filesTreeHideHint": "Look at this file only",
     "chat.filesTreeShow": "Show folders",
     "chat.filesTreeShowHint": "Show the folder list on the right",
+    "chat.imageZoom": "Tap to see it larger",
+    "chat.imageClose": "Close",
     "chat.filesPickOne": "Pick a file on the right. You can change it right away",
     "chat.filesPickOneFolded": "The folder list is hidden. Tap the arrow on the right to open it.",
     "chat.sessions": "Chats",

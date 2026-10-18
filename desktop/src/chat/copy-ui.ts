@@ -226,7 +226,7 @@ export function renderAttachmentStrip(attachments: ChatAttachment[] | undefined)
       img.className = "chat-bubble-attachment-image";
       img.src = convertFileSrc(item.path);
       img.alt = item.name;
-      img.title = item.path;
+      img.title = t("chat.imageZoom");
       strip.appendChild(img);
     } else {
       const chip = document.createElement("span");

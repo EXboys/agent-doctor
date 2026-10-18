@@ -4908,6 +4908,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   line-height: 1.7;
 }
 
+.chat-files-rendered-doc img {
+  max-width: 100%;
+  cursor: zoom-in;
+}
+
 .chat-files-rendered.is-html .chat-files-rendered-frame {
   flex: 1;
   min-height: 0;
@@ -5120,6 +5125,43 @@ html[data-theme="dark"] .chat-files-inline[data-kind="delete"] {
   max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.chat-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px 24px;
+  background: rgba(8, 10, 14, 0.72);
+}
+
+.chat-image-lightbox[hidden] {
+  display: none;
+}
+
+.chat-image-lightbox img {
+  max-width: min(92vw, 1200px);
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  background: #111;
+}
+
+.chat-image-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(20, 22, 28, 0.9);
+  color: #fff;
+  font-size: 0.82rem;
+  cursor: pointer;
 }
 
 .chat-files-sheet {
@@ -7882,6 +7924,7 @@ html[data-theme="dark"] .chat-hands-notice {
   object-fit: contain;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.04);
+  cursor: zoom-in;
 }
 
 .chat-bubble-attach {

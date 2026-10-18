@@ -1,4 +1,5 @@
 import { fitTextarea } from "./fit-textarea";
+import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
 import { HAND_MISSING_PHASE } from "./chat/format";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
@@ -1128,6 +1129,7 @@ export function showBootFailure(error: unknown): void {
   }
 }
 
+installImageLightbox();
 initChatStore();
 
 try {
