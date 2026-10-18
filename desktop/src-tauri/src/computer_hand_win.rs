@@ -27,8 +27,8 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
-    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE,
+    PIPE_UNLIMITED_INSTANCES,
 };
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken,
@@ -88,10 +88,10 @@ fn serve() -> Result<()> {
             CreateNamedPipeW(
                 &name,
                 FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
-                // 8 is PIPE_REJECT_REMOTE_CLIENTS. It belongs here.
-                // On the open mode, some Windows builds reject the pipe, so the
-                // tool hears "file not found". Builds that ignore the bit still work.
-                PIPE_TYPE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
+                // Do not set PIPE_REJECT_REMOTE_CLIENTS. On some Windows PCs the
+                // tool is treated as a remote client, and then the pipe is hidden:
+                // the tool hears "系统找不到指定的文件".
+                PIPE_TYPE_BYTE,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,

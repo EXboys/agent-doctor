@@ -411,18 +411,31 @@ fn ask_hand_windows(line: &str) -> Result<String> {
     use windows::Win32::System::Pipes::PeekNamedPipe;
 
     let name = HSTRING::from(agent_doctor_core::COMPUTER_HAND_PIPE);
-    let pipe = unsafe {
-        CreateFileW(
-            &name,
-            GENERIC_READ.0 | GENERIC_WRITE.0,
-            FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0),
-            None,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            HANDLE::default(),
-        )
+    // The desktop app opens this pipe as it starts. A cold start can miss the first try.
+    let mut pipe = None;
+    for attempt in 0..8 {
+        match unsafe {
+            CreateFileW(
+                &name,
+                GENERIC_READ.0 | GENERIC_WRITE.0,
+                FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0),
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                HANDLE::default(),
+            )
+        } {
+            Ok(handle) => {
+                pipe = Some(handle);
+                break;
+            }
+            Err(_) if attempt + 1 < 8 => std::thread::sleep(Duration::from_millis(200)),
+            Err(_) => break,
+        }
     }
-    .map_err(|_| anyhow::anyhow!("操作这台电脑还没连上。请确认 Agent Doctor 开着，再试一次。"))?;
+    let pipe = pipe.ok_or_else(|| {
+        anyhow::anyhow!("操作这台电脑还没连上。请确认 Agent Doctor 开着，再试一次。")
+    })?;
     let body = format!("{line}\n");
     let mut written = 0u32;
     let wrote = unsafe { WriteFile(pipe, Some(body.as_bytes()), Some(&mut written), None) };
