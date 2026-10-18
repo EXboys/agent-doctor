@@ -1152,6 +1152,27 @@ export class AskMentionMenuController {
     this.setSlashTab(next);
   }
 
+  /** The book button closes the list and takes the `/` back out of the box. */
+  closeSkillPicker(): void {
+    this.clearSlashTrigger();
+    this.hideMentionMenu();
+  }
+
+  private clearSlashTrigger(): void {
+    const query = this.mentionQuery;
+    if (!query || query.trigger !== "slash") return;
+    const el = this.dom.promptEl;
+    const value = el.value;
+    let start = query.start;
+    if (start > 0 && value[start - 1] === " " && (start < 2 || !/\s/.test(value[start - 2] ?? ""))) {
+      start -= 1;
+    }
+    const end = Math.min(query.end, value.length);
+    el.value = value.slice(0, start) + value.slice(end);
+    el.setSelectionRange(start, start);
+    this.autoResizePrompt();
+  }
+
   /** Open the same list as typing `/`: skills, knowledge, then tools. */
   openSkillPicker(): void {
     const el = this.dom.promptEl;

@@ -291,7 +291,7 @@ export function bootChat(): void {
     event.preventDefault();
     event.stopPropagation();
     if (mentionMenu.isSlashMenuOpen()) {
-      mentionMenu.hideMentionMenu();
+      mentionMenu.closeSkillPicker();
       return;
     }
     mentionMenu.openSkillPicker();

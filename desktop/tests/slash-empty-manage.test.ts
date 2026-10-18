@@ -172,6 +172,21 @@ assert(knowledgeButton?.textContent === t("chat.slashManageKnowledge"), "knowled
 knowledgeButton?.click();
 assert(opened.join() === "skill,knowledge", "knowledge button opens the knowledge page");
 
+value = "";
+caret = 0;
+mentionMenu.openSkillPicker();
+assert(value === "/", "the book puts a slash in an empty box");
+mentionMenu.closeSkillPicker();
+assert(value === "", "closing the book takes that slash back out");
+assert(menu.hidden === true, "closing the book hides the list");
+
+value = "你好";
+caret = 2;
+mentionMenu.openSkillPicker();
+assert(value === "你好 /", "the book adds a slash after existing text");
+mentionMenu.closeSkillPicker();
+assert(value === "你好", "closing the book restores the text");
+
 value = "/zzzz";
 caret = 5;
 mentionMenu.setSlashTab("mcp");
