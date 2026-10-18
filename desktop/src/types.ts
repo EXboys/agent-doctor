@@ -453,6 +453,8 @@ export interface NativeAccountRow {
   reachable: boolean;
   visible: boolean;
   provider_name: string;
+  /** Models this signed-in account listed. Empty until that list arrives. */
+  models: string[];
 }
 
 export interface NativeAccountStatus {

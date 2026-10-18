@@ -72,7 +72,67 @@ fn run_claude(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    let overlay = collect_overlay_env_for_options(options);
+    let mut overlay = collect_overlay_env_for_options(options);
+    if crate::setup::is_native_subscription("claude-code") {
+        let prepared = (|| -> Result<()> {
+            let list = crate::setup::ensure_account_models("claude-code")?;
+            let chosen = list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str));
+            crate::setup::merge::repair_claude_subscription_configs(
+                &cwd,
+                chosen.as_deref(),
+                &list.models,
+            )?;
+            if let Some(id) = chosen {
+                overlay.insert(crate::setup::MODEL_ENV.to_string(), id);
+            } else {
+                overlay.remove(crate::setup::MODEL_ENV);
+            }
+            Ok(())
+        })();
+        if let Err(error) = prepared {
+            let raw = format!("{error:#}");
+            let message = if raw.contains("模型名单") {
+                "这个账号的模型名单没取到，这一轮没有发出去。再发一次试试。"
+            } else {
+                "这个账号的设置没改成，这一轮没有发出去。再发一次试试。"
+            };
+            on_event(PromptSessionEvent::Started {
+                session_id: session_id.clone(),
+                runtime: runtime.clone(),
+                cwd: cwd.display().to_string(),
+                command: String::new(),
+                client_run_id: String::new(),
+            });
+            on_event(PromptSessionEvent::TurnError {
+                session_id: session_id.clone(),
+                message: message.to_string(),
+                plain: true,
+            });
+            on_event(PromptSessionEvent::StderrLine {
+                session_id: session_id.clone(),
+                line: format!("{error:#}"),
+            });
+            on_event(PromptSessionEvent::Completed {
+                session_id: session_id.clone(),
+                status: PromptSessionStatus::Failed,
+                exit_code: None,
+                summary: message.to_string(),
+                timeout: None,
+            });
+            return Ok(PromptSessionReport {
+                usage: None,
+                session_id,
+                runtime,
+                cwd: cwd.display().to_string(),
+                status: PromptSessionStatus::Failed,
+                exit_code: None,
+                summary: message.to_string(),
+                log_excerpt: message.to_string(),
+                duration_ms: 0,
+                runtime_thread_id: None,
+            });
+        }
+    }
     let hands = wire_hands("claude-code", options, &cwd, &overlay, |phase, message| {
         on_event(PromptSessionEvent::Status {
             session_id: session_id.clone(),

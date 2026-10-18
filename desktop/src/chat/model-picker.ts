@@ -2,8 +2,8 @@
 import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
-import { nativeAccountStatus } from "../ipc";
-import { modelsForPresetId, modelsForProviderUrl, providerChipForUrl } from "../provider-models";
+import { nativeAccountStatus, refreshSubscriptionModels } from "../ipc";
+import { modelsForProviderUrl, providerChipForUrl } from "../provider-models";
 import type {
   NativeAccountRow,
   PersonalProviderListItem,
@@ -46,22 +46,22 @@ type SubscriptionCatalog = {
 
 export function createModelPickerController(deps: ModelPickerDeps) {
   let nativeRows: NativeAccountRow[] = [];
+  let modelListTriedAt = 0;
 
   function subscriptionCatalog(): SubscriptionCatalog | null {
     const runtime = deps.selectedRuntime();
     if (runtime !== "codex" && runtime !== "claude-code") return null;
     const row = nativeRows.find((item) => item.runtime_id === runtime);
     if (!row?.using_subscription) return null;
-    const models = modelsForPresetId(runtime === "codex" ? "openai" : "anthropic");
-    if (models.length === 0) return null;
     return {
-      models,
+      models: row.models ?? [],
       label: runtime === "codex" ? t("native.chatgpt") : t("native.claude"),
     };
   }
 
   /** Keep this chat on an account model, and drop a saved service so the next message cannot use it. */
   function alignSubscriptionSession(catalog: SubscriptionCatalog): string {
+    if (catalog.models.length === 0) return "";
     const session = deps.activeSession();
     const current = session?.model?.trim() ?? "";
     const model = catalog.models.includes(current) ? current : catalog.models[0];
@@ -126,7 +126,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const catalog = subscriptionCatalog();
     if (catalog) {
       const model = alignSubscriptionSession(catalog);
-      deps.modelLabelEl.textContent = model;
+      deps.modelLabelEl.textContent = model || t("chat.modelListMissing");
       deps.modelBtnEl.disabled = deps.isComposerLocked();
       deps.modelBtnEl.title = t("chat.modelSubscriptionHint");
       deps.modelBtnEl.setAttribute("aria-label", model);
@@ -156,6 +156,13 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   }
 
   function renderSubscriptionMenu(catalog: SubscriptionCatalog): void {
+    if (catalog.models.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "chat-model-menu-hint";
+      hint.textContent = t("chat.modelListMissing");
+      deps.modelMenuEl.appendChild(hint);
+      return;
+    }
     const model = alignSubscriptionSession(catalog);
     const group = document.createElement("div");
     group.className = "chat-model-group";
@@ -237,6 +244,26 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
   function openModelMenu(): void {
     if (deps.modelBtnEl.disabled || deps.isComposerLocked()) return;
+    const catalog = subscriptionCatalog();
+    if (catalog && Date.now() - modelListTriedAt > 15000) {
+      modelListTriedAt = Date.now();
+      const runtime = deps.selectedRuntime();
+      void refreshSubscriptionModels(runtime)
+        .then(async () => {
+          const again = await nativeAccountStatus(false);
+          nativeRows = again.rows;
+          renderModelPickerLabel();
+          if (deps.getModelMenuOpen()) {
+            renderModelMenu();
+            positionModelMenu();
+          }
+        })
+        .catch(() => {
+          if ((subscriptionCatalog()?.models.length ?? 0) === 0) {
+            deps.setStatus(t("chat.modelListMissing"), "warn");
+          }
+        });
+    }
     renderModelMenu();
     deps.setModelMenuOpen(true);
     deps.modelMenuEl.hidden = false;
@@ -261,6 +288,17 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         nativeAccountStatus(false).catch(() => null),
       ]);
       if (accounts) nativeRows = accounts.rows;
+      const missing = nativeRows.filter(
+        (row) => row.using_subscription && (row.models ?? []).length === 0,
+      );
+      if (missing.length > 0 && Date.now() - modelListTriedAt > 15000) {
+        modelListTriedAt = Date.now();
+        await Promise.all(
+          missing.map((row) => refreshSubscriptionModels(row.runtime_id).catch(() => [])),
+        );
+        const again = await nativeAccountStatus(false).catch(() => null);
+        if (again) nativeRows = again.rows;
+      }
       deps.setProviders(doc.providers);
       const active =
         doc.providers.find((p) => p.active) ||

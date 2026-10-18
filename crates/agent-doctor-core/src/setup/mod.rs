@@ -1,3 +1,4 @@
+mod account_models;
 mod coding_plan;
 pub(crate) mod merge;
 mod mode;
@@ -6,6 +7,10 @@ mod personal;
 mod pipeline;
 mod zhipu;
 
+pub use account_models::{
+    account_model_allowed, ensure_account_models, load_account_models, refresh_account_models,
+    AccountModelList,
+};
 pub use merge::{
     apply_claude_code, apply_claude_code_with_model, apply_codex_slot, apply_hermes_slot,
     apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth,

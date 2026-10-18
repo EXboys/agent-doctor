@@ -13,8 +13,8 @@ use crate::profile::{
 #[cfg(windows)]
 use crate::setup::anthropic_gateway_url_from_evotown_base;
 use crate::setup::merge::{
-    apply_codex_slot, codex_slot_display_name, codex_slot_env_key, CODEX_PERSONAL_SLOT,
-    CODEX_TEAM_SLOT,
+    align_codex_subscription_configs, apply_codex_slot, codex_slot_display_name,
+    codex_slot_env_key, codex_subscription_config_paths, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
 };
 use crate::setup::{
     clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth, COMPANY_API_KEY_ENV,
@@ -29,6 +29,14 @@ pub(crate) fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSession
     // not enough — Codex 0.14x still routes via model_provider / openai_base_url in config.toml,
     // and without that it silently hits api.openai.com (401 with company keys).
     // Prefer isolated workspace CODEX_HOME when active (avoid project-local deny on ~/.codex).
+    if crate::setup::is_native_subscription("codex") {
+        let list = crate::setup::ensure_account_models("codex")?;
+        align_codex_subscription_configs(
+            &codex_subscription_config_paths(None, cwd),
+            None,
+            &list.models,
+        )?;
+    }
     let launch = if crate::setup::is_native_subscription("codex") {
         None
     } else {

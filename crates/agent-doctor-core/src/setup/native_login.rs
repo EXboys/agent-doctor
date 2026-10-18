@@ -15,13 +15,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::adapters::util::{discover_binary, home_join};
 use crate::edition::ensure_edition_allows_mode;
 use crate::setup::merge::{
-    align_codex_subscription_model, apply_codex_slot, clear_codex_chatgpt_auth_for_gateway,
-    strip_codex_project_denied_provider_keys, CODEX_PERSONAL_SLOT,
+    align_codex_subscription_configs, apply_codex_slot, clear_codex_chatgpt_auth_for_gateway,
+    known_claude_subscription_dirs, known_codex_subscription_config_paths,
+    repair_claude_subscription_configs, strip_codex_project_denied_provider_keys,
+    CODEX_PERSONAL_SLOT,
 };
 use crate::setup::{
     anthropic_gateway_for_provider_url, apply_claude_code_with_model, backup_file,
@@ -44,6 +46,9 @@ pub struct NativeAccountRow {
     pub reachable: bool,
     pub visible: bool,
     pub provider_name: String,
+    /// Models this signed-in account listed. Empty until that list arrives.
+    #[serde(default)]
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,7 +95,7 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
         restore_codex_auth();
     }
     if logged_in(runtime_id) {
-        release_provider_override(runtime_id)?;
+        finish_subscription(runtime_id)?;
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
         if runtime_id == CODEX_ID {
             publish_codex_subscription_auth(None);
@@ -110,7 +115,7 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     if !logged_in(runtime_id) {
         return Ok(switch(runtime_id, false, "login_incomplete", provider_name));
     }
-    release_provider_override(runtime_id)?;
+    finish_subscription(runtime_id)?;
     write_mode(runtime_id, MODE_SUBSCRIPTION)?;
     if runtime_id == CODEX_ID {
         publish_codex_subscription_auth(None);
@@ -194,7 +199,19 @@ fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountR
         reachable,
         visible: account_row_visible(using, reachable, installed),
         provider_name: provider_name.to_string(),
+        models: if using {
+            crate::setup::load_account_models(runtime_id)
+                .map(|list| list.models)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        },
     }
+}
+
+fn finish_subscription(runtime_id: &str) -> Result<()> {
+    let models = crate::setup::refresh_account_models(runtime_id).ok();
+    release_provider_override(runtime_id, models.as_ref())
 }
 
 fn known_runtime(runtime_id: &str) -> Result<&'static str> {
@@ -300,29 +317,37 @@ pub(crate) fn account_row_visible(
     using_subscription || (reachable && installed)
 }
 
-fn release_provider_override(runtime_id: &str) -> Result<()> {
+fn release_provider_override(
+    runtime_id: &str,
+    models: Option<&crate::setup::AccountModelList>,
+) -> Result<()> {
+    let allowed = models.map(|list| list.models.as_slice()).unwrap_or(&[]);
     if runtime_id == CODEX_ID {
-        for path in codex_config_paths() {
+        let paths = known_codex_subscription_config_paths();
+        for path in &paths {
             if path.exists() {
-                let _ = backup_file(&path)?;
-                let _ = strip_codex_project_denied_provider_keys(&path);
-                let _ = align_codex_subscription_model(&path, None);
+                let _ = backup_file(path)?;
+                let _ = strip_codex_project_denied_provider_keys(path);
             }
         }
+        // A model the account listed stays. Anything else is removed.
+        align_codex_subscription_configs(&paths, None, allowed)?;
         return Ok(());
     }
-    let path = home_join(".claude/settings.json");
-    if !path.exists() {
-        return Ok(());
+    for dir in known_claude_subscription_dirs() {
+        for path in crate::setup::merge::claude_subscription_settings_paths(&dir) {
+            if path.exists() {
+                let _ = backup_file(&path)?;
+            }
+        }
+        // A settings file that cannot be read is left as it is. Sending later
+        // stops instead of replacing it with an empty file.
+        repair_claude_subscription_configs(&dir, None, allowed)?;
     }
-    let _ = backup_file(&path)?;
-    let raw = fs::read_to_string(&path)?;
-    let mut root = serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| json!({}));
-    strip_claude_provider_keys(&mut root);
-    fs::write(&path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn strip_claude_provider_keys(root: &mut Value) {
     let Some(object) = root.as_object_mut() else {
         return;
@@ -335,33 +360,9 @@ pub(crate) fn strip_claude_provider_keys(root: &mut Value) {
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_SMALL_FAST_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        "CLAUDE_CODE_SUBAGENT_MODEL",
     ] {
         env.remove(key);
     }
-}
-
-fn codex_config_paths() -> Vec<PathBuf> {
-    let mut paths = vec![home_join(".codex/config.toml")];
-    if let Some(isolated) = crate::workspace::load_workspaces().ok().and_then(|doc| {
-        let active = doc.active.as_deref()?;
-        let entry = doc.workspaces.get(active)?;
-        let global = home_join(".codex");
-        if !entry.codex_home.exists()
-            || crate::workspace::path::paths_equal(&entry.codex_home, &global)
-        {
-            return None;
-        }
-        Some(entry.codex_home.join("config.toml"))
-    }) {
-        paths.push(isolated);
-    }
-    paths
 }
 
 fn stash_path() -> Option<PathBuf> {
@@ -561,6 +562,7 @@ fn host_reachable(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn chatgpt_login_is_not_an_empty_api_key() {
@@ -633,7 +635,7 @@ mod tests {
             "env": {
                 "ANTHROPIC_API_KEY": "sk",
                 "ANTHROPIC_BASE_URL": "https://api.example/anthropic",
-                "ANTHROPIC_MODEL": "mini",
+                "ANTHROPIC_MODEL": "claude-sonnet-5",
                 "OTHER": "keep"
             }
         });
@@ -641,7 +643,7 @@ mod tests {
         assert!(root.get("anthropicBaseUrl").is_none());
         assert_eq!(root["theme"], "dark");
         assert!(root["env"].get("ANTHROPIC_API_KEY").is_none());
-        assert!(root["env"].get("ANTHROPIC_MODEL").is_none());
+        assert_eq!(root["env"]["ANTHROPIC_MODEL"], "claude-sonnet-5");
         assert_eq!(root["env"]["OTHER"], "keep");
     }
 

@@ -326,6 +326,10 @@ export function nativeAccountStatus(probe: boolean): Promise<NativeAccountStatus
   return invoke("native_account_status_command", { probe });
 }
 
+export function refreshSubscriptionModels(runtimeId: string): Promise<string[]> {
+  return invoke("refresh_subscription_models_command", { runtimeId });
+}
+
 export function useNativeSubscription(runtimeId: string): Promise<NativeAccountSwitch> {
   return invoke("use_native_subscription_command", { runtimeId });
 }

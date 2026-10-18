@@ -89,18 +89,57 @@ const CODEX_PROJECT_DENIED_PROVIDER_KEYS: &[&str] = &[
     "model_providers",
 ];
 
-/// ChatGPT login rejects ids that belong to another vendor.
-pub fn codex_account_rejects_model(model: &str) -> bool {
-    let model = model.trim().to_ascii_lowercase();
-    if model.is_empty() {
-        return false;
+/// User config, every saved project, and an isolated Codex home.
+pub fn known_codex_subscription_config_paths() -> Vec<std::path::PathBuf> {
+    let home = home_join("");
+    let mut paths = codex_subscription_config_paths(None, &home);
+    if let Ok(doc) = crate::workspace::load_workspaces() {
+        for entry in doc.workspaces.values() {
+            paths.extend(codex_subscription_config_paths(
+                Some(&entry.codex_home),
+                &entry.path,
+            ));
+        }
     }
-    [
-        "glm", "deepseek", "qwen", "kimi", "moonshot", "minimax", "doubao", "claude", "gemini",
-        "ernie",
-    ]
-    .iter()
-    .any(|prefix| model.starts_with(prefix))
+    let mut unique = Vec::new();
+    for path in paths {
+        let key = path.canonicalize().unwrap_or(path);
+        if unique.iter().any(|seen: &std::path::PathBuf| seen == &key) {
+            continue;
+        }
+        unique.push(key);
+    }
+    unique
+}
+
+/// Every `config.toml` this turn's Codex can load: the user file, the project
+/// file, and an isolated `CODEX_HOME`.
+pub fn codex_subscription_config_paths(
+    codex_home: Option<&std::path::Path>,
+    cwd: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![
+        home_join(".codex/config.toml"),
+        cwd.join(".codex").join("config.toml"),
+    ];
+    if let Some(home) = codex_home {
+        paths.push(home.join("config.toml"));
+    }
+    if let Some(home) = std::env::var_os("CODEX_HOME") {
+        let home = std::path::PathBuf::from(home);
+        if !home.as_os_str().is_empty() {
+            paths.push(home.join("config.toml"));
+        }
+    }
+    let mut unique = Vec::new();
+    for path in paths {
+        let key = path.canonicalize().unwrap_or(path.clone());
+        if unique.iter().any(|seen: &std::path::PathBuf| seen == &key) {
+            continue;
+        }
+        unique.push(key);
+    }
+    unique
 }
 
 /// Make the account's config model match this chat.
@@ -112,41 +151,141 @@ pub fn codex_account_rejects_model(model: &str) -> bool {
 pub fn align_codex_subscription_model(
     path: &std::path::Path,
     chosen: Option<&str>,
+    allowed: &[String],
 ) -> AnyhowResult<bool> {
-    if !path.exists() {
+    if allowed.is_empty() || !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
-    let mut doc = raw
-        .parse::<toml_edit::DocumentMut>()
-        .unwrap_or_else(|_| toml_edit::DocumentMut::new());
-    let current = doc
-        .get("model")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut doc = raw.parse::<toml_edit::DocumentMut>().with_context(|| {
+        format!(
+            "Codex config could not be read, so this turn was not sent: {}",
+            path.display()
+        )
+    })?;
     let chosen = chosen
         .map(str::trim)
-        .filter(|id| !id.is_empty() && !codex_account_rejects_model(id));
-    let next = if let Some(chosen) = chosen {
-        if current == chosen {
-            return Ok(false);
-        }
-        Some(chosen.to_string())
-    } else if codex_account_rejects_model(&current) {
-        None
-    } else {
-        return Ok(false);
-    };
-    match next {
-        Some(id) => doc["model"] = toml_edit::value(id),
-        None => {
-            doc.remove("model");
+        .filter(|id| crate::setup::account_model_allowed(allowed, id));
+    let mut changed = false;
+    scrub_model_keys(doc.as_table_mut(), chosen, allowed, &mut changed);
+    if let Some(chosen) = chosen {
+        let current = doc
+            .get("model")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim();
+        if current != chosen {
+            doc["model"] = toml_edit::value(chosen);
+            changed = true;
         }
     }
-    fs::write(path, doc.to_string())?;
+    if !changed {
+        return Ok(false);
+    }
+    fs::write(path, doc.to_string())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
+}
+
+/// Align every config this turn can load. A file that still holds another
+/// service's model, and cannot be rewritten, stops the turn.
+pub fn align_codex_subscription_configs(
+    paths: &[std::path::PathBuf],
+    chosen: Option<&str>,
+    allowed: &[String],
+) -> AnyhowResult<()> {
+    for path in paths {
+        align_codex_subscription_model(path, chosen, allowed)?;
+    }
+    Ok(())
+}
+
+fn scrub_model_keys(
+    table: &mut toml_edit::Table,
+    chosen: Option<&str>,
+    allowed: &[String],
+    changed: &mut bool,
+) {
+    let keys: Vec<String> = table.iter().map(|(key, _)| key.to_string()).collect();
+    for key in keys {
+        if key == "model" {
+            let current = table
+                .get(&key)
+                .and_then(|item| item.as_str())
+                .unwrap_or("")
+                .to_string();
+            if crate::setup::account_model_allowed(allowed, &current) {
+                continue;
+            }
+            match chosen {
+                Some(id) => table[&key] = toml_edit::value(id),
+                None => {
+                    table.remove(&key);
+                }
+            }
+            *changed = true;
+            continue;
+        }
+        if let Some(child) = table.get_mut(&key) {
+            scrub_model_item(child, chosen, allowed, changed);
+        }
+    }
+}
+
+fn scrub_model_item(
+    item: &mut toml_edit::Item,
+    chosen: Option<&str>,
+    allowed: &[String],
+    changed: &mut bool,
+) {
+    match item {
+        toml_edit::Item::Table(table) => scrub_model_keys(table, chosen, allowed, changed),
+        toml_edit::Item::ArrayOfTables(tables) => {
+            for table in tables.iter_mut() {
+                scrub_model_keys(table, chosen, allowed, changed);
+            }
+        }
+        toml_edit::Item::Value(value) => scrub_model_value(value, chosen, allowed, changed),
+        _ => {}
+    }
+}
+
+fn scrub_model_value(
+    value: &mut toml_edit::Value,
+    chosen: Option<&str>,
+    allowed: &[String],
+    changed: &mut bool,
+) {
+    match value {
+        toml_edit::Value::InlineTable(table) => {
+            let keys: Vec<String> = table.iter().map(|(key, _)| key.to_string()).collect();
+            for key in keys {
+                if key == "model" {
+                    let current = table.get(&key).and_then(|item| item.as_str()).unwrap_or("");
+                    if !crate::setup::account_model_allowed(allowed, current) {
+                        match chosen {
+                            Some(id) => table[&key] = toml_edit::Value::from(id),
+                            None => {
+                                table.remove(&key);
+                            }
+                        }
+                        *changed = true;
+                    }
+                    continue;
+                }
+                if let Some(child) = table.get_mut(&key) {
+                    scrub_model_value(child, chosen, allowed, changed);
+                }
+            }
+        }
+        toml_edit::Value::Array(items) => {
+            for item in items.iter_mut() {
+                scrub_model_value(item, chosen, allowed, changed);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Remove provider/auth routing keys from a Codex `config.toml`.
@@ -334,21 +473,46 @@ mod codex_responses_tests {
             "model = \"glm-5.3\"\napproval_policy = \"on-request\"\n",
         )
         .unwrap();
-        assert!(align_codex_subscription_model(&path, Some("gpt-5.6-sol")).unwrap());
+        let allowed = vec!["gpt-5.6-sol".to_string(), "gpt-5.4".to_string()];
+        assert!(align_codex_subscription_model(&path, Some("gpt-5.6-sol"), &allowed).unwrap());
         let rendered = fs::read_to_string(&path).unwrap();
         assert!(rendered.contains("model = \"gpt-5.6-sol\""));
         assert!(rendered.contains("approval_policy"));
         assert!(!rendered.contains("glm-5.3"));
-        assert!(!align_codex_subscription_model(&path, Some("glm-5.3")).unwrap());
+        assert!(!align_codex_subscription_model(&path, Some("glm-5.3"), &allowed).unwrap());
         let kept = fs::read_to_string(&path).unwrap();
         assert!(kept.contains("gpt-5.6-sol"));
+
+        fs::write(
+            &path,
+            "model = \"gpt-5.6-sol\"\n[profiles.work]\nmodel = \"zhipu/glm-5.3\"\n[profiles.account]\nmodel = \"gpt-5.4\"\n",
+        )
+        .unwrap();
+        assert!(align_codex_subscription_model(&path, Some("gpt-5.6-sol"), &allowed).unwrap());
+        let profiles = fs::read_to_string(&path).unwrap();
+        assert!(profiles.contains("model = \"gpt-5.6-sol\""));
+        assert!(profiles.contains("model = \"gpt-5.4\""));
+        assert!(!profiles.contains("glm-5.3"));
+        fs::write(
+            &path,
+            "model = \"llama-3\"\napproval_policy = \"on-request\"\n",
+        )
+        .unwrap();
+        assert!(align_codex_subscription_model(&path, None, &allowed).unwrap());
+        let unknown = fs::read_to_string(&path).unwrap();
+        assert!(!unknown.contains("llama-3"));
+        assert!(unknown.contains("approval_policy"));
+
+        fs::write(&path, "model = [\n").unwrap();
+        assert!(align_codex_subscription_model(&path, Some("gpt-5.6-sol"), &allowed).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "model = [\n");
 
         fs::write(
             &path,
             "model = \"glm-5.3\"\napproval_policy = \"on-request\"\n",
         )
         .unwrap();
-        assert!(align_codex_subscription_model(&path, None).unwrap());
+        assert!(align_codex_subscription_model(&path, None, &allowed).unwrap());
         let cleared = fs::read_to_string(&path).unwrap();
         assert!(!cleared.contains("model"));
         assert!(cleared.contains("approval_policy"));

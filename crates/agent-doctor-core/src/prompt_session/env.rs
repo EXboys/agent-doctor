@@ -52,25 +52,14 @@ fn apply_subscription_model(env: &mut HashMap<String, String>, runtime: &str, mo
     }
 }
 
-/// A ChatGPT or Claude login only answers for that account's own models.
-/// A saved GLM / DeepSeek id is dropped so the account can use its default.
-pub(crate) fn subscription_model_for<'a>(runtime: &str, model: Option<&'a str>) -> Option<&'a str> {
-    let model = model.map(str::trim).filter(|id| !id.is_empty())?;
-    let lower = model.to_ascii_lowercase();
-    let from_saved_service = [
-        "glm", "deepseek", "qwen", "kimi", "moonshot", "minimax", "doubao", "gemini", "ernie",
-    ]
-    .iter()
-    .any(|prefix| lower.starts_with(prefix));
-    let rejected = match runtime {
-        "codex" => from_saved_service || lower.starts_with("claude"),
-        "claude-code" => from_saved_service || lower.starts_with("gpt-"),
-        _ => false,
-    };
-    if rejected {
-        None
-    } else {
-        Some(model)
+/// A ChatGPT or Claude login only answers for models that account listed.
+/// Until the list is saved, the requested id is kept so the send path can
+/// check it after the account answers.
+pub(crate) fn subscription_model_for(runtime: &str, model: Option<&str>) -> Option<String> {
+    let model = model.map(str::trim).filter(|id| !id.is_empty());
+    match crate::setup::load_account_models(runtime) {
+        Some(list) => list.choose(model),
+        None => model.map(str::to_string),
     }
 }
 
@@ -470,26 +459,31 @@ pub(crate) fn resolve_deepseek_harness_overlay(
     }
 }
 
-pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
+pub(crate) fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> Result<()> {
     if crate::setup::is_native_subscription("codex") {
         // Login writes ~/.codex/auth.json. A project home keeps the copy it was
         // seeded with, so a later sign-in never reaches the chat until we replace it.
         let home = overlay.get("CODEX_HOME").map(PathBuf::from);
         crate::setup::publish_codex_subscription_auth(home.as_deref());
-        // The file is also the project config when the chat folder is the home
-        // directory, so a leftover `model = "glm-5.3"` beats the picker.
-        let chosen = overlay.get(MODEL_ENV).map(String::as_str);
-        let _ = crate::setup::merge::align_codex_subscription_model(
-            &crate::adapters::util::home_join(".codex/config.toml"),
-            chosen,
-        );
-        if let Some(home) = home.as_deref() {
-            let _ = crate::setup::merge::align_codex_subscription_model(
-                &home.join("config.toml"),
-                chosen,
-            );
+        let list = crate::setup::ensure_account_models("codex")?;
+        let chosen = list.choose(overlay.get(MODEL_ENV).map(String::as_str));
+        match &chosen {
+            Some(id) => {
+                overlay.insert(MODEL_ENV.to_string(), id.clone());
+            }
+            None => {
+                overlay.remove(MODEL_ENV);
+            }
         }
-        return;
+        // Project config wins over `-c`. Every file this turn can load is
+        // rewritten to a model this account listed.
+        let paths = crate::setup::merge::codex_subscription_config_paths(home.as_deref(), cwd);
+        crate::setup::merge::align_codex_subscription_configs(
+            &paths,
+            chosen.as_deref(),
+            &list.models,
+        )?;
+        return Ok(());
     }
     let _ = clear_codex_placeholder_auth();
     if let Some((url, key, model, slot)) = resolve_codex_overlay(overlay) {
@@ -513,6 +507,7 @@ pub(crate) fn prepare_codex_home(overlay: &HashMap<String, String>) {
                 crate::setup::merge::drop_unreachable_codex_mcp_servers(&home.join("config.toml"));
         }
     }
+    Ok(())
 }
 
 /// Ensure the active Hermes profile (`HERMES_HOME`) has a usable model pointer + API key.
@@ -845,10 +840,17 @@ pub(crate) fn scrub_subscription_gateway_env(cmd: &mut Command) {
 /// ChatGPT login: pass only the chosen model. A provider table would send the
 /// turn to the saved service.
 pub(crate) fn codex_subscription_model_args(model: Option<&str>) -> Vec<String> {
-    let Some(model_id) = model.map(str::trim).filter(|id| !id.is_empty()) else {
+    let Some(model_id) = subscription_model_for("codex", model) else {
         return Vec::new();
     };
-    vec!["-c".to_string(), format!("model={}", toml_string(model_id))]
+    // No saved list yet: do not pass an id the account has not confirmed.
+    if crate::setup::load_account_models("codex").is_none() {
+        return Vec::new();
+    }
+    vec![
+        "-c".to_string(),
+        format!("model={}", toml_string(&model_id)),
+    ]
 }
 
 /// `-c` overrides shared by Codex exec / app-server for company/personal gateway.
@@ -917,24 +919,34 @@ mod tests {
 
     #[test]
     fn subscription_keeps_the_account_model_and_drops_a_saved_service_id() {
+        let codex = crate::setup::AccountModelList {
+            models: vec!["gpt-5.6-sol".into(), "gpt-5.5".into()],
+            default_model: Some("gpt-5.6-sol".into()),
+        };
+        assert_eq!(codex.choose(Some("gpt-5.5")).as_deref(), Some("gpt-5.5"));
         assert_eq!(
-            subscription_model_for("codex", Some("gpt-5.6-sol")),
+            codex.choose(Some("glm-5.3")).as_deref(),
             Some("gpt-5.6-sol")
         );
-        assert_eq!(subscription_model_for("codex", Some("glm-5.3")), None);
         assert_eq!(
-            subscription_model_for("claude-code", Some("claude-sonnet-5")),
+            codex.choose(Some("zhipu/glm-5.3")).as_deref(),
+            Some("gpt-5.6-sol")
+        );
+        let claude = crate::setup::AccountModelList {
+            models: vec!["claude-sonnet-5".into(), "claude-opus-5".into()],
+            default_model: Some("claude-sonnet-5".into()),
+        };
+        assert_eq!(
+            claude.choose(Some("claude-opus-5")).as_deref(),
+            Some("claude-opus-5")
+        );
+        assert_eq!(
+            claude.choose(Some("glm-5.3")).as_deref(),
             Some("claude-sonnet-5")
         );
-        assert_eq!(subscription_model_for("claude-code", Some("glm-5.3")), None);
-    }
-
-    #[test]
-    fn subscription_codex_args_name_only_the_model() {
-        let args = codex_subscription_model_args(Some("gpt-5.6-sol"));
         assert_eq!(
-            args,
-            vec!["-c".to_string(), "model=\"gpt-5.6-sol\"".to_string()]
+            claude.choose(Some("gpt-5.6-sol")).as_deref(),
+            Some("claude-sonnet-5")
         );
         assert!(codex_subscription_model_args(Some("  ")).is_empty());
     }

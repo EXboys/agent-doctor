@@ -589,6 +589,7 @@ pub fn run() {
             token_usage_by_day_command,
             apply_personal_provider_command,
             native_account_status_command,
+            refresh_subscription_models_command,
             use_native_subscription_command,
             resign_native_subscription_command,
             use_current_service_command,

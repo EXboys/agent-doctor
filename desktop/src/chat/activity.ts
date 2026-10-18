@@ -626,7 +626,8 @@ export function createActivityController(deps: ActivityDeps) {
       explain &&
       (explain.kind === "glm_codex_url" ||
         explain.kind === "geo_blocked" ||
-        explain.kind === "session_expired") &&
+        explain.kind === "session_expired" ||
+        explain.kind === "account_model") &&
       deps.onChatConnectionFailure
     ) {
       deps.onChatConnectionFailure(explain);

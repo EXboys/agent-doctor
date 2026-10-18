@@ -64,6 +64,18 @@ where
     let id_num = id.as_u64().or_else(|| id.as_i64().map(|n| n as u64));
 
     if let Some(err) = value.get("error") {
+        if state.model_update_rpc.is_some() && state.model_update_rpc == id_num {
+            // This Codex cannot change the model on the open thread. Do not
+            // send the turn there; the caller starts a new thread instead.
+            state.model_update_rpc = None;
+            state.thread_open_error = Some(
+                err.get("message")
+                    .and_then(|message| message.as_str())
+                    .unwrap_or("model update refused")
+                    .to_string(),
+            );
+            return Ok(());
+        }
         let msg = err
             .get("message")
             .and_then(|m| m.as_str())
@@ -80,6 +92,11 @@ where
             state.turn_done = true;
         }
         return Ok(());
+    }
+
+    if state.model_update_rpc == id_num {
+        state.model_update_rpc = None;
+        return write_turn_start(control, state, on_event);
     }
 
     if state.waiting_thread == id_num {
@@ -117,6 +134,37 @@ pub(crate) fn turn_input(prompt: &str, images: &[String]) -> Value {
 
 /// Send this message as a new turn on the open thread.
 pub(crate) fn start_turn<F>(
+    control: &PromptSessionControl,
+    state: &mut PumpState,
+    on_event: &mut F,
+) -> Result<()>
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let thread_id = state.thread_id.clone().context("no open Codex thread")?;
+    if state.resumed {
+        if let Some(model) = state.account_model.clone() {
+            // A resumed thread keeps the model it was opened with. Wait until
+            // this change is accepted. A server without the method fails the
+            // open, and the caller starts a new thread on the repaired config.
+            let settings_id = next_rpc_id();
+            state.model_update_rpc = Some(settings_id);
+            state.thread_wait_started = std::time::Instant::now();
+            control.write_line(
+                &json!({
+                    "method": "thread/settings/update",
+                    "id": settings_id,
+                    "params": { "threadId": thread_id, "model": model }
+                })
+                .to_string(),
+            )?;
+            return Ok(());
+        }
+    }
+    write_turn_start(control, state, on_event)
+}
+
+fn write_turn_start<F>(
     control: &PromptSessionControl,
     state: &mut PumpState,
     on_event: &mut F,

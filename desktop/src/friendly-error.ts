@@ -257,6 +257,7 @@ export type ChatFailureKind =
   | "account_balance"
   | "rate_limit"
   | "session_expired"
+  | "account_model"
   | "provider_key"
   | "provider_url"
   | "provider_model"
@@ -318,6 +319,12 @@ function isExpiredSignIn(lower: string): boolean {
     /could not be refreshed/.test(lower) ||
     /failed to refresh token/.test(lower)
   );
+}
+
+/** The signed-in account refused the model. The id itself is not the rule. */
+function isAccountModelRejected(lower: string): boolean {
+  if (!/model is not supported/.test(lower)) return false;
+  return /chatgpt account/.test(lower) || /claude account/.test(lower);
 }
 
 function isGeoBlockedService(lower: string): boolean {
@@ -417,6 +424,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       message: t("chat.fail.macosDenied.message"),
       next: t("chat.fail.macosDenied.next"),
       actions: ["privacy"],
+    };
+  }
+
+  if (isAccountModelRejected(lower)) {
+    return {
+      kind: "account_model",
+      message: t("chat.fail.accountModel.message"),
+      next: t("chat.fail.accountModel.next"),
+      actions: ["askAgain"],
     };
   }
 

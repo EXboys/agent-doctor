@@ -39,6 +39,10 @@ pub(crate) fn open_claude_code(
     prompt: Option<&str>,
     prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
+    if crate::setup::is_native_subscription("claude-code") {
+        let list = crate::setup::ensure_account_models("claude-code")?;
+        crate::setup::merge::repair_claude_subscription_configs(cwd, None, &list.models)?;
+    }
     let refreshed = if crate::setup::is_native_subscription("claude-code") {
         None
     } else {

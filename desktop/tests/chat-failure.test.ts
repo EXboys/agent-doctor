@@ -97,6 +97,24 @@ async function main() {
   );
   assert(refresh?.kind === "session_expired", "a failed token refresh is the same expired sign-in");
 
+  const accountModel = explainChatFailure(
+    [
+      "2026-10-18T03:40:45.466165Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: Connection reset by peer (os error 54), url: wss://chatgpt.com/backend-api/codex/responses",
+      "Reconnecting... 5/5",
+      '{"detail":"The \'glm-5.3\' model is not supported when using Codex with a ChatGPT account."}',
+    ].join("\n"),
+  );
+  assert(accountModel?.kind === "account_model", "an account that rejects the model is not a dead connection");
+  assert(accountModel!.actions.length === 1 && accountModel!.actions[0] === "askAgain", "account model offers asking again");
+  assert(
+    !accountModel!.message.includes("glm") && !accountModel!.message.includes("websocket") && !accountModel!.next.includes("密钥"),
+    "account model copy hides the log and does not send the user to a key",
+  );
+  const resets = explainChatFailure(
+    "2026-10-18T03:40:45.466165Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: Connection reset by peer",
+  );
+  assert(resets?.kind === "network", "a connection reset without a model refusal stays a network failure");
+
   const unknown = explainChatFailure("unexpected status 500 Internal Server Error");
   assert(unknown?.kind === "unknown", "bare 500 stays unknown");
   assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");

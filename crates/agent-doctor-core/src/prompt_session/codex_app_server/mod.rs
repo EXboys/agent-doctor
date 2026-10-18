@@ -54,6 +54,59 @@ fn next_rpc_id() -> u64 {
     RPC_SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
+fn emit_closed_failure(
+    session_id: &str,
+    runtime: &str,
+    cwd: &std::path::Path,
+    message: &str,
+    detail: &str,
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) {
+    on_event(PromptSessionEvent::Started {
+        session_id: session_id.to_string(),
+        runtime: runtime.to_string(),
+        cwd: cwd.display().to_string(),
+        command: String::new(),
+        client_run_id: String::new(),
+    });
+    on_event(PromptSessionEvent::TurnError {
+        session_id: session_id.to_string(),
+        message: message.to_string(),
+        plain: true,
+    });
+    on_event(PromptSessionEvent::StderrLine {
+        session_id: session_id.to_string(),
+        line: detail.to_string(),
+    });
+    on_event(PromptSessionEvent::Completed {
+        session_id: session_id.to_string(),
+        status: PromptSessionStatus::Failed,
+        exit_code: None,
+        summary: message.to_string(),
+        timeout: None,
+    });
+}
+
+fn closed_failure_report(
+    session_id: &str,
+    runtime: &str,
+    cwd: &std::path::Path,
+    message: &str,
+) -> PromptSessionReport {
+    PromptSessionReport {
+        usage: None,
+        session_id: session_id.to_string(),
+        runtime: runtime.to_string(),
+        cwd: cwd.display().to_string(),
+        status: PromptSessionStatus::Failed,
+        exit_code: None,
+        summary: message.to_string(),
+        log_excerpt: message.to_string(),
+        duration_ms: 0,
+        runtime_thread_id: None,
+    }
+}
+
 /// Interactive Ask approval policy.
 ///
 /// Use `on-request` (not `untrusted` / UnlessTrusted): the latter rejects
@@ -161,6 +214,7 @@ fn thread_open_request(
     cwd: &str,
     approval_policy: &Value,
     developer_instructions: Option<&str>,
+    model: Option<&str>,
 ) -> (&'static str, Value) {
     let mut params = json!({
         "cwd": cwd,
@@ -168,6 +222,9 @@ fn thread_open_request(
         "sandbox": thread_sandbox_mode(),
         "approvalsReviewer": "user",
     });
+    if let Some(model) = model.map(str::trim).filter(|id| !id.is_empty()) {
+        params["model"] = json!(model);
+    }
     if let Some(instructions) = developer_instructions {
         params["developerInstructions"] = Value::String(instructions.to_string());
     }
@@ -226,8 +283,24 @@ fn run_codex_app_server(
     }
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
-    let overlay = collect_overlay_env_for_options(options);
-    prepare_codex_home(&overlay);
+    let mut overlay = collect_overlay_env_for_options(options);
+    if let Err(error) = prepare_codex_home(&mut overlay, &cwd) {
+        let raw = format!("{error:#}");
+        let message = if raw.contains("模型名单") {
+            "这个账号的模型名单没取到，这一轮没有发出去。再发一次试试。"
+        } else {
+            "这个账号的设置没改成，这一轮没有发出去。再发一次试试。"
+        };
+        emit_closed_failure(
+            &session_id,
+            &runtime,
+            &cwd,
+            message,
+            &format!("{error:#}"),
+            on_event,
+        );
+        return Ok(closed_failure_report(&session_id, &runtime, &cwd, message));
+    }
     // Project-local Codex config is loaded with the message's folder, separate
     // from ~/.codex. A missing tool there fails the same way.
     let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(
@@ -261,7 +334,7 @@ fn run_codex_app_server(
     // reject forced deletes before that button exists.
     let interactive = has_ui_control;
     let approval_policy = approval_policy_for_turn(has_ui_control);
-    let resume_thread_id = options
+    let mut resume_thread_id = options
         .resume_thread_id
         .as_deref()
         .map(str::trim)
@@ -274,6 +347,17 @@ fn run_codex_app_server(
         None
     };
 
+    let account_model = if crate::setup::is_native_subscription("codex") {
+        crate::setup::load_account_models("codex")
+            .and_then(|list| list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str)))
+    } else {
+        None
+    };
+    // No account model means the saved one belonged to another service. An old
+    // thread would keep that model, so this turn starts a new thread instead.
+    if account_model.is_none() && crate::setup::is_native_subscription("codex") {
+        resume_thread_id = None;
+    }
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
     let mut emit = |event: PromptSessionEvent| {
@@ -322,6 +406,9 @@ fn run_codex_app_server(
         saw_agent_delta: false,
         tools: ToolWatch::default(),
         thinking: ThinkingLine::default(),
+        account_model: account_model.clone(),
+        resumed: false,
+        model_update_rpc: None,
     };
 
     let fingerprint =
@@ -340,6 +427,7 @@ fn run_codex_app_server(
             control.close();
             control.attach_stdin(stdin);
             let mut state = new_state(Some(thread_id.to_string()), None);
+            state.resumed = true;
             if start_turn(&control, &mut state, &mut emit).is_ok() {
                 let outcome = pump_app_server(
                     &mut child,
@@ -361,6 +449,17 @@ fn run_codex_app_server(
     }
 
     let mut dropped_resume = false;
+    let reused = match reused {
+        Some((Err(err), mut child, mut pipes)) if is_thread_open_failure(&err) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            pipes.join(Duration::from_millis(500));
+            dropped_resume = true;
+            resume_thread_id = None;
+            None
+        }
+        other => other,
+    };
     let (result, child, pipes) = match reused {
         Some(done) => done,
         None => {
@@ -417,6 +516,7 @@ fn run_codex_app_server(
                         &cwd.display().to_string(),
                         &approval_policy,
                         developer_instructions.as_deref(),
+                        account_model.as_deref(),
                     );
                     emit(PromptSessionEvent::Status {
                         session_id: session_id.clone(),
@@ -439,6 +539,7 @@ fn run_codex_app_server(
                     )?;
 
                     let mut state = new_state(resume_for_attempt.clone(), Some(thread_id_rpc));
+                    state.resumed = resume_for_attempt.is_some();
                     let outcome = pump_app_server(
                         &mut child,
                         &mut pipes,
@@ -596,6 +697,12 @@ pub(crate) struct PumpState {
     saw_agent_delta: bool,
     tools: ToolWatch,
     thinking: ThinkingLine,
+    /// Account model for this turn. Empty when Codex should keep its own default.
+    account_model: Option<String>,
+    /// This thread was resumed, so its saved model has to be replaced before the turn.
+    resumed: bool,
+    /// `thread/settings/update` sent before the turn. An error starts a new thread.
+    model_update_rpc: Option<u64>,
 }
 
 fn codex_config_files(
@@ -659,7 +766,7 @@ where
             pipes.join(Duration::from_millis(500));
             bail!("codex thread did not open: {message}");
         }
-        if state.waiting_thread.is_some()
+        if (state.waiting_thread.is_some() || state.model_update_rpc.is_some())
             && state.thread_wait_started.elapsed() >= THREAD_OPEN_BUDGET
         {
             force_stop_child(child, pid);
@@ -766,15 +873,21 @@ mod tests {
 
     #[test]
     fn resume_asks_for_metadata_only_and_start_does_not() {
-        let (_method, resume) =
-            thread_open_request(Some("thr_1"), "/tmp", &json!("on-request"), None);
+        let (_method, resume) = thread_open_request(
+            Some("thr_1"),
+            "/tmp",
+            &json!("on-request"),
+            None,
+            Some("gpt-5.6-sol"),
+        );
         assert_eq!(resume["threadId"], "thr_1");
         assert_eq!(resume["excludeTurns"], true);
         assert!(resume.get("developerInstructions").is_none());
         assert!(resume.get("serviceName").is_none());
+        assert_eq!(resume["model"], "gpt-5.6-sol");
 
         let (method, start) =
-            thread_open_request(None, "/tmp", &json!("on-request"), Some("be brief"));
+            thread_open_request(None, "/tmp", &json!("on-request"), Some("be brief"), None);
         assert_eq!(method, "thread/start");
         assert!(start.get("excludeTurns").is_none());
         assert!(start.get("threadId").is_none());
@@ -812,6 +925,9 @@ mod tests {
             saw_agent_delta: false,
             tools: ToolWatch::default(),
             thinking: ThinkingLine::default(),
+            account_model: None,
+            resumed: false,
+            model_update_rpc: None,
         };
         let control = PromptSessionControl::new();
         handle_rpc_response(
@@ -829,6 +945,43 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("no rollout"));
+    }
+
+    #[test]
+    fn a_refused_model_update_does_not_send_the_turn() {
+        let mut state = PumpState {
+            session_id: "s1".into(),
+            waiting_thread: None,
+            waiting_turn: None,
+            thread_id: Some("thr_old".into()),
+            thread_open_error: None,
+            thread_wait_started: Instant::now(),
+            turn_done: false,
+            interactive: false,
+            cwd: "/tmp".into(),
+            sandbox_roots: Vec::new(),
+            prompt: "hi".into(),
+            images: Vec::new(),
+            approval_policy: json!("on-request"),
+            saw_agent_delta: false,
+            tools: ToolWatch::default(),
+            thinking: ThinkingLine::default(),
+            account_model: Some("gpt-5.6-sol".into()),
+            resumed: true,
+            model_update_rpc: Some(9),
+        };
+        let control = PromptSessionControl::new();
+        handle_rpc_response(
+            &json!({"id": 9, "error": {"message": "method not found"}}),
+            &json!(9),
+            &control,
+            &mut state,
+            &mut |_| {},
+        )
+        .expect("response");
+        assert!(!state.turn_done);
+        assert!(state.model_update_rpc.is_none());
+        assert!(state.thread_open_error.is_some());
     }
 
     #[test]
@@ -850,6 +1003,9 @@ mod tests {
             saw_agent_delta: false,
             tools: ToolWatch::default(),
             thinking: ThinkingLine::default(),
+            account_model: None,
+            resumed: false,
+            model_update_rpc: None,
         };
         let mut events = Vec::new();
         handle_notification(
