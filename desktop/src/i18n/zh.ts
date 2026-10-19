@@ -716,7 +716,7 @@ export const zh = {
       "打开「系统设置 → 隐私与安全性 → 文件和文件夹」，打开 Agent Doctor，再回到问答重试。",
     "chat.fail.balance.message": "模型账号余额不够，这一轮没问到。这不是本软件的问题。",
     "chat.fail.balance.next": "到服务商网站充值，或点「去服务商」换一个还有额度的密钥。",
-    "chat.fail.rateLimit.message": "服务商这会儿限流了，这一轮没问到。这不是本软件的问题。",
+    "chat.fail.rateLimit.message": "这会儿问得太勤，模型那边暂时不接了。这不是本软件的问题。",
     "chat.fail.rateLimit.next": "等一会儿再问一次。",
     "chat.fail.actionAskAgain": "再问一次",
     "chat.fail.askAgainReady": "输入框已在下面。等一会儿再发送。",

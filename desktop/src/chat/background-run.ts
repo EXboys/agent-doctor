@@ -127,12 +127,15 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       const failed =
         payload.status !== "succeeded" && payload.status !== "cancelled" && payload.status !== "timed_out";
       if (failed && !run.turnNoticeSaved) {
-        const explain =
-          explainChatFailure(run.turnReports.join("\n")) ?? explainChatFailure(run.turnErrors.join("\n"));
-        if (explain) {
-          session.messages.push({ id: uid(), role: "meta", content: formatChatFailureLine(explain), at: Date.now() });
-        } else if (noReply && !markTurnLogFailed(session.messages)) {
-          session.messages.push({ id: uid(), role: "meta", content: agentFailedLine(session.runtime), at: Date.now() });
+        const explainedOnLog = noReply && markTurnLogFailed(session.messages);
+        if (!explainedOnLog) {
+          const explain =
+            explainChatFailure(run.turnReports.join("\n")) ?? explainChatFailure(run.turnErrors.join("\n"));
+          if (explain) {
+            session.messages.push({ id: uid(), role: "meta", content: formatChatFailureLine(explain), at: Date.now() });
+          } else if (noReply) {
+            session.messages.push({ id: uid(), role: "meta", content: agentFailedLine(session.runtime), at: Date.now() });
+          }
         }
       }
       ctx.touchSession(session);

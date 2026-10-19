@@ -1,4 +1,5 @@
 import type { AskRuntime } from "../ask-resources";
+import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
 import { t, type MessageKey } from "../i18n";
 import type { ChatMessage, ToolStep } from "./types";
 import { runtimeDisplayName } from "./runtime";
@@ -90,6 +91,17 @@ export function agentFailedLine(runtime: AskRuntime): string {
 }
 
 /**
+ * Sentence on a failed run-log row. A log that already says why (a limit, an
+ * expired sign-in, a refused model) uses that sentence. Anything else stays
+ * the generic “it reported an error”.
+ */
+export function runLogFailureLabel(content: string, runtime: AskRuntime): string {
+  const explained = explainChatFailure(content);
+  if (explained) return formatChatFailureLine(explained);
+  return agentFailedLine(runtime);
+}
+
+/**
  * A failed turn that only left a log: the row carries the sentence, and the
  * old "notes are above" line is not drawn again.
  */
@@ -140,11 +152,12 @@ export function markTurnLogFailed(messages: ChatMessage[]): boolean {
 }
 
 /** Point the open turn's log row at the failure sentence. */
-export function labelCurrentRunLog(logEl: HTMLElement, summaryText: string): boolean {
-  const label = currentRunLog(logEl)?.querySelector(".chat-activity-text");
-  if (!label) return false;
+export function labelCurrentRunLog(logEl: HTMLElement, summaryText: string): HTMLElement | null {
+  const row = currentRunLog(logEl);
+  const label = row?.querySelector(".chat-activity-text");
+  if (!row || !label) return null;
   label.textContent = summaryText;
-  return true;
+  return row;
 }
 
 /** Add raw output to this turn's collapsed log, starting one at the end if needed. */

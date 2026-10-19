@@ -714,7 +714,7 @@ export const en = {
       "Open System Settings → Privacy & Security → Files and Folders, turn on Agent Doctor, then ask again.",
     "chat.fail.balance.message": "The model account has no balance, so this turn did not go through. This app is fine.",
     "chat.fail.balance.next": "Recharge on the provider’s site, or tap Open Provider and switch to a key that still has credit.",
-    "chat.fail.rateLimit.message": "The provider is rate-limiting right now, so this turn did not go through. This app is fine.",
+    "chat.fail.rateLimit.message": "Too many questions just now, so the model is not taking this one. This app is fine.",
     "chat.fail.rateLimit.next": "Wait a moment, then ask again.",
     "chat.fail.actionAskAgain": "Ask again",
     "chat.fail.askAgainReady": "The box below is ready. Wait a moment, then send.",

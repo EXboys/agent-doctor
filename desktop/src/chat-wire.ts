@@ -141,8 +141,9 @@ import { createBackupUiController } from "./chat/backup-ui";
 import { createVoiceInputController } from "./chat/voice";
 import { createHostedController } from "./chat/hosted";
 import { readImageTextEnabled } from "./chat/image-text";
-import { mountChatFailureBubble } from "./chat/chat-failure-ui";
+import { mountChatFailureActions, mountChatFailureBubble } from "./chat/chat-failure-ui";
 import {
+  explainChatFailure,
   formatChatFailureLine,
   type ChatFailureExplain,
 } from "./friendly-error";
@@ -421,6 +422,11 @@ export function wireChatControllers(): void {
       void focusMainTab({ tab: "provider" }).catch((error) => {
         setStatus(String(error), "error");
       });
+    },
+    attachRunLogFailure: (row, content) => {
+      const explain = explainChatFailure(content);
+      if (!explain) return;
+      mountChatFailureActions(row, explain, chatFailureHandlers);
     },
   });
 

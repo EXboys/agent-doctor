@@ -13,6 +13,7 @@ import {
   isRunLogPointer,
   labelCurrentRunLog,
   markTurnLogFailed,
+  runLogFailureLabel,
   mountFailedCommand,
   splitToolActivity,
   toolSignature,
@@ -89,6 +90,8 @@ export type BubblesDeps = {
   setLifecycleActivityEl: (el: HTMLElement | null) => void;
   addProject: () => void;
   openProvider: () => void;
+  /** Buttons for a failed run log whose sentence is already on the row. */
+  attachRunLogFailure?: (row: HTMLElement, content: string) => void;
 };
 
 export type BubblesApi = ReturnType<typeof createBubblesController>;
@@ -296,13 +299,26 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.scheduleStorePersist();
   }
   /** A failed turn with only a log: one sentence on that row, original stays inside. */
-  function noteFailedRunLog(): boolean {
+  function noteFailedRunLog(): string | null {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
-    if (!markTurnLogFailed(session.messages)) return false;
+    if (!markTurnLogFailed(session.messages)) return null;
     deps.touchSession(session);
     deps.scheduleStorePersist();
-    if (deps.isViewingRunningSession()) labelCurrentRunLog(deps.logEl, agentFailedLine(session.runtime));
-    return true;
+    const content = latestTurnLogContent(session.messages);
+    const label = runLogFailureLabel(content, session.runtime);
+    if (deps.isViewingRunningSession()) {
+      const row = labelCurrentRunLog(deps.logEl, label);
+      if (row) deps.attachRunLogFailure?.(row, content);
+    }
+    return label;
+  }
+  function latestTurnLogContent(messages: ChatMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message?.role === "user") break;
+      if (message?.role === "meta" && message.log) return message.content;
+    }
+    return "";
   }
   function rememberTurnNotice(text: string): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
@@ -670,11 +686,13 @@ export function createBubblesController(deps: BubblesDeps) {
           i += 1;
           continue;
         } else if (isLogMessage(message)) {
-          appendRunLog(
+          const failed = covered.failedLogs.has(i);
+          const row = appendRunLog(
             deps.logEl,
             message.content,
-            covered.failedLogs.has(i) ? agentFailedLine(session.runtime) : undefined,
+            failed ? runLogFailureLabel(message.content, session.runtime) : undefined,
           );
+          if (failed && row) deps.attachRunLogFailure?.(row, message.content);
         } else {
           const bubble = document.createElement("div");
           bubble.className = `chat-bubble ${message.role}`;

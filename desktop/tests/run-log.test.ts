@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { appendRunLogMessage } = await import("../src/chat/tool-records");
-const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed } = await import("../src/chat/format");
+const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed, runLogFailureLabel } = await import("../src/chat/format");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -76,5 +76,17 @@ assert(onlyLog.failedLogs.has(1), "a log with no reply is the failure line");
 assert(markTurnLogFailed(saved), "marking finds this turn's log");
 assert(saved[1].summary === "commandFailed", "the log row keeps the failure sentence");
 assert(!markTurnLogFailed([user("只有一句")]), "a turn with no log is not marked");
+
+const crowded = [
+  "Reconnecting... 5/5",
+  "2026-10-19T20:18:35.499978Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: Connection reset by peer (os error 54)",
+  "exceeded retry limit, last status: 429 Too Many Requests, request id: 95339256-bbd9-424f-a213-108f167d3c2c",
+].join("\n");
+const crowdedLabel = runLogFailureLabel(crowded, "codex");
+assert(crowdedLabel.includes("等一会儿"), `rate-limit log label: ${crowdedLabel}`);
+assert(!crowdedLabel.includes("429") && !crowdedLabel.includes("websocket"), "the row hides the raw log");
+assert(!crowdedLabel.includes("报错了"), "a rate limit is not the generic failure line");
+const unknownLabel = runLogFailureLabel("Installing Python dependencies failed", "codex");
+assert(unknownLabel.includes("Codex") && unknownLabel.includes("报错了"), `generic log label: ${unknownLabel}`);
 
 console.log("run log ok");

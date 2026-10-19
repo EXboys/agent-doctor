@@ -71,6 +71,18 @@ async function main() {
   const limited = explainChatFailure("LLM HTTP 429 Too Many Requests");
   assert(limited?.kind === "rate_limit", "bare 429 should be rate limit");
   assert(limited!.actions.includes("askAgain"), "rate limit offers ask again");
+  assert(limited!.next.includes("等一会儿"), "rate limit tells the user to wait");
+  assert(!limited!.message.includes("429") && !limited!.message.includes("再发一次"), "rate limit does not say to send again now");
+
+  const codexLimit = explainChatFailure(
+    [
+      "Reconnecting... 5/5",
+      "2026-10-19T20:18:35.499978Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: Connection reset by peer (os error 54), url: wss://chatgpt.com/backend-api/codex/responses",
+      "exceeded retry limit, last status: 429 Too Many Requests, request id: 95339256-bbd9-424f-a213-108f167d3c2c",
+    ].join("\n"),
+  );
+  assert(codexLimit?.kind === "rate_limit", "a websocket reset that ends in 429 is a rate limit");
+  assert(!codexLimit!.message.includes("websocket") && !codexLimit!.message.includes("Codex"), "the 429 sentence hides the log");
   assert(missingProviderFieldsMessage(["url"]) === "还缺地址。", "only a missing address is named");
   assert(
     !missingProviderFieldsMessage(["url"]).includes("密钥"),

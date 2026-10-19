@@ -29,28 +29,38 @@ export function mountChatFailureBubble(
   bubble.className = "chat-bubble meta is-failure";
   bubble.textContent = formatChatFailureLine(explain);
   wrap.appendChild(bubble);
-
-  if (explain.actions.length > 0) {
-    const actions = document.createElement("div");
-    actions.className = "chat-failure-actions";
-    actions.setAttribute("role", "group");
-
-    for (const action of explain.actions) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chat-failure-btn";
-      btn.textContent = actionLabel(action, explain);
-      btn.addEventListener("click", () => {
-        void runChatFailureAction(action, explain, handlers, actions);
-      });
-      actions.appendChild(btn);
-    }
-
-    wrap.appendChild(actions);
-  }
+  mountChatFailureActions(wrap, explain, handlers);
   logEl.appendChild(wrap);
   logEl.scrollTop = logEl.scrollHeight;
   return bubble;
+}
+
+/** Buttons for a failure that already has its sentence. Skips a second copy. */
+export function mountChatFailureActions(
+  parent: HTMLElement,
+  explain: ChatFailureExplain,
+  handlers: ChatFailureHandlers,
+): HTMLElement | null {
+  if (explain.actions.length === 0 || parent.querySelector(".chat-failure-actions")) return null;
+  const actions = document.createElement("div");
+  actions.className = "chat-failure-actions";
+  actions.setAttribute("role", "group");
+
+  for (const action of explain.actions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-failure-btn";
+    btn.textContent = actionLabel(action, explain);
+    btn.addEventListener("click", () => {
+      void runChatFailureAction(action, explain, handlers, actions);
+    });
+    actions.appendChild(btn);
+  }
+
+  const details = parent.querySelector(".chat-permission-more");
+  if (details) parent.insertBefore(actions, details);
+  else parent.appendChild(actions);
+  return actions;
 }
 
 function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): string {

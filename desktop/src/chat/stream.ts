@@ -63,7 +63,7 @@ export type StreamDeps = {
     text: string,
     opts?: { id?: string; persist?: boolean },
   ) => HTMLElement;
-  noteFailedRunLog: () => boolean;
+  noteFailedRunLog: () => string | null;
   agentFailedLine: () => string;
   rememberMeta: (text: string) => void;
   appendChatFailure: (explain: ChatFailureExplain) => void;
@@ -200,11 +200,18 @@ export function createStreamController(deps: StreamDeps) {
                 deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
               }
             } else if (failed && !failureSaid) {
-              failureSaid = showChatTurnFailure(deps);
-              if (!failureSaid && !hadAssistantText && !deps.noteFailedRunLog()) {
-                const sentence = deps.agentFailedLine();
-                deps.rememberMeta(sentence);
-                deps.appendBubble("meta", sentence, { persist: false });
+              const logged = !hadAssistantText ? deps.noteFailedRunLog() : null;
+              if (logged) {
+                failureSaid = true;
+                markChatFailureBubbleShown();
+                deps.setStatus(logged, "error");
+              } else {
+                failureSaid = showChatTurnFailure(deps);
+                if (!failureSaid && !hadAssistantText) {
+                  const sentence = deps.agentFailedLine();
+                  deps.rememberMeta(sentence);
+                  deps.appendBubble("meta", sentence, { persist: false });
+                }
               }
             }
           }
