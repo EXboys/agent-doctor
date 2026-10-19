@@ -1,0 +1,16 @@
+{
+  "slug": "ai-seo",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "ai-seo",
+      "version": "1.0.0",
+      "sha256": "f555435608007a6794935a18185b07842adf5dd88faa9fb42986023e528825a9"
+    }
+  ],
+  "artifact": {
+    "url": "/skills/ai-seo/ai-seo.zip",
+    "version": "1.0.0",
+    "sha256": "f555435608007a6794935a18185b07842adf5dd88faa9fb42986023e528825a9"
+  }
+}

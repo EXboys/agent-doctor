@@ -1,0 +1,5 @@
+/api/v1/packs/:slug/manifest /skills/:slug/manifest.json 200
+/api/v1/packs/:slug/skills/:skill /skills/:skill/:skill.zip 200
+/api/v1/doctor/packs/:slug/manifest /skills/:slug/manifest.json 200
+/api/v1/packs /skills/catalog.json 200
+/api/v1/skills /skills/catalog.json 200

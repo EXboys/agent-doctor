@@ -1,0 +1,208 @@
+{
+  "version": "1.0.0",
+  "bundle": {
+    "id": "everyday",
+    "name": "All five",
+    "zh": "五个一起下",
+    "summary": "The five open source skills in one zip.",
+    "download": "/skills/everyday/everyday.zip",
+    "sha256": "c7323e6127db3811a92f8aa3688e296ebe81522b29838c3307f7a8964bd52532",
+    "version": "1.0.0"
+  },
+  "items": [
+    {
+      "id": "copywriting",
+      "name": "Write a page",
+      "skill": "copywriting",
+      "zh": "写文章",
+      "group": "writing",
+      "groupLabel": "Articles",
+      "summary": "Writes the headline, the page, and the line you want someone to click.",
+      "fits": "Home pages, landing pages, product pages",
+      "author": "coreyhaines31/marketingskills",
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/copywriting",
+      "installs": "228.6K on skills.sh",
+      "version": "1.0.0",
+      "free": true,
+      "download": "/skills/copywriting/copywriting.zip",
+      "sha256": "39a6a710c87c6f47b2eebf7850e83ec6029634ccf00b5732dae02c14fe7acaa1"
+    },
+    {
+      "id": "vercel-react-best-practices",
+      "name": "Write React code",
+      "skill": "vercel-react-best-practices",
+      "zh": "写代码",
+      "group": "code",
+      "groupLabel": "Code",
+      "summary": "Vercel’s rules for writing React and Next.js that stays fast.",
+      "fits": "Components, data fetching, bundle size",
+      "author": "vercel-labs/agent-skills",
+      "license": "MIT",
+      "source": "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+      "installs": "816.3K on skills.sh",
+      "version": "1.0.0",
+      "free": true,
+      "download": "/skills/vercel-react-best-practices/vercel-react-best-practices.zip",
+      "sha256": "a16252366d74e298a6a8d0c669ae2681d91e643967f64c923dcb567388683e11"
+    },
+    {
+      "id": "video",
+      "name": "Make a video",
+      "skill": "video",
+      "zh": "做视频",
+      "group": "video",
+      "groupLabel": "Video",
+      "summary": "Plans a video for Remotion, Hyperframes, or an AI video tool.",
+      "fits": "Explainers, product demos, short clips",
+      "author": "coreyhaines31/marketingskills",
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/video",
+      "version": "1.0.0",
+      "free": true,
+      "download": "/skills/video/video.zip",
+      "sha256": "bd6c1b494b96a8c7745c3d1bd7e00c3aec2594b191baca7ac82c4f3a546515d7"
+    },
+    {
+      "id": "codex-ppt",
+      "name": "Make a slide deck",
+      "skill": "codex-ppt",
+      "zh": "做 PPT",
+      "group": "slides",
+      "groupLabel": "Slides",
+      "summary": "Turns notes, an article, or an outline into a slide deck.",
+      "fits": "Reports, talks, pitches",
+      "author": "ningzimu/codex-ppt-skill",
+      "license": "MIT",
+      "source": "https://github.com/ningzimu/codex-ppt-skill",
+      "version": "1.0.0",
+      "free": true,
+      "download": "/skills/codex-ppt/codex-ppt.zip",
+      "sha256": "933a98fe61f99e2242115a8f78f2249c292df9def0886b69a76db6f11defbf9e"
+    },
+    {
+      "id": "ai-seo",
+      "name": "Get cited by AI answers",
+      "skill": "ai-seo",
+      "zh": "做 GEO",
+      "group": "geo",
+      "groupLabel": "GEO",
+      "summary": "Rewrites a page so ChatGPT, Perplexity, and Google AI answers can cite it.",
+      "fits": "GEO, AI Overviews, llms.txt",
+      "author": "coreyhaines31/marketingskills",
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/ai-seo",
+      "version": "1.0.0",
+      "free": true,
+      "download": "/skills/ai-seo/ai-seo.zip",
+      "sha256": "f555435608007a6794935a18185b07842adf5dd88faa9fb42986023e528825a9"
+    }
+  ],
+  "packs": [
+    {
+      "slug": "copywriting",
+      "id": "copywriting",
+      "kind": "skill",
+      "name": "Write a page",
+      "title": "Write a page",
+      "description": "Writes the headline, the page, and the line you want someone to click.",
+      "free": true,
+      "priceCents": 0,
+      "version": "1.0.0",
+      "skill_count": 1,
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/copywriting",
+      "skills": [
+        {
+          "id": "copywriting",
+          "version": "1.0.0",
+          "sha256": "39a6a710c87c6f47b2eebf7850e83ec6029634ccf00b5732dae02c14fe7acaa1"
+        }
+      ]
+    },
+    {
+      "slug": "vercel-react-best-practices",
+      "id": "vercel-react-best-practices",
+      "kind": "skill",
+      "name": "Write React code",
+      "title": "Write React code",
+      "description": "Vercel’s rules for writing React and Next.js that stays fast.",
+      "free": true,
+      "priceCents": 0,
+      "version": "1.0.0",
+      "skill_count": 1,
+      "license": "MIT",
+      "source": "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+      "skills": [
+        {
+          "id": "vercel-react-best-practices",
+          "version": "1.0.0",
+          "sha256": "a16252366d74e298a6a8d0c669ae2681d91e643967f64c923dcb567388683e11"
+        }
+      ]
+    },
+    {
+      "slug": "video",
+      "id": "video",
+      "kind": "skill",
+      "name": "Make a video",
+      "title": "Make a video",
+      "description": "Plans a video for Remotion, Hyperframes, or an AI video tool.",
+      "free": true,
+      "priceCents": 0,
+      "version": "1.0.0",
+      "skill_count": 1,
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/video",
+      "skills": [
+        {
+          "id": "video",
+          "version": "1.0.0",
+          "sha256": "bd6c1b494b96a8c7745c3d1bd7e00c3aec2594b191baca7ac82c4f3a546515d7"
+        }
+      ]
+    },
+    {
+      "slug": "codex-ppt",
+      "id": "codex-ppt",
+      "kind": "skill",
+      "name": "Make a slide deck",
+      "title": "Make a slide deck",
+      "description": "Turns notes, an article, or an outline into a slide deck.",
+      "free": true,
+      "priceCents": 0,
+      "version": "1.0.0",
+      "skill_count": 1,
+      "license": "MIT",
+      "source": "https://github.com/ningzimu/codex-ppt-skill",
+      "skills": [
+        {
+          "id": "codex-ppt",
+          "version": "1.0.0",
+          "sha256": "933a98fe61f99e2242115a8f78f2249c292df9def0886b69a76db6f11defbf9e"
+        }
+      ]
+    },
+    {
+      "slug": "ai-seo",
+      "id": "ai-seo",
+      "kind": "skill",
+      "name": "Get cited by AI answers",
+      "title": "Get cited by AI answers",
+      "description": "Rewrites a page so ChatGPT, Perplexity, and Google AI answers can cite it.",
+      "free": true,
+      "priceCents": 0,
+      "version": "1.0.0",
+      "skill_count": 1,
+      "license": "MIT",
+      "source": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/ai-seo",
+      "skills": [
+        {
+          "id": "ai-seo",
+          "version": "1.0.0",
+          "sha256": "f555435608007a6794935a18185b07842adf5dd88faa9fb42986023e528825a9"
+        }
+      ]
+    }
+  ]
+}

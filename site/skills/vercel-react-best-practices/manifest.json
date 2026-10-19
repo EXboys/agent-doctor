@@ -1,0 +1,16 @@
+{
+  "slug": "vercel-react-best-practices",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "vercel-react-best-practices",
+      "version": "1.0.0",
+      "sha256": "a16252366d74e298a6a8d0c669ae2681d91e643967f64c923dcb567388683e11"
+    }
+  ],
+  "artifact": {
+    "url": "/skills/vercel-react-best-practices/vercel-react-best-practices.zip",
+    "version": "1.0.0",
+    "sha256": "a16252366d74e298a6a8d0c669ae2681d91e643967f64c923dcb567388683e11"
+  }
+}

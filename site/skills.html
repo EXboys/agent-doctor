@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Free skills — Agent Doctor</title>
+  <meta name="description" content="Open source skills for writing pages, writing React, making videos, making slide decks, and GEO. Download the author’s zip and add it in Agent Doctor.">
+  <meta name="theme-color" content="#e7eef6">
+  <link rel="icon" href="/assets/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/apple-touch.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/site.css">
+  <meta property="og:title" content="Free skills — Agent Doctor">
+  <meta property="og:description" content="Articles, code, video, slides, and GEO. Download a zip and add it in Agent Doctor.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://agentdoctor.io/skills">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap nav">
+      <a class="brand" href="/">
+        <img src="/assets/icon-128.png" width="32" height="32" alt="">
+        Agent Doctor
+      </a>
+      <nav class="nav-links" aria-label="Page">
+        <a href="/#product">Product</a>
+        <a href="/#agents">Agents</a>
+        <a href="/skills" aria-current="page">Skills</a>
+        <a href="/#download">Download</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="btn btn-primary btn-small" href="/#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap market-hero">
+      <p class="kicker">Free skills</p>
+      <h1>Open source skills for jobs you <em>already do</em>.</h1>
+      <p class="lead">These are skills other people published. Agent Doctor did not write them. Download the zip, then add it in the app. The license on each card is the author’s license.</p>
+      <div class="market-actions">
+        <a class="btn btn-primary" id="bundle-download" href="/skills/everyday/everyday.zip">Download all five</a>
+        <a class="btn btn-ghost" href="#add">How to add one</a>
+      </div>
+    </div>
+
+    <section class="wrap market">
+      <div class="filters" role="tablist" aria-label="Skill types">
+        <button type="button" class="filter on" data-group="all" aria-pressed="true">All</button>
+        <button type="button" class="filter" data-group="writing" aria-pressed="false">Articles</button>
+        <button type="button" class="filter" data-group="code" aria-pressed="false">Code</button>
+        <button type="button" class="filter" data-group="video" aria-pressed="false">Video</button>
+        <button type="button" class="filter" data-group="slides" aria-pressed="false">Slides</button>
+        <button type="button" class="filter" data-group="geo" aria-pressed="false">GEO</button>
+      </div>
+      <div class="skill-grid" id="skill-grid">
+        <p class="market-status">Loading skills…</p>
+      </div>
+    </section>
+
+    <section class="wrap section" id="add">
+      <h2>Add a skill on this computer.</h2>
+      <ol class="steps add-steps">
+        <li>
+          <div class="step-no">01</div>
+          <h3>Download the zip</h3>
+          <p>Pick one skill, or take all five. The file stays on this computer.</p>
+        </li>
+        <li>
+          <div class="step-no">02</div>
+          <h3>Open Agent Doctor</h3>
+          <p>If it is not installed yet, get it from the download page first.</p>
+        </li>
+        <li>
+          <div class="step-no">03</div>
+          <h3>Choose Add a skill, then Zip</h3>
+          <p>Pick the file you just downloaded. The agent can use it on the next job.</p>
+        </li>
+      </ol>
+      <p class="market-next"><a href="/#download">Get Agent Doctor</a></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div>Agent Doctor · free skills for articles, code, video, slides, and GEO.</div>
+      <nav aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/#download">Download</a>
+        <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+  <script src="/js/skills.js"></script>
+</body>
+</html>

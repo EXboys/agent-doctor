@@ -41,10 +41,12 @@
       <nav class="nav-links" aria-label="Page">
         <a href="#product">Product</a>
         <a href="#agents">Agents</a>
+        <a href="/skills">Skills</a>
         <a href="#safety">Safety</a>
         <a href="#download">Download</a>
       </nav>
       <div class="nav-cta">
+        <a class="nav-skills" href="/skills">Skills</a>
         <a class="btn btn-ghost btn-small" href="https://github.com/EXboys/agent-doctor">GitHub</a>
         <a class="btn btn-primary btn-small" id="nav-download" href="#download">Download</a>
       </div>
@@ -69,7 +71,7 @@
         </ul>
       </div>
 
-      <div>
+      <div class="stage">
         <div class="app" aria-hidden="true">
           <div class="app-bar">
             <div class="app-brand">
@@ -212,8 +214,24 @@
       </div>
     </section>
 
-    <section class="band" id="safety">
-      <div class="wrap section split">
+    <section id="skills">
+      <div class="wrap section">
+        <h2>Open source skills for jobs you do often.</h2>
+        <p class="section-lead">Pages, React, video, slides, and GEO. Each one is someone else’s skill, with their license. Download the zip and add it in Agent Doctor.</p>
+        <ul class="skill-tease">
+          <li><a href="/skills">Write a page <span>写文章</span></a></li>
+          <li><a href="/skills">Write React code <span>写代码</span></a></li>
+          <li><a href="/skills">Make a video <span>做视频</span></a></li>
+          <li><a href="/skills">Make a slide deck <span>做 PPT</span></a></li>
+          <li><a href="/skills">Get cited by AI answers <span>做 GEO</span></a></li>
+        </ul>
+        <p class="market-next"><a class="btn btn-primary" href="/skills">Open the skills market</a></p>
+      </div>
+    </section>
+
+    <section id="safety">
+      <div class="wrap">
+        <div class="safety-board split">
         <div>
           <h2>A repair you can undo.</h2>
           <p class="section-lead">Agent Doctor writes only through typed actions. It takes a backup first, and it does not invent a shell command.</p>
@@ -236,6 +254,7 @@
             <span>The app is in active use and still before 1.0. The scan, diagnose, and repair loop is the part you can rely on today.</span>
           </li>
         </ul>
+        </div>
       </div>
     </section>
 
@@ -250,6 +269,7 @@
           </div>
           <div class="cards">
             <article class="card" data-slot="macos-arm64">
+              <span class="yours">This computer</span>
               <h3>macOS</h3>
               <p>Apple silicon disk image. Open it and drag Agent Doctor into Applications. If macOS blocks it, open System Settings → Privacy &amp; Security and choose Open Anyway.</p>
               <div class="file">Checking the release…</div>
@@ -257,12 +277,14 @@
               <a id="mac-intel" hidden href="https://github.com/EXboys/agent-doctor/releases/latest">Intel Mac installer</a>
             </article>
             <article class="card" data-slot="windows-x64">
+              <span class="yours">This computer</span>
               <h3>Windows</h3>
               <p>64-bit installer. Run it and follow the steps on screen. Current builds carry their own runtime, so a separate Visual C++ install is not required.</p>
               <div class="file">Checking the release…</div>
               <a class="btn btn-primary" data-download href="https://github.com/EXboys/agent-doctor/releases/latest">Download for Windows</a>
             </article>
             <article class="card" data-slot="linux-appimage">
+              <span class="yours">This computer</span>
               <h3>Linux</h3>
               <p>AppImage. After it downloads, allow the file to run, then open it. A Debian package is listed here when the release includes one.</p>
               <div class="file">Checking the release…</div>
@@ -286,6 +308,7 @@ tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
     <div class="wrap">
       <div>Agent Doctor · diagnose, repair, and keep projects separate.</div>
       <nav aria-label="Footer">
+        <a href="/skills">Skills</a>
         <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
         <a href="https://github.com/EXboys/agent-doctor/blob/main/LICENSE">MIT</a>
         <a href="https://github.com/EXboys/agent-doctor/releases">Releases</a>
