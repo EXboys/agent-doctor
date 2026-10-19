@@ -3,7 +3,7 @@ use std::process::Command;
 #[cfg(target_os = "windows")]
 use std::process::Stdio;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use crate::adapters::{locate_qoder, QoderInstall};
 
@@ -39,10 +39,10 @@ fn launch_qoder_app(app: &Path) -> Result<()> {
             .arg(app)
             .status()
             .context("failed to open Qoder")?;
-        if status.success() {
-            return Ok(());
+        if !status.success() {
+            anyhow::bail!("Qoder is on this computer but did not open");
         }
-        bail!("Qoder is on this computer but did not open");
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -55,16 +55,16 @@ fn launch_qoder_app(app: &Path) -> Result<()> {
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .context("failed to start Qoder")?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
         Command::new(app).spawn().context("failed to start Qoder")?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = app;
-        bail!("opening Qoder is not supported on this platform");
+        anyhow::bail!("opening Qoder is not supported on this platform")
     }
 }
