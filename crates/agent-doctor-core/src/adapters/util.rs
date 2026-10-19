@@ -379,13 +379,113 @@ pub(crate) fn prepend_user_path(dir: &Path) {
     if dir.as_os_str().is_empty() {
         return;
     }
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let mut dirs = vec![dir.to_path_buf()];
-    dirs.extend(std::env::split_paths(&current));
-    if let Ok(joined) = std::env::join_paths(dirs.iter().filter(|p| !p.as_os_str().is_empty())) {
-        // SAFETY: process-local PATH update so child npm/node shims resolve.
-        std::env::set_var("PATH", joined);
+    assign_merged_path(vec![dir.to_path_buf()]);
+}
+
+/// Windows rejects one environment value at 32,767 UTF-16 code units,
+/// including the trailing NUL (`SetEnvironmentVariableW`). The whole block
+/// shares that cap. Past it, `std::env::set_var` panics. The scan task shows
+/// that panic, then the same setup runs on the UI thread, the panic is not
+/// caught, and the window closes a few seconds after launch.
+///
+/// macOS and Linux have no 32,767 cap. `setenv` still panics when the OS
+/// rejects the value, and that panic on the UI thread closes the window too.
+/// Stay under a fraction of `ARG_MAX`.
+fn path_value_limit() -> usize {
+    #[cfg(windows)]
+    {
+        32_766
     }
+    #[cfg(not(windows))]
+    {
+        128 * 1024
+    }
+}
+
+fn path_value_len(value: &std::ffi::OsStr) -> usize {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        value.encode_wide().count()
+    }
+    #[cfg(not(windows))]
+    {
+        value.len()
+    }
+}
+
+fn path_value_fits(value: &std::ffi::OsStr) -> bool {
+    path_value_len(value) <= path_value_limit()
+}
+
+#[cfg(any(windows, test))]
+fn normalize_windows_path_key(value: &str) -> String {
+    let mut value = value.trim().trim_matches('"').trim().replace('/', "\\");
+    value.make_ascii_lowercase();
+    while value.len() > 3 && value.ends_with('\\') {
+        value.pop();
+    }
+    value
+}
+
+fn dedupe_path_dirs(dirs: &mut Vec<PathBuf>) {
+    let mut seen = BTreeSet::new();
+    dirs.retain(|path| {
+        if path.as_os_str().is_empty() {
+            return false;
+        }
+        seen.insert(normalize_path_for_set(path))
+    });
+}
+
+/// Prepend `prefix`, then the PATH this process already inherited. If the
+/// merged value does not fit, drop prefix entries and try again. The
+/// inherited PATH is kept: it already fits, and it still has the system
+/// directories child processes need.
+fn assign_merged_path(prefix: Vec<PathBuf>) {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
+
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut keep = prefix.len();
+    loop {
+        let mut dirs: Vec<PathBuf> = prefix.iter().take(keep).cloned().collect();
+        dirs.extend(std::env::split_paths(&current));
+        dedupe_path_dirs(&mut dirs);
+        if set_path_if_changed(&dirs) {
+            return;
+        }
+        if keep == 0 {
+            return;
+        }
+        keep = keep.saturating_sub((keep / 2).max(1));
+    }
+}
+
+fn set_path_if_changed(dirs: &[PathBuf]) -> bool {
+    let Ok(joined) = std::env::join_paths(dirs.iter().filter(|path| !path.as_os_str().is_empty()))
+    else {
+        return false;
+    };
+    if !path_value_fits(&joined) {
+        return false;
+    }
+    if std::env::var_os("PATH").unwrap_or_default() == joined {
+        return true;
+    }
+    set_path_value(&joined)
+}
+
+fn set_path_value(value: &std::ffi::OsStr) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the key is the fixed string PATH. `value` comes from
+        // `join_paths`, so it has no interior NUL, and callers already
+        // rejected values the platform will not store. On Windows this is
+        // sound beside other threads. On Unix it is not; this runs once under
+        // the PATH lock, and a rejection is caught so it cannot close the window.
+        unsafe { std::env::set_var("PATH", value) }
+    }))
+    .is_ok()
 }
 
 pub fn find_binary(name: &str) -> Option<PathBuf> {
@@ -473,13 +573,12 @@ fn find_all_binary_in_dirs(name: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
 
 fn normalize_path_for_set(path: &Path) -> String {
     // Avoid canonicalize(): on Windows it can block for tens of seconds on a
-    // disconnected network PATH entry.
+    // disconnected network PATH entry. Trailing slashes and quotes must not
+    // count as a second copy, or User + Machine + the live PATH blows past
+    // the Windows environment-block cap.
     #[cfg(windows)]
     {
-        return path
-            .to_string_lossy()
-            .replace('/', "\\")
-            .to_ascii_lowercase();
+        return normalize_windows_path_key(&path.to_string_lossy());
     }
     #[cfg(not(windows))]
     {
@@ -583,24 +682,13 @@ pub fn refresh_managed_runtime_path() {
 fn merge_managed_dirs_into_path() {
     // Seed PATH with static known dirs first so `npm`/`node` shebangs resolve
     // before we query `npm prefix -g` (GUI apps often lack Homebrew on PATH).
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let mut dirs = static_common_binary_dirs();
-    dirs.extend(std::env::split_paths(&current));
-    let mut seen = BTreeSet::new();
-    dirs.retain(|p| {
-        if p.as_os_str().is_empty() {
-            return false;
-        }
-        seen.insert(normalize_path_for_set(p))
-    });
-    if let Ok(joined) = std::env::join_paths(dirs) {
-        // SAFETY: process-local PATH update for discovery / child installers.
-        std::env::set_var("PATH", joined);
-    }
+    let mut prefix = static_common_binary_dirs();
+    assign_merged_path(prefix.clone());
 
     invalidate_npm_global_bin_dir_cache();
     if let Some(npm_bin) = npm_global_bin_dir() {
-        prepend_user_path(&npm_bin);
+        prefix.insert(0, npm_bin);
+        assign_merged_path(prefix);
     }
 }
 
@@ -624,18 +712,7 @@ fn merge_windows_persistent_path_into_env() {
     if dirs.is_empty() {
         return;
     }
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    dirs.extend(std::env::split_paths(&current));
-    let mut seen = BTreeSet::new();
-    dirs.retain(|p| {
-        if p.as_os_str().is_empty() {
-            return false;
-        }
-        seen.insert(normalize_path_for_set(p))
-    });
-    if let Ok(joined) = std::env::join_paths(dirs) {
-        std::env::set_var("PATH", joined);
-    }
+    assign_merged_path(dirs);
 }
 
 #[cfg(windows)]
@@ -646,9 +723,14 @@ fn windows_env_path_dirs(scope: &str) -> Vec<PathBuf> {
         return Vec::new();
     };
     raw.split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+        .filter_map(|entry| {
+            let entry = entry.trim().trim_matches('"').trim();
+            if entry.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(entry))
+            }
+        })
         .collect()
 }
 
@@ -709,13 +791,16 @@ fn common_binary_dirs() -> Vec<PathBuf> {
 
 /// Well-known bin dirs that do not require invoking `npm` (safe while seeding PATH).
 fn static_common_binary_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/opt/homebrew/sbin"),
-        PathBuf::from("/usr/local/bin"),
-    ];
-
-    dirs.extend(homebrew_node_bin_dirs());
+    let mut dirs = Vec::new();
+    // POSIX prefixes are not Windows directories. Putting them on PATH only
+    // spends the 32,767-character block.
+    #[cfg(not(windows))]
+    {
+        dirs.push(PathBuf::from("/opt/homebrew/bin"));
+        dirs.push(PathBuf::from("/opt/homebrew/sbin"));
+        dirs.push(PathBuf::from("/usr/local/bin"));
+        dirs.extend(homebrew_node_bin_dirs());
+    }
 
     if let Some(home) = dirs::home_dir() {
         dirs.push(home.join(".local/bin"));
@@ -761,6 +846,7 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
 }
 
 /// Homebrew kegs like `node@24` put `node`/`npm` under `opt/node@NN/bin`.
+#[cfg(not(windows))]
 fn homebrew_node_bin_dirs() -> Vec<PathBuf> {
     static CACHE: OnceLock<Vec<PathBuf>> = OnceLock::new();
     CACHE
@@ -1102,6 +1188,60 @@ mod tests {
                 .any(|d| d.ends_with(".claude/local") || d.ends_with(r".claude\local")),
             "expected a …/.claude/local entry, got {dirs:?}"
         );
+        #[cfg(not(windows))]
         assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+        #[cfg(windows)]
+        assert!(
+            !dirs
+                .iter()
+                .any(|dir| dir == &PathBuf::from("/usr/local/bin")),
+            "POSIX prefixes must not consume the Windows PATH block"
+        );
+    }
+
+    #[test]
+    fn windows_path_keys_ignore_case_quotes_and_trailing_slashes() {
+        assert_eq!(
+            normalize_windows_path_key(r#""C:\Program Files\nodejs\"#),
+            r"c:\program files\nodejs"
+        );
+        assert_eq!(
+            normalize_windows_path_key(r"C:\Program Files\nodejs"),
+            normalize_windows_path_key("c:/program files/nodejs/")
+        );
+        assert_eq!(normalize_windows_path_key(r"C:\"), r"c:\");
+    }
+
+    #[test]
+    fn oversized_path_is_not_offered_to_the_operating_system() {
+        assert!(path_value_fits(std::ffi::OsStr::new(
+            "C:\\Windows\\system32"
+        )));
+        let huge = "A".repeat(path_value_limit() + 8);
+        assert!(!path_value_fits(std::ffi::OsStr::new(&huge)));
+
+        let current = std::env::var_os("PATH").unwrap_or_default();
+        let prefix: Vec<_> = (0..8_000)
+            .map(|index| PathBuf::from(format!("/agent-doctor-path-prefix/{index}/bin")))
+            .collect();
+        let mut keep = prefix.len();
+        let mut chosen = None;
+        loop {
+            let mut dirs: Vec<_> = prefix.iter().take(keep).cloned().collect();
+            dirs.extend(std::env::split_paths(&current));
+            if let Ok(joined) = std::env::join_paths(&dirs) {
+                if path_value_fits(&joined) {
+                    chosen = Some((keep, joined));
+                    break;
+                }
+            }
+            if keep == 0 {
+                break;
+            }
+            keep = keep.saturating_sub((keep / 2).max(1));
+        }
+        let (keep, joined) = chosen.expect("the inherited PATH itself fits");
+        assert!(keep < prefix.len());
+        assert!(path_value_fits(&joined));
     }
 }
