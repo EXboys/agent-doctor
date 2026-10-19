@@ -1505,7 +1505,9 @@ fn type_text(text: &str) -> Result<()> {
             '\u{8}' => send_key(&parse_key("backspace").map_err(anyhow::Error::msg)?)?,
             '\u{7f}' => send_key(&parse_key("delete").map_err(anyhow::Error::msg)?)?,
             other => {
-                for unit in other.encode_utf16() {
+                let mut units = [0u16; 2];
+                let n = other.encode_utf16(&mut units).len();
+                for &unit in &units[..n] {
                     send_unicode(unit, false)?;
                     send_unicode(unit, true)?;
                 }
