@@ -203,6 +203,7 @@ pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
 }
 
 /// `f1`…`f12`. `VK_F1` is `0x70`.
+#[cfg(any(windows, test))]
 fn function_vk(token: &str) -> Option<u16> {
     let rest = token.strip_prefix('f')?;
     let n: u16 = rest.parse().ok()?;
