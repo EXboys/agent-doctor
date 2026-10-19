@@ -10,6 +10,7 @@ pub mod qoder;
 mod runner;
 mod uninstall;
 pub mod workbuddy;
+pub mod zcode;
 
 pub use download_route::{use_china_mirrors, NPM_MIRROR};
 
@@ -52,4 +53,8 @@ pub use runner::{
 };
 pub use workbuddy::{
     run_workbuddy_lifecycle, workbuddy_install_shell_command, WorkbuddyLifecycleAction,
+};
+pub use zcode::{
+    run_zcode_lifecycle, zcode_install_shell_command, zcode_update_shell_command,
+    ZcodeLifecycleAction,
 };

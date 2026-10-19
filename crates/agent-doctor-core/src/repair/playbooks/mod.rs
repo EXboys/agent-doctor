@@ -15,8 +15,9 @@ pub use npm_cli::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
     apply_codex_playbook_filtered, apply_cursor_playbook, apply_cursor_playbook_filtered,
     apply_qoder_playbook, apply_qoder_playbook_filtered, apply_workbuddy_playbook,
-    apply_workbuddy_playbook_filtered, suggest_claude_code_repairs, suggest_codex_repairs,
-    suggest_cursor_repairs, suggest_qoder_repairs, suggest_workbuddy_repairs,
+    apply_workbuddy_playbook_filtered, apply_zcode_playbook, apply_zcode_playbook_filtered,
+    suggest_claude_code_repairs, suggest_codex_repairs, suggest_cursor_repairs,
+    suggest_qoder_repairs, suggest_workbuddy_repairs, suggest_zcode_repairs,
 };
 pub use openclaw::{
     apply_openclaw_playbook, apply_openclaw_playbook_filtered, suggest_openclaw_repairs,

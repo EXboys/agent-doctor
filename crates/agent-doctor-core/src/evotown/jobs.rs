@@ -172,6 +172,7 @@ pub fn normalize_runtime(raw: &str) -> String {
         "cursor" | "cursor-cli" | "cursor-agent" => "cursor".into(),
         "qoder" => "qoder".into(),
         "workbuddy" | "codebuddy" => "workbuddy".into(),
+        "zcode" | "z-code" => "zcode".into(),
         other => other.to_string(),
     }
 }

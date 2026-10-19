@@ -9,7 +9,7 @@ use crate::lifecycle::{
     deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
     hermes_install_shell_command, hermes_update_shell_command, openclaw_install_shell_command,
     openclaw_update_shell_command, run_shell_command_streaming, waiting_input_kind,
-    write_install_log,
+    write_install_log, zcode_install_shell_command, zcode_update_shell_command,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
@@ -525,6 +525,7 @@ fn update_shell_command(runtime_id: &str) -> Option<String> {
         "claude-code" => Some(claude_code_update_shell_command()),
         "codex" => Some(codex_update_shell_command()),
         "deepseek-harness" => Some(deepseek_harness_update_shell_command()),
+        "zcode" => Some(zcode_update_shell_command()),
         _ => None,
     }
 }
@@ -536,6 +537,7 @@ fn install_shell_command(runtime_id: &str) -> Option<String> {
         "openclaw" => Some(openclaw_install_shell_command()),
         "claude-code" => Some(claude_code_install_shell_command()),
         "codex" => Some(codex_install_shell_command()),
+        "zcode" => Some(zcode_install_shell_command()),
         _ => None,
     }
 }
@@ -547,6 +549,7 @@ fn install_action_id(runtime_id: &str) -> &'static str {
         "openclaw" => "fix-openclaw-install",
         "claude-code" => "fix-claude-code-install",
         "codex" => "fix-codex-install",
+        "zcode" => "fix-zcode-install",
         _ => "fix-install",
     }
 }

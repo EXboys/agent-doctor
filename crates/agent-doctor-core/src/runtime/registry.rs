@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
     ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter,
-    OpenClawAdapter, QoderAdapter, WorkbuddyAdapter,
+    OpenClawAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
 };
 use crate::evotown::{
     run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook, AssignedJob, JobResult,
@@ -14,14 +14,15 @@ use crate::evotown::{
 use crate::lifecycle::{
     run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
     run_deepseek_harness_lifecycle, run_hermes_lifecycle, run_openclaw_lifecycle,
-    run_qoder_lifecycle, run_workbuddy_lifecycle, CursorLifecycleAction,
+    run_qoder_lifecycle, run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction,
     DeepSeekHarnessLifecycleAction, HermesLifecycleAction, NpmCliLifecycleAction,
-    OpenClawLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction,
+    OpenClawLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
 };
 use crate::probe::runtimes::{
     claude_code_probe_deep, codex_probe_deep, deepseek_harness_probe_deep, openclaw_probe_deep,
     probe_deep, probe_deep_noop, schema_claude_code, schema_codex, schema_cursor,
     schema_deepseek_harness, schema_hermes, schema_openclaw, schema_qoder, schema_workbuddy,
+    schema_zcode,
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
@@ -33,13 +34,15 @@ use crate::repair::{
     apply_claude_code_playbook_filtered, apply_codex_playbook_filtered, apply_config_syntax_repair,
     apply_cursor_playbook_filtered, apply_deepseek_harness_playbook_filtered,
     apply_hermes_playbook_filtered, apply_openclaw_playbook_filtered,
-    apply_qoder_playbook_filtered, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
-    suggest_codex_repairs, suggest_config_syntax_repairs, suggest_cursor_repairs,
-    suggest_deepseek_harness_repairs, suggest_hermes_repairs, suggest_openclaw_repairs,
-    suggest_qoder_repairs, suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
+    apply_qoder_playbook_filtered, apply_workbuddy_playbook_filtered,
+    apply_zcode_playbook_filtered, suggest_claude_code_repairs, suggest_codex_repairs,
+    suggest_config_syntax_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
+    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
+    suggest_workbuddy_repairs, suggest_zcode_repairs, PlaybookApplyResult, SuggestedRepair,
 };
 use crate::session_launch::{
-    open_claude_code, open_codex, open_cursor_app, open_in_terminal, open_qoder, OpenSessionReport,
+    open_claude_code, open_codex, open_cursor_app, open_in_terminal, open_qoder, open_zcode,
+    OpenSessionReport,
 };
 use crate::setup::{EffectorKind, WriteSemantics};
 use crate::workspace::backends::{
@@ -290,6 +293,7 @@ const DEEPSEEK_HARNESS_ENV: &[&str] = &["DSH", "DEEPSEEK"];
 const QODER_ENV: &[&str] = &["QODER"];
 const WORKBUDDY_ENV: &[&str] = &["CODEBUDDY", "WORKBUDDY", "TENCENT"];
 const CURSOR_ENV: &[&str] = &["CURSOR"];
+const ZCODE_ENV: &[&str] = &["ZCODE"];
 
 fn openclaw_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(OpenClawAdapter)
@@ -321,6 +325,10 @@ fn workbuddy_adapter() -> Box<dyn RuntimeAdapter> {
 
 fn cursor_adapter() -> Box<dyn RuntimeAdapter> {
     Box::new(CursorAdapter)
+}
+
+fn zcode_adapter() -> Box<dyn RuntimeAdapter> {
+    Box::new(ZcodeAdapter)
 }
 
 const WIRE_GATEWAY: WiringSpec = WiringSpec {
@@ -430,6 +438,14 @@ fn open_cursor_session(
     open_cursor_app(cwd)
 }
 
+fn open_zcode_session(
+    cwd: &Path,
+    _prompt: Option<&str>,
+    _prefer_deep_link: bool,
+) -> Result<OpenSessionReport> {
+    open_zcode(cwd)
+}
+
 fn run_openclaw_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
     let action = match action {
         RuntimeLifecycleAction::Install => OpenClawLifecycleAction::Install,
@@ -484,6 +500,14 @@ fn run_workbuddy_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> 
         RuntimeLifecycleAction::Update => WorkbuddyLifecycleAction::Update,
     };
     run_workbuddy_lifecycle(action)
+}
+
+fn run_zcode_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
+    let action = match action {
+        RuntimeLifecycleAction::Install => ZcodeLifecycleAction::Install,
+        RuntimeLifecycleAction::Update => ZcodeLifecycleAction::Update,
+    };
+    run_zcode_lifecycle(action)
 }
 
 fn run_cursor_lifecycle_action(action: RuntimeLifecycleAction) -> Result<()> {
@@ -687,6 +711,30 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         skill_mount: true,
         browser_mcp: false,
     },
+    RuntimeDescriptor {
+        id: "zcode",
+        probe: RuntimeProbeSpec {
+            binary_name: "zcode",
+            config_format: ConfigFormat::Json,
+            env_keywords: ZCODE_ENV,
+        },
+        create_adapter: zcode_adapter,
+        schema_probe: Some(schema_zcode),
+        deep_probe: Some(probe_deep_noop),
+        suggest_repairs: Some(suggest_zcode_repairs),
+        apply_playbook: Some(apply_zcode_playbook_filtered),
+        run_lifecycle: Some(run_zcode_lifecycle_action),
+        wiring: None,
+        ask: None,
+        workspace_bind: None,
+        workspace_repairs: &[],
+        label: "ZCode",
+        open_session: Some(open_zcode_session),
+        open_session_kind: Some(OpenSessionKind::App),
+        dispatch: None,
+        skill_mount: false,
+        browser_mcp: false,
+    },
 ];
 
 pub fn all_runtime_ids() -> impl Iterator<Item = &'static str> {
@@ -697,6 +745,7 @@ pub fn descriptor_by_id(runtime_id: &str) -> Option<&'static RuntimeDescriptor> 
     let runtime_id = match runtime_id.trim().to_ascii_lowercase().as_str() {
         "dsh" | "deepseek" | "deepseek_harness" => "deepseek-harness",
         "cursor-cli" | "cursor-agent" => "cursor",
+        "z-code" => "zcode",
         _ => runtime_id,
     };
     RUNTIME_REGISTRY.iter().find(|entry| entry.id == runtime_id)
@@ -911,7 +960,8 @@ mod tests {
                 "codex",
                 "qoder",
                 "workbuddy",
-                "cursor"
+                "cursor",
+                "zcode"
             ]
         );
         let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
@@ -1106,6 +1156,11 @@ mod tests {
         assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
         assert!(descriptor_by_id("workbuddy").unwrap().ask.is_none());
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
+        assert!(descriptor_by_id("zcode").unwrap().ask.is_none());
+        assert_eq!(
+            descriptor_by_id("zcode").unwrap().open_session_kind,
+            Some(OpenSessionKind::App)
+        );
         let mut repair_ids: Vec<_> = RUNTIME_REGISTRY
             .iter()
             .flat_map(|entry| entry.workspace_repairs.iter().map(|repair| repair.check_id))

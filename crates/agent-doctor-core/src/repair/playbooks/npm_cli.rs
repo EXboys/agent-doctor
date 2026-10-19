@@ -28,8 +28,8 @@ use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
 use crate::lifecycle::{
     run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle, run_qoder_lifecycle,
-    run_workbuddy_lifecycle, CursorLifecycleAction, NpmCliLifecycleAction, QoderLifecycleAction,
-    WorkbuddyLifecycleAction,
+    run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction, NpmCliLifecycleAction,
+    QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
 };
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::{SkippedRepairAction, SuggestedRepair};
@@ -78,6 +78,12 @@ pub(crate) const CURSOR_RULES: &[Rule] = &[install_rule!(
     "Install Cursor",
     APP_INSTALL_TEXT,
     "cursor"
+)];
+pub(crate) const ZCODE_RULES: &[Rule] = &[install_rule!(
+    "fix-zcode-install",
+    "Install ZCode",
+    APP_INSTALL_TEXT,
+    "zcode"
 )];
 
 /// Run before the mode rewire.
@@ -158,6 +164,10 @@ pub fn suggest_workbuddy_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRep
 
 pub fn suggest_cursor_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
     suggest_rules(CURSOR_RULES, probe)
+}
+
+pub fn suggest_zcode_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+    suggest_rules(ZCODE_RULES, probe)
 }
 
 fn suggest_npm_cli_repairs(
@@ -480,6 +490,17 @@ pub fn apply_cursor_playbook_filtered(
     apply_install_only_playbook("cursor", probe, only_ids)
 }
 
+pub fn apply_zcode_playbook(probe: &RuntimeProbeReport) -> Result<PlaybookApplyResult> {
+    apply_zcode_playbook_filtered(probe, None)
+}
+
+pub fn apply_zcode_playbook_filtered(
+    probe: &RuntimeProbeReport,
+    only_ids: Option<&[String]>,
+) -> Result<PlaybookApplyResult> {
+    apply_install_only_playbook("zcode", probe, only_ids)
+}
+
 fn apply_install_only_playbook(
     runtime_id: &str,
     probe: &RuntimeProbeReport,
@@ -489,6 +510,7 @@ fn apply_install_only_playbook(
         "qoder" => QODER_RULES,
         "workbuddy" => WORKBUDDY_RULES,
         "cursor" => CURSOR_RULES,
+        "zcode" => ZCODE_RULES,
         other => bail!("no install playbook for {other}"),
     };
     Ok(apply_rules(rules, probe, only_ids))
@@ -784,6 +806,7 @@ fn run_install(runtime_id: &str) -> Result<()> {
         "qoder" => run_qoder_lifecycle(QoderLifecycleAction::Install),
         "workbuddy" => run_workbuddy_lifecycle(WorkbuddyLifecycleAction::Install),
         "cursor" => run_cursor_lifecycle(CursorLifecycleAction::Install),
+        "zcode" => run_zcode_lifecycle(ZcodeLifecycleAction::Install),
         other => bail!("no npm install playbook for {other}"),
     }
 }
@@ -1005,6 +1028,7 @@ mod tests {
             QODER_RULES,
             WORKBUDDY_RULES,
             CURSOR_RULES,
+            ZCODE_RULES,
             CLAUDE_CODE_SETUP_RULES,
             CLAUDE_CODE_RULES,
             CODEX_SETUP_RULES,

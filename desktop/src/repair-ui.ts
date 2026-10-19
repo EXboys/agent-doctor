@@ -100,6 +100,7 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-qoder-install": "repair.fix.qoderInstall",
   "fix-workbuddy-install": "repair.fix.workbuddyInstall",
   "fix-cursor-install": "repair.fix.cursorInstall",
+  "fix-zcode-install": "repair.fix.zcodeInstall",
   "fix-claude-code-install": "repair.fix.claudeInstall",
   "fix-codex-install": "repair.fix.codexInstall",
   "fix-claude-code-settings-permissions": "repair.fix.envPermissions",

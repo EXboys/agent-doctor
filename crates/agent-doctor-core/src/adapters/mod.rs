@@ -7,6 +7,7 @@ mod openclaw;
 mod qoder;
 pub(crate) mod util;
 mod workbuddy;
+mod zcode;
 
 pub use claude_code::ClaudeCodeAdapter;
 pub use codex::CodexAdapter;
@@ -21,3 +22,5 @@ pub use qoder::QoderAdapter;
 pub(crate) use qoder::{locate_qoder, QoderInstall};
 pub use util::{hermes_root, refresh_managed_runtime_path};
 pub use workbuddy::WorkbuddyAdapter;
+pub use zcode::ZcodeAdapter;
+pub(crate) use zcode::{locate_zcode, ZcodeInstall};

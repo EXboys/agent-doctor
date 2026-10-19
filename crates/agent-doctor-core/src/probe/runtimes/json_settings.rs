@@ -42,6 +42,15 @@ pub(crate) fn probe_schema_cursor(
     probe_json_object_schema(path, parsed, checks, facts, "Cursor");
 }
 
+pub(crate) fn probe_schema_zcode(
+    path: &Path,
+    parsed: &ParsedConfig,
+    checks: &mut Vec<ProbeCheck>,
+    facts: &mut Vec<DiagnosticFact>,
+) {
+    probe_json_object_schema(path, parsed, checks, facts, "ZCode");
+}
+
 pub(crate) fn probe_schema_workbuddy(
     path: &Path,
     parsed: &ParsedConfig,

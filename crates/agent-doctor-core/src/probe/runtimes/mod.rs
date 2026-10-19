@@ -15,6 +15,6 @@ pub(crate) use deepseek_harness::{
 pub(crate) use hermes::{probe_deep, probe_schema as schema_hermes};
 pub(crate) use json_settings::{
     probe_deep_noop, probe_schema_cursor as schema_cursor, probe_schema_qoder as schema_qoder,
-    probe_schema_workbuddy as schema_workbuddy,
+    probe_schema_workbuddy as schema_workbuddy, probe_schema_zcode as schema_zcode,
 };
 pub(crate) use openclaw::{probe_deep as openclaw_probe_deep, probe_schema as schema_openclaw};

@@ -45,10 +45,11 @@ pub use playbooks::{
     apply_deepseek_harness_playbook, apply_deepseek_harness_playbook_filtered,
     apply_hermes_playbook, apply_hermes_playbook_filtered, apply_openclaw_playbook,
     apply_openclaw_playbook_filtered, apply_qoder_playbook, apply_qoder_playbook_filtered,
-    apply_workbuddy_playbook, apply_workbuddy_playbook_filtered, suggest_claude_code_repairs,
-    suggest_codex_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
-    suggest_workbuddy_repairs, PlaybookApplyResult,
+    apply_workbuddy_playbook, apply_workbuddy_playbook_filtered, apply_zcode_playbook,
+    apply_zcode_playbook_filtered, suggest_claude_code_repairs, suggest_codex_repairs,
+    suggest_cursor_repairs, suggest_deepseek_harness_repairs, suggest_hermes_repairs,
+    suggest_openclaw_repairs, suggest_qoder_repairs, suggest_workbuddy_repairs,
+    suggest_zcode_repairs, PlaybookApplyResult,
 };
 pub use repair_loop::{
     diff_probe_checks, execute_repair_loop, CheckChange, CheckDiff, RepairLoopOptions,

@@ -39,6 +39,12 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         "cursor" => {
             return Ok("rm -f \"$HOME/.local/bin/agent\"".to_string());
         }
+        "zcode" => {
+            return Ok(
+                "rm -rf \"$HOME/Applications/ZCode.app\"; rm -f \"$HOME/.local/bin/zcode\" \"$HOME/.local/bin/ZCode.AppImage\""
+                    .to_string(),
+            );
+        }
         "openclaw" => {
             return Ok(
                 "openclaw uninstall --service --yes --non-interactive; npm uninstall -g openclaw"
@@ -355,6 +361,26 @@ fn uninstall_cursor_cli() -> Result<()> {
     bail!("没找到 Cursor 命令行。电脑上的 Cursor 窗口不会被卸掉。");
 }
 
+fn uninstall_zcode() -> Result<()> {
+    let mut removed = false;
+    let app = home_join("Applications/ZCode.app");
+    if app.exists() {
+        std::fs::remove_dir_all(&app)?;
+        removed = true;
+    }
+    for rel in [".local/bin/zcode", ".local/bin/ZCode.AppImage"] {
+        let path = home_join(rel);
+        if path.is_file() || path.is_symlink() {
+            std::fs::remove_file(&path)?;
+            removed = true;
+        }
+    }
+    if removed {
+        return Ok(());
+    }
+    bail!("没找到能卸的 ZCode。应用程序文件夹里的窗口不会被卸掉。");
+}
+
 pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
     match runtime_id {
         "qoder" => uninstall_native_cli(&["qoder", "qodercli"], "@qoder-ai/qodercli", "qodercli"),
@@ -364,6 +390,7 @@ pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
             "codebuddy",
         ),
         "cursor" => uninstall_cursor_cli(),
+        "zcode" => uninstall_zcode(),
         "hermes" if cfg!(windows) => uninstall_hermes_windows(),
         "hermes" => {
             let command = hermes_uninstall_shell_command();

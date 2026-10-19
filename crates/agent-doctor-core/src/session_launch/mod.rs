@@ -103,12 +103,14 @@ mod codex;
 mod cursor;
 mod qoder;
 mod terminal;
+mod zcode;
 
 pub use claude::*;
 pub(crate) use codex::*;
 pub(crate) use cursor::*;
 pub(crate) use qoder::*;
 pub(crate) use terminal::*;
+pub(crate) use zcode::*;
 
 #[cfg(test)]
 mod tests {
