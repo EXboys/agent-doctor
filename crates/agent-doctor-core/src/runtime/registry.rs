@@ -39,7 +39,7 @@ use crate::repair::{
     suggest_qoder_repairs, suggest_workbuddy_repairs, PlaybookApplyResult, SuggestedRepair,
 };
 use crate::session_launch::{
-    open_claude_code, open_codex, open_cursor_app, open_in_terminal, OpenSessionReport,
+    open_claude_code, open_codex, open_cursor_app, open_in_terminal, open_qoder, OpenSessionReport,
 };
 use crate::setup::{EffectorKind, WriteSemantics};
 use crate::workspace::backends::{
@@ -411,7 +411,7 @@ fn open_qoder_session(
     prompt: Option<&str>,
     _prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
-    open_in_terminal("qoder", &["qoder"], cwd, prompt)
+    open_qoder(cwd, prompt)
 }
 
 fn open_workbuddy_session(

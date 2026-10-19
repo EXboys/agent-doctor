@@ -101,11 +101,13 @@ pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSess
 mod claude;
 mod codex;
 mod cursor;
+mod qoder;
 mod terminal;
 
 pub use claude::*;
 pub(crate) use codex::*;
 pub(crate) use cursor::*;
+pub(crate) use qoder::*;
 pub(crate) use terminal::*;
 
 #[cfg(test)]

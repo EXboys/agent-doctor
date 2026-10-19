@@ -26,7 +26,7 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
         "qoder" => {
             return Ok(
-                "rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.qoder/bin/qoder\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
+                "rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.local/bin/qodercli\" \"$HOME/.qoder/bin/qoder\"; rm -rf \"$HOME/.qoder/bin/qodercli\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
                     .to_string(),
             );
         }
@@ -357,7 +357,7 @@ fn uninstall_cursor_cli() -> Result<()> {
 
 pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
     match runtime_id {
-        "qoder" => uninstall_native_cli(&["qoder"], "@qoder-ai/qodercli", "qoder"),
+        "qoder" => uninstall_native_cli(&["qoder", "qodercli"], "@qoder-ai/qodercli", "qodercli"),
         "workbuddy" => uninstall_native_cli(
             &["codebuddy", "workbuddy"],
             "@tencent-ai/codebuddy-code",
