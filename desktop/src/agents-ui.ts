@@ -25,6 +25,11 @@ export function isDesktopAppRuntimeId(runtimeId: string): boolean {
   return catalogIsDesktopAppRuntimeId(runtimeId);
 }
 
+/** Its own window is the only place to talk to it. Ask runtimes stay in this app. */
+export function opensOwnWindowOnly(runtimeId: string): boolean {
+  return isDesktopAppRuntimeId(runtimeId) && !isAskRuntimeId(runtimeId);
+}
+
 export function supportsBrowserMcp(runtimeId: string): boolean {
   return catalogSupportsBrowserMcp(runtimeId);
 }

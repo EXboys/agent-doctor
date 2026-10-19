@@ -23,4 +23,4 @@ pub(crate) use qoder::{locate_qoder, QoderInstall};
 pub use util::{hermes_root, refresh_managed_runtime_path};
 pub use workbuddy::WorkbuddyAdapter;
 pub use zcode::ZcodeAdapter;
-pub(crate) use zcode::{locate_zcode, ZcodeInstall};
+pub(crate) use zcode::{locate_zcode, locate_zcode_headless, ZcodeHeadless, ZcodeInstall};

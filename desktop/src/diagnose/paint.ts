@@ -8,7 +8,7 @@ import {
 import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { applyStaticI18n, t } from "../i18n";
-import { isDesktopAppRuntimeId, supportsBrowserMcp } from "../agents-ui";
+import { opensOwnWindowOnly, supportsBrowserMcp } from "../agents-ui";
 import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
 import { renderPlainRepairCheckBody } from "../repair-plain";
 import type { RepairPreviewResponse } from "../types";
@@ -442,7 +442,7 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
     const hasFail = Boolean(session.preview && session.preview.summary.fail > 0);
     dom.testHintEl.hidden = session.activeStep !== "test" || (hasFail && !session.testedOk);
     if (session.activeStep === "test") {
-      dom.testHintEl.textContent = isDesktopAppRuntimeId(session.runtimeId)
+      dom.testHintEl.textContent = opensOwnWindowOnly(session.runtimeId)
         ? t("diagnose.flow.testHintDesktop", { name: session.displayName })
         : t("diagnose.flow.testHint");
     }
@@ -523,7 +523,7 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
         paintHeroTone("busy");
       }
       const browserVerify = supportsBrowserMcp(session.runtimeId);
-      const desktopApp = isDesktopAppRuntimeId(session.runtimeId);
+      const desktopApp = opensOwnWindowOnly(session.runtimeId);
       dom.headlineEl.textContent = session.testedOk
         ? desktopApp
           ? t("diagnose.flow.testOkHeadlineDesktop", { name: session.displayName })

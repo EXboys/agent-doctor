@@ -466,7 +466,8 @@ export function createSendController(deps: SendDeps) {
         dangerouslySkipPermissions:
           (runtimeForTurn === "claude-code" ||
             runtimeForTurn === "hermes" ||
-            runtimeForTurn === "deepseek-harness") &&
+            runtimeForTurn === "deepseek-harness" ||
+            runtimeForTurn === "zcode") &&
           elevated,
         fullAuto: (runtimeForTurn === "codex" || runtimeForTurn === "openclaw") && elevated,
         resumeThreadId,

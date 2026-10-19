@@ -19,6 +19,72 @@ pub(crate) fn locate_zcode() -> Option<ZcodeInstall> {
     cli_path().map(ZcodeInstall::Cli)
 }
 
+/// How to start a headless `zcode --prompt` without opening the window.
+///
+/// A `zcode` on PATH is the CLI. The desktop install keeps the same script inside
+/// the app (`Contents/Resources/glm/zcode.cjs`), run by the app binary as Node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ZcodeHeadless {
+    pub program: PathBuf,
+    pub script: Option<PathBuf>,
+}
+
+pub(crate) fn locate_zcode_headless() -> Option<ZcodeHeadless> {
+    if let Some(path) = cli_path() {
+        if !is_app_image(&path) {
+            return Some(ZcodeHeadless {
+                program: path,
+                script: None,
+            });
+        }
+    }
+    desktop_app_path().and_then(|app| headless_inside_app(&app))
+}
+
+fn macos_headless_program(app: &Path) -> PathBuf {
+    let helper = app.join("Contents/Frameworks/ZCode Helper.app/Contents/MacOS/ZCode Helper");
+    if helper.is_file() {
+        helper
+    } else {
+        app.join("Contents/MacOS/ZCode")
+    }
+}
+
+fn headless_inside_app(app: &Path) -> Option<ZcodeHeadless> {
+    let (program, script) = if app
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("app"))
+    {
+        (
+            // The main app binary shows up in the Dock as a blank "exec" window.
+            // ZCode itself asks through the helper, which stays in the background.
+            macos_headless_program(app),
+            app.join("Contents/Resources/glm/zcode.cjs"),
+        )
+    } else if app
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+    {
+        let parent = app.parent()?;
+        (
+            app.to_path_buf(),
+            parent.join("resources").join("glm").join("zcode.cjs"),
+        )
+    } else {
+        return None;
+    };
+    if program.is_file() && script.is_file() {
+        Some(ZcodeHeadless {
+            program,
+            script: Some(script),
+        })
+    } else {
+        None
+    }
+}
+
 fn cli_path() -> Option<PathBuf> {
     if let Some(path) = find_binary("zcode") {
         return Some(path);
@@ -198,5 +264,45 @@ mod tests {
             return Some(ZcodeInstall::App(app));
         }
         cli.map(ZcodeInstall::Cli)
+    }
+
+    #[test]
+    fn bundled_app_script_is_the_headless_cli() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app = temp.path().join("Applications/ZCode.app");
+        let program = app.join("Contents/MacOS/ZCode");
+        let script = app.join("Contents/Resources/glm/zcode.cjs");
+        fs::create_dir_all(program.parent().unwrap()).unwrap();
+        fs::create_dir_all(script.parent().unwrap()).unwrap();
+        fs::write(&program, b"").unwrap();
+        fs::write(&script, b"").unwrap();
+        with_test_home(temp.path(), || {
+            if find_binary("zcode").is_some() {
+                return;
+            }
+            let found = locate_zcode_headless().expect("headless");
+            assert_eq!(found.program, program);
+            assert_eq!(found.script.as_deref(), Some(script.as_path()));
+        });
+    }
+
+    #[test]
+    fn headless_uses_the_background_helper_when_present() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app = temp.path().join("Applications/ZCode.app");
+        let main = app.join("Contents/MacOS/ZCode");
+        let helper = app.join("Contents/Frameworks/ZCode Helper.app/Contents/MacOS/ZCode Helper");
+        let script = app.join("Contents/Resources/glm/zcode.cjs");
+        for path in [&main, &helper, &script] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"").unwrap();
+        }
+        with_test_home(temp.path(), || {
+            if find_binary("zcode").is_some() {
+                return;
+            }
+            let found = locate_zcode_headless().expect("headless");
+            assert_eq!(found.program, helper);
+        });
     }
 }

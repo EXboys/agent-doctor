@@ -28,7 +28,7 @@ use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::prompt_session::{
     AskBackend, ClaudeAskBackend, CodexAskBackend, DeepSeekHarnessAskBackend, HermesAskBackend,
-    OpenClawAskBackend,
+    OpenClawAskBackend, ZcodeAskBackend,
 };
 use crate::repair::{
     apply_claude_code_playbook_filtered, apply_codex_playbook_filtered, apply_config_syntax_repair,
@@ -357,6 +357,7 @@ static HERMES_ASK: HermesAskBackend = HermesAskBackend;
 static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBackend;
 static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
 static CODEX_ASK: CodexAskBackend = CodexAskBackend;
+static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
 
 fn bind_openclaw_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
     bind_openclaw(input.openclaw_agent_id, input.openclaw_workspace)
@@ -725,7 +726,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_zcode_playbook_filtered),
         run_lifecycle: Some(run_zcode_lifecycle_action),
         wiring: None,
-        ask: None,
+        ask: Some(&ZCODE_ASK),
         workspace_bind: None,
         workspace_repairs: &[],
         label: "ZCode",
@@ -1141,7 +1142,8 @@ mod tests {
                 "hermes",
                 "deepseek-harness",
                 "claude-code",
-                "codex"
+                "codex",
+                "zcode"
             ]
         );
         let workspace: Vec<_> = RUNTIME_REGISTRY
@@ -1156,7 +1158,7 @@ mod tests {
         assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
         assert!(descriptor_by_id("workbuddy").unwrap().ask.is_none());
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
-        assert!(descriptor_by_id("zcode").unwrap().ask.is_none());
+        assert!(descriptor_by_id("zcode").unwrap().ask.is_some());
         assert_eq!(
             descriptor_by_id("zcode").unwrap().open_session_kind,
             Some(OpenSessionKind::App)

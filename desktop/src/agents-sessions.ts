@@ -1,5 +1,5 @@
 
-import { isDesktopAppRuntimeId } from "./agents-ui";
+import { opensOwnWindowOnly } from "./agents-ui";
 import { t } from "./i18n";
 import { openSession, openAskWindow as openAskWindowCommand, closeAskWindow } from "./ipc";
 
@@ -42,7 +42,7 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
 
   async function openAskWindow(runtime: string): Promise<void> {
     try {
-      if (isDesktopAppRuntimeId(runtime)) {
+      if (opensOwnWindowOnly(runtime)) {
         await openDesktopApp(runtime);
         return;
       }
@@ -63,7 +63,7 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
 
   async function openAskWindowForVerify(runtime: string): Promise<void> {
     try {
-      if (isDesktopAppRuntimeId(runtime)) {
+      if (opensOwnWindowOnly(runtime)) {
         await openDesktopApp(runtime);
         return;
       }

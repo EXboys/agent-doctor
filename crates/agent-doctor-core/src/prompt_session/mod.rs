@@ -1,4 +1,4 @@
-//! Light Ask sessions for Claude Code, Codex, DeepSeek Harness, Hermes, and OpenClaw.
+//! Light Ask sessions for Claude Code, Codex, DeepSeek Harness, Hermes, OpenClaw, and ZCode.
 //!
 //! UI consumes a shared [`PromptSessionEvent`] stream. Each runtime is an
 //! [`AskBackend`] adapter (Claude: `control_request`; Codex: `app-server`;
@@ -18,6 +18,7 @@ mod tool_step;
 mod util;
 mod vision;
 mod warm;
+mod zcode;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -39,6 +40,7 @@ pub(crate) use codex_app_server::CodexAskBackend;
 pub(crate) use deepseek_harness::DeepSeekHarnessAskBackend;
 pub(crate) use hermes::HermesAskBackend;
 pub(crate) use openclaw::OpenClawAskBackend;
+pub(crate) use zcode::ZcodeAskBackend;
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
 

@@ -59,7 +59,8 @@ export type AskRuntime =
   | "codex"
   | "hermes"
   | "openclaw"
-  | "deepseek-harness";
+  | "deepseek-harness"
+  | "zcode";
 
 export type MentionKind = "skill" | "mcp" | "knowledge";
 

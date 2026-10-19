@@ -21,7 +21,7 @@ import {
   withProviderFailure,
   type ProviderField,
 } from "../friendly-error";
-import { isDesktopAppRuntimeId } from "../agents-ui";
+import { opensOwnWindowOnly } from "../agents-ui";
 import { t } from "../i18n";
 import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
 import type {
@@ -394,7 +394,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function openAskYourself(): Promise<void> {
     try {
-      if (isDesktopAppRuntimeId(session.runtimeId)) {
+      if (opensOwnWindowOnly(session.runtimeId)) {
         await openDesktopApp();
         return;
       }
@@ -406,7 +406,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
 
   async function openAskForVerify(): Promise<void> {
     try {
-      if (isDesktopAppRuntimeId(session.runtimeId)) {
+      if (opensOwnWindowOnly(session.runtimeId)) {
         await openDesktopApp();
         return;
       }

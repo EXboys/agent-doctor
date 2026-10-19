@@ -10,7 +10,8 @@ export type AskRuntime =
   | "codex"
   | "hermes"
   | "openclaw"
-  | "deepseek-harness";
+  | "deepseek-harness"
+  | "zcode";
 
 type PromptSessionStatus = "succeeded" | "failed" | "cancelled" | "timed_out";
 
@@ -128,6 +129,7 @@ function selectedRuntime(): AskRuntime {
     value === "hermes" ||
     value === "openclaw" ||
     value === "deepseek-harness" ||
+    value === "zcode" ||
     value === "claude-code"
   ) {
     return value;
@@ -143,7 +145,11 @@ function elevatedFlags(runtime: AskRuntime): {
   const on = Boolean(elevated?.checked);
   return {
     dangerously_skip_permissions:
-      (runtime === "claude-code" || runtime === "hermes" || runtime === "deepseek-harness") && on,
+      (runtime === "claude-code" ||
+        runtime === "hermes" ||
+        runtime === "deepseek-harness" ||
+        runtime === "zcode") &&
+      on,
     full_auto: (runtime === "codex" || runtime === "openclaw") && on,
   };
 }

@@ -229,6 +229,7 @@ const AGENT_NAMES: Record<string, { name: string; badge: string }> = {
   hermes: { name: "Hermes", badge: "Hermes" },
   openclaw: { name: "OpenClaw", badge: "OpenClaw" },
   "deepseek-harness": { name: "DeepSeek", badge: "DeepSeek" },
+  zcode: { name: "ZCode", badge: "ZCode" },
 };
 
 export type IslandSessionSource = {
