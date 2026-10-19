@@ -21,6 +21,9 @@ pub(crate) struct KeyPress {
     pub alt: bool,
     pub win: bool,
     pub vk: u16,
+    /// Dedicated Delete, arrows, Home, and End. Without this, Windows treats
+    /// Delete as the numpad key and many text fields ignore it.
+    pub extended: bool,
 }
 
 #[cfg(any(windows, test))]
@@ -148,6 +151,7 @@ pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
         alt: false,
         win: false,
         vk: 0,
+        extended: false,
     };
     let mut token = String::new();
     for part in key.split('+') {
@@ -160,21 +164,53 @@ pub(crate) fn parse_key(key: &str) -> Result<KeyPress, String> {
             _ => {}
         }
     }
-    press.vk = match token.as_str() {
-        "return" | "enter" => 0x0D,
-        "escape" | "esc" => 0x1B,
-        "tab" => 0x09,
-        "space" => 0x20,
-        "up" => 0x26,
-        "down" => 0x28,
-        "left" => 0x25,
-        "right" => 0x27,
-        other if other.len() == 1 && other.as_bytes()[0].is_ascii_lowercase() => {
-            other.as_bytes()[0].to_ascii_uppercase() as u16
+    let (vk, extended) = match token.as_str() {
+        "return" | "enter" => (0x0D, false),
+        "escape" | "esc" => (0x1B, false),
+        "tab" => (0x09, false),
+        "space" => (0x20, false),
+        // The character before the cursor. This is the key people use to edit a field.
+        "backspace" | "bksp" | "bs" | "退格" => (0x08, false),
+        // The character after the cursor. Must be the extended Delete key.
+        "delete" | "del" | "删除" => (0x2E, true),
+        "insert" | "ins" => (0x2D, true),
+        "home" => (0x24, true),
+        "end" => (0x23, true),
+        "pageup" | "page_up" | "pgup" | "page up" => (0x21, true),
+        "pagedown" | "page_down" | "pgdn" | "page down" => (0x22, true),
+        "up" => (0x26, true),
+        "down" => (0x28, true),
+        "left" => (0x25, true),
+        "right" => (0x27, true),
+        other if other.len() == 1 && other.as_bytes()[0].is_ascii_digit() => {
+            (other.as_bytes()[0] as u16, false)
         }
-        other => return Err(format!("unknown key: {other}")),
+        other if other.len() == 1 && other.as_bytes()[0].is_ascii_lowercase() => {
+            (other.as_bytes()[0].to_ascii_uppercase() as u16, false)
+        }
+        other => match function_vk(other) {
+            Some(vk) => (vk, false),
+            None => {
+                return Err(format!(
+                    "unknown key: {other}. Use backspace to remove the character before the cursor, or delete for the one after it."
+                ));
+            }
+        },
     };
+    press.vk = vk;
+    press.extended = extended;
     Ok(press)
+}
+
+/// `f1`…`f12`. `VK_F1` is `0x70`.
+fn function_vk(token: &str) -> Option<u16> {
+    let rest = token.strip_prefix('f')?;
+    let n: u16 = rest.parse().ok()?;
+    if (1..=12).contains(&n) {
+        Some(0x6F + n)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -220,6 +256,23 @@ mod tests {
         let enter = parse_key("ctrl+enter").unwrap();
         assert!(enter.control);
         assert_eq!(enter.vk, 0x0D);
+    }
+
+    #[test]
+    fn delete_and_backspace_reach_a_text_field() {
+        let back = parse_key("backspace").unwrap();
+        assert_eq!(back.vk, 0x08);
+        assert!(!back.extended);
+        let del = parse_key("delete").unwrap();
+        assert_eq!(del.vk, 0x2E);
+        assert!(del.extended);
+        let chord = parse_key("ctrl+退格").unwrap();
+        assert!(chord.control);
+        assert_eq!(chord.vk, 0x08);
+        assert_eq!(parse_key("删除").unwrap().vk, 0x2E);
+        assert!(parse_key("up").unwrap().extended);
+        assert_eq!(parse_key("f5").unwrap().vk, 0x74);
+        assert!(parse_key("not-a-key").is_err());
     }
 
     #[test]

@@ -45,10 +45,11 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT,
-    MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
+    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
+    KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE,
+    MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::Shell::{
     ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
@@ -1447,46 +1448,69 @@ fn send_key(press: &KeyPress) -> Result<()> {
     if press.win {
         mods.push(VK_LWIN);
     }
+    let mut down = Vec::with_capacity(mods.len() + 1);
     for vk in &mods {
-        send_vk(*vk, false)?;
+        down.push(key_input(*vk, false, false));
     }
-    send_vk(VIRTUAL_KEY(press.vk), false)?;
+    down.push(key_input(VIRTUAL_KEY(press.vk), false, press.extended));
+    send_keys(&down)?;
     thread::sleep(Duration::from_millis(20));
-    send_vk(VIRTUAL_KEY(press.vk), true)?;
+    let mut up = Vec::with_capacity(mods.len() + 1);
+    up.push(key_input(VIRTUAL_KEY(press.vk), true, press.extended));
     for vk in mods.iter().rev() {
-        send_vk(*vk, true)?;
+        up.push(key_input(*vk, true, false));
     }
-    Ok(())
+    send_keys(&up)
 }
 
-fn send_vk(vk: VIRTUAL_KEY, up: bool) -> Result<()> {
-    let input = INPUT {
+fn key_input(vk: VIRTUAL_KEY, up: bool, extended: bool) -> INPUT {
+    let scan = unsafe { MapVirtualKeyW(u32::from(vk.0), MAPVK_VK_TO_VSC) } as u16;
+    let mut flags = if up {
+        KEYEVENTF_KEYUP
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk,
-                wScan: 0,
-                dwFlags: if up {
-                    KEYEVENTF_KEYUP
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                },
+                wScan: scan,
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
             },
         },
-    };
-    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-    if sent != 1 {
+    }
+}
+
+fn send_keys(inputs: &[INPUT]) -> Result<()> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let sent = unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent != inputs.len() as u32 {
         bail!("keys did not go through");
     }
     Ok(())
 }
 
 fn type_text(text: &str) -> Result<()> {
-    for unit in text.encode_utf16() {
-        send_unicode(unit, false)?;
-        send_unicode(unit, true)?;
+    for ch in text.chars() {
+        match ch {
+            // A Unicode packet for these two is ignored by a text field.
+            '\u{8}' => send_key(&parse_key("backspace").map_err(anyhow::Error::msg)?)?,
+            '\u{7f}' => send_key(&parse_key("delete").map_err(anyhow::Error::msg)?)?,
+            other => {
+                for unit in other.encode_utf16() {
+                    send_unicode(unit, false)?;
+                    send_unicode(unit, true)?;
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(8));
     }
     Ok(())

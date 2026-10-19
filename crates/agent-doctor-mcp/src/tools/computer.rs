@@ -210,7 +210,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "screen_press".into(),
-            description: "Press a key inside the current app, such as return, escape, tab, or command+a. Do not use this to open or switch apps; call screen_open.".into(),
+            description: "Press a key inside the current app, such as return, escape, tab, backspace, delete, or command+a. backspace removes the character before the cursor in a text field. delete removes the character after the cursor. Do not use this to open or switch apps; call screen_open.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": { "key": { "type": "string" } },

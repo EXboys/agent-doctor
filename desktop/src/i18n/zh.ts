@@ -807,6 +807,8 @@ export const zh = {
     "chat.key.down": "向下",
     "chat.key.left": "向左",
     "chat.key.right": "向右",
+    "chat.key.backspace": "退格",
+    "chat.key.delete": "删除",
     "chat.key.selectAll": "全选",
     "chat.key.copy": "复制",
     "chat.key.paste": "粘贴",

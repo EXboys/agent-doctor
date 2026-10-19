@@ -805,6 +805,8 @@ export const en = {
     "chat.key.down": "Down",
     "chat.key.left": "Left",
     "chat.key.right": "Right",
+    "chat.key.backspace": "Backspace",
+    "chat.key.delete": "Delete",
     "chat.key.selectAll": "Select all",
     "chat.key.copy": "Copy",
     "chat.key.paste": "Paste",
