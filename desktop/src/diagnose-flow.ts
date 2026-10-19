@@ -58,18 +58,66 @@ export function scoreLooksGood(score: DiagnoseScore): boolean {
   return score.fail === 0 && score.percent >= 80;
 }
 
+type FailCheck = {
+  id?: string;
+  title?: string;
+  status: string;
+  message?: string;
+};
+
+/** True when every failure is the model address, so the next step is the provider page. */
+export function failsNeedAddress(preview: {
+  summary: { fail: number };
+  checks?: FailCheck[];
+}): boolean {
+  if (preview.summary.fail <= 0) {
+    return false;
+  }
+  const fails = (preview.checks ?? []).filter((check) => check.status === "fail");
+  // Callers that only pass a fail count keep the previous address button.
+  if (fails.length === 0) {
+    return true;
+  }
+  return fails.every(
+    (check) =>
+      check.id === "gateway.connectivity" ||
+      check.title === "Gateway connectivity" ||
+      /gateway (TCP|DNS|host|URL)/i.test(check.message ?? ""),
+  );
+}
+
+/** Saved key + only a browser-tool write left. The key form should stay closed. */
+export function autoFixNoticeKey(preview: {
+  suggested_repairs: Array<{ id: string; auto_fixable: boolean }>;
+}): "diagnose.flow.scoreNeedsBrowser" | "diagnose.flow.scoreNeedsAutoFix" {
+  const ids = preview.suggested_repairs
+    .filter((item) => item.auto_fixable)
+    .map((item) => item.id);
+  if (ids.length > 0 && ids.every((id) => id.includes("browser-mcp"))) {
+    return "diagnose.flow.scoreNeedsBrowser";
+  }
+  return "diagnose.flow.scoreNeedsAutoFix";
+}
+
 /** Main button when checks failed: only offer a settings write when one exists. */
 export function failurePrimary(
-  preview: { can_apply_repair: boolean; summary: { fail: number } },
+  preview: {
+    can_apply_repair: boolean;
+    summary: { fail: number };
+    checks?: FailCheck[];
+  },
   autoFixTried: boolean,
 ): "apply-settings" | "check-address" | null {
-  if (preview.summary.fail <= 0) {
-    return null;
-  }
   if (preview.can_apply_repair && !autoFixTried) {
     return "apply-settings";
   }
-  return "check-address";
+  if (preview.summary.fail <= 0) {
+    return null;
+  }
+  if (failsNeedAddress(preview)) {
+    return "check-address";
+  }
+  return null;
 }
 
 /** What a settings apply actually changed, so the button note does not claim a fix. */

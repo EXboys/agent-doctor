@@ -3,7 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
+  autoFixNoticeKey,
   computeDiagnoseScore,
+  failsNeedAddress,
   needsWiringFromPreview,
   scoreLooksGood,
   settingsApplyKind,
@@ -102,9 +104,14 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         runtime: session.runtimeId,
       });
       const kind = settingsApplyKind(session.preview);
+      const browserSkipped = (session.preview.last_execute?.skipped ?? []).some((item) =>
+        item.id.includes("browser"),
+      );
       const note =
         kind === "nothing"
-          ? t("diagnose.flow.autoFixNoChange")
+          ? browserSkipped
+            ? t("diagnose.flow.autoFixBrowserSkipped")
+            : t("diagnose.flow.autoFixNoChange")
           : kind === "still-fail"
             ? t("diagnose.flow.autoFixStillFail")
             : t("diagnose.flow.autoFixOk");
@@ -286,10 +293,12 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       await paint.playSequentialConfirm(session.preview!);
       await paint.animateScoreCount(session.lastScore!);
 
+      const canApplyRepair = Boolean(session.preview!.can_apply_repair);
       session.testedOk =
         providerOk &&
         scoreLooksGood(session.lastScore!) &&
-        session.preview!.summary.fail === 0;
+        session.preview!.summary.fail === 0 &&
+        !canApplyRepair;
       paint.hideScanMeter();
       dom.scoreRingEl.classList.remove("is-scanning");
       dom.testHintEl.hidden = false;
@@ -299,6 +308,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       const notice = session.repairNotice;
       session.repairNotice = null;
       const withNotice = (text: string) => (notice ? `${notice} ${text}` : text);
+      const scoreText = String(session.lastScore!.percent);
 
       if (session.testedOk) {
         session.guideFillConfig = false;
@@ -308,7 +318,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           "ok",
           withNotice(
             t("diagnose.flow.scoreOk", {
-              score: String(session.lastScore!.percent),
+              score: scoreText,
               pass: String(session.lastScore!.pass),
               total: String(session.lastScore!.total || session.lastScore!.pass),
             }),
@@ -318,40 +328,50 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         paint.paintAll();
       } else {
         const needsFill = !providerOk || needsWiringFromPreview(session.preview!);
-        const canFixHere = Boolean(session.preview!.can_apply_repair) && !session.autoFixTried;
+        const canFixHere = canApplyRepair && !session.autoFixTried;
         session.canAutoFix = canFixHere;
-        if (needsFill || canFixHere) {
-          session.guideFillConfig = needsFill;
+        // A saved key stays saved. Browser tools and other setting writes
+        // belong on the result step, not back on the empty key form.
+        if (needsFill) {
+          session.guideFillConfig = true;
           session.configured = false;
           session.activeStep = "config";
           paint.setResult(
             "error",
-            withNotice(
-              needsFill
-                ? t("diagnose.flow.scoreNeedsConfig", {
-                    score: String(session.lastScore!.percent),
-                  })
-                : t("diagnose.flow.scoreNeedsAutoFix", {
-                    score: String(session.lastScore!.percent),
-                  }),
-            ),
+            withNotice(t("diagnose.flow.scoreNeedsConfig", { score: scoreText })),
           );
+          paint.paintAll();
+        } else if (canFixHere) {
+          session.guideFillConfig = false;
+          session.activeStep = "test";
+          const browserOnly = autoFixNoticeKey(session.preview!) === "diagnose.flow.scoreNeedsBrowser";
+          paint.setResult(
+            session.preview!.summary.fail > 0 ? "error" : "warn",
+            withNotice(t(autoFixNoticeKey(session.preview!), { score: scoreText })),
+          );
+          paint.paintAll();
+          dom.headlineEl.textContent = t("diagnose.flow.configDoneHeadline");
+          dom.detailEl.textContent = browserOnly
+            ? t("diagnose.flow.browserNext")
+            : t("diagnose.flow.autoFixNext");
         } else {
           session.guideFillConfig = false;
-          const score = String(session.lastScore!.percent);
           const fail = session.preview!.summary.fail;
+          const address = failsNeedAddress(session.preview!);
           paint.setResult(
             "error",
             withNotice(
               fail === 0
-                ? t("diagnose.flow.scoreNeedsFix", { score })
-                : session.repairTried
-                  ? t("diagnose.flow.scoreNeedsAskFix", { score, fail: String(fail) })
-                  : t("diagnose.flow.scoreNeedsRepair", { score, fail: String(fail) }),
+                ? t("diagnose.flow.scoreNeedsFix", { score: scoreText })
+                : address
+                  ? session.repairTried
+                    ? t("diagnose.flow.scoreNeedsAskFix", { score: scoreText, fail: String(fail) })
+                    : t("diagnose.flow.scoreNeedsRepair", { score: scoreText, fail: String(fail) })
+                  : t("diagnose.flow.scoreNeedsDetail", { score: scoreText, fail: String(fail) }),
             ),
           );
+          paint.paintAll();
         }
-        paint.paintAll();
       }
     } catch (error) {
       session.repairNotice = null;

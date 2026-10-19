@@ -21,6 +21,11 @@ pub const SHORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Tighter budget for runtime `--version` during doctor / discovery sweeps.
 pub const VERSION_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// Diagnose probes one runtime. A new Mac often spends several seconds on the
+/// first start (Gatekeeper, a cold Python CLI). Killing that at 1.5s looks
+/// like the program was never installed.
+pub const VERSION_PROBE_DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(12);
+
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x00000008;
 

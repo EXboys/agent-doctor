@@ -4,7 +4,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::adapter::AdapterDiscovery;
-use crate::exec::{run_output, skips_version_probe, VERSION_PROBE_TIMEOUT};
+use crate::exec::{
+    run_output, skips_version_probe, VERSION_PROBE_DIAGNOSE_TIMEOUT, VERSION_PROBE_TIMEOUT,
+};
 
 #[cfg(test)]
 thread_local! {
@@ -863,16 +865,23 @@ pub fn discover_binary(name: &str) -> AdapterDiscovery {
 }
 
 fn read_version(binary: &PathBuf, flags: &[&str]) -> Option<String> {
-    read_version_result_with_flags(binary, flags).unwrap_or_default()
+    read_version_result_with_flags(binary, flags, VERSION_PROBE_TIMEOUT).unwrap_or_default()
 }
 
 pub fn read_version_result(binary: &PathBuf) -> Result<Option<String>, String> {
-    read_version_result_with_flags(binary, &["--version", "-V", "version"])
+    // Discovery sweeps stay on the short budget. A diagnose of one runtime
+    // can wait for a cold first start.
+    read_version_result_with_flags(
+        binary,
+        &["--version", "-V", "version"],
+        VERSION_PROBE_DIAGNOSE_TIMEOUT,
+    )
 }
 
 fn read_version_result_with_flags(
     binary: &PathBuf,
     flags: &[&str],
+    timeout: Duration,
 ) -> Result<Option<String>, String> {
     // Cursor.exe and similar desktop apps stay open after a version check.
     // The file on disk is enough to know they are installed.
@@ -881,7 +890,7 @@ fn read_version_result_with_flags(
     }
     let mut last_error = None;
     for flag in flags {
-        match run_output(binary, &[flag], VERSION_PROBE_TIMEOUT) {
+        match run_output(binary, &[flag], timeout) {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);

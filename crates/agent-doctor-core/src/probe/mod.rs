@@ -361,19 +361,32 @@ fn probe_binary(
         Ok(None) => checks.push(ProbeCheck::new(
             "binary.version",
             "Version command",
-            ProbeStatus::Warn,
-            ProbeSeverity::Warning,
+            ProbeStatus::NotApplicable,
+            ProbeSeverity::Info,
             "version command ran but returned no output",
             SensitivityLevel::Public,
         )),
-        Err(error) => checks.push(ProbeCheck::new(
-            "binary.version",
-            "Version command",
-            ProbeStatus::Fail,
-            ProbeSeverity::Error,
-            error,
-            SensitivityLevel::SensitiveLog,
-        )),
+        Err(error) => {
+            // No version string (slow first start, or empty output) is not a defect
+            // and stays out of the readiness score.
+            let (status, severity) = version_command_status(&error);
+            checks.push(ProbeCheck::new(
+                "binary.version",
+                "Version command",
+                status,
+                severity,
+                error,
+                SensitivityLevel::SensitiveLog,
+            ));
+        }
+    }
+}
+
+fn version_command_status(error: &str) -> (ProbeStatus, ProbeSeverity) {
+    if error.contains("timed out") || error.contains("no output") {
+        (ProbeStatus::NotApplicable, ProbeSeverity::Info)
+    } else {
+        (ProbeStatus::Fail, ProbeSeverity::Error)
     }
 }
 
@@ -997,6 +1010,18 @@ fn expand_home(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_version_is_not_scored() {
+        let (status, severity) = version_command_status("--version timed out after 12s");
+        assert_eq!(status, ProbeStatus::NotApplicable);
+        assert_eq!(severity, ProbeSeverity::Info);
+        let (status, _) = version_command_status("version command ran but returned no output");
+        assert_eq!(status, ProbeStatus::NotApplicable);
+        let (status, severity) = version_command_status("--version: No such file or directory");
+        assert_eq!(status, ProbeStatus::Fail);
+        assert_eq!(severity, ProbeSeverity::Error);
+    }
 
     #[test]
     fn tries_ipv4_before_ipv6() {

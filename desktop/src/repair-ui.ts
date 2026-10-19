@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import {
   isGatewayConnectivityCheck,
+  relatedIssueLabel,
   renderPlainRepairCheckBody,
 } from "./repair-plain";
 
@@ -500,7 +501,10 @@ export function extractRelatedTags(report: RepairPreviewResponse | undefined): R
     const nameMatch =
       check.message.match(/[`'"]([a-z0-9._/-]+)[`'"]/i) ||
       check.title.match(/(?:mcp|skill)[._-]?([a-z0-9._/-]+)/i);
-    const name = (nameMatch?.[1] || check.title).replace(/^(mcp|skill)[._-]?/i, "") || check.title;
+    let name = (nameMatch?.[1] || check.title).replace(/^(mcp|skill)[._-]?/i, "") || check.title;
+    if ((check.id ?? "").includes("mcp.browser") || /browser mcp/i.test(blob)) {
+      name = "browser";
+    }
     const key = `${kind}:${name}`;
     if (seen.has(key)) {
       continue;
@@ -530,8 +534,7 @@ export function renderRelatedResourcesHtml(report: RepairPreviewResponse | undef
   }
   const tagsHtml = broken
     .map((tag) => {
-      const label = tag.kind === "skill" ? "Skill" : "MCP";
-      return `<span class="mini-tag ${tag.kind} broken">${label} · ${escapeHtml(tag.name)} · ${t("agents.relatedMissing")}</span>`;
+      return `<span class="mini-tag ${tag.kind} broken">${escapeHtml(relatedIssueLabel(tag.kind, tag.name))}</span>`;
     })
     .join("");
   return `

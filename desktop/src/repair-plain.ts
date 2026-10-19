@@ -16,6 +16,15 @@ export type PlainRepairCheck = {
   techDetail: string | null;
 };
 
+/** Card tag for a broken skill or tool. Browser MCP stays in words the user already has. */
+export function relatedIssueLabel(kind: "mcp" | "skill", name: string): string {
+  if (kind === "mcp" && /browser/i.test(name)) {
+    return t("agents.relatedBrowserMissing");
+  }
+  const label = kind === "skill" ? "Skill" : "MCP";
+  return `${label} · ${name} · ${t("agents.relatedMissing")}`;
+}
+
 export function isGatewayConnectivityCheck(check: RepairCheckLike): boolean {
   return (
     check.id === "gateway.connectivity" ||
@@ -382,6 +391,13 @@ export function plainRepairCheckCopy(check: RepairCheckLike): PlainRepairCheck {
 
   const id = (check.id ?? "").trim();
   const family = (id ? idFamily(id) : "") || inferFamilyFromTitle(check);
+  if (family === "binary.version" && /timed out|no output/i.test(check.message)) {
+    return {
+      title: t("repair.check.versionSlowTitle"),
+      message: t("repair.check.versionSlowDesc"),
+      techDetail,
+    };
+  }
   const copy = family ? familyCopy(family) : null;
   if (copy) {
     return {

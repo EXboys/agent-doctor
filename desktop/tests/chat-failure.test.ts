@@ -119,7 +119,9 @@ async function main() {
   assert(unknown?.kind === "unknown", "bare 500 stays unknown");
   assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");
 
-  const { failurePrimary, settingsApplyKind } = await import("../src/diagnose-flow");
+  const { autoFixNoticeKey, failurePrimary, failsNeedAddress, settingsApplyKind } = await import(
+    "../src/diagnose-flow"
+  );
   assert(
     failurePrimary({ can_apply_repair: true, summary: { fail: 2 } }, false) === "apply-settings",
     "auto-fixable failures offer a settings apply",
@@ -129,9 +131,58 @@ async function main() {
     "gateway-only failures send the user to check the address",
   );
   assert(
-    failurePrimary({ can_apply_repair: true, summary: { fail: 0 } }, false) === null,
-    "no failures means no failure button",
+    failurePrimary({ can_apply_repair: true, summary: { fail: 0 } }, false) === "apply-settings",
+    "a saved key with an auto-fixable warning still offers the settings button",
   );
+  assert(
+    failurePrimary({ can_apply_repair: true, summary: { fail: 0 } }, true) === null,
+    "after the settings button was already used, it is not offered again",
+  );
+  assert(
+    failurePrimary(
+      {
+        can_apply_repair: false,
+        summary: { fail: 1 },
+        checks: [{ id: "binary.version", status: "fail", message: "--version timed out after 1.5s" }],
+      },
+      false,
+    ) === null,
+    "a slow version check does not send the user to fill the key",
+  );
+  assert(
+    !failsNeedAddress({
+      summary: { fail: 1 },
+      checks: [{ id: "binary.version", status: "fail", message: "timed out" }],
+    }),
+    "version timeout is not an address problem",
+  );
+  assert(
+    autoFixNoticeKey({
+      suggested_repairs: [{ id: "fix-hermes-browser-mcp", auto_fixable: true }],
+    }) === "diagnose.flow.scoreNeedsBrowser",
+    "only a browser-tool write names the browser tool",
+  );
+
+  const { plainRepairCheckCopy, relatedIssueLabel } = await import("../src/repair-plain");
+  const slow = plainRepairCheckCopy({
+    id: "binary.version",
+    title: "Version command",
+    status: "warn",
+    message: "--version timed out after 1.5s",
+  });
+  assert(slow.title === "这一下没读到版本", `slow version title: ${slow.title}`);
+  assert(slow.message.includes("已经装好了"), `slow version message: ${slow.message}`);
+  assert(!slow.message.includes("强制重装"), "a slow version check does not ask for a reinstall");
+  const unread = plainRepairCheckCopy({
+    id: "binary.version",
+    title: "Version command",
+    status: "n/a",
+    message: "version command ran but returned no output",
+  });
+  assert(unread.title === "这一下没读到版本", `unread version title: ${unread.title}`);
+  const browserTag = relatedIssueLabel("mcp", "browser");
+  assert(browserTag === "浏览器工具还没接上", `browser tag: ${browserTag}`);
+  assert(!browserTag.includes("MCP"), "the browser tag does not say MCP");
   assert(
     settingsApplyKind({ summary: { fail: 1 }, last_execute: { executed: ["backup-runtime-configs"] } }) ===
       "nothing",
