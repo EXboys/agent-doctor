@@ -24,9 +24,9 @@
   --chat-topbar-h: 44px;
   --chat-side-w: 250px;
   --chat-splitter-w: 5px;
-  --chat-files-panel-w: 400px;
-  /* Split with the folder open: keep the composer controls on one line. */
-  --chat-split-chat-min: 390px;
+  /* Folder open: chat stays wide enough for one composer row. Leftover space goes to the files. */
+  --chat-split-chat-min: 410px;
+  --chat-split-chat-w: 410px;
   --md-heading: #111827;
   --md-strong: #111827;
   --md-code-fg: #334155;
@@ -4318,7 +4318,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   min-height: 0;
   min-width: 0;
   display: none;
-  --files-tree-w: var(--files-tree-w-user, 128px);
+  --files-tree-w: var(--files-tree-w-user, 50%);
   --files-inner-split: var(--chat-splitter-w);
   grid-template-columns: minmax(0, 1fr) var(--files-inner-split) var(--files-tree-w);
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -4334,11 +4334,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) {
-  /* Chat stays wide enough for the composer; the folder column gives up width first. */
+  /* Chat stays compact. The folder takes the remaining width. */
   grid-template-columns:
-    minmax(min(var(--chat-split-chat-min), 100%), 1fr)
+    minmax(min(var(--chat-split-chat-min), 100%), min(var(--chat-split-chat-w), 100%))
     var(--chat-splitter-w)
-    minmax(min(200px, 30%), var(--chat-files-panel-w));
+    minmax(min(280px, 40%), 1fr);
 }
 
 .chat-main.is-files-open.is-files-split:not(.is-settings):not(.is-resources-page) > .chat-top,
@@ -8703,32 +8703,42 @@ html[data-theme="dark"] .chat-permission-deny {
   line-height: 1;
 }
 
-/* Composer toolbar: light chips, send stays bottom-right when tools wrap. */
+/* Composer toolbar stays on one line. Auto-approve and chat memory live in the tune menu. */
 .chat-composer-bar {
   flex-wrap: nowrap;
   flex-shrink: 0;
   position: relative;
   z-index: 1;
-  align-items: flex-end;
-  gap: 8px;
+  align-items: center;
+  gap: 6px 8px;
   padding: 2px 8px 8px 6px;
 }
 
 .chat-composer-tools {
+  flex: 1 1 auto;
   flex-wrap: nowrap;
-  gap: 2px;
+  gap: 4px;
+  min-width: min-content;
 }
 
 .chat-composer-send .chat-model-wrap {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 120px;
+  width: 120px;
+  min-width: 120px;
 }
 
 .chat-composer-send .chat-model-btn {
-  max-width: min(148px, 28vw);
+  width: 100%;
+  max-width: none;
+  min-width: 0;
   height: 30px;
+  justify-content: flex-start;
   border-color: transparent;
   background: transparent;
+}
+
+.chat-composer-send .chat-model-btn span:first-child {
+  flex: 1 1 auto;
 }
 
 .chat-composer-send .chat-model-menu {
@@ -8799,7 +8809,8 @@ html[data-theme="dark"] .chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-
 
 .chat-composer-send {
   flex: 0 0 auto;
-  gap: 4px;
+  margin-left: auto;
+  gap: 6px;
 }
 
 .chat-composer-bar .btn-composer-icon:not(.is-listening),
@@ -8883,6 +8894,44 @@ html[data-theme="dark"] .chat-composer-bar .chat-tune-wrap.is-inline .chat-tune-
 
 .chat-tune-item + .chat-tune-item {
   margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.chat-tune-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 8px 2px;
+}
+
+.chat-tune-context .chat-context-wrap {
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-tune-context .chat-context-ring-btn {
+  min-width: 0;
+  height: 28px;
+  padding: 0 2px;
+  pointer-events: none;
+}
+
+.chat-tune-context-name {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chat-tune-menu .chat-context-compact {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.chat-tune-context .chat-tune-hint {
+  flex: 1 0 100%;
+  padding: 0 2px 8px;
 }
 
 .chat-tune-item:hover {

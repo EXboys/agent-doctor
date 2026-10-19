@@ -57,7 +57,6 @@ import {
   openMainResources,
   closeContextPopover,
   positionContextPopover,
-  toggleContextPopover,
   updateContextMeter,
   ensureListener,
   readInitialRuntime,
@@ -303,11 +302,6 @@ export function bootChat(): void {
     if (promptEl.dataset.composing === "1") return;
     mentionMenu.renderMentionMenu();
     updateContextMeter();
-  });
-  contextMeterEl?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleContextPopover();
   });
   contextCompactEl?.addEventListener("click", (event) => {
     event.preventDefault();

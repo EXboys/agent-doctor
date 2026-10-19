@@ -1,13 +1,13 @@
 const SIDE_KEY = "agent-doctor-ask-side-w";
-const FILES_KEY = "agent-doctor-ask-files-w";
+const CHAT_SPLIT_KEY = "agent-doctor-ask-chat-split-w";
 const TREE_KEY = "agent-doctor-ask-files-tree-w";
 const SIDE_DEFAULT = 250;
-const FILES_DEFAULT = 400;
-const TREE_DEFAULT = 128;
+const CHAT_SPLIT_DEFAULT = 410;
+const TREE_DEFAULT = 280;
 
 const SIDE_MIN = 200;
 const SIDE_MAX = 420;
-const FILES_MIN = 200;
+const FILES_MIN = 280;
 const TREE_MIN = 96;
 /** File preview keeps this much so the folder list cannot cover it. */
 const PREVIEW_MIN = 160;
@@ -15,7 +15,7 @@ const PREVIEW_MIN = 160;
 function chatSplitMinPx(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-split-chat-min").trim();
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 390;
+  return Number.isFinite(n) && n > 0 ? n : 410;
 }
 
 function readPx(key: string, fallback: number): number {
@@ -34,17 +34,26 @@ function currentSidePx(): number {
   return Number.isFinite(n) ? n : readPx(SIDE_KEY, SIDE_DEFAULT);
 }
 
-function currentFilesPx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-files-panel-w").trim();
+function currentChatSplitPx(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-split-chat-w").trim();
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : readPx(FILES_KEY, FILES_DEFAULT);
+  return Number.isFinite(n) ? n : readPx(CHAT_SPLIT_KEY, CHAT_SPLIT_DEFAULT);
 }
 
 export function applyLayoutVars(): void {
   const root = document.documentElement;
   root.style.setProperty("--chat-side-w", `${readPx(SIDE_KEY, SIDE_DEFAULT)}px`);
-  root.style.setProperty("--chat-files-panel-w", `${readPx(FILES_KEY, FILES_DEFAULT)}px`);
+  const chatW = Math.max(readPx(CHAT_SPLIT_KEY, CHAT_SPLIT_DEFAULT), chatSplitMinPx());
+  root.style.setProperty("--chat-split-chat-w", `${chatW}px`);
   fitFilesTree();
+}
+
+/** Folder list width. A saved drag wins; otherwise the list takes half the files area. */
+function preferredTreePx(panelW: number): number {
+  const raw = localStorage.getItem(TREE_KEY);
+  const saved = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(saved) && saved > 0) return saved;
+  return Math.max(TREE_DEFAULT, Math.round(panelW * 0.5));
 }
 
 /** Keep the folder list inside the files area. A narrow panel shrinks it; the saved width stays. */
@@ -57,7 +66,7 @@ function fitFilesTree(): void {
   if (panelW < 40) return;
   const splitW = handle?.getBoundingClientRect().width ?? 0;
   const max = Math.max(TREE_MIN, panelW - PREVIEW_MIN - splitW);
-  const next = clamp(readPx(TREE_KEY, TREE_DEFAULT), TREE_MIN, max);
+  const next = clamp(preferredTreePx(panelW), TREE_MIN, max);
   panel.style.setProperty("--files-tree-w-user", `${Math.round(next)}px`);
 }
 
@@ -180,17 +189,15 @@ export function bindLayoutResize(): void {
     bindDrag(
       chatFiles,
       (clientX, ctx) => {
-        if (!ctx.startW) {
-          const panel = main.querySelector("#chat-files-panel");
-          ctx.startW = panel?.getBoundingClientRect().width || currentFilesPx();
-        }
+        if (!ctx.startW) ctx.startW = currentChatSplitPx();
         const mainW = main.getBoundingClientRect().width;
-        const max = Math.max(FILES_MIN, mainW - chatSplitMinPx());
-        const delta = ctx.startX - clientX;
-        const next = clamp(ctx.startW + delta, FILES_MIN, max);
-        document.documentElement.style.setProperty("--chat-files-panel-w", `${next}px`);
+        const splitterW = chatFiles.getBoundingClientRect().width || 5;
+        const max = Math.max(chatSplitMinPx(), mainW - FILES_MIN - splitterW);
+        const delta = clientX - ctx.startX;
+        const next = clamp(ctx.startW + delta, chatSplitMinPx(), max);
+        document.documentElement.style.setProperty("--chat-split-chat-w", `${Math.round(next)}px`);
       },
-      () => savePx(FILES_KEY, currentFilesPx()),
+      () => savePx(CHAT_SPLIT_KEY, currentChatSplitPx()),
     );
   }
 }
