@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Doctor — diagnose and repair local AI agents</title>
+  <meta name="description" content="Agent Doctor scans the AI agents on your computer, explains what is wrong, and repairs it after you confirm. A backup is taken first. Claude Code, Codex, OpenClaw, Hermes, and DeepSeek Harness.">
+  <meta name="theme-color" content="#e7eef6">
+  <link rel="icon" href="/assets/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/apple-touch.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/site.css">
+  <meta property="og:title" content="Agent Doctor — diagnose and repair local AI agents">
+  <meta property="og:description" content="One desktop app for the agents already on your computer. Scan, explain the problem, repair with a backup, and roll back if you need to.">
+  <meta property="og:type" content="website">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Agent Doctor",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Windows, Linux",
+    "license": "https://opensource.org/licenses/MIT",
+    "downloadUrl": "https://github.com/EXboys/agent-doctor/releases/latest",
+    "codeRepository": "https://github.com/EXboys/agent-doctor",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "Diagnose, repair, and isolate local AI agent runtimes on one machine."
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap nav">
+      <a class="brand" href="/">
+        <img src="/assets/icon-128.png" width="32" height="32" alt="">
+        Agent Doctor
+      </a>
+      <nav class="nav-links" aria-label="Page">
+        <a href="#product">Product</a>
+        <a href="#agents">Agents</a>
+        <a href="#safety">Safety</a>
+        <a href="#download">Download</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="btn btn-ghost btn-small" href="https://github.com/EXboys/agent-doctor">GitHub</a>
+        <a class="btn btn-primary btn-small" id="nav-download" href="#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap hero">
+      <div>
+        <p class="kicker">Local agent ops</p>
+        <h1>See which agents are <em>healthy</em>, and repair the ones that are not.</h1>
+        <p class="lead">Agent Doctor is a desktop app for the AI agents already on this computer. It scans what is installed, says what is wrong in one sentence, and repairs it only after you confirm.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" id="hero-download" href="#download">Download</a>
+          <a class="btn btn-ghost" href="https://github.com/EXboys/agent-doctor">View the source</a>
+        </div>
+        <ul class="trust">
+          <li>Runs on your computer</li>
+          <li>Keys stay in a local file</li>
+          <li>Backup before a repair</li>
+          <li>MIT license</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="app" aria-hidden="true">
+          <div class="app-bar">
+            <div class="app-brand">
+              <img src="/assets/icon-128.png" alt="">
+              Agent Doctor
+            </div>
+            <div>
+              <span class="pill">EN</span>
+              <span class="pill pill-blue">Rescan</span>
+            </div>
+          </div>
+          <div class="app-status">
+            <span><span class="dot"></span>Environment is safe</span>
+            <span>5 of 5 installed</span>
+          </div>
+          <div class="tabs">
+            <span class="on">Agents</span>
+            <span>Resources</span>
+            <span>Wiring</span>
+            <span>Workspace</span>
+          </div>
+          <div class="workspace-line">
+            <span>Current project · agent-doctor</span>
+            <span>Switch</span>
+          </div>
+          <div class="app-body">
+            <div>
+              <div class="score-row">
+                <div class="ring" title="Health 92"><span>92</span></div>
+                <div class="score-copy">
+                  <h3>Agents look healthy</h3>
+                  <p>Core runtimes are available. Two suggestions are waiting.</p>
+                  <div class="checks">
+                    <span>28 checks passed</span>
+                    <span>0 high risk</span>
+                  </div>
+                </div>
+              </div>
+              <ul class="agent-grid">
+                <li><strong>OpenClaw</strong><span>Ready</span></li>
+                <li><strong>Hermes</strong><span>DeepSeek</span></li>
+                <li><strong>DeepSeek Harness</strong><span>Preview</span></li>
+                <li><strong>Claude</strong><span>Ready</span></li>
+                <li><strong>Codex CLI</strong><span>Installed</span></li>
+              </ul>
+            </div>
+            <aside class="attention">
+              <div class="attention-head">
+                <h3>Needs attention</h3>
+                <span class="count">2</span>
+              </div>
+              <div class="note">
+                <strong>DeepSeek Harness is a preview</strong>
+                <p>It can be used. Read the note before you rely on it.</p>
+              </div>
+              <div class="note">
+                <strong>One tool connection is listed twice</strong>
+                <p>It still works. Cleaning it up makes the list quieter.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+        <p class="caption">Example of the Agents screen. The app is also available in 中文.</p>
+      </div>
+    </div>
+
+    <section class="band" id="product">
+      <div class="wrap section">
+        <h2>Scan, explain, then repair.</h2>
+        <p class="section-lead">The same loop every time an agent stops connecting, asks for a key, or starts mixing one project with another.</p>
+        <ol class="steps">
+          <li>
+            <div class="step-no">01</div>
+            <h3>Scan</h3>
+            <p>Lists the agents on this computer and scores the environment. You see what is installed and what is waiting.</p>
+          </li>
+          <li>
+            <div class="step-no">02</div>
+            <h3>Diagnose</h3>
+            <p>Says the problem in words you already use: this project, this tool, cannot connect, needs a key.</p>
+          </li>
+          <li>
+            <div class="step-no">03</div>
+            <h3>Repair</h3>
+            <p>You confirm first. Agent Doctor takes a backup, applies a typed fix, then checks again. You can roll back to that backup.</p>
+          </li>
+        </ol>
+        <div class="panels">
+          <article class="panel">
+            <h3>Your endpoint, written into each agent</h3>
+            <p>Bring your own address, key, and model. Agent Doctor writes that connection into the agents on this computer and checks that it answers.</p>
+          </article>
+          <article class="panel">
+            <h3>Projects stay separate</h3>
+            <p>Switch the active project so one project’s memory and tools do not leak into the next one.</p>
+          </article>
+          <article class="panel">
+            <h3>Ask it to look again</h3>
+            <p>After a repair, ask in a sentence why something still fails. The check runs through the agent that is already installed.</p>
+          </article>
+          <article class="panel">
+            <h3>A team build, when you need one</h3>
+            <p>Companies that share one baseline use a separate team package, with policy and audit on top of the same repair core.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents">
+      <div class="wrap section">
+        <h2>Agents it already knows.</h2>
+        <p class="section-lead">Each one keeps its own install, settings, and failure modes. Agent Doctor reads them from one window.</p>
+        <ul class="runtime-row">
+          <li>
+            <div class="mark"><img src="/assets/agents/claude-code.svg" alt=""></div>
+            <strong>Claude Code</strong>
+            <span>Settings and sign-in on this computer</span>
+          </li>
+          <li>
+            <div class="mark"><img src="/assets/agents/codex.svg" alt=""></div>
+            <strong>Codex</strong>
+            <span>CLI config and the active model</span>
+          </li>
+          <li>
+            <div class="mark"><img src="/assets/agents/openclaw.svg" alt=""></div>
+            <strong>OpenClaw</strong>
+            <span>Gateway wiring and local config</span>
+          </li>
+          <li>
+            <div class="mark"><img src="/assets/agents/hermes.svg" alt=""></div>
+            <strong>Hermes</strong>
+            <span>Model, keys, and repair playbooks</span>
+          </li>
+          <li>
+            <div class="mark"><img src="/assets/agents/deepseek-harness.svg" alt=""></div>
+            <strong>DeepSeek Harness</strong>
+            <span>Local harness settings</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="band" id="safety">
+      <div class="wrap section split">
+        <div>
+          <h2>A repair you can undo.</h2>
+          <p class="section-lead">Agent Doctor writes only through typed actions. It takes a backup first, and it does not invent a shell command.</p>
+        </div>
+        <ul class="safety">
+          <li>
+            <strong>Preview, then apply</strong>
+            <span>The first pass only reads. Nothing is written until you confirm.</span>
+          </li>
+          <li>
+            <strong>Backup, then a typed fix</strong>
+            <span>The backup sits on this computer. Roll back to it if the repair is wrong.</span>
+          </li>
+          <li>
+            <strong>Keys stay here</strong>
+            <span>Secrets are removed before an explanation is written. A missing key becomes a placeholder and a short guide. You paste the secret yourself.</span>
+          </li>
+          <li>
+            <strong>Still early</strong>
+            <span>The app is in active use and still before 1.0. The scan, diagnose, and repair loop is the part you can rely on today.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="wrap section">
+        <h2>Install it on this computer.</h2>
+        <p class="section-lead">The desktop app is free. Installers come from the public GitHub release. Pick the one that matches this computer.</p>
+        <div class="download-panel">
+          <div class="download-top">
+            <strong>Personal edition</strong>
+            <span class="release-meta" id="release-meta">Looking up the current release…</span>
+          </div>
+          <div class="cards">
+            <article class="card" data-slot="macos-arm64">
+              <h3>macOS</h3>
+              <p>Apple silicon disk image. Open it and drag Agent Doctor into Applications. If macOS blocks it, open System Settings → Privacy &amp; Security and choose Open Anyway.</p>
+              <div class="file">Checking the release…</div>
+              <a class="btn btn-primary" data-download href="https://github.com/EXboys/agent-doctor/releases/latest">Download for macOS</a>
+              <a id="mac-intel" hidden href="https://github.com/EXboys/agent-doctor/releases/latest">Intel Mac installer</a>
+            </article>
+            <article class="card" data-slot="windows-x64">
+              <h3>Windows</h3>
+              <p>64-bit installer. Run it and follow the steps on screen. Current builds carry their own runtime, so a separate Visual C++ install is not required.</p>
+              <div class="file">Checking the release…</div>
+              <a class="btn btn-primary" data-download href="https://github.com/EXboys/agent-doctor/releases/latest">Download for Windows</a>
+            </article>
+            <article class="card" data-slot="linux-appimage">
+              <h3>Linux</h3>
+              <p>AppImage. After it downloads, allow the file to run, then open it. A Debian package is listed here when the release includes one.</p>
+              <div class="file">Checking the release…</div>
+              <a class="btn btn-primary" data-download href="https://github.com/EXboys/agent-doctor/releases/latest">Download for Linux</a>
+              <a id="linux-deb" hidden href="https://github.com/EXboys/agent-doctor/releases/latest">Debian package</a>
+            </article>
+          </div>
+          <details class="cli">
+            <summary>Command-line install</summary>
+            <pre><code># macOS Apple silicon
+gh release download --repo EXboys/agent-doctor --pattern 'agent-doctor-*-macos-arm64.tar.gz'
+tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
+./agent-doctor doctor</code></pre>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div>Agent Doctor · diagnose, repair, and keep projects separate.</div>
+      <nav aria-label="Footer">
+        <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
+        <a href="https://github.com/EXboys/agent-doctor/blob/main/LICENSE">MIT</a>
+        <a href="https://github.com/EXboys/agent-doctor/releases">Releases</a>
+        <a href="https://github.com/EXboys/agent-doctor/blob/main/docs/zh-CN/README.md">中文说明</a>
+      </nav>
+    </div>
+  </footer>
+  <script src="/js/site.js"></script>
+</body>
+</html>

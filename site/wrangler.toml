@@ -1,0 +1,6 @@
+# Cloudflare Pages — free static hosting.
+# From the repo root:
+#   npx wrangler pages deploy site --project-name agent-doctor
+name = "agent-doctor"
+compatibility_date = "2026-10-19"
+pages_build_output_dir = "."
