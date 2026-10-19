@@ -2,7 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
-import { withErrorDetail } from "./friendly-error";
+import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import type { DoctorReport, InstallProgressEvent } from "./types";
 import { installRuntime, uninstallRuntime as uninstallRuntimeCommand } from "./ipc";
@@ -239,16 +239,15 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
         nextHintText = t("runtime.installAlready");
       } else if (landed) {
         const last = liveInstalls.get(runtime)?.logLines.slice(-3).join("\n") ?? "";
-        const done = update ? t("runtime.updateOk") : t("runtime.installOk");
+        const done = installDoneSentence(runtime, update);
         const next = update ? "" : `<p class="footnote">${escapeHtml(t("runtime.installWireNext"))}</p>`;
         nextHintHtml = `<div class="install-progress-done">${escapeHtml(done)}${next}${last ? `<pre class="install-progress-log">${escapeHtml(last)}</pre>` : ""}</div>`;
       } else {
-        const failed = update ? t("runtime.updateFailed") : t("runtime.installFailed");
         const detail =
           report.skipped.map((item) => item.reason).find(Boolean) ||
           report.manual_fallback[0] ||
-          failed;
-        nextHintText = `${failed} ${detail}`;
+          "";
+        nextHintText = update ? t("runtime.updateFailed") : installFailureSentence(detail);
       }
       // refresh() re-renders cards and would wipe the in-card hint — keep sticky.
       let stickyHtml = nextHintHtml;

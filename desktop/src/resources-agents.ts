@@ -2,7 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { setAgentBrandIcon } from "./agent-brand";
 import { t, tRuntimeBlurb } from "./i18n";
-import { withErrorDetail } from "./friendly-error";
+import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
 import { runtimeCatalog } from "./runtime-catalog";
 import type { InstallProgressEvent, RuntimeDoctorResult } from "./types";
 import { resourcesState, agentsListEl, agentsEmptyEl, agentInstallInFlight, agentOpenInFlight, agentInstallHint } from "./resources-state";
@@ -195,14 +195,16 @@ export async function installCatalogAgent(runtime: string): Promise<void> {
       runtime,
       force: false,
     });
-    if (!report.install_needed || report.install_succeeded || report.after_installed) {
+    if (!report.install_needed) {
       agentInstallHint.delete(runtime);
+    } else if (report.install_succeeded || report.after_installed) {
+      agentInstallHint.set(runtime, installDoneSentence(runtime, false));
     } else {
       const detail =
         report.skipped.map((item) => item.reason).find(Boolean) ||
         report.manual_fallback[0] ||
-        t("runtime.installFailed");
-      setAgentInstallHint(runtime, `${t("runtime.installFailed")} ${detail}`, "error");
+        "";
+      setAgentInstallHint(runtime, installFailureSentence(detail), "error");
     }
     await loadDoctor();
   } catch (error) {

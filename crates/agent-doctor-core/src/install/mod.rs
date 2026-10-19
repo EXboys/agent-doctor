@@ -92,11 +92,7 @@ where
         input_kind: String::new(),
     };
 
-    on_progress(emit(
-        "probing",
-        "Checking whether the runtime binary is installed…",
-        5,
-    ));
+    on_progress(emit("probing", "正在确认有没有装好…", 5));
 
     let has_rule_install = runtime_supports_lifecycle(runtime_id);
     let before_probe = probe_runtime(runtime_id)?;
@@ -109,40 +105,29 @@ where
     let mut install_succeeded = !install_needed;
 
     if !install_needed {
-        on_progress(emit(
-            "done",
-            "Already installed — no install action required.",
-            100,
-        ));
+        on_progress(emit("done", "已经装好了，不用再装。", 100));
     } else if has_rule_install {
         if updating {
-            on_progress(emit("installing", "Updating the installed copy…", 12));
+            on_progress(emit("installing", "正在更新…", 12));
         } else if options.force && !binary_missing {
-            on_progress(emit(
-                "installing",
-                "Force reinstall requested — re-running installer…",
-                12,
-            ));
+            on_progress(emit("installing", "正在重新安装…", 12));
         }
         let max_attempts = 1 + options.retry_count;
         while install_attempts < max_attempts {
             install_attempts += 1;
-            on_progress(emit(
-                "installing",
-                &format!("Running installer (attempt {install_attempts}/{max_attempts})…"),
-                15,
-            ));
+            let installing = if install_attempts == 1 {
+                "正在安装…"
+            } else {
+                "刚才没装上，正在再试一次…"
+            };
+            on_progress(emit("installing", installing, 15));
             match run_rule_install(runtime_id, updating, &mut on_progress) {
                 Ok(path) => {
                     install_log_path = Some(path.display().to_string());
                     // Installers update the user PATH in the OS; refresh this process
                     // so the post-install probe can see the new binary.
                     crate::adapters::util::refresh_managed_runtime_path();
-                    on_progress(emit(
-                        "verifying",
-                        "Installer finished — verifying binary…",
-                        85,
-                    ));
+                    on_progress(emit("verifying", "正在确认能不能用…", 85));
                     let after_attempt = probe_runtime(runtime_id)?;
                     if install_attempt_ok(&after_attempt, updating) {
                         install_succeeded = true;
@@ -170,14 +155,10 @@ where
             }
         }
     } else {
-        on_progress(emit(
-            "installing",
-            "No rule installer — falling back to AI / allowlisted install…",
-            20,
-        ));
+        on_progress(emit("installing", "正在安装…", 20));
     }
 
-    on_progress(emit("verifying", "Re-probing runtime health…", 90));
+    on_progress(emit("verifying", "正在再查一遍…", 90));
     crate::adapters::util::refresh_managed_runtime_path();
     let mut after_probe = probe_runtime(runtime_id)?;
     if install_needed && !install_succeeded && install_attempt_ok(&after_probe, updating) {

@@ -13,6 +13,7 @@ import { isPersonalEdition } from "../edition";
 import {
   explainLlmAccountBlock,
   missingProviderFieldsMessage,
+  installFailureSentence,
   withErrorDetail,
   formatProviderFailure,
   withProviderFailure,
@@ -81,8 +82,8 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         const detail =
           report.skipped.map((item) => item.reason).find(Boolean) ||
           report.manual_fallback[0] ||
-          t("diagnose.flow.installFailed");
-        paint.setResult("error", t("diagnose.flow.installFailedDetail", { error: detail }));
+          "";
+        paint.setResult("error", installFailureSentence(detail));
       }
     } catch (error) {
       paint.setResult("error", withErrorDetail(t("diagnose.flow.installFailedDetail"), error));

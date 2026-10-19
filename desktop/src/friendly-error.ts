@@ -16,6 +16,28 @@ export function withErrorDetail(message: string, error: unknown): string {
   return t("error.withDetail", { message, detail });
 }
 
+/** One sentence after a runtime install. Update keeps the existing wording. */
+export function installDoneSentence(runtime: string, update: boolean): string {
+  if (update) return t("runtime.updateOk");
+  if (runtime === "hermes") return t("runtime.installOkHermes");
+  if (runtime === "claude-code") return t("runtime.installOkClaude");
+  if (runtime === "codex") return t("runtime.installOkCodex");
+  return t("runtime.installOk");
+}
+
+/** Install failures stay one sentence. The log button still holds the raw output. */
+export function installFailureSentence(detail: string): string {
+  const lower = detail.toLowerCase();
+  if (
+    /claude\.ai|chatgpt\.com|enotfound|econnrefused|etimedout|timed?\s*out|timeout|could not resolve|connection refused|curl: \([0-9]+\)|network|dns|连不上|网络/.test(
+      lower,
+    )
+  ) {
+    return t("runtime.installFailNetwork");
+  }
+  return t("runtime.installFailed");
+}
+
 /** TeamUps browser-login failures: one plain sentence, no HTML or English dumps. */
 export function teamupsLoginFailure(error: unknown): string {
   const lower = errorDetail(error).toLowerCase();
