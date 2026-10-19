@@ -30,12 +30,13 @@ pub(crate) fn open_codex(cwd: &Path, prompt: Option<&str>) -> Result<OpenSession
     // and without that it silently hits api.openai.com (401 with company keys).
     // Prefer isolated workspace CODEX_HOME when active (avoid project-local deny on ~/.codex).
     if crate::setup::is_native_subscription("codex") {
-        let list = crate::setup::ensure_account_models("codex")?;
-        align_codex_subscription_configs(
-            &codex_subscription_config_paths(None, cwd),
-            None,
-            &list.models,
-        )?;
+        if let Ok(list) = crate::setup::ensure_account_models("codex") {
+            let _ = align_codex_subscription_configs(
+                &codex_subscription_config_paths(None, cwd),
+                None,
+                &list.models,
+            );
+        }
     }
     let launch = if crate::setup::is_native_subscription("codex") {
         None

@@ -185,7 +185,39 @@ pub fn align_codex_subscription_model(
     }
     fs::write(path, doc.to_string())
         .with_context(|| format!("failed to write {}", path.display()))?;
+    confirm_codex_subscription_model(path, chosen, allowed)?;
     Ok(true)
+}
+
+fn confirm_codex_subscription_model(
+    path: &std::path::Path,
+    chosen: Option<&str>,
+    allowed: &[String],
+) -> AnyhowResult<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read back {}", path.display()))?;
+    let doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("Codex config read-back was not valid: {}", path.display()))?;
+    let current = doc
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if let Some(chosen) = chosen {
+        if current != chosen {
+            anyhow::bail!(
+                "Codex config model is {current:?}, expected {chosen}: {}",
+                path.display()
+            );
+        }
+    } else if !current.is_empty() && !crate::setup::account_model_allowed(allowed, current) {
+        anyhow::bail!(
+            "Codex config still has another service's model {current:?}: {}",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Align every config this turn can load. A file that still holds another
@@ -385,7 +417,7 @@ pub(crate) fn write_codex_provider_config(
         .with_context(|| format!("model_providers.{slot} must be a table"))?;
 
     entry_table["name"] = toml_edit::value(display);
-    entry_table["base_url"] = toml_edit::value(gateway_url);
+    entry_table["base_url"] = toml_edit::value(&gateway_url);
     entry_table["env_key"] = toml_edit::value(codex_slot_env_key(slot));
     entry_table["requires_openai_auth"] = toml_edit::value(false);
     // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
@@ -393,6 +425,45 @@ pub(crate) fn write_codex_provider_config(
     entry_table["supports_websockets"] = toml_edit::value(false);
 
     fs::write(path, doc.to_string())?;
+    confirm_codex_provider_config(path, &gateway_url, model_id, slot)?;
+    Ok(())
+}
+
+fn confirm_codex_provider_config(
+    path: &std::path::Path,
+    gateway_url: &str,
+    model_id: &str,
+    slot: &str,
+) -> AnyhowResult<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read back {}", path.display()))?;
+    let doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("Codex config read-back was not valid: {}", path.display()))?;
+    let model = doc
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let provider = doc
+        .get("model_provider")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let base = doc
+        .get("openai_base_url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let slot_base = doc
+        .get("model_providers")
+        .and_then(|value| value.get(slot))
+        .and_then(|value| value.get("base_url"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if model != model_id || provider != slot || base != gateway_url || slot_base != gateway_url {
+        anyhow::bail!(
+            "Codex config did not keep the saved service after rewrite: {}",
+            path.display()
+        );
+    }
     Ok(())
 }
 
@@ -589,6 +660,31 @@ base_url = "https://gateway.example/v1"
         assert!(rendered.contains("openai_base_url = \"https://api.deepseek.com/v1\""));
         assert!(rendered.contains("base_url = \"https://api.deepseek.com/v1\""));
         assert!(rendered.contains("model = \"deepseek-v4-flash\""));
+    }
+
+    #[test]
+    fn provider_readback_rejects_a_different_address() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+model = "deepseek-v4-flash"
+model_provider = "personal"
+openai_base_url = "https://api.openai.com/v1"
+
+[model_providers.personal]
+base_url = "https://api.deepseek.com/v1"
+"#,
+        )
+        .unwrap();
+        assert!(confirm_codex_provider_config(
+            &path,
+            "https://api.deepseek.com/v1",
+            "deepseek-v4-flash",
+            CODEX_PERSONAL_SLOT,
+        )
+        .is_err());
     }
 
     #[test]

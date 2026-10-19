@@ -75,6 +75,7 @@ pub fn repair_claude_subscription_file(
         }
         fs::write(path, serde_json::to_string_pretty(&root)?)
             .with_context(|| format!("failed to write {}", path.display()))?;
+        confirm_claude_login_settings(path, chosen)?;
         return Ok(true);
     };
     for key in [
@@ -128,7 +129,54 @@ pub fn repair_claude_subscription_file(
     }
     fs::write(path, serde_json::to_string_pretty(&root)?)
         .with_context(|| format!("failed to write {}", path.display()))?;
+    confirm_claude_login_settings(path, chosen)?;
     Ok(true)
+}
+
+/// The file on disk matches a Claude login: no saved-service address or key.
+fn confirm_claude_login_settings(path: &std::path::Path, chosen: Option<&str>) -> AnyhowResult<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read back {}", path.display()))?;
+    let root = serde_json::from_str::<serde_json::Value>(&raw).with_context(|| {
+        format!(
+            "Claude settings read-back was not valid: {}",
+            path.display()
+        )
+    })?;
+    if root
+        .get("anthropicBaseUrl")
+        .and_then(|value| value.as_str())
+        .is_some()
+    {
+        anyhow::bail!(
+            "Claude settings still have a saved-service address: {}",
+            path.display()
+        );
+    }
+    if let Some(env) = root.get("env").and_then(|value| value.as_object()) {
+        for key in [
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+        ] {
+            if env.contains_key(key) {
+                anyhow::bail!("Claude settings still have {key}: {}", path.display());
+            }
+        }
+        if let Some(chosen) = chosen {
+            let written = env
+                .get("ANTHROPIC_MODEL")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            if written != chosen {
+                anyhow::bail!(
+                    "Claude settings model is {written:?}, expected {chosen}: {}",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn repair_claude_subscription_configs(
@@ -190,6 +238,7 @@ pub fn apply_claude_code_with_model(
         .insert("anthropicBaseUrl".to_string(), json!(gateway_url));
 
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
+    confirm_claude_provider_settings(&path, gateway_url, api_key, model)?;
 
     Ok(RuntimeSetupResult {
         runtime_id: "claude-code".to_string(),
@@ -202,6 +251,67 @@ pub fn apply_claude_code_with_model(
         ),
         ..Default::default()
     })
+}
+
+/// The file on disk matches the saved service just written.
+fn confirm_claude_provider_settings(
+    path: &std::path::Path,
+    gateway_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+) -> AnyhowResult<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read back {}", path.display()))?;
+    let root = serde_json::from_str::<serde_json::Value>(&raw).with_context(|| {
+        format!(
+            "Claude settings read-back was not valid: {}",
+            path.display()
+        )
+    })?;
+    let top = root
+        .get("anthropicBaseUrl")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let env = root
+        .get("env")
+        .and_then(|value| value.as_object())
+        .with_context(|| {
+            format!(
+                "Claude settings have no env after rewrite: {}",
+                path.display()
+            )
+        })?;
+    let base = env
+        .get("ANTHROPIC_BASE_URL")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let api = env
+        .get("ANTHROPIC_API_KEY")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let token = env
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if top != gateway_url || base != gateway_url || api != api_key || token != api_key {
+        anyhow::bail!(
+            "Claude settings did not keep the saved service after rewrite: {}",
+            path.display()
+        );
+    }
+    if let Some(model_id) = model.map(str::trim).filter(|id| !id.is_empty()) {
+        let written = env
+            .get("ANTHROPIC_MODEL")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if written != model_id {
+            anyhow::bail!(
+                "Claude settings model is {written:?}, expected {model_id}: {}",
+                path.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -238,5 +348,35 @@ mod tests {
         fs::write(&path, "{").unwrap();
         assert!(repair_claude_subscription_file(&path, Some("claude-sonnet-5"), &allowed).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "{");
+    }
+
+    #[test]
+    fn provider_readback_rejects_a_leftover_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"anthropicBaseUrl":"https://api.deepseek.com/anthropic","env":{"ANTHROPIC_BASE_URL":"https://api.deepseek.com/anthropic","ANTHROPIC_API_KEY":"good-key","ANTHROPIC_AUTH_TOKEN":"stale-token","ANTHROPIC_MODEL":"deepseek-flash"}}"#,
+        )
+        .unwrap();
+        assert!(confirm_claude_provider_settings(
+            &path,
+            "https://api.deepseek.com/anthropic",
+            "good-key",
+            Some("deepseek-flash"),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn login_readback_rejects_a_leftover_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"env":{"ANTHROPIC_API_KEY":"secret","ANTHROPIC_MODEL":"claude-sonnet-5"}}"#,
+        )
+        .unwrap();
+        assert!(confirm_claude_login_settings(&path, Some("claude-sonnet-5")).is_err());
     }
 }

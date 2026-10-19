@@ -39,6 +39,30 @@ export type ModelPickerDeps = ModelPickerEls & {
 
 export type ModelPickerApi = ReturnType<typeof createModelPickerController>;
 
+/** Account-model alignment for one chat. `replace` means the login may take over. */
+export function subscriptionModelForSession(
+  session: ChatSession | null | undefined,
+  catalogModels: readonly string[],
+): { model: string; replace: boolean } {
+  if (sessionKeepsSavedService(session)) {
+    return { model: session?.model?.trim() || "", replace: false };
+  }
+  if (catalogModels.length === 0) return { model: "", replace: false };
+  const current = session?.model?.trim() ?? "";
+  const model = catalogModels.includes(current) ? current : catalogModels[0];
+  return { model, replace: Boolean(session && session.model !== model) };
+}
+
+/** This chat named a saved service. Login must not replace it on its own. */
+export function sessionKeepsSavedService(session: ChatSession | null | undefined): boolean {
+  if (!session) return false;
+  if (session.providerId?.trim()) return true;
+  const model = session.model?.trim().toLowerCase() ?? "";
+  return ["glm", "deepseek", "qwen", "kimi", "moonshot", "minimax", "doubao", "gemini", "ernie"].some(
+    (prefix) => model.startsWith(prefix),
+  );
+}
+
 type SubscriptionCatalog = {
   models: string[];
   label: string;
@@ -59,16 +83,13 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     };
   }
 
-  /** Keep this chat on an account model, and drop a saved service so the next message cannot use it. */
+  /** Keep this chat on an account model when it is already using the login.
+   * A saved service stays selected. Replacing it here makes the next message
+   * delete that service's key. */
   function alignSubscriptionSession(catalog: SubscriptionCatalog): string {
-    if (catalog.models.length === 0) return "";
-    const session = deps.activeSession();
-    const current = session?.model?.trim() ?? "";
-    const model = catalog.models.includes(current) ? current : catalog.models[0];
-    if (session && (session.providerId || session.model !== model)) {
-      deps.pinSubscriptionModel(model);
-    }
-    return model;
+    const decision = subscriptionModelForSession(deps.activeSession(), catalog.models);
+    if (decision.replace) deps.pinSubscriptionModel(decision.model);
+    return decision.model;
   }
 
   function closeModelMenu(): void {
@@ -126,9 +147,10 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const catalog = subscriptionCatalog();
     if (catalog) {
       const model = alignSubscriptionSession(catalog);
+      const saved = sessionKeepsSavedService(deps.activeSession());
       deps.modelLabelEl.textContent = model || t("chat.modelListMissing");
       deps.modelBtnEl.disabled = deps.isComposerLocked();
-      deps.modelBtnEl.title = t("chat.modelSubscriptionHint");
+      deps.modelBtnEl.title = saved ? t("chat.modelPickHint") : t("chat.modelSubscriptionHint");
       deps.modelBtnEl.setAttribute("aria-label", model);
       return;
     }
@@ -189,10 +211,12 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   function renderModelMenu(): void {
     deps.modelMenuEl.replaceChildren();
     const catalog = subscriptionCatalog();
-    if (catalog) {
+    const keepSaved = sessionKeepsSavedService(deps.activeSession());
+    if (catalog && !keepSaved) {
       renderSubscriptionMenu(catalog);
       return;
     }
+    if (catalog) renderSubscriptionMenu(catalog);
     const providers = deps.getProviders();
     const wired = deps.getWiredProvider();
     if (providers.length === 0 && !wired) {

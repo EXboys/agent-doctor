@@ -13,8 +13,8 @@ use anyhow::{bail, Context, Result};
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
-    apply_claude_env, apply_overlay_env, claude_provider_env, collect_overlay_env_for_options,
-    format_command_display,
+    apply_claude_env, apply_overlay_env, chat_uses_saved_service, claude_provider_env,
+    collect_overlay_env_for_options, format_command_display,
 };
 use super::mcp_ensure::wire_hands;
 use super::plan::{tool_carries_plan, PlanBoard};
@@ -73,64 +73,26 @@ fn run_claude(
         .filter(|s| !s.is_empty());
 
     let mut overlay = collect_overlay_env_for_options(options);
-    if crate::setup::is_native_subscription("claude-code") {
-        let prepared = (|| -> Result<()> {
-            let list = crate::setup::ensure_account_models("claude-code")?;
+    let saved_service =
+        chat_uses_saved_service(options.model.as_deref(), options.provider_id.as_deref());
+    // A saved DeepSeek / GLM key must stay on the request. Rewriting Claude's
+    // settings here deletes that key, and the same key then comes back as 401.
+    if crate::setup::is_native_subscription("claude-code") && !saved_service {
+        if let Ok(list) = crate::setup::ensure_account_models("claude-code") {
             let chosen = list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str));
-            crate::setup::merge::repair_claude_subscription_configs(
+            if crate::setup::merge::repair_claude_subscription_configs(
                 &cwd,
                 chosen.as_deref(),
                 &list.models,
-            )?;
-            if let Some(id) = chosen {
-                overlay.insert(crate::setup::MODEL_ENV.to_string(), id);
-            } else {
-                overlay.remove(crate::setup::MODEL_ENV);
+            )
+            .is_ok()
+            {
+                if let Some(id) = chosen {
+                    overlay.insert(crate::setup::MODEL_ENV.to_string(), id);
+                } else {
+                    overlay.remove(crate::setup::MODEL_ENV);
+                }
             }
-            Ok(())
-        })();
-        if let Err(error) = prepared {
-            let raw = format!("{error:#}");
-            let message = if raw.contains("模型名单") {
-                "这个账号的模型名单没取到，这一轮没有发出去。再发一次试试。"
-            } else {
-                "这个账号的设置没改成，这一轮没有发出去。再发一次试试。"
-            };
-            on_event(PromptSessionEvent::Started {
-                session_id: session_id.clone(),
-                runtime: runtime.clone(),
-                cwd: cwd.display().to_string(),
-                command: String::new(),
-                client_run_id: String::new(),
-            });
-            on_event(PromptSessionEvent::TurnError {
-                session_id: session_id.clone(),
-                message: message.to_string(),
-                plain: true,
-            });
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: session_id.clone(),
-                line: format!("{error:#}"),
-            });
-            on_event(PromptSessionEvent::Completed {
-                session_id: session_id.clone(),
-                status: PromptSessionStatus::Failed,
-                exit_code: None,
-                summary: message.to_string(),
-                timeout: None,
-            });
-            return Ok(PromptSessionReport {
-                usage: None,
-                session_id,
-                runtime,
-                cwd: cwd.display().to_string(),
-                status: PromptSessionStatus::Failed,
-                exit_code: None,
-                summary: message.to_string(),
-                log_excerpt: message.to_string(),
-                duration_ms: 0,
-                runtime_thread_id: None,
-            });
         }
     }
     let hands = wire_hands("claude-code", options, &cwd, &overlay, |phase, message| {

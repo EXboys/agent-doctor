@@ -13,8 +13,8 @@ use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::env::{
     apply_codex_env, apply_overlay_env, codex_provider_config_args, codex_subscription_model_args,
-    collect_overlay_env_for_options, format_command_display, prepare_codex_home,
-    resolve_codex_overlay, scrub_subscription_gateway_env,
+    codex_turn_keeps_saved_service, collect_overlay_env_for_options, format_command_display,
+    prepare_codex_home, resolve_codex_overlay, scrub_subscription_gateway_env,
 };
 use super::mcp_ensure::{wire_hands, Hands};
 use super::util::{
@@ -52,59 +52,6 @@ impl AskBackend for CodexAskBackend {
 
 fn next_rpc_id() -> u64 {
     RPC_SEQ.fetch_add(1, Ordering::Relaxed)
-}
-
-fn emit_closed_failure(
-    session_id: &str,
-    runtime: &str,
-    cwd: &std::path::Path,
-    message: &str,
-    detail: &str,
-    on_event: &mut dyn FnMut(PromptSessionEvent),
-) {
-    on_event(PromptSessionEvent::Started {
-        session_id: session_id.to_string(),
-        runtime: runtime.to_string(),
-        cwd: cwd.display().to_string(),
-        command: String::new(),
-        client_run_id: String::new(),
-    });
-    on_event(PromptSessionEvent::TurnError {
-        session_id: session_id.to_string(),
-        message: message.to_string(),
-        plain: true,
-    });
-    on_event(PromptSessionEvent::StderrLine {
-        session_id: session_id.to_string(),
-        line: detail.to_string(),
-    });
-    on_event(PromptSessionEvent::Completed {
-        session_id: session_id.to_string(),
-        status: PromptSessionStatus::Failed,
-        exit_code: None,
-        summary: message.to_string(),
-        timeout: None,
-    });
-}
-
-fn closed_failure_report(
-    session_id: &str,
-    runtime: &str,
-    cwd: &std::path::Path,
-    message: &str,
-) -> PromptSessionReport {
-    PromptSessionReport {
-        usage: None,
-        session_id: session_id.to_string(),
-        runtime: runtime.to_string(),
-        cwd: cwd.display().to_string(),
-        status: PromptSessionStatus::Failed,
-        exit_code: None,
-        summary: message.to_string(),
-        log_excerpt: message.to_string(),
-        duration_ms: 0,
-        runtime_thread_id: None,
-    }
 }
 
 /// Interactive Ask approval policy.
@@ -284,22 +231,13 @@ fn run_codex_app_server(
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let mut overlay = collect_overlay_env_for_options(options);
+    // A missing model list or a settings rewrite must not swallow the turn.
+    // The saved key still has to go out, the same way 0.86 sent it.
     if let Err(error) = prepare_codex_home(&mut overlay, &cwd) {
-        let raw = format!("{error:#}");
-        let message = if raw.contains("模型名单") {
-            "这个账号的模型名单没取到，这一轮没有发出去。再发一次试试。"
-        } else {
-            "这个账号的设置没改成，这一轮没有发出去。再发一次试试。"
-        };
-        emit_closed_failure(
-            &session_id,
-            &runtime,
-            &cwd,
-            message,
-            &format!("{error:#}"),
-            on_event,
-        );
-        return Ok(closed_failure_report(&session_id, &runtime, &cwd, message));
+        on_event(PromptSessionEvent::StderrLine {
+            session_id: session_id.clone(),
+            line: format!("{error:#}"),
+        });
     }
     // Project-local Codex config is loaded with the message's folder, separate
     // from ~/.codex. A missing tool there fails the same way.
@@ -347,7 +285,8 @@ fn run_codex_app_server(
         None
     };
 
-    let account_model = if crate::setup::is_native_subscription("codex") {
+    let saved_service = codex_turn_keeps_saved_service(&overlay);
+    let account_model = if crate::setup::is_native_subscription("codex") && !saved_service {
         crate::setup::load_account_models("codex")
             .and_then(|list| list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str)))
     } else {
@@ -355,7 +294,8 @@ fn run_codex_app_server(
     };
     // No account model means the saved one belonged to another service. An old
     // thread would keep that model, so this turn starts a new thread instead.
-    if account_model.is_none() && crate::setup::is_native_subscription("codex") {
+    // A saved-service turn keeps its own model and must not be replaced here.
+    if account_model.is_none() && crate::setup::is_native_subscription("codex") && !saved_service {
         resume_thread_id = None;
     }
     let display_text = Arc::new(Mutex::new(String::new()));
@@ -648,7 +588,8 @@ fn build_app_server_command(
     cmd.arg("app-server")
         .arg("-c")
         .arg("features.default_mode_request_user_input=true");
-    if crate::setup::is_native_subscription("codex") {
+    let saved_service = codex_turn_keeps_saved_service(overlay);
+    if crate::setup::is_native_subscription("codex") && !saved_service {
         let model = overlay
             .get(crate::setup::MODEL_ENV)
             .map(|value| value.as_str());
@@ -666,7 +607,7 @@ fn build_app_server_command(
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, overlay);
     apply_codex_env(&mut cmd, overlay);
-    if crate::setup::is_native_subscription("codex") {
+    if crate::setup::is_native_subscription("codex") && !saved_service {
         scrub_subscription_gateway_env(&mut cmd);
     }
     Ok(cmd)
