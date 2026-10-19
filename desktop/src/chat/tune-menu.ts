@@ -29,9 +29,59 @@ function setOpen(open: boolean): void {
   b.classList.toggle("is-open", open);
 }
 
-/** Auto-approve and chat memory stay in the menu, so the bar stays one line. */
+/** Wide composer shows the two switches in the bar. A narrow one keeps the menu. */
 function fitTune(): void {
-  wrap()?.classList.remove("is-inline");
+  const bar = document.querySelector<HTMLElement>(".chat-composer-bar");
+  const tools = document.querySelector<HTMLElement>(".chat-composer-tools");
+  const send = document.querySelector<HTMLElement>(".chat-composer-send");
+  const row = wrap();
+  const m = menu();
+  if (!bar || !tools || !send || !row || !m) return;
+
+  const wasInline = row.classList.contains("is-inline");
+  const wasHidden = m.hidden;
+  row.classList.add("is-inline");
+  m.hidden = false;
+  m.style.left = "";
+  m.style.bottom = "";
+  m.style.width = "";
+
+  const model = tools.querySelector<HTMLElement>(".chat-model-btn");
+  const modelWrap = model?.parentElement;
+  const modelMax = model?.style.maxWidth ?? "";
+  const modelShrink = modelWrap?.style.flexShrink ?? "";
+  if (model) model.style.maxWidth = "none";
+  if (modelWrap) modelWrap.style.flexShrink = "0";
+  let others = 0;
+  let visible = 0;
+  for (const child of Array.from(tools.children) as HTMLElement[]) {
+    if (child === row) {
+      visible += 1;
+      continue;
+    }
+    const width = child.offsetWidth;
+    if (width <= 0) continue;
+    others += width;
+    visible += 1;
+  }
+  const chips = m.offsetWidth;
+  if (model) model.style.maxWidth = modelMax;
+  if (modelWrap) modelWrap.style.flexShrink = modelShrink;
+
+  const toolGap = parseFloat(getComputedStyle(tools).columnGap) || 0;
+  const barGap = parseFloat(getComputedStyle(bar).columnGap) || 0;
+  const available = bar.clientWidth - send.offsetWidth - barGap;
+  const need = others + chips + toolGap * Math.max(0, visible - 1);
+  const slack = wasInline ? 0 : 20;
+  const inline = available >= need + slack;
+
+  row.classList.toggle("is-inline", inline);
+  if (inline) {
+    btn()?.setAttribute("aria-expanded", "false");
+    btn()?.classList.remove("is-open");
+    return;
+  }
+  m.hidden = wasInline ? true : wasHidden;
 }
 
 export function syncTuneLabels(): void {

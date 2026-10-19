@@ -111,6 +111,13 @@ export function createContextMeterController(deps: ContextMeterDeps) {
     }
     const label = `${pct}%`;
     if (deps.contextLabelEl.textContent !== label) deps.contextLabelEl.textContent = label;
+    const foldedPct = document.querySelector("#chat-tune-context-pct");
+    if (foldedPct && foldedPct.textContent !== label) foldedPct.textContent = label;
+    const foldedRing = document.querySelector<SVGCircleElement>("#chat-tune-ring-fill");
+    if (foldedRing) {
+      if (foldedRing.style.strokeDasharray !== ring) foldedRing.style.strokeDasharray = ring;
+      if (foldedRing.style.strokeDashoffset !== offset) foldedRing.style.strokeDashoffset = offset;
+    }
     const title = t("chat.contextMeterTitle");
     if (deps.contextMeterEl.title !== title) deps.contextMeterEl.title = title;
     deps.contextMeterEl.classList.toggle("is-warn", pct >= 70 && pct < 90);
@@ -129,10 +136,17 @@ export function createContextMeterController(deps: ContextMeterDeps) {
     if (deps.contextPopoverBodyEl && deps.contextPopoverBodyEl.textContent !== popoverBody) {
       deps.contextPopoverBodyEl.textContent = popoverBody;
     }
+    const foldedBody = document.querySelector("#chat-tune-context-body");
+    if (foldedBody && foldedBody.textContent !== popoverBody) foldedBody.textContent = popoverBody;
+    const canCompact = turns.length > COMPACT_KEEP_TURNS && !deps.isComposerLocked();
     if (deps.contextCompactEl) {
-      const canCompact = turns.length > COMPACT_KEEP_TURNS && !deps.isComposerLocked();
       deps.contextCompactEl.disabled = !canCompact;
       deps.contextCompactEl.hidden = !hasContent;
+    }
+    const foldedCompact = document.querySelector<HTMLButtonElement>("#chat-tune-compact");
+    if (foldedCompact) {
+      foldedCompact.disabled = !canCompact;
+      foldedCompact.hidden = !hasContent;
     }
     if (deps.contextPopoverEl && !deps.contextPopoverEl.hidden) {
       positionContextPopover();

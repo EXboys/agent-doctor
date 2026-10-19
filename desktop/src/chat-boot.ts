@@ -57,6 +57,7 @@ import {
   openMainResources,
   closeContextPopover,
   positionContextPopover,
+  toggleContextPopover,
   updateContextMeter,
   ensureListener,
   readInitialRuntime,
@@ -303,7 +304,17 @@ export function bootChat(): void {
     mentionMenu.renderMentionMenu();
     updateContextMeter();
   });
+  contextMeterEl?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleContextPopover();
+  });
   contextCompactEl?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    compactActiveSession();
+  });
+  document.querySelector("#chat-tune-compact")?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     compactActiveSession();

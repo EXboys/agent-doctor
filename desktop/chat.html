@@ -822,31 +822,23 @@
                     </div>
                     <div class="chat-tune-item chat-tune-context">
                       <div class="chat-context-wrap">
-                        <button
-                          id="chat-context-meter"
-                          type="button"
-                          class="chat-context-ring-btn"
-                          aria-haspopup="dialog"
-                          aria-expanded="false"
-                          aria-controls="chat-context-popover"
-                          title="点这里查看对话占用"
-                        >
+                        <span class="chat-context-ring-btn" aria-hidden="true">
                           <svg class="chat-context-ring" viewBox="0 0 32 32" aria-hidden="true">
                             <circle class="chat-context-ring-bg" cx="16" cy="16" r="12"></circle>
                             <circle
-                              id="chat-context-ring-fill"
+                              id="chat-tune-ring-fill"
                               class="chat-context-ring-fg"
                               cx="16"
                               cy="16"
                               r="12"
                             ></circle>
                           </svg>
-                          <span id="chat-context-label" class="chat-context-pct">0%</span>
-                        </button>
+                          <span id="chat-tune-context-pct" class="chat-context-pct">0%</span>
+                        </span>
                         <span class="chat-tune-context-name">对话占用</span>
                       </div>
                       <button
-                        id="chat-context-compact"
+                        id="chat-tune-compact"
                         type="button"
                         class="chat-context-compact"
                         data-i18n="chat.contextCompact"
@@ -855,11 +847,34 @@
                       >
                         精简对话
                       </button>
-                      <p id="chat-context-popover-body" class="chat-tune-hint">
+                      <p id="chat-tune-context-body" class="chat-tune-hint">
                         当前大约用了 0%。快满时点「精简对话」，继续聊会更稳。
                       </p>
                     </div>
                   </div>
+                </div>
+                <div class="chat-context-wrap">
+                  <button
+                    id="chat-context-meter"
+                    type="button"
+                    class="chat-context-ring-btn"
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                    aria-controls="chat-context-popover"
+                    title="点这里查看对话占用"
+                  >
+                    <svg class="chat-context-ring" viewBox="0 0 32 32" aria-hidden="true">
+                      <circle class="chat-context-ring-bg" cx="16" cy="16" r="12"></circle>
+                      <circle
+                        id="chat-context-ring-fill"
+                        class="chat-context-ring-fg"
+                        cx="16"
+                        cy="16"
+                        r="12"
+                      ></circle>
+                    </svg>
+                    <span id="chat-context-label" class="chat-context-pct">0%</span>
+                  </button>
                 </div>
               </div>
               <div class="chat-composer-send">
@@ -897,8 +912,27 @@
         </footer>
       </main>
     </div>
-    <div id="chat-context-popover" class="chat-context-popover" hidden>
+    <div
+      id="chat-context-popover"
+      class="chat-context-popover"
+      hidden
+      role="dialog"
+      aria-labelledby="chat-context-popover-title"
+    >
       <strong id="chat-context-popover-title" class="chat-context-popover-title">对话占用</strong>
+      <p id="chat-context-popover-body" class="chat-context-popover-body">
+        当前大约用了 0%。快满时建议精简，继续聊会更稳。
+      </p>
+      <button
+        id="chat-context-compact"
+        type="button"
+        class="chat-context-compact"
+        data-i18n="chat.contextCompact"
+        data-i18n-title="chat.contextCompactHint"
+        title="丢掉较早细节，保留最近几轮"
+      >
+        精简对话
+      </button>
     </div>
     <script type="module" src="/src/chat.ts"></script>
     <script>
