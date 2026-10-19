@@ -638,25 +638,63 @@ fn merge_windows_persistent_path_into_env() {
 
 #[cfg(windows)]
 fn windows_env_path_dirs(scope: &str) -> Vec<PathBuf> {
-    let script = format!("[Environment]::GetEnvironmentVariable('Path','{scope}')");
-    let output = run_output(
-        Path::new("powershell"),
-        &["-NoProfile", "-NonInteractive", "-Command", &script],
-        Duration::from_secs(8),
-    )
-    .ok();
-    let Some(output) = output else {
+    // A GUI app that starts powershell.exe shows a terminal for a moment, even
+    // with CREATE_NO_WINDOW. The Path value is already in the registry.
+    let Some(raw) = read_windows_registry_path(scope) else {
         return Vec::new();
     };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    let raw = String::from_utf8_lossy(&output.stdout);
     raw.split(';')
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .collect()
+}
+
+/// User and machine `Path`, with `%VAR%` already expanded.
+#[cfg(windows)]
+fn read_windows_registry_path(scope: &str) -> Option<String> {
+    use std::ffi::c_void;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    };
+
+    let (root, subkey) = match scope {
+        "User" => (HKEY_CURRENT_USER, r"Environment"),
+        "Machine" => (
+            HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ),
+        _ => return None,
+    };
+    let sub: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+    let name: Vec<u16> = "Path".encode_utf16().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 32 * 1024];
+    let mut size = (buf.len() * 2) as u32;
+    // RRF_RT_REG_EXPAND_SZ without RRF_NOEXPAND expands %SystemRoot% and friends.
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            PCWSTR(sub.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut c_void),
+            Some(&mut size),
+        )
+    };
+    if status.0 != 0 || size < 2 {
+        return None;
+    }
+    let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
+    let text = String::from_utf16_lossy(&buf[..chars]);
+    let trimmed = text.trim_matches('\0').trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn common_binary_dirs() -> Vec<PathBuf> {

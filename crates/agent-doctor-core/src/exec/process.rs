@@ -2,7 +2,12 @@
 //!
 //! Windows GUI apps (Tauri) can hang forever on `Command::output()` when the
 //! child is a `.cmd` shim (`npm`, `claude`, …) or a GUI exe that never exits.
-//! Always use a timeout, closed stdin, and `CREATE_NO_WINDOW`.
+//! Always use a timeout, closed stdin, and [`DETACHED_PROCESS`].
+//!
+//! `CREATE_NO_WINDOW` is not enough when Windows Terminal is the default
+//! terminal: each short probe still paints a window and closes it. Opening
+//! the app runs one probe per installed command, so that looks like several
+//! flashes in a row. A detached process is not handed to that terminal.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -17,7 +22,7 @@ pub const SHORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const VERSION_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+const DETACHED_PROCESS: u32 = 0x00000008;
 
 #[derive(Debug)]
 pub enum RunError {
@@ -87,7 +92,7 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
     {
         // npm global CLIs are `.cmd` shims. `cmd /C shim.cmd` has no console, so
         // Windows gives the `node.exe` that the shim starts its own visible one.
-        // Launch node itself so CREATE_NO_WINDOW applies to the process that runs.
+        // Launch node itself so DETACHED_PROCESS applies to the process that runs.
         if let Some((node, script)) = npm_shim_launch(program) {
             let mut cmd = Command::new(node);
             cmd.arg(script);
@@ -111,11 +116,27 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
 }
 
 /// Version probes must not start a desktop app. GUI executables ignore
-/// `CREATE_NO_WINDOW` and often stay open after the stub exits.
+/// `DETACHED_PROCESS` and often stay open after the stub exits.
 pub fn skips_version_probe(path: &Path) -> bool {
     // Desktop apps (Cursor.exe and shims that only start them) ignore
-    // CREATE_NO_WINDOW and stay open. Presence of the file is enough.
-    launch_opens_gui_window(path)
+    // DETACHED_PROCESS and stay open. Presence of the file is enough.
+    if launch_opens_gui_window(path) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        // A batch file we cannot turn into `node script.js` has to run through
+        // cmd.exe. The program that script starts then gets its own terminal.
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if (ext == "cmd" || ext == "bat") && npm_shim_launch(path).is_none() {
+            return true;
+        }
+    }
+    false
 }
 
 fn launch_opens_gui_window(path: &Path) -> bool {
@@ -180,9 +201,31 @@ fn pe_subsystem_is_gui(bytes: &[u8]) -> bool {
     subsystem == 2
 }
 
+/// npm writes some global `.cmd` shims as UTF-16. Reading them as UTF-8 fails,
+/// and the fallback `cmd /C` then gives `node.exe` its own terminal window.
+fn read_cmd_text(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        return Some(String::from_utf16_lossy(&units));
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .collect();
+        return Some(String::from_utf16_lossy(&units));
+    }
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    String::from_utf8(bytes.to_vec()).ok()
+}
+
 /// npm `cmd-shim`: the batch file's job is `node.exe` plus a `.js` entry.
 fn npm_shim_launch(cmd_path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let text = std::fs::read_to_string(cmd_path).ok()?;
+    let text = read_cmd_text(cmd_path)?;
     let dir = cmd_path.parent()?;
     let rel = npm_shim_script_rel(&text)?;
     let script = resolve_under(dir, &rel);
@@ -261,7 +304,7 @@ fn resolve_under(dir: &Path, rel: &str) -> PathBuf {
 }
 
 fn cmd_references_gui_exe(cmd_path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(cmd_path) else {
+    let Some(text) = read_cmd_text(cmd_path) else {
         return false;
     };
     let Some(dir) = cmd_path.parent() else {
@@ -310,7 +353,7 @@ fn quoted_tokens(text: &str) -> Vec<&str> {
 }
 
 /// Build a spawnable CLI command. Windows starts npm `.cmd` shims as `node`
-/// directly and hides the console, so a GUI app does not flash a terminal.
+/// directly and detaches the console, so a GUI app does not flash a terminal.
 pub fn command_for_path(program: &Path) -> Command {
     let mut cmd = build_command(program, &[]);
     apply_no_window(&mut cmd);
@@ -321,7 +364,7 @@ fn apply_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        _cmd.creation_flags(CREATE_NO_WINDOW);
+        _cmd.creation_flags(DETACHED_PROCESS);
     }
 }
 
@@ -331,7 +374,7 @@ pub fn kill_process_tree(pid: u32) {
         use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(DETACHED_PROCESS)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -401,6 +444,19 @@ mod tests {
         assert_eq!(node, PathBuf::from("node"));
         assert_eq!(launched, script);
         assert!(!launch_opens_gui_window(&cmd));
+
+        let mut wide = Vec::new();
+        wide.extend_from_slice(&[0xFF, 0xFE]);
+        for unit in
+            "@ECHO off\r\n\"%_prog%\" \"%dp0%\\node_modules\\claude\\cli.js\" %*\r\n".encode_utf16()
+        {
+            wide.extend_from_slice(&unit.to_le_bytes());
+        }
+        let wide_cmd = temp.path().join("claude-wide.cmd");
+        std::fs::write(&wide_cmd, wide).unwrap();
+        let (node, launched) = npm_shim_launch(&wide_cmd).expect("utf-16 shim");
+        assert_eq!(node, PathBuf::from("node"));
+        assert_eq!(launched, script);
     }
 
     #[test]
