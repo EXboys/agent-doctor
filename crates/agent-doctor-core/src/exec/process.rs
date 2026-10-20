@@ -72,6 +72,8 @@ pub fn run_output(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_no_window(&mut cmd);
+    #[cfg(windows)]
+    log_spawn(&cmd);
 
     let child = cmd.spawn().map_err(RunError::Io)?;
     let pid = child.id();
@@ -596,12 +598,14 @@ fn apply_no_window(_cmd: &mut Command) {
     {
         use std::os::windows::process::CommandExt;
         _cmd.creation_flags(DETACHED_PROCESS);
-        log_spawn(_cmd);
     }
 }
 
-/// One line per console child in `%LOCALAPPDATA%\AgentDoctor\logs\spawn.log`.
-/// A terminal flash names no program; this file does.
+/// One line per short captured probe in
+/// `%LOCALAPPDATA%\AgentDoctor\logs\spawn.log`.
+///
+/// Logging immediately before the actual spawn keeps the final argv and avoids
+/// counting commands that were only built for fingerprints or later mutation.
 #[cfg(windows)]
 fn log_spawn(cmd: &Command) {
     use std::io::Write;

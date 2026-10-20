@@ -424,14 +424,6 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn help_lists_computer(text: &str) -> bool {
-    text.lines().any(|line| {
-        line.split_whitespace()
-            .next()
-            .is_some_and(|word| word.eq_ignore_ascii_case("computer"))
-    })
-}
-
 type ComputerSupportKey = (String, Option<SystemTime>, u64);
 
 fn computer_support_cache() -> &'static Mutex<HashMap<ComputerSupportKey, bool>> {
@@ -456,7 +448,7 @@ fn binary_supports_computer(path: &Path) -> bool {
             return *hit;
         }
     }
-    let supports = probe_computer_support(path);
+    let supports = binary_contains_screen_open(path);
     if let Some(key) = key {
         computer_support_cache()
             .lock()
@@ -466,87 +458,16 @@ fn binary_supports_computer(path: &Path) -> bool {
     supports
 }
 
-fn tool_list_has_screen_open(body: &str) -> bool {
-    body.contains("\"name\":\"screen_open\"") || body.contains("\"name\": \"screen_open\"")
+fn binary_contains_screen_open(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    bytes_have_screen_open(&bytes)
 }
 
-fn probe_computer_support(path: &Path) -> bool {
-    // A cold first start of the CLI can take seconds; a diagnose-length budget
-    // keeps the probe from reporting "no computer tools" on a slow machine.
-    let Ok(output) = crate::exec::run_output(
-        path,
-        &["mcp", "--help"],
-        crate::exec::VERSION_PROBE_DIAGNOSE_TIMEOUT,
-    ) else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    help_lists_computer(&text) && lists_screen_open(path)
-}
-
-/// `mcp computer` on an older CLI has clicks and no `screen_open`. That CLI
-/// must not win, or the model opens apps by clicking the Dock.
-fn lists_screen_open(path: &Path) -> bool {
-    use std::io::{BufRead, BufReader, Write};
-    use std::process::Stdio;
-    use std::time::Duration;
-
-    let mut cmd = crate::exec::command_for_path(path);
-    let mut child = match cmd
-        .args(["mcp", "computer"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return false,
-    };
-    let Some(mut stdin) = child.stdin.take() else {
-        let _ = child.kill();
-        return false;
-    };
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        return false;
-    };
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = writeln!(
-            stdin,
-            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2024-11-05","capabilities":{{}},"clientInfo":{{"name":"probe","version":"0"}}}}}}"#
-        );
-        let _ = writeln!(
-            stdin,
-            r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#
-        );
-        let _ = writeln!(
-            stdin,
-            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{{}}}}"#
-        );
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        let mut found = false;
-        while reader.read_line(&mut line).unwrap_or(0) > 0 {
-            if tool_list_has_screen_open(&line) {
-                found = true;
-                break;
-            }
-            line.clear();
-        }
-        let _ = tx.send(found);
-    });
-    let found = rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false);
-    let _ = child.kill();
-    let _ = child.wait();
-    found
+fn bytes_have_screen_open(bytes: &[u8]) -> bool {
+    const TOOL: &[u8] = b"screen_open";
+    bytes.windows(TOOL.len()).any(|window| window == TOOL)
 }
 
 /// The installed CLI can be the same version number and still lack `mcp computer`.
@@ -655,17 +576,12 @@ mod tests {
         assert!(lined.contains("COMPUTER TOOLS ARE NOT CONNECTED"));
         assert!(!lined.contains("server named `computer`"));
         assert_eq!(Hands::default().prompt("你好"), "你好");
-        assert!(help_lists_computer(
-            "Commands:\n  computer   Start computer MCP server\n  browser    Start browser MCP server\n"
+        assert!(bytes_have_screen_open(
+            b"\0tools/list\0screen_open\0screen_snapshot\0"
         ));
-        assert!(!help_lists_computer(
-            "Commands:\n  browser    Start browser MCP server\n"
+        assert!(!bytes_have_screen_open(
+            b"\0tools/list\0screen_click\0screen_snapshot\0"
         ));
-        assert!(tool_list_has_screen_open(
-            r#"{"result":{"tools":[{"name":"screen_open"}]}}"#
-        ));
-        assert!(!tool_list_has_screen_open(
-            r#"{"result":{"tools":[{"name":"screen_click"}]}}"#
-        ));
+        assert!(!bytes_have_screen_open(b"screen_ope"));
     }
 }
