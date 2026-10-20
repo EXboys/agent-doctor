@@ -453,8 +453,12 @@ fn probe_remote_runtime(
         }
     }
 
-    // config files under remote HOME (relative paths from local adapter config_paths)
+    // Config files live under the remote HOME. Local adapter paths are only a
+    // source of the home-relative suffix: a remote host is POSIX, so Hermes
+    // stays at `~/.hermes` even when this computer installed it under
+    // `%LOCALAPPDATA%\hermes`.
     let local_home = dirs::home_dir();
+    let hermes_root = crate::adapters::hermes_root();
     for (local_config, required) in adapter
         .config_paths()
         .into_iter()
@@ -466,25 +470,17 @@ fn probe_remote_runtime(
                 .map(|path| (path, false)),
         )
     {
-        let relative = match local_home
-            .as_ref()
-            .and_then(|h| local_config.strip_prefix(h).ok())
-        {
-            Some(rel) => rel.to_path_buf(),
-            None => {
-                // Fallback: use known suffixes
-                continue;
-            }
+        let Some(relative) =
+            remote_home_relative(&local_config, local_home.as_deref(), &hermes_root)
+        else {
+            continue;
         };
-        // Remote homes are always POSIX (`/home/deploy`), so build the path
-        // with forward slashes even when this host is Windows and `join`
-        // wrote `\` — the backend looks the remote file up by that string.
-        let remote_config = posix_remote_path(&remote_home.join(&relative));
+        let remote_config = posix_join(remote_home, &relative);
         match backend.exists(&remote_config) {
             Ok(false) => {
                 if required {
                     checks.push(ProbeCheck::new(
-                        format!("config.exists.{}", relative.display()),
+                        format!("config.exists.{}", relative),
                         "Config exists",
                         ProbeStatus::Warn,
                         ProbeSeverity::Warning,
@@ -496,7 +492,7 @@ fn probe_remote_runtime(
             }
             Err(err) => {
                 checks.push(ProbeCheck::new(
-                    format!("config.exists.{}", relative.display()),
+                    format!("config.exists.{}", relative),
                     "Config exists",
                     ProbeStatus::Fail,
                     ProbeSeverity::Error,
@@ -519,7 +515,7 @@ fn probe_remote_runtime(
                     Ok(parsed) => {
                         checks.push(
                             ProbeCheck::new(
-                                format!("config.parse.{}", relative.display()),
+                                format!("config.parse.{}", relative),
                                 "Config parse",
                                 ProbeStatus::Pass,
                                 ProbeSeverity::Info,
@@ -533,7 +529,7 @@ fn probe_remote_runtime(
                             // (gateway URLs are ConfigShape, not API keys).
                             checks.push(
                                 ProbeCheck::new(
-                                    format!("config.gateway.{}", relative.display()),
+                                    format!("config.gateway.{}", relative),
                                     "Gateway / base URL",
                                     ProbeStatus::Pass,
                                     ProbeSeverity::Info,
@@ -546,7 +542,7 @@ fn probe_remote_runtime(
                     }
                     Err(err) => {
                         checks.push(ProbeCheck::new(
-                            format!("config.parse.{}", relative.display()),
+                            format!("config.parse.{}", relative),
                             "Config parse",
                             ProbeStatus::Fail,
                             ProbeSeverity::Error,
@@ -558,7 +554,7 @@ fn probe_remote_runtime(
             }
             Err(err) => {
                 checks.push(ProbeCheck::new(
-                    format!("config.read.{}", relative.display()),
+                    format!("config.read.{}", relative),
                     "Config read",
                     ProbeStatus::Fail,
                     ProbeSeverity::Error,
@@ -666,6 +662,49 @@ fn format_name(format: ConfigFormat) -> &'static str {
 /// wrote `\`.
 fn posix_remote_path(path: &Path) -> PathBuf {
     PathBuf::from(path.to_string_lossy().replace('\\', "/"))
+}
+
+/// Home-relative POSIX path (`".hermes/config.yaml"`) for a local config file.
+///
+/// `hermes_root` on Windows is `%LOCALAPPDATA%\hermes`. Strip that prefix and
+/// put the file back under `.hermes`, which is where the remote host stores it.
+fn remote_home_relative(
+    local_config: &Path,
+    local_home: Option<&Path>,
+    hermes_root: &Path,
+) -> Option<String> {
+    if let Ok(rest) = local_config.strip_prefix(hermes_root) {
+        return Some(posix_child(".hermes", rest));
+    }
+    let home = local_home?;
+    let rest = local_config.strip_prefix(home).ok()?;
+    Some(to_forward_slashes(rest))
+}
+
+fn posix_child(parent: &str, child: &Path) -> String {
+    let child = to_forward_slashes(child);
+    if child.is_empty() {
+        parent.to_string()
+    } else {
+        format!("{parent}/{child}")
+    }
+}
+
+fn to_forward_slashes(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn posix_join(base: &Path, relative: &str) -> PathBuf {
+    let base = base.to_string_lossy().replace('\\', "/");
+    let base = base.trim_end_matches('/');
+    let relative = relative.trim_start_matches('/');
+    if base.is_empty() {
+        return PathBuf::from(relative);
+    }
+    if relative.is_empty() {
+        return PathBuf::from(base);
+    }
+    PathBuf::from(format!("{base}/{relative}"))
 }
 
 fn extract_gateway(runtime_id: &str, raw: &str, parsed: &ParsedConfig) -> Option<String> {
@@ -896,5 +935,32 @@ mod tests {
             .find(|c| c.id.starts_with("config.gateway."))
             .expect("gateway check");
         assert!(gateway.details.iter().any(|d| d.contains("gw.example")));
+        assert_eq!(gateway.id, "config.gateway..hermes/config.yaml");
+    }
+
+    #[test]
+    fn windows_hermes_install_maps_to_remote_dot_hermes() {
+        let home = Path::new("C:/Users/runner");
+        let hermes = Path::new("C:/Users/runner/AppData/Local/hermes");
+        let config = hermes.join("config.yaml");
+        assert_eq!(
+            remote_home_relative(&config, Some(home), hermes).as_deref(),
+            Some(".hermes/config.yaml")
+        );
+        let remote = posix_join(Path::new(r"\home\deploy"), ".hermes/config.yaml");
+        assert_eq!(
+            remote.display().to_string(),
+            "/home/deploy/.hermes/config.yaml"
+        );
+    }
+
+    #[test]
+    fn other_runtime_configs_stay_home_relative() {
+        let home = Path::new("/Users/runner");
+        let config = home.join(".codex").join("config.toml");
+        assert_eq!(
+            remote_home_relative(&config, Some(home), &home.join(".hermes")).as_deref(),
+            Some(".codex/config.toml")
+        );
     }
 }
