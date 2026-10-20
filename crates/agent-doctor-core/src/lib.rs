@@ -13,6 +13,9 @@ pub mod probe;
 pub mod profile;
 pub mod remote;
 pub mod repair;
+/// Redaction, diagnostic, and typed-action types shared by probe, install,
+/// workspace, setup, and the repair crate.
+pub mod repair_types;
 pub mod runtime;
 /// Overlay env computation for spawning agent CLIs. Lives below
 /// `agent-doctor-prompt` because setup/merge and session_launch need it too.
