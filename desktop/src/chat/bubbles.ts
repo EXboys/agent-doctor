@@ -238,7 +238,11 @@ export function createBubblesController(deps: BubblesDeps) {
       session.title = seed.split(/\n/)[0].slice(0, 48);
     }
     if (!deps.getBusy() || session.id === deps.getStore().activeId) {
-      session.runtime = deps.selectedRuntime();
+      const nextRuntime = deps.selectedRuntime();
+      if (session.runtime !== nextRuntime) {
+        session.runtimeThreadId = null;
+      }
+      session.runtime = nextRuntime;
     }
     deps.touchSession(session);
     if (deps.getBusy()) {

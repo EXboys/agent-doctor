@@ -66,11 +66,13 @@ fn run_claude(
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let interactive = !options.dangerously_skip_permissions && control.is_some();
+    // `claude -p --resume` accepts a UUID. A ZCode id (`sess_<uuid>`) is rejected
+    // before any reply, so it must not be passed through.
     let resume_session_id = options
         .resume_thread_id
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty());
+        .filter(|value| is_claude_session_id(value));
 
     let mut overlay = collect_overlay_env_for_options(options);
     let saved_service =
@@ -364,6 +366,34 @@ fn claude_config_files(cwd: &Path) -> Vec<std::path::PathBuf> {
     files
 }
 
+/// Claude Code session ids are UUIDs. `sess_…` belongs to ZCode.
+fn is_claude_session_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    let groups = [8usize, 4, 4, 4, 12];
+    let mut index = 0;
+    for (nth, group) in groups.into_iter().enumerate() {
+        if nth > 0 {
+            if bytes.get(index) != Some(&b'-') {
+                return false;
+            }
+            index += 1;
+        }
+        for _ in 0..group {
+            if !bytes
+                .get(index)
+                .is_some_and(|byte| byte.is_ascii_hexdigit())
+            {
+                return false;
+            }
+            index += 1;
+        }
+    }
+    index == bytes.len()
+}
+
 fn build_claude_command(
     prompt: &str,
     launch: &ClaudeLaunch<'_>,
@@ -402,7 +432,7 @@ fn build_claude_command(
             }
         }
     }
-    if let Some(sid) = resume_session_id {
+    if let Some(sid) = resume_session_id.filter(|sid| is_claude_session_id(sid)) {
         cmd.arg("--resume").arg(sid);
     }
     let mut ask_settings = serde_json::Map::new();
@@ -1926,6 +1956,38 @@ mod tests {
         assert!(args[..dash]
             .iter()
             .any(|arg| arg == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn zcode_session_id_is_not_resumed() {
+        assert!(!is_claude_session_id(
+            "sess_1fe74b61-77d7-466f-a6dd-f9246c751058"
+        ));
+        assert!(is_claude_session_id("1fe74b61-77d7-466f-a6dd-f9246c751058"));
+        let dir = tempdir().unwrap();
+        let overlay = std::collections::HashMap::new();
+        let launch = ClaudeLaunch {
+            cwd: dir.path(),
+            skip_permissions: true,
+            interactive: false,
+            stream_input: false,
+            computer_mcp: false,
+            overlay: &overlay,
+        };
+        let cmd = build_claude_command(
+            "hi",
+            &launch,
+            Some("sess_1fe74b61-77d7-466f-a6dd-f9246c751058"),
+        )
+        .unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|arg| arg == "--resume"),
+            "a ZCode id must not be passed to claude --resume: {args:?}"
+        );
     }
 
     #[test]

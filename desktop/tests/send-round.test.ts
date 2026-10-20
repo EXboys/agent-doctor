@@ -253,14 +253,15 @@ console.log("\nsend: what a finished round keeps");
 
 await check("a finished round keeps the agent's thread, and the next send resumes it", async () => {
   reset();
+  const thread = "11111111-2222-4333-8444-555555555555";
   const session = makeSession("s-keep");
   const { api, state, promptEl } = newController({ sessions: [session], providerTag: "p1" });
-  startReply = async () => okReport({ runtime_thread_id: " th-1 ", cwd: "/tmp/project" });
+  startReply = async () => okReport({ runtime_thread_id: ` ${thread} `, cwd: "/tmp/project" });
   promptEl.value = "first";
 
   await api.sendAsk();
 
-  eq(session.runtimeThreadId, "th-1", "saved thread");
+  eq(session.runtimeThreadId, thread, "saved thread");
   eq(session.providerTag, "p1", "provider the thread belongs to");
   eq(session.interrupted, null, "a finished round is not marked interrupted");
   eq(state.displayedCwd, ["/tmp/project"], "shown folder");
@@ -270,7 +271,40 @@ await check("a finished round keeps the agent's thread, and the next send resume
 
   promptEl.value = "second";
   await api.sendAsk();
-  eq(roundCalls()[1].args.resumeThreadId, "th-1", "the next round resumes the saved thread");
+  eq(roundCalls()[1].args.resumeThreadId, thread, "the next round resumes the saved thread");
+});
+
+await check("a ZCode session id is not passed to Claude", async () => {
+  reset();
+  const session = makeSession("s-zcode-on-claude", {
+    runtime: "claude-code",
+    runtimeThreadId: "sess_1fe74b61-77d7-466f-a6dd-f9246c751058",
+  });
+  const { api, promptEl } = newController({ sessions: [session], runtime: "claude-code" });
+  promptEl.value = "again";
+
+  await api.sendAsk();
+
+  eq(roundCalls()[0].args.resumeThreadId, null, "sess_ is not a Claude session");
+  eq(session.runtimeThreadId, null, "the mismatched id is dropped");
+});
+
+await check("ZCode keeps its own session id", async () => {
+  reset();
+  const session = makeSession("s-zcode", {
+    runtime: "zcode",
+    runtimeThreadId: "sess_1fe74b61-77d7-466f-a6dd-f9246c751058",
+  });
+  const { api, promptEl } = newController({ sessions: [session], runtime: "zcode" });
+  promptEl.value = "again";
+
+  await api.sendAsk();
+
+  eq(
+    roundCalls()[0].args.resumeThreadId,
+    "sess_1fe74b61-77d7-466f-a6dd-f9246c751058",
+    "ZCode resumes sess_",
+  );
 });
 
 await check("after switching provider, the next send starts a fresh thread", async () => {
@@ -286,14 +320,21 @@ await check("after switching provider, the next send starts a fresh thread", asy
 
 await check("a thread that cannot be resumed is dropped, so the next send starts clean", async () => {
   reset();
-  const session = makeSession("s-gone", { runtimeThreadId: "th-gone", providerTag: "p1" });
+  const session = makeSession("s-gone", {
+    runtimeThreadId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    providerTag: "p1",
+  });
   const { api, promptEl } = newController({ sessions: [session], providerTag: "p1" });
   startReply = async () => okReport({ status: "failed" });
   promptEl.value = "hello";
 
   await api.sendAsk();
 
-  eq(roundCalls()[0].args.resumeThreadId, "th-gone", "the round tried to resume");
+  eq(
+    roundCalls()[0].args.resumeThreadId,
+    "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "the round tried to resume",
+  );
   eq(session.runtimeThreadId, null, "dead thread dropped");
   eq(session.interrupted?.status, "failed", "chat marked as not finished");
 });

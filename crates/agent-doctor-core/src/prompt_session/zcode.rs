@@ -66,11 +66,9 @@ fn run_zcode(
         bail!("session cwd does not exist: {}", cwd.display());
     }
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
-    let resume_session_id = options
-        .resume_thread_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    // Headless `--resume` takes a ZCode session id (`sess_…`). A bare UUID is
+    // a Claude session and must not be forwarded.
+    let resume_session_id = zcode_resume_id(options.resume_thread_id.as_deref());
 
     let mut cmd = build_zcode_command(prompt, &cwd, resume_session_id)?;
     let command_display = format_command_display(&cmd);
@@ -227,6 +225,12 @@ fn bundled_provider_config(script: &Path) -> Option<std::path::PathBuf> {
     ]
     .into_iter()
     .find(|path| path.is_file())
+}
+
+/// ZCode session ids are `sess_…`. A bare UUID belongs to Claude.
+fn zcode_resume_id(raw: Option<&str>) -> Option<&str> {
+    raw.map(str::trim)
+        .filter(|value| value.starts_with("sess_") && value.len() > "sess_".len())
 }
 
 fn build_zcode_command(
@@ -649,6 +653,19 @@ mod tests {
             },
         );
         (events, turn)
+    }
+
+    #[test]
+    fn resume_id_keeps_zcode_sessions_only() {
+        assert_eq!(
+            zcode_resume_id(Some("sess_1fe74b61-77d7-466f-a6dd-f9246c751058")),
+            Some("sess_1fe74b61-77d7-466f-a6dd-f9246c751058")
+        );
+        assert_eq!(
+            zcode_resume_id(Some("1fe74b61-77d7-466f-a6dd-f9246c751058")),
+            None
+        );
+        assert_eq!(zcode_resume_id(Some("  sess_ ")), None);
     }
 
     #[test]

@@ -170,6 +170,24 @@ function rejectedPictures(report: PromptSessionReport): boolean {
   return PICTURE_REJECTED.test(`${report.summary ?? ""}\n${report.log_excerpt ?? ""}`);
 }
 
+const CLAUDE_SESSION_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Claude's `--resume` only accepts a UUID. ZCode's id is `sess_…`.
+ * A mismatch starts a new thread, and the prompt keeps the earlier turns.
+ */
+function resumeThreadForRuntime(
+  runtime: string,
+  threadId: string | null | undefined,
+): string | null {
+  const value = threadId?.trim() ?? "";
+  if (!value) return null;
+  if (runtime === "claude-code") return CLAUDE_SESSION_ID.test(value) ? value : null;
+  if (runtime === "zcode") return value.startsWith("sess_") ? value : null;
+  return value;
+}
+
 export function createSendController(deps: SendDeps) {
   /** Ask whether the model sees pictures, and read their words when that is on. */
   async function readPictures(
@@ -344,7 +362,17 @@ export function createSendController(deps: SendDeps) {
       // provider can be refused outright, so carry the words over as text instead.
       sendSessionEarly.runtimeThreadId = null;
     }
-    const resumeThreadId = sendSessionEarly.runtimeThreadId?.trim() || null;
+    if (sendSessionEarly.runtime !== runtimeForTurn) {
+      // The saved thread belongs to the other agent.
+      sendSessionEarly.runtimeThreadId = null;
+    }
+    const resumeThreadId = resumeThreadForRuntime(
+      runtimeForTurn,
+      sendSessionEarly.runtimeThreadId,
+    );
+    if ((sendSessionEarly.runtimeThreadId?.trim() || null) !== resumeThreadId) {
+      sendSessionEarly.runtimeThreadId = resumeThreadId;
+    }
 
     if (foreground) {
       deps.setVerifyMcpTurn(Boolean(draft.verifyMcp));
