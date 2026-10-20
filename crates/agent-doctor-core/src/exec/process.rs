@@ -630,9 +630,10 @@ fn log_spawn(cmd: &Command) {
         .map(|arg| spawn_log_arg(&arg.to_string_lossy()))
         .collect();
     let line = format!(
-        "[{}] pid={} {} {}\n",
+        "[{}] pid={} tag={} hidden=yes flags=0x{CREATE_NO_WINDOW:08x} {} {}\n",
         local_stamp(),
         std::process::id(),
+        probe_tag(cmd),
         cmd.get_program().to_string_lossy(),
         args.join(" ")
     );
@@ -654,6 +655,18 @@ fn log_spawn(cmd: &Command) {
         .open(&file)
     {
         let _ = handle.write_all(line.as_bytes());
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn probe_tag(cmd: &Command) -> &'static str {
+    let args: Vec<_> = cmd.get_args().collect();
+    if args.len() >= 2 && args[args.len() - 2] == "prefix" && args[args.len() - 1] == "-g" {
+        "npm-prefix"
+    } else if args.iter().any(|arg| *arg == "--version") {
+        "version-probe"
+    } else {
+        "captured-probe"
     }
 }
 
@@ -829,6 +842,13 @@ mod tests {
         );
         let prompt = "please fix the config file and then restart the gateway now";
         assert!(spawn_log_arg(prompt).ends_with('…'));
+
+        let mut npm = Command::new("node");
+        npm.args(["npm-cli.js", "prefix", "-g"]);
+        assert_eq!(probe_tag(&npm), "npm-prefix");
+        let mut version = Command::new("claude.exe");
+        version.arg("--version");
+        assert_eq!(probe_tag(&version), "version-probe");
     }
 
     #[test]

@@ -103,16 +103,24 @@ fn timezone_from_localtime() -> Option<String> {
 
 #[cfg(windows)]
 fn platform_timezone() -> Option<String> {
-    let output = Command::new("tzutil").arg("/g").output().ok()?;
-    if !output.status.success() {
+    use windows::Win32::System::Time::{
+        GetDynamicTimeZoneInformation, DYNAMIC_TIME_ZONE_INFORMATION, TIME_ZONE_ID_INVALID,
+    };
+
+    let mut info = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    // SAFETY: Windows writes one initialized structure to this valid pointer.
+    if unsafe { GetDynamicTimeZoneInformation(&mut info) } == TIME_ZONE_ID_INVALID {
         return None;
     }
-    let name = String::from_utf8_lossy(&output.stdout);
-    let name = name.trim();
-    if name.is_empty() {
+    let end = info
+        .TimeZoneKeyName
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(info.TimeZoneKeyName.len());
+    if end == 0 {
         None
     } else {
-        Some(name.to_string())
+        Some(String::from_utf16_lossy(&info.TimeZoneKeyName[..end]))
     }
 }
 
