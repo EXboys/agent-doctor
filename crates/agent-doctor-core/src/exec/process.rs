@@ -28,6 +28,8 @@ pub const VERSION_PROBE_DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x00000008;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug)]
 pub enum RunError {
@@ -320,6 +322,21 @@ fn well_known_node_dirs() -> Vec<PathBuf> {
 }
 
 fn npm_shim_script_rel(text: &str) -> Option<String> {
+    // Node's own `npm.cmd` / `npx.cmd` keep the entry in a variable
+    // (`SET "NPM_CLI_JS=%~dp0\…\npm-cli.js"`) and launch `"%NODE_EXE%"  "%NPM_CLI_JS%" %*`.
+    // The line that forwards `%*` names the real entry; earlier helper scripts do not.
+    let vars = dp0_script_vars(text);
+    for line in text.lines().filter(|line| line.contains("%*")) {
+        for token in quoted_tokens(line) {
+            if let Some(rel) = strip_dp0(token).filter(|rel| is_js_entry(rel)) {
+                return Some(rel);
+            }
+            let name = token.strip_prefix('%').and_then(|t| t.strip_suffix('%'));
+            if let Some(rel) = name.and_then(|name| vars.get(&name.to_ascii_uppercase())) {
+                return Some(rel.clone());
+            }
+        }
+    }
     for line in text.lines() {
         if let Some(rel) = quoted_dp0_script(line) {
             return Some(rel);
@@ -340,15 +357,43 @@ fn quoted_dp0_script(line: &str) -> Option<String> {
         let end_rel = line[start..].find('"')?;
         let end = start + end_rel;
         let token = &line[start..end];
-        if let Some(rel) = strip_dp0(token) {
-            let lower = rel.to_ascii_lowercase();
-            if lower.ends_with(".js") || lower.ends_with(".cjs") || lower.ends_with(".mjs") {
-                return Some(rel);
-            }
+        if let Some(rel) = strip_dp0(token).filter(|rel| is_js_entry(rel)) {
+            return Some(rel);
         }
         i = end + 1;
     }
     None
+}
+
+fn is_js_entry(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    lower.ends_with(".js") || lower.ends_with(".cjs") || lower.ends_with(".mjs")
+}
+
+/// `SET "NAME=%~dp0\x.js"` lines, keyed by upper-case name (batch variables ignore case).
+fn dp0_script_vars(text: &str) -> std::collections::HashMap<String, String> {
+    let mut vars = std::collections::HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(head) = line.get(..4) else {
+            continue;
+        };
+        if !head.eq_ignore_ascii_case("set ") {
+            continue;
+        }
+        let rest = line[4..].trim();
+        let rest = match rest.strip_prefix('"') {
+            Some(quoted) => quoted.split('"').next().unwrap_or(""),
+            None => rest,
+        };
+        let Some((name, value)) = rest.split_once('=') else {
+            continue;
+        };
+        if let Some(rel) = strip_dp0(value.trim()).filter(|rel| is_js_entry(rel)) {
+            vars.insert(name.trim().to_ascii_uppercase(), rel);
+        }
+    }
+    vars
 }
 
 /// The program a `.cmd` shim actually starts, when that program is an `.exe`
@@ -493,7 +538,14 @@ fn apply_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        _cmd.creation_flags(DETACHED_PROCESS);
+        // Console programs a batch file starts share cmd's console. A detached cmd has
+        // none, so each of them would open its own terminal window instead.
+        let flags = if _cmd.get_program() == "cmd" {
+            CREATE_NO_WINDOW
+        } else {
+            DETACHED_PROCESS
+        };
+        _cmd.creation_flags(flags);
     }
 }
 
@@ -592,6 +644,45 @@ mod tests {
             node == Path::new("node") || (node.is_absolute() && node.is_file()),
             "node must be the bare name or an absolute existing file: {node:?}"
         );
+    }
+
+    #[test]
+    fn node_bundled_npm_cmd_launches_npm_cli() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(temp.path().join("node.exe"), b"MZ stub").unwrap();
+        let bin = temp.path().join("node_modules").join("npm").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("npm-cli.js"), "").unwrap();
+        std::fs::write(bin.join("npm-prefix.js"), "").unwrap();
+        let cmd = temp.path().join("npm.cmd");
+        std::fs::write(
+            &cmd,
+            ":: Created by npm, please don't edit manually.\r\n\
+             @ECHO OFF\r\n\
+             \r\n\
+             SETLOCAL\r\n\
+             \r\n\
+             SET \"NODE_EXE=%~dp0\\node.exe\"\r\n\
+             IF NOT EXIST \"%NODE_EXE%\" (\r\n\
+             \x20 SET \"NODE_EXE=node\"\r\n\
+             )\r\n\
+             \r\n\
+             SET \"NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js\"\r\n\
+             SET \"NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js\"\r\n\
+             FOR /F \"delims=\" %%F IN ('CALL \"%NODE_EXE%\" \"%NPM_PREFIX_JS%\"') DO (\r\n\
+             \x20 SET \"NPM_PREFIX_NPM_CLI_JS=%%F\\node_modules\\npm\\bin\\npm-cli.js\"\r\n\
+             )\r\n\
+             IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (\r\n\
+             \x20 SET \"NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%\"\r\n\
+             )\r\n\
+             \r\n\
+             \"%NODE_EXE%\"  \"%NPM_CLI_JS%\" %*\r\n",
+        )
+        .unwrap();
+
+        let (node, launched) = npm_shim_launch(&cmd).expect("npm.cmd");
+        assert_eq!(node, temp.path().join("node.exe"));
+        assert_eq!(launched, bin.join("npm-cli.js"));
     }
 
     #[test]
