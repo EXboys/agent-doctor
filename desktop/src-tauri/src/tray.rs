@@ -213,18 +213,26 @@ pub(crate) fn setup_tray(app: &tauri::App) {
             "show" => show_main_window(app),
             "workspace_doctor" => {
                 set_tray_busy(app, Some("Workspace check…"));
-                let result = workspace_doctor();
-                set_tray_busy(app, None);
-                if let Ok(report) = result {
-                    publish_workspace_doctor_report(app, &report);
-                }
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = workspace_doctor();
+                    set_tray_busy(&app_handle, None);
+                    if let Ok(report) = result {
+                        publish_workspace_doctor_report(&app_handle, &report);
+                    }
+                });
             }
             "doctor" => {
                 set_tray_busy(app, Some("Doctor…"));
-                let report = run_doctor();
-                remember_tray_health(app, &report);
-                set_tray_busy(app, None);
-                publish_doctor_report(app, &report);
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    // Doctor spawns version/npm probe children; menu events run on
+                    // the main thread, so this must stay off it.
+                    let report = run_doctor();
+                    remember_tray_health(&app_handle, &report);
+                    set_tray_busy(&app_handle, None);
+                    publish_doctor_report(&app_handle, &report);
+                });
             }
             "check_update" => {
                 show_main_window(app);

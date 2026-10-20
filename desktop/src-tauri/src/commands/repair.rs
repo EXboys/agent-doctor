@@ -292,16 +292,24 @@ pub async fn run_browser_smoke_command() -> Result<BrowserSmokeSummary, String> 
 }
 
 #[tauri::command]
-pub fn run_repair_rollback_command(
-    app: tauri::AppHandle,
+pub async fn run_repair_rollback_command(
+    app: AppHandle,
     runtime: String,
     backup: Option<String>,
 ) -> Result<RestoreSummary, String> {
-    let report =
-        restore_runtime_backup(&runtime, backup.as_deref()).map_err(|error| error.to_string())?;
-    let doctor = run_doctor();
-    remember_tray_health(&app, &doctor);
-    update_tray_tooltip(&app);
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        restore_runtime_backup(&runtime, backup.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    // Tray refresh runs doctor probes; never block the rollback result on it.
+    let app_tray = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let doctor = run_doctor();
+        remember_tray_health(&app_tray, &doctor);
+        update_tray_tooltip(&app_tray);
+    });
     Ok(RestoreSummary::from(&report))
 }
 
@@ -311,10 +319,15 @@ pub async fn uninstall_runtime_command(app: AppHandle, runtime: String) -> Resul
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
-    agent_doctor_core::refresh_managed_runtime_path();
-    let doctor = run_doctor();
-    remember_tray_health(&app, &doctor);
-    update_tray_tooltip(&app);
+    // PATH refresh re-runs the npm prefix probe and doctor spawns probe
+    // children; keep both off the async executor.
+    let app_tray = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_doctor_core::refresh_managed_runtime_path();
+        let doctor = run_doctor();
+        remember_tray_health(&app_tray, &doctor);
+        update_tray_tooltip(&app_tray);
+    });
     Ok(())
 }
 
@@ -344,7 +357,9 @@ pub async fn install_runtime_command(
                 explain: false,
                 plan_ai_repair: false,
                 repair_after: false,
-                retry_count: 0,
+                // Store installs download hundreds of MB on flaky home
+                // connections; one automatic retry beats a failed card.
+                retry_count: 1,
                 force,
                 update,
             },
@@ -360,11 +375,16 @@ pub async fn install_runtime_command(
     end_install(&runtime_for_end);
     let response = response??;
     // Install may have mutated the OS user PATH; keep this process in sync before
-    // the post-install doctor pass updates tray health.
-    agent_doctor_core::refresh_managed_runtime_path();
-    let doctor = run_doctor();
-    remember_tray_health(&app, &doctor);
-    update_tray_tooltip(&app);
+    // the post-install doctor pass updates tray health. The refresh re-runs the
+    // npm prefix probe and doctor spawns probe children, so both stay off the
+    // async executor.
+    let app_tray = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_doctor_core::refresh_managed_runtime_path();
+        let doctor = run_doctor();
+        remember_tray_health(&app_tray, &doctor);
+        update_tray_tooltip(&app_tray);
+    });
     Ok(response)
 }
 
