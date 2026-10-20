@@ -469,6 +469,7 @@ mod tests {
     use crate::repair::SensitivityLevel;
     use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -490,6 +491,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn tighten_env_permissions_sets_600_on_unix() {
         let temp = tempfile::tempdir().expect("tempdir");

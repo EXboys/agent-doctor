@@ -376,6 +376,15 @@ fn read_servers_from_dsh_patch(
             .unwrap_or(&[]),
         _ => &[],
     };
+    let items: Vec<&serde_yaml::Value> = items
+        .iter()
+        // Patch entries wrap plugins in an `insert` list; bare entries are
+        // the pre-insert shape older builds left behind.
+        .flat_map(|item| match item.get("insert").and_then(serde_yaml::Value::as_sequence) {
+            Some(list) => list.iter().collect::<Vec<&serde_yaml::Value>>(),
+            None => vec![item],
+        })
+        .collect();
     items
         .iter()
         .filter_map(|item| {
@@ -1449,5 +1458,18 @@ args = ["mcp", "browser", "--port", "9222"]
                 "after invalidate, empty mcpServers should drop the project browser"
             );
         });
+    }
+    #[test]
+    fn dsh_inventory_reads_plugins_inside_insert_patches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(
+            &path,
+            "- insert:\n  - id: mcp-computer\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      serverName: computer\n      transport: stdio\n      command: /bin/agent-doctor\n      args: [mcp, computer]\n  - id: mcp-browser\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      serverName: browser\n      transport: stdio\n      command: /bin/agent-doctor\n      args: [mcp, browser]\n",
+        )
+        .unwrap();
+        let items = read_servers_from_dsh_patch(&path, "dsh-home", "deepseek-harness");
+        let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
+        assert_eq!(names, vec!["computer", "browser"], "{names:?}");
     }
 }

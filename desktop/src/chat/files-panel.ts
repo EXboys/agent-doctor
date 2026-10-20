@@ -833,9 +833,16 @@ export function createFilesPanel(deps: FilesPanelDeps) {
   window.addEventListener("chat-open-workspace-file", (event) => {
     const detail = (event as CustomEvent<Partial<FileChangePreview> & { path?: string }>).detail;
     const projectRoot = deps.getRoot().trim();
+    const hasRoot = Boolean(projectRoot) && projectRoot !== "—";
     const raw = detail?.path?.trim();
     if (!raw) return;
-    const root = projectRoot && projectRoot !== "—" ? projectRoot : "/";
+    const absolute = raw.startsWith("/") || raw.startsWith("~/");
+    // Without a project only an absolute path can still open, as an outside file.
+    if (!hasRoot && !absolute) {
+      deps.setStatus(t("chat.filesNoFolder"), "warn");
+      return;
+    }
+    const root = hasRoot ? projectRoot : "/";
     void findWorkspacePath({ root, query: raw })
       .catch(() => null)
       .then((match) => {
@@ -848,6 +855,14 @@ export function createFilesPanel(deps: FilesPanelDeps) {
           const cut = relative.lastIndexOf("/");
           outsideRoot = match.isDir ? relative : relative.slice(0, cut) || "/";
           relative = match.isDir ? "" : relative.slice(cut + 1);
+        } else if (!hasRoot) {
+          // Find ran against "/", so its "relative" path is the absolute path
+          // minus the leading slash. Open it as an outside file; openFile's
+          // root guard would otherwise reject it for having no project.
+          const absolutePath = `/${relative}`;
+          const cut = absolutePath.lastIndexOf("/");
+          outsideRoot = match.isDir ? absolutePath : absolutePath.slice(0, cut) || "/";
+          relative = match.isDir ? "" : absolutePath.slice(cut + 1);
         } else {
           outsideRoot = null;
         }

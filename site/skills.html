@@ -43,20 +43,12 @@
       <h1>Open source skills for jobs you <em>already do</em>.</h1>
       <p class="lead">These are skills other people published. Agent Doctor did not write them. Download the zip, then add it in the app. The license on each card is the author’s license.</p>
       <div class="market-actions">
-        <a class="btn btn-primary" id="bundle-download" href="/skills/everyday/everyday.zip">Download all five</a>
-        <a class="btn btn-ghost" href="#add">How to add one</a>
+        <a class="btn btn-primary" href="#add">How to add one</a>
       </div>
     </div>
 
     <section class="wrap market">
-      <div class="filters" role="tablist" aria-label="Skill types">
-        <button type="button" class="filter on" data-group="all" aria-pressed="true">All</button>
-        <button type="button" class="filter" data-group="writing" aria-pressed="false">Articles</button>
-        <button type="button" class="filter" data-group="code" aria-pressed="false">Code</button>
-        <button type="button" class="filter" data-group="video" aria-pressed="false">Video</button>
-        <button type="button" class="filter" data-group="slides" aria-pressed="false">Slides</button>
-        <button type="button" class="filter" data-group="geo" aria-pressed="false">GEO</button>
-      </div>
+      <div class="filters" id="skill-filters" role="tablist" aria-label="Skill types"></div>
       <div class="skill-grid" id="skill-grid">
         <p class="market-status">Loading skills…</p>
       </div>
@@ -68,7 +60,7 @@
         <li>
           <div class="step-no">01</div>
           <h3>Download the zip</h3>
-          <p>Pick one skill, or take all five. The file stays on this computer.</p>
+          <p>Pick a skill below. The zip downloads to this computer.</p>
         </li>
         <li>
           <div class="step-no">02</div>

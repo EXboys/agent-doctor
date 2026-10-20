@@ -1,2 +1,0 @@
-Packaged unchanged from https://github.com/vercel-labs/agent-skills
-The upstream SKILL.md declares license: MIT.

@@ -253,6 +253,32 @@ pub fn drop_unreachable_dsh_mcp_plugins(path: &Path) -> AnyhowResult<bool> {
 }
 
 pub(crate) fn prune_dsh_plugin_seq(seq: &mut Vec<YamlValue>) -> bool {
+    let mut changed = prune_dsh_plugin_seq_items(seq);
+    // Patch entries wrap plugins in an `insert` list; prune inside them too,
+    // and drop the wrapper when pruning emptied it.
+    let mut emptied = Vec::new();
+    for (index, patch) in seq.iter_mut().enumerate() {
+        let Some(list) = patch
+            .as_mapping_mut()
+            .and_then(|map| map.get_mut(YamlValue::String("insert".into())))
+            .and_then(YamlValue::as_sequence_mut)
+        else {
+            continue;
+        };
+        if prune_dsh_plugin_seq_items(list) {
+            changed = true;
+            if list.is_empty() {
+                emptied.push(index);
+            }
+        }
+    }
+    for index in emptied.into_iter().rev() {
+        seq.remove(index);
+    }
+    changed
+}
+
+fn prune_dsh_plugin_seq_items(seq: &mut Vec<YamlValue>) -> bool {
     let before = seq.len();
     seq.retain(|item| !dsh_plugin_command_missing(item));
     seq.len() != before
@@ -280,4 +306,47 @@ pub(crate) fn dsh_plugin_command_missing(item: &YamlValue) -> bool {
         .get("command")
         .and_then(YamlValue::as_str)
         .is_some_and(command_path_missing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(raw: &str) -> Vec<YamlValue> {
+        serde_yaml::from_str::<YamlValue>(raw)
+            .unwrap()
+            .as_sequence()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn prune_keeps_a_patch_whose_insert_list_still_has_live_plugins() {
+        let mut seq = parse(
+            "- insert:\n  - id: dead\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /missing/agent-doctor\n  - id: alive\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /bin/echo\n",
+        );
+        assert!(prune_dsh_plugin_seq(&mut seq));
+        let rendered = serde_yaml::to_string(&YamlValue::Sequence(seq)).unwrap();
+        assert!(rendered.contains("id: alive"), "{rendered}");
+        assert!(!rendered.contains("id: dead"), "{rendered}");
+        assert!(rendered.contains("insert:"), "{rendered}");
+    }
+
+    #[test]
+    fn prune_drops_a_patch_whose_insert_list_became_empty() {
+        let mut seq = parse(
+            "- id: keep-me\n  name: other\n- insert:\n  - id: dead\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /missing/agent-doctor\n",
+        );
+        assert!(prune_dsh_plugin_seq(&mut seq));
+        let rendered = serde_yaml::to_string(&YamlValue::Sequence(seq)).unwrap();
+        assert!(rendered.contains("keep-me"), "{rendered}");
+        assert!(!rendered.contains("insert:"), "{rendered}");
+    }
+
+    #[test]
+    fn prune_leaves_unrelated_patch_entries_alone() {
+        let mut seq = parse("- id: disable-telemetry\n  disabled: true\n");
+        assert!(!prune_dsh_plugin_seq(&mut seq));
+        assert_eq!(seq.len(), 1);
+    }
 }

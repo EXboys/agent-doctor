@@ -1,5 +1,11 @@
+use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -570,20 +576,194 @@ fn is_dsh_browser_plugin(value: &serde_yaml::Value, plugin_id: &str, server_name
         == Some(server_name)
 }
 
-fn upsert_dsh_browser_seq(
-    seq: &mut Vec<serde_yaml::Value>,
-    plugin_id: &str,
-    server_name: &str,
-    entry: serde_yaml::Value,
-) {
-    if let Some(index) = seq
-        .iter()
-        .position(|value| is_dsh_browser_plugin(value, plugin_id, server_name))
-    {
-        seq[index] = entry;
-    } else {
-        seq.push(entry);
+/// The profile Ask boots. `--dump-config` composes exactly this tree without
+/// starting it, so it is the composition the wire has to satisfy.
+const DSH_ASK_PROFILE: &str = "acp";
+
+/// Read the patch list dsh applies: a top-level YAML array.
+///
+/// Older Agent Doctor builds wrote bare plugin entries (dsh warns
+/// `patch: entry … not found` and skips them) or a `plugins:` mapping (which
+/// dsh refuses to boot). Both are migrated here instead of being overwritten.
+/// Anything unrecognizable fails the wire: a hand-edited file must never be
+/// clobbered by a blind rewrite.
+fn read_dsh_patch_list(config_path: &Path) -> Result<Vec<serde_yaml::Value>> {
+    if !config_path.exists() {
+        return Ok(Vec::new());
     }
+    let raw = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    if yaml_has_tag(&raw) {
+        anyhow::bail!(
+            "{} uses YAML tags (like !!js) that Agent Doctor cannot rewrite without dropping them; edit that file by hand",
+            config_path.display()
+        );
+    }
+    let root: serde_yaml::Value = serde_yaml::from_str(&raw).with_context(|| {
+        format!(
+            "{} is not valid YAML; fix or remove that file by hand so Agent Doctor does not overwrite your edits",
+            config_path.display()
+        )
+    })?;
+    match root {
+        serde_yaml::Value::Sequence(seq) => Ok(seq),
+        serde_yaml::Value::Mapping(map) => {
+            let plugins = map
+                .get(serde_yaml::Value::String("plugins".into()))
+                .and_then(serde_yaml::Value::as_sequence)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} must be a top-level YAML array of patch entries; Agent Doctor will not rewrite an unknown mapping",
+                        config_path.display()
+                    )
+                })?;
+            Ok(plugins.clone())
+        }
+        serde_yaml::Value::Null => Ok(Vec::new()),
+        _ => anyhow::bail!(
+            "{} must be a top-level YAML array of patch entries",
+            config_path.display()
+        ),
+    }
+}
+
+fn dsh_insert_patch(entry: serde_yaml::Value) -> serde_yaml::Value {
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("insert".into()),
+        serde_yaml::Value::Sequence(vec![entry]),
+    );
+    serde_yaml::Value::Mapping(map)
+}
+
+/// serde_yaml parses `!!js`-style YAML.org tags into plain strings and drops
+/// the tag on rewrite — `!!js process.env.X` would silently become the literal
+/// text `process.env.X`, changing what dsh executes. A file using any tag in
+/// tag position must be edited by hand instead.
+fn yaml_has_tag(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.iter().enumerate().any(|(index, &byte)| {
+        if byte != b'!' {
+            return false;
+        }
+        match index {
+            0 => true,
+            _ => matches!(
+                bytes[index - 1],
+                b' ' | b'\t' | b'\n' | b'-' | b':' | b'[' | b','
+            ),
+        }
+    })
+}
+
+type DshVerifyKey = (String, Option<SystemTime>, Option<u64>, String, String);
+
+fn dsh_verify_cache() -> &'static Mutex<HashMap<DshVerifyKey, Result<(), String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<DshVerifyKey, Result<(), String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// After writing, ask dsh itself whether the entry reached the composed tree.
+///
+/// A patch dsh silently skips (wrong shape, unknown file) used to leave the
+/// wire reporting a green light while the model saw no tools at all. Best
+/// effort: without a dsh binary there is nothing to ask, and the result is
+/// cached per file content so repeated wiring costs nothing.
+fn verify_dsh_patch_loads(config_path: &Path, plugin_id: &str) -> Result<(), String> {
+    let Some(dsh) = agent_doctor_core::adapters::util::find_binary(
+        agent_doctor_core::adapters::DEEPSEEK_HARNESS_CLI,
+    ) else {
+        return Ok(());
+    };
+    let content = fs::read_to_string(config_path).unwrap_or_default();
+    let meta = fs::metadata(&dsh).ok();
+    let key: DshVerifyKey = (
+        dsh.to_string_lossy().into_owned(),
+        meta.as_ref().and_then(|meta| meta.modified().ok()),
+        meta.as_ref().map(|meta| meta.len()),
+        content,
+        plugin_id.to_string(),
+    );
+    let cache = dsh_verify_cache();
+    if let Some(hit) = cache
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .get(&key)
+    {
+        return hit.clone();
+    }
+    let result = run_dsh_dump_config(&dsh, plugin_id);
+    cache
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(key, result.clone());
+    result
+}
+
+fn run_dsh_dump_config(dsh: &Path, plugin_id: &str) -> Result<(), String> {
+    let mut child = Command::new(dsh)
+        .args(["--profile", DSH_ASK_PROFILE, "--dump-config"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("failed to start dsh: {err}"))?;
+    // The pipes must drain while dsh runs or a large tree can deadlock both
+    // processes, so the readers own their pipe and the watchdog only waits.
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stdout_handle = thread::spawn(move || read_pipe_text(stdout_pipe));
+    let stderr_handle = thread::spawn(move || read_pipe_text(stderr_pipe));
+    const DSH_VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if started.elapsed() < DSH_VERIFY_TIMEOUT => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err("dsh --dump-config timed out".into());
+            }
+            Err(err) => return Err(format!("failed to run dsh: {err}")),
+        }
+    };
+    let Some(status) = status else {
+        return Err("dsh --dump-config did not run".into());
+    };
+    let tree = stdout_handle.join().unwrap_or_default();
+    let stderr_text = stderr_handle.join().unwrap_or_default();
+    if !status.success() {
+        return Err(format!("exit {}: {}", status, excerpt(&stderr_text)));
+    }
+    if !tree.contains(&format!("id: {plugin_id}")) {
+        return Err(format!(
+            "the composed dsh config has no '{plugin_id}' entry; dsh said: {}",
+            excerpt(&stderr_text)
+        ));
+    }
+    Ok(())
+}
+
+fn read_pipe_text<R: Read + Send + 'static>(pipe: Option<R>) -> String {
+    pipe.and_then(|mut pipe| {
+        let mut text = String::new();
+        pipe.read_to_string(&mut text).ok()?;
+        Some(text)
+    })
+    .unwrap_or_default()
+}
+
+fn excerpt(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= 300 {
+        return trimmed.to_string();
+    }
+    trimmed.chars().take(300).collect()
 }
 
 fn write_dsh_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
@@ -607,49 +787,69 @@ fn write_dsh_plugin_mcp(
     command: &str,
     args: &[String],
 ) -> Result<()> {
-    use serde_yaml::Value as YamlValue;
-
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
 
-    let mut root: YamlValue = if config_path.exists() {
-        let raw = fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        if raw.trim().is_empty() {
-            YamlValue::Sequence(Vec::new())
-        } else {
-            serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Sequence(Vec::new()))
+    let mut patches = read_dsh_patch_list(config_path)?;
+    let managed = |item: &serde_yaml::Value| is_dsh_browser_plugin(item, plugin_id, server_name);
+
+    // Drop this server wherever a previous wire left it: inside an insert
+    // list (the shape dsh applies) or bare at the top level (the pre-insert
+    // shape dsh warns about and skips). Rewritten in place so repeated wires
+    // never duplicate an entry — dsh accepts duplicate insert ids silently.
+    let mut slot: Option<usize> = None;
+    for (index, patch) in patches.iter_mut().enumerate() {
+        let Some(map) = patch.as_mapping_mut() else {
+            continue;
+        };
+        if map.contains_key(serde_yaml::Value::String("id".into())) {
+            continue; // group-targeted insert: our entries belong at the root
         }
-    } else {
-        YamlValue::Sequence(Vec::new())
-    };
+        let Some(list) = map
+            .get_mut(serde_yaml::Value::String("insert".into()))
+            .and_then(serde_yaml::Value::as_sequence_mut)
+        else {
+            continue;
+        };
+        let before = list.len();
+        list.retain(|item| !managed(item));
+        if list.len() != before && slot.is_none() {
+            slot = Some(index);
+        }
+    }
+    patches.retain(|item| !managed(item));
 
     let entry = dsh_browser_plugin_entry(server_name, plugin_id, command, args);
-    match &mut root {
-        YamlValue::Sequence(seq) => upsert_dsh_browser_seq(seq, plugin_id, server_name, entry),
-        YamlValue::Mapping(map) => {
-            let key = YamlValue::String("plugins".into());
-            let seq = match map.get_mut(&key) {
-                Some(YamlValue::Sequence(seq)) => seq,
-                _ => {
-                    map.insert(key.clone(), YamlValue::Sequence(Vec::new()));
-                    map.get_mut(&key)
-                        .and_then(YamlValue::as_sequence_mut)
-                        .expect("plugins sequence")
-                }
+    match slot {
+        Some(index) => {
+            let list = patches[index]
+                .as_mapping_mut()
+                .and_then(|map| map.get_mut(serde_yaml::Value::String("insert".into())))
+                .and_then(serde_yaml::Value::as_sequence_mut);
+            let Some(list) = list else {
+                anyhow::bail!(
+                    "the insert slot in {} vanished while rewriting",
+                    config_path.display()
+                );
             };
-            upsert_dsh_browser_seq(seq, plugin_id, server_name, entry);
+            list.push(entry);
         }
-        _ => root = YamlValue::Sequence(vec![entry]),
+        None => patches.push(dsh_insert_patch(entry)),
     }
 
-    let rendered = serde_yaml::to_string(&root)
+    let rendered = serde_yaml::to_string(&serde_yaml::Value::Sequence(patches))
         .with_context(|| format!("Failed to serialize {}", config_path.display()))?;
     fs::write(config_path, rendered)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
-    Ok(())
+
+    verify_dsh_patch_loads(config_path, plugin_id).map_err(|message| {
+        anyhow::anyhow!(
+            "wrote {} but dsh rejected it: {message}",
+            config_path.display()
+        )
+    })
 }
 
 fn write_hermes_browser_mcp(config_path: &Path, command: &str, args: &[String]) -> Result<()> {
@@ -924,9 +1124,22 @@ foo = true
         assert!(path.ends_with("cordis.patch.yml"));
     }
 
+    /// The dsh patch tests point `DSH_HOME` at a temp home so the writer's
+    /// `--dump-config` verification composes the temp file, not the
+    /// developer's real config. One lock: env vars are process-wide.
+    fn dsh_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// `verify_dsh_patch_loads` shells out to a real dsh when one is
+    /// installed. Under `DSH_HOME=<temp>` that end-to-end check runs on dev
+    /// machines and is silently skipped where dsh is absent.
     #[test]
-    fn dsh_patch_write_upserts_browser_plugin() {
+    fn dsh_patch_write_upserts_browser_plugin_in_insert_form() {
+        let _env = dsh_env_lock();
         let dir = tempdir().unwrap();
+        std::env::set_var("DSH_HOME", dir.path());
         let path = dir.path().join("cordis.patch.yml");
         fs::write(&path, "- id: keep-me\n  name: other\n").unwrap();
         write_dsh_browser_mcp(
@@ -946,11 +1159,183 @@ foo = true
             ],
         )
         .unwrap();
+        std::env::remove_var("DSH_HOME");
         let rendered = fs::read_to_string(&path).unwrap();
-        assert!(rendered.contains("keep-me"));
-        assert_eq!(rendered.matches("mcp-browser").count(), 1);
-        assert!(rendered.contains("@deepseek-ai/dsh-mcp-client"));
-        assert!(rendered.contains("serverName: browser"));
-        assert!(rendered.contains("--port"));
+        assert!(rendered.contains("keep-me"), "{rendered}");
+        assert_eq!(rendered.matches("id: mcp-browser").count(), 1, "{rendered}");
+        assert_eq!(rendered.matches("insert:").count(), 1, "{rendered}");
+        assert!(
+            rendered.contains("@deepseek-ai/dsh-mcp-client"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("serverName: browser"), "{rendered}");
+        assert!(rendered.contains("--port"), "{rendered}");
+    }
+
+    #[test]
+    fn dsh_patch_write_migrates_legacy_bare_entries_for_the_server_it_wires() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        std::env::set_var("DSH_HOME", dir.path());
+        let path = dir.path().join("cordis.patch.yml");
+        // The shape earlier Agent Doctor builds left on user machines: bare
+        // plugin entries, which dsh warns about and skips.
+        fs::write(
+            &path,
+            "- id: mcp-browser\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: browser\n    transport: stdio\n    command: /bin/agent-doctor\n    args: [mcp, browser]\n- id: mcp-computer\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: computer\n    transport: stdio\n    command: /bin/agent-doctor\n    args: [mcp, computer]\n",
+        )
+        .unwrap();
+        write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        )
+        .unwrap();
+        std::env::remove_var("DSH_HOME");
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            rendered.matches("id: mcp-computer").count(),
+            1,
+            "{rendered}"
+        );
+        assert!(rendered.contains("insert:"), "{rendered}");
+        // The browser entry migrates when its own wire runs, not before.
+        assert!(rendered.contains("serverName: browser"), "{rendered}");
+    }
+
+    #[test]
+    fn dsh_patch_write_migrates_the_legacy_plugins_mapping_root() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        std::env::set_var("DSH_HOME", dir.path());
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(
+            &path,
+            "plugins:\n- id: keep-me\n  name: other\n- id: mcp-computer\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: computer\n    command: /old\n",
+        )
+        .unwrap();
+        write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        )
+        .unwrap();
+        std::env::remove_var("DSH_HOME");
+        let rendered = fs::read_to_string(&path).unwrap();
+        // dsh refuses a mapping root, so the file must come back a sequence.
+        assert!(rendered.starts_with('-'), "{rendered}");
+        assert!(rendered.contains("keep-me"), "{rendered}");
+        assert!(rendered.contains("insert:"), "{rendered}");
+        assert!(!rendered.contains("plugins:"), "{rendered}");
+    }
+
+    #[test]
+    fn dsh_patch_write_preserves_unrelated_patches() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        std::env::set_var("DSH_HOME", dir.path());
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(
+            &path,
+            "- id: keep-me\n  name: other\n- insert:\n  - id: mcp-github\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      serverName: github\n      transport: stdio\n      command: npx\n",
+        )
+        .unwrap();
+        write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        )
+        .unwrap();
+        std::env::remove_var("DSH_HOME");
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("keep-me"), "{rendered}");
+        assert!(rendered.contains("serverName: github"), "{rendered}");
+        assert!(rendered.contains("command: npx"), "{rendered}");
+        assert_eq!(
+            rendered.matches("id: mcp-computer").count(),
+            1,
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn dsh_patch_write_fails_without_overwriting_an_unreadable_file() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(&path, ":::: not yaml").unwrap();
+        let result = write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), ":::: not yaml");
+    }
+
+    #[test]
+    fn dsh_patch_write_refuses_an_unknown_mapping_root() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cordis.patch.yml");
+        fs::write(&path, "some: other meaning\n").unwrap();
+        let result = write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "some: other meaning\n");
+    }
+
+    #[test]
+    fn dsh_patch_write_fails_cleanly_when_the_file_uses_tags() {
+        let _env = dsh_env_lock();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cordis.patch.yml");
+        let seed = "- insert:\n  - id: user-plugin\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      env:\n        TOKEN: !!js process.env.TOKEN\n";
+        fs::write(&path, seed).unwrap();
+        let result = write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        );
+        assert!(result.is_err());
+        // The tag would be lost on rewrite, so the file must stay untouched.
+        assert_eq!(fs::read_to_string(&path).unwrap(), seed);
+    }
+
+    /// The wiring is only truthful when a dropped patch is reported. With a
+    /// `DSH_HOME` that does not contain the file just written, dsh composes a
+    /// tree without the entry and the wire must fail instead of going green.
+    #[test]
+    fn dsh_wire_reports_when_dsh_drops_the_entry() {
+        let Some(_) = agent_doctor_core::adapters::util::find_binary(
+            agent_doctor_core::adapters::DEEPSEEK_HARNESS_CLI,
+        ) else {
+            return;
+        };
+        let _env = dsh_env_lock();
+        let home = tempdir().unwrap();
+        let elsewhere = tempdir().unwrap();
+        std::env::set_var("DSH_HOME", home.path());
+        let path = elsewhere.path().join("cordis.patch.yml");
+        let result = write_dsh_stdio_mcp(
+            &path,
+            "computer",
+            "/bin/agent-doctor",
+            &["mcp".into(), "computer".into()],
+        );
+        std::env::remove_var("DSH_HOME");
+        let message = result
+            .expect_err("dsh should not see this file")
+            .to_string();
+        assert!(message.contains("dsh rejected"), "{message}");
     }
 }
