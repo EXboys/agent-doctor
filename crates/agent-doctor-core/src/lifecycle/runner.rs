@@ -392,7 +392,9 @@ pub fn write_install_log(runtime_id: &str, capture: &ShellCapture) -> Result<Pat
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_npm_install, submit_install_line, waiting_input_kind};
+    #[cfg(unix)]
+    use super::submit_install_line;
+    use super::{looks_like_npm_install, waiting_input_kind};
     use crate::lifecycle::openclaw::{
         openclaw_install_shell_command, openclaw_update_shell_command,
     };

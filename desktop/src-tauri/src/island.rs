@@ -10,7 +10,9 @@
 //! longer fits.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -98,6 +100,8 @@ struct Snapshot {
     /// The page still reports a browser tool. Windows are not hidden for it.
     #[allow(dead_code)]
     browser: bool,
+    /// macOS peeks the bar unless the person is typing. Windows keeps a chip.
+    #[cfg_attr(windows, allow(dead_code))]
     composing: bool,
     title: String,
     detail: String,
@@ -177,6 +181,7 @@ struct Inner {
     #[cfg_attr(not(windows), allow(dead_code))]
     chip_drag: HashMap<String, (f64, f64)>,
     /// Monitor work-area origins, so a new screen gets its own notch.
+    #[cfg_attr(windows, allow(dead_code))]
     screen_sig: Vec<(i32, i32)>,
     last_view: IslandView,
 }
@@ -237,6 +242,7 @@ fn pending_opens_card(pending: Option<&IslandPending>) -> bool {
 /// On macOS the bar can stay up, or hide until a turn is running.
 /// Hover peeks. A click on the bar keeps it open.
 /// A question opens it unless the person is typing or they just clicked somewhere else.
+#[cfg(not(windows))]
 pub(crate) fn island_chrome(
     hovering: bool,
     attention: bool,
@@ -278,7 +284,7 @@ fn windows_ask_in_front(app: &AppHandle) -> bool {
         if window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(false) {
             return false;
         }
-        return window.is_focused().unwrap_or(false);
+        window.is_focused().unwrap_or(false)
     }
     #[cfg(not(windows))]
     {
@@ -720,11 +726,13 @@ fn monitors_for_island(app: &AppHandle) -> Vec<tauri::Monitor> {
         .collect()
 }
 
+#[cfg(not(windows))]
 const MENU_BAR_FALLBACK: f64 = 24.0;
 /// Windows has no menu bar to clear. A small gap keeps the chip off the edge.
 #[cfg_attr(not(windows), allow(dead_code))]
 const STATUS_TOP_GAP: f64 = 8.0;
 
+#[cfg(not(windows))]
 struct TopAnchor {
     notch_x: f64,
     notch_w: f64,
@@ -733,6 +741,7 @@ struct TopAnchor {
 }
 
 /// Width, height, x, y, and the top inset that keeps words out of the menu bar.
+#[cfg(not(windows))]
 fn island_frame(
     chrome: Chrome,
     screen_x: f64,
@@ -775,6 +784,7 @@ fn island_frame(
     }
 }
 
+#[cfg(not(windows))]
 fn top_anchor(monitor: &tauri::Monitor) -> Option<TopAnchor> {
     #[cfg(target_os = "macos")]
     {
@@ -953,7 +963,7 @@ fn status_frame(
     #[cfg(windows)]
     {
         let _ = monitor;
-        return windows_status_frame(chrome, screen_x, screen_y, screen_w, peek_height);
+        windows_status_frame(chrome, screen_x, screen_y, screen_w, peek_height)
     }
     #[cfg(not(windows))]
     {
@@ -1105,11 +1115,11 @@ fn status_origin(monitor: &tauri::Monitor) -> Option<(f64, f64, f64)> {
     #[cfg(windows)]
     {
         let work = monitor.work_area();
-        return Some((
+        Some((
             work.position.x as f64 / scale,
             work.position.y as f64 / scale,
             work.size.width as f64 / scale,
-        ));
+        ))
     }
     #[cfg(not(windows))]
     screen_top(monitor)
@@ -1130,6 +1140,7 @@ fn screen_top(monitor: &tauri::Monitor) -> Option<(f64, f64, f64)> {
     ))
 }
 
+#[cfg(not(windows))]
 fn screen_signature(app: &AppHandle) -> Vec<(i32, i32)> {
     monitors_for_island(app)
         .iter()
@@ -1169,7 +1180,6 @@ fn refresh_screens(app: &AppHandle) {
                 present_island(&window);
             }
         }
-        return;
     }
     #[cfg(not(windows))]
     refresh_notch_screens(app);
@@ -1962,10 +1972,12 @@ pub fn current_island_view_command(app: AppHandle) -> IslandView {
 #[cfg(test)]
 mod tests {
     use super::{
-        chrome_if_enabled, clamp_chip_to_work, format_chip_place, island_chrome, island_frame,
-        parse_chip_place, peek_height, pending_opens_card, windows_chip_origin,
-        windows_status_chrome, windows_status_frame, Chrome, IslandPending, TopAnchor, WorkRect,
+        chrome_if_enabled, clamp_chip_to_work, format_chip_place, parse_chip_place, peek_height,
+        pending_opens_card, windows_chip_origin, windows_status_chrome, windows_status_frame,
+        Chrome, IslandPending, WorkRect,
     };
+    #[cfg(not(windows))]
+    use super::{island_chrome, island_frame, TopAnchor};
 
     #[test]
     fn an_allow_request_stays_on_the_chip() {
@@ -1996,6 +2008,7 @@ mod tests {
         assert!(many <= 460.0);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_screen_without_a_notch_hangs_below_the_menu_bar() {
         let anchor = TopAnchor {
@@ -2019,6 +2032,7 @@ mod tests {
         assert_eq!(card_inset, 0.0);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_notch_still_fills_the_camera_housing() {
         let anchor = TopAnchor {
@@ -2036,6 +2050,7 @@ mod tests {
         assert!(height > 37.0);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn an_idle_bar_hides_until_a_turn_is_running() {
         assert_eq!(
@@ -2063,6 +2078,7 @@ mod tests {
         assert_eq!(chrome_if_enabled(true, Chrome::Pill), Chrome::Pill);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn the_island_stays_up_while_idle_when_hiding_is_off() {
         assert_eq!(
@@ -2075,6 +2091,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_question_opens_the_island_unless_typing() {
         assert_eq!(
@@ -2091,6 +2108,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_click_outside_folds_the_card() {
         assert_eq!(
@@ -2103,6 +2121,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_click_on_the_bar_opens_it_again() {
         assert_eq!(

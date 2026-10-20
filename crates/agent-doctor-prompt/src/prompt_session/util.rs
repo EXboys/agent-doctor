@@ -668,7 +668,7 @@ pub(crate) fn humanize_runtime_error(raw: &str) -> String {
     t.to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]

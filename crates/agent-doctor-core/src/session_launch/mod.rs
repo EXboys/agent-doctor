@@ -4,17 +4,11 @@
 //! Chat/TUI stays in the official CLI (Claude Code deep link or a system terminal).
 
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "windows")]
-use std::process::Stdio;
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::evotown::normalize_runtime;
-#[cfg(windows)]
-use crate::profile::read_company_profile;
-#[cfg(windows)]
-use crate::setup::anthropic_gateway_url_from_evotown_base;
 #[cfg(test)]
 use crate::setup::{PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV};
 use crate::workspace::{ensure_default_workspace, load_workspaces};

@@ -1,17 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
-#[cfg(target_os = "windows")]
-use std::process::Stdio;
 
 use anyhow::Result;
 
-#[cfg(windows)]
-use crate::profile::read_company_profile;
 use crate::profile::{
     GATEWAY_URL_ENV, PROVIDER_KIND_COMPANY, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
 };
-#[cfg(windows)]
-use crate::setup::anthropic_gateway_url_from_evotown_base;
 use crate::setup::merge::{
     align_codex_subscription_configs, apply_codex_slot, codex_slot_display_name,
     codex_slot_env_key, codex_subscription_config_paths, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,

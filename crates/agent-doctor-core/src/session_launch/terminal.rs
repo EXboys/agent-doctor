@@ -18,15 +18,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 
 use crate::evotown::load_evotown_config;
+use crate::profile::agent_profile_path;
 #[cfg(windows)]
 use crate::profile::read_company_profile;
-use crate::profile::{agent_profile_path, GATEWAY_URL_ENV};
+#[cfg(not(windows))]
+use crate::profile::GATEWAY_URL_ENV;
 #[cfg(windows)]
 use crate::setup::anthropic_gateway_url_from_evotown_base;
-use crate::setup::{
-    evotown_agent_env_path, write_company_profile_with_gateway, COMPANY_API_KEY_ENV,
-    EVOTOWN_API_KEY_ENV,
-};
+#[cfg(not(windows))]
+use crate::setup::evotown_agent_env_path;
+use crate::setup::{write_company_profile_with_gateway, COMPANY_API_KEY_ENV, EVOTOWN_API_KEY_ENV};
+#[cfg(not(windows))]
 use crate::workspace::active_env_path;
 
 use super::*;
@@ -445,8 +447,7 @@ pub(crate) fn write_windows_terminal_launch_script(
 pub(crate) fn shell_join(argv: &[&str]) -> String {
     #[cfg(windows)]
     {
-        return argv
-            .iter()
+        argv.iter()
             .enumerate()
             .map(|(index, part)| {
                 if index == 0 {
@@ -466,7 +467,7 @@ pub(crate) fn shell_join(argv: &[&str]) -> String {
                 }
             })
             .collect::<Vec<_>>()
-            .join(" ");
+            .join(" ")
     }
     #[cfg(not(windows))]
     {
@@ -485,6 +486,7 @@ pub(crate) fn shell_join(argv: &[&str]) -> String {
     }
 }
 
+#[cfg(not(windows))]
 pub(crate) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }

@@ -6,11 +6,13 @@ use super::runner::run_shell_command;
 
 pub const CURSOR_INSTALL_SCRIPT_URL: &str = "https://cursor.com/install";
 
+#[cfg(not(target_os = "windows"))]
 const CURSOR_INSTALL_UNIX: &str =
     "bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://cursor.com/install -o $tmp && bash $tmp; \
     status=$?; rm -f $tmp; exit $status'";
 
+#[cfg(not(target_os = "windows"))]
 const CURSOR_UPDATE_UNIX: &str =
     "agent update || bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://cursor.com/install -o $tmp && bash $tmp; \

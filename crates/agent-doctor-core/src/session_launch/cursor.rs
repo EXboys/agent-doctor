@@ -5,12 +5,9 @@ use std::process::Command;
 #[cfg(target_os = "windows")]
 use std::process::Stdio;
 
-use anyhow::{bail, Context, Result};
-
-#[cfg(windows)]
-use crate::profile::read_company_profile;
-#[cfg(windows)]
-use crate::setup::anthropic_gateway_url_from_evotown_base;
+#[cfg(not(windows))]
+use anyhow::bail;
+use anyhow::{Context, Result};
 
 use super::*;
 

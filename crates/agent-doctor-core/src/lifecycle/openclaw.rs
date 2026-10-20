@@ -13,11 +13,13 @@ pub const OPENCLAW_INSTALL_SCRIPT_URL: &str = "https://openclaw.ai/install.sh";
 pub const OPENCLAW_INSTALL_PS1_URL: &str = "https://openclaw.ai/install.ps1";
 
 /// Unix install: curl to temp file, then bash (not `curl | bash` — safer under WSL/sub-shells).
+#[cfg(not(target_os = "windows"))]
 const OPENCLAW_INSTALL_UNIX: &str =
     "bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://openclaw.ai/install.sh -o $tmp && bash $tmp --no-onboard --no-prompt; \
     status=$?; rm -f $tmp; exit $status'";
 
+#[cfg(not(target_os = "windows"))]
 const OPENCLAW_UPDATE_UNIX: &str =
     "openclaw update || bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://openclaw.ai/install.sh -o $tmp && bash $tmp --no-onboard --no-prompt; \

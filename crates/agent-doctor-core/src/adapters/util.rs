@@ -557,11 +557,11 @@ fn is_protected_path_dir(path: &Path) -> bool {
         let root = normalize_windows_path_key(&root);
         let system32 = format!("{root}\\system32");
         let syswow64 = format!("{root}\\syswow64");
-        return key == root
+        key == root
             || key == system32
             || key.starts_with(&format!("{system32}\\"))
             || key == syswow64
-            || key.starts_with(&format!("{syswow64}\\"));
+            || key.starts_with(&format!("{syswow64}\\"))
     }
     #[cfg(not(windows))]
     {
@@ -625,10 +625,10 @@ fn windows_shim_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
     {
         // Prefer .cmd/.exe over the npm shebang file named `claude` (no extension),
         // which CreateProcess cannot run and which we used to try first.
-        return [".cmd", ".exe", ".bat"]
+        [".cmd", ".exe", ".bat"]
             .into_iter()
             .map(|ext| dir.join(format!("{name}{ext}")))
-            .collect();
+            .collect()
     }
     #[cfg(not(windows))]
     {
@@ -688,7 +688,7 @@ fn normalize_path_for_set(path: &Path) -> String {
     // the Windows environment-block cap.
     #[cfg(windows)]
     {
-        return normalize_windows_path_key(&path.to_string_lossy());
+        normalize_windows_path_key(&path.to_string_lossy())
     }
     #[cfg(not(windows))]
     {
@@ -973,7 +973,7 @@ fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         // `npm prefix -g` is already the directory that holds .cmd shims.
-        return Some(prefix);
+        Some(prefix)
     }
     #[cfg(not(windows))]
     {

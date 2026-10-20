@@ -77,7 +77,7 @@ fn powershell_profile_path() -> PathBuf {
                 .join("PowerShell")
                 .join("Microsoft.PowerShell_profile.ps1");
         }
-        return home_join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1");
+        home_join("Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
     }
     #[cfg(not(windows))]
     {

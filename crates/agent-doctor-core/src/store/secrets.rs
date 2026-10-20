@@ -11,7 +11,8 @@
 //! unlock prompts). Re-enter once in the app, or set `keyring` backend temporarily.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(windows)]
@@ -89,6 +90,31 @@ struct SecretsFile {
     secrets: HashMap<String, String>,
 }
 
+/// Write `bytes` to `path` so a crash mid-write can never leave a truncated
+/// vault behind: the content lands in a sibling temp file first, then renames
+/// over the target. The temp file is created owner-only (mode `0600` on Unix),
+/// so secrets never touch the disk world-readable.
+pub(crate) fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let parent = path
+        .parent()
+        .context("secrets path has no parent directory")?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create a temp file next to {}", path.display()))?;
+    tmp.write_all(bytes)
+        .with_context(|| format!("failed to write {}", tmp.path().display()))?;
+    tmp.as_file()
+        .sync_all()
+        .with_context(|| format!("failed to flush {}", tmp.path().display()))?;
+    tmp.persist(path)
+        .map_err(|err| err.error)
+        .with_context(|| format!("failed to replace {}", path.display()))?;
+    Ok(())
+}
+
 /// Local JSON vault (`secrets.json`, mode 0600). Default on macOS / Linux.
 pub struct LocalFileSecretBackend {
     path: PathBuf,
@@ -124,17 +150,8 @@ impl LocalFileSecretBackend {
     }
 
     fn save_unlocked(&self, file: &SecretsFile) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let raw = serde_json::to_string_pretty(file)? + "\n";
-        std::fs::write(&self.path, raw)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
-        }
-        Ok(())
+        atomic_write_private(&self.path, raw.as_bytes())
     }
 }
 
@@ -242,7 +259,7 @@ impl SecretBackend for CompositeSecretBackend {
                                  (Windows Credential Manager unavailable)"
                             )
                         })?;
-                    return Ok(());
+                    Ok(())
                 }
                 #[cfg(not(windows))]
                 {
@@ -258,7 +275,7 @@ impl SecretBackend for CompositeSecretBackend {
             Ok(None) => {
                 #[cfg(windows)]
                 {
-                    return self.windows_fallback.get(account);
+                    self.windows_fallback.get(account)
                 }
                 #[cfg(not(windows))]
                 {
@@ -288,7 +305,7 @@ impl SecretBackend for CompositeSecretBackend {
         {
             let fallback = self.windows_fallback.delete(account);
             primary.or(fallback)?;
-            return Ok(());
+            Ok(())
         }
         #[cfg(not(windows))]
         {
@@ -400,13 +417,9 @@ impl WindowsDpapiVault {
     }
 
     fn save_map(&self, map: &HashMap<String, String>) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let plain = serde_json::to_vec(map)?;
         let protected = dpapi_protect(&plain)?;
-        std::fs::write(&self.path, protected)?;
-        Ok(())
+        atomic_write_private(&self.path, &protected)
     }
 }
 
@@ -446,7 +459,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>> {
         CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
-    let mut data_in = CRYPT_INTEGER_BLOB {
+    let data_in = CRYPT_INTEGER_BLOB {
         cbData: plain.len() as u32,
         pbData: plain.as_ptr() as *mut u8,
     };
@@ -458,7 +471,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>> {
     // SAFETY: CryptProtectData writes an allocated blob into data_out; we copy then LocalFree.
     let ok = unsafe {
         CryptProtectData(
-            &mut data_in,
+            &data_in,
             PWSTR::null(),
             None,
             None,
@@ -485,7 +498,7 @@ fn dpapi_unprotect(protected: &[u8]) -> Result<Vec<u8>> {
         CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
-    let mut data_in = CRYPT_INTEGER_BLOB {
+    let data_in = CRYPT_INTEGER_BLOB {
         cbData: protected.len() as u32,
         pbData: protected.as_ptr() as *mut u8,
     };
@@ -496,7 +509,7 @@ fn dpapi_unprotect(protected: &[u8]) -> Result<Vec<u8>> {
 
     let ok = unsafe {
         CryptUnprotectData(
-            &mut data_in,
+            &data_in,
             None,
             None,
             None,
@@ -536,5 +549,32 @@ mod tests {
         backend.delete("team.api_key").unwrap();
         assert_eq!(backend.get("team.api_key").unwrap(), None);
         assert!(path.exists());
+    }
+
+    #[test]
+    fn save_is_atomic_and_private() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested").join("secrets.json");
+        let backend = LocalFileSecretBackend::open_at(path.clone());
+        backend.set("personal.p1.api_key", "sk-test").unwrap();
+        backend.set("personal.p2.api_key", "sk-other").unwrap();
+        // The rename must not leave temp siblings behind, and the vault must
+        // never have been readable by anyone but the owner.
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name != "secrets.json")
+            .collect();
+        assert!(leftovers.is_empty(), "leftover files: {leftovers:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        assert_eq!(
+            backend.get("personal.p1.api_key").unwrap().as_deref(),
+            Some("sk-test")
+        );
     }
 }

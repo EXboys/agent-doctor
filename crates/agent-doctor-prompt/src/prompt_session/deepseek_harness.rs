@@ -1008,8 +1008,11 @@ fn chunk_text(update: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::prompt_session::util::TEST_ENV_LOCK;
+    #[cfg(unix)]
     use std::fs;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     use crate::prompt_session::tool_step::ToolStep;
@@ -1204,6 +1207,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     const FAKE_ACP: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 log_path = os.environ["AD_DSH_LOG"]
@@ -1254,6 +1258,7 @@ for raw in sys.stdin:
         pending_prompt = None
 "#;
 
+    #[cfg(unix)]
     fn options(dir: &Path, prompt: &str, resume: Option<&str>) -> PromptSessionOptions {
         PromptSessionOptions {
             runtime: DEEPSEEK_HARNESS_RUNTIME_ID.into(),

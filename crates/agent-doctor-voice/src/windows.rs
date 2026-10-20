@@ -305,8 +305,8 @@ fn recognize_once_inner(
         Duration::from_secs(8),
     );
     match first {
-        Ok(result) if !result.text.trim().is_empty() => return Ok(result),
-        Err(error) if !can_retry_local(&error) => return Err(error),
+        Ok(result) if !result.text.trim().is_empty() => Ok(result),
+        Err(error) if !can_retry_local(&error) => Err(error),
         other => {
             let mut last = match other {
                 Ok(_) => SpeechError::new(SpeechErrorCode::NoSpeech, "dictation heard nothing"),

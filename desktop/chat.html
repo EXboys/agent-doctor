@@ -934,43 +934,8 @@
         精简对话
       </button>
     </div>
+    <!-- The watchdog loads first so its error hook is live before chat.ts evaluates. -->
+    <script type="module" src="/src/chat/boot-watchdog.ts"></script>
     <script type="module" src="/src/chat.ts"></script>
-    <script>
-      window.addEventListener("error", function () {
-        var log = document.getElementById("chat-log");
-        if (!log || log.querySelector(".chat-session, .chat-bubble.assistant, .chat-bubble.user")) return;
-        if (document.getElementById("chat-boot-error")) return;
-        var box = document.createElement("div");
-        box.id = "chat-boot-error";
-        box.className = "chat-bubble meta";
-        box.style.margin = "12px";
-        box.textContent =
-          "对话页脚本出错。请关掉 Ask，从主页重新点进问答；或完全退出 Agent Doctor 再开。";
-        log.appendChild(box);
-      });
-      // Stuck Ask webviews keep the shell but never boot chat.ts — force a reload once.
-      window.setTimeout(function () {
-        if (window.__AD_ASK_BOOTED__) return;
-        var sessions = document.getElementById("chat-sessions");
-        var emptyList = sessions && sessions.childElementCount === 0;
-        var placeholder = document.getElementById("chat-boot-placeholder");
-        if (!emptyList && !placeholder) return;
-        if (sessionStorage.getItem("ad-ask-reload") === "1") {
-          var log = document.getElementById("chat-log");
-          if (log && !document.getElementById("chat-boot-error")) {
-            var box = document.createElement("div");
-            box.id = "chat-boot-error";
-            box.className = "chat-bubble meta";
-            box.style.margin = "12px";
-            box.textContent =
-              "会话列表加载失败。请完全退出 Agent Doctor，确认开发服务还在跑，再重新打开。";
-            log.appendChild(box);
-          }
-          return;
-        }
-        sessionStorage.setItem("ad-ask-reload", "1");
-        location.reload();
-      }, 2500);
-    </script>
   </body>
 </html>

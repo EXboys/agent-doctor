@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 
+#[cfg(not(target_os = "windows"))]
 use super::download_route::use_china_mirrors;
 use super::runner::run_shell_command;
 
@@ -17,6 +18,7 @@ pub enum WorkbuddyLifecycleAction {
     Update,
 }
 
+#[cfg(not(target_os = "windows"))]
 fn unix_script_url() -> &'static str {
     if use_china_mirrors() {
         WORKBUDDY_INSTALL_SCRIPT_URL
@@ -25,6 +27,7 @@ fn unix_script_url() -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn unix_install_command(force: bool) -> String {
     let url = unix_script_url();
     let args = if force { "--force" } else { "" };

@@ -746,7 +746,7 @@ fn bundled_cli_candidates(dir: &Path, allow_parent_resources: bool) -> Vec<PathB
 fn registered_install_dirs() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
-        return windows_registered_install_dirs();
+        windows_registered_install_dirs()
     }
     #[cfg(not(windows))]
     {

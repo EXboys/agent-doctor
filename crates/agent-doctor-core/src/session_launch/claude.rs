@@ -1,14 +1,8 @@
 use std::path::Path;
-#[cfg(target_os = "windows")]
-use std::process::Stdio;
 
 use anyhow::Result;
 use url::form_urlencoded;
 
-#[cfg(windows)]
-use crate::profile::read_company_profile;
-#[cfg(windows)]
-use crate::setup::anthropic_gateway_url_from_evotown_base;
 use crate::setup::merge::apply_claude_code;
 
 use super::*;

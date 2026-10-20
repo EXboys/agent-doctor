@@ -1061,9 +1061,12 @@ fn value_to_text_depth(value: &Value, depth: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::prompt_session::util::TEST_ENV_LOCK;
     use std::fs;
+    #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
 

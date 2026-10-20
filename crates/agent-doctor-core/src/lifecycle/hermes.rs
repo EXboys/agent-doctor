@@ -16,9 +16,11 @@ pub const HERMES_INSTALL_SCRIPT_URL: &str = "https://hermes-agent.nousresearch.c
 pub const HERMES_INSTALL_PS1_URL: &str = "https://hermes-agent.nousresearch.com/install.ps1";
 
 /// Unix install: curl to temp file, then bash (not `curl | bash` — safer under WSL/sub-shells).
+#[cfg(not(target_os = "windows"))]
 const HERMES_FETCH_UNIX: &str =
     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o $tmp";
 
+#[cfg(not(target_os = "windows"))]
 const HERMES_FETCH_UNIX_CHINA: &str =
     "curl -fsSL --max-time 60 https://hermes-agent.nousresearch.com/install.sh -o $tmp";
 

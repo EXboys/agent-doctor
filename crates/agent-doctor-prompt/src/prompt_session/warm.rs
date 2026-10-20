@@ -320,12 +320,12 @@ fn wait_or_stop(child: &mut Child) {
     force_stop_child(child, pid);
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn parked_count() -> usize {
     POOL.lock().map(|pool| pool.len()).unwrap_or(0)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn disable_for_test() {
     ENABLED.store(false, Ordering::SeqCst);
 }
@@ -333,8 +333,11 @@ pub(crate) fn disable_for_test() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::prompt_session::backend::AskBackend;
+    #[cfg(unix)]
     use crate::prompt_session::util::TEST_ENV_LOCK;
+    #[cfg(unix)]
     use crate::prompt_session::{
         ClaudeAskBackend, CodexAskBackend, PromptSessionCancel, PromptSessionEvent,
         PromptSessionOptions, PromptSessionReport, PromptSessionStatus,
@@ -351,6 +354,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     fn ask(
         backend: &dyn AskBackend,
         runtime: &str,
@@ -422,6 +426,7 @@ for line in sys.stdin:
     print(json.dumps({"type": "result", "session_id": "sid_warm", "is_error": False, "result": text}), flush=True)
 "##;
 
+    #[cfg(unix)]
     fn pid_of(reply: &str) -> String {
         reply
             .split_whitespace()

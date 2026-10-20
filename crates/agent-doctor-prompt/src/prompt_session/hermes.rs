@@ -787,9 +787,12 @@ fn is_hermes_stderr_noise(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::prompt_session::util::TEST_ENV_LOCK;
     use std::fs;
+    #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
 

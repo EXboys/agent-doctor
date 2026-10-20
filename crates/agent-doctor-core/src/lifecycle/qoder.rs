@@ -9,11 +9,13 @@ pub const QODER_INSTALL_SCRIPT_URL: &str = "https://qoder.com/install";
 #[cfg(target_os = "windows")]
 pub const QODER_INSTALL_PS1_URL: &str = "https://qoder.com/install.ps1";
 
+#[cfg(not(target_os = "windows"))]
 const QODER_INSTALL_UNIX: &str =
     "bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://qoder.com/install -o $tmp && bash $tmp; \
     status=$?; rm -f $tmp; exit $status'";
 
+#[cfg(not(target_os = "windows"))]
 const QODER_UPDATE_UNIX: &str =
     "qoder update || bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
     https://qoder.com/install -o $tmp && bash $tmp --force; \

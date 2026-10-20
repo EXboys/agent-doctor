@@ -397,10 +397,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::util::TEST_ENV_LOCK;
     use super::*;
+    #[cfg(unix)]
     use std::thread;
+    #[cfg(unix)]
     use std::time::Duration;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     #[cfg(unix)]

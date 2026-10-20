@@ -25,7 +25,7 @@ const _: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/info_plist.stamp"));
 
 mod channel_link;
 mod commands;
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(windows, allow(dead_code, unused_imports))]
 mod computer_contrl;
 mod computer_geom;
 #[cfg(unix)]
@@ -230,9 +230,47 @@ fn apply_profile_model_command(
 
 #[tauri::command]
 fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    let candidate = std::path::Path::new(&path);
+    // The webview can only ask for paths this app printed itself, but an
+    // injected page would ride the same invoke. Only folders and plain
+    // documents open, so "reveal this file" can never turn into launching
+    // an executable container.
+    let meta = std::fs::metadata(candidate).map_err(|err| format!("{path} 不存在（{err}）"))?;
+    if !meta.is_dir() && !is_document_path(candidate) {
+        return Err(format!("出于安全考虑，不打开 {path}"));
+    }
     app.opener()
         .open_path(path, None::<&str>)
         .map_err(|error| error.to_string())
+}
+
+fn is_document_path(path: &std::path::Path) -> bool {
+    if path.file_name().and_then(|name| name.to_str()) == Some(".env") {
+        return true;
+    }
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "svg"
+                | "txt"
+                | "md"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "toml"
+                | "log"
+                | "env"
+                | "pdf"
+        )
+    )
 }
 
 /// Catalog entry as the UI expects it: core's catalog plus the ask flag,
@@ -858,6 +896,42 @@ mod tests {
         names.sort();
         names.dedup();
         names
+    }
+
+    #[test]
+    fn open_path_only_allows_documents_and_folders() {
+        use crate::is_document_path;
+        use std::path::PathBuf;
+        let ok = [
+            "guide.md",
+            "config.json",
+            "install-hermes-2026.log",
+            "screenshot.png",
+            "settings.yaml",
+            "profile.env",
+            ".env",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+        let refused = [
+            "Hermes.app",
+            "setup.sh",
+            "run.cmd",
+            "script.ps1",
+            "installer.exe",
+            "archive.zip",
+            "note.txt.app",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+        for path in ok {
+            assert!(is_document_path(&path), "expected {path:?} to open");
+        }
+        for path in refused {
+            assert!(!is_document_path(&path), "expected {path:?} to be refused");
+        }
     }
 
     #[test]
