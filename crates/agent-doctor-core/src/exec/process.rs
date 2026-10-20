@@ -2,12 +2,11 @@
 //!
 //! Windows GUI apps (Tauri) can hang forever on `Command::output()` when the
 //! child is a `.cmd` shim (`npm`, `claude`, …) or a GUI exe that never exits.
-//! Always use a timeout, closed stdin, and [`DETACHED_PROCESS`].
+//! Always use a timeout and closed stdin. Captured probes use
+//! `CREATE_NO_WINDOW`; long-lived CLI sessions use [`DETACHED_PROCESS`].
 //!
-//! `CREATE_NO_WINDOW` is not enough when Windows Terminal is the default
-//! terminal: each short probe still paints a window and closes it. Opening
-//! the app runs one probe per installed command, so that looks like several
-//! flashes in a row. A detached process is not handed to that terminal.
+//! The two flags must not be combined: Windows ignores `CREATE_NO_WINDOW`
+//! when `DETACHED_PROCESS` is also present.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -28,6 +27,8 @@ pub const VERSION_PROBE_DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x00000008;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[derive(Debug)]
 pub enum RunError {
     Io(std::io::Error),
@@ -71,7 +72,7 @@ pub fn run_output(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    apply_no_window(&mut cmd);
+    apply_probe_no_window(&mut cmd);
     #[cfg(windows)]
     log_spawn(&cmd);
 
@@ -158,7 +159,7 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
     {
         // npm global CLIs are `.cmd` shims. `cmd /C shim.cmd` has no console, so
         // Windows gives the `node.exe` that the shim starts its own visible one.
-        // Launch node itself so DETACHED_PROCESS applies to the process that runs.
+        // Launch node itself so our creation flags apply to the process that runs.
         if let Some((node, script)) = npm_shim_launch(program) {
             let mut cmd = Command::new(node);
             cmd.arg(script);
@@ -189,11 +190,11 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-/// Version probes must not start a desktop app. GUI executables ignore
-/// `DETACHED_PROCESS` and often stay open after the stub exits.
+/// Version probes must not start a desktop app. GUI executables ignore console
+/// creation flags and often stay open after the stub exits.
 pub fn skips_version_probe(path: &Path) -> bool {
     // Desktop apps (Cursor.exe and shims that only start them) ignore
-    // DETACHED_PROCESS and stay open. Presence of the file is enough.
+    // console creation flags and stay open. Presence of the file is enough.
     if launch_opens_gui_window(path) {
         return true;
     }
@@ -589,11 +590,19 @@ fn quoted_tokens(text: &str) -> Vec<&str> {
 /// directly and detaches the console, so a GUI app does not flash a terminal.
 pub fn command_for_path(program: &Path) -> Command {
     let mut cmd = build_command(program, &[]);
-    apply_no_window(&mut cmd);
+    apply_detached(&mut cmd);
     cmd
 }
 
-fn apply_no_window(_cmd: &mut Command) {
+fn apply_probe_no_window(_cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        _cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+fn apply_detached(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -621,8 +630,9 @@ fn log_spawn(cmd: &Command) {
         .map(|arg| spawn_log_arg(&arg.to_string_lossy()))
         .collect();
     let line = format!(
-        "[{}] {} {}\n",
+        "[{}] pid={} {} {}\n",
         local_stamp(),
+        std::process::id(),
         cmd.get_program().to_string_lossy(),
         args.join(" ")
     );
@@ -681,7 +691,7 @@ pub fn kill_process_tree(pid: u32) {
         use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(DETACHED_PROCESS)
+            .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
