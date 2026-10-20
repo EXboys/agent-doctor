@@ -445,13 +445,40 @@ fn dedupe_path_dirs(dirs: &mut Vec<PathBuf>) {
 /// adds so Claude and Node resolve; those stay in front. System directories
 /// stay as well. The bulky remainder is cut from the end.
 fn assign_merged_path(prefix: Vec<PathBuf>) {
+    assign_merged_path_ext(prefix, Vec::new());
+}
+
+/// Same merge, plus `registry_tail` appended after the inherited PATH. Tail
+/// entries sit at the very end, so under cap pressure they are cut before
+/// anything the process actually inherited.
+fn assign_merged_path_ext(prefix: Vec<PathBuf>, registry_tail: Vec<PathBuf>) {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
 
     let current = std::env::var_os("PATH").unwrap_or_default();
-    let inherited: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    let mut inherited: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    inherited.extend(registry_tail);
+
+    let mut wanted = prefix.clone();
+    wanted.extend(inherited.iter().cloned());
+    dedupe_path_dirs(&mut wanted);
+
     let dirs = select_path_dirs(&prefix, &inherited);
-    let _ = set_path_if_changed(&dirs);
+    let dropped: Vec<String> = wanted
+        .iter()
+        .filter(|dir| !dirs.contains(dir))
+        .map(|dir| dir.display().to_string())
+        .collect();
+    if !dropped.is_empty() {
+        log_path_event(&format!(
+            "cap cut {} dir(s): {}",
+            dropped.len(),
+            dropped.join("; ")
+        ));
+    }
+    if !set_path_if_changed(&dirs) {
+        log_path_event("PATH value rejected; kept the previous PATH");
+    }
 }
 
 fn select_path_dirs(prefix: &[PathBuf], inherited: &[PathBuf]) -> Vec<PathBuf> {
@@ -774,8 +801,15 @@ pub fn refresh_managed_runtime_path() {
 }
 
 fn merge_managed_dirs_into_path() {
-    // Seed PATH with static known dirs first so `npm`/`node` shebangs resolve
-    // before we query `npm prefix -g` (GUI apps often lack Homebrew on PATH).
+    // Seed PATH with the dirs child processes need to resolve node/npm.
+    // Windows keeps the prefix to the two managed dirs — `find_binary` falls
+    // back to `common_binary_dirs()` for discovery, so a longer prefix only
+    // spends the 32,767-character budget and shadows the live PATH. Unix
+    // shebangs (`#!/usr/bin/env node`) still resolve through PATH, so the
+    // static list stays there.
+    #[cfg(windows)]
+    let mut prefix = vec![managed_nodejs_root()];
+    #[cfg(not(windows))]
     let mut prefix = static_common_binary_dirs();
     assign_merged_path(prefix.clone());
 
@@ -799,14 +833,48 @@ pub(crate) fn ensure_windows_user_path() {
 
 #[cfg(windows)]
 fn merge_windows_persistent_path_into_env() {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for scope in ["User", "Machine"] {
-        dirs.extend(windows_env_path_dirs(scope));
+    // The inherited PATH is already the Machine+User merge logon built. The
+    // registry only adds entries an installer wrote after this process's
+    // parent started — append that difference at the tail. Wholesale
+    // reordering in front (0.1.87–0.1.90) let user dirs shadow the live PATH
+    // and doubled the length toward the environment cap.
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let live: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    let mut registry = Vec::new();
+    for scope in ["Machine", "User"] {
+        registry.extend(windows_env_path_dirs(scope));
     }
-    if dirs.is_empty() {
+    let diff = registry_path_diff(&live, &registry);
+    if diff.is_empty() {
         return;
     }
-    assign_merged_path(dirs);
+    log_path_event(&format!(
+        "registry diff appended ({}): {}",
+        diff.len(),
+        diff.iter()
+            .map(|dir| dir.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    ));
+    assign_merged_path_ext(Vec::new(), diff);
+}
+
+/// Registry entries the live PATH does not have yet, in canonical
+/// Machine-before-User order. Near-duplicates (case, quotes, trailing
+/// separator) count as already present.
+#[cfg(any(windows, test))]
+fn registry_path_diff(live: &[PathBuf], registry: &[PathBuf]) -> Vec<PathBuf> {
+    let present: BTreeSet<String> = live.iter().map(|dir| normalize_path_for_set(dir)).collect();
+    let mut seen = BTreeSet::new();
+    registry
+        .iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| {
+            let key = normalize_path_for_set(dir);
+            !present.contains(&key) && seen.insert(key)
+        })
+        .cloned()
+        .collect()
 }
 
 #[cfg(windows)]
@@ -838,6 +906,9 @@ fn read_windows_registry_path(scope: &str) -> Option<String> {
         RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
     };
 
+    const ERROR_FILE_NOT_FOUND: u32 = 2;
+    const ERROR_MORE_DATA: u32 = 234;
+
     let (root, subkey) = match scope {
         "User" => (HKEY_CURRENT_USER, r"Environment"),
         "Machine" => (
@@ -848,31 +919,88 @@ fn read_windows_registry_path(scope: &str) -> Option<String> {
     };
     let sub: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
     let name: Vec<u16> = "Path".encode_utf16().chain(std::iter::once(0)).collect();
-    let mut buf = vec![0u16; 32 * 1024];
-    let mut size = (buf.len() * 2) as u32;
-    // RRF_RT_REG_EXPAND_SZ without RRF_NOEXPAND expands %SystemRoot% and friends.
-    let status = unsafe {
-        RegGetValueW(
-            root,
-            PCWSTR(sub.as_ptr()),
-            PCWSTR(name.as_ptr()),
-            RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
-            None,
-            Some(buf.as_mut_ptr() as *mut c_void),
-            Some(&mut size),
-        )
+    // A long PATH is exactly the machine this code exists for; grow instead of
+    // reporting a missing value.
+    for size_units in [32 * 1024, 256 * 1024] {
+        let mut buf = vec![0u16; size_units];
+        let mut size = (buf.len() * 2) as u32;
+        // RRF_RT_REG_EXPAND_SZ without RRF_NOEXPAND expands %SystemRoot% and friends.
+        let status = unsafe {
+            RegGetValueW(
+                root,
+                PCWSTR(sub.as_ptr()),
+                PCWSTR(name.as_ptr()),
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+                None,
+                Some(buf.as_mut_ptr() as *mut c_void),
+                Some(&mut size),
+            )
+        };
+        if status.0 == ERROR_MORE_DATA {
+            continue;
+        }
+        if status.0 == ERROR_FILE_NOT_FOUND {
+            return None;
+        }
+        if status.0 != 0 {
+            log_path_event(&format!("registry Path read {scope} failed: {}", status.0));
+            return None;
+        }
+        if size < 2 {
+            return None;
+        }
+        let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
+        let text = String::from_utf16_lossy(&buf[..chars]);
+        let trimmed = text.trim_matches('\0').trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+    log_path_event(&format!("registry Path {scope} exceeds 256 KiB; skipped"));
+    None
+}
+
+/// Tiny append-only trail for PATH surgery. Every silent degrade in the
+/// 0.1.89–0.1.90 incident was invisible; this file is the post-mortem record.
+fn log_path_event(line: &str) {
+    use std::io::Write;
+
+    let Some(file) = path_log_file() else {
+        return;
     };
-    if status.0 != 0 || size < 2 {
-        return None;
+    if file.exists()
+        && std::fs::metadata(&file)
+            .map(|meta| meta.len() > 256 * 1024)
+            .unwrap_or(false)
+    {
+        // Bounded: start a fresh trail instead of growing forever.
+        let _ = std::fs::remove_file(&file);
     }
-    let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
-    let text = String::from_utf16_lossy(&buf[..chars]);
-    let trimmed = text.trim_matches('\0').trim();
-    if trimmed.is_empty() {
-        None
+    let Ok(mut handle) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+    else {
+        return;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let _ = writeln!(handle, "[{stamp}] {line}");
+}
+
+fn path_log_file() -> Option<PathBuf> {
+    let dir = if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+        PathBuf::from(base).join("AgentDoctor")
     } else {
-        Some(trimmed.to_string())
+        dirs::data_local_dir()?.join("AgentDoctor")
     }
+    .join("logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("path.log"))
 }
 
 fn common_binary_dirs() -> Vec<PathBuf> {
@@ -1357,5 +1485,49 @@ mod tests {
         assert!(selected.contains(&prefix[1]));
         assert!(selected.contains(&protected));
         assert!(!selected.contains(inherited.last().unwrap()));
+    }
+
+    #[test]
+    fn registry_diff_appends_only_missing_entries() {
+        let live = vec![PathBuf::from("/already/live/bin")];
+        let registry = vec![
+            PathBuf::from("/already/live/bin"),
+            PathBuf::from("/machine/bin"),
+            PathBuf::from("/home/u/.claude/local"),
+            PathBuf::from("/machine/bin"),
+        ];
+        let diff = registry_path_diff(&live, &registry);
+        assert_eq!(
+            diff,
+            vec![
+                PathBuf::from("/machine/bin"),
+                PathBuf::from("/home/u/.claude/local"),
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registry_diff_treats_near_duplicates_as_present() {
+        let live = vec![PathBuf::from(r"C:\Tools")];
+        let registry = vec![PathBuf::from(r"c:\tools\"), PathBuf::from(r"D:\New")];
+        let diff = registry_path_diff(&live, &registry);
+        assert_eq!(diff, vec![PathBuf::from(r"D:\New")]);
+    }
+
+    #[test]
+    fn registry_tail_is_cut_before_the_inherited_path() {
+        let protected = sample_protected_dir();
+        let mut inherited = vec![protected.clone(), PathBuf::from("/live/keep")];
+        for index in 0..5_000 {
+            inherited.push(PathBuf::from(format!("/agent-doctor-bulky/{index:04}/bin")));
+        }
+        inherited.push(PathBuf::from("/registry/fresh-install"));
+        let selected = select_path_dirs(&[], &inherited);
+        let joined = std::env::join_paths(&selected).expect("join");
+        assert!(path_value_fits(&joined));
+        assert!(selected.contains(&protected));
+        assert!(selected.contains(&PathBuf::from("/live/keep")));
+        assert!(!selected.contains(&PathBuf::from("/registry/fresh-install")));
     }
 }
