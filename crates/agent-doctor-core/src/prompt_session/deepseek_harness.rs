@@ -95,6 +95,8 @@ fn run_deepseek_harness(
         .filter_map(|p| encode_image(p))
         .collect();
 
+    ensure_chat_capable_dsh(&session_id, on_event)?;
+
     let mut cmd = build_command(&cwd, &overlay);
     let command_display = format_command_display(&cmd);
     let fingerprint = warm::enabled()
@@ -262,6 +264,31 @@ fn finish_failed(
         duration_ms,
         runtime_thread_id: acp_session,
     }
+}
+
+/// Old `dsh` builds have no `acp` profile and exit before the first message.
+fn ensure_chat_capable_dsh(
+    session_id: &str,
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) -> Result<()> {
+    if std::env::var_os("AGENT_DOCTOR_DSH_BIN").is_some() {
+        return Ok(());
+    }
+    let Some(installed) = crate::lifecycle::installed_deepseek_harness_version() else {
+        return Ok(());
+    };
+    if !crate::lifecycle::deepseek_harness_is_outdated(&installed) {
+        return Ok(());
+    }
+    on_event(PromptSessionEvent::Status {
+        session_id: session_id.to_string(),
+        phase: "setup".into(),
+        message: "DeepSeek 助手版本太旧，正在更新，第一次要等一两分钟。".into(),
+    });
+    crate::lifecycle::run_deepseek_harness_lifecycle(
+        crate::lifecycle::DeepSeekHarnessLifecycleAction::Update,
+    )
+    .map_err(|_| anyhow::anyhow!("DeepSeek 助手版本太旧，自动更新没有成功。请检查网络后再发一次。"))
 }
 
 fn build_command(cwd: &Path, overlay: &std::collections::HashMap<String, String>) -> Command {

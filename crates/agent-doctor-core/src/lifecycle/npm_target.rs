@@ -50,7 +50,7 @@ fn strip_verbatim_prefix(raw: &str) -> String {
 ///
 /// A Windows global shim sits next to `node_modules` (`…\npm\claude.cmd`), not
 /// inside it. That directory is the prefix, wherever the user put it.
-fn prefix_for_binary(bin: &Path) -> Option<PathBuf> {
+pub(super) fn prefix_for_binary(bin: &Path) -> Option<PathBuf> {
     if let Some(prefix) = npm_prefix_owning_binary(bin) {
         return Some(prefix);
     }

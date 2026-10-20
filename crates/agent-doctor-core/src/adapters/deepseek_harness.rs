@@ -9,7 +9,7 @@ use crate::adapters::util::{discover_binary, home_join};
 
 pub const DEEPSEEK_HARNESS_RUNTIME_ID: &str = "deepseek-harness";
 pub const DEEPSEEK_HARNESS_CLI: &str = "dsh";
-pub const DEEPSEEK_HARNESS_VERSION: &str = "0.1.0-rc.6";
+pub const DEEPSEEK_HARNESS_VERSION: &str = "0.1.5-rc.3";
 pub const DEEPSEEK_HARNESS_NPM_PACKAGE: &str = "@deepseek-ai/dsh";
 pub const DEEPSEEK_BASE_URL_ENV: &str = "DEEPSEEK_BASE_URL";
 pub const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn version_and_package_are_pinned() {
-        assert_eq!(DEEPSEEK_HARNESS_VERSION, "0.1.0-rc.6");
+        assert_eq!(DEEPSEEK_HARNESS_VERSION, "0.1.5-rc.3");
         assert_eq!(DEEPSEEK_HARNESS_NPM_PACKAGE, "@deepseek-ai/dsh");
         assert!(!DeepSeekHarnessAdapter.config_paths_required());
     }

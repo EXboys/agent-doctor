@@ -8,8 +8,10 @@ use crate::lifecycle::{
     codex_install_shell_command, codex_update_shell_command,
     deepseek_harness_install_shell_command, deepseek_harness_update_shell_command,
     hermes_install_shell_command, hermes_update_shell_command, openclaw_install_shell_command,
-    openclaw_update_shell_command, run_shell_command_streaming, waiting_input_kind,
-    write_install_log, zcode_install_shell_command, zcode_update_shell_command,
+    openclaw_update_shell_command, qoder_install_shell_command, qoder_update_shell_command,
+    run_shell_command_streaming, waiting_input_kind, workbuddy_install_shell_command,
+    workbuddy_update_shell_command, write_install_log, zcode_install_shell_command,
+    zcode_update_shell_command,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{
@@ -526,6 +528,8 @@ fn update_shell_command(runtime_id: &str) -> Option<String> {
         "codex" => Some(codex_update_shell_command()),
         "deepseek-harness" => Some(deepseek_harness_update_shell_command()),
         "zcode" => Some(zcode_update_shell_command()),
+        "qoder" => Some(qoder_update_shell_command()),
+        "workbuddy" => Some(workbuddy_update_shell_command()),
         _ => None,
     }
 }
@@ -538,6 +542,8 @@ fn install_shell_command(runtime_id: &str) -> Option<String> {
         "claude-code" => Some(claude_code_install_shell_command()),
         "codex" => Some(codex_install_shell_command()),
         "zcode" => Some(zcode_install_shell_command()),
+        "qoder" => Some(qoder_install_shell_command()),
+        "workbuddy" => Some(workbuddy_install_shell_command()),
         _ => None,
     }
 }
@@ -550,6 +556,8 @@ fn install_action_id(runtime_id: &str) -> &'static str {
         "claude-code" => "fix-claude-code-install",
         "codex" => "fix-codex-install",
         "zcode" => "fix-zcode-install",
+        "qoder" => "fix-qoder-install",
+        "workbuddy" => "fix-workbuddy-install",
         _ => "fix-install",
     }
 }
@@ -660,7 +668,10 @@ fn manual_fallback_steps(
             }
             "deepseek-harness" => {
                 steps.push("Retry: agent-doctor install deepseek-harness".to_string());
-                steps.push("Manual: npm install --global @deepseek-ai/dsh@0.1.0-rc.6".to_string());
+                steps.push(format!(
+                    "Manual: {}",
+                    crate::lifecycle::deepseek_harness_install_shell_command()
+                ));
             }
             "openclaw" => {
                 steps.push("Retry: agent-doctor install openclaw".to_string());
@@ -881,5 +892,30 @@ mod tests {
             repair_loop_after_install(&InstallOptions::default(), true, true, true, &probe),
             None
         );
+    }
+
+    #[test]
+    fn workbuddy_and_qoder_have_install_and_update_commands() {
+        for runtime in ["workbuddy", "qoder"] {
+            let install = lifecycle_shell_command(runtime, false)
+                .unwrap_or_else(|| panic!("no install command for {runtime}"));
+            let update = lifecycle_shell_command(runtime, true)
+                .unwrap_or_else(|| panic!("no update command for {runtime}"));
+            assert!(!install.contains("npm install"), "{install}");
+            assert!(
+                update.contains("update ||"),
+                "{runtime} update should try the installed CLI first: {update}"
+            );
+        }
+        let workbuddy = lifecycle_shell_command("workbuddy", false).unwrap();
+        assert!(
+            workbuddy.contains("codebuddy.cn/cli/install")
+                || workbuddy.contains("copilot.tencent.com/cli/install"),
+            "{workbuddy}"
+        );
+        let qoder = lifecycle_shell_command("qoder", false).unwrap();
+        assert!(qoder.contains("qoder.com/install"), "{qoder}");
+        assert_eq!(install_action_id("workbuddy"), "fix-workbuddy-install");
+        assert_eq!(install_action_id("qoder"), "fix-qoder-install");
     }
 }
