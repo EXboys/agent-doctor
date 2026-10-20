@@ -104,6 +104,14 @@ fn build_command(program: &Path, args: &[&str]) -> Command {
             cmd.args(args);
             return cmd;
         }
+        // Same window, different target: the shim starts `claude.exe` (a console
+        // program). `cmd /C` has no console, so Windows opens one for that exe,
+        // prints the failure there, and closes it when the process exits.
+        if let Some(exe) = shim_exe_target(program) {
+            let mut cmd = Command::new(exe);
+            cmd.args(args);
+            return cmd;
+        }
         let ext = program
             .extension()
             .and_then(|e| e.to_str())
@@ -130,14 +138,17 @@ pub fn skips_version_probe(path: &Path) -> bool {
     }
     #[cfg(windows)]
     {
-        // A batch file we cannot turn into `node script.js` has to run through
+        // A batch file we cannot turn into the real program has to run through
         // cmd.exe. The program that script starts then gets its own terminal.
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if (ext == "cmd" || ext == "bat") && npm_shim_launch(path).is_none() {
+        if (ext == "cmd" || ext == "bat")
+            && npm_shim_launch(path).is_none()
+            && shim_exe_target(path).is_none()
+        {
             return true;
         }
     }
@@ -229,6 +240,8 @@ fn read_cmd_text(path: &Path) -> Option<String> {
 }
 
 /// npm `cmd-shim`: the batch file's job is `node.exe` plus a `.js` entry.
+/// The node is resolved absolutely by [`resolve_shim_node`], so a truncated
+/// PATH cannot break the launch.
 fn npm_shim_launch(cmd_path: &Path) -> Option<(PathBuf, PathBuf)> {
     let text = read_cmd_text(cmd_path)?;
     let dir = cmd_path.parent()?;
@@ -242,13 +255,68 @@ fn npm_shim_launch(cmd_path: &Path) -> Option<(PathBuf, PathBuf)> {
     if !matches!(ext.as_str(), "js" | "cjs" | "mjs") || !script.is_file() {
         return None;
     }
-    let beside = dir.join("node.exe");
-    let node = if beside.is_file() {
-        beside
-    } else {
-        PathBuf::from("node")
-    };
+    let node = resolve_shim_node(dir);
     Some((node, script))
+}
+
+/// The `node.exe` that runs an npm shim, as an absolute path when one exists.
+///
+/// A long-PATH machine can shed the nodejs dirs from this process's PATH, and
+/// the shim runs whatever `node` the child then resolves — every npm CLI dies
+/// while node is installed. Resolve absolutely and keep the bare name (PATH at
+/// spawn time) only as the last resort.
+fn resolve_shim_node(shim_dir: &Path) -> PathBuf {
+    if let Some(node) = node_candidates_for_shim(shim_dir)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+    {
+        return node;
+    }
+    PathBuf::from("node")
+}
+
+/// Ordered candidates: node shipped beside the shim (the app's managed npm
+/// prefix keeps one there), the app-managed runtime, then well-known machine
+/// installs.
+fn node_candidates_for_shim(shim_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![shim_dir.join("node.exe")];
+    candidates.push(crate::adapters::util::managed_nodejs_root().join("node.exe"));
+    candidates.extend(
+        well_known_node_dirs()
+            .into_iter()
+            .map(|dir| dir.join("node.exe")),
+    );
+    candidates
+}
+
+/// Directories a standard Windows node install keeps `node.exe` in.
+fn well_known_node_dirs() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        let mut dirs = Vec::new();
+        for key in ["ProgramFiles", "ProgramW6432"] {
+            if let Ok(root) = std::env::var(key) {
+                if !root.is_empty() {
+                    dirs.push(PathBuf::from(root).join("nodejs"));
+                }
+            }
+        }
+        // nvm-for-windows points NVM_SYMLINK at the active node dir itself.
+        if let Ok(root) = std::env::var("NVM_SYMLINK") {
+            if !root.is_empty() {
+                dirs.push(PathBuf::from(root));
+            }
+        }
+        if let Some(home) = dirs::home_dir() {
+            dirs.push(home.join(r"scoop\apps\nodejs\current"));
+            dirs.push(home.join(r"AppData\Local\Programs\nodejs"));
+        }
+        dirs
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
 }
 
 fn npm_shim_script_rel(text: &str) -> Option<String> {
@@ -281,6 +349,62 @@ fn quoted_dp0_script(line: &str) -> Option<String> {
         i = end + 1;
     }
     None
+}
+
+/// The program a `.cmd` shim actually starts, when that program is an `.exe`
+/// next to the shim (the native Claude install) rather than a node script.
+/// Callers are Windows-only; tests on other platforms still resolve the path.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn shim_exe_target(cmd_path: &Path) -> Option<PathBuf> {
+    let text = read_cmd_text(cmd_path)?;
+    let dir = cmd_path.parent()?;
+    for token in exe_tokens(&text) {
+        let lower = token.to_ascii_lowercase();
+        if !lower.ends_with(".exe") {
+            continue;
+        }
+        if lower == "node.exe" || lower.ends_with("\\node.exe") || lower.ends_with("/node.exe") {
+            continue;
+        }
+        let Some(resolved) = resolve_shim_token(dir, &token) else {
+            continue;
+        };
+        if resolved.is_file() && !is_gui_subsystem_exe(&resolved) {
+            return Some(resolved);
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn exe_tokens(text: &str) -> Vec<String> {
+    let mut found: Vec<String> = quoted_tokens(text)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    for word in text.split_whitespace() {
+        let word = word.trim_matches(|c: char| c == '"' || c == '\'');
+        if word.to_ascii_lowercase().ends_with(".exe") && !found.iter().any(|token| token == word) {
+            found.push(word.to_string());
+        }
+    }
+    found
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn resolve_shim_token(dir: &Path, token: &str) -> Option<PathBuf> {
+    if let Some(rel) = strip_dp0(token) {
+        return Some(resolve_under(dir, &rel));
+    }
+    if token.contains('%') {
+        return None;
+    }
+    let path = PathBuf::from(token);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(resolve_under(dir, token))
+    }
 }
 
 fn strip_dp0(token: &str) -> Option<String> {
@@ -446,7 +570,10 @@ mod tests {
         .unwrap();
 
         let (node, launched) = npm_shim_launch(&cmd).expect("shim");
-        assert_eq!(node, PathBuf::from("node"));
+        assert!(
+            node == Path::new("node") || (node.is_absolute() && node.is_file()),
+            "node must be the bare name or an absolute existing file: {node:?}"
+        );
         assert_eq!(launched, script);
         assert!(!launch_opens_gui_window(&cmd));
 
@@ -460,8 +587,64 @@ mod tests {
         let wide_cmd = temp.path().join("claude-wide.cmd");
         std::fs::write(&wide_cmd, wide).unwrap();
         let (node, launched) = npm_shim_launch(&wide_cmd).expect("utf-16 shim");
-        assert_eq!(node, PathBuf::from("node"));
         assert_eq!(launched, script);
+        assert!(
+            node == Path::new("node") || (node.is_absolute() && node.is_file()),
+            "node must be the bare name or an absolute existing file: {node:?}"
+        );
+    }
+
+    #[test]
+    fn shim_prefers_the_node_beside_it() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(temp.path().join("node.exe"), b"MZ stub").unwrap();
+        let script = temp
+            .path()
+            .join("node_modules")
+            .join("claude")
+            .join("cli.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "console.log('1.0.0')\n").unwrap();
+        let cmd = temp.path().join("claude.cmd");
+        std::fs::write(
+            &cmd,
+            "@ECHO off\r\n\"%_prog%\" \"%dp0%\\node_modules\\claude\\cli.js\" %*\r\n",
+        )
+        .unwrap();
+
+        let (node, launched) = npm_shim_launch(&cmd).expect("shim");
+        assert_eq!(node, temp.path().join("node.exe"));
+        assert_eq!(launched, script);
+    }
+
+    #[test]
+    fn exe_shim_launches_the_program_not_cmd() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let exe = temp
+            .path()
+            .join("node_modules")
+            .join("@anthropic-ai")
+            .join("claude-code")
+            .join("bin")
+            .join("claude.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"not a pe").unwrap();
+        let cmd = temp.path().join("claude.cmd");
+        std::fs::write(
+            &cmd,
+            "@ECHO off\r\n\"%_prog%\" \"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\" %*\r\n",
+        )
+        .unwrap();
+
+        assert!(npm_shim_launch(&cmd).is_none());
+        assert_eq!(shim_exe_target(&cmd).as_deref(), Some(exe.as_path()));
+        assert!(!skips_version_probe(&cmd));
+
+        #[cfg(windows)]
+        {
+            let built = build_command(&cmd, &["--version"]);
+            assert_eq!(built.get_program(), exe.as_os_str());
+        }
     }
 
     #[test]

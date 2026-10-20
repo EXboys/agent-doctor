@@ -438,27 +438,121 @@ fn dedupe_path_dirs(dirs: &mut Vec<PathBuf>) {
     });
 }
 
-/// Prepend `prefix`, then the PATH this process already inherited. If the
-/// merged value does not fit, drop prefix entries and try again. The
-/// inherited PATH is kept: it already fits, and it still has the system
-/// directories child processes need.
+/// Prepend `prefix`, then as much of the inherited PATH as fits.
+///
+/// The platform rejects one environment value past the limit, and `set_var`
+/// panics, which closes the window. `prefix` is the directories this app
+/// adds so Claude and Node resolve; those stay in front. System directories
+/// stay as well. The bulky remainder is cut from the end.
 fn assign_merged_path(prefix: Vec<PathBuf>) {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
 
     let current = std::env::var_os("PATH").unwrap_or_default();
-    let mut keep = prefix.len();
-    loop {
-        let mut dirs: Vec<PathBuf> = prefix.iter().take(keep).cloned().collect();
-        dirs.extend(std::env::split_paths(&current));
+    let inherited: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    let dirs = select_path_dirs(&prefix, &inherited);
+    let _ = set_path_if_changed(&dirs);
+}
+
+fn select_path_dirs(prefix: &[PathBuf], inherited: &[PathBuf]) -> Vec<PathBuf> {
+    let prefix: Vec<PathBuf> = prefix
+        .iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .cloned()
+        .collect();
+    let mut protected = Vec::new();
+    let mut flexible = Vec::new();
+    for dir in inherited {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        if is_protected_path_dir(dir) {
+            protected.push(dir.clone());
+        } else {
+            flexible.push(dir.clone());
+        }
+    }
+
+    let prefix_keep = largest_prefix_that_fits(
+        |count| {
+            let mut dirs: Vec<PathBuf> = prefix.iter().take(count).cloned().collect();
+            dirs.extend(protected.iter().cloned());
+            dirs_fit(&dirs)
+        },
+        prefix.len(),
+    );
+
+    if prefix_keep == 0 && !dirs_fit(&protected) {
+        let protected_keep = largest_prefix_that_fits(
+            |count| dirs_fit(&protected.iter().take(count).cloned().collect::<Vec<_>>()),
+            protected.len(),
+        );
+        let mut dirs: Vec<PathBuf> = protected.into_iter().take(protected_keep).collect();
         dedupe_path_dirs(&mut dirs);
-        if set_path_if_changed(&dirs) {
-            return;
+        return dirs;
+    }
+
+    let mut dirs: Vec<PathBuf> = prefix.into_iter().take(prefix_keep).collect();
+    dirs.extend(protected);
+    let flex_keep = largest_prefix_that_fits(
+        |count| {
+            let mut with_tail = dirs.clone();
+            with_tail.extend(flexible.iter().take(count).cloned());
+            dirs_fit(&with_tail)
+        },
+        flexible.len(),
+    );
+    dirs.extend(flexible.into_iter().take(flex_keep));
+    dedupe_path_dirs(&mut dirs);
+    dirs
+}
+
+/// Largest `count` in `0..=len` for which `fits(count)` is true.
+/// `fits(0)` is the head with nothing taken from the candidate list.
+fn largest_prefix_that_fits(mut fits: impl FnMut(usize) -> bool, len: usize) -> usize {
+    let mut low = 0;
+    let mut high = len;
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        if fits(mid) {
+            low = mid;
+        } else {
+            high = mid - 1;
         }
-        if keep == 0 {
-            return;
-        }
-        keep = keep.saturating_sub((keep / 2).max(1));
+    }
+    low
+}
+
+fn dirs_fit(dirs: &[PathBuf]) -> bool {
+    let mut owned = dirs.to_vec();
+    dedupe_path_dirs(&mut owned);
+    let Ok(joined) = std::env::join_paths(owned.iter().filter(|path| !path.as_os_str().is_empty()))
+    else {
+        return false;
+    };
+    path_value_fits(&joined)
+}
+
+fn is_protected_path_dir(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let key = normalize_windows_path_key(&path.to_string_lossy());
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+        let root = normalize_windows_path_key(&root);
+        let system32 = format!("{root}\\system32");
+        let syswow64 = format!("{root}\\syswow64");
+        return key == root
+            || key == system32
+            || key.starts_with(&format!("{system32}\\"))
+            || key == syswow64
+            || key.starts_with(&format!("{syswow64}\\"));
+    }
+    #[cfg(not(windows))]
+    {
+        matches!(
+            path.to_string_lossy().as_ref(),
+            "/bin" | "/usr/bin" | "/sbin" | "/usr/sbin"
+        )
     }
 }
 
@@ -1212,6 +1306,18 @@ mod tests {
         assert_eq!(normalize_windows_path_key(r"C:\"), r"c:\");
     }
 
+    fn sample_protected_dir() -> PathBuf {
+        #[cfg(windows)]
+        {
+            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+            PathBuf::from(root).join("System32")
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/usr/bin")
+        }
+    }
+
     #[test]
     fn oversized_path_is_not_offered_to_the_operating_system() {
         assert!(path_value_fits(std::ffi::OsStr::new(
@@ -1220,28 +1326,36 @@ mod tests {
         let huge = "A".repeat(path_value_limit() + 8);
         assert!(!path_value_fits(std::ffi::OsStr::new(&huge)));
 
-        let current = std::env::var_os("PATH").unwrap_or_default();
         let prefix: Vec<_> = (0..8_000)
             .map(|index| PathBuf::from(format!("/agent-doctor-path-prefix/{index}/bin")))
             .collect();
-        let mut keep = prefix.len();
-        let mut chosen = None;
-        loop {
-            let mut dirs: Vec<_> = prefix.iter().take(keep).cloned().collect();
-            dirs.extend(std::env::split_paths(&current));
-            if let Ok(joined) = std::env::join_paths(&dirs) {
-                if path_value_fits(&joined) {
-                    chosen = Some((keep, joined));
-                    break;
-                }
-            }
-            if keep == 0 {
-                break;
-            }
-            keep = keep.saturating_sub((keep / 2).max(1));
-        }
-        let (keep, joined) = chosen.expect("the inherited PATH itself fits");
-        assert!(keep < prefix.len());
+        let protected = sample_protected_dir();
+        let selected = select_path_dirs(&prefix, std::slice::from_ref(&protected));
+        let joined = std::env::join_paths(&selected).expect("join");
         assert!(path_value_fits(&joined));
+        assert!(selected.len() < prefix.len() + 1);
+        assert!(selected.contains(&prefix[0]));
+        assert!(!selected.contains(&prefix[prefix.len() - 1]));
+        assert!(selected.contains(&protected));
+    }
+
+    #[test]
+    fn claude_and_node_dirs_stay_when_inherited_path_is_too_long() {
+        let prefix = vec![
+            PathBuf::from("/agent-doctor/.claude/local"),
+            PathBuf::from("/agent-doctor/nodejs"),
+        ];
+        let protected = sample_protected_dir();
+        let mut inherited = vec![protected.clone()];
+        for index in 0..5_000 {
+            inherited.push(PathBuf::from(format!("/agent-doctor-bulky/{index:04}/bin")));
+        }
+        let selected = select_path_dirs(&prefix, &inherited);
+        let joined = std::env::join_paths(&selected).expect("join");
+        assert!(path_value_fits(&joined));
+        assert_eq!(selected[0], prefix[0]);
+        assert!(selected.contains(&prefix[1]));
+        assert!(selected.contains(&protected));
+        assert!(!selected.contains(inherited.last().unwrap()));
     }
 }
