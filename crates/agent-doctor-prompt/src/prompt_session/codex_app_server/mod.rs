@@ -1141,9 +1141,11 @@ mod tests {
             json!(["/tmp/proj", "/tmp/codex-home"])
         );
         let roots = ask_sandbox_roots(&std::collections::HashMap::new());
-        assert!(roots
-            .iter()
-            .any(|root| root == "/tmp" || root.contains("tmp")));
+        let temp = std::env::temp_dir().display().to_string();
+        assert!(
+            roots.iter().any(|root| root == &temp),
+            "temp dir is writable: {roots:?}"
+        );
         if let Some(home) = dirs::home_dir() {
             let home = home.display().to_string();
             assert!(roots.iter().any(|root| root == &home));

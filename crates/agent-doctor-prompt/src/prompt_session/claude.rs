@@ -2039,8 +2039,12 @@ mod tests {
                 .iter()
                 .filter(|arg| arg.starts_with("--mcp-config="))
                 .collect();
+            let project_mcp = std::path::Path::new("proj").join(".mcp.json");
             assert!(
-                configs.iter().any(|arg| arg.ends_with("proj/.mcp.json")),
+                configs.iter().any(|arg| {
+                    arg.strip_prefix("--mcp-config=")
+                        .is_some_and(|path| std::path::Path::new(path).ends_with(&project_mcp))
+                }),
                 "project config stays: {configs:?}"
             );
             assert!(
