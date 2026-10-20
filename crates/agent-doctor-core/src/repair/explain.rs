@@ -1,48 +1,8 @@
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::LlmConfig;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplainReport {
-    pub summary: String,
-    pub likely_causes: Vec<String>,
-    pub recommended_action_ids: Vec<String>,
-    pub user_next_steps: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplainInput {
-    pub runtime_id: String,
-    pub probe_summary: String,
-    pub issue_score: u32,
-    pub checks: Vec<ExplainCheck>,
-    pub suggested_repairs: Vec<ExplainSuggestion>,
-    pub install_failure: Option<ExplainInstallFailure>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplainCheck {
-    pub title: String,
-    pub status: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplainSuggestion {
-    pub id: String,
-    pub title: String,
-    pub auto_fixable: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplainInstallFailure {
-    pub action_id: String,
-    pub reason: String,
-    pub log_path: Option<String>,
-    pub log_tail: String,
-}
+use crate::repair_types::{ExplainInput, ExplainReport};
 
 pub fn explain_runtime(input: &ExplainInput) -> Result<ExplainReport> {
     let Some(config) = LlmConfig::from_env() else {
@@ -168,6 +128,7 @@ fn fallback_explain(input: &ExplainInput) -> ExplainReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repair_types::{ExplainCheck, ExplainSuggestion};
 
     #[test]
     fn fallback_explain_lists_failed_checks() {

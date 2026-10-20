@@ -3,6 +3,9 @@
 //! Lives in core because probe, install, workspace, and setup all speak these
 //! types; only the playbooks and execution loop belong to the repair crate.
 
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +166,77 @@ pub struct AuditReport {
     pub action_ids: Vec<String>,
     pub verification_summary: String,
     pub rollback_hint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestedRepair {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub auto_fixable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedRepairAction {
+    pub id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct PlaybookApplyResult {
+    pub executed: Vec<String>,
+    pub skipped: Vec<SkippedRepairAction>,
+    /// When API key scaffold is created, path to the generated guide document.
+    pub guide_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainReport {
+    pub summary: String,
+    pub likely_causes: Vec<String>,
+    pub recommended_action_ids: Vec<String>,
+    pub user_next_steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainInput {
+    pub runtime_id: String,
+    pub probe_summary: String,
+    pub issue_score: u32,
+    pub checks: Vec<ExplainCheck>,
+    pub suggested_repairs: Vec<ExplainSuggestion>,
+    pub install_failure: Option<ExplainInstallFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainCheck {
+    pub title: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainSuggestion {
+    pub id: String,
+    pub title: String,
+    pub auto_fixable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainInstallFailure {
+    pub action_id: String,
+    pub reason: String,
+    pub log_path: Option<String>,
+    pub log_tail: String,
+}
+
+/// Root directory every runtime backup snapshot lives under.
+pub fn backups_root() -> Result<PathBuf> {
+    let root = dirs::config_dir()
+        .map(|dir| dir.join("agent-doctor").join("backups"))
+        .context("could not resolve config directory")?;
+    std::fs::create_dir_all(&root)?;
+    Ok(root)
 }
 
 pub fn build_repair_preview(runtime_id: &str) -> RepairPlan {

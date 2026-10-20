@@ -8,6 +8,8 @@ pub mod exec;
 pub mod install;
 pub mod knowledge_sync;
 pub mod lifecycle;
+/// Secret vault and masking helpers for presenting config to the LLM.
+pub mod mask;
 pub mod presets;
 pub mod probe;
 pub mod profile;

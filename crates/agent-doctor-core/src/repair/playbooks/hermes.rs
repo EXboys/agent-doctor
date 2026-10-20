@@ -9,17 +9,10 @@ use crate::adapters::HermesAdapter;
 use crate::lifecycle::{run_hermes_lifecycle, HermesLifecycleAction};
 use crate::presets::{load_profiles, HermesProfilePreset};
 use crate::probe::{ProbeStatus, RuntimeProbeReport};
-use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use crate::repair::SuggestedRepair;
+use crate::repair_types::PlaybookApplyResult;
 
 use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
-
-#[derive(Debug, Default)]
-pub struct PlaybookApplyResult {
-    pub executed: Vec<String>,
-    pub skipped: Vec<SkippedRepairAction>,
-    /// When API key scaffold is created, path to the generated guide document.
-    pub guide_path: Option<PathBuf>,
-}
 
 /// Hermes repair rules, in the order they run.
 pub(crate) const HERMES_RULES: &[Rule] = &[

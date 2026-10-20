@@ -10,6 +10,7 @@ use super::{
     RepairAction, RepairActionKind, RepairPlan, SensitivityLevel, SnapshotFile,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
+use crate::repair_types::{backups_root, SkippedRepairAction};
 use crate::runtime::{
     adapter_by_id, apply_runtime_playbook, run_runtime_lifecycle, runtime_supports_lifecycle,
     runtime_supports_playbook, RuntimeLifecycleAction,
@@ -19,12 +20,6 @@ use crate::runtime::{
 pub struct RepairExecuteOptions {
     /// When true, run write actions such as `PatchConfig` that require confirmation.
     pub apply_confirmed_writes: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkippedRepairAction {
-    pub id: String,
-    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,14 +175,6 @@ fn execute_planned_action(
 
 fn apply_patch_config(_runtime_id: &str, _action: &RepairAction) -> Result<()> {
     anyhow::bail!("rule-based PatchConfig playbooks are not implemented yet")
-}
-
-pub fn backups_root() -> Result<PathBuf> {
-    let root = dirs::config_dir()
-        .map(|dir| dir.join("agent-doctor").join("backups"))
-        .context("could not resolve config directory")?;
-    fs::create_dir_all(&root)?;
-    Ok(root)
 }
 
 pub fn create_runtime_backup_snapshot(runtime_id: &str) -> Result<BackupSnapshot> {

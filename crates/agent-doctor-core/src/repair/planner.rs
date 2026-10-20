@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::llm::{chat_with_tools, max_agent_turns, LlmConfig, LlmTurn};
-use super::mask::{load_masked_config_snippets, MaskedFileSnippet, SecretVault};
 use super::tools::{parse_tool_call, RepairToolExecutor, RepairToolResult};
 use super::{RedactedFact, RedactionPolicy, Redactor, SuggestedRepair};
+use crate::mask::{load_masked_config_snippets, MaskedFileSnippet, SecretVault};
 use crate::probe::RuntimeProbeReport;
 use crate::runtime::{adapter_by_id, runtime_allowed_bash_commands};
 

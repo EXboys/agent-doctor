@@ -8,7 +8,7 @@ use super::diff::unified_diff;
 use super::discover::{grep_allowed_files, list_allowed_directory};
 use super::patch::patch_structured_file;
 use super::policy::{allowed_paths_for_runtime, bash_command_allowed, path_is_allowed};
-use crate::repair::mask::{is_env_file, mask_config_file, unmask_file_content, SecretVault};
+use crate::mask::{is_env_file, mask_config_file, unmask_file_content, SecretVault};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

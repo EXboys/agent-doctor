@@ -3,14 +3,16 @@ mod deep_diagnose;
 mod execute;
 mod explain;
 mod llm;
-mod mask;
 mod planner;
 mod playbooks;
 mod repair_loop;
 mod restore;
-mod suggested;
 mod tools;
 
+pub use crate::mask::{
+    load_masked_config_snippets, mask_config_file, mask_env_file_content, mask_secret_value,
+    merge_env_with_vault, unmask_file_content, MaskedFileSnippet, SecretVault,
+};
 pub use browser_tools_gate::{browser_tools_allowed, HoldBrowserToolsOff};
 pub use deep_diagnose::{
     deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
@@ -18,18 +20,11 @@ pub use deep_diagnose::{
     DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
 };
 pub use execute::{
-    backups_root, execute_repair, probe_health_summary, probe_issue_score, RepairExecuteOptions,
-    RepairExecuteReport, SkippedRepairAction,
+    execute_repair, probe_health_summary, probe_issue_score, RepairExecuteOptions,
+    RepairExecuteReport,
 };
-pub use explain::{
-    explain_runtime, ExplainCheck, ExplainInput, ExplainInstallFailure, ExplainReport,
-    ExplainSuggestion,
-};
+pub use explain::explain_runtime;
 pub use llm::LlmConfig;
-pub use mask::{
-    load_masked_config_snippets, mask_config_file, mask_env_file_content, mask_secret_value,
-    merge_env_with_vault, unmask_file_content, MaskedFileSnippet, SecretVault,
-};
 pub use planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
     PlannerOptions, PlannerResult, RepairPlanner,
@@ -47,7 +42,7 @@ pub use playbooks::{
     apply_zcode_playbook_filtered, suggest_claude_code_repairs, suggest_codex_repairs,
     suggest_cursor_repairs, suggest_deepseek_harness_repairs, suggest_hermes_repairs,
     suggest_openclaw_repairs, suggest_qoder_repairs, suggest_workbuddy_repairs,
-    suggest_zcode_repairs, PlaybookApplyResult,
+    suggest_zcode_repairs,
 };
 pub use repair_loop::{
     diff_probe_checks, execute_repair_loop, CheckChange, CheckDiff, RepairLoopOptions,
@@ -57,7 +52,6 @@ pub use restore::{
     list_runtime_backup_ids, load_backup_snapshot, restore_backup_snapshot, restore_runtime_backup,
     RestoreReport,
 };
-pub use suggested::SuggestedRepair;
 pub use tools::{
     allowed_paths_for_runtime, bash_command_allowed, parse_tool_call, RepairToolCall,
     RepairToolExecutor, RepairToolKind, RepairToolResult,
@@ -67,7 +61,9 @@ pub use tools::{
 // so probe, install, workspace, and setup can share it without the repair
 // execution loop. The re-export keeps every existing `crate::repair::*` path.
 pub use crate::repair_types::{
-    build_repair_preview, build_repair_preview_from_bundle, AuditReport, BackupSnapshot,
-    DiagnosticBundle, DiagnosticFact, RedactedFact, RedactionPolicy, Redactor, RepairAction,
-    RepairActionKind, RepairPlan, RepairRisk, SensitivityLevel, SnapshotFile,
+    backups_root, build_repair_preview, build_repair_preview_from_bundle, AuditReport,
+    BackupSnapshot, DiagnosticBundle, DiagnosticFact, ExplainCheck, ExplainInput,
+    ExplainInstallFailure, ExplainReport, ExplainSuggestion, PlaybookApplyResult, RedactedFact,
+    RedactionPolicy, Redactor, RepairAction, RepairActionKind, RepairPlan, RepairRisk,
+    SensitivityLevel, SkippedRepairAction, SnapshotFile, SuggestedRepair,
 };
