@@ -27,13 +27,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (core + CLI only)
-        run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+        run: cargo clippy -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor --all-targets -- -D warnings
 
       - name: Test (core + CLI only)
         # Some unit tests still mutate process env (e.g. AGENT_DOCTOR_*_BIN);
         # serialize to avoid cross-test races. HOME is no longer mutated.
         # Memory secrets backend avoids OS keyring prompts in CI.
-        run: cargo test -p agent-doctor-core -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
+        run: cargo test -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
         env:
           RUST_TEST_THREADS: "1"
           AGENT_DOCTOR_SECRETS_BACKEND: memory
@@ -178,13 +178,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Test (core + CLI + satellite crates)
-        run: cargo test -p agent-doctor-core -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
+        run: cargo test -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
         env:
           RUST_TEST_THREADS: "1"
           AGENT_DOCTOR_SECRETS_BACKEND: memory
 
       - name: Clippy (core + CLI)
-        run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+        run: cargo clippy -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor --all-targets -- -D warnings
 
       # custom-protocol (default) requires frontendDist at compile time.
       - name: Placeholder frontend dist for clippy

@@ -1,5 +1,5 @@
-use agent_doctor_core::{ask_image_support, AskImageSupport};
 use agent_doctor_ocr::{read_image_texts, ImageTextReport};
+use agent_doctor_prompt::{ask_image_support, AskImageSupport};
 
 /// Reads the saved provider, so keep it off the UI thread too.
 #[tauri::command]

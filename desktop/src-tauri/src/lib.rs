@@ -1,13 +1,15 @@
 use agent_doctor_core::{
     apply_profile_model, ensure_default_workspace, evotown_status, execute_evotown_onboarding,
     execute_register, execute_skills_sync, list_mcp_inventory, load_doctor_node_config,
-    load_profiles, load_workspaces, open_interactive_session, run_doctor,
-    run_prompt_session_with_cancel, runtime_catalog, set_runtime_model, use_profile, ApplyReport,
-    DoctorReport, EvotownStatus, HermesAdapter, HermesProfilePreset, HermesSettings,
-    OnboardingOptions, OnboardingReport, OpenSessionOptions, OpenSessionReport, ProfilesDocument,
-    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionReport, RegisterOptions, RegisterReport, RuntimeCatalogEntry, RuntimeModelPreset,
+    load_profiles, load_workspaces, open_interactive_session, run_doctor, runtime_catalog,
+    set_runtime_model, use_profile, ApplyReport, DoctorReport, EvotownStatus, HermesAdapter,
+    HermesProfilePreset, HermesSettings, OnboardingOptions, OnboardingReport, OpenSessionOptions,
+    OpenSessionReport, ProfilesDocument, RegisterOptions, RegisterReport, RuntimeModelPreset,
     SkillsSyncOptions, SyncReport, UseProfileReport,
+};
+use agent_doctor_prompt::{
+    run_prompt_session_with_cancel, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
+    PromptSessionOptions, PromptSessionReport,
 };
 
 use std::path::PathBuf;
@@ -150,8 +152,8 @@ fn run_engine_register_command(
 }
 
 #[tauri::command]
-fn list_installed_ask_agents_command() -> Vec<agent_doctor_core::InstalledAskAgent> {
-    agent_doctor_core::installed_ask_agents()
+fn list_installed_ask_agents_command() -> Vec<agent_doctor_core::InstalledAgent> {
+    agent_doctor_prompt::installed_ask_agents()
 }
 
 #[tauri::command]
@@ -233,9 +235,32 @@ fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> 
         .map_err(|error| error.to_string())
 }
 
+/// Catalog entry as the UI expects it: core's catalog plus the ask flag,
+/// which only `agent-doctor-prompt` knows (the core registry is ask-agnostic).
+#[derive(Clone, Debug, serde::Serialize)]
+struct RuntimeCatalogEntryDto {
+    id: &'static str,
+    label: &'static str,
+    ask: bool,
+    opens_app: bool,
+    browser_mcp: bool,
+    skill_mount: bool,
+}
+
 #[tauri::command]
-fn runtime_catalog_command() -> Vec<RuntimeCatalogEntry> {
+fn runtime_catalog_command() -> Vec<RuntimeCatalogEntryDto> {
+    let ask_ids = agent_doctor_prompt::ask_runtime_ids();
     runtime_catalog()
+        .into_iter()
+        .map(|entry| RuntimeCatalogEntryDto {
+            id: entry.id,
+            label: entry.label,
+            ask: ask_ids.contains(&entry.id),
+            opens_app: entry.opens_app,
+            browser_mcp: entry.browser_mcp,
+            skill_mount: entry.skill_mount,
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -523,7 +548,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
-            agent_doctor_core::enable_warm_sessions();
+            agent_doctor_prompt::enable_warm_sessions();
             #[cfg(any(unix, windows))]
             computer_hand::spawn();
             app.manage(DeepDiagnoseState::default());
@@ -711,7 +736,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             if let tauri::RunEvent::Exit = event {
-                agent_doctor_core::shutdown_warm_sessions();
+                agent_doctor_prompt::shutdown_warm_sessions();
             }
         });
 }

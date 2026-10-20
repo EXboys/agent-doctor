@@ -82,19 +82,15 @@ pub fn install_browser_mcp_wire_backend(backend: &'static dyn BrowserMcpWireBack
     let _ = BACKEND.set(backend);
 }
 
-pub(crate) fn ensure_chrome_for_wire() -> Result<(), String> {
+pub fn ensure_chrome_for_wire() -> Result<(), String> {
     backend()?.ensure_chrome()
 }
 
-pub(crate) fn wire_browser_mcp(
-    options: &WireBrowserMcpOptions,
-) -> Result<BrowserMcpWireReport, String> {
+pub fn wire_browser_mcp(options: &WireBrowserMcpOptions) -> Result<BrowserMcpWireReport, String> {
     Ok(backend()?.wire(options))
 }
 
-pub(crate) fn wire_computer_mcp(
-    options: &WireBrowserMcpOptions,
-) -> Result<BrowserMcpWireReport, String> {
+pub fn wire_computer_mcp(options: &WireBrowserMcpOptions) -> Result<BrowserMcpWireReport, String> {
     Ok(backend()?.wire_computer(options))
 }
 

@@ -18,7 +18,6 @@ use serde_json::Value;
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::format_command_display;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
@@ -30,8 +29,9 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, PumpResult, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::adapters::locate_zcode_headless;
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::adapters::locate_zcode_headless;
+use agent_doctor_core::session_env::format_command_display;
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 const ZCODE_MISSING: &str = "没找到 ZCode。先点「安装」。";
 const ZCODE_NOT_READY: &str = "ZCode 还不能在这里问答。先打开 ZCode 窗口登录一次，再回来问。";
@@ -239,14 +239,14 @@ fn build_zcode_command(
     resume_session_id: Option<&str>,
 ) -> Result<Command> {
     let launch = if let Some(bin) = std::env::var_os("AGENT_DOCTOR_ZCODE_BIN") {
-        crate::adapters::ZcodeHeadless {
+        agent_doctor_core::adapters::ZcodeHeadless {
             program: std::path::PathBuf::from(bin),
             script: std::env::var_os("AGENT_DOCTOR_ZCODE_SCRIPT").map(std::path::PathBuf::from),
         }
     } else {
         locate_zcode_headless().ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
     };
-    let mut cmd = crate::exec::command_for_path(&launch.program);
+    let mut cmd = agent_doctor_core::exec::command_for_path(&launch.program);
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
     if let Some(script) = &launch.script {
         cmd.env("ELECTRON_RUN_AS_NODE", "1");

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use agent_doctor_core::{PromptSessionCancel, PromptSessionControl, PromptSessionEvent};
+use agent_doctor_prompt::{PromptSessionCancel, PromptSessionControl, PromptSessionEvent};
 use serde::Serialize;
 
 pub struct ActivePromptRun {

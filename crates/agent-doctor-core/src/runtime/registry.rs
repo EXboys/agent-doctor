@@ -26,10 +26,6 @@ use crate::probe::runtimes::{
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
-use crate::prompt_session::{
-    AskBackend, ClaudeAskBackend, CodexAskBackend, DeepSeekHarnessAskBackend, HermesAskBackend,
-    OpenClawAskBackend, ZcodeAskBackend,
-};
 use crate::repair::{
     apply_claude_code_playbook_filtered, apply_codex_playbook_filtered, apply_config_syntax_repair,
     apply_cursor_playbook_filtered, apply_deepseek_harness_playbook_filtered,
@@ -81,7 +77,6 @@ type SuggestRepairsFn = fn(&RuntimeProbeReport) -> Vec<SuggestedRepair>;
 type ApplyPlaybookFn = fn(&RuntimeProbeReport, Option<&[String]>) -> Result<PlaybookApplyResult>;
 type RunLifecycleFn = fn(RuntimeLifecycleAction) -> Result<()>;
 type WorkspaceBindFn = for<'a> fn(&WorkspaceBindInput<'a>) -> Result<RuntimeBindReport>;
-type AskSession = &'static (dyn AskBackend + Sync);
 type OpenSessionFn = fn(&Path, Option<&str>, bool) -> Result<OpenSessionReport>;
 type DispatchJobFn = fn(&AssignedJob) -> Result<JobResult>;
 
@@ -222,7 +217,6 @@ pub struct RuntimeDescriptor {
     /// `None` means personal/team gateway wiring is not supported.
     wiring: Option<WiringSpec>,
     /// `None` means Ask is not supported.
-    ask: Option<AskSession>,
     /// `None` means project isolation is not supported.
     workspace_bind: Option<WorkspaceBindFn>,
     /// Doctor checks this runtime can repair. Empty means workspace fix skips it.
@@ -243,7 +237,6 @@ pub struct RuntimeDescriptor {
 pub struct RuntimeCatalogEntry {
     pub id: &'static str,
     pub label: &'static str,
-    pub ask: bool,
     pub opens_app: bool,
     pub browser_mcp: bool,
     pub skill_mount: bool,
@@ -351,13 +344,6 @@ const WIRE_CLAUDE: WiringSpec = WiringSpec {
     openai_compatible: false,
     anthropic_compatible: true,
 };
-
-static OPENCLAW_ASK: OpenClawAskBackend = OpenClawAskBackend;
-static HERMES_ASK: HermesAskBackend = HermesAskBackend;
-static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBackend;
-static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
-static CODEX_ASK: CodexAskBackend = CodexAskBackend;
-static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
 
 fn bind_openclaw_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
     bind_openclaw(input.openclaw_agent_id, input.openclaw_workspace)
@@ -534,7 +520,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_openclaw_playbook_filtered),
         run_lifecycle: Some(run_openclaw_lifecycle_action),
         wiring: Some(WIRE_GATEWAY),
-        ask: Some(&OPENCLAW_ASK),
         workspace_bind: Some(bind_openclaw_workspace),
         workspace_repairs: OPENCLAW_REPAIRS,
         label: "OpenClaw",
@@ -558,7 +543,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_hermes_playbook_filtered),
         run_lifecycle: Some(run_hermes_lifecycle_action),
         wiring: Some(WIRE_GATEWAY),
-        ask: Some(&HERMES_ASK),
         workspace_bind: Some(bind_hermes_workspace),
         workspace_repairs: HERMES_REPAIRS,
         label: "Hermes",
@@ -582,7 +566,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_deepseek_harness_playbook_filtered),
         run_lifecycle: Some(run_deepseek_harness_lifecycle_action),
         wiring: None,
-        ask: Some(&DEEPSEEK_HARNESS_ASK),
         workspace_bind: None,
         workspace_repairs: &[],
         label: "DeepSeek",
@@ -606,7 +589,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_claude_code_playbook_filtered),
         run_lifecycle: Some(run_claude_code_lifecycle_action),
         wiring: Some(WIRE_CLAUDE),
-        ask: Some(&CLAUDE_ASK),
         workspace_bind: Some(bind_claude_workspace),
         workspace_repairs: CLAUDE_REPAIRS,
         label: "Claude",
@@ -630,7 +612,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_codex_playbook_filtered),
         run_lifecycle: Some(run_codex_lifecycle_action),
         wiring: Some(WIRE_CODEX),
-        ask: Some(&CODEX_ASK),
         workspace_bind: Some(bind_codex_workspace),
         workspace_repairs: CODEX_REPAIRS,
         label: "Codex",
@@ -654,7 +635,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_qoder_playbook_filtered),
         run_lifecycle: Some(run_qoder_lifecycle_action),
         wiring: None,
-        ask: None,
         workspace_bind: None,
         workspace_repairs: &[],
         label: "Qoder",
@@ -678,7 +658,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_workbuddy_playbook_filtered),
         run_lifecycle: Some(run_workbuddy_lifecycle_action),
         wiring: None,
-        ask: None,
         workspace_bind: None,
         workspace_repairs: &[],
         label: "WorkBuddy",
@@ -702,7 +681,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_cursor_playbook_filtered),
         run_lifecycle: Some(run_cursor_lifecycle_action),
         wiring: None,
-        ask: None,
         workspace_bind: None,
         workspace_repairs: &[],
         label: "Cursor",
@@ -726,7 +704,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         apply_playbook: Some(apply_zcode_playbook_filtered),
         run_lifecycle: Some(run_zcode_lifecycle_action),
         wiring: None,
-        ask: Some(&ZCODE_ASK),
         workspace_bind: None,
         workspace_repairs: &[],
         label: "ZCode",
@@ -835,37 +812,25 @@ pub fn apply_runtime_playbook_filtered(
     Ok(result)
 }
 
-pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
-    descriptor_by_id(runtime_id).and_then(|entry| entry.ask)
-}
-
 #[derive(Debug, Clone, Serialize)]
-pub struct InstalledAskAgent {
+pub struct InstalledAgent {
     pub id: String,
     pub label: String,
 }
 
-/// Chat agents whose program is on this computer.
+/// Agents whose program is on this computer.
 /// Looks the file up and does not start it, so the picker does not wait on
-/// a version check.
-pub fn installed_ask_agents() -> Vec<InstalledAskAgent> {
+/// a version check. Ask-support filtering lives in `agent-doctor-prompt`,
+/// which knows the per-runtime `AskBackend` set.
+pub fn installed_agents_with_binary() -> Vec<InstalledAgent> {
     crate::adapters::util::ensure_managed_runtime_path();
     RUNTIME_REGISTRY
         .iter()
-        .filter(|entry| entry.ask.is_some())
         .filter(|entry| crate::adapters::util::find_binary(entry.probe.binary_name).is_some())
-        .map(|entry| InstalledAskAgent {
+        .map(|entry| InstalledAgent {
             id: entry.id.to_string(),
             label: (entry.create_adapter)().display_name().to_string(),
         })
-        .collect()
-}
-
-pub(crate) fn ask_runtime_ids() -> Vec<&'static str> {
-    RUNTIME_REGISTRY
-        .iter()
-        .filter(|entry| entry.ask.is_some())
-        .map(|entry| entry.id)
         .collect()
 }
 
@@ -920,7 +885,6 @@ pub fn runtime_catalog() -> Vec<RuntimeCatalogEntry> {
         .map(|entry| RuntimeCatalogEntry {
             id: entry.id,
             label: entry.label,
-            ask: entry.ask.is_some(),
             opens_app: entry.open_session_kind == Some(OpenSessionKind::App),
             browser_mcp: entry.browser_mcp,
             skill_mount: entry.skill_mount,
@@ -970,11 +934,10 @@ mod tests {
     }
 
     #[test]
-    fn installed_ask_agents_are_only_chat_runtimes() {
-        let ask: std::collections::HashSet<_> = ask_runtime_ids().into_iter().collect();
-        for agent in installed_ask_agents() {
-            assert!(ask.contains(agent.id.as_str()), "{}", agent.id);
-            assert!(!agent.label.is_empty());
+    fn installed_agents_have_labels() {
+        for agent in installed_agents_with_binary() {
+            assert!(!agent.id.is_empty(), "agent id");
+            assert!(!agent.label.is_empty(), "{}", agent.id);
         }
     }
 
@@ -1130,22 +1093,6 @@ mod tests {
             .map(|entry| entry.id)
             .collect();
         assert_eq!(wired, vec!["openclaw", "hermes", "claude-code", "codex"]);
-        let ask: Vec<_> = RUNTIME_REGISTRY
-            .iter()
-            .filter(|entry| entry.ask.is_some())
-            .map(|entry| entry.id)
-            .collect();
-        assert_eq!(
-            ask,
-            vec![
-                "openclaw",
-                "hermes",
-                "deepseek-harness",
-                "claude-code",
-                "codex",
-                "zcode"
-            ]
-        );
         let workspace: Vec<_> = RUNTIME_REGISTRY
             .iter()
             .filter(|entry| entry.workspace_bind.is_some())
@@ -1156,9 +1103,7 @@ mod tests {
             vec!["openclaw", "hermes", "claude-code", "codex"]
         );
         assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
-        assert!(descriptor_by_id("workbuddy").unwrap().ask.is_none());
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
-        assert!(descriptor_by_id("zcode").unwrap().ask.is_some());
         assert_eq!(
             descriptor_by_id("zcode").unwrap().open_session_kind,
             Some(OpenSessionKind::App)
@@ -1214,7 +1159,7 @@ mod tests {
         assert_eq!(catalog.len(), RUNTIME_REGISTRY.len());
         assert!(catalog
             .iter()
-            .any(|entry| entry.id == "codex" && entry.browser_mcp && entry.ask));
+            .any(|entry| entry.id == "codex" && entry.browser_mcp));
         let mut browser_ids: Vec<_> = RUNTIME_REGISTRY
             .iter()
             .filter(|entry| entry.browser_mcp)
@@ -1226,6 +1171,6 @@ mod tests {
         assert_eq!(browser_ids, listed);
         assert!(catalog
             .iter()
-            .any(|entry| entry.id == "qoder" && !entry.skill_mount && !entry.ask));
+            .any(|entry| entry.id == "qoder" && !entry.skill_mount));
     }
 }

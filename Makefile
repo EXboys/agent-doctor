@@ -7,7 +7,7 @@ fmt-check:
 	cargo fmt --all -- --check
 
 clippy-cli:
-	cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+	cargo clippy -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor --all-targets -- -D warnings
 
 clippy-desktop:
 	cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings
@@ -20,7 +20,7 @@ hooks:
 	./scripts/install-git-hooks.sh
 
 test-cli:
-	cargo test -p agent-doctor-core -p agent-doctor
+	cargo test -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor
 
 build-cli:
 	cargo build --release -p agent-doctor

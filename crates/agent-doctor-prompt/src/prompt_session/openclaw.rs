@@ -16,7 +16,6 @@ use serde_json::Value;
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{apply_overlay_env, collect_overlay_env_for_options, format_command_display};
 use super::util::{
     combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
     format_tool_status, is_runtime_log_line, is_runtime_stderr_noise, join_reader, push_capped,
@@ -26,7 +25,8 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::session_env::{apply_overlay_env, format_command_display};
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 pub struct OpenClawAskBackend;
 
@@ -72,7 +72,7 @@ fn run_openclaw(
         .map(str::to_string)
         .unwrap_or_else(fresh_openclaw_session_id);
 
-    let overlay = collect_overlay_env_for_options(options);
+    let overlay = super::collect_overlay_env_for_options(options);
     sync_openclaw_personal_slot(&overlay);
     if let Some(note) = ensure_openclaw_config_current() {
         on_event(PromptSessionEvent::Status {
@@ -195,7 +195,10 @@ fn run_openclaw(
                 emit(turn_error(&session_id, &message));
             }
 
-            if let Some(usage) = parsed.as_ref().and_then(crate::usage::find_usage) {
+            if let Some(usage) = parsed
+                .as_ref()
+                .and_then(agent_doctor_core::usage::find_usage)
+            {
                 emit(PromptSessionEvent::Usage {
                     session_id: session_id.clone(),
                     usage,
@@ -302,27 +305,32 @@ fn sync_openclaw_personal_slot(overlay: &std::collections::HashMap<String, Strin
         return;
     }
     let personal = overlay
-        .get(crate::profile::PROVIDER_KIND_ENV)
-        .is_some_and(|kind| kind.eq_ignore_ascii_case(crate::profile::PROVIDER_KIND_PERSONAL));
+        .get(agent_doctor_core::profile::PROVIDER_KIND_ENV)
+        .is_some_and(|kind| {
+            kind.eq_ignore_ascii_case(agent_doctor_core::profile::PROVIDER_KIND_PERSONAL)
+        });
     if !personal {
         return;
     }
     let protocol = overlay
-        .get(crate::setup::PROVIDER_PROTOCOL_ENV)
-        .map(|p| crate::setup::normalize_protocol(p));
-    let Some((saved_url, key, Some(model))) = super::env::resolve_hermes_overlay(overlay) else {
+        .get(agent_doctor_core::setup::PROVIDER_PROTOCOL_ENV)
+        .map(|p| agent_doctor_core::setup::normalize_protocol(p));
+    let Some((saved_url, key, Some(model))) =
+        agent_doctor_core::session_env::resolve_hermes_overlay(overlay)
+    else {
         return;
     };
-    let (url, dual) = crate::setup::openai_gateway_for_provider_url(&saved_url);
-    if protocol.as_deref() == Some(crate::setup::PROTOCOL_ANTHROPIC) && !dual {
+    let (url, dual) = agent_doctor_core::setup::openai_gateway_for_provider_url(&saved_url);
+    if protocol.as_deref() == Some(agent_doctor_core::setup::PROTOCOL_ANTHROPIC) && !dual {
         return;
     }
-    let slot = crate::setup::OPENCLAW_PERSONAL_SLOT;
-    let config: Value =
-        fs::read_to_string(crate::adapters::util::home_join(".openclaw/openclaw.json"))
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or(Value::Null);
+    let slot = agent_doctor_core::setup::OPENCLAW_PERSONAL_SLOT;
+    let config: Value = fs::read_to_string(agent_doctor_core::adapters::util::home_join(
+        ".openclaw/openclaw.json",
+    ))
+    .ok()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+    .unwrap_or(Value::Null);
     let wired_url = config
         .pointer(&format!("/models/providers/{slot}/baseUrl"))
         .and_then(Value::as_str)
@@ -331,23 +339,25 @@ fn sync_openclaw_personal_slot(overlay: &std::collections::HashMap<String, Strin
         .pointer("/agents/defaults/model/primary")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let wired_key = fs::read_to_string(crate::adapters::util::home_join(".openclaw/.env"))
-        .ok()
-        .and_then(|raw| {
-            raw.lines().find_map(|line| {
-                line.trim()
-                    .strip_prefix("OPENAI_API_KEY=")
-                    .map(str::to_string)
-            })
+    let wired_key = fs::read_to_string(agent_doctor_core::adapters::util::home_join(
+        ".openclaw/.env",
+    ))
+    .ok()
+    .and_then(|raw| {
+        raw.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("OPENAI_API_KEY=")
+                .map(str::to_string)
         })
-        .unwrap_or_default();
+    })
+    .unwrap_or_default();
     let config_stale =
         wired_url.trim_end_matches('/') != url || wired_primary != format!("{slot}/{model}");
     let key_stale = wired_key.trim() != key;
     if !config_stale && !key_stale {
         return;
     }
-    let _ = crate::setup::apply_openclaw_slot(
+    let _ = agent_doctor_core::setup::apply_openclaw_slot(
         &url,
         if key_stale { &key } else { "" },
         Some(&model),
@@ -358,11 +368,11 @@ fn sync_openclaw_personal_slot(overlay: &std::collections::HashMap<String, Strin
 /// Drop legacy `agents.list` before Ask. OpenClaw rejects the file and exits
 /// before it can answer.
 fn ensure_openclaw_config_current() -> Option<String> {
-    let path = crate::adapters::util::home_join(".openclaw/openclaw.json");
+    let path = agent_doctor_core::adapters::util::home_join(".openclaw/openclaw.json");
     let raw = fs::read_to_string(&path).ok()?;
     let value: Value = serde_json::from_str(&raw).ok()?;
     value.pointer("/agents/list")?;
-    match crate::lifecycle::run_openclaw_doctor_fix() {
+    match agent_doctor_core::lifecycle::run_openclaw_doctor_fix() {
         Ok(()) => Some("Updated the old config so chat can start.".into()),
         Err(err) => Some(format!("Could not update the old config ({err}).")),
     }
@@ -382,15 +392,17 @@ fn ensure_openclaw_agent_ready(
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
         .or_else(|| {
-            crate::workspace::load_workspaces().ok().and_then(|doc| {
-                doc.active
-                    .as_ref()
-                    .and_then(|name| doc.workspaces.get(name))
-                    .map(|entry| entry.openclaw_workspace.clone())
-            })
+            agent_doctor_core::workspace::load_workspaces()
+                .ok()
+                .and_then(|doc| {
+                    doc.active
+                        .as_ref()
+                        .and_then(|name| doc.workspaces.get(name))
+                        .map(|entry| entry.openclaw_workspace.clone())
+                })
         })?;
 
-    match crate::workspace::backends::bind_openclaw(&agent, &workspace) {
+    match agent_doctor_core::workspace::backends::bind_openclaw(&agent, &workspace) {
         Ok(report) => Some(format!(
             "OpenClaw agent ready: {} ({})",
             agent, report.detail

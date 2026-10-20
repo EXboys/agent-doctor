@@ -16,26 +16,29 @@ use crate::setup::{
 };
 use crate::workspace::active_env_path;
 
+/// The Ask-turn inputs [`collect_overlay_env_for_options`] needs. A plain
+/// struct so this module stays independent of `agent-doctor-prompt`.
+pub struct OverlayAskOptions<'a> {
+    pub runtime: &'a str,
+    pub model: Option<&'a str>,
+    pub provider_id: Option<&'a str>,
+    pub workspace_name: Option<&'a str>,
+}
+
 /// Overlay env for an Ask turn, optionally bound to a registered workspace (not global `active` only).
-pub(crate) fn collect_overlay_env_for_options(
-    options: &super::PromptSessionOptions,
-) -> HashMap<String, String> {
-    let mut env = collect_overlay_env_for_workspace(options.workspace_name.as_deref());
-    let runtime = crate::evotown::normalize_runtime(&options.runtime);
+pub fn collect_overlay_env_for_options(options: &OverlayAskOptions) -> HashMap<String, String> {
+    let mut env = collect_overlay_env_for_workspace(options.workspace_name);
+    let runtime = crate::evotown::normalize_runtime(options.runtime);
     // A DeepSeek / GLM id is the saved service. 0.86 sent that key. Login mode
     // must not strip it, or the same key comes back as 401.
     if crate::setup::is_native_subscription(&runtime)
-        && !chat_uses_saved_service(options.model.as_deref(), options.provider_id.as_deref())
+        && !chat_uses_saved_service(options.model, options.provider_id)
     {
         // The saved service stays checked for other tools. Its address must not
         // rewrite the account model (gpt-5.6-sol on a GLM host becomes glm-5.3).
-        apply_subscription_model(&mut env, &runtime, options.model.as_deref());
+        apply_subscription_model(&mut env, &runtime, options.model);
     } else {
-        apply_ask_provider_choice(
-            &mut env,
-            options.provider_id.as_deref(),
-            options.model.as_deref(),
-        );
+        apply_ask_provider_choice(&mut env, options.provider_id, options.model);
     }
     env
 }
@@ -61,14 +64,14 @@ fn apply_subscription_model(env: &mut HashMap<String, String>, runtime: &str, mo
 /// check it after the account answers.
 /// The chat named a saved service (DeepSeek, GLM, …) or pinned one. That key
 /// has to go out with the turn. A Claude / ChatGPT login must not replace it.
-pub(crate) fn chat_uses_saved_service(model: Option<&str>, provider_id: Option<&str>) -> bool {
+pub fn chat_uses_saved_service(model: Option<&str>, provider_id: Option<&str>) -> bool {
     if provider_id.map(str::trim).is_some_and(|id| !id.is_empty()) {
         return true;
     }
     saved_service_model(model)
 }
 
-pub(crate) fn codex_turn_keeps_saved_service(overlay: &HashMap<String, String>) -> bool {
+pub fn codex_turn_keeps_saved_service(overlay: &HashMap<String, String>) -> bool {
     saved_service_model(overlay.get(MODEL_ENV).map(String::as_str))
         || resolve_codex_overlay(overlay).is_some()
 }
@@ -85,7 +88,7 @@ fn saved_service_model(model: Option<&str>) -> bool {
     .any(|prefix| lower.starts_with(prefix))
 }
 
-pub(crate) fn subscription_model_for(runtime: &str, model: Option<&str>) -> Option<String> {
+pub fn subscription_model_for(runtime: &str, model: Option<&str>) -> Option<String> {
     let model = model.map(str::trim).filter(|id| !id.is_empty());
     match crate::setup::load_account_models(runtime) {
         Some(list) => list.choose(model),
@@ -128,9 +131,7 @@ fn apply_ask_provider_choice(
     );
 }
 
-pub(crate) fn collect_overlay_env_for_workspace(
-    workspace_name: Option<&str>,
-) -> HashMap<String, String> {
+pub fn collect_overlay_env_for_workspace(workspace_name: Option<&str>) -> HashMap<String, String> {
     let mut env = collect_overlay_env();
     if let Some(name) = workspace_name.map(str::trim).filter(|n| !n.is_empty()) {
         if let Ok(session) = crate::workspace::session_env_for_workspace(name) {
@@ -183,7 +184,7 @@ fn install_personal_ask_env(
     }
 }
 
-pub(crate) fn collect_overlay_env() -> HashMap<String, String> {
+pub fn collect_overlay_env() -> HashMap<String, String> {
     let mut env = HashMap::new();
     let personal_edition =
         crate::edition::product_edition() == crate::edition::ProductEdition::Personal;
@@ -332,13 +333,13 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
     }
 }
 
-pub(crate) fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+pub fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     for (key, value) in overlay {
         cmd.env(key, value);
     }
 }
 
-pub(crate) fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+pub fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     if crate::setup::is_native_subscription("claude-code")
         && resolve_claude_overlay(overlay).is_none()
     {
@@ -399,7 +400,7 @@ fn claude_model(overlay: &HashMap<String, String>) -> Option<&str> {
 
 /// The active provider for Claude Code, every slot filled. Claude prefers
 /// ANTHROPIC_AUTH_TOKEN over ANTHROPIC_API_KEY, so both carry the same key.
-pub(crate) fn claude_provider_env(
+pub fn claude_provider_env(
     overlay: &HashMap<String, String>,
 ) -> Option<Vec<(&'static str, String)>> {
     if crate::setup::is_native_subscription("claude-code")
@@ -425,7 +426,7 @@ pub(crate) fn claude_provider_env(
     )
 }
 
-pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+pub fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     if crate::setup::is_native_subscription("codex") && resolve_codex_overlay(overlay).is_none() {
         scrub_subscription_gateway_env(cmd);
         return;
@@ -438,7 +439,7 @@ pub(crate) fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, Strin
     }
 }
 
-pub(crate) fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+pub fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let home = hermes_home_from_overlay(overlay);
     cmd.env("HERMES_HOME", &home);
     // Belt: even a profile under the installer home must not start a second
@@ -457,7 +458,7 @@ pub(crate) fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, Stri
     }
 }
 
-pub(crate) fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+pub fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let (url, key) = resolve_deepseek_harness_overlay(overlay);
     if let Some(key) = key {
         cmd.env("DEEPSEEK_API_KEY", key);
@@ -467,7 +468,7 @@ pub(crate) fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<St
     }
 }
 
-pub(crate) fn resolve_deepseek_harness_overlay(
+pub fn resolve_deepseek_harness_overlay(
     overlay: &HashMap<String, String>,
 ) -> (Option<String>, Option<String>) {
     let direct_key = overlay
@@ -493,7 +494,7 @@ pub(crate) fn resolve_deepseek_harness_overlay(
     }
 }
 
-pub(crate) fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> Result<()> {
+pub fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> Result<()> {
     // A pinned provider can use a model id that does not start with deepseek/glm.
     // The overlay already carries that service's address and key; login must not
     // rewrite the Codex files out from under it.
@@ -558,7 +559,7 @@ pub(crate) fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Pa
 /// Workspace isolation points Hermes at `~/.hermes/profiles/<workspace>` which often only
 /// has `terminal.cwd`. Without `model.provider`/`base_url`, Hermes falls back to OpenRouter
 /// and fails with HTTP 401 when `OPENROUTER_API_KEY` is missing.
-pub(crate) fn prepare_hermes_home(overlay: &HashMap<String, String>) {
+pub fn prepare_hermes_home(overlay: &HashMap<String, String>) {
     let Some((url, key, model)) = resolve_hermes_overlay(overlay) else {
         return;
     };
@@ -567,7 +568,7 @@ pub(crate) fn prepare_hermes_home(overlay: &HashMap<String, String>) {
     let _ = upsert_dotenv_key(&home.join(".env"), "OPENAI_API_KEY", &key);
 }
 
-pub(crate) fn hermes_home_from_overlay(overlay: &HashMap<String, String>) -> PathBuf {
+pub fn hermes_home_from_overlay(overlay: &HashMap<String, String>) -> PathBuf {
     overlay
         .get("HERMES_HOME")
         .map(|v| v.trim())
@@ -577,7 +578,7 @@ pub(crate) fn hermes_home_from_overlay(overlay: &HashMap<String, String>) -> Pat
 }
 
 /// (base_url, api_key, model)
-pub(crate) fn resolve_hermes_overlay(
+pub fn resolve_hermes_overlay(
     env: &HashMap<String, String>,
 ) -> Option<(String, String, Option<String>)> {
     let url = env
@@ -734,7 +735,7 @@ fn upsert_dotenv_key(path: &Path, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn resolve_claude_overlay(env: &HashMap<String, String>) -> Option<(String, String)> {
+pub fn resolve_claude_overlay(env: &HashMap<String, String>) -> Option<(String, String)> {
     let api_key = [
         "ANTHROPIC_API_KEY",
         COMPANY_API_KEY_ENV,
@@ -812,7 +813,7 @@ pub(crate) fn resolve_claude_overlay(env: &HashMap<String, String>) -> Option<(S
 }
 
 /// (base_url, api_key, model, slot)
-pub(crate) fn resolve_codex_overlay(
+pub fn resolve_codex_overlay(
     env: &HashMap<String, String>,
 ) -> Option<(String, String, Option<String>, String)> {
     let url = env
@@ -856,7 +857,7 @@ pub(crate) fn resolve_codex_overlay(
     Some((url, key, model, slot))
 }
 
-pub(crate) fn toml_string(value: &str) -> String {
+pub fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -874,7 +875,7 @@ const SUBSCRIPTION_GATEWAY_ENV: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
 ];
 
-pub(crate) fn scrub_subscription_gateway_env(cmd: &mut Command) {
+pub fn scrub_subscription_gateway_env(cmd: &mut Command) {
     for key in SUBSCRIPTION_GATEWAY_ENV {
         cmd.env_remove(key);
     }
@@ -882,7 +883,7 @@ pub(crate) fn scrub_subscription_gateway_env(cmd: &mut Command) {
 
 /// ChatGPT login: pass only the chosen model. A provider table would send the
 /// turn to the saved service.
-pub(crate) fn codex_subscription_model_args(model: Option<&str>) -> Vec<String> {
+pub fn codex_subscription_model_args(model: Option<&str>) -> Vec<String> {
     let Some(model_id) = subscription_model_for("codex", model) else {
         return Vec::new();
     };
@@ -897,7 +898,7 @@ pub(crate) fn codex_subscription_model_args(model: Option<&str>) -> Vec<String> 
 }
 
 /// `-c` overrides shared by Codex exec / app-server for company/personal gateway.
-pub(crate) fn codex_provider_config_args(
+pub fn codex_provider_config_args(
     launch: Option<&(String, String, Option<String>, String)>,
 ) -> Vec<String> {
     let mut argv = Vec::new();
@@ -935,7 +936,7 @@ pub(crate) fn codex_provider_config_args(
     argv
 }
 
-pub(crate) fn format_command_display(cmd: &Command) -> String {
+pub fn format_command_display(cmd: &Command) -> String {
     let program = cmd.get_program().to_string_lossy();
     let args: Vec<String> = cmd
         .get_args()

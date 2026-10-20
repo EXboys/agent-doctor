@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::adapters::util::find_binary;
-use crate::exec::{command_for_path, kill_process_tree};
+use agent_doctor_core::adapters::util::find_binary;
+use agent_doctor_core::exec::{command_for_path, kill_process_tree};
 
 use super::{PromptSessionEvent, PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_CHARS};
 

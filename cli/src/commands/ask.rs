@@ -1,4 +1,4 @@
-use agent_doctor_core::{
+use agent_doctor_prompt::{
     run_prompt_session_with_cancel, PlanStepState, PromptSessionCancel, PromptSessionEvent,
     PromptSessionOptions, PromptSessionStatus,
 };

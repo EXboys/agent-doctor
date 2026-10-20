@@ -25,6 +25,7 @@ version = "0.1.92-beta.6"
 dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
+ "agent-doctor-prompt",
  "anyhow",
  "clap",
  "ctrlc",
@@ -66,6 +67,7 @@ dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
  "agent-doctor-ocr",
+ "agent-doctor-prompt",
  "agent-doctor-voice",
  "anyhow",
  "base64 0.22.1",
@@ -118,6 +120,21 @@ dependencies = [
  "objc2-foundation",
  "serde",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "agent-doctor-prompt"
+version = "0.1.92-beta.6"
+dependencies = [
+ "agent-doctor-core",
+ "anyhow",
+ "base64 0.22.1",
+ "dirs",
+ "image",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

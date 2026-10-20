@@ -10,12 +10,12 @@ use std::time::SystemTime;
 
 use anyhow::Context;
 
-use crate::browser_wire::{
+use agent_doctor_core::browser_wire::{
     ensure_chrome_for_wire, wire_browser_mcp, wire_computer_mcp, WireBrowserMcpOptions,
     BROWSER_MCP_WIRE_RUNTIMES,
 };
 
-use crate::workspace::{load_workspaces, resolve_agent_doctor_binary};
+use agent_doctor_core::workspace::{load_workspaces, resolve_agent_doctor_binary};
 
 use super::PromptSessionOptions;
 
@@ -241,7 +241,10 @@ pub(crate) fn wire_hands(
     hands
 }
 
-fn wire_report(hand: &str, report: crate::browser_wire::BrowserMcpWireReport) -> HandWire {
+fn wire_report(
+    hand: &str,
+    report: agent_doctor_core::browser_wire::BrowserMcpWireReport,
+) -> HandWire {
     let mut ready = Vec::new();
     let mut failed = Vec::new();
     for item in report.results {
@@ -492,8 +495,9 @@ fn resolve_computer_mcp_binary() -> anyhow::Result<PathBuf> {
                 "agent-doctor"
             });
             if candidate.is_file() && binary_supports_computer(&candidate) {
-                let stable = crate::workspace::ensure_stable_agent_doctor_cli(&candidate)
-                    .unwrap_or_else(|_| candidate.clone());
+                let stable =
+                    agent_doctor_core::workspace::ensure_stable_agent_doctor_cli(&candidate)
+                        .unwrap_or_else(|_| candidate.clone());
                 if binary_supports_computer(&stable) {
                     return Ok(stable);
                 }
@@ -514,7 +518,7 @@ fn resolve_mcp_binary() -> anyhow::Result<PathBuf> {
     }
     // Prefer app-bundled / real CLI over a stale PATH shim (common C-end trap).
     let resolved = resolve_agent_doctor_binary().context("resolve agent-doctor MCP binary")?;
-    crate::workspace::ensure_stable_agent_doctor_cli(&resolved)
+    agent_doctor_core::workspace::ensure_stable_agent_doctor_cli(&resolved)
 }
 
 #[cfg(test)]

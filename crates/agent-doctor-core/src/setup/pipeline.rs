@@ -631,7 +631,7 @@ fn model_is_foreign_vendor(model_l: &str) -> bool {
 }
 
 /// The OpenAI-compatible address the runtimes are wired to for this saved address.
-pub(crate) fn openai_gateway_for_provider_url(url: &str) -> (String, bool) {
+pub fn openai_gateway_for_provider_url(url: &str) -> (String, bool) {
     match dual_protocol_endpoints(url) {
         Some(dual) => (dual.openai_url, true),
         None => (url.trim().trim_end_matches('/').to_string(), false),

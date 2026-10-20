@@ -15,10 +15,6 @@ use anyhow::{bail, Context, Result};
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{
-    apply_hermes_env, apply_overlay_env, collect_overlay_env_for_options, format_command_display,
-    prepare_hermes_home,
-};
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
@@ -30,7 +26,10 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::session_env::{
+    apply_hermes_env, apply_overlay_env, format_command_display, prepare_hermes_home,
+};
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 /// Shown instead of Hermes's usage dump when the installed copy is too old to chat.
 const HERMES_TOO_OLD: &str =
@@ -76,7 +75,7 @@ fn run_hermes(
         .filter(|s| !s.is_empty());
     let yolo = options.dangerously_skip_permissions || options.full_auto;
 
-    let overlay = collect_overlay_env_for_options(options);
+    let overlay = super::collect_overlay_env_for_options(options);
     let hands =
         super::mcp_ensure::wire_hands("hermes", options, &cwd, &overlay, |phase, message| {
             on_event(PromptSessionEvent::Status {
@@ -520,7 +519,7 @@ fn handle_hermes_stream_line<F>(
         }
         "result" => {
             // Final text is read after the process exits via `extract_hermes_stream_final`.
-            if let Some(usage) = crate::usage::find_usage(&value) {
+            if let Some(usage) = agent_doctor_core::usage::find_usage(&value) {
                 on_event(PromptSessionEvent::Usage {
                     session_id: session_id.to_string(),
                     usage,
@@ -855,7 +854,7 @@ Session: 20260814223955a98b96
 
     #[test]
     fn prepare_hermes_home_writes_model_pointer_and_env() {
-        use super::super::env::prepare_hermes_home;
+        use agent_doctor_core::session_env::prepare_hermes_home;
         use std::collections::HashMap;
         let dir = tempdir().unwrap();
         let mut overlay = HashMap::new();
@@ -877,7 +876,7 @@ Session: 20260814223955a98b96
 
     #[test]
     fn prepare_hermes_home_clears_the_previous_provider() {
-        use super::super::env::prepare_hermes_home;
+        use agent_doctor_core::session_env::prepare_hermes_home;
         use std::collections::HashMap;
         let dir = tempdir().unwrap();
         fs::write(

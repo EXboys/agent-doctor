@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use serde::Serialize;
 
-use super::env::{collect_overlay_env, resolve_claude_overlay, resolve_codex_overlay};
-use crate::profile::{PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL};
-use crate::setup::MODEL_ENV;
+use agent_doctor_core::profile::{PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL};
+use agent_doctor_core::session_env::{
+    collect_overlay_env, resolve_claude_overlay, resolve_codex_overlay,
+};
+use agent_doctor_core::setup::MODEL_ENV;
 
 /// Formats every vision runtime we send to accepts (DeepSeek, OpenAI, Anthropic).
 pub const SENDABLE_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
@@ -34,7 +36,7 @@ pub struct AskImageSupport {
 
 /// Whether Ask on `runtime` can hand pictures to the model this turn.
 pub fn ask_image_support(runtime: &str) -> AskImageSupport {
-    let runtime = crate::evotown::normalize_runtime(runtime);
+    let runtime = agent_doctor_core::evotown::normalize_runtime(runtime);
     let overlay = collect_overlay_env();
     AskImageSupport {
         sees_images: runtime_sees_images(&runtime, &overlay),
@@ -315,7 +317,7 @@ fn encode_jpeg(rgb: &image::RgbImage) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::setup::PROVIDER_PROTOCOL_ENV;
+    use agent_doctor_core::setup::PROVIDER_PROTOCOL_ENV;
 
     #[test]
     fn deepseek_flash_sees_images_but_pro_and_chat_do_not() {

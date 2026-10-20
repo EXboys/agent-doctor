@@ -1,6 +1,6 @@
 mod account_models;
 mod coding_plan;
-pub(crate) mod merge;
+pub mod merge;
 mod mode;
 mod native_login;
 mod personal;
@@ -39,7 +39,7 @@ pub use personal::{
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
     PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
 };
-pub(crate) use pipeline::openai_gateway_for_provider_url;
+pub use pipeline::openai_gateway_for_provider_url;
 pub use pipeline::{
     anthropic_gateway_for_provider_url, apply_mode_switch, coerce_gateway_model, effector_label,
     probe_endpoint_bundle, project_bundle, runtime_strategies, strategy_for, BundleProbeReport,

@@ -9,7 +9,6 @@ mod claude;
 mod codex_app_server;
 mod control;
 mod deepseek_harness;
-pub(crate) mod env;
 mod hermes;
 mod mcp_ensure;
 mod openclaw;
@@ -25,8 +24,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::evotown::normalize_runtime;
-pub use crate::usage::TokenUsage;
+use agent_doctor_core::evotown::normalize_runtime;
+pub use agent_doctor_core::usage::TokenUsage;
 
 pub use backend::AskBackend;
 pub use control::PromptSessionControl;
@@ -42,7 +41,64 @@ pub(crate) use hermes::HermesAskBackend;
 pub(crate) use openclaw::OpenClawAskBackend;
 pub(crate) use zcode::ZcodeAskBackend;
 
+type AskSession = &'static (dyn AskBackend + Sync);
+
+static OPENCLAW_ASK: OpenClawAskBackend = OpenClawAskBackend;
+static HERMES_ASK: HermesAskBackend = HermesAskBackend;
+static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBackend;
+static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
+static CODEX_ASK: CodexAskBackend = CodexAskBackend;
+static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
+
+/// Which runtimes have an [`AskBackend`] here. The registry in
+/// `agent-doctor-core` deliberately knows nothing about ask sessions.
+pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
+    match runtime_id {
+        "openclaw" => Some(&OPENCLAW_ASK),
+        "hermes" => Some(&HERMES_ASK),
+        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID => Some(&DEEPSEEK_HARNESS_ASK),
+        "claude-code" => Some(&CLAUDE_ASK),
+        "codex" => Some(&CODEX_ASK),
+        "zcode" => Some(&ZCODE_ASK),
+        _ => None,
+    }
+}
+
+pub fn ask_runtime_ids() -> Vec<&'static str> {
+    vec![
+        "openclaw",
+        "hermes",
+        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID,
+        "claude-code",
+        "codex",
+        "zcode",
+    ]
+}
+
+/// Chat agents whose program is on this computer and can run ask sessions.
+pub fn installed_ask_agents() -> Vec<agent_doctor_core::InstalledAgent> {
+    agent_doctor_core::installed_agents_with_binary()
+        .into_iter()
+        .filter(|agent| ask_backend(&agent.id).is_some())
+        .collect()
+}
+
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// Bridge so backends keep passing `&PromptSessionOptions` while
+/// `agent_doctor_core::session_env` stays free of prompt types.
+pub(crate) fn collect_overlay_env_for_options(
+    options: &PromptSessionOptions,
+) -> std::collections::HashMap<String, String> {
+    agent_doctor_core::session_env::collect_overlay_env_for_options(
+        &agent_doctor_core::session_env::OverlayAskOptions {
+            runtime: &options.runtime,
+            model: options.model.as_deref(),
+            provider_id: options.provider_id.as_deref(),
+            workspace_name: options.workspace_name.as_deref(),
+        },
+    )
+}
 
 pub(crate) const DEFAULT_TIMEOUT_SEC: u64 = 600;
 pub(crate) const MAX_TIMEOUT_SEC: u64 = 86_400;
@@ -295,17 +351,17 @@ where
         bail!("prompt must not be empty");
     }
     let runtime = normalize_runtime(&options.runtime);
-    let Some(backend) = crate::runtime::ask_backend(&runtime) else {
-        let supported = crate::runtime::ask_runtime_ids().join(", ");
+    let Some(backend) = ask_backend(&runtime) else {
+        let supported = ask_runtime_ids().join(", ");
         bail!("ask supports {supported} (got '{runtime}')");
     };
-    let cwd = crate::session_launch::resolve_session_cwd(
+    let cwd = agent_doctor_core::session_launch::resolve_session_cwd(
         options.cwd.as_deref(),
         options.workspace_name.as_deref(),
     );
     // Every assistant starts its tools as part of sending. Drop missing
     // programs first so that failure never shows up on the message.
-    crate::setup::merge::drop_unreachable_ask_tools(&cwd);
+    agent_doctor_core::setup::merge::drop_unreachable_ask_tools(&cwd);
     let mut used = TokenUsage::default();
     let mut used_model: Option<String> = None;
     let mut report = backend.run(options, cancel, control, &mut |event| {
@@ -322,7 +378,7 @@ where
         if !cfg!(test) {
             // DeepSeek Harness ignores the chat's saved model and talks only to
             // DeepSeek. A GLM model left on the chat must not be written down.
-            let harness = runtime == crate::DEEPSEEK_HARNESS_RUNTIME_ID;
+            let harness = runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID;
             let model = if harness {
                 used_model.as_deref()
             } else {
@@ -333,7 +389,7 @@ where
             } else {
                 options.provider_id.as_deref()
             };
-            let _ = crate::usage::record_turn(&runtime, provider_id, model, &used);
+            let _ = agent_doctor_core::usage::record_turn(&runtime, provider_id, model, &used);
         }
     }
     Ok(report)
@@ -407,7 +463,7 @@ mod tests {
         assert!(message.contains("ask supports"));
         assert!(message.contains("openclaw"));
         assert!(message.contains("got 'not-a-runtime'"));
-        assert!(!crate::runtime::ask_runtime_ids().contains(&"qoder"));
+        assert!(!ask_runtime_ids().contains(&"qoder"));
     }
 
     #[test]

@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::util::home_join;
-use crate::prompt_session::env::collect_overlay_env;
 use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::session_env::collect_overlay_env;
 
 use super::super::config::ParsedConfig;
 use super::super::schema::{schema_error, schema_warn};

@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::adapters::{DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_HARNESS_VERSION};
-use crate::prompt_session::env::{collect_overlay_env, resolve_deepseek_harness_overlay};
 use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::session_env::{collect_overlay_env, resolve_deepseek_harness_overlay};
 
 use super::super::config::{parse_env_file, ParsedConfig};
 use super::super::schema::{schema_error, schema_warn};

@@ -15,9 +15,20 @@ const MARKER: &str = "raw-spawn-ok";
 
 #[test]
 fn raw_command_spawn_is_confined_or_marked() {
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // core plus the prompt crate that was split out of it: prompt_session
+    // spawns more agent children than anywhere else in the workspace.
+    let sources = [
+        manifest.join("src"),
+        manifest
+            .join("../agent-doctor-prompt/src")
+            .canonicalize()
+            .expect("agent-doctor-prompt/src next to agent-doctor-core"),
+    ];
     let mut offenders = Vec::new();
-    visit(&src, &mut offenders);
+    for src in &sources {
+        visit(src, &mut offenders);
+    }
     assert!(
         offenders.is_empty(),
         "raw Command::new without '{MARKER}'. Route it through \

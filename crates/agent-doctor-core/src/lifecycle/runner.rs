@@ -251,7 +251,11 @@ where
 
 fn looks_like_npm_install(command_line: &str) -> bool {
     let lower = command_line.to_ascii_lowercase();
-    lower.contains("npm install") || lower.contains("npm uninstall")
+    lower.contains("npm install")
+        || lower.contains("npm uninstall")
+        // OpenClaw's npm install hides inside the downloaded official script,
+        // so match the script URL to give it the heartbeat and fetch tuning.
+        || lower.contains("openclaw.ai/install")
 }
 
 /// Make long npm installs visible and ignore host-injected npm knobs (e.g. Cursor `devdir`).
@@ -388,7 +392,18 @@ pub fn write_install_log(runtime_id: &str, capture: &ShellCapture) -> Result<Pat
 
 #[cfg(test)]
 mod tests {
-    use super::{submit_install_line, waiting_input_kind};
+    use super::{looks_like_npm_install, submit_install_line, waiting_input_kind};
+    use crate::lifecycle::openclaw::{
+        openclaw_install_shell_command, openclaw_update_shell_command,
+    };
+
+    #[test]
+    fn openclaw_script_commands_get_npm_install_tuning() {
+        assert!(looks_like_npm_install(&openclaw_install_shell_command()));
+        assert!(looks_like_npm_install(&openclaw_update_shell_command()));
+        assert!(looks_like_npm_install("npm install -g @openai/codex"));
+        assert!(!looks_like_npm_install("git clone https://github.com/x/y"));
+    }
 
     #[test]
     fn classifies_prompts_that_need_a_reply() {

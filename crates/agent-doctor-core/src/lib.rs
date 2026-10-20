@@ -11,10 +11,12 @@ pub mod lifecycle;
 pub mod presets;
 pub mod probe;
 pub mod profile;
-pub mod prompt_session;
 pub mod remote;
 pub mod repair;
 pub mod runtime;
+/// Overlay env computation for spawning agent CLIs. Lives below
+/// `agent-doctor-prompt` because setup/merge and session_launch need it too.
+pub mod session_env;
 pub mod session_launch;
 pub mod setup;
 pub mod skills;
@@ -129,12 +131,6 @@ pub use profile::{
     agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
     read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
 };
-pub use prompt_session::{
-    ask_image_support, enable_warm_sessions, retire_warm_sessions, run_prompt_session,
-    run_prompt_session_with_cancel, shutdown_warm_sessions, AskImageSupport, PlanStep,
-    PlanStepState, PromptSessionCancel, PromptSessionControl, PromptSessionEvent,
-    PromptSessionOptions, PromptSessionReport, PromptSessionStatus,
-};
 pub use remote::{
     add_host, add_project, bootstrap_and_add_host, list_hosts, list_projects, load_remote_hosts,
     probe_remote_host, publish_managed_logins, remote_hosts_path, remote_key_path_for,
@@ -168,9 +164,9 @@ pub use repair::{
 };
 pub use runtime::{
     adapter_by_id, all_adapters, all_runtime_ids, apply_runtime_playbook,
-    apply_runtime_playbook_filtered, descriptor_by_id, installed_ask_agents, run_runtime_lifecycle,
-    runtime_catalog, runtime_supports_lifecycle, runtime_supports_playbook,
-    suggest_runtime_repairs, InstalledAskAgent, RuntimeCatalogEntry, RuntimeDescriptor,
+    apply_runtime_playbook_filtered, descriptor_by_id, installed_agents_with_binary,
+    run_runtime_lifecycle, runtime_catalog, runtime_supports_lifecycle, runtime_supports_playbook,
+    suggest_runtime_repairs, InstalledAgent, RuntimeCatalogEntry, RuntimeDescriptor,
     RuntimeLifecycleAction, RuntimeProbeSpec,
 };
 pub use session_launch::{

@@ -4,7 +4,7 @@ use super::{PromptSessionCancel, PromptSessionControl, PromptSessionOptions, Pro
 
 /// Ask-session backend for a single runtime (Claude Code, Codex, …).
 ///
-/// Distinct from Doctor's [`crate::adapter::RuntimeAdapter`] (discover/config).
+/// Distinct from Doctor's [`agent_doctor_core::adapter::RuntimeAdapter`] (discover/config).
 pub trait AskBackend {
     fn run(
         &self,

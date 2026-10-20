@@ -7,12 +7,12 @@ pub struct ZcodeAdapter;
 
 /// ZCode is the desktop app from zai-org/ZCode. A terminal `zcode` is optional.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ZcodeInstall {
+pub enum ZcodeInstall {
     App(PathBuf),
     Cli(PathBuf),
 }
 
-pub(crate) fn locate_zcode() -> Option<ZcodeInstall> {
+pub fn locate_zcode() -> Option<ZcodeInstall> {
     if let Some(app) = desktop_app_path() {
         return Some(ZcodeInstall::App(app));
     }
@@ -24,12 +24,12 @@ pub(crate) fn locate_zcode() -> Option<ZcodeInstall> {
 /// A `zcode` on PATH is the CLI. The desktop install keeps the same script inside
 /// the app (`Contents/Resources/glm/zcode.cjs`), run by the app binary as Node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ZcodeHeadless {
+pub struct ZcodeHeadless {
     pub program: PathBuf,
     pub script: Option<PathBuf>,
 }
 
-pub(crate) fn locate_zcode_headless() -> Option<ZcodeHeadless> {
+pub fn locate_zcode_headless() -> Option<ZcodeHeadless> {
     if let Some(path) = cli_path() {
         if !is_app_image(&path) {
             return Some(ZcodeHeadless {

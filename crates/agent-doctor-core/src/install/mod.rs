@@ -263,7 +263,12 @@ where
         log_path: None,
     })?;
 
-    if matches!(runtime_id, "claude-code" | "codex" | "deepseek-harness") {
+    // OpenClaw's official script also installs via npm; without Node it falls
+    // back to Homebrew/winget, which stall behind the GFW.
+    if matches!(
+        runtime_id,
+        "claude-code" | "codex" | "deepseek-harness" | "openclaw"
+    ) {
         on_progress(InstallProgressEvent {
             runtime_id: runtime_id.to_string(),
             phase: "installing".to_string(),

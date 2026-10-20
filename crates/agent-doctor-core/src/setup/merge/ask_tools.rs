@@ -100,7 +100,7 @@ pub fn drop_unreachable_ask_tools(cwd: &Path) {
             );
         }
     }
-    let overlay = crate::prompt_session::env::collect_overlay_env();
+    let overlay = crate::session_env::collect_overlay_env();
     if let Some(home) = overlay.get("CODEX_HOME") {
         roots.codex_homes.push(PathBuf::from(home));
     }

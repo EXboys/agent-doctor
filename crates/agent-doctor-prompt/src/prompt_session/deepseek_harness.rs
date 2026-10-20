@@ -17,10 +17,6 @@ use serde_json::{json, Value};
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{
-    apply_deepseek_harness_env, apply_overlay_env, collect_overlay_env_for_options,
-    format_command_display,
-};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
     command_from_cli, force_stop_child, format_tool_status, is_runtime_stderr_noise, summarize,
@@ -32,8 +28,11 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::adapters::{DEEPSEEK_HARNESS_CLI, DEEPSEEK_HARNESS_RUNTIME_ID};
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::adapters::{DEEPSEEK_HARNESS_CLI, DEEPSEEK_HARNESS_RUNTIME_ID};
+use agent_doctor_core::session_env::{
+    apply_deepseek_harness_env, apply_overlay_env, format_command_display,
+};
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 const RUNTIME_KEY: &str = "deepseek-harness";
 
@@ -75,7 +74,7 @@ fn run_deepseek_harness(
         .filter(|id| !id.is_empty())
         .map(str::to_string);
     let auto_allow = options.dangerously_skip_permissions || options.full_auto;
-    let overlay = collect_overlay_env_for_options(options);
+    let overlay = super::collect_overlay_env_for_options(options);
     let hands = super::mcp_ensure::wire_hands(
         "deepseek-harness",
         options,
@@ -99,8 +98,12 @@ fn run_deepseek_harness(
 
     let mut cmd = build_command(&cwd, &overlay);
     let command_display = format_command_display(&cmd);
-    let fingerprint = warm::enabled()
-        .then(|| warm::fingerprint(&cmd, &[crate::DeepSeekHarnessAdapter::cordis_patch_path()]));
+    let fingerprint = warm::enabled().then(|| {
+        warm::fingerprint(
+            &cmd,
+            &[agent_doctor_core::DeepSeekHarnessAdapter::cordis_patch_path()],
+        )
+    });
 
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),
@@ -274,10 +277,10 @@ fn ensure_chat_capable_dsh(
     if std::env::var_os("AGENT_DOCTOR_DSH_BIN").is_some() {
         return Ok(());
     }
-    let Some(installed) = crate::lifecycle::installed_deepseek_harness_version() else {
+    let Some(installed) = agent_doctor_core::lifecycle::installed_deepseek_harness_version() else {
         return Ok(());
     };
-    if !crate::lifecycle::deepseek_harness_is_outdated(&installed) {
+    if !agent_doctor_core::lifecycle::deepseek_harness_is_outdated(&installed) {
         return Ok(());
     }
     on_event(PromptSessionEvent::Status {
@@ -285,8 +288,8 @@ fn ensure_chat_capable_dsh(
         phase: "setup".into(),
         message: "DeepSeek 助手版本太旧，正在更新，第一次要等一两分钟。".into(),
     });
-    crate::lifecycle::run_deepseek_harness_lifecycle(
-        crate::lifecycle::DeepSeekHarnessLifecycleAction::Update,
+    agent_doctor_core::lifecycle::run_deepseek_harness_lifecycle(
+        agent_doctor_core::lifecycle::DeepSeekHarnessLifecycleAction::Update,
     )
     .map_err(|_| anyhow::anyhow!("DeepSeek 助手版本太旧，自动更新没有成功。请检查网络后再发一次。"))
 }
@@ -701,7 +704,7 @@ fn handle_acp_message<F>(
             } else {
                 state.prompt_done = true;
             }
-            if let Some(usage) = crate::usage::find_usage(&result) {
+            if let Some(usage) = agent_doctor_core::usage::find_usage(&result) {
                 on_event(PromptSessionEvent::Usage {
                     session_id: session_id.to_string(),
                     usage,

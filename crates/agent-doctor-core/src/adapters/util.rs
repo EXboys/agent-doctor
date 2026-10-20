@@ -8,7 +8,6 @@ use crate::exec::{
     run_probe_cached, skips_version_probe, VERSION_PROBE_DIAGNOSE_TIMEOUT, VERSION_PROBE_TIMEOUT,
 };
 
-#[cfg(test)]
 thread_local! {
     /// Per-test home override so unit tests never mutate the process `HOME`.
     static TEST_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
@@ -21,7 +20,6 @@ thread_local! {
 
 /// Resolve the user home directory (tests may override via [`with_test_home`]).
 pub fn home_dir() -> PathBuf {
-    #[cfg(test)]
     {
         if let Some(path) = TEST_HOME_OVERRIDE.with(|cell| cell.borrow().clone()) {
             return path;
@@ -59,11 +57,11 @@ pub fn hermes_profile_dir(profile: &str) -> PathBuf {
 }
 
 fn hermes_root_path() -> PathBuf {
+    if TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_some()) {
+        return home_dir().join(".hermes");
+    }
     #[cfg(test)]
     {
-        if TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_some()) {
-            return home_dir().join(".hermes");
-        }
         // Unit tests must not scan or adopt the developer's real Hermes.
         hermes_root_for(
             cfg!(windows),
@@ -238,7 +236,6 @@ pub(crate) fn hermes_root_for(
 }
 
 fn adopt_legacy_hermes_home(root: &Path) {
-    #[cfg(test)]
     {
         if TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_none()) {
             return;
@@ -327,7 +324,6 @@ fn is_foreign_venv_shim(path: &Path) -> bool {
 /// Tests may override via [`with_test_home`], which also redirects this so
 /// workspace registry writes stay inside the temp home.
 pub fn config_dir() -> Option<PathBuf> {
-    #[cfg(test)]
     {
         if let Some(path) = TEST_CONFIG_OVERRIDE.with(|cell| cell.borrow().clone()) {
             return Some(path);
@@ -337,9 +333,9 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 /// Run `f` with [`home_dir`] / [`home_join`] / [`config_dir`] rooted at `home`
-/// for this thread only.
-#[cfg(test)]
-pub(crate) fn with_test_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+/// for this thread only. Compiled unconditionally: `agent-doctor-prompt`'s
+/// tests override the home through it as well.
+pub fn with_test_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
     let config = home.join("Library/Application Support");
     TEST_HOME_OVERRIDE.with(|home_cell| {
         TEST_CONFIG_OVERRIDE.with(|config_cell| {

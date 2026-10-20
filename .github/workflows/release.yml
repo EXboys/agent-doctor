@@ -33,7 +33,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (core + CLI)
-        run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+        run: cargo clippy -p agent-doctor-core -p agent-doctor-prompt -p agent-doctor --all-targets -- -D warnings
 
   lint-desktop:
     name: Clippy desktop

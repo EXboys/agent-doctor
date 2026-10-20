@@ -11,11 +11,6 @@ use serde_json::{json, Value};
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{
-    apply_codex_env, apply_overlay_env, codex_provider_config_args, codex_subscription_model_args,
-    codex_turn_keeps_saved_service, collect_overlay_env_for_options, format_command_display,
-    prepare_codex_home, resolve_codex_overlay, scrub_subscription_gateway_env,
-};
 use super::mcp_ensure::{wire_hands, Hands};
 use super::util::{
     combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
@@ -27,7 +22,12 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::session_env::{
+    apply_codex_env, apply_overlay_env, codex_provider_config_args, codex_subscription_model_args,
+    codex_turn_keeps_saved_service, format_command_display, prepare_codex_home,
+    resolve_codex_overlay, scrub_subscription_gateway_env,
+};
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 mod protocol;
 pub(crate) use protocol::*;
@@ -127,7 +127,7 @@ fn ask_sandbox_roots(overlay: &std::collections::HashMap<String, String>) -> Vec
     {
         roots.push(home.to_string());
     }
-    if let Some(dir) = crate::adapters::util::config_dir() {
+    if let Some(dir) = agent_doctor_core::adapters::util::config_dir() {
         roots.push(dir.join("agent-doctor").display().to_string());
     }
     // Videos and other files usually sit on the Desktop, in Downloads, in
@@ -230,7 +230,7 @@ fn run_codex_app_server(
     }
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
-    let mut overlay = collect_overlay_env_for_options(options);
+    let mut overlay = super::collect_overlay_env_for_options(options);
     // A missing model list or a settings rewrite must not swallow the turn.
     // The saved key still has to go out, the same way 0.86 sent it.
     if let Err(error) = prepare_codex_home(&mut overlay, &cwd) {
@@ -241,7 +241,7 @@ fn run_codex_app_server(
     }
     // Project-local Codex config is loaded with the message's folder, separate
     // from ~/.codex. A missing tool there fails the same way.
-    let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(
+    let _ = agent_doctor_core::setup::merge::drop_unreachable_codex_mcp_servers(
         &cwd.join(".codex").join("config.toml"),
     );
     let hands = wire_hands("codex", options, &cwd, &overlay, |phase, message| {
@@ -286,16 +286,25 @@ fn run_codex_app_server(
     };
 
     let saved_service = codex_turn_keeps_saved_service(&overlay);
-    let account_model = if crate::setup::is_native_subscription("codex") && !saved_service {
-        crate::setup::load_account_models("codex")
-            .and_then(|list| list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str)))
-    } else {
-        None
-    };
+    let account_model =
+        if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
+            agent_doctor_core::setup::load_account_models("codex").and_then(|list| {
+                list.choose(
+                    overlay
+                        .get(agent_doctor_core::setup::MODEL_ENV)
+                        .map(String::as_str),
+                )
+            })
+        } else {
+            None
+        };
     // No account model means the saved one belonged to another service. An old
     // thread would keep that model, so this turn starts a new thread instead.
     // A saved-service turn keeps its own model and must not be replaced here.
-    if account_model.is_none() && crate::setup::is_native_subscription("codex") && !saved_service {
+    if account_model.is_none()
+        && agent_doctor_core::setup::is_native_subscription("codex")
+        && !saved_service
+    {
         resume_thread_id = None;
     }
     let display_text = Arc::new(Mutex::new(String::new()));
@@ -589,9 +598,9 @@ fn build_app_server_command(
         .arg("-c")
         .arg("features.default_mode_request_user_input=true");
     let saved_service = codex_turn_keeps_saved_service(overlay);
-    if crate::setup::is_native_subscription("codex") && !saved_service {
+    if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
         let model = overlay
-            .get(crate::setup::MODEL_ENV)
+            .get(agent_doctor_core::setup::MODEL_ENV)
             .map(|value| value.as_str());
         for arg in codex_subscription_model_args(model) {
             cmd.arg(arg);
@@ -607,7 +616,7 @@ fn build_app_server_command(
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, overlay);
     apply_codex_env(&mut cmd, overlay);
-    if crate::setup::is_native_subscription("codex") && !saved_service {
+    if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
         scrub_subscription_gateway_env(&mut cmd);
     }
     Ok(cmd)
@@ -651,7 +660,7 @@ fn codex_config_files(
     overlay: &std::collections::HashMap<String, String>,
 ) -> Vec<std::path::PathBuf> {
     let mut files = vec![
-        crate::adapters::util::home_join(".codex").join("config.toml"),
+        agent_doctor_core::adapters::util::home_join(".codex").join("config.toml"),
         cwd.join(".codex").join("config.toml"),
     ];
     let homes = [

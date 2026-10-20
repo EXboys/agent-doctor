@@ -12,10 +12,6 @@ use anyhow::{bail, Context, Result};
 
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
-use super::env::{
-    apply_claude_env, apply_overlay_env, chat_uses_saved_service, claude_provider_env,
-    collect_overlay_env_for_options, format_command_display,
-};
 use super::mcp_ensure::wire_hands;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
@@ -29,7 +25,11 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use crate::session_launch::resolve_session_cwd;
+use agent_doctor_core::session_env::{
+    apply_claude_env, apply_overlay_env, chat_uses_saved_service, claude_provider_env,
+    format_command_display,
+};
+use agent_doctor_core::session_launch::resolve_session_cwd;
 
 pub struct ClaudeAskBackend;
 
@@ -75,15 +75,19 @@ fn run_claude(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let mut overlay = collect_overlay_env_for_options(options);
+    let mut overlay = super::collect_overlay_env_for_options(options);
     let saved_service =
         chat_uses_saved_service(options.model.as_deref(), options.provider_id.as_deref());
     // A saved DeepSeek / GLM key must stay on the request. Rewriting Claude's
     // settings here deletes that key, and the same key then comes back as 401.
-    if crate::setup::is_native_subscription("claude-code") && !saved_service {
-        if let Ok(list) = crate::setup::ensure_account_models("claude-code") {
-            let chosen = list.choose(overlay.get(crate::setup::MODEL_ENV).map(String::as_str));
-            if crate::setup::merge::repair_claude_subscription_configs(
+    if agent_doctor_core::setup::is_native_subscription("claude-code") && !saved_service {
+        if let Ok(list) = agent_doctor_core::setup::ensure_account_models("claude-code") {
+            let chosen = list.choose(
+                overlay
+                    .get(agent_doctor_core::setup::MODEL_ENV)
+                    .map(String::as_str),
+            );
+            if agent_doctor_core::setup::merge::repair_claude_subscription_configs(
                 &cwd,
                 chosen.as_deref(),
                 &list.models,
@@ -91,9 +95,9 @@ fn run_claude(
             .is_ok()
             {
                 if let Some(id) = chosen {
-                    overlay.insert(crate::setup::MODEL_ENV.to_string(), id);
+                    overlay.insert(agent_doctor_core::setup::MODEL_ENV.to_string(), id);
                 } else {
-                    overlay.remove(crate::setup::MODEL_ENV);
+                    overlay.remove(agent_doctor_core::setup::MODEL_ENV);
                 }
             }
         }
@@ -108,7 +112,7 @@ fn run_claude(
 
     let effective_prompt = hands.prompt(prompt);
     // A computer server left in the project file shows up in the person's own Claude.
-    let _ = crate::forget_project_computer_mcp(&cwd);
+    let _ = agent_doctor_core::forget_project_computer_mcp(&cwd);
 
     let images: Vec<super::vision::EncodedImage> =
         super::vision::turn_images("claude-code", &options.image_paths, &overlay)
@@ -354,14 +358,14 @@ struct ClaudeLaunch<'a> {
 }
 
 fn claude_config_files(cwd: &Path) -> Vec<std::path::PathBuf> {
-    let home = crate::adapters::util::home_join(".claude");
+    let home = agent_doctor_core::adapters::util::home_join(".claude");
     let mut files = vec![
         home.join("settings.json"),
         cwd.join(".mcp.json"),
         cwd.join(".claude").join("settings.json"),
         cwd.join(".claude").join("settings.local.json"),
     ];
-    if let Some(path) = crate::claude_computer_mcp_config_path() {
+    if let Some(path) = agent_doctor_core::claude_computer_mcp_config_path() {
         files.push(path);
     }
     files
@@ -427,7 +431,7 @@ fn build_claude_command(
         cmd.arg(format!("--mcp-config={}", mcp_config.display()));
     }
     if computer_mcp {
-        if let Some(path) = crate::claude_computer_mcp_config_path() {
+        if let Some(path) = agent_doctor_core::claude_computer_mcp_config_path() {
             if path.is_file() {
                 cmd.arg(format!("--mcp-config={}", path.display()));
             }
@@ -500,7 +504,7 @@ fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf
     #[cfg(test)]
     let dir = std::env::temp_dir().join("agent-doctor-test-ask");
     #[cfg(not(test))]
-    let dir = crate::store::agent_doctor_config_dir()
+    let dir = agent_doctor_core::store::agent_doctor_config_dir()
         .context("could not resolve config directory")?
         .join("ask");
     std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
@@ -668,7 +672,7 @@ fn claude_turn_usage(session_id: &str, value: &serde_json::Value) -> Option<Prom
     if value.get("type").and_then(|v| v.as_str()) != Some("result") {
         return None;
     }
-    let usage = crate::usage::usage_from_value(value.get("usage")?)?;
+    let usage = agent_doctor_core::usage::usage_from_value(value.get("usage")?)?;
     let model = value
         .get("modelUsage")
         .and_then(|v| v.as_object())
@@ -676,7 +680,7 @@ fn claude_turn_usage(session_id: &str, value: &serde_json::Value) -> Option<Prom
             models
                 .iter()
                 .max_by_key(|(_, used)| {
-                    crate::usage::usage_from_value(used).map_or(0, |u| u.total())
+                    agent_doctor_core::usage::usage_from_value(used).map_or(0, |u| u.total())
                 })
                 .map(|(name, _)| name.clone())
         });
@@ -1863,8 +1867,11 @@ mod tests {
             "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
         );
         overlay.insert("OPENAI_API_KEY".to_string(), "new-key".to_string());
-        overlay.insert(crate::setup::MODEL_ENV.to_string(), "glm-5.3".to_string());
-        let cmd = crate::adapters::util::with_test_home(home.path(), || {
+        overlay.insert(
+            agent_doctor_core::setup::MODEL_ENV.to_string(),
+            "glm-5.3".to_string(),
+        );
+        let cmd = agent_doctor_core::adapters::util::with_test_home(home.path(), || {
             let launch = ClaudeLaunch {
                 cwd: home.path(),
                 skip_permissions: true,
@@ -2001,13 +2008,13 @@ mod tests {
             r#"{"mcpServers":{"computer":{"command":"old","args":["mcp","computer"]},"browser":{"command":"b","args":[]}}}"#,
         )
         .unwrap();
-        assert!(crate::forget_project_computer_mcp(&project));
+        assert!(agent_doctor_core::forget_project_computer_mcp(&project));
         let project_mcp = fs::read_to_string(project.join(".mcp.json")).unwrap();
         assert!(!project_mcp.contains("computer"));
         assert!(project_mcp.contains("browser"));
 
-        crate::adapters::util::with_test_home(dir.path(), || {
-            let private = crate::claude_computer_mcp_config_path().unwrap();
+        agent_doctor_core::adapters::util::with_test_home(dir.path(), || {
+            let private = agent_doctor_core::claude_computer_mcp_config_path().unwrap();
             fs::create_dir_all(private.parent().unwrap()).unwrap();
             fs::write(
                 &private,

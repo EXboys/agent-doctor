@@ -129,7 +129,7 @@ pub(crate) fn resolve_codex_launch_env() -> Option<(String, String, Option<Strin
 
 pub(crate) fn collect_launch_env_map() -> HashMap<String, String> {
     // Same overlay rules as Ask — personal edition must not inherit Evotown leftovers.
-    crate::prompt_session::env::collect_overlay_env()
+    crate::session_env::collect_overlay_env()
 }
 
 pub(crate) fn codex_launch_from_env(
@@ -184,5 +184,5 @@ pub(crate) fn resolve_claude_launch_env() -> Option<(String, String)> {
 pub(crate) fn anthropic_launch_from_env(env: &HashMap<String, String>) -> Option<(String, String)> {
     // Reuse Ask overlay resolution so opening Claude Code cannot rewrite
     // ~/.claude/settings.json back to a leftover Evotown/skilllite gateway.
-    crate::prompt_session::env::resolve_claude_overlay(env)
+    crate::session_env::resolve_claude_overlay(env)
 }

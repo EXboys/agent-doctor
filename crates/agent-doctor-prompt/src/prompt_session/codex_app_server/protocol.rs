@@ -275,7 +275,7 @@ pub(crate) fn handle_notification<F>(
         "thread/tokenUsage/updated" => {
             if let Some(usage) = params
                 .pointer("/tokenUsage/last")
-                .and_then(crate::usage::usage_from_value)
+                .and_then(agent_doctor_core::usage::usage_from_value)
             {
                 on_event(PromptSessionEvent::Usage {
                     session_id: state.session_id.clone(),

@@ -16,7 +16,7 @@ use crate::update_tray_tooltip;
 use tauri::Emitter;
 
 fn notify_provider_changed(app: &tauri::AppHandle) {
-    agent_doctor_core::retire_warm_sessions();
+    agent_doctor_prompt::retire_warm_sessions();
     let _ = app.emit("personal-provider-changed", ());
 }
 
@@ -308,7 +308,7 @@ pub async fn resign_native_subscription_command(
     .await
     .map_err(|error| error.to_string())??;
     // The parked chat still holds the expired account. The next send starts clean.
-    agent_doctor_core::retire_warm_sessions();
+    agent_doctor_prompt::retire_warm_sessions();
     if switched.outcome == "using" {
         notify_provider_changed(&app);
     }
