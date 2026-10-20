@@ -10,8 +10,9 @@ mod process;
 
 pub use local::LocalBackend;
 pub use process::{
-    command_for_path, kill_process_tree, run_output, skips_version_probe, RunError,
-    SHORT_PROBE_TIMEOUT, VERSION_PROBE_DIAGNOSE_TIMEOUT, VERSION_PROBE_TIMEOUT,
+    clear_probe_cache, command_for_path, kill_process_tree, run_output, run_probe_cached,
+    skips_version_probe, RunError, SHORT_PROBE_TIMEOUT, VERSION_PROBE_DIAGNOSE_TIMEOUT,
+    VERSION_PROBE_TIMEOUT,
 };
 
 /// Read-only / command execution surface used by remote doctor (and later repair).

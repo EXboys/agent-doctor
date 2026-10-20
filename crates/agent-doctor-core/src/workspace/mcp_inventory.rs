@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::adapters::util::{find_all_binaries, find_binary, home_join};
-use crate::exec::{run_output, SHORT_PROBE_TIMEOUT};
+use crate::exec::{run_probe_cached, SHORT_PROBE_TIMEOUT};
 
 use super::{load_workspaces, WorkspacesDocument};
 
@@ -941,7 +941,7 @@ fn is_ephemeral_cli_path(path: &Path) -> bool {
 }
 
 fn cli_version_label(path: &Path) -> Option<String> {
-    let output = run_output(path, &["--version"], SHORT_PROBE_TIMEOUT).ok()?;
+    let output = run_probe_cached(path, &["--version"], SHORT_PROBE_TIMEOUT).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1116,7 +1116,7 @@ fn classify_agent_doctor_cli(path: &Path) -> CliProbe {
 
     // Identity is `--version` only. Never fall back to `mcp status` — that can
     // open Chrome / wait on CDP and freeze "Apply repair" on Windows.
-    let Ok(output) = run_output(path, &["--version"], SHORT_PROBE_TIMEOUT) else {
+    let Ok(output) = run_probe_cached(path, &["--version"], SHORT_PROBE_TIMEOUT) else {
         return CliProbe::Unrunnable;
     };
     if !output.status.success() {

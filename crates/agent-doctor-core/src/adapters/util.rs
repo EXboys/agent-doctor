@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::adapter::AdapterDiscovery;
 use crate::exec::{
-    run_output, skips_version_probe, VERSION_PROBE_DIAGNOSE_TIMEOUT, VERSION_PROBE_TIMEOUT,
+    run_probe_cached, skips_version_probe, VERSION_PROBE_DIAGNOSE_TIMEOUT, VERSION_PROBE_TIMEOUT,
 };
 
 #[cfg(test)]
@@ -606,7 +606,7 @@ pub fn find_binary(name: &str) -> Option<PathBuf> {
     ensure_managed_runtime_path();
     find_in_path(name)
         .or_else(|| find_binary_in_dirs(name, &common_binary_dirs()))
-        .or_else(|| find_with_where_exe(name))
+        .or_else(|| find_with_pathext(name))
 }
 
 pub fn find_all_binaries(name: &str) -> Vec<PathBuf> {
@@ -788,6 +788,7 @@ pub(crate) fn ensure_managed_runtime_path() {
 /// and the managed node root are re-read, so a freshly installed CLI
 /// resolves without a restart.
 pub fn refresh_managed_runtime_path() {
+    crate::exec::clear_probe_cache();
     invalidate_npm_global_bin_dir_cache();
     merge_managed_dirs_into_path();
 }
@@ -964,7 +965,7 @@ fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
     // `#!/usr/bin/env node` still needs node on PATH — callers must seed PATH first.
     let npm =
         find_binary_in_dirs("npm", &static_common_binary_dirs()).or_else(|| find_in_path("npm"))?;
-    let output = run_output(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
+    let output = run_probe_cached(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -984,25 +985,34 @@ fn npm_global_bin_dir_uncached() -> Option<PathBuf> {
     }
 }
 
-/// Use `where.exe` on Windows to find executables that may be in restricted
-/// directories (e.g. WindowsApps) where read_dir() would fail.
+/// What `where.exe` adds over [`find_in_path`]: the other `PATHEXT`
+/// extensions. Done in-process: every probe of a missing tool used to start
+/// `where`, and on Windows each child can paint a terminal.
 #[cfg(target_os = "windows")]
-fn find_with_where_exe(name: &str) -> Option<PathBuf> {
-    let output = run_output(Path::new("where"), &[name], Duration::from_secs(3)).ok()?;
-    if !output.status.success() {
-        return None;
+fn find_with_pathext(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let exts: Vec<String> = pathext
+        .split(';')
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .filter(|ext| ext.starts_with('.') && ext.len() > 1)
+        .collect();
+    for dir in std::env::split_paths(&path_var) {
+        if dir.as_os_str().is_empty() || is_slow_network_path(&dir) {
+            continue;
+        }
+        for ext in &exts {
+            let candidate = dir.join(format!("{name}{ext}"));
+            if path_is_file(&candidate) {
+                return Some(candidate);
+            }
+        }
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let first_line = stdout.lines().next()?.trim();
-    if first_line.is_empty() {
-        return None;
-    }
-    let candidate = PathBuf::from(first_line);
-    path_is_file(&candidate).then_some(candidate)
+    None
 }
 
 #[cfg(not(target_os = "windows"))]
-fn find_with_where_exe(_name: &str) -> Option<PathBuf> {
+fn find_with_pathext(_name: &str) -> Option<PathBuf> {
     None
 }
 
@@ -1048,7 +1058,7 @@ fn read_version_result_with_flags(
     }
     let mut last_error = None;
     for flag in flags {
-        match run_output(binary, &[flag], timeout) {
+        match run_probe_cached(binary, &[flag], timeout) {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);

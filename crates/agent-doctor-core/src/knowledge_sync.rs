@@ -130,18 +130,56 @@ fn normalize_remote(raw: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+/// `remote.origin.url`, read from the repo config instead of starting `git`
+/// (on Windows each child can paint a terminal).
 fn git_origin(project: &Path) -> Option<String> {
-    let dir = project.to_string_lossy().into_owned();
-    let output = crate::exec::run_output(
-        "git",
-        &["-C", &dir, "remote", "get-url", "origin"],
-        crate::exec::SHORT_PROBE_TIMEOUT,
-    )
-    .ok()?;
-    if !output.status.success() {
-        return None;
+    let config = fs::read_to_string(git_config_path(project)?).ok()?;
+    normalize_remote(&origin_url_in_config(&config)?)
+}
+
+/// The config `git -C <project>` would read: the nearest `.git` up the tree.
+/// A worktree's `.git` file points at its gitdir, whose `commondir` holds the config.
+fn git_config_path(project: &Path) -> Option<PathBuf> {
+    for dir in project.ancestors() {
+        let dot_git = dir.join(".git");
+        if dot_git.is_dir() {
+            return Some(dot_git.join("config"));
+        }
+        if !dot_git.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&dot_git).ok()?;
+        let gitdir = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+        let gitdir = dir.join(gitdir.trim());
+        let common = fs::read_to_string(gitdir.join("commondir"))
+            .ok()
+            .map(|rel| gitdir.join(rel.trim()))
+            .unwrap_or(gitdir);
+        return Some(common.join("config"));
     }
-    normalize_remote(&String::from_utf8_lossy(&output.stdout))
+    None
+}
+
+fn origin_url_in_config(config: &str) -> Option<String> {
+    let mut in_origin = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            let header: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            in_origin = header.eq_ignore_ascii_case("[remote\"origin\"]");
+            continue;
+        }
+        if !in_origin {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("url") {
+            return Some(value.trim().trim_matches('"').to_string());
+        }
+    }
+    None
 }
 
 fn project_local_id(project: &Path) -> Result<String, String> {
@@ -677,6 +715,40 @@ fn sync_knowledge_locked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn origin_is_read_from_the_repo_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("proj");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir_all(repo.join("src")).unwrap();
+        fs::write(
+            repo.join(".git").join("config"),
+            "[core]\n\tbare = false\n[remote \"upstream\"]\n\turl = https://example.com/other.git\n\
+             [remote \"origin\"]\n\turl = https://github.com/acme/app.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            git_origin(&repo.join("src")).as_deref(),
+            Some("https://github.com/acme/app")
+        );
+
+        let worktree = temp.path().join("wt");
+        let gitdir = repo.join(".git").join("worktrees").join("wt");
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(gitdir.join("commondir"), "../..\n").unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            git_origin(&worktree).as_deref(),
+            Some("https://github.com/acme/app")
+        );
+    }
 
     fn meta(sha: &str, size: u64, mtime_ms: u64) -> FileMeta {
         FileMeta {

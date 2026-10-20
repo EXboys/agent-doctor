@@ -91,6 +91,66 @@ pub fn run_output(
     }
 }
 
+type ProbeKey = (PathBuf, Vec<String>, u64, Option<std::time::SystemTime>);
+
+static PROBE_CACHE: std::sync::Mutex<Option<std::collections::HashMap<ProbeKey, Output>>> =
+    std::sync::Mutex::new(None);
+
+/// [`run_output`] for read-only probes (`--version`, `npm prefix -g`).
+///
+/// Opening the app sweeps every runtime several times in its first minute,
+/// and on Windows each child can paint a terminal. A successful answer is kept
+/// until the program file changes or [`clear_probe_cache`] runs. A bare name
+/// (resolved through PATH at spawn time) and failures are never kept.
+pub fn run_probe_cached(
+    program: impl AsRef<Path>,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Output, RunError> {
+    let program = program.as_ref();
+    let Some(key) = probe_key(program, args) else {
+        return run_output(program, args, timeout);
+    };
+    if let Some(hit) = probe_cache_lock()
+        .as_ref()
+        .and_then(|cache| cache.get(&key).cloned())
+    {
+        return Ok(hit);
+    }
+    let output = run_output(program, args, timeout)?;
+    if output.status.success() {
+        probe_cache_lock()
+            .get_or_insert_with(Default::default)
+            .insert(key, output.clone());
+    }
+    Ok(output)
+}
+
+/// Forget every cached probe, e.g. after an install changed what is on disk.
+pub fn clear_probe_cache() {
+    *probe_cache_lock() = None;
+}
+
+fn probe_cache_lock(
+) -> std::sync::MutexGuard<'static, Option<std::collections::HashMap<ProbeKey, Output>>> {
+    PROBE_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn probe_key(program: &Path, args: &[&str]) -> Option<ProbeKey> {
+    if !program.is_absolute() {
+        return None;
+    }
+    let meta = std::fs::metadata(program).ok()?;
+    Some((
+        program.to_path_buf(),
+        args.iter().map(|arg| arg.to_string()).collect(),
+        meta.len(),
+        meta.modified().ok(),
+    ))
+}
+
 fn build_command(program: &Path, args: &[&str]) -> Command {
     #[cfg(windows)]
     {
@@ -546,10 +606,27 @@ fn apply_no_window(_cmd: &mut Command) {
 fn log_spawn(cmd: &Command) {
     use std::io::Write;
 
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     let Some(base) = std::env::var_os("LOCALAPPDATA") else {
         return;
     };
     let dir = PathBuf::from(base).join("AgentDoctor").join("logs");
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|arg| spawn_log_arg(&arg.to_string_lossy()))
+        .collect();
+    let line = format!(
+        "[{}] {} {}\n",
+        local_stamp(),
+        cmd.get_program().to_string_lossy(),
+        args.join(" ")
+    );
+
+    // Probes run on several threads; one locked write keeps each line whole.
+    let _guard = WRITE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
@@ -557,27 +634,24 @@ fn log_spawn(cmd: &Command) {
     if std::fs::metadata(&file).is_ok_and(|meta| meta.len() > 256 * 1024) {
         let _ = std::fs::remove_file(&file);
     }
-    let Ok(mut handle) = std::fs::OpenOptions::new()
+    if let Ok(mut handle) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&file)
-    else {
-        return;
-    };
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|since| since.as_secs())
-        .unwrap_or(0);
-    let args: Vec<String> = cmd
-        .get_args()
-        .map(|arg| spawn_log_arg(&arg.to_string_lossy()))
-        .collect();
-    let _ = writeln!(
-        handle,
-        "[{stamp}] {} {}",
-        cmd.get_program().to_string_lossy(),
-        args.join(" ")
-    );
+    {
+        let _ = handle.write_all(line.as_bytes());
+    }
+}
+
+/// `2026-10-20 11:34:42.517`, local time.
+#[cfg(windows)]
+fn local_stamp() -> String {
+    // SAFETY: GetLocalTime only writes the returned SYSTEMTIME.
+    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
+    )
 }
 
 /// Paths and flags stay readable. A long bare token may be a key, and prompt
@@ -692,6 +766,40 @@ mod tests {
             node == Path::new("node") || (node.is_absolute() && node.is_file()),
             "node must be the bare name or an absolute existing file: {node:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_cache_runs_an_unchanged_program_once() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let counter = temp.path().join("runs");
+        let script = temp.path().join("probe.sh");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\necho x >> '{}'\necho 1.0.0\n", counter.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let runs = || {
+            std::fs::read_to_string(&counter)
+                .map(|text| text.lines().count())
+                .unwrap_or(0)
+        };
+
+        let first = run_probe_cached(&script, &["--version"], SHORT_PROBE_TIMEOUT).expect("first");
+        let second =
+            run_probe_cached(&script, &["--version"], SHORT_PROBE_TIMEOUT).expect("second");
+        assert_eq!(first.stdout, second.stdout);
+        assert_eq!(runs(), 1);
+
+        run_probe_cached(&script, &["-V"], SHORT_PROBE_TIMEOUT).expect("other args");
+        assert_eq!(runs(), 2);
+
+        clear_probe_cache();
+        run_probe_cached(&script, &["--version"], SHORT_PROBE_TIMEOUT).expect("after clear");
+        assert_eq!(runs(), 3);
     }
 
     #[test]
