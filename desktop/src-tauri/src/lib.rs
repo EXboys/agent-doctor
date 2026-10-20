@@ -564,6 +564,7 @@ pub fn run() {
             channel_link::spawn(app.handle());
             seed_default_workspace_in_background();
             spawn_skill_link_repair();
+            spawn_browser_mcp_autowire();
             // Pre-create Ask on the UI thread at startup. Creating it on first
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
@@ -770,6 +771,40 @@ fn spawn_skill_link_repair() {
         .spawn(|| {
             let _ = std::panic::catch_unwind(|| {
                 agent_doctor_core::skills::repair_skill_links_at_launch();
+            });
+        });
+}
+
+/// Re-assert Browser MCP wiring in every detected runtime on each launch.
+///
+/// Without this, a freshly installed client is "MCP not configured" until
+/// someone opens Resources and clicks diagnose. The write is an idempotent
+/// upsert through the stable managed CLI path, so repeating it every launch
+/// is what keeps the binding forced instead of manual.
+fn spawn_browser_mcp_autowire() {
+    let _ = std::thread::Builder::new()
+        .name("ad-browser-mcp-autowire".into())
+        .spawn(|| {
+            // Window, tray, and startup probes go first.
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let _ = std::panic::catch_unwind(|| {
+                let options = agent_doctor_core::browser_mcp_wire_options_for_active_workspace(
+                    agent_doctor_core::resolve_agent_doctor_binary().unwrap_or_default(),
+                );
+                let report = agent_doctor_core::diagnose_and_wire_browser_mcp(options);
+                if report.failed > 0 || !report.issues.is_empty() {
+                    eprintln!(
+                        "browser-mcp autowire: wrote {} skipped {} failed {}{}",
+                        report.wrote,
+                        report.skipped,
+                        report.failed,
+                        report
+                            .issues
+                            .first()
+                            .map(|issue| format!(" — {}", issue.message))
+                            .unwrap_or_default(),
+                    );
+                }
             });
         });
 }
