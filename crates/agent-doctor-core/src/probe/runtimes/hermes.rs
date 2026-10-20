@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::HermesAdapter;
-use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 
 use super::super::config::{parse_env_file, EnvFile, ParsedConfig};
 use super::super::schema::{schema_error, schema_warn};

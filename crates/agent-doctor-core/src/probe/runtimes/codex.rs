@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::adapters::util::home_join;
 use crate::adapters::CodexAdapter;
-use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 use crate::session_env::collect_overlay_env;
 use crate::setup::merge::codex_responses_gateway_url;
 

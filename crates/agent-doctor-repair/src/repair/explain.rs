@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::LlmConfig;
-use crate::repair_types::{ExplainInput, ExplainReport};
+use agent_doctor_core::repair_types::{fallback_explain, ExplainInput, ExplainReport};
 
 pub fn explain_runtime(input: &ExplainInput) -> Result<ExplainReport> {
     let Some(config) = LlmConfig::from_env() else {
@@ -74,61 +74,10 @@ fn parse_explain_json(content: &str) -> Result<ExplainReport> {
     serde_json::from_str(json_text).context("invalid explain JSON")
 }
 
-fn fallback_explain(input: &ExplainInput) -> ExplainReport {
-    let mut likely_causes = Vec::new();
-    let mut next_steps = Vec::new();
-
-    for check in &input.checks {
-        if check.status == "fail" || check.status == "warn" {
-            likely_causes.push(format!("{}: {}", check.title, check.message));
-        }
-    }
-
-    if let Some(failure) = &input.install_failure {
-        likely_causes.push(format!("Install failed: {}", failure.reason));
-        next_steps.push(format!(
-            "Inspect install log: {}",
-            failure.log_path.as_deref().unwrap_or("(not saved)")
-        ));
-        next_steps.push(format!("Retry: agent-doctor install {}", input.runtime_id));
-    }
-
-    if next_steps.is_empty() {
-        for suggestion in &input.suggested_repairs {
-            if suggestion.auto_fixable {
-                next_steps.push(format!(
-                    "Run: agent-doctor repair {} --apply",
-                    input.runtime_id
-                ));
-                break;
-            }
-        }
-    }
-
-    if next_steps.is_empty() && input.issue_score == 0 {
-        next_steps.push("No action required.".to_string());
-    }
-
-    ExplainReport {
-        summary: format!(
-            "{} health score {} — {}",
-            input.runtime_id, input.issue_score, input.probe_summary
-        ),
-        likely_causes,
-        recommended_action_ids: input
-            .suggested_repairs
-            .iter()
-            .filter(|item| item.auto_fixable)
-            .map(|item| item.id.clone())
-            .collect(),
-        user_next_steps: next_steps,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repair_types::{ExplainCheck, ExplainSuggestion};
+    use agent_doctor_core::repair_types::{ExplainCheck, ExplainSuggestion};
 
     #[test]
     fn fallback_explain_lists_failed_checks() {

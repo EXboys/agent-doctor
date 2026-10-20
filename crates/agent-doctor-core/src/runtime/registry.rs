@@ -8,6 +8,7 @@ use crate::adapters::{
     ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter,
     OpenClawAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
 };
+use crate::config_syntax::{apply_config_syntax_repair, suggest_config_syntax_repairs};
 use crate::evotown::{
     run_claude_cli, run_codex_cli, run_hermes_hook, run_openclaw_hook, AssignedJob, JobResult,
 };
@@ -26,16 +27,7 @@ use crate::probe::runtimes::{
 };
 use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
-use crate::repair::{
-    apply_claude_code_playbook_filtered, apply_codex_playbook_filtered, apply_config_syntax_repair,
-    apply_cursor_playbook_filtered, apply_deepseek_harness_playbook_filtered,
-    apply_hermes_playbook_filtered, apply_openclaw_playbook_filtered,
-    apply_qoder_playbook_filtered, apply_workbuddy_playbook_filtered,
-    apply_zcode_playbook_filtered, suggest_claude_code_repairs, suggest_codex_repairs,
-    suggest_config_syntax_repairs, suggest_cursor_repairs, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, suggest_openclaw_repairs, suggest_qoder_repairs,
-    suggest_workbuddy_repairs, suggest_zcode_repairs, PlaybookApplyResult, SuggestedRepair,
-};
+use crate::repair_types::{PlaybookApplyResult, SuggestedRepair};
 use crate::session_launch::{
     open_claude_code, open_codex, open_cursor_app, open_in_terminal, open_qoder, open_zcode,
     OpenSessionReport,
@@ -73,8 +65,6 @@ pub enum RuntimeLifecycleAction {
 type AdapterFactory = fn() -> Box<dyn RuntimeAdapter>;
 type DeepProbeFn = fn(&mut Vec<ProbeCheck>, &mut Vec<DiagnosticFact>);
 type SchemaProbeFn = fn(&Path, &ParsedConfig, &mut Vec<ProbeCheck>, &mut Vec<DiagnosticFact>);
-type SuggestRepairsFn = fn(&RuntimeProbeReport) -> Vec<SuggestedRepair>;
-type ApplyPlaybookFn = fn(&RuntimeProbeReport, Option<&[String]>) -> Result<PlaybookApplyResult>;
 type RunLifecycleFn = fn(RuntimeLifecycleAction) -> Result<()>;
 type WorkspaceBindFn = for<'a> fn(&WorkspaceBindInput<'a>) -> Result<RuntimeBindReport>;
 type OpenSessionFn = fn(&Path, Option<&str>, bool) -> Result<OpenSessionReport>;
@@ -88,7 +78,7 @@ pub enum OpenSessionKind {
     App,
 }
 
-use crate::repair::DiagnosticFact;
+use crate::repair_types::DiagnosticFact;
 
 /// Gateway projection for one runtime. `None` on the descriptor means wiring is unsupported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,9 +200,7 @@ pub struct RuntimeDescriptor {
     create_adapter: AdapterFactory,
     schema_probe: Option<SchemaProbeFn>,
     deep_probe: Option<DeepProbeFn>,
-    suggest_repairs: Option<SuggestRepairsFn>,
     /// Filtered repair. `None` means this runtime has no playbook.
-    apply_playbook: Option<ApplyPlaybookFn>,
     run_lifecycle: Option<RunLifecycleFn>,
     /// `None` means personal/team gateway wiring is not supported.
     wiring: Option<WiringSpec>,
@@ -516,8 +504,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: openclaw_adapter,
         schema_probe: Some(schema_openclaw),
         deep_probe: Some(openclaw_probe_deep),
-        suggest_repairs: Some(suggest_openclaw_repairs),
-        apply_playbook: Some(apply_openclaw_playbook_filtered),
         run_lifecycle: Some(run_openclaw_lifecycle_action),
         wiring: Some(WIRE_GATEWAY),
         workspace_bind: Some(bind_openclaw_workspace),
@@ -539,8 +525,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: hermes_adapter,
         schema_probe: Some(schema_hermes),
         deep_probe: Some(probe_deep),
-        suggest_repairs: Some(suggest_hermes_repairs),
-        apply_playbook: Some(apply_hermes_playbook_filtered),
         run_lifecycle: Some(run_hermes_lifecycle_action),
         wiring: Some(WIRE_GATEWAY),
         workspace_bind: Some(bind_hermes_workspace),
@@ -562,8 +546,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: deepseek_harness_adapter,
         schema_probe: Some(schema_deepseek_harness),
         deep_probe: Some(deepseek_harness_probe_deep),
-        suggest_repairs: Some(suggest_deepseek_harness_repairs),
-        apply_playbook: Some(apply_deepseek_harness_playbook_filtered),
         run_lifecycle: Some(run_deepseek_harness_lifecycle_action),
         wiring: None,
         workspace_bind: None,
@@ -585,8 +567,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: claude_code_adapter,
         schema_probe: Some(schema_claude_code),
         deep_probe: Some(claude_code_probe_deep),
-        suggest_repairs: Some(suggest_claude_code_repairs),
-        apply_playbook: Some(apply_claude_code_playbook_filtered),
         run_lifecycle: Some(run_claude_code_lifecycle_action),
         wiring: Some(WIRE_CLAUDE),
         workspace_bind: Some(bind_claude_workspace),
@@ -608,8 +588,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: codex_adapter,
         schema_probe: Some(schema_codex),
         deep_probe: Some(codex_probe_deep),
-        suggest_repairs: Some(suggest_codex_repairs),
-        apply_playbook: Some(apply_codex_playbook_filtered),
         run_lifecycle: Some(run_codex_lifecycle_action),
         wiring: Some(WIRE_CODEX),
         workspace_bind: Some(bind_codex_workspace),
@@ -631,8 +609,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: qoder_adapter,
         schema_probe: Some(schema_qoder),
         deep_probe: Some(probe_deep_noop),
-        suggest_repairs: Some(suggest_qoder_repairs),
-        apply_playbook: Some(apply_qoder_playbook_filtered),
         run_lifecycle: Some(run_qoder_lifecycle_action),
         wiring: None,
         workspace_bind: None,
@@ -654,8 +630,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: workbuddy_adapter,
         schema_probe: Some(schema_workbuddy),
         deep_probe: Some(probe_deep_noop),
-        suggest_repairs: Some(suggest_workbuddy_repairs),
-        apply_playbook: Some(apply_workbuddy_playbook_filtered),
         run_lifecycle: Some(run_workbuddy_lifecycle_action),
         wiring: None,
         workspace_bind: None,
@@ -677,8 +651,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: cursor_adapter,
         schema_probe: Some(schema_cursor),
         deep_probe: Some(probe_deep_noop),
-        suggest_repairs: Some(suggest_cursor_repairs),
-        apply_playbook: Some(apply_cursor_playbook_filtered),
         run_lifecycle: Some(run_cursor_lifecycle_action),
         wiring: None,
         workspace_bind: None,
@@ -700,8 +672,6 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         create_adapter: zcode_adapter,
         schema_probe: Some(schema_zcode),
         deep_probe: Some(probe_deep_noop),
-        suggest_repairs: Some(suggest_zcode_repairs),
-        apply_playbook: Some(apply_zcode_playbook_filtered),
         run_lifecycle: Some(run_zcode_lifecycle_action),
         wiring: None,
         workspace_bind: None,
@@ -740,15 +710,40 @@ pub fn adapter_by_id(runtime_id: &str) -> Option<Box<dyn RuntimeAdapter>> {
     descriptor_by_id(runtime_id).map(|entry| entry.create_adapter())
 }
 
+/// Per-runtime repair playbooks, implemented by `agent-doctor-repair` and
+/// registered at startup so in-core callers (install, doctor) keep working
+/// without core depending on the playbook crate.
+pub trait RuntimePlaybooks: Send + Sync {
+    /// Config-syntax plus runtime-specific suggestions. The install
+    /// suggestion and dedup stay in [`suggest_runtime_repairs`].
+    fn suggest(&self, runtime_id: &str, probe: &RuntimeProbeReport) -> Vec<SuggestedRepair>;
+    fn apply(
+        &self,
+        runtime_id: &str,
+        probe: &RuntimeProbeReport,
+        only_ids: Option<&[String]>,
+    ) -> Result<PlaybookApplyResult>;
+    fn supports(&self, runtime_id: &str) -> bool;
+}
+
+static PLAYBOOKS: std::sync::OnceLock<&'static dyn RuntimePlaybooks> = std::sync::OnceLock::new();
+
+pub fn register_runtime_playbooks(playbooks: &'static dyn RuntimePlaybooks) {
+    let _ = PLAYBOOKS.set(playbooks);
+}
+
+fn runtime_playbooks() -> Option<&'static dyn RuntimePlaybooks> {
+    PLAYBOOKS.get().copied()
+}
+
 pub fn suggest_runtime_repairs(
     runtime_id: &str,
     probe: &RuntimeProbeReport,
 ) -> Vec<SuggestedRepair> {
     let mut items = suggest_config_syntax_repairs(probe);
     items.extend(
-        descriptor_by_id(runtime_id)
-            .and_then(|entry| entry.suggest_repairs)
-            .map(|suggest| suggest(probe))
+        runtime_playbooks()
+            .map(|playbooks| playbooks.suggest(runtime_id, probe))
             .unwrap_or_default(),
     );
 
@@ -799,13 +794,13 @@ pub fn apply_runtime_playbook_filtered(
     probe: &RuntimeProbeReport,
     only_ids: Option<&[String]>,
 ) -> Result<PlaybookApplyResult> {
-    let descriptor = descriptor_by_id(runtime_id);
-    let runtime_id = descriptor.map(|entry| entry.id).unwrap_or(runtime_id);
-    let apply = descriptor
-        .and_then(|entry| entry.apply_playbook)
-        .with_context(|| format!("runtime '{runtime_id}' has no repair playbook"))?;
+    let runtime_id = descriptor_by_id(runtime_id)
+        .map(|entry| entry.id)
+        .unwrap_or(runtime_id);
     let mut result = apply_config_syntax_repair(probe, only_ids);
-    let runtime = apply(probe, only_ids)?;
+    let playbooks = runtime_playbooks()
+        .with_context(|| format!("repair playbooks are not registered (runtime '{runtime_id}')"))?;
+    let runtime = playbooks.apply(runtime_id, probe, only_ids)?;
     result.executed.extend(runtime.executed);
     result.skipped.extend(runtime.skipped);
     result.guide_path = runtime.guide_path;
@@ -899,8 +894,24 @@ pub fn run_runtime_lifecycle(runtime_id: &str, action: RuntimeLifecycleAction) -
     run(action)
 }
 
+/// Playbook-bearing runtimes. Kept as data so the check works before
+/// `agent-doctor-repair` registers its dispatch table.
+const PLAYBOOK_RUNTIME_IDS: &[&str] = &[
+    "openclaw",
+    "hermes",
+    "deepseek-harness",
+    "claude-code",
+    "codex",
+    "qoder",
+    "workbuddy",
+    "cursor",
+    "zcode",
+];
+
 pub fn runtime_supports_playbook(runtime_id: &str) -> bool {
-    descriptor_by_id(runtime_id).is_some_and(|entry| entry.apply_playbook.is_some())
+    descriptor_by_id(runtime_id)
+        .map(|entry| PLAYBOOK_RUNTIME_IDS.contains(&entry.id))
+        .unwrap_or(false)
 }
 
 pub fn runtime_supports_lifecycle(runtime_id: &str) -> bool {
@@ -910,6 +921,34 @@ pub fn runtime_supports_lifecycle(runtime_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Core tests run without `agent-doctor-repair`; a stub keeps the
+    /// config-syntax composition paths exercisable.
+    struct NoRuntimePlaybooks;
+
+    impl RuntimePlaybooks for NoRuntimePlaybooks {
+        fn suggest(&self, _runtime_id: &str, _probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+            Vec::new()
+        }
+
+        fn apply(
+            &self,
+            _runtime_id: &str,
+            _probe: &RuntimeProbeReport,
+            _only_ids: Option<&[String]>,
+        ) -> Result<PlaybookApplyResult> {
+            Ok(PlaybookApplyResult::default())
+        }
+
+        fn supports(&self, _runtime_id: &str) -> bool {
+            false
+        }
+    }
+
+    fn register_test_playbooks() {
+        register_runtime_playbooks(&NoRuntimePlaybooks);
+    }
+
     use crate::probe::{ProbeCheck, ProbeSeverity};
 
     #[test]
@@ -955,8 +994,6 @@ mod tests {
         let openclaw = descriptor_by_id("openclaw").expect("openclaw");
         assert!(openclaw.schema_probe.is_some());
         assert!(openclaw.deep_probe.is_some());
-        assert!(openclaw.suggest_repairs.is_some());
-        assert!(openclaw.apply_playbook.is_some());
         assert!(openclaw.run_lifecycle.is_some());
     }
 
@@ -964,8 +1001,6 @@ mod tests {
     fn hermes_entry_wires_playbook_and_lifecycle() {
         let hermes = descriptor_by_id("hermes").expect("hermes");
         assert!(hermes.schema_probe.is_some());
-        assert!(hermes.suggest_repairs.is_some());
-        assert!(hermes.apply_playbook.is_some());
         assert!(hermes.run_lifecycle.is_some());
         assert!(hermes.deep_probe.is_some());
     }
@@ -976,8 +1011,6 @@ mod tests {
         assert_eq!(runtime.probe.binary_name, "dsh");
         assert!(runtime.schema_probe.is_some());
         assert!(runtime.deep_probe.is_some());
-        assert!(runtime.suggest_repairs.is_some());
-        assert!(runtime.apply_playbook.is_some());
         assert!(runtime.run_lifecycle.is_some());
         assert_eq!(
             descriptor_by_id("dsh").map(|item| item.id),
@@ -997,8 +1030,6 @@ mod tests {
         assert!(runtime_supports_lifecycle("codex"));
         assert!(runtime_supports_playbook("claude-code"));
         assert!(runtime_supports_playbook("codex"));
-        assert!(claude.suggest_repairs.is_some());
-        assert!(codex.apply_playbook.is_some());
     }
 
     #[test]
@@ -1013,7 +1044,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "missing",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };
@@ -1034,7 +1065,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "invalid JSON: trailing comma",
-                crate::repair::SensitivityLevel::SensitiveLog,
+                crate::repair_types::SensitivityLevel::SensitiveLog,
             )],
             facts: Vec::new(),
         }
@@ -1057,6 +1088,8 @@ mod tests {
 
     #[test]
     fn registry_apply_runs_shared_config_syntax_fix() {
+        register_test_playbooks();
+
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("settings.json");
         std::fs::write(&path, "{\"model\": \"x\",}").unwrap();
@@ -1075,11 +1108,6 @@ mod tests {
             assert!(
                 entry.schema_probe.is_some(),
                 "{} missing schema_probe",
-                entry.id
-            );
-            assert!(
-                entry.apply_playbook.is_some(),
-                "{} missing filtered playbook",
                 entry.id
             );
         }

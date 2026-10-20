@@ -528,6 +528,7 @@ pub fn run() {
     drag_pasteboard::keep_file_drags_from_aborting();
     agent_doctor_core::quiet_system_error_dialogs();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
+    agent_doctor_repair::register();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

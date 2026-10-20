@@ -9,6 +9,8 @@ pub(crate) use registry::{
     WorkspaceBindInput,
 };
 
+pub use registry::{register_runtime_playbooks, RuntimePlaybooks};
+
 pub use registry::{
     adapter_by_id, all_adapters, all_runtime_ids, apply_runtime_playbook,
     apply_runtime_playbook_filtered, descriptor_by_id, installed_agents_with_binary,

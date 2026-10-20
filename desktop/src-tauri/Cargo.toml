@@ -18,6 +18,7 @@ agent-doctor-core.workspace = true
 agent-doctor-mcp.workspace = true
 agent-doctor-ocr.workspace = true
 agent-doctor-prompt.workspace = true
+agent-doctor-repair.workspace = true
 agent-doctor-voice.workspace = true
 anyhow.workspace = true
 base64 = "0.22"

@@ -1,5 +1,6 @@
 pub mod browser_tools_gate;
 mod deep_diagnose;
+pub(crate) mod dispatch;
 mod execute;
 mod explain;
 mod llm;
@@ -9,7 +10,7 @@ mod repair_loop;
 mod restore;
 mod tools;
 
-pub use crate::mask::{
+pub use agent_doctor_core::mask::{
     load_masked_config_snippets, mask_config_file, mask_env_file_content, mask_secret_value,
     merge_env_with_vault, unmask_file_content, MaskedFileSnippet, SecretVault,
 };
@@ -19,18 +20,13 @@ pub use deep_diagnose::{
     DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
     DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
 };
-pub use execute::{
-    execute_repair, probe_health_summary, probe_issue_score, RepairExecuteOptions,
-    RepairExecuteReport,
-};
+pub use execute::{execute_repair, RepairExecuteOptions, RepairExecuteReport};
 pub use explain::explain_runtime;
-pub use llm::LlmConfig;
+
+use agent_doctor_core::repair_types::LlmConfig;
 pub use planner::{
-    build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
-    PlannerOptions, PlannerResult, RepairPlanner,
-};
-pub(crate) use playbooks::json_config::{
-    apply_config_syntax_repair, suggest_config_syntax_repairs,
+    build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, PlannerOptions,
+    PlannerResult, RepairPlanner,
 };
 pub use playbooks::{
     apply_claude_code_playbook, apply_claude_code_playbook_filtered, apply_codex_playbook,
@@ -44,10 +40,7 @@ pub use playbooks::{
     suggest_openclaw_repairs, suggest_qoder_repairs, suggest_workbuddy_repairs,
     suggest_zcode_repairs,
 };
-pub use repair_loop::{
-    diff_probe_checks, execute_repair_loop, CheckChange, CheckDiff, RepairLoopOptions,
-    RepairLoopReport, RepairLoopRound,
-};
+pub use repair_loop::{diff_probe_checks, execute_repair_loop};
 pub use restore::{
     list_runtime_backup_ids, load_backup_snapshot, restore_backup_snapshot, restore_runtime_backup,
     RestoreReport,
@@ -57,10 +50,10 @@ pub use tools::{
     RepairToolExecutor, RepairToolKind, RepairToolResult,
 };
 
-// The redaction/diagnostic/action vocabulary moved to `crate::repair_types`
+// The redaction/diagnostic/action vocabulary moved to `agent_doctor_core::repair_types`
 // so probe, install, workspace, and setup can share it without the repair
 // execution loop. The re-export keeps every existing `crate::repair::*` path.
-pub use crate::repair_types::{
+pub use agent_doctor_core::repair_types::{
     backups_root, build_repair_preview, build_repair_preview_from_bundle, AuditReport,
     BackupSnapshot, DiagnosticBundle, DiagnosticFact, ExplainCheck, ExplainInput,
     ExplainInstallFailure, ExplainReport, ExplainSuggestion, PlaybookApplyResult, RedactedFact,

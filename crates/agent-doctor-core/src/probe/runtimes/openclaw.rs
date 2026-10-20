@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::util::home_join;
-use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 use crate::session_env::{collect_overlay_env, resolve_hermes_overlay};
 
 use super::super::config::{parse_env_file, ParsedConfig};

@@ -9,7 +9,7 @@ use crate::adapters::configured_base_url;
 use crate::exec::ExecBackend;
 use crate::probe::config::parse_config;
 use crate::probe::{ParsedConfig, ProbeCheck, ProbeSeverity, ProbeStatus};
-use crate::repair::SensitivityLevel;
+use crate::repair_types::SensitivityLevel;
 use crate::runtime::{all_runtime_ids, descriptor_by_id, ConfigFormat};
 
 use super::registry::{load_remote_hosts, remote_root_dir, RemoteProjectEntry};

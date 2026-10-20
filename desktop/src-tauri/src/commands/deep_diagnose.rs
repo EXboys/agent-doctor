@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use agent_doctor_core::{
+use agent_doctor_repair::{
     deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
     DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
 };

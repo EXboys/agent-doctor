@@ -112,6 +112,20 @@ export function createSessionsController(deps: SessionsDeps) {
   const expandedSessionLists = new Set<string>();
   /** Chats opened from the island, so they sit at the top until a newer update. */
   const surfacedAt = new Map<string, number>();
+  /** Sidebar row currently showing its rename input. */
+  let renamingSessionId: string | null = null;
+
+  /** Pinned chats first (latest pin on top), then the usual recency rank. */
+  function compareSessionsForSidebar(a: ChatSession, b: ChatSession): number {
+    const pinA = a.pinnedAt ?? 0;
+    const pinB = b.pinnedAt ?? 0;
+    if ((pinA > 0) !== (pinB > 0)) return pinA > 0 ? -1 : 1;
+    if (pinA > 0 && pinB > 0 && pinA !== pinB) return pinB - pinA;
+    return (
+      sidebarSessionRank(b.updatedAt, surfacedAt.get(b.id) ?? 0) -
+      sidebarSessionRank(a.updatedAt, surfacedAt.get(a.id) ?? 0)
+    );
+  }
 
   function commitProjectReorder(
     from: string,
@@ -157,6 +171,14 @@ export function createSessionsController(deps: SessionsDeps) {
     return `${runtimeDisplayName(session.runtime)} · ${formatTime(session.updatedAt)}`;
   }
 
+  function createSessionPinIcon(): HTMLElement {
+    const pin = document.createElement("span");
+    pin.className = "chat-session-pin";
+    pin.setAttribute("aria-hidden", "true");
+    pin.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 3h6l-.7 6.3L17.5 12h-11l3.2-2.7L9 3zm3 9v9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    return pin;
+  }
+
   function renderSessionRow(session: ChatSession, layout: "default" | "compact" = "default"): HTMLElement {
     const isRunning = isChatRunning(session.id);
     const awaitingConfirm =
@@ -165,19 +187,61 @@ export function createSessionsController(deps: SessionsDeps) {
         ? deps.getPendingPermissionBatch().length > 0
         : backgroundChoiceCount(session.id) > 0);
     const doneUnseen = !isRunning && deps.getUnseenCompletedSessionIds().has(session.id);
+    const renaming = renamingSessionId === session.id;
     const row = document.createElement("div");
     row.className = `chat-session${session.id === deps.getStore().activeId ? " is-active" : ""}${
       awaitingConfirm ? " is-awaiting-confirm" : isRunning ? " is-running" : ""
-    }${doneUnseen ? " is-done-unseen" : ""}`;
+    }${doneUnseen ? " is-done-unseen" : ""}${renaming ? " is-renaming" : ""}`;
     row.dataset.sessionId = session.id;
 
-    const main = document.createElement("button");
-    main.type = "button";
+    // The rename input cannot live inside a <button>, so the row drops to a plain block while editing.
+    const main = document.createElement(renaming ? "div" : "button");
+    if (!renaming) {
+      (main as HTMLButtonElement).type = "button";
+    }
     main.className = "chat-session-main";
 
-    const title = document.createElement("span");
-    title.className = "chat-session-title";
-    title.textContent = deps.sessionTitle(session);
+    const titleText = deps.sessionTitle(session);
+    let title: HTMLElement;
+    if (renaming) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = `chat-session-title chat-session-rename${
+        layout === "compact" ? " chat-session-title-inline" : ""
+      }`;
+      input.value = titleText;
+      input.maxLength = 40;
+      input.setAttribute("aria-label", t("chat.sessionMenuRename"));
+      input.spellcheck = false;
+      const stop = (event: Event) => event.stopPropagation();
+      input.addEventListener("pointerdown", stop);
+      input.addEventListener("mousedown", stop);
+      input.addEventListener("click", stop);
+      input.addEventListener("dblclick", stop);
+      input.addEventListener("contextmenu", stop);
+      input.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          input.dataset.cancel = "1";
+          input.blur();
+        }
+      });
+      input.addEventListener("blur", () => commitSessionRename(session, input));
+      title = input;
+    } else {
+      const label = document.createElement("span");
+      label.className = "chat-session-title";
+      if (session.pinnedAt) {
+        label.append(createSessionPinIcon(), document.createTextNode(titleText));
+      } else {
+        label.textContent = titleText;
+      }
+      title = label;
+    }
 
     const metaText = sessionMetaLine(session, isRunning, awaitingConfirm, doneUnseen);
 
@@ -215,6 +279,12 @@ export function createSessionsController(deps: SessionsDeps) {
     del.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteSession(session.id);
+    });
+
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openSessionMenu(event.clientX, event.clientY, session);
     });
 
     row.append(main, del);
@@ -358,6 +428,85 @@ export function createSessionsController(deps: SessionsDeps) {
     projectMenu = menu;
   }
 
+  function openSessionMenu(x: number, y: number, session: ChatSession): void {
+    closeProjectMenu();
+    const menu = document.createElement("div");
+    menu.className = "chat-project-menu";
+    menu.setAttribute("role", "menu");
+
+    const addItem = (label: string, onPick: () => void) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "chat-project-menu-item";
+      item.setAttribute("role", "menuitem");
+      item.textContent = label;
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeProjectMenu();
+        onPick();
+      });
+      menu.append(item);
+    };
+
+    addItem(session.pinnedAt ? t("chat.sessionMenuUnpin") : t("chat.sessionMenuPin"), () => {
+      toggleSessionPin(session);
+    });
+    addItem(t("chat.sessionMenuRename"), () => {
+      beginSessionRename(session.id);
+    });
+
+    document.body.append(menu);
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(x, window.innerWidth - rect.width - 8);
+    const top = Math.min(y, window.innerHeight - rect.height - 8);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+    projectMenu = menu;
+  }
+
+  function toggleSessionPin(session: ChatSession): void {
+    session.pinnedAt = session.pinnedAt ? null : Date.now();
+    deps.saveStore();
+    renderSessionList();
+    deps.setStatus(session.pinnedAt ? t("chat.sessionPinned") : t("chat.sessionUnpinned"), "muted");
+  }
+
+  function beginSessionRename(id: string): void {
+    closeProjectMenu();
+    renamingSessionId = id;
+    renderSessionList();
+    const input = deps.sessionListEl.querySelector<HTMLInputElement>(
+      `.chat-session[data-session-id="${CSS.escape(id)}"] .chat-session-rename`,
+    );
+    if (!input) {
+      renamingSessionId = null;
+      return;
+    }
+    input.focus();
+    input.select();
+    // select() scrolls a long name to the end, so the start disappears.
+    input.scrollLeft = 0;
+  }
+
+  function commitSessionRename(session: ChatSession, input: HTMLInputElement): void {
+    if (renamingSessionId !== session.id) return;
+    renamingSessionId = null;
+    const next = input.value.trim().replace(/\s+/g, " ");
+    if (input.dataset.cancel !== "1" && next && next !== deps.sessionTitle(session)) {
+      if ([...next].length > 40) {
+        deps.setStatus(t("chat.projectRenameTooLong"), "warn");
+      } else {
+        session.title = next;
+        deps.saveStore();
+        deps.setStatus(t("chat.sessionRenameDone", { name: next }), "ok");
+      }
+    }
+    renderSessionList();
+    if (session.id === deps.getStore().activeId) {
+      deps.titleEl.textContent = deps.sessionTitle(deps.activeSession());
+    }
+  }
+
   document.addEventListener("pointerdown", (event) => {
     if (!projectMenu) return;
     const target = event.target;
@@ -402,7 +551,7 @@ export function createSessionsController(deps: SessionsDeps) {
     const groups = listProjectGroupsForSidebar(sessions, doc, t("chat.sessionGroupOther"));
     if (doc && workspaceCount === 0) {
       deps.sessionListEl.appendChild(renderEmptyProjects());
-      for (const session of sessions) {
+      for (const session of [...sessions].sort(compareSessionsForSidebar)) {
         if (!session.messages.some((message) => message.role === "user" || message.role === "assistant")) {
           continue;
         }
@@ -411,18 +560,14 @@ export function createSessionsController(deps: SessionsDeps) {
       return;
     }
     if (!shouldUseProjectSidebar(workspaceCount)) {
-      for (const session of deps.getStore().sessions) {
+      for (const session of [...deps.getStore().sessions].sort(compareSessionsForSidebar)) {
         deps.sessionListEl.appendChild(renderSessionRow(session));
       }
       return;
     }
 
     for (const group of groups) {
-      group.sessions.sort(
-        (a, b) =>
-          sidebarSessionRank(b.updatedAt, surfacedAt.get(b.id) ?? 0) -
-          sidebarSessionRank(a.updatedAt, surfacedAt.get(a.id) ?? 0),
-      );
+      group.sessions.sort(compareSessionsForSidebar);
       const key = sidebarGroupKey(group.name);
       const projectCollapsed = collapsedProjects.has(key);
       const block = document.createElement("section");

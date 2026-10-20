@@ -653,17 +653,6 @@ fn err_response(id: Option<Value>, code: i64, message: String) -> McpResponse {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_hand_reply;
-
-    #[test]
-    fn reply_line_parses_with_newline() {
-        let value = parse_hand_reply("{\"ok\":true,\"result\":{\"clicked\":\"point\"}}\n").unwrap();
-        assert_eq!(value["clicked"], "point");
-    }
-}
-
 fn write_response(response: &McpResponse, content_length: bool) -> Result<()> {
     let body = serde_json::to_string(response)?;
     let stdout = io::stdout();
@@ -675,4 +664,15 @@ fn write_response(response: &McpResponse, content_length: bool) -> Result<()> {
     }
     out.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hand_reply;
+
+    #[test]
+    fn reply_line_parses_with_newline() {
+        let value = parse_hand_reply("{\"ok\":true,\"result\":{\"clicked\":\"point\"}}\n").unwrap();
+        assert_eq!(value["clicked"], "point");
+    }
 }

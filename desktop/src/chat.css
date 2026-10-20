@@ -155,6 +155,12 @@ html, body {
   pointer-events: none;
 }
 
+/* No standing divider between sessions and chat: the side's tinted background
+   separates the panels. The line only shows while hovering or dragging. */
+.chat-splitter-between-sessions-chat::after {
+  background: transparent;
+}
+
 .chat-layout-splitter:hover::after,
 .chat-layout-splitter.is-dragging::after {
   background: rgba(47, 111, 237, 0.45);
@@ -2548,7 +2554,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 .chat-session-group-list .chat-session-delete {
   position: absolute;
   top: 50%;
-  right: 40px;
+  right: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2556,13 +2562,24 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   width: 22px;
   height: 22px;
   padding: 0;
-  color: #d64545;
-  background: rgba(214, 69, 69, 0.1);
+  color: var(--faint);
+  background: rgba(127, 127, 127, 0.14);
 }
 
-.chat-session-group-list .chat-session.is-compact:hover .chat-session-title-inline,
-.chat-session-group-list .chat-session.is-compact:focus-within .chat-session-title-inline {
-  padding-right: 26px;
+.chat-session-group-list .chat-session-delete:hover {
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.24);
+}
+
+/* The delete button takes the time's place, so the time steps aside while it shows. */
+.chat-session-group-list .chat-session:hover .chat-session-when,
+.chat-session-group-list .chat-session:has(.chat-session-delete:focus-visible) .chat-session-when {
+  opacity: 0;
+}
+
+.chat-session-group-list .chat-session:hover .chat-session-title-inline,
+.chat-session-group-list .chat-session:has(.chat-session-delete:focus-visible) .chat-session-title-inline {
+  padding-right: 30px;
 }
 
 .chat-session-group-more {
@@ -2766,6 +2783,24 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chat-session-pin {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: var(--faint);
+}
+.chat-session-rename {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 4px;
+  margin: 0;
+  padding: 1px 4px;
+  color: var(--text, #111);
+  background: var(--panel, #fff);
+  box-shadow: inset 0 0 0 1px var(--line-strong, rgba(15, 23, 42, 0.14));
+}
 .chat-session-meta {
   font-size: 0.66rem;
   color: var(--faint);
@@ -2786,8 +2821,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   opacity: 1;
 }
 .chat-session-delete:hover {
-  color: #fff;
-  background: #d64545;
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.2);
 }
 
 .chat-field {

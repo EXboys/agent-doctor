@@ -1,56 +1,20 @@
-use serde::{Deserialize, Serialize};
-
-use super::execute::{
-    build_audit_report, create_runtime_backup_snapshot, probe_health_summary, probe_issue_score,
-};
-use super::llm::LlmConfig;
+use super::execute::{build_audit_report, create_runtime_backup_snapshot};
+use super::planner::PlannerOptions;
 use super::planner::{
-    build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, MaskedRepairContext,
-    PlannerOptions, RepairPlanner,
+    build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, RepairPlanner,
 };
 use super::restore::restore_backup_snapshot;
-use super::tools::RepairToolResult;
-use super::{AuditReport, BackupSnapshot, RepairPlan, SkippedRepairAction};
-use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
-use crate::runtime::{
+use super::SkippedRepairAction;
+use agent_doctor_core::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
+use agent_doctor_core::repair_types::{
+    probe_health_summary, probe_issue_score, CheckChange, CheckDiff, RepairLoopOptions,
+    RepairLoopReport, RepairLoopRound, RepairToolResult,
+};
+use agent_doctor_core::runtime::{
     apply_runtime_playbook_filtered, runtime_supports_playbook, suggest_runtime_repairs,
 };
 
 const DEFAULT_MAX_ROUNDS: u32 = 5;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepairLoopRound {
-    pub round: u32,
-    pub probe_summary: String,
-    pub issue_score: u32,
-    pub planned_action_ids: Vec<String>,
-    pub executed_action_ids: Vec<String>,
-    pub skipped_actions: Vec<SkippedRepairAction>,
-    pub tool_trace: Vec<RepairToolResult>,
-    pub masked_context: MaskedRepairContext,
-    /// Checks this round made worse; non-empty with `rolled_back` means its edits were undone.
-    #[serde(default)]
-    pub new_issues: Vec<CheckChange>,
-    #[serde(default)]
-    pub rolled_back: bool,
-}
-
-/// One check whose state differs between two probes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckChange {
-    pub id: String,
-    pub title: String,
-    pub status: ProbeStatus,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckDiff {
-    /// Was warn/fail before, now passes (or no longer reported).
-    pub fixed: Vec<CheckChange>,
-    /// New warn/fail, or a check that got worse.
-    pub new_issues: Vec<CheckChange>,
-}
 
 fn status_rank(status: ProbeStatus) -> u8 {
     match status {
@@ -102,30 +66,6 @@ pub fn diff_probe_checks(before: &RuntimeProbeReport, after: &RuntimeProbeReport
         }
     }
     diff
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RepairLoopOptions {
-    pub apply_confirmed_writes: bool,
-    pub max_rounds: Option<u32>,
-    pub use_ai_planner: bool,
-    /// Model for the AI planner; `None` reads it from the environment.
-    #[serde(skip)]
-    pub llm: Option<LlmConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepairLoopReport {
-    pub runtime_id: String,
-    pub plan: RepairPlan,
-    pub backup: BackupSnapshot,
-    pub before_probe: RuntimeProbeReport,
-    pub after_probe: RuntimeProbeReport,
-    pub rounds: Vec<RepairLoopRound>,
-    pub executed_action_ids: Vec<String>,
-    pub skipped_actions: Vec<SkippedRepairAction>,
-    pub audit: AuditReport,
-    pub guide_path: Option<String>,
 }
 
 /// Generic bounded repair loop: probe → mask → plan (optional agent tools) → apply → verify.
@@ -346,8 +286,8 @@ fn tool_applied_ids(trace: &[RepairToolResult]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::{ProbeCheck, ProbeSeverity};
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity};
 
     fn probe(checks: &[(&str, ProbeStatus)]) -> RuntimeProbeReport {
         RuntimeProbeReport {

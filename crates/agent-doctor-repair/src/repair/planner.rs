@@ -1,23 +1,13 @@
+use agent_doctor_core::repair_types::RepairToolResult;
+use agent_doctor_core::repair_types::{LlmConfig, MaskedRepairContext};
 use serde::{Deserialize, Serialize};
 
-use super::llm::{chat_with_tools, max_agent_turns, LlmConfig, LlmTurn};
-use super::tools::{parse_tool_call, RepairToolExecutor, RepairToolResult};
-use super::{RedactedFact, RedactionPolicy, Redactor, SuggestedRepair};
-use crate::mask::{load_masked_config_snippets, MaskedFileSnippet, SecretVault};
-use crate::probe::RuntimeProbeReport;
-use crate::runtime::{adapter_by_id, runtime_allowed_bash_commands};
-
-/// Input for repair planning (LLM or deterministic). Secrets appear as vault tokens only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MaskedRepairContext {
-    pub runtime_id: String,
-    pub redacted_facts: Vec<RedactedFact>,
-    pub masked_files: Vec<MaskedFileSnippet>,
-    pub suggested_repairs: Vec<SuggestedRepair>,
-    /// Local-only vault for merge after planning; never serialized.
-    #[serde(skip)]
-    pub(crate) vault: SecretVault,
-}
+use super::llm::{chat_with_tools, max_agent_turns, LlmTurn};
+use super::tools::{parse_tool_call, RepairToolExecutor};
+use super::{RedactionPolicy, Redactor, SuggestedRepair};
+use agent_doctor_core::mask::{load_masked_config_snippets, SecretVault};
+use agent_doctor_core::probe::RuntimeProbeReport;
+use agent_doctor_core::runtime::{adapter_by_id, runtime_allowed_bash_commands};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlannerOptions {
@@ -42,13 +32,13 @@ pub fn build_masked_repair_context(
         .unwrap_or_default();
     let (masked_files, vault) = load_masked_config_snippets(&config_paths);
 
-    MaskedRepairContext {
-        runtime_id: runtime_id.to_string(),
-        redacted_facts: redactor.redact_bundle(&bundle),
+    MaskedRepairContext::new(
+        runtime_id.to_string(),
+        redactor.redact_bundle(&bundle),
         masked_files,
-        suggested_repairs: suggested,
+        suggested,
         vault,
-    }
+    )
 }
 
 pub trait RepairPlanner {
@@ -141,25 +131,26 @@ fn run_agent_loop(
         }),
         json!({
             "role": "user",
-            "content": serde_json::to_string(&MaskedRepairContext {
-                vault: SecretVault::default(),
-                ..context.clone()
-            })?
+            "content": serde_json::to_string(&MaskedRepairContext::new(
+                context.runtime_id.clone(),
+                context.redacted_facts.clone(),
+                context.masked_files.clone(),
+                context.suggested_repairs.clone(),
+                SecretVault::default(),
+            ))?
         }),
     ];
 
-    let mut executor = RepairToolExecutor::new(
-        &context.runtime_id,
-        std::mem::take(&mut context.vault),
-        options.apply_tool_writes,
-    );
+    let vault = context.take_vault();
+    let mut executor =
+        RepairToolExecutor::new(&context.runtime_id, vault, options.apply_tool_writes);
     let mut tool_trace = Vec::new();
 
     for _ in 0..max_agent_turns() {
         let turn = chat_with_tools(config, &messages)?;
         if turn.tool_calls.is_empty() {
             let action_ids = parse_action_ids_from_turn(&turn);
-            context.vault = executor.into_vault();
+            context.set_vault(executor.into_vault());
             return Ok(PlannerResult {
                 action_ids,
                 tool_trace,
@@ -188,7 +179,7 @@ fn run_agent_loop(
         }
     }
 
-    context.vault = executor.into_vault();
+    context.set_vault(executor.into_vault());
     Ok(PlannerResult {
         action_ids: DeterministicPlanner.plan(context, options)?.action_ids,
         tool_trace,

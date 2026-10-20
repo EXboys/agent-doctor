@@ -1,0 +1,18 @@
+[package]
+name = "agent-doctor-repair"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+agent-doctor-core = { workspace = true }
+anyhow.workspace = true
+dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+toml = "0.8"
+toml_edit.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tempfile = "3"

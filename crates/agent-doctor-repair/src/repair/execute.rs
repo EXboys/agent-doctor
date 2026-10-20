@@ -9,9 +9,9 @@ use super::{
     build_repair_preview_from_bundle, AuditReport, BackupSnapshot, RedactionPolicy, Redactor,
     RepairAction, RepairActionKind, RepairPlan, SensitivityLevel, SnapshotFile,
 };
-use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
-use crate::repair_types::{backups_root, SkippedRepairAction};
-use crate::runtime::{
+use agent_doctor_core::probe::{probe_runtime, RuntimeProbeReport};
+use agent_doctor_core::repair_types::{backups_root, probe_health_summary, SkippedRepairAction};
+use agent_doctor_core::runtime::{
     adapter_by_id, apply_runtime_playbook, run_runtime_lifecycle, runtime_supports_lifecycle,
     runtime_supports_playbook, RuntimeLifecycleAction,
 };
@@ -248,40 +248,7 @@ pub(crate) fn build_audit_report(
     }
 }
 
-pub fn probe_health_summary(report: &RuntimeProbeReport) -> String {
-    let mut pass = 0usize;
-    let mut warn = 0usize;
-    let mut fail = 0usize;
-    let mut not_checked = 0usize;
-    let mut not_applicable = 0usize;
-
-    for check in &report.checks {
-        match check.status {
-            ProbeStatus::Pass => pass += 1,
-            ProbeStatus::Warn => warn += 1,
-            ProbeStatus::Fail => fail += 1,
-            ProbeStatus::NotChecked => not_checked += 1,
-            ProbeStatus::NotApplicable => not_applicable += 1,
-        }
-    }
-
-    format!("pass={pass} warn={warn} fail={fail} not_checked={not_checked} n/a={not_applicable}")
-}
-
 /// Lower is healthier — used by the repair loop to detect progress between rounds.
-pub fn probe_issue_score(report: &RuntimeProbeReport) -> u32 {
-    let mut score = 0u32;
-    for check in &report.checks {
-        score += match check.status {
-            ProbeStatus::Fail => 100,
-            ProbeStatus::Warn => 10,
-            ProbeStatus::NotChecked => 1,
-            ProbeStatus::Pass | ProbeStatus::NotApplicable => 0,
-        };
-    }
-    score
-}
-
 fn unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

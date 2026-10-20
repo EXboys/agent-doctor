@@ -8,19 +8,8 @@ use super::diff::unified_diff;
 use super::discover::{grep_allowed_files, list_allowed_directory};
 use super::patch::patch_structured_file;
 use super::policy::{allowed_paths_for_runtime, bash_command_allowed, path_is_allowed};
-use crate::mask::{is_env_file, mask_config_file, unmask_file_content, SecretVault};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RepairToolKind {
-    Read,
-    ListDir,
-    GrepFiles,
-    WriteFile,
-    SearchReplace,
-    PatchConfig,
-    Bash,
-}
+use agent_doctor_core::mask::{is_env_file, mask_config_file, unmask_file_content, SecretVault};
+use agent_doctor_core::repair_types::{RepairToolKind, RepairToolResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepairToolCall {
@@ -33,16 +22,6 @@ pub struct RepairToolCall {
     pub value: Option<String>,
     pub pattern: Option<String>,
     pub command: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepairToolResult {
-    pub kind: RepairToolKind,
-    pub success: bool,
-    pub masked_output: String,
-    pub applied: bool,
-    pub preview_diff: Option<String>,
-    pub error: Option<String>,
 }
 
 pub struct RepairToolExecutor {
@@ -492,12 +471,12 @@ fn run_shell(command_line: &str) -> Result<std::process::Output> {
     use std::time::Duration;
     let timeout = Duration::from_secs(120);
     #[cfg(unix)]
-    let output = crate::exec::run_output("bash", &["-c", command_line], timeout)
+    let output = agent_doctor_core::exec::run_output("bash", &["-c", command_line], timeout)
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("failed to start bash")?;
 
     #[cfg(windows)]
-    let output = crate::exec::run_output("cmd", &["/C", command_line], timeout)
+    let output = agent_doctor_core::exec::run_output("cmd", &["/C", command_line], timeout)
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("failed to start cmd")?;
 

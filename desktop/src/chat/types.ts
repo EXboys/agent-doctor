@@ -154,6 +154,8 @@ export interface ChatSession {
   autoApprove?: boolean;
   /** Feishu conversation this chat belongs to. One conversation, one chat. */
   channelKey?: string | null;
+  /** Set when the user pins this chat from the sidebar menu. Pinned rows sort first. */
+  pinnedAt?: number | null;
 }
 
 export interface SessionStore {

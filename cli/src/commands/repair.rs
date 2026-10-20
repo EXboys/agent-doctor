@@ -1,8 +1,11 @@
+use agent_doctor_core::repair_types::RepairLoopOptions;
 use agent_doctor_core::{
-    build_explain_input, build_repair_preview_from_bundle, diff_probe_checks, execute_repair,
-    execute_repair_loop, explain_runtime, list_runtime_backup_ids, probe_health_summary,
-    probe_issue_score, probe_runtime, restore_runtime_backup, runtime_supports_playbook,
-    suggest_runtime_repairs, ProbeStatus, RepairExecuteOptions, RepairLoopOptions, RepairRisk,
+    build_explain_input, build_repair_preview_from_bundle, probe_health_summary, probe_issue_score,
+    probe_runtime, runtime_supports_playbook, suggest_runtime_repairs, ProbeStatus, RepairRisk,
+};
+use agent_doctor_repair::{
+    diff_probe_checks, execute_repair, execute_repair_loop, explain_runtime,
+    list_runtime_backup_ids, restore_runtime_backup, RepairExecuteOptions,
 };
 use anyhow::{bail, Result};
 

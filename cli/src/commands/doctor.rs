@@ -1,6 +1,5 @@
-use agent_doctor_core::{
-    build_explain_input, explain_runtime, probe_all_runtimes, probe_issue_score, run_doctor,
-};
+use agent_doctor_core::{build_explain_input, probe_all_runtimes, probe_issue_score, run_doctor};
+use agent_doctor_repair::explain_runtime;
 use anyhow::Result;
 
 use crate::commands::print_explain_report;

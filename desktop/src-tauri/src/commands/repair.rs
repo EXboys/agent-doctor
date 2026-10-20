@@ -1,11 +1,13 @@
 use agent_doctor_core::{
-    build_repair_preview_from_bundle, execute_install_with_progress, execute_repair,
-    list_runtime_backup_ids, needs_binary_install, probe_runtime, restore_runtime_backup,
-    run_doctor, suggest_runtime_repairs, uninstall_runtime, InstallOptions, InstallProgressEvent,
-    InstallReport, ProbeStatus, RepairExecuteOptions, RepairExecuteReport, RestoreReport,
-    RuntimeProbeReport,
+    build_repair_preview_from_bundle, execute_install_with_progress, needs_binary_install,
+    probe_runtime, run_doctor, suggest_runtime_repairs, uninstall_runtime, InstallOptions,
+    InstallProgressEvent, InstallReport, ProbeStatus, RuntimeProbeReport,
 };
 use agent_doctor_mcp::{smoke_browser_navigate, SmokeOptions};
+use agent_doctor_repair::{
+    execute_repair, list_runtime_backup_ids, restore_runtime_backup, RepairExecuteOptions,
+    RepairExecuteReport, RestoreReport,
+};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -231,7 +233,7 @@ pub async fn run_repair_execute_command(
 ) -> Result<RepairPreviewResponse, String> {
     let allow_browser_tools = allow_browser_tools.unwrap_or(true);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let _hold = (!allow_browser_tools).then(agent_doctor_core::HoldBrowserToolsOff::new);
+        let _hold = (!allow_browser_tools).then(agent_doctor_repair::HoldBrowserToolsOff::new);
         execute_repair(
             &runtime,
             &RepairExecuteOptions {

@@ -3,11 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use agent_doctor_core::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 
 use super::should_run;
-use super::PlaybookApplyResult;
+use agent_doctor_core::repair_types::PlaybookApplyResult;
 
 /// Returns a guide file to open when the fix leaves the user one manual step.
 pub(crate) type FixFn = fn(&RuntimeProbeReport) -> Result<Option<PathBuf>>;
@@ -111,7 +111,7 @@ pub(crate) fn installed_version(probe: &RuntimeProbeReport) -> Option<String> {
         .checks
         .iter()
         .find(|check| check.id == "binary.version" && check.status == ProbeStatus::Pass)
-        .and_then(|check| crate::version_check::extract_version(&check.message))
+        .and_then(|check| agent_doctor_core::version_check::extract_version(&check.message))
 }
 
 fn triggered<'a>(
@@ -218,8 +218,8 @@ pub(crate) fn assert_unique_ids(rules: &[Rule]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::ProbeSeverity;
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::ProbeSeverity;
 
     fn check(id: &str, status: ProbeStatus, message: &str) -> ProbeCheck {
         ProbeCheck::new(

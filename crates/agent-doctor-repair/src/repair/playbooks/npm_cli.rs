@@ -22,27 +22,29 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value as JsonValue};
 
-use crate::browser_wire::{ensure_chrome_for_wire, wire_browser_mcp, WireBrowserMcpOptions};
+use agent_doctor_core::browser_wire::{
+    ensure_chrome_for_wire, wire_browser_mcp, WireBrowserMcpOptions,
+};
 
-use crate::adapters::util::home_join;
-use crate::adapters::CodexAdapter;
-use crate::lifecycle::{
+use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use agent_doctor_core::adapters::util::home_join;
+use agent_doctor_core::adapters::CodexAdapter;
+use agent_doctor_core::lifecycle::{
     run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle, run_qoder_lifecycle,
     run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction, NpmCliLifecycleAction,
     QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
 };
-use crate::probe::{ProbeStatus, RuntimeProbeReport};
-use crate::repair::{SkippedRepairAction, SuggestedRepair};
-use crate::setup::{
+use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
+use agent_doctor_core::setup::{
     adopt_live_gateway_as_overlay, clear_codex_placeholder_auth, load_mode_status,
     mode_overlay_ready_from_profile, switch_to_personal_mode, switch_to_team_mode, MODE_PERSONAL,
     MODE_TEAM,
 };
-use crate::workspace::resolve_agent_doctor_binary;
+use agent_doctor_core::workspace::resolve_agent_doctor_binary;
 
 use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
 use super::should_run;
-use super::PlaybookApplyResult;
+use agent_doctor_core::repair_types::PlaybookApplyResult;
 
 const APP_INSTALL_TEXT: &str = "Install the official app. Needs a network connection.";
 const NPM_INSTALL_TEXT: &str =
@@ -306,7 +308,7 @@ fn suggest_npm_cli_repairs(
 
     items.extend(suggest_browser_mcp_repairs(runtime_id, display, probe));
     let items = dedupe_repairs(items);
-    if crate::setup::is_native_subscription(runtime_id) {
+    if agent_doctor_core::setup::is_native_subscription(runtime_id) {
         return items
             .into_iter()
             .filter(|item| !item.id.contains("from-mode") && !item.id.contains("api-key"))
@@ -346,7 +348,7 @@ fn suggest_claude_api_key(probe: &RuntimeProbeReport, mode_ready: bool) -> Vec<S
 }
 
 fn suggest_claude_global_mcp_bleed() -> Vec<SuggestedRepair> {
-    let summary = crate::workspace::backends::claude_global_mcp_summary();
+    let summary = agent_doctor_core::workspace::backends::claude_global_mcp_summary();
     let total = summary.user_scope_servers + summary.claude_json_servers;
     if total == 0 {
         return Vec::new();
@@ -841,16 +843,16 @@ fn rewire_gateway_from_active_mode() -> Result<()> {
 fn wire_browser_mcp_for_runtime(runtime_id: &str) -> Result<()> {
     ensure_chrome_for_wire().map_err(|error| anyhow::anyhow!("discover Chrome: {error}"))?;
     let resolved = resolve_agent_doctor_binary().context("resolve agent-doctor binary")?;
-    let binary = crate::workspace::ensure_stable_agent_doctor_cli(&resolved)?;
+    let binary = agent_doctor_core::workspace::ensure_stable_agent_doctor_cli(&resolved)?;
     let mut options = WireBrowserMcpOptions::with_binary(binary);
     options.runtimes = vec![runtime_id.to_string()];
-    if let Ok(doc) = crate::workspace::load_workspaces() {
+    if let Ok(doc) = agent_doctor_core::workspace::load_workspaces() {
         if let Some(active) = doc.active.as_ref() {
             if let Some(entry) = doc.workspaces.get(active) {
                 options.project_path = Some(entry.path.clone());
                 options.codex_home = Some(entry.codex_home.clone());
                 options.hermes_home = Some(
-                    crate::adapters::util::home_join(".hermes/profiles")
+                    agent_doctor_core::adapters::util::home_join(".hermes/profiles")
                         .join(&entry.hermes_profile),
                 );
                 options.openclaw_workspace = Some(entry.openclaw_workspace.clone());
@@ -962,7 +964,7 @@ fn patch_codex_wire_api() -> Result<()> {
 
     // Keep top-level openai_base_url aligned with the active provider base_url when present.
     if let Some(base) = entry.get("base_url").and_then(|v| v.as_str()) {
-        let fixed = crate::setup::merge::codex_responses_gateway_url(base);
+        let fixed = agent_doctor_core::setup::merge::codex_responses_gateway_url(base);
         if fixed != base {
             entry["base_url"] = toml_edit::value(&fixed);
         }
@@ -1008,8 +1010,8 @@ fn api_key_guide_path(file_name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::{ProbeCheck, ProbeSeverity};
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity};
 
     fn probe_with(runtime_id: &str, checks: Vec<ProbeCheck>) -> RuntimeProbeReport {
         RuntimeProbeReport {

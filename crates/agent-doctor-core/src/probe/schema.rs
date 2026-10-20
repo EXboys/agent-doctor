@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::repair::SensitivityLevel;
+use crate::repair_types::SensitivityLevel;
 
 use super::{ProbeCheck, ProbeSeverity, ProbeStatus};
 

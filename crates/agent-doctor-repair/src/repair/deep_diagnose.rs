@@ -4,21 +4,27 @@
 //! Q&A uses read-only tools (list/grep/read with secrets masked). Fixing goes
 //! through `execute_repair_loop` (backup → plan → apply → re-probe).
 
+use agent_doctor_core::repair_types::LlmConfig;
+use agent_doctor_core::repair_types::MaskedRepairContext;
+use agent_doctor_core::repair_types::RepairToolKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::execute::probe_issue_score;
-use super::llm::{chat_with_tool_set, max_agent_turns, read_only_tool_definitions, LlmConfig};
-use super::planner::{build_masked_repair_context, MaskedRepairContext};
-use super::repair_loop::{diff_probe_checks, execute_repair_loop, CheckChange, RepairLoopOptions};
-use super::tools::{parse_tool_call, RepairToolExecutor, RepairToolKind};
+use super::llm::{chat_with_tool_set, max_agent_turns, read_only_tool_definitions};
+use super::planner::build_masked_repair_context;
+use super::repair_loop::{diff_probe_checks, execute_repair_loop};
+use super::tools::{parse_tool_call, RepairToolExecutor};
 use super::SkippedRepairAction;
-use crate::probe::{probe_runtime, ProbeStatus};
-use crate::runtime::suggest_runtime_repairs;
-use crate::setup::{load_active_personal_provider, normalize_protocol, PROTOCOL_ANTHROPIC};
+use agent_doctor_core::probe::{probe_runtime, ProbeStatus};
+use agent_doctor_core::repair_types::probe_issue_score;
+use agent_doctor_core::repair_types::{CheckChange, RepairLoopOptions};
+use agent_doctor_core::runtime::suggest_runtime_repairs;
+use agent_doctor_core::setup::{
+    load_active_personal_provider, normalize_protocol, PROTOCOL_ANTHROPIC,
+};
 
 /// Error prefixes the desktop maps to plain-language guidance.
 pub const DEEP_DIAGNOSE_NO_PROVIDER: &str = "deep_diagnose_no_provider";
@@ -137,11 +143,7 @@ pub fn run_deep_diagnose_chat(
     messages.push(json!({ "role": "user", "content": question }));
 
     let tools = read_only_tool_definitions();
-    let mut executor = RepairToolExecutor::new(
-        &options.runtime_id,
-        std::mem::take(&mut context.vault),
-        false,
-    );
+    let mut executor = RepairToolExecutor::new(&options.runtime_id, context.take_vault(), false);
     let mut tool_calls = 0usize;
 
     for round in 1..=max_agent_turns() {

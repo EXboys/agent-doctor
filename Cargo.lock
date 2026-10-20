@@ -26,6 +26,7 @@ dependencies = [
  "agent-doctor-core",
  "agent-doctor-mcp",
  "agent-doctor-prompt",
+ "agent-doctor-repair",
  "anyhow",
  "clap",
  "ctrlc",
@@ -68,6 +69,7 @@ dependencies = [
  "agent-doctor-mcp",
  "agent-doctor-ocr",
  "agent-doctor-prompt",
+ "agent-doctor-repair",
  "agent-doctor-voice",
  "anyhow",
  "base64 0.22.1",
@@ -135,6 +137,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doctor-repair"
+version = "0.1.92-beta.6"
+dependencies = [
+ "agent-doctor-core",
+ "anyhow",
+ "dirs",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "toml 0.8.2",
+ "toml_edit 0.22.27",
 ]
 
 [[package]]

@@ -9,15 +9,19 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
-use crate::repair::{SkippedRepairAction, SuggestedRepair};
+use crate::repair_types::{PlaybookApplyResult, SkippedRepairAction, SuggestedRepair};
 
-use super::should_run;
-use super::PlaybookApplyResult;
+/// Filter kept identical to the playbook-side helper: `None` runs everything.
+pub(crate) fn should_run(action_id: &str, only_ids: Option<&[String]>) -> bool {
+    only_ids
+        .map(|ids| ids.iter().any(|id| id == action_id))
+        .unwrap_or(true)
+}
 
 pub(crate) const CONFIG_SYNTAX_FIX_ID: &str = "fix-config-syntax";
 
 /// Missing file reads as `{}` so callers can create it.
-pub(crate) fn load_json_config(path: &Path) -> Result<Value> {
+pub fn load_json_config(path: &Path) -> Result<Value> {
     if path.exists() {
         let raw = fs::read_to_string(path)?;
         serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
@@ -27,7 +31,7 @@ pub(crate) fn load_json_config(path: &Path) -> Result<Value> {
 }
 
 /// Writes pretty JSON, keeping a timestamped `.bak` copy of any existing file.
-pub(crate) fn write_json_config(path: &Path, root: &Value) -> Result<()> {
+pub fn write_json_config(path: &Path, root: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -206,7 +210,7 @@ fn strip_trailing_commas(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::probe::ProbeSeverity;
-    use crate::repair::SensitivityLevel;
+    use crate::repair_types::SensitivityLevel;
 
     fn probe_with(checks: Vec<ProbeCheck>) -> RuntimeProbeReport {
         RuntimeProbeReport {

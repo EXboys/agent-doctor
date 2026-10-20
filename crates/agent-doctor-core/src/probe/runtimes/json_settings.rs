@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::repair::DiagnosticFact;
+use crate::repair_types::DiagnosticFact;
 
 use super::super::config::ParsedConfig;
 use super::super::schema::schema_error;

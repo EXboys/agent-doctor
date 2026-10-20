@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
 
-use crate::adapters::util::home_join;
-use crate::adapters::HermesAdapter;
-use crate::lifecycle::{run_hermes_lifecycle, HermesLifecycleAction};
-use crate::presets::{load_profiles, HermesProfilePreset};
-use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::SuggestedRepair;
-use crate::repair_types::PlaybookApplyResult;
+use agent_doctor_core::adapters::util::home_join;
+use agent_doctor_core::adapters::HermesAdapter;
+use agent_doctor_core::lifecycle::{run_hermes_lifecycle, HermesLifecycleAction};
+use agent_doctor_core::presets::{load_profiles, HermesProfilePreset};
+use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
+use agent_doctor_core::repair_types::PlaybookApplyResult;
 
 use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
 
@@ -251,7 +251,7 @@ fn active_hermes_preset() -> Result<HermesProfilePreset> {
 }
 
 fn repair_hermes_dotted_model() -> Result<()> {
-    use crate::setup::merge::{
+    use agent_doctor_core::setup::merge::{
         hermes_chat_base_url, hermes_model_will_be_rewritten, model_is_claude,
         restore_hyphenated_vendor_model,
     };
@@ -466,8 +466,8 @@ pub fn dedupe_env_key_lines(raw: &str, key: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
 

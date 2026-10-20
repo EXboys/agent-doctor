@@ -11,7 +11,7 @@ use crate::adapter::RuntimeAdapter;
 use crate::adapters::util::home_join;
 use crate::adapters::{configured_base_url, CodexAdapter, HermesAdapter};
 use crate::profile::{read_agent_profile, ProviderKind};
-use crate::repair::{DiagnosticFact, SensitivityLevel};
+use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 use crate::setup::{COMPANY_DEFAULT_MODEL, MODE_PERSONAL, MODE_TEAM};
 
 use super::{ProbeCheck, ProbeSeverity, ProbeStatus};

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::util::{find_all_binaries, read_version_result};
-use crate::repair::{DiagnosticBundle, DiagnosticFact, SensitivityLevel};
+use crate::repair_types::{DiagnosticBundle, DiagnosticFact, SensitivityLevel};
 use crate::runtime::{adapter_by_id, all_adapters, descriptor_by_id, ConfigFormat};
 
 pub(crate) mod config;
@@ -51,7 +51,7 @@ pub struct ProbeCheck {
 }
 
 impl ProbeCheck {
-    pub(crate) fn new(
+    pub fn new(
         id: impl Into<String>,
         title: impl Into<String>,
         status: ProbeStatus,

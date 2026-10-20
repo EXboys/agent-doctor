@@ -1,12 +1,14 @@
 use anyhow::Result;
 
-use crate::adapters::DEEPSEEK_HARNESS_VERSION;
-use crate::lifecycle::{run_deepseek_harness_lifecycle, DeepSeekHarnessLifecycleAction};
-use crate::probe::{ProbeStatus, RuntimeProbeReport};
 use crate::repair::SuggestedRepair;
+use agent_doctor_core::adapters::DEEPSEEK_HARNESS_VERSION;
+use agent_doctor_core::lifecycle::{
+    run_deepseek_harness_lifecycle, DeepSeekHarnessLifecycleAction,
+};
+use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
 
 use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
-use super::PlaybookApplyResult;
+use agent_doctor_core::repair_types::PlaybookApplyResult;
 
 /// DeepSeek Harness repair rules. `{pinned}` in text becomes the pinned package version.
 /// The version check only exists when the binary is installed, so install and pin never both run.
@@ -79,8 +81,8 @@ pub fn apply_deepseek_harness_playbook_filtered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::{ProbeCheck, ProbeSeverity};
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity};
 
     #[test]
     fn suggests_pin_for_version_warning() {

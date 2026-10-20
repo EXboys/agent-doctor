@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Result};
 
 use super::policy::path_is_allowed;
-use crate::mask::{mask_config_file, SecretVault};
+use agent_doctor_core::mask::{mask_config_file, SecretVault};
 
 const MAX_LIST_ENTRIES: usize = 200;
 const MAX_GREP_MATCHES: usize = 50;

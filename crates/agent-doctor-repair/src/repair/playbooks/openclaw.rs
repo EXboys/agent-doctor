@@ -4,16 +4,18 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::adapters::util::home_join;
-use crate::lifecycle::{run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClawLifecycleAction};
-use crate::probe::{ProbeStatus, RuntimeProbeReport};
-use crate::profile::read_company_profile;
 use crate::repair::playbooks::hermes::dedupe_env_key_lines;
 use crate::repair::SuggestedRepair;
+use agent_doctor_core::adapters::util::home_join;
+use agent_doctor_core::lifecycle::{
+    run_openclaw_doctor_fix, run_openclaw_lifecycle, OpenClawLifecycleAction,
+};
+use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
+use agent_doctor_core::profile::read_company_profile;
 
-use super::json_config::{load_json_config, write_json_config};
 use super::rule::{apply_rules, suggest_rules, CheckMatch, Fix, Rule, Versions};
-use super::PlaybookApplyResult;
+use agent_doctor_core::config_syntax::{load_json_config, write_json_config};
+use agent_doctor_core::repair_types::PlaybookApplyResult;
 
 const DEFAULT_TOOL_PROFILE: &str = "coding";
 const OPENCLAW_API_KEY_VARS: &[&str] = &["OPENAI_API_KEY", "ANTHROPIC_API_KEY"];
@@ -186,7 +188,7 @@ fn create_openclaw_config() -> Result<()> {
         .flatten()
         .and_then(|profile| profile.gateway_url);
     if let Some(url) = gateway_url {
-        crate::setup::merge::apply_openclaw(&url, "", None)?;
+        agent_doctor_core::setup::merge::apply_openclaw(&url, "", None)?;
         let mut root = load_json_config(&path)?;
         if let Some(obj) = root.as_object_mut() {
             obj.entry("env").or_insert_with(|| json!({ "vars": {} }));
@@ -205,16 +207,16 @@ fn create_openclaw_config() -> Result<()> {
 
 fn apply_gateway_from_company_profile() -> Result<()> {
     let url = company_gateway_url()?;
-    crate::setup::merge::apply_openclaw(&url, "", None)?;
+    agent_doctor_core::setup::merge::apply_openclaw(&url, "", None)?;
     Ok(())
 }
 
 fn migrate_legacy_gateway_url() -> Result<()> {
     let path = openclaw_config_path();
     let root = load_json_config(&path)?;
-    let url =
-        crate::adapters::configured_base_url(&root).context("no LLM base URL found to migrate")?;
-    crate::setup::merge::apply_openclaw(&url, "", None)?;
+    let url = agent_doctor_core::adapters::configured_base_url(&root)
+        .context("no LLM base URL found to migrate")?;
+    agent_doctor_core::setup::merge::apply_openclaw(&url, "", None)?;
     Ok(())
 }
 
@@ -379,8 +381,8 @@ fn api_key_guide_path() -> Result<PathBuf> {
 mod tests {
     use super::super::rule;
     use super::*;
-    use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
     use crate::repair::SensitivityLevel;
+    use agent_doctor_core::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
 
     fn sample_probe(checks: Vec<ProbeCheck>) -> RuntimeProbeReport {
         RuntimeProbeReport {

@@ -24,6 +24,10 @@ fn raw_command_spawn_is_confined_or_marked() {
             .join("../agent-doctor-prompt/src")
             .canonicalize()
             .expect("agent-doctor-prompt/src next to agent-doctor-core"),
+        manifest
+            .join("../agent-doctor-repair/src")
+            .canonicalize()
+            .expect("agent-doctor-repair/src next to agent-doctor-core"),
     ];
     let mut offenders = Vec::new();
     for src in &sources {

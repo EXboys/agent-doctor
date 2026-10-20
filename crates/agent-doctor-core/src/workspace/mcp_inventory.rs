@@ -176,7 +176,7 @@ pub fn list_mcp_inventory_with_doc(doc: &WorkspacesDocument) -> McpInventoryRepo
 /// Attach Browser MCP probe checks for Claude / Codex / Hermes / OpenClaw.
 pub fn probe_browser_mcp_for_runtime(runtime_id: &str, checks: &mut Vec<crate::probe::ProbeCheck>) {
     use crate::probe::{ProbeCheck, ProbeSeverity, ProbeStatus};
-    use crate::repair::SensitivityLevel;
+    use crate::repair_types::SensitivityLevel;
 
     if !matches!(
         runtime_id,

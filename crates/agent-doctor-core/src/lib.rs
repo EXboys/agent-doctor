@@ -1,6 +1,8 @@
 pub mod adapter;
 pub mod adapters;
 pub mod browser_wire;
+/// Shared JSON config-syntax suggestions and fixes used by every runtime playbook.
+pub mod config_syntax;
 pub mod doctor;
 pub mod edition;
 pub mod evotown;
@@ -14,7 +16,6 @@ pub mod presets;
 pub mod probe;
 pub mod profile;
 pub mod remote;
-pub mod repair;
 /// Redaction, diagnostic, and typed-action types shared by probe, install,
 /// workspace, setup, and the repair crate.
 pub mod repair_types;
@@ -145,27 +146,21 @@ pub use remote::{
     RemoteHostEntry, RemoteHostProbeReport, RemoteHostsDocument, RemoteProjectEntry,
     RemoteRuntimeDoctorResult, SshBackend, SshTarget,
 };
-pub use repair::{
-    allowed_paths_for_runtime, apply_deepseek_harness_playbook,
-    apply_deepseek_harness_playbook_filtered, apply_hermes_playbook,
-    apply_hermes_playbook_filtered, build_repair_preview, build_repair_preview_from_bundle,
-    diff_probe_checks, execute_repair, execute_repair_loop, explain_runtime,
-    list_runtime_backup_ids, mask_secret_value, merge_env_with_vault, probe_health_summary,
-    probe_issue_score, restore_runtime_backup, suggest_deepseek_harness_repairs,
-    suggest_hermes_repairs, unmask_file_content, AiRepairPlanner, AuditReport, BackupSnapshot,
-    CheckChange, CheckDiff, DeterministicPlanner, DiagnosticBundle, DiagnosticFact, ExplainCheck,
-    ExplainInput, ExplainInstallFailure, ExplainReport, ExplainSuggestion, HoldBrowserToolsOff,
-    LlmConfig, MaskedFileSnippet, MaskedRepairContext, PlannerOptions, PlannerResult,
-    PlaybookApplyResult, RedactedFact, RedactionPolicy, Redactor, RepairAction, RepairActionKind,
-    RepairExecuteOptions, RepairExecuteReport, RepairLoopOptions, RepairLoopReport,
-    RepairLoopRound, RepairPlan, RepairPlanner, RepairRisk, RepairToolCall, RepairToolExecutor,
-    RepairToolKind, RepairToolResult, RestoreReport, SecretVault, SensitivityLevel,
-    SkippedRepairAction, SnapshotFile, SuggestedRepair,
+// Repair vocabulary that lives in core; the playbooks and execution loop
+// moved to `agent-doctor-repair` (see its facade for those symbols).
+pub use install::{register_install_repair_followups, InstallRepairFollowups};
+pub use mask::{
+    load_masked_config_snippets, mask_config_file, mask_env_file_content, mask_secret_value,
+    merge_env_with_vault, unmask_file_content, MaskedFileSnippet, SecretVault,
 };
-pub use repair::{
-    deep_diagnose_llm_config, run_deep_diagnose_chat, run_deep_repair, DeepDiagnoseEvent,
-    DeepDiagnoseOptions, DeepDiagnoseReport, DeepDiagnoseTurn, DeepRepairSummary,
-    DEEP_DIAGNOSE_CANCELLED, DEEP_DIAGNOSE_NO_PROVIDER, DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL,
+pub use repair_types::{
+    backups_root, build_repair_preview, build_repair_preview_from_bundle, fallback_explain,
+    probe_health_summary, probe_issue_score, AuditReport, BackupSnapshot, CheckChange, CheckDiff,
+    DiagnosticBundle, DiagnosticFact, ExplainCheck, ExplainInput, ExplainInstallFailure,
+    ExplainReport, ExplainSuggestion, LlmConfig, MaskedRepairContext, PlaybookApplyResult,
+    RedactedFact, RedactionPolicy, Redactor, RepairAction, RepairActionKind, RepairLoopOptions,
+    RepairLoopReport, RepairLoopRound, RepairPlan, RepairRisk, RepairToolKind, RepairToolResult,
+    SensitivityLevel, SkippedRepairAction, SnapshotFile, SuggestedRepair,
 };
 pub use runtime::{
     adapter_by_id, all_adapters, all_runtime_ids, apply_runtime_playbook,
@@ -174,6 +169,7 @@ pub use runtime::{
     suggest_runtime_repairs, InstalledAgent, RuntimeCatalogEntry, RuntimeDescriptor,
     RuntimeLifecycleAction, RuntimeProbeSpec,
 };
+pub use runtime::{register_runtime_playbooks, RuntimePlaybooks};
 pub use session_launch::{
     claude_cli_deep_link, open_interactive_session, resolve_session_cwd, OpenSessionMethod,
     OpenSessionOptions, OpenSessionReport,

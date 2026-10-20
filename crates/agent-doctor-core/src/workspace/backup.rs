@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 
 use crate::adapters::util::home_join;
-use crate::repair::{backups_root, BackupSnapshot, SensitivityLevel, SnapshotFile};
+use crate::repair_types::{backups_root, BackupSnapshot, SensitivityLevel, SnapshotFile};
 
 use super::WorkspaceEntry;
 

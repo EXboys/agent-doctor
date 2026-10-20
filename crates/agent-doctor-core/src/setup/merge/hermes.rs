@@ -147,12 +147,12 @@ pub fn apply_hermes_slot(
 
 /// Claude ids are the ones Hermes is supposed to hyphenate. Everything else
 /// (GLM, Qwen, Kimi, MiniMax) must keep the vendor's dotted spelling.
-pub(crate) fn model_is_claude(model: &str) -> bool {
+pub fn model_is_claude(model: &str) -> bool {
     model.trim().to_ascii_lowercase().starts_with("claude")
 }
 
 /// `true` when Hermes would send a name the vendor will reject.
-pub(crate) fn hermes_model_will_be_rewritten(
+pub fn hermes_model_will_be_rewritten(
     provider: &str,
     api_mode: &str,
     base_url: &str,
@@ -172,7 +172,7 @@ pub(crate) fn hermes_model_will_be_rewritten(
 }
 
 /// Map a known Anthropic Messages URL back to that vendor's OpenAI-compatible URL.
-pub(crate) fn hermes_chat_base_url(url: &str) -> String {
+pub fn hermes_chat_base_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
     let lower = trimmed.to_ascii_lowercase();
     if !lower.contains("/anthropic") {
@@ -197,7 +197,7 @@ pub(crate) fn hermes_chat_base_url(url: &str) -> String {
 }
 
 /// Undo Hermes's dot-to-hyphen pass for vendor ids whose canonical form uses a dot.
-pub(crate) fn restore_hyphenated_vendor_model(model: &str) -> String {
+pub fn restore_hyphenated_vendor_model(model: &str) -> String {
     let trimmed = model.trim();
     if let Some(restored) = restore_version_dot(trimmed, "glm-") {
         return restored;

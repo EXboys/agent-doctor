@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::runtime::{adapter_by_id, bash_command_allowed_for_runtime};
+use agent_doctor_core::runtime::{adapter_by_id, bash_command_allowed_for_runtime};
 
 /// Paths the repair agent may read or edit for a runtime.
 pub fn allowed_paths_for_runtime(runtime_id: &str) -> Vec<PathBuf> {
@@ -37,8 +37,8 @@ pub fn bash_command_allowed(runtime_id: &str, command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lifecycle::hermes::hermes_install_shell_command;
-    use crate::lifecycle::openclaw::openclaw_install_shell_command;
+    use agent_doctor_core::lifecycle::hermes::hermes_install_shell_command;
+    use agent_doctor_core::lifecycle::openclaw::openclaw_install_shell_command;
 
     #[test]
     fn allows_hermes_lifecycle_commands() {

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::lifecycle::{
@@ -14,11 +14,37 @@ use crate::lifecycle::{
     zcode_update_shell_command,
 };
 use crate::probe::{probe_runtime, ProbeStatus, RuntimeProbeReport};
-use crate::repair::{
-    execute_repair_loop, explain_runtime, probe_health_summary, probe_issue_score, ExplainReport,
-    RepairLoopOptions, RepairLoopReport, SkippedRepairAction,
+use crate::repair_types::{
+    fallback_explain, probe_health_summary, probe_issue_score, ExplainReport, RepairLoopOptions,
+    RepairLoopReport, SkippedRepairAction,
 };
 use crate::runtime::{descriptor_by_id, runtime_supports_lifecycle, suggest_runtime_repairs};
+
+/// Post-install repair capabilities owned by `agent-doctor-repair`, injected
+/// at startup so `install --explain` / `--repair-after` keep working without
+/// core depending on the playbook crate.
+pub trait InstallRepairFollowups: Send + Sync {
+    fn explain(
+        &self,
+        input: &crate::repair_types::ExplainInput,
+    ) -> anyhow::Result<crate::repair_types::ExplainReport>;
+    fn run_repair_loop(
+        &self,
+        runtime_id: &str,
+        options: &crate::repair_types::RepairLoopOptions,
+    ) -> anyhow::Result<crate::repair_types::RepairLoopReport>;
+}
+
+static FOLLOWUPS: std::sync::OnceLock<&'static dyn InstallRepairFollowups> =
+    std::sync::OnceLock::new();
+
+pub fn register_install_repair_followups(followups: &'static dyn InstallRepairFollowups) {
+    let _ = FOLLOWUPS.set(followups);
+}
+
+pub(crate) fn install_repair_followups() -> Option<&'static dyn InstallRepairFollowups> {
+    FOLLOWUPS.get().copied()
+}
 
 fn is_install_failure_action(id: &str) -> bool {
     id.ends_with("-install")
@@ -204,15 +230,19 @@ where
                 "Running repair loop for remaining issues…",
                 92,
             ));
-            let loop_report = execute_repair_loop(
-                runtime_id,
-                &RepairLoopOptions {
-                    apply_confirmed_writes: true,
-                    max_rounds: None,
-                    use_ai_planner,
-                    llm: None,
-                },
-            )?;
+            let loop_report = install_repair_followups()
+                .with_context(|| {
+                    "repair follow-ups are not registered (agent-doctor-repair missing?)"
+                })?
+                .run_repair_loop(
+                    runtime_id,
+                    &RepairLoopOptions {
+                        apply_confirmed_writes: true,
+                        max_rounds: None,
+                        use_ai_planner,
+                        llm: None,
+                    },
+                )?;
             after_probe = loop_report.after_probe.clone();
             install_succeeded = !install_needed || install_attempt_ok(&after_probe, updating);
             Some(loop_report)
@@ -644,7 +674,7 @@ fn build_and_explain(
                         .join("\n")
                 })
                 .unwrap_or_default();
-            crate::repair::ExplainInstallFailure {
+            crate::repair_types::ExplainInstallFailure {
                 action_id: item.id.clone(),
                 reason: item.reason.clone(),
                 log_path: log_path.map(str::to_string),
@@ -653,7 +683,11 @@ fn build_and_explain(
         });
 
     let input = build_explain_input(runtime_id, probe, install_failure);
-    explain_runtime(&input)
+    match install_repair_followups() {
+        Some(followups) => followups.explain(&input),
+        // No LLM stack registered: the deterministic summary still explains the failure.
+        None => Ok(fallback_explain(&input)),
+    }
 }
 
 fn manual_fallback_steps(
@@ -713,9 +747,9 @@ fn manual_fallback_steps(
 pub fn build_explain_input(
     runtime_id: &str,
     probe: &RuntimeProbeReport,
-    install_failure: Option<crate::repair::ExplainInstallFailure>,
-) -> crate::repair::ExplainInput {
-    use crate::repair::{ExplainCheck, ExplainInput, ExplainSuggestion};
+    install_failure: Option<crate::repair_types::ExplainInstallFailure>,
+) -> crate::repair_types::ExplainInput {
+    use crate::repair_types::{ExplainCheck, ExplainInput, ExplainSuggestion};
 
     let suggested = suggest_runtime_repairs(runtime_id, probe);
     ExplainInput {
@@ -793,7 +827,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "missing",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };
@@ -812,7 +846,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "Installed 0.20.1 is older than this app can use (0.21.3)",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };
@@ -832,7 +866,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "missing",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };
@@ -854,7 +888,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "missing",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };
@@ -876,7 +910,7 @@ mod tests {
                 ProbeStatus::Fail,
                 ProbeSeverity::Error,
                 "missing",
-                crate::repair::SensitivityLevel::Public,
+                crate::repair_types::SensitivityLevel::Public,
             )],
             facts: Vec::new(),
         };

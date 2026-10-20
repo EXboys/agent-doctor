@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::mask::{MaskedFileSnippet, SecretVault};
+use crate::probe::{ProbeStatus, RuntimeProbeReport};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SensitivityLevel {
@@ -385,6 +388,270 @@ fn looks_secret_value(value: &str) -> bool {
             || trimmed.starts_with("xox")
             || trimmed.starts_with("AKIA")
             || trimmed.contains("_API_KEY="))
+}
+
+// ===== Loop, tool, and planner vocabulary (moved with the repair split) =====
+
+/// One repair tool an LLM planner may call, mirrored from tool-call JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepairToolKind {
+    Read,
+    ListDir,
+    GrepFiles,
+    WriteFile,
+    SearchReplace,
+    PatchConfig,
+    Bash,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairToolResult {
+    pub kind: RepairToolKind,
+    pub success: bool,
+    pub masked_output: String,
+    pub applied: bool,
+    pub preview_diff: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Input for repair planning (LLM or deterministic). Secrets appear as vault tokens only.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MaskedRepairContext {
+    pub runtime_id: String,
+    pub redacted_facts: Vec<RedactedFact>,
+    pub masked_files: Vec<MaskedFileSnippet>,
+    pub suggested_repairs: Vec<SuggestedRepair>,
+    /// Local-only vault for merge after planning; never serialized.
+    #[serde(skip)]
+    vault: SecretVault,
+}
+
+impl MaskedRepairContext {
+    /// Struct-literal construction stays possible across crates; the vault
+    /// itself is only reachable through [`Self::set_vault`] / [`Self::take_vault`].
+    #[allow(clippy::needless_update)]
+    pub fn new(
+        runtime_id: String,
+        redacted_facts: Vec<RedactedFact>,
+        masked_files: Vec<MaskedFileSnippet>,
+        suggested_repairs: Vec<SuggestedRepair>,
+        vault: SecretVault,
+    ) -> Self {
+        Self {
+            runtime_id,
+            redacted_facts,
+            masked_files,
+            suggested_repairs,
+            vault,
+        }
+    }
+
+    pub fn set_vault(&mut self, vault: SecretVault) {
+        self.vault = vault;
+    }
+
+    /// Takes the vault out for the merge-back phase.
+    pub fn take_vault(&mut self) -> SecretVault {
+        std::mem::take(&mut self.vault)
+    }
+}
+
+/// OpenAI-compatible gateway endpoint plus credentials. `Debug` never shows the key.
+#[derive(Clone)]
+pub struct LlmConfig {
+    pub api_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("api_url", &self.api_url)
+            .field("api_key", &"<redacted>")
+            .field("model", &self.model)
+            .finish()
+    }
+}
+
+impl LlmConfig {
+    /// OpenAI-compatible gateway base (e.g. `https://api.deepseek.com/v1`) or a full
+    /// `.../chat/completions` URL.
+    pub fn from_gateway(gateway_url: &str, api_key: &str, model: &str) -> Self {
+        let base = gateway_url.trim().trim_end_matches('/');
+        let api_url = if base.ends_with("/chat/completions") {
+            base.to_string()
+        } else {
+            format!("{base}/chat/completions")
+        };
+        Self {
+            api_url,
+            api_key: api_key.trim().to_string(),
+            model: model.trim().to_string(),
+        }
+    }
+
+    pub fn from_env() -> Option<Self> {
+        let api_key = std::env::var("AGENT_DOCTOR_LLM_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .ok()?;
+        if api_key.trim().is_empty() {
+            return None;
+        }
+        let api_url = std::env::var("AGENT_DOCTOR_LLM_API_URL")
+            .unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string());
+        let model =
+            std::env::var("AGENT_DOCTOR_LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+        Some(Self {
+            api_url,
+            api_key,
+            model,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairLoopRound {
+    pub round: u32,
+    pub probe_summary: String,
+    pub issue_score: u32,
+    pub planned_action_ids: Vec<String>,
+    pub executed_action_ids: Vec<String>,
+    pub skipped_actions: Vec<SkippedRepairAction>,
+    pub tool_trace: Vec<RepairToolResult>,
+    pub masked_context: MaskedRepairContext,
+    /// Checks this round made worse; non-empty with `rolled_back` means its edits were undone.
+    #[serde(default)]
+    pub new_issues: Vec<CheckChange>,
+    #[serde(default)]
+    pub rolled_back: bool,
+}
+
+/// One check whose state differs between two probes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckChange {
+    pub id: String,
+    pub title: String,
+    pub status: ProbeStatus,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckDiff {
+    /// Was warn/fail before, now passes (or no longer reported).
+    pub fixed: Vec<CheckChange>,
+    /// New warn/fail, or a check that got worse.
+    pub new_issues: Vec<CheckChange>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepairLoopOptions {
+    pub apply_confirmed_writes: bool,
+    pub max_rounds: Option<u32>,
+    pub use_ai_planner: bool,
+    /// Model for the AI planner; `None` reads it from the environment.
+    #[serde(skip)]
+    pub llm: Option<LlmConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairLoopReport {
+    pub runtime_id: String,
+    pub plan: RepairPlan,
+    pub backup: BackupSnapshot,
+    pub before_probe: RuntimeProbeReport,
+    pub after_probe: RuntimeProbeReport,
+    pub rounds: Vec<RepairLoopRound>,
+    pub executed_action_ids: Vec<String>,
+    pub skipped_actions: Vec<SkippedRepairAction>,
+    pub audit: AuditReport,
+    pub guide_path: Option<String>,
+}
+
+pub fn probe_health_summary(report: &RuntimeProbeReport) -> String {
+    let mut pass = 0usize;
+    let mut warn = 0usize;
+    let mut fail = 0usize;
+    let mut not_checked = 0usize;
+    let mut not_applicable = 0usize;
+
+    for check in &report.checks {
+        match check.status {
+            ProbeStatus::Pass => pass += 1,
+            ProbeStatus::Warn => warn += 1,
+            ProbeStatus::Fail => fail += 1,
+            ProbeStatus::NotChecked => not_checked += 1,
+            ProbeStatus::NotApplicable => not_applicable += 1,
+        }
+    }
+
+    format!("pass={pass} warn={warn} fail={fail} not_checked={not_checked} n/a={not_applicable}")
+}
+
+pub fn probe_issue_score(report: &RuntimeProbeReport) -> u32 {
+    let mut score = 0u32;
+    for check in &report.checks {
+        score += match check.status {
+            ProbeStatus::Fail => 100,
+            ProbeStatus::Warn => 10,
+            ProbeStatus::NotChecked => 1,
+            ProbeStatus::Pass | ProbeStatus::NotApplicable => 0,
+        };
+    }
+    score
+}
+
+/// Deterministic explanation used when no LLM is configured or reachable.
+pub fn fallback_explain(input: &ExplainInput) -> ExplainReport {
+    let mut likely_causes = Vec::new();
+    let mut next_steps = Vec::new();
+
+    for check in &input.checks {
+        if check.status == "fail" || check.status == "warn" {
+            likely_causes.push(format!("{}: {}", check.title, check.message));
+        }
+    }
+
+    if let Some(failure) = &input.install_failure {
+        likely_causes.push(format!("Install failed: {}", failure.reason));
+        next_steps.push(format!(
+            "Inspect install log: {}",
+            failure.log_path.as_deref().unwrap_or("(not saved)")
+        ));
+        next_steps.push(format!("Retry: agent-doctor install {}", input.runtime_id));
+    }
+
+    if next_steps.is_empty() {
+        for suggestion in &input.suggested_repairs {
+            if suggestion.auto_fixable {
+                next_steps.push(format!(
+                    "Run: agent-doctor repair {} --apply",
+                    input.runtime_id
+                ));
+                break;
+            }
+        }
+    }
+
+    if next_steps.is_empty() && input.issue_score == 0 {
+        next_steps.push("No action required.".to_string());
+    }
+
+    ExplainReport {
+        summary: format!(
+            "{} health score {} — {}",
+            input.runtime_id, input.issue_score, input.probe_summary
+        ),
+        likely_causes,
+        recommended_action_ids: input
+            .suggested_repairs
+            .iter()
+            .filter(|item| item.auto_fixable)
+            .map(|item| item.id.clone())
+            .collect(),
+        user_next_steps: next_steps,
+    }
 }
 
 #[cfg(test)]

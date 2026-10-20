@@ -12,11 +12,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::mask::mask_secret_value;
 use crate::profile::{
     agent_profile_path, ensure_company_baseline_snapshot_from_active, COMPANY_API_KEY_ENV,
     GATEWAY_URL_ENV, PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL,
 };
-use crate::repair::mask_secret_value;
 use crate::runtime::all_adapters;
 use crate::setup::coding_plan::{
     models_list_is_public, plan_line_needs_live_check, plan_openai_alternates,

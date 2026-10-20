@@ -18,11 +18,11 @@ use super::{
     evotown_agent_env_path, evotown_base_from_gateway, gateway_url_from_evotown_base,
     RuntimeSetupResult, SetupReport, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV,
 };
+use crate::mask::mask_secret_value;
 use crate::profile::{
     agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,
     read_env_map, ProviderKind,
 };
-use crate::repair::mask_secret_value;
 
 pub const MODE_PERSONAL: &str = "personal";
 pub const MODE_TEAM: &str = "team";
