@@ -28,9 +28,6 @@ pub const VERSION_PROBE_DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x00000008;
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 #[derive(Debug)]
 pub enum RunError {
     Io(std::io::Error),
@@ -538,14 +535,65 @@ fn apply_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // Console programs a batch file starts share cmd's console. A detached cmd has
-        // none, so each of them would open its own terminal window instead.
-        let flags = if _cmd.get_program() == "cmd" {
-            CREATE_NO_WINDOW
-        } else {
-            DETACHED_PROCESS
-        };
-        _cmd.creation_flags(flags);
+        _cmd.creation_flags(DETACHED_PROCESS);
+        log_spawn(_cmd);
+    }
+}
+
+/// One line per console child in `%LOCALAPPDATA%\AgentDoctor\logs\spawn.log`.
+/// A terminal flash names no program; this file does.
+#[cfg(windows)]
+fn log_spawn(cmd: &Command) {
+    use std::io::Write;
+
+    let Some(base) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let dir = PathBuf::from(base).join("AgentDoctor").join("logs");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let file = dir.join("spawn.log");
+    if std::fs::metadata(&file).is_ok_and(|meta| meta.len() > 256 * 1024) {
+        let _ = std::fs::remove_file(&file);
+    }
+    let Ok(mut handle) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+    else {
+        return;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|arg| spawn_log_arg(&arg.to_string_lossy()))
+        .collect();
+    let _ = writeln!(
+        handle,
+        "[{stamp}] {} {}",
+        cmd.get_program().to_string_lossy(),
+        args.join(" ")
+    );
+}
+
+/// Paths and flags stay readable. A long bare token may be a key, and prompt
+/// text does not belong in a log, so both are cut.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn spawn_log_arg(arg: &str) -> String {
+    let looks_like_path = arg.contains('\\') || arg.contains('/');
+    if !looks_like_path && !arg.contains(' ') && arg.chars().count() > 24 {
+        return "<hidden>".to_string();
+    }
+    let limit = if looks_like_path { 160 } else { 40 };
+    if arg.chars().count() > limit {
+        let head: String = arg.chars().take(limit).collect();
+        format!("{head}…")
+    } else {
+        arg.to_string()
     }
 }
 
@@ -644,6 +692,21 @@ mod tests {
             node == Path::new("node") || (node.is_absolute() && node.is_file()),
             "node must be the bare name or an absolute existing file: {node:?}"
         );
+    }
+
+    #[test]
+    fn spawn_log_hides_keys_and_long_text() {
+        assert_eq!(spawn_log_arg("--version"), "--version");
+        assert_eq!(
+            spawn_log_arg("sk-abcdefghijklmnopqrstuvwxyz123456"),
+            "<hidden>"
+        );
+        assert_eq!(
+            spawn_log_arg(r"C:\Users\Admin\AppData\Local\AgentDoctor\runtime\nodejs\npm.cmd"),
+            r"C:\Users\Admin\AppData\Local\AgentDoctor\runtime\nodejs\npm.cmd"
+        );
+        let prompt = "please fix the config file and then restart the gateway now";
+        assert!(spawn_log_arg(prompt).ends_with('…'));
     }
 
     #[test]
