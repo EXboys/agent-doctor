@@ -443,21 +443,14 @@ fn dedupe_path_dirs(dirs: &mut Vec<PathBuf>) {
 /// The platform rejects one environment value past the limit, and `set_var`
 /// panics, which closes the window. `prefix` is the directories this app
 /// adds so Claude and Node resolve; those stay in front. System directories
-/// stay as well. The bulky remainder is cut from the end.
+/// stay as well. The bulky remainder is cut from the end, and every cut is
+/// logged to `AgentDoctor/logs/path.log`.
 fn assign_merged_path(prefix: Vec<PathBuf>) {
-    assign_merged_path_ext(prefix, Vec::new());
-}
-
-/// Same merge, plus `registry_tail` appended after the inherited PATH. Tail
-/// entries sit at the very end, so under cap pressure they are cut before
-/// anything the process actually inherited.
-fn assign_merged_path_ext(prefix: Vec<PathBuf>, registry_tail: Vec<PathBuf>) {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
 
     let current = std::env::var_os("PATH").unwrap_or_default();
-    let mut inherited: Vec<PathBuf> = std::env::split_paths(&current).collect();
-    inherited.extend(registry_tail);
+    let inherited: Vec<PathBuf> = std::env::split_paths(&current).collect();
 
     let mut wanted = prefix.clone();
     wanted.extend(inherited.iter().cloned());
@@ -776,27 +769,26 @@ fn path_exists_bounded(path: &Path) -> bool {
 }
 
 /// GUI apps (double-clicked `.exe`) inherit Explorer's PATH, which often
-/// omits nvm/npm shims that a developer terminal has. Prepend well-known
+/// omits nvm/npm shims that a developer terminal has. Prepend the managed
 /// install locations so discovery matches `cargo run` from a shell.
+///
+/// The registry PATH is deliberately not read. The inherited PATH already is
+/// the logon Machine+User merge, discovery falls back to
+/// [`static_common_binary_dirs`], and npm-global resolves through
+/// `npm prefix -g`. Merging the registry copies (0.1.87–0.1.90) only
+/// shadowed the live PATH and pushed it toward the environment cap.
 pub(crate) fn ensure_managed_runtime_path() {
-    ensure_windows_user_path();
-    #[cfg(not(windows))]
-    {
-        static ONCE: OnceLock<()> = OnceLock::new();
-        ONCE.get_or_init(|| {
-            merge_managed_dirs_into_path();
-        });
-    }
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        merge_managed_dirs_into_path();
+    });
 }
 
-/// Re-merge managed dirs into PATH after an install (installers often mutate the
-/// user PATH in the registry; GUI processes keep a stale copy).
+/// Re-merge managed dirs into PATH after an install: the npm prefix probe
+/// and the managed node root are re-read, so a freshly installed CLI
+/// resolves without a restart.
 pub fn refresh_managed_runtime_path() {
     invalidate_npm_global_bin_dir_cache();
-    #[cfg(windows)]
-    {
-        merge_windows_persistent_path_into_env();
-    }
     merge_managed_dirs_into_path();
 }
 
@@ -818,148 +810,6 @@ fn merge_managed_dirs_into_path() {
         prefix.insert(0, npm_bin);
         assign_merged_path(prefix);
     }
-}
-
-pub(crate) fn ensure_windows_user_path() {
-    #[cfg(windows)]
-    {
-        static ONCE: OnceLock<()> = OnceLock::new();
-        ONCE.get_or_init(|| {
-            merge_windows_persistent_path_into_env();
-            merge_managed_dirs_into_path();
-        });
-    }
-}
-
-#[cfg(windows)]
-fn merge_windows_persistent_path_into_env() {
-    // The inherited PATH is already the Machine+User merge logon built. The
-    // registry only adds entries an installer wrote after this process's
-    // parent started — append that difference at the tail. Wholesale
-    // reordering in front (0.1.87–0.1.90) let user dirs shadow the live PATH
-    // and doubled the length toward the environment cap.
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let live: Vec<PathBuf> = std::env::split_paths(&current).collect();
-    let mut registry = Vec::new();
-    for scope in ["Machine", "User"] {
-        registry.extend(windows_env_path_dirs(scope));
-    }
-    let diff = registry_path_diff(&live, &registry);
-    if diff.is_empty() {
-        return;
-    }
-    log_path_event(&format!(
-        "registry diff appended ({}): {}",
-        diff.len(),
-        diff.iter()
-            .map(|dir| dir.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    ));
-    assign_merged_path_ext(Vec::new(), diff);
-}
-
-/// Registry entries the live PATH does not have yet, in canonical
-/// Machine-before-User order. Near-duplicates (case, quotes, trailing
-/// separator) count as already present.
-#[cfg(any(windows, test))]
-fn registry_path_diff(live: &[PathBuf], registry: &[PathBuf]) -> Vec<PathBuf> {
-    let present: BTreeSet<String> = live.iter().map(|dir| normalize_path_for_set(dir)).collect();
-    let mut seen = BTreeSet::new();
-    registry
-        .iter()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .filter(|dir| {
-            let key = normalize_path_for_set(dir);
-            !present.contains(&key) && seen.insert(key)
-        })
-        .cloned()
-        .collect()
-}
-
-#[cfg(windows)]
-fn windows_env_path_dirs(scope: &str) -> Vec<PathBuf> {
-    // A GUI app that starts powershell.exe shows a terminal for a moment, even
-    // with CREATE_NO_WINDOW. The Path value is already in the registry.
-    let Some(raw) = read_windows_registry_path(scope) else {
-        return Vec::new();
-    };
-    raw.split(';')
-        .filter_map(|entry| {
-            let entry = entry.trim().trim_matches('"').trim();
-            if entry.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(entry))
-            }
-        })
-        .collect()
-}
-
-/// User and machine `Path`, with `%VAR%` already expanded.
-#[cfg(windows)]
-fn read_windows_registry_path(scope: &str) -> Option<String> {
-    use std::ffi::c_void;
-
-    use windows::core::PCWSTR;
-    use windows::Win32::System::Registry::{
-        RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
-    };
-
-    const ERROR_FILE_NOT_FOUND: u32 = 2;
-    const ERROR_MORE_DATA: u32 = 234;
-
-    let (root, subkey) = match scope {
-        "User" => (HKEY_CURRENT_USER, r"Environment"),
-        "Machine" => (
-            HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-        ),
-        _ => return None,
-    };
-    let sub: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
-    let name: Vec<u16> = "Path".encode_utf16().chain(std::iter::once(0)).collect();
-    // A long PATH is exactly the machine this code exists for; grow instead of
-    // reporting a missing value.
-    for size_units in [32 * 1024, 256 * 1024] {
-        let mut buf = vec![0u16; size_units];
-        let mut size = (buf.len() * 2) as u32;
-        // RRF_RT_REG_EXPAND_SZ without RRF_NOEXPAND expands %SystemRoot% and friends.
-        let status = unsafe {
-            RegGetValueW(
-                root,
-                PCWSTR(sub.as_ptr()),
-                PCWSTR(name.as_ptr()),
-                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
-                None,
-                Some(buf.as_mut_ptr() as *mut c_void),
-                Some(&mut size),
-            )
-        };
-        if status.0 == ERROR_MORE_DATA {
-            continue;
-        }
-        if status.0 == ERROR_FILE_NOT_FOUND {
-            return None;
-        }
-        if status.0 != 0 {
-            log_path_event(&format!("registry Path read {scope} failed: {}", status.0));
-            return None;
-        }
-        if size < 2 {
-            return None;
-        }
-        let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
-        let text = String::from_utf16_lossy(&buf[..chars]);
-        let trimmed = text.trim_matches('\0').trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    }
-    log_path_event(&format!("registry Path {scope} exceeds 256 KiB; skipped"));
-    None
 }
 
 /// Tiny append-only trail for PATH surgery. Every silent degrade in the
@@ -1488,46 +1338,18 @@ mod tests {
     }
 
     #[test]
-    fn registry_diff_appends_only_missing_entries() {
-        let live = vec![PathBuf::from("/already/live/bin")];
-        let registry = vec![
-            PathBuf::from("/already/live/bin"),
-            PathBuf::from("/machine/bin"),
-            PathBuf::from("/home/u/.claude/local"),
-            PathBuf::from("/machine/bin"),
-        ];
-        let diff = registry_path_diff(&live, &registry);
-        assert_eq!(
-            diff,
-            vec![
-                PathBuf::from("/machine/bin"),
-                PathBuf::from("/home/u/.claude/local"),
-            ]
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn registry_diff_treats_near_duplicates_as_present() {
-        let live = vec![PathBuf::from(r"C:\Tools")];
-        let registry = vec![PathBuf::from(r"c:\tools\"), PathBuf::from(r"D:\New")];
-        let diff = registry_path_diff(&live, &registry);
-        assert_eq!(diff, vec![PathBuf::from(r"D:\New")]);
-    }
-
-    #[test]
-    fn registry_tail_is_cut_before_the_inherited_path() {
+    fn late_inherited_dirs_are_cut_first() {
         let protected = sample_protected_dir();
         let mut inherited = vec![protected.clone(), PathBuf::from("/live/keep")];
         for index in 0..5_000 {
             inherited.push(PathBuf::from(format!("/agent-doctor-bulky/{index:04}/bin")));
         }
-        inherited.push(PathBuf::from("/registry/fresh-install"));
+        inherited.push(PathBuf::from("/late/install"));
         let selected = select_path_dirs(&[], &inherited);
         let joined = std::env::join_paths(&selected).expect("join");
         assert!(path_value_fits(&joined));
         assert!(selected.contains(&protected));
         assert!(selected.contains(&PathBuf::from("/live/keep")));
-        assert!(!selected.contains(&PathBuf::from("/registry/fresh-install")));
+        assert!(!selected.contains(&PathBuf::from("/late/install")));
     }
 }
