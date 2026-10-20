@@ -161,6 +161,45 @@ jobs:
       - name: Test desktop crate
         run: cargo test -p agent-doctor-desktop --lib
 
+  # A large share of recent fixes are Windows-only (console children, PATH
+  # budget, computer_hand_win). Keep that platform compiling, linted, and
+  # tested in CI — release.yml only builds it there, never tests.
+  rust-windows:
+    name: Rust Windows (clippy + test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Channel is rust-toolchain.toml. Do not set toolchain: stable.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test (core + CLI + satellite crates)
+        run: cargo test -p agent-doctor-core -p agent-doctor -p agent-doctor-mcp -p agent-doctor-ocr -p agent-doctor-voice
+        env:
+          RUST_TEST_THREADS: "1"
+          AGENT_DOCTOR_SECRETS_BACKEND: memory
+
+      - name: Clippy (core + CLI)
+        run: cargo clippy -p agent-doctor-core -p agent-doctor --all-targets -- -D warnings
+
+      # custom-protocol (default) requires frontendDist at compile time.
+      - name: Placeholder frontend dist for clippy
+        shell: bash
+        run: |
+          mkdir -p desktop/dist
+          printf '%s\n' '<!doctype html><title>clippy</title>' > desktop/dist/index.html
+
+      # The only place computer_hand_win.rs is linted and unit-tested.
+      - name: Clippy desktop crate
+        run: cargo clippy -p agent-doctor-desktop --all-targets -- -D warnings
+
+      - name: Test desktop crate
+        run: cargo test -p agent-doctor-desktop --lib
+
   desktop-frontend:
     name: Desktop frontend
     runs-on: ubuntu-latest
