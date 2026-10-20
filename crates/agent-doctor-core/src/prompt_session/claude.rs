@@ -66,13 +66,14 @@ fn run_claude(
 
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let interactive = !options.dangerously_skip_permissions && control.is_some();
-    // `claude -p --resume` accepts a UUID. A ZCode id (`sess_<uuid>`) is rejected
-    // before any reply, so it must not be passed through.
+    // Keep the id as-is here: it is also the warm-pool key and the reported
+    // thread id. `claude -p --resume` only accepts a UUID, so the arg itself is
+    // filtered in `build_claude_command`.
     let resume_session_id = options
         .resume_thread_id
         .as_deref()
         .map(str::trim)
-        .filter(|value| is_claude_session_id(value));
+        .filter(|value| !value.is_empty());
 
     let mut overlay = collect_overlay_env_for_options(options);
     let saved_service =
