@@ -169,7 +169,7 @@ pub(crate) fn ensure_profile_env_from_evotown() -> anyhow::Result<()> {
 pub(crate) fn open_url(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("open")
+        let status = Command::new("open") // raw-spawn-ok
             .arg(url)
             .status()
             .context("failed to run `open` for deep link")?;
@@ -180,7 +180,7 @@ pub(crate) fn open_url(url: &str) -> Result<()> {
     }
     #[cfg(target_os = "linux")]
     {
-        let status = Command::new("xdg-open")
+        let status = Command::new("xdg-open") // raw-spawn-ok
             .arg(url)
             .status()
             .context("failed to run `xdg-open` for deep link")?;
@@ -195,7 +195,7 @@ pub(crate) fn open_url(url: &str) -> Result<()> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         // `status()` can wait on the "choose an app" dialog if claude-cli://
         // is unregistered, which froze the desktop on "Opening…".
-        Command::new("cmd")
+        Command::new("cmd") // raw-spawn-ok
             .args(["/C", "start", "", url])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -221,7 +221,7 @@ pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<(
         // Terminal.app's AppleScript `do script` also truncates long strings (~1024
         // bytes); the self-deleting script keeps Codex overrides intact.
         let launch_script = write_macos_terminal_launch_script(cwd, command_line)?;
-        if Command::new("open")
+        if Command::new("open") // raw-spawn-ok
             .arg(&launch_script)
             .status()
             .map(|status| status.success())
@@ -229,7 +229,7 @@ pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<(
         {
             // Nudge Terminal forward in case Ask / another always-focused window
             // kept covering the new tab.
-            let _ = Command::new("open").args(["-a", "Terminal"]).status();
+            let _ = Command::new("open").args(["-a", "Terminal"]).status(); // raw-spawn-ok
             return Ok(());
         }
 
@@ -239,6 +239,7 @@ pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<(
             "tell application \"Terminal\"\nactivate\ndo script \"{cmd}\"\nend tell",
             cmd = escape_applescript(&invoke_script),
         );
+        // raw-spawn-ok
         let status = match Command::new("osascript").args(["-e", &script]).status() {
             Ok(status) => status,
             Err(error) => {
@@ -250,7 +251,7 @@ pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<(
             let _ = fs::remove_file(&launch_script);
             bail!("osascript exited with {status}");
         }
-        let _ = Command::new("open").args(["-a", "Terminal"]).status();
+        let _ = Command::new("open").args(["-a", "Terminal"]).status(); // raw-spawn-ok
         Ok(())
     }
     #[cfg(target_os = "linux")]
@@ -268,7 +269,7 @@ pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<(
             ("xterm", &["-e", "bash", "-lc"]),
         ];
         for (bin, prefix) in candidates {
-            let mut cmd = Command::new(bin);
+            let mut cmd = Command::new(bin); // raw-spawn-ok
             cmd.args(*prefix).arg(&shell_cmd);
             if cmd.spawn().is_ok() {
                 return Ok(());
@@ -343,7 +344,7 @@ pub(crate) fn launch_windows_terminal(cwd: &Path, command_line: &str) -> Result<
     let script = write_windows_terminal_launch_script(cwd, command_line)?;
     let script_arg = script.to_string_lossy().into_owned();
     let powershell = windows_powershell_exe();
-    let mut cmd = Command::new(&powershell);
+    let mut cmd = Command::new(&powershell); // raw-spawn-ok
     cmd.args([
         "-NoLogo",
         "-NoProfile",

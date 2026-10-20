@@ -285,7 +285,7 @@ pub(crate) fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
     {
         let openclaw = which_openclaw().context("openclaw binary not found on PATH")?;
         let output = run_command_with_timeout(
-            Command::new(&openclaw)
+            crate::exec::command_for_path(&openclaw)
                 .args(["gateway", "restart"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
@@ -312,7 +312,7 @@ pub(crate) fn restart_openclaw_gateway_for_key_sync() -> AnyhowResult<String> {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn restart_openclaw_via_launchctl() -> AnyhowResult<String> {
-    let uid = Command::new("id")
+    let uid = Command::new("id") // raw-spawn-ok
         .arg("-u")
         .output()
         .ok()
@@ -323,7 +323,7 @@ pub(crate) fn restart_openclaw_via_launchctl() -> AnyhowResult<String> {
         .context("could not resolve user id for launchctl")?;
     let label = format!("gui/{uid}/ai.openclaw.gateway");
     let output = run_command_with_timeout(
-        Command::new("launchctl")
+        Command::new("launchctl") // raw-spawn-ok
             .args(["kickstart", "-k", &label])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
@@ -358,12 +358,12 @@ pub(crate) fn run_command_with_timeout(
         Ok(Ok(output)) => Ok(output),
         Ok(Err(err)) => Err(err).context("failed waiting for process"),
         Err(_) => {
-            let _ = Command::new("kill")
+            let _ = Command::new("kill") // raw-spawn-ok
                 .arg("-TERM")
                 .arg(pid.to_string())
                 .output();
             thread::sleep(Duration::from_millis(200));
-            let _ = Command::new("kill")
+            let _ = Command::new("kill") // raw-spawn-ok
                 .arg("-KILL")
                 .arg(pid.to_string())
                 .output();

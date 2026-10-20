@@ -137,7 +137,7 @@ where
     crate::adapters::util::ensure_managed_runtime_path();
 
     #[cfg(unix)]
-    let mut command = Command::new("bash");
+    let mut command = Command::new("bash"); // raw-spawn-ok
     #[cfg(unix)]
     command.arg("-c").arg(command_line);
 
@@ -145,7 +145,7 @@ where
     let mut command = {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x00000008;
-        let mut command = Command::new("cmd");
+        let mut command = Command::new("cmd"); // raw-spawn-ok
         command
             .args(["/C", command_line])
             .creation_flags(DETACHED_PROCESS);

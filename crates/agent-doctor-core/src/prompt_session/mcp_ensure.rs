@@ -471,10 +471,13 @@ fn tool_list_has_screen_open(body: &str) -> bool {
 }
 
 fn probe_computer_support(path: &Path) -> bool {
-    let Ok(output) = std::process::Command::new(path)
-        .args(["mcp", "--help"])
-        .output()
-    else {
+    // A cold first start of the CLI can take seconds; a diagnose-length budget
+    // keeps the probe from reporting "no computer tools" on a slow machine.
+    let Ok(output) = crate::exec::run_output(
+        path,
+        &["mcp", "--help"],
+        crate::exec::VERSION_PROBE_DIAGNOSE_TIMEOUT,
+    ) else {
         return false;
     };
     if !output.status.success() {
@@ -492,10 +495,11 @@ fn probe_computer_support(path: &Path) -> bool {
 /// must not win, or the model opens apps by clicking the Dock.
 fn lists_screen_open(path: &Path) -> bool {
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::Duration;
 
-    let mut child = match Command::new(path)
+    let mut cmd = crate::exec::command_for_path(path);
+    let mut child = match cmd
         .args(["mcp", "computer"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

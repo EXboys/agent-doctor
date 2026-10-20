@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -132,16 +131,13 @@ fn normalize_remote(raw: &str) -> Option<String> {
 }
 
 fn git_origin(project: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &project.to_string_lossy(),
-            "remote",
-            "get-url",
-            "origin",
-        ])
-        .output()
-        .ok()?;
+    let dir = project.to_string_lossy().into_owned();
+    let output = crate::exec::run_output(
+        "git",
+        &["-C", &dir, "remote", "get-url", "origin"],
+        crate::exec::SHORT_PROBE_TIMEOUT,
+    )
+    .ok()?;
     if !output.status.success() {
         return None;
     }

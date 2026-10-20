@@ -444,7 +444,7 @@ pub(crate) fn command_from_cli(bin: &str) -> Command {
 pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("pkill")
+        let _ = std::process::Command::new("pkill") // raw-spawn-ok
             .args(["-P", &pid.to_string()])
             .status();
     }

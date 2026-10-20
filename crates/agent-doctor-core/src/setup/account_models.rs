@@ -5,7 +5,7 @@
 //! replaced with the account default.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -105,7 +105,7 @@ fn fetch_codex_models() -> Result<AccountModelList> {
     let bin = discover_binary("codex")
         .binary_path
         .context("codex is not installed")?;
-    let mut cmd = Command::new(bin);
+    let mut cmd = crate::exec::command_for_path(&bin);
     cmd.arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

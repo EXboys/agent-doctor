@@ -5,7 +5,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{bail, Context, Result};
 use tempfile::TempDir;
@@ -115,7 +115,7 @@ pub fn generate_ed25519_key(path: &Path, host_id: &str) -> Result<()> {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let comment = format!("agent-doctor-{host_id}");
-    let status = Command::new("ssh-keygen")
+    let status = crate::exec::command_for_path(Path::new("ssh-keygen"))
         .arg("-t")
         .arg("ed25519")
         .arg("-N")
@@ -169,7 +169,7 @@ pub fn build_install_pubkey_remote_script(pubkey: &str) -> String {
 /// `ssh -i … -o BatchMode=yes -o IdentitiesOnly=yes … true`
 pub fn verify_key_login(hostname: &str, user: &str, port: u16, identity_file: &Path) -> Result<()> {
     let backend = SshBackend::direct(user, hostname, port, identity_file);
-    let mut cmd = Command::new("ssh");
+    let mut cmd = crate::exec::command_for_path(Path::new("ssh"));
     cmd.arg("-o")
         .arg("BatchMode=yes")
         .arg("-o")
@@ -209,7 +209,7 @@ fn run_password_ssh(
     remote_script: &str,
 ) -> Result<()> {
     let askpass = AskPassGuard::create(password)?;
-    let mut cmd = Command::new("ssh");
+    let mut cmd = crate::exec::command_for_path(Path::new("ssh"));
     cmd.arg("-o")
         .arg("PreferredAuthentications=password")
         .arg("-o")
@@ -335,7 +335,11 @@ mod tests {
 
     #[test]
     fn generate_ed25519_when_ssh_keygen_available() {
-        if Command::new("ssh-keygen").arg("-h").output().is_err() {
+        if crate::exec::command_for_path(Path::new("ssh-keygen"))
+            .arg("-h")
+            .output()
+            .is_err()
+        {
             return;
         }
 

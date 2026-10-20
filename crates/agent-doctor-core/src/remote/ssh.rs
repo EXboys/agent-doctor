@@ -125,7 +125,7 @@ impl SshBackend {
     }
 
     fn ssh_base(&self) -> Command {
-        let mut cmd = Command::new("ssh");
+        let mut cmd = crate::exec::command_for_path(Path::new("ssh"));
         cmd.arg("-o")
             .arg("BatchMode=yes")
             .arg("-o")

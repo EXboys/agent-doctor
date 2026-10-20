@@ -7,7 +7,7 @@
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -465,7 +465,8 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     } else {
         &["auth", "login"]
     };
-    let mut child = Command::new(&binary)
+    let mut cmd = crate::exec::command_for_path(&binary);
+    let mut child = cmd
         .args(args)
         // Sign-in must land in ~/.codex. A project CODEX_HOME would keep the new
         // account away from the file the next chat copies in.

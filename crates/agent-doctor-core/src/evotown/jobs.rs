@@ -1,6 +1,6 @@
 //! Local job executors — Claude Code / Codex CLI + OpenClaw / Hermes hooks.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -234,7 +234,7 @@ pub(crate) fn run_claude_cli(job: &AssignedJob) -> Result<JobResult> {
         .unwrap_or_else(|| "claude".into());
     let cwd = workdir(job);
     let prompt = job.prompt();
-    let mut cmd = Command::new(&bin);
+    let mut cmd = crate::exec::command_for_path(Path::new(&bin));
     cmd.arg("-p")
         .arg(&prompt)
         .arg("--output-format")
@@ -265,7 +265,7 @@ pub(crate) fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
     let cwd = workdir(job);
     let prompt = job.prompt();
     // Prefer modern `codex exec`; fall back to positional prompt.
-    let mut cmd = Command::new(&bin);
+    let mut cmd = crate::exec::command_for_path(Path::new(&bin));
     cmd.arg("exec")
         .arg(&prompt)
         .current_dir(&cwd)
@@ -278,7 +278,7 @@ pub(crate) fn run_codex_cli(job: &AssignedJob) -> Result<JobResult> {
     let output = match run_command_with_timeout(cmd, job.timeout_sec) {
         Ok(out) => out,
         Err(_) => {
-            let mut cmd2 = Command::new(&bin);
+            let mut cmd2 = crate::exec::command_for_path(Path::new(&bin));
             cmd2.arg(&prompt)
                 .current_dir(&cwd)
                 .stdin(Stdio::null())
@@ -334,7 +334,7 @@ fn run_command_with_timeout(mut cmd: Command, timeout_sec: u64) -> Result<std::p
     match rx.recv_timeout(Duration::from_secs(timeout_sec)) {
         Ok(result) => result.context("wait_with_output failed"),
         Err(_) => {
-            let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+            crate::exec::kill_process_tree(pid);
             bail!("runtime timed out after {timeout_sec}s (killed pid {pid})")
         }
     }

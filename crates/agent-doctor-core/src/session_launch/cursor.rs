@@ -28,7 +28,7 @@ pub(crate) fn open_cursor_app(cwd: &Path) -> Result<OpenSessionReport> {
 pub(crate) fn launch_cursor_app() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("open")
+        let status = Command::new("open") // raw-spawn-ok
             .args(["-a", "Cursor"])
             .status()
             .context("failed to open Cursor")?;
@@ -37,7 +37,7 @@ pub(crate) fn launch_cursor_app() -> Result<()> {
         }
         let app = PathBuf::from("/Applications/Cursor.app");
         if app.exists() {
-            let status = Command::new("open")
+            let status = Command::new("open") // raw-spawn-ok
                 .arg(&app)
                 .status()
                 .context("failed to open Cursor.app")?;
@@ -55,7 +55,7 @@ pub(crate) fn launch_cursor_app() -> Result<()> {
             for rel in ["Programs/cursor/Cursor.exe", "Programs/Cursor/Cursor.exe"] {
                 let exe = PathBuf::from(&local).join(rel);
                 if exe.is_file() {
-                    Command::new(&exe)
+                    Command::new(&exe) // raw-spawn-ok
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
@@ -66,7 +66,7 @@ pub(crate) fn launch_cursor_app() -> Result<()> {
                 }
             }
         }
-        Command::new("cmd")
+        Command::new("cmd") // raw-spawn-ok
             .args(["/C", "start", "", "cursor"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -78,14 +78,14 @@ pub(crate) fn launch_cursor_app() -> Result<()> {
     }
     #[cfg(target_os = "linux")]
     {
-        if Command::new("cursor")
+        if Command::new("cursor") // raw-spawn-ok
             .spawn()
             .map(|_| true)
             .unwrap_or(false)
         {
             return Ok(());
         }
-        let status = Command::new("xdg-open")
+        let status = Command::new("xdg-open") // raw-spawn-ok
             .arg("cursor://")
             .status()
             .context("failed to open Cursor")?;

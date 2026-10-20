@@ -396,7 +396,7 @@ fn read_service_env_openai_key(path: &std::path::Path) -> Option<String> {
 }
 
 fn read_openclaw_gateway_process_key() -> Option<String> {
-    let output = Command::new("pgrep")
+    let output = Command::new("pgrep") // raw-spawn-ok
         .args(["-f", "openclaw/dist/index.js gateway"])
         .output()
         .ok()?;
@@ -411,7 +411,7 @@ fn read_openclaw_gateway_process_key() -> Option<String> {
     if pid.is_empty() {
         return None;
     }
-    let ps = Command::new("ps").args(["eww", "-p", &pid]).output().ok()?;
+    let ps = Command::new("ps").args(["eww", "-p", &pid]).output().ok()?; // raw-spawn-ok
     if !ps.status.success() {
         return None;
     }

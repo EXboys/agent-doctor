@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value as JsonValue};
@@ -698,10 +697,7 @@ pub(crate) fn run_openclaw(args: &[&str]) -> Result<ShellCapture> {
     let Some(binary) = find_binary("openclaw") else {
         anyhow::bail!("openclaw binary not found");
     };
-    let output = Command::new(binary)
-        .args(args)
-        .output()
-        .context("run openclaw")?;
+    let output = run_capture(&binary, args, "openclaw")?;
     Ok(ShellCapture {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -714,16 +710,25 @@ pub(crate) fn run_hermes(args: &[&str]) -> Result<ShellCapture> {
     let Some(binary) = find_binary("hermes") else {
         anyhow::bail!("hermes binary not found");
     };
-    let output = Command::new(binary)
-        .args(args)
-        .output()
-        .context("run hermes")?;
+    let output = run_capture(&binary, args, "hermes")?;
     Ok(ShellCapture {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         exit_code: output.status.code(),
     })
+}
+
+/// OpenClaw / Hermes are console CLIs. A GUI app that spawns them without
+/// `DETACHED_PROCESS` paints a terminal window per call, and an unbounded
+/// `output()` can hang the caller forever — both go through `run_output`.
+fn run_capture(
+    binary: &Path,
+    args: &[&str],
+    name: &str,
+) -> Result<std::process::Output, anyhow::Error> {
+    crate::exec::run_output(binary, args, crate::exec::VERSION_PROBE_DIAGNOSE_TIMEOUT)
+        .map_err(|err| anyhow::anyhow!("run {name}: {err}"))
 }
 
 fn infer_hermes_profile_from_home_env() -> Option<String> {

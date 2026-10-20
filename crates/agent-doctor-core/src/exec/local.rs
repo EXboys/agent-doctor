@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
+use super::process::command_for_path;
 use super::{ExecBackend, ExecOutput};
 
 /// Local filesystem / process backend (tests and future local probe migration).
@@ -15,7 +15,7 @@ impl ExecBackend for LocalBackend {
         let Some((program, args)) = argv.split_first() else {
             bail!("empty argv");
         };
-        let mut cmd = Command::new(program);
+        let mut cmd = command_for_path(Path::new(program));
         cmd.args(args);
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);

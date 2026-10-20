@@ -5,6 +5,7 @@
 //! (Homebrew Node vs user ~/.local vs managed Node often disagree).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
@@ -68,11 +69,7 @@ fn prefix_from_npm_beside(bin: &Path) -> Option<PathBuf> {
         .into_iter()
         .map(|name| dir.join(name))
         .find(|path| path.is_file())?;
-    let output = std::process::Command::new(&npm)
-        .args(["prefix", "-g"])
-        .current_dir(dir)
-        .output()
-        .ok()?;
+    let output = crate::exec::run_output(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -85,10 +82,7 @@ fn prefix_from_npm_beside(bin: &Path) -> Option<PathBuf> {
 
 pub fn default_npm_global_prefix() -> Option<PathBuf> {
     let npm = find_binary("npm")?;
-    let output = std::process::Command::new(&npm)
-        .args(["prefix", "-g"])
-        .output()
-        .ok()?;
+    let output = crate::exec::run_output(&npm, &["prefix", "-g"], Duration::from_secs(5)).ok()?;
     if !output.status.success() {
         return None;
     }

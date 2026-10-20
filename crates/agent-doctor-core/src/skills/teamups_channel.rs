@@ -161,7 +161,7 @@ fn computer_name() -> String {
 
 #[cfg(target_os = "macos")]
 fn macos_computer_name() -> Option<String> {
-    let output = std::process::Command::new("scutil")
+    let output = std::process::Command::new("scutil") // raw-spawn-ok
         .args(["--get", "ComputerName"])
         .output()
         .ok()?;

@@ -35,7 +35,7 @@ fn open_zcode_app(app: &Path, cwd: &Path) -> Result<OpenSessionReport> {
 fn launch_zcode_app(app: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("open")
+        let status = Command::new("open") // raw-spawn-ok
             .arg(app)
             .status()
             .context("failed to open ZCode")?;
@@ -48,7 +48,7 @@ fn launch_zcode_app(app: &Path) -> Result<()> {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new(app)
+        Command::new(app) // raw-spawn-ok
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -59,7 +59,7 @@ fn launch_zcode_app(app: &Path) -> Result<()> {
     }
     #[cfg(target_os = "linux")]
     {
-        Command::new(app).spawn().context("failed to start ZCode")?;
+        Command::new(app).spawn().context("failed to start ZCode")?; // raw-spawn-ok
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]

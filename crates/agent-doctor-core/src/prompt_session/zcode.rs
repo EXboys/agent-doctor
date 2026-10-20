@@ -246,7 +246,7 @@ fn build_zcode_command(
     } else {
         locate_zcode_headless().ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
     };
-    let mut cmd = Command::new(&launch.program);
+    let mut cmd = crate::exec::command_for_path(&launch.program);
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
     if let Some(script) = &launch.script {
         cmd.env("ELECTRON_RUN_AS_NODE", "1");
