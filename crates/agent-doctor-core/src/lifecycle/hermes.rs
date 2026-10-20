@@ -201,6 +201,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn unix_install_uses_temp_file_not_pipe() {
         let cmd = hermes_install_shell_command();
         assert!(cmd.contains("mktemp"));

@@ -235,16 +235,23 @@ https://cdn-zcode.z.ai/zcode/electron/releases/3.16.1/linux-arm64/ZCode-3.16.1-l
     #[test]
     fn install_script_uses_the_official_download_page() {
         let cmd = zcode_install_shell_command();
-        assert!(cmd.contains(ZCODE_DOWNLOAD_PAGE));
-        assert!(cmd.contains("cdn-zcode.z.ai"));
-        assert!(!cmd.contains("npm install"));
-        #[cfg(not(windows))]
+        #[cfg(not(target_os = "windows"))]
         {
+            assert!(cmd.contains(ZCODE_DOWNLOAD_PAGE));
+            assert!(cmd.contains("cdn-zcode.z.ai"));
+            assert!(!cmd.contains("npm install"));
             assert!(cmd.contains("macos-arm64/"));
             assert!(cmd.contains("-mac-arm64.dmg"));
             assert!(cmd.contains("linux-x64/"));
             assert!(cmd.contains("-linux-x64.AppImage"));
             assert!(cmd.contains("Applications/ZCode.app"));
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // The Windows script ships base64-encoded, so its URLs are not
+            // visible in the command string; assert the launcher shape.
+            assert!(cmd.contains("powershell"));
+            assert!(cmd.contains("-EncodedCommand"));
         }
     }
 }

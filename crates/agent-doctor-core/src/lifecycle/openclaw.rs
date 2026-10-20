@@ -90,6 +90,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn unix_install_uses_temp_file_and_no_onboard() {
         let cmd = openclaw_install_shell_command();
         assert!(cmd.contains("mktemp"));

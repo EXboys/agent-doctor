@@ -506,7 +506,17 @@ mod tests {
         fs::write(source.join("SKILL.md"), "# calc\n").unwrap();
 
         assert_eq!(link_skill_dir(&source, &target).unwrap(), "mounted");
-        assert_eq!(link_skill_dir(&source, &target).unwrap(), "skipped");
+        #[cfg(unix)]
+        {
+            assert_eq!(link_skill_dir(&source, &target).unwrap(), "skipped");
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows mounts by copying, and a real copy at the target is an
+            // error rather than a silent overwrite.
+            let error = link_skill_dir(&source, &target).unwrap_err();
+            assert!(error.to_string().contains("already exists"), "{error}");
+        }
         assert!(target.join("SKILL.md").exists());
     }
 
@@ -518,9 +528,19 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("SKILL.md"), "# calc\n").unwrap();
         assert_eq!(link_skill_dir(&source, &target).unwrap(), "mounted");
-        assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "unmounted");
-        assert!(!target.exists());
-        assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "skipped");
+        #[cfg(unix)]
+        {
+            assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "unmounted");
+            assert!(!target.exists());
+            assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "skipped");
+        }
+        #[cfg(not(unix))]
+        {
+            // A Windows mount is a real directory: Doctor never deletes
+            // user-owned copies.
+            assert_eq!(unlink_skill_dir(&source, &target).unwrap(), "skipped");
+            assert!(target.join("SKILL.md").exists());
+        }
     }
 
     #[test]

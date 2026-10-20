@@ -476,7 +476,10 @@ fn probe_remote_runtime(
                 continue;
             }
         };
-        let remote_config = remote_home.join(&relative);
+        // Remote homes are always POSIX (`/home/deploy`), so build the path
+        // with forward slashes even when this host is Windows and `join`
+        // wrote `\` — the backend looks the remote file up by that string.
+        let remote_config = posix_remote_path(&remote_home.join(&relative));
         match backend.exists(&remote_config) {
             Ok(false) => {
                 if required {
@@ -568,7 +571,7 @@ fn probe_remote_runtime(
 
     // project-side traces
     for (label, rel) in project_traces(runtime_id) {
-        let path = project_path.join(rel);
+        let path = posix_remote_path(&project_path.join(rel));
         match backend.exists(&path) {
             Ok(true) => {
                 checks.push(
@@ -656,6 +659,13 @@ fn format_name(format: ConfigFormat) -> &'static str {
         ConfigFormat::Toml => "toml",
         ConfigFormat::Env => "env",
     }
+}
+
+/// Remote machines run POSIX shells, so every path handed to the backend must
+/// carry forward slashes even when this host is Windows and `Path::join`
+/// wrote `\`.
+fn posix_remote_path(path: &Path) -> PathBuf {
+    PathBuf::from(path.to_string_lossy().replace('\\', "/"))
 }
 
 fn extract_gateway(runtime_id: &str, raw: &str, parsed: &ParsedConfig) -> Option<String> {

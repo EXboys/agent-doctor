@@ -765,12 +765,12 @@ url = "https://example.com/mcp"
         let program = dir.path().join("node_repl");
         fs::write(&program, "").unwrap();
         let path = dir.path().join("config.toml");
+        // TOML basic strings have no backslash escapes for Windows paths, and
+        // Windows accepts forward slashes, so write the path TOML-safe.
+        let toml_command = program.display().to_string().replace('\\', "/");
         fs::write(
             &path,
-            format!(
-                "[mcp_servers.node_repl]\ncommand = \"{}\"\n",
-                program.display()
-            ),
+            format!("[mcp_servers.node_repl]\ncommand = \"{toml_command}\"\n"),
         )
         .unwrap();
 

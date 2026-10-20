@@ -322,9 +322,13 @@ mod tests {
 
     #[test]
     fn prune_keeps_a_patch_whose_insert_list_still_has_live_plugins() {
-        let mut seq = parse(
-            "- insert:\n  - id: dead\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /missing/agent-doctor\n  - id: alive\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /bin/echo\n",
-        );
+        // "Live" means the command exists on THIS machine, so point at a file
+        // every platform has: this very test binary.
+        let live_command = std::env::current_exe().unwrap();
+        let live_command = live_command.display().to_string().replace('\\', "/");
+        let mut seq = parse(&format!(
+            "- insert:\n  - id: dead\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: /missing/agent-doctor\n  - id: alive\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      command: {live_command}\n"
+        ));
         assert!(prune_dsh_plugin_seq(&mut seq));
         let rendered = serde_yaml::to_string(&YamlValue::Sequence(seq)).unwrap();
         assert!(rendered.contains("id: alive"), "{rendered}");
