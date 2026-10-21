@@ -127,7 +127,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" dist/
           Compress-Archive -Path "dist/${{ matrix.bin }}" -DestinationPath "$out.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.name }}
           path: |
@@ -470,7 +470,7 @@ jobs:
 
       - name: Upload macOS artifact (dmg)
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-doctor-desktop-${{ matrix.edition }}-darwin-arm64
           path: target/release/bundle/dmg/*.dmg
@@ -478,7 +478,7 @@ jobs:
 
       - name: Upload macOS updater archive
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-doctor-desktop-${{ matrix.edition }}-darwin-arm64-updater
           path: |
@@ -488,7 +488,7 @@ jobs:
 
       - name: Upload Windows artifacts
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-doctor-desktop-${{ matrix.edition }}-windows-x64
           path: |
@@ -502,7 +502,7 @@ jobs:
 
       - name: Upload Linux artifacts
         if: matrix.os == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-doctor-desktop-${{ matrix.edition }}-linux-x64
           path: |
