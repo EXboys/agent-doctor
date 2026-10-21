@@ -15,6 +15,7 @@ use agent_doctor_prompt::{
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 
 // Rebuild this crate (and re-embed Info.plist via generate_context!) whenever
@@ -39,6 +40,7 @@ mod drag_pasteboard;
 mod island;
 mod speech;
 mod state;
+mod teamups_login;
 mod tray;
 mod windows;
 
@@ -569,15 +571,16 @@ pub fn run() {
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     agent_doctor_repair::register();
     let mut builder = tauri::Builder::default()
+        // Single-instance stays first so a second launch (shortcut or
+        // agent-doctor://) reaches this process. Deep-link must follow it
+        // so that URL is turned into the login handoff.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            windows::show_main_window(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // Second launch (Start Menu / desktop shortcut) while minimized or
-            // tray-hidden: bring the existing main window back instead of
-            // starting a stuck second WebView2 process.
-            windows::show_main_window(app);
-        }));
+        .plugin(tauri_plugin_process::init());
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
@@ -621,6 +624,17 @@ pub fn run() {
             }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
+            }
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls: Vec<String> = event.urls().iter().map(|url| url.to_string()).collect();
+                teamups_login::open_from_website(&handle, &urls);
+            });
+            // Windows / Linux deliver the launch URL before this listener
+            // exists. macOS delivers it afterwards, through on_open_url.
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                let urls: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
+                teamups_login::open_from_website(app.handle(), &urls);
             }
             Ok(())
         })

@@ -365,11 +365,16 @@ pub async fn list_teamups_mall_catalog_command() -> Result<TeamupsMallCatalog, S
 }
 
 #[tauri::command]
-pub async fn start_teamups_login_command() -> Result<TeamupsLoginStart, String> {
-    tauri::async_runtime::spawn_blocking(start_teamups_login)
+pub async fn start_teamups_login_command(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<TeamupsLoginStart, String> {
+    let started = tauri::async_runtime::spawn_blocking(start_teamups_login)
         .await
         .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::teamups_login::watch(app, window.label().to_string(), &started);
+    Ok(started)
 }
 
 #[tauri::command]
@@ -398,6 +403,7 @@ pub async fn teamups_account_status_command() -> Result<TeamupsAccountStatus, St
 
 #[tauri::command]
 pub async fn sign_out_teamups_command(app: AppHandle) -> Result<TeamupsAccountStatus, String> {
+    crate::teamups_login::cancel();
     let status = tauri::async_runtime::spawn_blocking(sign_out_teamups)
         .await
         .map_err(|error| error.to_string())?

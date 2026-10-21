@@ -26,7 +26,6 @@ import {
   getPersonalProviderStatus,
   listPersonalProviders,
   nativeAccountStatus,
-  pollTeamupsLogin,
   signOutTeamups,
   startTeamupsLogin,
   teamupsAccountStatus,
@@ -68,15 +67,12 @@ const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 
 const OFFICIAL_PROVIDER_ID = "teamups-official";
 let officialAccount: TeamupsAccountStatus | null = null;
-let officialLoginTimer: ReturnType<typeof setTimeout> | null = null;
+let officialLoginWaiting = false;
 let officialBalanceTimer: ReturnType<typeof setTimeout> | null = null;
 let officialBalanceWatch: { until: number; leftApp: boolean; baseline: string } | null = null;
 
 function stopOfficialLoginPoll(): void {
-  if (officialLoginTimer != null) {
-    clearTimeout(officialLoginTimer);
-    officialLoginTimer = null;
-  }
+  officialLoginWaiting = false;
 }
 
 /** Personal edition always shows 官方, even before sign-in creates the saved row. */
@@ -629,36 +625,19 @@ export function createPersonalController(deps: PersonalDeps) {
     }
   }
 
-  async function pollOfficialLogin(
-    deviceCode: string,
-    intervalSec: number,
-    expiresAt: number,
-  ): Promise<void> {
-    if (Date.now() >= expiresAt) {
-      personalListHintEl.hidden = false;
-      personalListHintEl.textContent = t("resources.mallLoginExpired");
+  function finishOfficialLogin(status: string, message?: string): void {
+    if (!officialLoginWaiting) return;
+    officialLoginWaiting = false;
+    personalListHintEl.hidden = false;
+    if (status === "approved") {
+      personalListHintEl.textContent = t("resources.mallLoginOk");
+      void loadPersonalProviderStatus();
       return;
     }
-    try {
-      const poll = await pollTeamupsLogin({ deviceCode });
-      if (poll.status === "pending") {
-        officialLoginTimer = setTimeout(() => {
-          void pollOfficialLogin(deviceCode, intervalSec, expiresAt);
-        }, Math.max(1, intervalSec) * 1000);
-        return;
-      }
-      if (poll.status === "approved") {
-        personalListHintEl.hidden = false;
-        personalListHintEl.textContent = t("resources.mallLoginOk");
-        await loadPersonalProviderStatus();
-        return;
-      }
-      personalListHintEl.hidden = false;
-      personalListHintEl.textContent = t("resources.mallLoginExpired");
-    } catch (error) {
-      personalListHintEl.hidden = false;
-      personalListHintEl.textContent = teamupsLoginFailure(error);
-    }
+    personalListHintEl.textContent =
+      status === "expired" || status === "denied"
+        ? t("resources.mallLoginExpired")
+        : teamupsLoginFailure(message || "");
   }
 
   async function switchOfficialAccount(): Promise<void> {
@@ -679,18 +658,14 @@ export function createPersonalController(deps: PersonalDeps) {
   }
 
   async function startOfficialLogin(): Promise<void> {
-    stopOfficialLoginPoll();
+    officialLoginWaiting = true;
     personalListHintEl.hidden = false;
     personalListHintEl.textContent = t("resources.mallLoggingIn");
     try {
       const started = await startTeamupsLogin();
       await openUrl(started.verification_url);
-      await pollOfficialLogin(
-        started.device_code,
-        started.interval_sec,
-        Date.now() + Math.max(30, started.expires_in_sec) * 1000,
-      );
     } catch (error) {
+      officialLoginWaiting = false;
       personalListHintEl.hidden = false;
       personalListHintEl.textContent = teamupsLoginFailure(error);
     }
@@ -1025,6 +1000,9 @@ export function createPersonalController(deps: PersonalDeps) {
 
     void listen("teamups-account-changed", () => {
       void refreshOfficialAccount();
+    });
+    void listen<{ status?: string; message?: string }>("teamups-login-finished", (event) => {
+      finishOfficialLogin(event.payload?.status || "", event.payload?.message);
     });
 
     document.addEventListener("visibilitychange", () => {

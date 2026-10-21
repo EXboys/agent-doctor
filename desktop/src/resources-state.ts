@@ -87,6 +87,7 @@ export const mcpSnippetEl = document.querySelector<HTMLElement>("#mcp-snippet")!
 export const mcpFootnoteEl = document.querySelector<HTMLElement>("#mcp-footnote")!;
 export const agentInstallInFlight = new Set<string>();
 export const agentOpenInFlight = new Set<string>();
+export const agentJustOpened = new Map<string, number>();
 export const agentInstallHint = new Map<string, string>();
 export const personalEdition = isPersonalEdition();
 
@@ -105,7 +106,6 @@ export const resourcesState = {
   mcpConfigureInFlight: false,
   mallActionInFlight: false,
   mallLoginInFlight: false,
-  mallLoginTimer: null as number | null,
   skillsStatusMessage: null as string | null,
   highlightSkillKey: null as string | null,
   skillNavActive: "all" as SkillFilter,

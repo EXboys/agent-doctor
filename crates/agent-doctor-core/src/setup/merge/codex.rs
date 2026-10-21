@@ -328,7 +328,8 @@ pub fn strip_codex_project_denied_provider_keys(path: &std::path::Path) -> Anyho
     if !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut doc = raw
         .parse::<toml_edit::DocumentMut>()
         .unwrap_or_else(|_| toml_edit::DocumentMut::new());
@@ -339,7 +340,8 @@ pub fn strip_codex_project_denied_provider_keys(path: &std::path::Path) -> Anyho
         }
     }
     if changed {
-        fs::write(path, doc.to_string())?;
+        fs::write(path, doc.to_string())
+            .with_context(|| format!("failed to write {}", path.display()))?;
     }
     Ok(changed)
 }
@@ -387,7 +389,8 @@ pub(crate) fn write_codex_provider_config(
     let gateway_url = codex_responses_gateway_url(gateway_url);
 
     let mut doc = if path.exists() {
-        let raw = fs::read_to_string(path)?;
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         raw.parse::<toml_edit::DocumentMut>()
             .unwrap_or_else(|_| toml_edit::DocumentMut::new())
     } else {
@@ -424,7 +427,8 @@ pub(crate) fn write_codex_provider_config(
     entry_table["wire_api"] = toml_edit::value("responses");
     entry_table["supports_websockets"] = toml_edit::value(false);
 
-    fs::write(path, doc.to_string())?;
+    fs::write(path, doc.to_string())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     confirm_codex_provider_config(path, &gateway_url, model_id, slot)?;
     Ok(())
 }
@@ -482,7 +486,8 @@ pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
     if !path.exists() {
         return Ok(());
     }
-    let raw = fs::read_to_string(&path)?;
+    let raw =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(());
     };
@@ -496,7 +501,7 @@ pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
         && value.get("api_key").is_none()
         && value.get("tokens").is_none();
     if is_placeholder || is_empty_apikey {
-        fs::remove_file(&path)?;
+        fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
     Ok(())
 }
@@ -510,7 +515,8 @@ pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
     if !path.exists() {
         return Ok(());
     }
-    let raw = fs::read_to_string(&path)?;
+    let raw =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(());
     };
@@ -526,7 +532,7 @@ pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
         return Ok(());
     }
     let _ = crate::setup::backup_file(&path);
-    fs::remove_file(&path)?;
+    fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
     Ok(())
 }
 

@@ -33,7 +33,8 @@ pub fn apply_openclaw_slot(
     ensure_parent(&path)?;
 
     let mut root = if path.exists() {
-        let raw = fs::read_to_string(&path)?;
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         serde_json::from_str(&raw).unwrap_or_else(|_| json!({}))
     } else {
         json!({})
@@ -114,7 +115,8 @@ pub fn apply_openclaw_slot(
         }
     }
 
-    fs::write(&path, serde_json::to_string_pretty(&root)?)?;
+    fs::write(&path, serde_json::to_string_pretty(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
 
     let mut message = format!(
         "set models.providers.{slot} baseUrl={gateway_url} model={model} (primary={slot}/{model}; additive)"
@@ -222,7 +224,8 @@ pub(crate) fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
         .position(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
         .unwrap_or(lines.len());
     lines.insert(insert_at, format!("OPENAI_API_KEY={api_key}"));
-    fs::write(&env_path, lines.join("\n") + "\n")?;
+    fs::write(&env_path, lines.join("\n") + "\n")
+        .with_context(|| format!("failed to write {}", env_path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -232,7 +235,8 @@ pub(crate) fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
     // LaunchAgent gateway injects OPENAI_API_KEY from service-env; update if present.
     let service_env = home_join(".openclaw/service-env/ai.openclaw.gateway.env");
     if service_env.exists() {
-        let raw = fs::read_to_string(&service_env)?;
+        let raw = fs::read_to_string(&service_env)
+            .with_context(|| format!("failed to read {}", service_env.display()))?;
         let escaped = api_key.replace('\'', "'\\''");
         let replacement = format!("export OPENAI_API_KEY='{escaped}'");
         let mut replaced = false;
@@ -250,7 +254,8 @@ pub(crate) fn sync_openclaw_openai_api_key(api_key: &str) -> AnyhowResult<()> {
         if !replaced {
             out.push(replacement);
         }
-        fs::write(&service_env, out.join("\n") + "\n")?;
+        fs::write(&service_env, out.join("\n") + "\n")
+            .with_context(|| format!("failed to write {}", service_env.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

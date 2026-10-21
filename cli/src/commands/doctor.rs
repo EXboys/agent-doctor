@@ -59,12 +59,17 @@ pub fn run(json: bool, explain: bool) -> Result<()> {
 
     println!();
     for runtime in &report.runtimes {
-        let status = if runtime.installed {
+        let status = if runtime.error.is_some() {
+            "probe failed"
+        } else if runtime.installed {
             "installed"
         } else {
             "not installed"
         };
         println!("{} ({}) — {status}", runtime.display_name, runtime.id);
+        if let Some(error) = &runtime.error {
+            println!("  error: {error}");
+        }
         if let Some(version) = &runtime.version {
             println!("  version: {version}");
         }

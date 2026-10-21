@@ -814,7 +814,8 @@ fn is_canonical_providers_path(path: &Path) -> bool {
 
 fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     // Strip keys from on-disk providers.json — keys live in the local secrets vault.
     let mut redacted = store.clone();
@@ -849,7 +850,7 @@ fn save_store(path: &Path, store: &PersonalProvidersStore) -> Result<()> {
         }
     }
     let raw = serde_json::to_string_pretty(&redacted)?;
-    fs::write(path, raw + "\n")?;
+    fs::write(path, raw + "\n").with_context(|| format!("failed to write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -896,7 +897,8 @@ fn load_store(path: &Path) -> Result<PersonalProvidersStore> {
     if !path.exists() {
         return Ok(PersonalProvidersStore::default());
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     if raw.trim().is_empty() {
         return Ok(PersonalProvidersStore::default());
     }
@@ -1051,7 +1053,8 @@ pub(crate) fn write_personal_profile(
     ensure_company_baseline_snapshot_from_active()?;
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let mut file = fs::File::create(path).context("failed to create profile.env")?;
@@ -1127,7 +1130,8 @@ fn extract_model_ids(body: &str) -> Vec<String> {
 }
 
 fn read_env_file(path: &Path) -> Result<HashMap<String, String>> {
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut map = HashMap::new();
     for line in raw.lines() {
         let trimmed = line.trim();

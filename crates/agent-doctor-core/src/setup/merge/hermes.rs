@@ -67,7 +67,8 @@ pub fn apply_hermes_slot(
     upsert_hermes_slot(&slot, &gateway_url, &model)?;
 
     let mut root: YamlValue = if path.exists() {
-        let raw = fs::read_to_string(&path)?;
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
     } else {
         YamlValue::Mapping(Mapping::new())
@@ -119,7 +120,8 @@ pub fn apply_hermes_slot(
         }
     }
 
-    fs::write(&path, serde_yaml::to_string(&root)?)?;
+    fs::write(&path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     let env_provider = if effective_provider == "custom" {
         "openai"
     } else {
@@ -269,7 +271,8 @@ pub(crate) fn upsert_hermes_slot(slot: &str, gateway_url: &str, model: &str) -> 
     let path = hermes_slots_path();
     ensure_parent(&path)?;
     let mut root: YamlValue = if path.exists() {
-        let raw = fs::read_to_string(&path)?;
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         serde_yaml::from_str(&raw).unwrap_or_else(|_| YamlValue::Mapping(Mapping::new()))
     } else {
         YamlValue::Mapping(Mapping::new())
@@ -288,7 +291,8 @@ pub(crate) fn upsert_hermes_slot(slot: &str, gateway_url: &str, model: &str) -> 
     entry.insert(YamlValue::from("base_url"), YamlValue::from(gateway_url));
     entry.insert(YamlValue::from("default"), YamlValue::from(model));
     slots_map.insert(YamlValue::from(slot), YamlValue::Mapping(entry));
-    fs::write(&path, serde_yaml::to_string(&root)?)?;
+    fs::write(&path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

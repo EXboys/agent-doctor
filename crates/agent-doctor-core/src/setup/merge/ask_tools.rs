@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result as AnyhowResult;
+use anyhow::{Context as _, Result as AnyhowResult};
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
 
@@ -17,7 +17,8 @@ pub fn drop_unreachable_codex_mcp_servers(path: &Path) -> AnyhowResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut doc = raw.parse::<toml_edit::DocumentMut>()?;
     let Some(servers) = doc
         .get_mut("mcp_servers")
@@ -42,7 +43,8 @@ pub fn drop_unreachable_codex_mcp_servers(path: &Path) -> AnyhowResult<bool> {
     for name in &stale {
         servers.remove(name);
     }
-    fs::write(path, doc.to_string())?;
+    fs::write(path, doc.to_string())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
 }
 
@@ -146,7 +148,8 @@ pub fn drop_unreachable_json_mcp_servers(path: &Path) -> AnyhowResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut doc: JsonValue = match serde_json::from_str(&raw) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -165,7 +168,8 @@ pub fn drop_unreachable_json_mcp_servers(path: &Path) -> AnyhowResult<bool> {
         return Ok(false);
     }
     let rendered = serde_json::to_string_pretty(&doc)?;
-    fs::write(path, format!("{rendered}\n"))?;
+    fs::write(path, format!("{rendered}\n"))
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
 }
 
@@ -196,7 +200,8 @@ pub fn drop_unreachable_yaml_mcp_servers(path: &Path) -> AnyhowResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut root: YamlValue = match serde_yaml::from_str(&raw) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -220,7 +225,8 @@ pub fn drop_unreachable_yaml_mcp_servers(path: &Path) -> AnyhowResult<bool> {
     for name in stale {
         servers.remove(&name);
     }
-    fs::write(path, serde_yaml::to_string(&root)?)?;
+    fs::write(path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
 }
 
@@ -229,7 +235,8 @@ pub fn drop_unreachable_dsh_mcp_plugins(path: &Path) -> AnyhowResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
-    let raw = fs::read_to_string(path)?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut root: YamlValue = match serde_yaml::from_str(&raw) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -248,7 +255,8 @@ pub fn drop_unreachable_dsh_mcp_plugins(path: &Path) -> AnyhowResult<bool> {
     if !changed {
         return Ok(false);
     }
-    fs::write(path, serde_yaml::to_string(&root)?)?;
+    fs::write(path, serde_yaml::to_string(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(true)
 }
 

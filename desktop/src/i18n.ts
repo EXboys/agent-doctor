@@ -1,17 +1,19 @@
-import { en, type MessageKey } from "./i18n/en";
-import { zh } from "./i18n/zh";
+import type { MessageKey } from "./i18n/en";
 
 export type Locale = "en" | "zh";
 export type { MessageKey };
 
+type Dict = Record<MessageKey, string>;
+
 const STORAGE_KEY = "agent-doctor-locale";
 
-const messages = {
-  en,
-  zh,
-} as const;
-
 let locale: Locale = detectLocale();
+// Fixed at boot so `t()` always has a dictionary to fall back to while a
+// switched-to locale is still streaming in.
+const bootLocale = locale;
+
+/** Only the active locale is fetched per window; the other stays a lazy chunk. */
+const loaded: Partial<Record<Locale, Dict>> = {};
 
 function detectLocale(): Locale {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -22,18 +24,35 @@ function detectLocale(): Locale {
   return lang.startsWith("zh") ? "zh" : "en";
 }
 
+async function loadDict(which: Locale): Promise<Dict> {
+  const mod = await import(`./i18n/${which}`);
+  return (which === "zh" ? mod.zh : mod.en) as Dict;
+}
+
+function ensureLoaded(which: Locale): Promise<void> {
+  return loadDict(which).then((dict) => {
+    loaded[which] = dict;
+  });
+}
+
+// Every entry script is a module importing this file, so the active
+// dictionary is ready before the first render; the other locale never loads.
+await ensureLoaded(locale);
+
 export function getLocale(): Locale {
   return locale;
 }
 
-export function setLocale(next: Locale): void {
+export async function setLocale(next: Locale): Promise<void> {
   locale = next;
   localStorage.setItem(STORAGE_KEY, next);
   document.documentElement.lang = next === "zh" ? "zh-CN" : "en";
+  await ensureLoaded(next);
 }
 
 export function t(key: MessageKey, params?: Record<string, string>): string {
-  let text: string = messages[locale][key] ?? messages.en[key] ?? key;
+  let text: string =
+    loaded[locale]?.[key] ?? loaded[bootLocale]![key] ?? key;
   if (params) {
     for (const [name, value] of Object.entries(params)) {
       text = text.split(`{${name}}`).join(value);
@@ -55,9 +74,9 @@ export function tNamed(key: MessageKey, name: string, params?: Record<string, st
 /** Blurb keyed by runtime id (`resources.agentBlurb.<id>` in en.ts / zh.ts). */
 export function tRuntimeBlurb(runtimeId: string): string {
   const key = `resources.agentBlurb.${runtimeId}`;
-  const localized = messages[locale] as Record<string, string>;
-  const english = messages.en as Record<string, string>;
-  return localized[key] ?? english[key] ?? "";
+  const localized = loaded[locale] as Record<string, string> | undefined;
+  const boot = loaded[bootLocale] as Record<string, string>;
+  return localized?.[key] ?? boot[key] ?? "";
 }
 
 export function applyStaticI18n(root: ParentNode = document): void {

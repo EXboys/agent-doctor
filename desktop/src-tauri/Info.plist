@@ -12,5 +12,16 @@
   <string>项目文件夹有时在桌面上。允许后才能检查和修复这个项目里的 Agent。</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>项目文件夹有时在「下载」里。允许后才能检查和修复这个项目里的 Agent。</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Agent Doctor</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>agent-doctor</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

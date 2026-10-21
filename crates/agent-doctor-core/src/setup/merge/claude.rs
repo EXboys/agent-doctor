@@ -204,7 +204,8 @@ pub fn apply_claude_code_with_model(
     ensure_parent(&path)?;
 
     let mut root = if path.exists() {
-        let raw = fs::read_to_string(&path)?;
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         serde_json::from_str(&raw).unwrap_or_else(|_| json!({}))
     } else {
         json!({})
@@ -237,7 +238,8 @@ pub fn apply_claude_code_with_model(
         .expect("object")
         .insert("anthropicBaseUrl".to_string(), json!(gateway_url));
 
-    fs::write(&path, serde_json::to_string_pretty(&root)?)?;
+    fs::write(&path, serde_json::to_string_pretty(&root)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     confirm_claude_provider_settings(&path, gateway_url, api_key, model)?;
 
     Ok(RuntimeSetupResult {

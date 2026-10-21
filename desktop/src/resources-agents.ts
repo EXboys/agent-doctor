@@ -3,13 +3,23 @@ import { listen } from "@tauri-apps/api/event";
 import { setAgentBrandIcon } from "./agent-brand";
 import { t, tRuntimeBlurb } from "./i18n";
 import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
-import { runtimeCatalog } from "./runtime-catalog";
+import { isAskRuntimeId, runtimeCatalog } from "./runtime-catalog";
 import type { InstallProgressEvent, RuntimeDoctorResult } from "./types";
-import { resourcesState, agentsListEl, agentsEmptyEl, agentInstallInFlight, agentOpenInFlight, agentInstallHint } from "./resources-state";
+import {
+  resourcesState,
+  agentsListEl,
+  agentsEmptyEl,
+  agentInstallInFlight,
+  agentOpenInFlight,
+  agentJustOpened,
+  agentInstallHint,
+} from "./resources-state";
 import { agentChipLabel } from "./resources-skills";
 import { renderResourcesList, syncPanelLead } from "./resources";
-import { installRuntime, openSession, runDoctor } from "./ipc";
+import { installRuntime, openAskWindow, openSession, runDoctor } from "./ipc";
 import { mountInstallReply } from "./install-reply";
+
+const JUST_OPENED_MS = 2000;
 
 export function agentCatalogBlurb(runtime: string): string {
   return tRuntimeBlurb(runtime);
@@ -125,7 +135,11 @@ export function renderAgentCatalog(): void {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-secondary btn-compact";
-      btn.textContent = opening ? t("runtime.opening") : t("runtime.open");
+      btn.textContent = opening
+        ? t("runtime.opening")
+        : agentJustOpened.has(runtime.id)
+          ? t("resources.agentOpened")
+          : t("runtime.open");
       btn.disabled = opening;
       btn.addEventListener("click", () => {
         void openCatalogAgent(runtime.id);
@@ -216,19 +230,35 @@ export async function installCatalogAgent(runtime: string): Promise<void> {
   }
 }
 
+function markAgentJustOpened(runtime: string): void {
+  const prior = agentJustOpened.get(runtime);
+  if (prior !== undefined) window.clearTimeout(prior);
+  agentJustOpened.set(
+    runtime,
+    window.setTimeout(() => {
+      agentJustOpened.delete(runtime);
+      renderAgentCatalog();
+    }, JUST_OPENED_MS),
+  );
+}
+
 export async function openCatalogAgent(runtime: string): Promise<void> {
   if (agentOpenInFlight.has(runtime) || agentInstallInFlight.has(runtime)) return;
   agentOpenInFlight.add(runtime);
+  agentInstallHint.delete(runtime);
   renderAgentCatalog();
-  setAgentInstallHint(runtime, t("runtime.opening"), "busy");
   try {
-    await openSession({
-      runtime,
-      cwd: null,
-      prompt: null,
-      terminal: null,
-    });
-    setAgentInstallHint(runtime, t("resources.agentOpened"), "ok");
+    if (isAskRuntimeId(runtime)) {
+      await openAskWindow({ runtime });
+    } else {
+      await openSession({
+        runtime,
+        cwd: null,
+        prompt: null,
+        terminal: null,
+      });
+    }
+    markAgentJustOpened(runtime);
   } catch (error) {
     setAgentInstallHint(runtime, withErrorDetail(t("runtime.openFailed"), error), "error");
   } finally {

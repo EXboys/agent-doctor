@@ -299,6 +299,41 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Bring the window that started a login back in front of the browser.
+pub(crate) fn focus_named_window(app: &AppHandle, label: &str) {
+    activate_current_app();
+    let Some(window) = app.get_webview_window(label) else {
+        show_main_window(app);
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_always_on_top(false);
+    }
+}
+
+fn activate_current_app() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
+
+        let Some(cls) = AnyClass::get(c"NSApplication") else {
+            return;
+        };
+        unsafe {
+            let app: *mut AnyObject = msg_send![cls, sharedApplication];
+            if !app.is_null() {
+                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+            }
+        }
+    }
+}
+
 pub(crate) fn attach_main_window_close_behavior(window: &tauri::WebviewWindow) {
     let hide = window.clone();
     window.on_window_event(move |event| {

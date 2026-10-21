@@ -62,6 +62,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["agent-doctor"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2RjUyRTYwMTMwREQ0RjQKUldUMDFBMFRZQzcxdGhUQzJhbWFoQlVGQlJ4aUxIZ0JiWW5jZkJUdlo3TjFvS3llNEJTYlJBa04K",
       "endpoints": [

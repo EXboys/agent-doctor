@@ -215,11 +215,13 @@ pub fn evotown_agent_env_path() -> Option<PathBuf> {
 /// Upsert a single `KEY=value` line in `evotown.agent.env` without wiping other keys.
 pub fn upsert_evotown_agent_env_key(path: &Path, key: &str, value: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let mut lines: Vec<String> = if path.exists() {
-        fs::read_to_string(path)?
+        fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?
             .lines()
             .map(|l| l.to_string())
             .collect()
@@ -246,7 +248,8 @@ pub fn upsert_evotown_agent_env_key(path: &Path, key: &str, value: &str) -> Resu
         lines.push(format!("{key}={value}"));
     }
 
-    fs::write(path, lines.join("\n") + "\n")?;
+    fs::write(path, lines.join("\n") + "\n")
+        .with_context(|| format!("failed to write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -274,7 +277,8 @@ pub fn remove_evotown_agent_env_key(path: &Path, key: &str) -> Result<()> {
         })
         .map(|l| l.to_string())
         .collect();
-    fs::write(path, lines.join("\n") + "\n")?;
+    fs::write(path, lines.join("\n") + "\n")
+        .with_context(|| format!("failed to write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -328,7 +332,8 @@ pub fn write_evotown_agent_env(
 
     let path = evotown_agent_env_path().context("could not resolve config directory")?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     // Preserve engine register credentials across setup rewrites.
@@ -373,7 +378,8 @@ pub fn write_evotown_agent_env(
     ];
     lines.extend(preserved);
 
-    fs::write(&path, lines.join("\n") + "\n")?;
+    fs::write(&path, lines.join("\n") + "\n")
+        .with_context(|| format!("failed to write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -389,7 +395,8 @@ pub fn write_company_profile_with_gateway(
     evotown_base: &str,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let mut file = fs::File::create(path).context("failed to create profile.env")?;
@@ -425,7 +432,8 @@ pub(crate) fn backup_file(path: &Path) -> Result<Option<PathBuf>> {
     if !path.exists() {
         return Ok(None);
     }
-    let original = fs::read_to_string(path)?;
+    let original =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -436,13 +444,15 @@ pub(crate) fn backup_file(path: &Path) -> Result<Option<PathBuf>> {
             .and_then(|ext| ext.to_str())
             .unwrap_or("bak")
     ));
-    std::fs::write(&backup_path, original)?;
+    std::fs::write(&backup_path, original)
+        .with_context(|| format!("failed to write backup {}", backup_path.display()))?;
     Ok(Some(backup_path))
 }
 
 pub(crate) fn ensure_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     Ok(())
 }

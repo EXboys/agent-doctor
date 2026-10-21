@@ -8,7 +8,7 @@ import type { MallFilter } from "./resources-state";
 import { defaultToolsFootnote, renderResourcesList, rowMatchesQuery, setSkillsFootnote, skillsPanelActive, syncSkillsFootnote } from "./resources";
 import { buildMcpRows, loadMcpStatus } from "./resources-browser";
 import { appendFilterChip, appendResourceRow, appendUnifiedSkillRow, entryFromMallItem, isStoreScope, loadSkills, renderSkillsList } from "./resources-skills";
-import { listTeamupsMallCatalog, teamupsAccountStatus, pollTeamupsLogin, startTeamupsLogin, signOutTeamups, installTeamupsMallItem } from "./ipc";
+import { listTeamupsMallCatalog, teamupsAccountStatus, startTeamupsLogin, signOutTeamups, installTeamupsMallItem } from "./ipc";
 
 export function applyAccountOwnership(): void {
   if (!resourcesState.lastMallCatalog || !resourcesState.lastTeamupsAccount?.signed_in) return;
@@ -154,13 +154,6 @@ export function canInstallMallItem(item: TeamupsCatalogItem): boolean {
   return item.free || item.owned;
 }
 
-export function stopMallLoginPoll(): void {
-  if (resourcesState.mallLoginTimer != null) {
-    window.clearTimeout(resourcesState.mallLoginTimer);
-    resourcesState.mallLoginTimer = null;
-  }
-}
-
 export function renderMallAccount(): void {
   const signedIn = Boolean(resourcesState.lastTeamupsAccount?.signed_in);
   mallAccountEl.classList.toggle("is-signed-in", signedIn);
@@ -211,47 +204,20 @@ export async function loadMall(): Promise<void> {
   }
 }
 
-export async function scheduleMallLoginPoll(
-  deviceCode: string,
-  intervalSec: number,
-  expiresAt: number,
-): Promise<void> {
-  stopMallLoginPoll();
-  const tick = async () => {
-    if (Date.now() >= expiresAt) {
-      resourcesState.mallLoginInFlight = false;
-      renderMallAccount();
-      setSkillsFootnote(t("resources.mallLoginExpired"));
-      return;
-    }
-    try {
-      const poll = await pollTeamupsLogin({
-        deviceCode,
-      });
-      if (poll.status === "pending") {
-        resourcesState.mallLoginTimer = window.setTimeout(() => {
-          void tick();
-        }, Math.max(1, intervalSec) * 1000);
-        return;
-      }
-      resourcesState.mallLoginInFlight = false;
-      if (poll.status === "approved") {
-        setSkillsFootnote(t("resources.mallLoginOk"));
-        await loadMall();
-        return;
-      }
-      if (poll.status === "expired" || poll.status === "denied") {
-        setSkillsFootnote(t("resources.mallLoginExpired"));
-        renderMallAccount();
-        return;
-      }
-    } catch (error) {
-      resourcesState.mallLoginInFlight = false;
-      setSkillsFootnote(teamupsLoginFailure(error));
-      renderMallAccount();
-    }
-  };
-  await tick();
+export function noteMallLoginFinished(status: string, message?: string): void {
+  if (!resourcesState.mallLoginInFlight) return;
+  resourcesState.mallLoginInFlight = false;
+  if (status === "approved") {
+    setSkillsFootnote(t("resources.mallLoginOk"));
+    void loadMall();
+    return;
+  }
+  setSkillsFootnote(
+    status === "expired" || status === "denied"
+      ? t("resources.mallLoginExpired")
+      : teamupsLoginFailure(message || ""),
+  );
+  renderMallAccount();
 }
 
 export async function startMallLogin(): Promise<void> {
@@ -262,8 +228,6 @@ export async function startMallLogin(): Promise<void> {
   try {
     const started = await startTeamupsLogin();
     await openUrl(started.verification_url);
-    const expiresAt = Date.now() + Math.max(30, started.expires_in_sec) * 1000;
-    await scheduleMallLoginPoll(started.device_code, started.interval_sec, expiresAt);
   } catch (error) {
     resourcesState.mallLoginInFlight = false;
     setSkillsFootnote(teamupsLoginFailure(error));
@@ -273,7 +237,6 @@ export async function startMallLogin(): Promise<void> {
 
 export async function signOutMallAccount(): Promise<void> {
   if (resourcesState.mallLoginInFlight) return;
-  stopMallLoginPoll();
   try {
     resourcesState.lastTeamupsAccount = await signOutTeamups();
     setSkillsFootnote(t("resources.mallLogoutOk"));
