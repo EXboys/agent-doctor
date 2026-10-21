@@ -17,7 +17,7 @@ serde_yaml = "0.9"
 toml.workspace = true
 toml_edit.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-zip = "2.2"
+zip = "9"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"

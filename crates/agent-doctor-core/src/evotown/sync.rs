@@ -316,7 +316,7 @@ fn extract_zip_bytes(content: &[u8], target_dir: &Path) -> Result<()> {
             Some(path) => target_dir.join(path),
             None => continue,
         };
-        if file.name().ends_with('/') {
+        if file.is_dir() {
             fs::create_dir_all(&outpath)?;
             continue;
         }
