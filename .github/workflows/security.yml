@@ -18,7 +18,9 @@ on:
 
 permissions:
   contents: read
-  # rustsec/audit-check files an issue per new advisory on scheduled runs.
+  # rustsec/audit-check posts its findings as a check run, and files an
+  # issue per new advisory on scheduled runs.
+  checks: write
   issues: write
 
 jobs:
