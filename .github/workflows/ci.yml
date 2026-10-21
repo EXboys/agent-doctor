@@ -14,14 +14,14 @@ jobs:
     name: Version manifests agree
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: bash scripts/check-versions.sh
 
   rust-cli:
     name: Rust CLI (fmt, clippy, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Channel is rust-toolchain.toml. Do not set toolchain: stable.
       - uses: dtolnay/rust-toolchain@stable
@@ -52,7 +52,7 @@ jobs:
     name: Desktop bundles agent-doctor-cli
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -78,7 +78,7 @@ jobs:
       matrix:
         browser: [chrome, edge]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -146,7 +146,7 @@ jobs:
     name: Rust desktop (Tauri)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -175,7 +175,7 @@ jobs:
     name: Rust Windows (clippy + test)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Channel is rust-toolchain.toml. Do not set toolchain: stable.
       - uses: dtolnay/rust-toolchain@stable
@@ -214,7 +214,7 @@ jobs:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v5
         with:
