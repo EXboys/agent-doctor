@@ -201,15 +201,25 @@ pub(crate) fn last_has_field() -> bool {
     LAST_FIELD.load(Ordering::Relaxed)
 }
 
-/// 48×48 grayscale — enough to tell that the picture changed.
+/// 48×48 grayscale — enough to tell that the picture changed. Nothing on
+/// platforms without the `image` crate; there the hand does not see screens.
 pub(crate) fn shot_fingerprint(path: &str) -> Option<Vec<u8>> {
-    let image = image::open(path).ok()?;
-    let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
-    Some(small.to_luma8().into_raw())
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let image = image::open(path).ok()?;
+        let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
+        Some(small.to_luma8().into_raw())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 /// A click only counts when the screen actually changed. `capture` takes the
 /// verification shot; failing to capture keeps the click.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub(crate) fn confirm_picture(capture: impl FnOnce() -> Result<Shot>) -> Result<()> {
     let before = last_print();
     if before.is_empty() {
