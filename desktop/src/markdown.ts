@@ -1,12 +1,8 @@
 /** Lightweight GFM-ish markdown → HTML. Escapes raw HTML first (safe for LLM output). */
 
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+import { escapeHtml } from "./format";
+
+export { escapeHtml };
 
 export type MarkdownOptions = {
   /** Turn `[text](page.md)` and `[[Page]]` into in-page links carrying `data-wiki-page` / `data-wiki-name`. */

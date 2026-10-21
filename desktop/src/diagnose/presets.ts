@@ -11,6 +11,7 @@ import {
 } from "../provider-presets";
 import { shortModelLabel } from "../provider-models";
 import { t } from "../i18n";
+import { escapeHtml } from "../format";
 import {
   modelChipsEl,
   modelEl,
@@ -117,13 +118,6 @@ function renderModelChips(presetId: string, models: string[], selected?: string)
   }
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 export function applyPreset(presetId: string): void {
   const preset = PROVIDER_PRESETS[presetId];

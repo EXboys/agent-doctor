@@ -1,4 +1,5 @@
 import { cancelDeepDiagnose, readImageTexts, deepDiagnoseChat, deepRepair } from "../ipc";
+import { escapeHtml } from "../format";
 //! Deep diagnose = Agent Doctor's own agent loop on top of the rule checks.
 //! The runtime under diagnosis never answers for itself.
 
@@ -78,13 +79,6 @@ export type DeepChatApi = {
   dispose: () => void;
 };
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 /** Rule checks are gathered by the loop itself; only add what the user supplied. */
 function buildQuestion(
