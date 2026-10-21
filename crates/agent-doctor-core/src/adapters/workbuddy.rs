@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
-use crate::adapters::util::{discover_binary, home_join};
+use crate::adapters::util::{discover_binary, home_join, profile_from_config_paths};
 
 pub struct WorkbuddyAdapter;
 
@@ -27,13 +27,6 @@ impl RuntimeAdapter for WorkbuddyAdapter {
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
-        Ok(RuntimeProfile {
-            gateway_url: None,
-            key_source: self
-                .config_paths()
-                .into_iter()
-                .find(|path| path.exists())
-                .map(|path| path.display().to_string()),
-        })
+        Ok(profile_from_config_paths(self.config_paths()))
     }
 }

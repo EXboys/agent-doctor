@@ -33,6 +33,7 @@ mod computer_hand;
 #[cfg(windows)]
 #[path = "computer_hand_win.rs"]
 mod computer_hand;
+mod computer_hand_common;
 #[cfg(target_os = "macos")]
 mod drag_pasteboard;
 mod island;

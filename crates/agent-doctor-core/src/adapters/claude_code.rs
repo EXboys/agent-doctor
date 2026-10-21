@@ -26,10 +26,7 @@ impl RuntimeAdapter for ClaudeCodeAdapter {
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
         let path = home_join(".claude/settings.json");
         if !path.exists() {
-            return Ok(RuntimeProfile {
-                gateway_url: None,
-                key_source: None,
-            });
+            return Ok(RuntimeProfile::missing());
         }
 
         let raw = fs::read_to_string(&path)?;

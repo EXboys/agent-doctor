@@ -13,6 +13,7 @@ mod hermes;
 mod mcp_ensure;
 mod openclaw;
 mod plan;
+mod pump;
 mod tool_step;
 mod util;
 mod vision;

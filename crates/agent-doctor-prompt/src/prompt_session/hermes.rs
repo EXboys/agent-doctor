@@ -5,11 +5,9 @@
 //! stuck on “waiting for the model” during long tool loops. `session_id:` stays on stderr.
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 
@@ -18,9 +16,8 @@ use super::control::PromptSessionControl;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
-    combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    format_tool_status, is_runtime_stderr_noise, join_reader, push_capped, summarize,
-    tool_activity_detail, tool_chip, turn_error, SessionClock, ToolWatch,
+    combine_output, command_from_cli, format_tool_status, summarize, tool_activity_detail,
+    tool_chip, turn_error, ToolWatch,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -111,11 +108,13 @@ fn run_hermes(
         on_event(event);
     };
 
-    let result = pump_lines(
+    let result = super::pump::pump_oneshot(
         &session_id,
         &mut child,
         timeout_sec,
         cancel.handle(),
+        "failed waiting for hermes ask",
+        &mut HermesPump::default(),
         &mut emit,
     );
 
@@ -258,129 +257,40 @@ fn build_hermes_command(
     Ok(cmd)
 }
 
-fn pump_lines<F>(
-    session_id: &str,
-    child: &mut Child,
-    timeout_sec: u64,
-    cancel: Arc<AtomicBool>,
-    on_event: &mut F,
-) -> Result<super::PumpResult>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let pid = child.id();
-    let queue = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
-    let stdout_acc = Arc::new(Mutex::new(String::new()));
-    let stderr_acc = Arc::new(Mutex::new(String::new()));
+/// Hermes's half of the shared pump: stream-json stdout becomes live
+/// deltas and tool chips, its own banner/diagnostic stderr lines stay hidden.
+#[derive(Default)]
+struct HermesPump {
+    plan_board: PlanBoard,
+    tools: ToolWatch,
+}
 
-    let stdout = child.stdout.take().context("missing stdout pipe")?;
-    let stderr = child.stderr.take().context("missing stderr pipe")?;
+impl super::pump::OneShotHandler for HermesPump {
+    fn on_stdout(
+        &mut self,
+        session_id: &str,
+        line: &str,
+        on_event: &mut dyn FnMut(PromptSessionEvent),
+    ) {
+        observe_hermes_tools(line, &mut self.tools);
+        handle_hermes_stream_line(session_id, line, &mut self.plan_board, on_event);
+    }
 
-    let q_out = Arc::clone(&queue);
-    let acc_out = Arc::clone(&stdout_acc);
-    let stdout_eof = Arc::new(AtomicBool::new(false));
-    let stdout_eof_flag = Arc::clone(&stdout_eof);
-    let stdout_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_out, &line);
-            if let Ok(mut guard) = q_out.lock() {
-                guard.push((true, line));
-            }
-        }
-        stdout_eof_flag.store(true, Ordering::SeqCst);
-    });
+    fn hides_stderr(&mut self, line: &str) -> bool {
+        is_hermes_stderr_noise(line)
+    }
 
-    let q_err = Arc::clone(&queue);
-    let acc_err = Arc::clone(&stderr_acc);
-    let stderr_eof = Arc::new(AtomicBool::new(false));
-    let stderr_eof_flag = Arc::clone(&stderr_eof);
-    let stderr_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_err, &line);
-            if let Ok(mut guard) = q_err.lock() {
-                guard.push((false, line));
-            }
-        }
-        stderr_eof_flag.store(true, Ordering::SeqCst);
-    });
+    fn tool_running(&self) -> bool {
+        self.tools.running()
+    }
 
-    let mut plan_board = PlanBoard::default();
-    let mut tools = ToolWatch::default();
-    let mut drain = |on_event: &mut F, tools: &mut ToolWatch| -> bool {
-        let drained = {
-            let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
-            guard.drain(..).collect::<Vec<_>>()
-        };
-        let saw = !drained.is_empty();
-        for (is_stdout, line) in drained {
-            if is_stdout {
-                observe_hermes_tools(&line, tools);
-                handle_hermes_stream_line(session_id, &line, &mut plan_board, on_event);
-                continue;
-            }
-            if is_hermes_stderr_noise(&line) || is_runtime_stderr_noise(&line) {
-                continue;
-            }
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: session_id.to_string(),
-                line,
-            });
-        }
-        saw
-    };
+    fn stall_guard(&self) -> bool {
+        true
+    }
 
-    let mut clock = SessionClock::new(timeout_sec);
-    let mut pipes_closed_at: Option<Instant> = None;
-    let mut timeout_note = None;
-    let (status, exit_code) = loop {
-        if drain(on_event, &mut tools) {
-            clock.touch();
-        }
-        clock.set_tool_running(tools.running());
-        if cancel.load(Ordering::SeqCst) {
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::Cancelled, None);
-        }
-        if clock.expired() || clock.stalled() {
-            timeout_note = Some(clock.timeout_note(tools.last_label()));
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::TimedOut, None);
-        }
-        if let Some(done) = finish_oneshot_after_pipes_closed(
-            child,
-            pid,
-            &stdout_eof,
-            &stderr_eof,
-            &mut pipes_closed_at,
-        ) {
-            break done;
-        }
-        match child.try_wait() {
-            Ok(Some(wait_status)) => {
-                let code = wait_status.code();
-                let status = if wait_status.success() {
-                    PromptSessionStatus::Succeeded
-                } else {
-                    PromptSessionStatus::Failed
-                };
-                break (status, code);
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
-            Err(error) => return Err(error).context("failed waiting for hermes ask"),
-        }
-    };
-
-    join_reader(stdout_handle, Duration::from_millis(500));
-    join_reader(stderr_handle, Duration::from_millis(500));
-    drain(on_event, &mut tools);
-
-    let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr, timeout_note))
+    fn timeout_label(&self) -> String {
+        self.tools.last_label().to_string()
+    }
 }
 
 fn observe_hermes_tools(line: &str, tools: &mut ToolWatch) {
@@ -425,14 +335,12 @@ struct HermesStreamFinal {
 }
 
 /// Map one Hermes `stream-json` stdout line into Ask events (live text + tool chips).
-fn handle_hermes_stream_line<F>(
+fn handle_hermes_stream_line(
     session_id: &str,
     line: &str,
     plan_board: &mut PlanBoard,
-    on_event: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return;

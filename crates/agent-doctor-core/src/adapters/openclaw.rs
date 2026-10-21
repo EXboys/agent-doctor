@@ -31,10 +31,7 @@ impl RuntimeAdapter for OpenClawAdapter {
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
         let path = home_join(".openclaw/openclaw.json");
         if !path.exists() {
-            return Ok(RuntimeProfile {
-                gateway_url: None,
-                key_source: None,
-            });
+            return Ok(RuntimeProfile::missing());
         }
 
         let raw = fs::read_to_string(&path)?;

@@ -1,18 +1,22 @@
 //! Clicks, typing, and screenshots on Windows.
 //!
+//! Tool names, argument checks and reply shapes live in
+//! [`crate::computer_hand_common`]; this file is the Windows way of doing them.
+//!
 //! The desktop app listens on [`agent_doctor_core::COMPUTER_HAND_PIPE`]. The computer
 //! tool sends one JSON line and reads one JSON line back. The reply stays in the
 //! pipe until that tool closes it. Disconnecting sooner throws the reply away, and
 //! the tool hears "管道的另一端上无任何进程". An app opened as administrator sits
 //! above this process, so clicks to it are refused.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
+
+use crate::computer_hand_common as proto;
 use windows::core::{IUnknown, BSTR, HSTRING, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -63,29 +67,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::computer_geom::{
-    crop_pixels, picture_changed, point_inside, window_has_control, window_has_field,
-};
-
-use crate::computer_geom::{
-    absolute_axis, control_line, parse_key, pixel_of, point_of, scale_of, KeyPress,
+    absolute_axis, control_line, crop_pixels, parse_key, pixel_of, point_inside, point_of,
+    scale_of, window_has_control, window_has_field, KeyPress,
 };
 
 const ADMIN_BLOCK: &str = "这个软件是用管理员打开的，点不了。用普通方式打开它再试。";
 const CONTROLS_MISSING: &str = "控件名单没有读到。按图上的位置点。\n";
 
 static LAST_SCREEN: Mutex<Option<Desktop>> = Mutex::new(None);
-static LAST_PRINT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-static LAST_FIELD: AtomicBool = AtomicBool::new(false);
 
 pub fn spawn() {
-    thread::Builder::new()
-        .name("computer-hand".into())
-        .spawn(|| {
-            if let Err(err) = serve() {
-                eprintln!("computer hand stopped: {err:#}");
-            }
-        })
-        .ok();
+    proto::spawn(serve);
 }
 
 fn serve() -> Result<()> {
@@ -139,11 +131,8 @@ fn answer_pipe(pipe: HANDLE) {
     let _com = ComInit::new();
     let reply =
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match read_line(pipe) {
-            Ok(line) => match handle_line(&line) {
-                Ok(result) => json!({ "ok": true, "result": result }),
-                Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-            },
-            Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
+            Ok(line) => proto::envelope(proto::handle_line(&WinHand, &line)),
+            Err(err) => proto::envelope(Err(err)),
         })) {
             Ok(reply) => reply,
             Err(_) => json!({ "ok": false, "error": "看屏幕这一步中断了。请再试一次。" }),
@@ -247,105 +236,67 @@ fn read_line(pipe: HANDLE) -> Result<String> {
     Ok(text.to_string())
 }
 
-fn try_cua(tool: &str, args: &Value) -> Option<Value> {
-    match tool {
-        "screen_apps" => {
-            let apps = crate::computer_contrl::cua::running_apps()?;
-            Some(json!({ "apps": apps }))
-        }
-        "screen_open" => {
-            let name = args.get("app").and_then(Value::as_str).unwrap_or("").trim();
-            if name.is_empty() || !crate::computer_contrl::cua::launch(None, name) {
-                return None;
-            }
-            Some(json!({ "opened": name }))
-        }
-        "screen_menu" => {
-            let names = args
-                .get("path")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::trim)
-                        .filter(|item| !item.is_empty())
-                        .map(str::to_string)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            if names.is_empty() || !crate::computer_contrl::cua::menu(app, &names) {
-                return None;
-            }
-            Some(json!({ "menu": names }))
-        }
-        "screen_windows" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let windows = crate::computer_contrl::cua::windows(app)?;
-            Some(json!({ "windows": windows }))
-        }
-        _ => None,
-    }
-}
+struct WinHand;
 
-fn handle_line(line: &str) -> Result<Value> {
-    let req: Value = serde_json::from_str(line).context("bad request")?;
-    let tool = req.get("tool").and_then(Value::as_str).unwrap_or("");
-    let args = req.get("args").cloned().unwrap_or(json!({}));
-    if let Some(done) = try_cua(tool, &args) {
-        return Ok(done);
+impl proto::Hand for WinHand {
+    fn cua_open(&self, args: &Value) -> Option<Value> {
+        let name = args.get("app").and_then(Value::as_str).unwrap_or("").trim();
+        if name.is_empty() || !crate::computer_contrl::cua::launch(None, name) {
+            return None;
+        }
+        Some(json!({ "opened": name }))
     }
-    match tool {
-        "screen_click" => {
-            let x = args.get("x").and_then(Value::as_f64).context("missing x")?;
-            let y = args.get("y").and_then(Value::as_f64).context("missing y")?;
-            click_at(x, y)?;
-            Ok(json!({ "clicked": "point", "x": x, "y": y }))
-        }
-        "screen_press" => {
-            let key = args.get("key").and_then(Value::as_str).unwrap_or("");
-            press_key(key)?;
-            Ok(json!({ "pressed": key }))
-        }
-        "screen_type" => {
-            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-            if text.is_empty() {
-                bail!("text is empty");
-            }
-            type_text(text)?;
-            Ok(json!({ "typed": text.chars().count() }))
-        }
-        "screen_menus" => Ok(json!({ "text": menu_text()? })),
-        "screen_apps" => Ok(json!({ "apps": app_names()? })),
-        "screen_open" => open_named(args.get("app").and_then(Value::as_str).unwrap_or("")),
-        "screen_windows" => {
-            list_named_windows(args.get("app").and_then(Value::as_str).unwrap_or(""))
-        }
-        "screen_state" => window_controls(args.get("app").and_then(Value::as_str).unwrap_or("")),
-        "screen_click_label" => click_label(
-            args.get("app").and_then(Value::as_str).unwrap_or(""),
-            args.get("label").and_then(Value::as_str).unwrap_or(""),
-        ),
-        "screen_set" => set_labeled(
-            args.get("app").and_then(Value::as_str).unwrap_or(""),
-            args.get("label").and_then(Value::as_str).unwrap_or(""),
-            args.get("text").and_then(Value::as_str).unwrap_or(""),
-        ),
-        "screen_menu" => click_menu(
-            args.get("app").and_then(Value::as_str).unwrap_or(""),
-            string_list(args.get("path")),
-        ),
-        "screen_scroll" => scroll_view(&args),
-        "screen_look" => {
-            let app = args
-                .get("app")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            screen_look(&app)
-        }
-        other => bail!("unknown hand tool: {other}"),
+
+    fn click_at(&self, x: f64, y: f64) -> Result<()> {
+        click_at(x, y)
+    }
+
+    fn press_key(&self, key: &str) -> Result<()> {
+        press_key(key)
+    }
+
+    fn scroll_view(&self, args: &Value) -> Result<Value> {
+        scroll_view(args)
+    }
+
+    fn type_text(&self, text: &str) -> Result<()> {
+        type_text(text)
+    }
+
+    fn menu_text(&self) -> Result<String> {
+        menu_text()
+    }
+
+    fn app_names(&self) -> Result<Vec<String>> {
+        app_names()
+    }
+
+    fn open_named(&self, app: &str) -> Result<Value> {
+        open_named(app)
+    }
+
+    fn list_windows(&self, app: &str) -> Result<Value> {
+        list_named_windows(app)
+    }
+
+    fn window_state(&self, app: &str) -> Result<Value> {
+        window_controls(app)
+    }
+
+    fn click_label(&self, app: &str, label: &str) -> Result<Value> {
+        click_label(app, label)
+    }
+
+    fn set_label(&self, app: &str, label: &str, text: &str) -> Result<Value> {
+        set_labeled(app, label, text)
+    }
+
+    fn click_menu(&self, app: &str, names: Vec<String>) -> Result<Value> {
+        click_menu(app, names)
+    }
+
+    fn look(&self, app: &str) -> Result<Value> {
+        screen_look(app)
     }
 }
 
@@ -385,46 +336,17 @@ fn screen_look(app: &str) -> Result<Value> {
     } else {
         body = CONTROLS_MISSING.to_string();
     }
-    remember_field(window_has_field(&body));
-    if let Some(print) = shot_fingerprint(&shot.path) {
-        remember_print(print);
+    proto::remember_field(window_has_field(&body));
+    if let Some(print) = proto::shot_fingerprint(&shot.path) {
+        proto::remember_print(print);
     }
     *LAST_SCREEN.lock().unwrap_or_else(|err| err.into_inner()) = Some(desk);
-    let mut text =
-        "Rows are @eN name x y. Click that @eN. If a row is not listed, call screen_scroll on the list.\n"
-            .to_string();
-    if cropped {
-        text.push_str("The picture is this app's window.\n");
-    }
-    text.push_str(&window_header(hwnd));
-    text.push_str(&body);
-    if text.chars().count() > 12000 {
-        text.truncate(12000);
-        text.push_str("\n…");
-    }
-    text.push_str(&format!(
-        "\n\nScreenshot file: {}\nImage pixels: {}x{}. Scale: {}.\nClick x,y are points ({}x{}), not image pixels. Divide a pixel position by the scale.",
-        shot.path, shot.pixels.0, shot.pixels.1, shot.scale, shot.points.0, shot.points.1
-    ));
-    Ok(json!({
-        "text": text,
-        "image": shot.path,
-        "pixel_width": shot.pixels.0,
-        "pixel_height": shot.pixels.1,
-        "scale": shot.scale,
-        "point_width": shot.points.0,
-        "point_height": shot.points.1,
-    }))
+    let body = format!("{}{}", window_header(hwnd), body);
+    let text = proto::look_text(&shot, cropped, &body);
+    Ok(proto::look_value(text, &shot))
 }
 
-struct Shot {
-    path: String,
-    pixels: (i64, i64),
-    points: (i64, i64),
-    scale: f64,
-}
-
-fn capture_png(desk: &Desktop) -> Result<Shot> {
+fn capture_png(desk: &Desktop) -> Result<proto::Shot> {
     let hdc = unsafe { GetDC(HWND::default()) };
     if hdc.is_invalid() {
         bail!("could not capture the screen");
@@ -492,7 +414,7 @@ fn capture_png(desk: &Desktop) -> Result<Shot> {
         .context("could not capture the screen")?;
         let point_w = point_of(desk.origin_x + desk.width, desk.origin_x, desk.scale).max(1);
         let point_h = point_of(desk.origin_y + desk.height, desk.origin_y, desk.scale).max(1);
-        Ok(Shot {
+        Ok(proto::Shot {
             path: path.display().to_string(),
             pixels: (desk.width as i64, desk.height as i64),
             points: (point_w, point_h),
@@ -971,7 +893,7 @@ fn click_at(x: f64, y: f64) -> Result<()> {
         bail!("这个位置不在刚才的画面里。先看一眼屏幕，再用画面里的点。");
     }
     click_desk(&desk, x, y)?;
-    confirm_picture(&desk)
+    proto::confirm_picture(|| capture_png(&desk))
 }
 
 fn click_desk(desk: &Desktop, x: f64, y: f64) -> Result<()> {
@@ -1008,51 +930,6 @@ fn point_size(desk: &Desktop) -> (f64, f64) {
     )
 }
 
-fn remember_print(print: Vec<u8>) {
-    *LAST_PRINT.lock().unwrap_or_else(|err| err.into_inner()) = print;
-}
-
-fn last_print() -> Vec<u8> {
-    LAST_PRINT
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .clone()
-}
-
-fn remember_field(yes: bool) {
-    LAST_FIELD.store(yes, Ordering::Relaxed);
-}
-
-fn last_has_field() -> bool {
-    LAST_FIELD.load(Ordering::Relaxed)
-}
-
-fn shot_fingerprint(path: &str) -> Option<Vec<u8>> {
-    let image = image::open(path).ok()?;
-    let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
-    Some(small.to_luma8().into_raw())
-}
-
-fn confirm_picture(desk: &Desktop) -> Result<()> {
-    let before = last_print();
-    if before.is_empty() {
-        return Ok(());
-    }
-    thread::sleep(Duration::from_millis(280));
-    let shot = match capture_png(desk) {
-        Ok(shot) => shot,
-        Err(_) => return Ok(()),
-    };
-    let after = shot_fingerprint(&shot.path).unwrap_or_default();
-    let _ = std::fs::remove_file(&shot.path);
-    if picture_changed(&before, &after) {
-        remember_print(after);
-        Ok(())
-    } else {
-        bail!("这一下没有点到。画面没有变化。先看一眼屏幕，再点一次。");
-    }
-}
-
 fn window_frame(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
@@ -1065,10 +942,10 @@ fn window_frame(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
 }
 
 fn crop_to_window(
-    shot: &Shot,
+    shot: &proto::Shot,
     desk: &Desktop,
     frame: (i32, i32, i32, i32),
-) -> Option<(Desktop, Shot)> {
+) -> Option<(Desktop, proto::Shot)> {
     let (x, y, width, height) = crop_pixels(
         crate::computer_geom::Picture {
             origin_x: desk.origin_x as f64,
@@ -1095,28 +972,13 @@ fn crop_to_window(
     let (point_w, point_h) = point_size(&desk);
     Some((
         desk,
-        Shot {
+        proto::Shot {
             path: shot.path.clone(),
             pixels: (i64::from(width), i64::from(height)),
             points: (point_w.round() as i64, point_h.round() as i64),
             scale: shot.scale,
         },
     ))
-}
-
-fn string_list(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn open_named(app: &str) -> Result<Value> {
@@ -1212,7 +1074,7 @@ fn window_controls(app: &str) -> Result<Value> {
     let hwnd = window_for(app).context("没有看到窗口。")?;
     let desk = monitor_of(hwnd);
     let body = read_controls(hwnd, &desk).unwrap_or_default();
-    remember_field(window_has_field(&body));
+    proto::remember_field(window_has_field(&body));
     let mut controls = Vec::new();
     for line in body.lines() {
         let mut parts = line.split('\t');
@@ -1263,9 +1125,6 @@ fn set_labeled(app: &str, label: &str, text: &str) -> Result<Value> {
     let label = label.trim();
     if label.is_empty() {
         bail!("说一下要填的名字。");
-    }
-    if !last_has_field() {
-        bail!("这个窗口没有输入框。先点一下要填的地方，再用打字。");
     }
     let hwnd = window_for(app).context("没有看到窗口。")?;
     refuse_if_higher(hwnd)?;

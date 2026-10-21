@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
-use crate::adapters::util::{find_binary, home_join, read_version_result};
+use crate::adapters::util::{find_binary, home_join, profile_from_config_paths, DesktopAppSpec};
 
 pub struct QoderAdapter;
 
@@ -16,8 +16,28 @@ pub(crate) enum QoderInstall {
     App(PathBuf),
 }
 
+const DESKTOP_APP: DesktopAppSpec = DesktopAppSpec {
+    macos_apps: &["Qoder IDE.app", "Qoder.app"],
+    windows_local: &[
+        "Programs/Qoder IDE/Qoder IDE.exe",
+        "Programs/Qoder/Qoder.exe",
+    ],
+    windows_machine: &["Qoder IDE/Qoder IDE.exe", "Qoder/Qoder.exe"],
+    linux_paths: &[
+        "/usr/share/qoder-ide/qoder-ide",
+        "/usr/bin/qoder-ide",
+        "/opt/Qoder/qoder",
+        "/usr/share/qoder/qoder",
+        "~/.local/share/qoder-ide/qoder-ide",
+    ],
+};
+
 pub(crate) fn locate_qoder() -> Option<QoderInstall> {
     choose_qoder_install(cli_on_path(), versioned_cli_path(), desktop_app_path())
+}
+
+fn desktop_app_path() -> Option<PathBuf> {
+    crate::adapters::util::desktop_app_path(&DESKTOP_APP)
 }
 
 fn choose_qoder_install(
@@ -91,88 +111,6 @@ fn looks_like_qoder_cli(path: &Path) -> bool {
         || stem.starts_with("qoder-")
 }
 
-fn discovery_from_cli(path: PathBuf) -> AdapterDiscovery {
-    let version = read_version_result(&path).ok().flatten();
-    AdapterDiscovery {
-        installed: true,
-        version,
-        binary_path: Some(path),
-    }
-}
-
-fn discovery_present(path: PathBuf) -> AdapterDiscovery {
-    AdapterDiscovery {
-        installed: true,
-        version: None,
-        binary_path: Some(path),
-    }
-}
-
-fn desktop_app_candidates() -> Vec<PathBuf> {
-    let mut paths = vec![
-        home_join("Applications/Qoder IDE.app"),
-        home_join("Applications/Qoder.app"),
-    ];
-    paths.extend(system_desktop_app_candidates());
-    paths
-}
-
-#[cfg(test)]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    Vec::new()
-}
-
-#[cfg(all(not(test), target_os = "macos"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    vec![
-        PathBuf::from("/Applications/Qoder IDE.app"),
-        PathBuf::from("/Applications/Qoder.app"),
-    ]
-}
-
-#[cfg(all(not(test), target_os = "windows"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        let local = PathBuf::from(local);
-        paths.push(local.join("Programs/Qoder IDE/Qoder IDE.exe"));
-        paths.push(local.join("Programs/Qoder/Qoder.exe"));
-    }
-    for key in ["ProgramFiles", "ProgramW6432"] {
-        if let Some(root) = std::env::var_os(key) {
-            let root = PathBuf::from(root);
-            paths.push(root.join("Qoder IDE/Qoder IDE.exe"));
-            paths.push(root.join("Qoder/Qoder.exe"));
-        }
-    }
-    paths
-}
-
-#[cfg(all(not(test), target_os = "linux"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    vec![
-        PathBuf::from("/usr/share/qoder-ide/qoder-ide"),
-        PathBuf::from("/usr/bin/qoder-ide"),
-        PathBuf::from("/opt/Qoder/qoder"),
-        PathBuf::from("/usr/share/qoder/qoder"),
-        home_join(".local/share/qoder-ide/qoder-ide"),
-    ]
-}
-
-#[cfg(all(
-    not(test),
-    not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
-))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    Vec::new()
-}
-
-fn desktop_app_path() -> Option<PathBuf> {
-    desktop_app_candidates()
-        .into_iter()
-        .find(|path| path.exists())
-}
-
 impl RuntimeAdapter for QoderAdapter {
     fn id(&self) -> &'static str {
         "qoder"
@@ -184,8 +122,8 @@ impl RuntimeAdapter for QoderAdapter {
 
     fn discover(&self) -> AdapterDiscovery {
         match locate_qoder() {
-            Some(QoderInstall::Cli(path)) => discovery_from_cli(path),
-            Some(QoderInstall::App(path)) => discovery_present(path),
+            Some(QoderInstall::Cli(path)) => crate::adapters::util::discovery_from_cli(path),
+            Some(QoderInstall::App(path)) => crate::adapters::util::discovery_present(path),
             None => AdapterDiscovery {
                 installed: false,
                 version: None,
@@ -199,14 +137,7 @@ impl RuntimeAdapter for QoderAdapter {
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
-        Ok(RuntimeProfile {
-            gateway_url: None,
-            key_source: self
-                .config_paths()
-                .into_iter()
-                .find(|path| path.exists())
-                .map(|path| path.display().to_string()),
-        })
+        Ok(profile_from_config_paths(self.config_paths()))
     }
 }
 

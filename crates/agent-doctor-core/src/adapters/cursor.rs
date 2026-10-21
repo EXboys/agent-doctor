@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
-use crate::adapters::util::{discover_binary, home_join, read_version_result};
+use crate::adapters::util::{
+    discover_binary, discovery_from_cli, discovery_present, home_join, DesktopAppSpec,
+};
 
 pub struct CursorAdapter;
 
+/// `cursor-agent` installs as `agent` under `~/.local/bin`, so the binary name
+/// alone cannot tell it from other tools'.
 fn looks_like_cursor_agent(path: &Path) -> bool {
     let text = path.to_string_lossy();
     text.contains("cursor-agent")
@@ -12,74 +16,19 @@ fn looks_like_cursor_agent(path: &Path) -> bool {
         || text.ends_with("\\agent.exe")
 }
 
-fn discovery_from_cli(path: PathBuf) -> AdapterDiscovery {
-    let version = read_version_result(&path).ok().flatten();
-    AdapterDiscovery {
-        installed: true,
-        version,
-        binary_path: Some(path),
-    }
-}
-
-fn discovery_present(path: PathBuf) -> AdapterDiscovery {
-    AdapterDiscovery {
-        installed: true,
-        version: None,
-        binary_path: Some(path),
-    }
-}
-
-fn desktop_app_candidates() -> Vec<PathBuf> {
-    let mut paths = vec![home_join("Applications/Cursor.app")];
-    paths.extend(system_desktop_app_candidates());
-    paths
-}
-
-#[cfg(test)]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    Vec::new()
-}
-
-#[cfg(all(not(test), target_os = "macos"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    vec![PathBuf::from("/Applications/Cursor.app")]
-}
-
-#[cfg(all(not(test), target_os = "windows"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    std::env::var("LOCALAPPDATA")
-        .ok()
-        .map(PathBuf::from)
-        .map(|local| {
-            vec![
-                local.join("Programs/cursor/Cursor.exe"),
-                local.join("Programs/Cursor/Cursor.exe"),
-            ]
-        })
-        .unwrap_or_default()
-}
-
-#[cfg(all(not(test), target_os = "linux"))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    vec![
-        PathBuf::from("/opt/Cursor/cursor"),
-        PathBuf::from("/usr/share/cursor/cursor"),
-        home_join(".local/share/applications/cursor.desktop"),
-    ]
-}
-
-#[cfg(all(
-    not(test),
-    not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
-))]
-fn system_desktop_app_candidates() -> Vec<PathBuf> {
-    Vec::new()
-}
+const DESKTOP_APP: DesktopAppSpec = DesktopAppSpec {
+    macos_apps: &["Cursor.app"],
+    windows_local: &["Programs/cursor/Cursor.exe", "Programs/Cursor/Cursor.exe"],
+    windows_machine: &[],
+    linux_paths: &[
+        "/opt/Cursor/cursor",
+        "/usr/share/cursor/cursor",
+        "~/.local/share/applications/cursor.desktop",
+    ],
+};
 
 fn desktop_app_path() -> Option<PathBuf> {
-    desktop_app_candidates()
-        .into_iter()
-        .find(|path| path.exists())
+    crate::adapters::util::desktop_app_path(&DESKTOP_APP)
 }
 
 impl RuntimeAdapter for CursorAdapter {

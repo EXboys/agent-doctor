@@ -1,5 +1,8 @@
 //! Clicks and keystrokes run in this app. macOS blocks `osascript` from sending
 //! them, even when this app is allowed to control the computer.
+//!
+//! Tool names, argument checks and reply shapes live in
+//! [`crate::computer_hand_common`]; this file is the macOS way of doing them.
 
 use std::cell::Cell;
 use std::fs;
@@ -14,19 +17,11 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::computer_geom::{
-    crop_pixels, picture_changed, point_inside, window_has_control, window_has_field,
-};
+use crate::computer_geom::{crop_pixels, point_inside, window_has_control, window_has_field};
+use crate::computer_hand_common as proto;
 
 pub fn spawn() {
-    thread::Builder::new()
-        .name("computer-hand".into())
-        .spawn(|| {
-            if let Err(err) = serve() {
-                eprintln!("computer hand stopped: {err:#}");
-            }
-        })
-        .ok();
+    proto::spawn(serve);
 }
 
 fn socket_path() -> Result<PathBuf> {
@@ -62,142 +57,127 @@ fn serve() -> Result<()> {
             continue;
         }
         thread::spawn(move || {
-            let reply = match handle_line(&line) {
-                Ok(result) => json!({ "ok": true, "result": result }),
-                Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-            };
+            let reply = proto::envelope(proto::handle_line(&MacHand, &line));
             let _ = writeln!(write_half, "{reply}");
         });
     }
     Ok(())
 }
 
-fn handle_line(line: &str) -> Result<Value> {
-    let req: Value = serde_json::from_str(line).context("bad request")?;
-    let tool = req.get("tool").and_then(Value::as_str).unwrap_or("");
-    let args = req.get("args").cloned().unwrap_or(json!({}));
-    if let Some(done) = try_cua(tool, &args) {
-        return Ok(done);
+struct MacHand;
+
+impl proto::Hand for MacHand {
+    fn cua_open(&self, args: &Value) -> Option<Value> {
+        try_cua_open(args)
     }
-    ensure_trusted()?;
-    match tool {
-        "screen_click" => {
-            let x = args.get("x").and_then(Value::as_f64).context("missing x")?;
-            let y = args.get("y").and_then(Value::as_f64).context("missing y")?;
-            click_at(x, y)?;
-            Ok(json!({ "clicked": "point", "x": x, "y": y }))
-        }
-        "screen_press" => {
-            let key = args.get("key").and_then(Value::as_str).unwrap_or("");
-            press_key(key)?;
-            Ok(json!({ "pressed": key }))
-        }
-        "screen_scroll" => {
-            let direction = args
-                .get("direction")
-                .and_then(Value::as_str)
-                .unwrap_or("down");
-            let amount = args
-                .get("amount")
-                .and_then(Value::as_i64)
-                .unwrap_or(4)
-                .clamp(1, 12) as i32;
-            let lines = if direction.eq_ignore_ascii_case("up") {
-                amount
+
+    fn ensure_trusted(&self) -> Result<()> {
+        ensure_trusted()
+    }
+
+    fn click_at(&self, x: f64, y: f64) -> Result<()> {
+        click_at(x, y)
+    }
+
+    fn press_key(&self, key: &str) -> Result<()> {
+        press_key(key)
+    }
+
+    fn scroll_view(&self, args: &Value) -> Result<Value> {
+        let direction = args
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("down");
+        let amount = args
+            .get("amount")
+            .and_then(Value::as_i64)
+            .unwrap_or(4)
+            .clamp(1, 12) as i32;
+        let lines = if direction.eq_ignore_ascii_case("up") {
+            amount
+        } else {
+            -amount
+        };
+        let (x, y) = scroll_point(args)?;
+        require_point(x, y)?;
+        scroll_at(x, y, lines)?;
+        Ok(json!({ "scrolled": direction, "x": x, "y": y, "amount": amount }))
+    }
+
+    fn type_text(&self, text: &str) -> Result<()> {
+        type_text(text)
+    }
+
+    fn menu_text(&self) -> Result<String> {
+        menu_text()
+    }
+
+    fn app_names(&self) -> Result<Vec<String>> {
+        app_names()
+    }
+
+    fn open_named(&self, app: &str) -> Result<Value> {
+        open_named_app(app)
+    }
+
+    fn list_windows(&self, app: &str) -> Result<Value> {
+        let windows = crate::computer_contrl::list_windows(app).map_err(anyhow::Error::msg)?;
+        Ok(json!({
+            "windows": windows
+                .into_iter()
+                .map(|window| json!({ "app": window.app, "title": window.title }))
+                .collect::<Vec<_>>()
+        }))
+    }
+
+    fn window_state(&self, app: &str) -> Result<Value> {
+        let state = crate::computer_contrl::window_state(app).map_err(anyhow::Error::msg)?;
+        proto::remember_field(
+            state
+                .controls
+                .iter()
+                .any(|control| control.role == "text field"),
+        );
+        Ok(json!({
+            "app": state.app,
+            "window": state.title,
+            "controls": state
+                .controls
+                .into_iter()
+                .map(|control| json!({
+                    "role": control.role,
+                    "label": control.label,
+                    "x": control.x,
+                    "y": control.y
+                }))
+                .collect::<Vec<_>>()
+        }))
+    }
+
+    fn click_label(&self, app: &str, label: &str) -> Result<Value> {
+        crate::computer_contrl::click_control(app, label).map_err(anyhow::Error::msg)?;
+        confirm_click()?;
+        Ok(json!({ "clicked": label }))
+    }
+
+    fn set_label(&self, app: &str, label: &str, text: &str) -> Result<Value> {
+        crate::computer_contrl::set_value(app, label, text).map_err(|err| {
+            if err.contains("没有找到") {
+                anyhow::anyhow!("没有这个输入框。先点一下要填的地方，再用打字。")
             } else {
-                -amount
-            };
-            let (x, y) = scroll_point(&args)?;
-            require_point(x, y)?;
-            scroll_at(x, y, lines)?;
-            Ok(json!({ "scrolled": direction, "x": x, "y": y, "amount": amount }))
-        }
-        "screen_type" => {
-            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-            if text.is_empty() {
-                bail!("text is empty");
+                anyhow::anyhow!(err)
             }
-            type_text(text)?;
-            Ok(json!({ "typed": text.chars().count() }))
-        }
-        "screen_menus" => Ok(json!({ "text": menu_text()? })),
-        "screen_apps" => Ok(json!({ "apps": app_names()? })),
-        "screen_open" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            open_named_app(app)
-        }
-        "screen_windows" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let windows = crate::computer_contrl::list_windows(app).map_err(anyhow::Error::msg)?;
-            Ok(json!({
-                "windows": windows
-                    .into_iter()
-                    .map(|window| json!({ "app": window.app, "title": window.title }))
-                    .collect::<Vec<_>>()
-            }))
-        }
-        "screen_state" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let state = crate::computer_contrl::window_state(app).map_err(anyhow::Error::msg)?;
-            remember_field(
-                state
-                    .controls
-                    .iter()
-                    .any(|control| control.role == "text field"),
-            );
-            Ok(json!({
-                "app": state.app,
-                "window": state.title,
-                "controls": state
-                    .controls
-                    .into_iter()
-                    .map(|control| json!({
-                        "role": control.role,
-                        "label": control.label,
-                        "x": control.x,
-                        "y": control.y
-                    }))
-                    .collect::<Vec<_>>()
-            }))
-        }
-        "screen_click_label" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let label = args.get("label").and_then(Value::as_str).unwrap_or("");
-            crate::computer_contrl::click_control(app, label).map_err(anyhow::Error::msg)?;
-            confirm_picture()?;
-            Ok(json!({ "clicked": label }))
-        }
-        "screen_set" => {
-            if !last_has_field() {
-                bail!("这个窗口没有输入框。先点一下要填的地方，再用打字。");
-            }
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let label = args.get("label").and_then(Value::as_str).unwrap_or("");
-            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-            crate::computer_contrl::set_value(app, label, text).map_err(|err| {
-                if err.contains("没有找到") {
-                    anyhow::anyhow!("没有这个输入框。先点一下要填的地方，再用打字。")
-                } else {
-                    anyhow::anyhow!(err)
-                }
-            })?;
-            Ok(json!({ "set": label }))
-        }
-        "screen_menu" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let names = string_list(args.get("path"));
-            crate::computer_contrl::invoke_menu(app, &names).map_err(anyhow::Error::msg)?;
-            Ok(json!({ "menu": names }))
-        }
-        "screen_look" => {
-            let app = args
-                .get("app")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            screen_look(&app)
-        }
-        other => bail!("unknown hand tool: {other}"),
+        })?;
+        Ok(json!({ "set": label }))
+    }
+
+    fn click_menu(&self, app: &str, names: Vec<String>) -> Result<Value> {
+        crate::computer_contrl::invoke_menu(app, &names).map_err(anyhow::Error::msg)?;
+        Ok(json!({ "menu": names }))
+    }
+
+    fn look(&self, app: &str) -> Result<Value> {
+        screen_look(app)
     }
 }
 
@@ -272,33 +252,13 @@ fn screen_look(app: &str) -> Result<Value> {
     // makes the assistant click without seeing the screen.
     let shot = capture_png(app)?;
     let look = look_text(app)?;
-    remember_field(window_has_field(&look.text));
+    proto::remember_field(window_has_field(&look.text));
     let (shot, cropped) = fit_window(shot, &look);
-    if let Some(print) = shot_fingerprint(&shot.path) {
-        remember_print(print);
+    if let Some(print) = proto::shot_fingerprint(&shot.path) {
+        proto::remember_print(print);
     }
-    let mut text = "Rows are @eN name x y. Click that @eN. If a row is not listed, call screen_scroll on the list.\n".to_string();
-    if cropped {
-        text.push_str("The picture is this app's window.\n");
-    }
-    text.push_str(&look.text);
-    if text.chars().count() > 12000 {
-        text.truncate(12000);
-        text.push_str("\n…");
-    }
-    text.push_str(&format!(
-        "\n\nScreenshot file: {}\nImage pixels: {}x{}. Scale: {}.\nClick x,y are points ({}x{}), not image pixels. Divide a pixel position by the scale.",
-        shot.path, shot.pixels.0, shot.pixels.1, shot.scale, shot.points.0, shot.points.1
-    ));
-    Ok(json!({
-        "text": text,
-        "image": shot.path,
-        "pixel_width": shot.pixels.0,
-        "pixel_height": shot.pixels.1,
-        "scale": shot.scale,
-        "point_width": shot.points.0,
-        "point_height": shot.points.1,
-    }))
+    let text = proto::look_text(&shot, cropped, &look.text);
+    Ok(proto::look_value(text, &shot))
 }
 
 fn look_text(app: &str) -> Result<Look> {
@@ -469,45 +429,6 @@ fn try_cua_open(args: &Value) -> Option<Value> {
         }
         Some(json!({ "opened": name }))
     }
-}
-
-fn try_cua(tool: &str, args: &Value) -> Option<Value> {
-    match tool {
-        "screen_apps" => {
-            let apps = crate::computer_contrl::cua::running_apps()?;
-            Some(json!({ "apps": apps }))
-        }
-        "screen_open" => try_cua_open(args),
-        "screen_menu" => {
-            let names = string_list(args.get("path"));
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            if names.is_empty() || !crate::computer_contrl::cua::menu(app, &names) {
-                return None;
-            }
-            Some(json!({ "menu": names }))
-        }
-        "screen_windows" => {
-            let app = args.get("app").and_then(Value::as_str).unwrap_or("");
-            let windows = crate::computer_contrl::cua::windows(app)?;
-            Some(json!({ "windows": windows }))
-        }
-        _ => None,
-    }
-}
-
-fn string_list(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn app_names() -> Result<Vec<String>> {
@@ -709,14 +630,7 @@ fn running_app_paths() -> Vec<String> {
     paths
 }
 
-struct Shot {
-    path: String,
-    pixels: (i64, i64),
-    points: (i64, i64),
-    scale: f64,
-}
-
-fn capture_png(app: &str) -> Result<Shot> {
+fn capture_png(app: &str) -> Result<proto::Shot> {
     #[cfg(target_os = "macos")]
     {
         if !unsafe { CGPreflightScreenCaptureAccess() } {
@@ -751,7 +665,13 @@ fn capture_png(app: &str) -> Result<Shot> {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_rect(x: f64, y: f64, width: f64, height: f64, display_id: Option<u32>) -> Result<Shot> {
+fn capture_rect(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    display_id: Option<u32>,
+) -> Result<proto::Shot> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -792,7 +712,7 @@ fn capture_rect(x: f64, y: f64, width: f64, height: f64, display_id: Option<u32>
     } else {
         display_scale
     };
-    Ok(Shot {
+    Ok(proto::Shot {
         path,
         pixels: (px_w, px_h),
         points: (pt_w as i64, pt_h as i64),
@@ -800,7 +720,7 @@ fn capture_rect(x: f64, y: f64, width: f64, height: f64, display_id: Option<u32>
     })
 }
 
-fn fit_window(shot: Shot, look: &Look) -> (Shot, bool) {
+fn fit_window(shot: proto::Shot, look: &Look) -> (proto::Shot, bool) {
     #[cfg(target_os = "macos")]
     {
         if window_has_control(&look.text) {
@@ -819,7 +739,7 @@ fn fit_window(shot: Shot, look: &Look) -> (Shot, bool) {
 }
 
 #[cfg(target_os = "macos")]
-fn crop_shot_to_window(shot: Shot, frame: (f64, f64, f64, f64)) -> (Shot, bool) {
+fn crop_shot_to_window(shot: proto::Shot, frame: (f64, f64, f64, f64)) -> (proto::Shot, bool) {
     let (origin_x, origin_y) = last_origin();
     let Some((x, y, width, height)) = crop_pixels(
         crate::computer_geom::Picture {
@@ -852,7 +772,7 @@ fn crop_shot_to_window(shot: Shot, frame: (f64, f64, f64, f64)) -> (Shot, bool) 
     remember_size(vis_w, vis_h);
     let pixels = png_size(&shot.path).unwrap_or((i64::from(width), i64::from(height)));
     (
-        Shot {
+        proto::Shot {
             path: shot.path,
             pixels,
             points: (vis_w as i64, vis_h as i64),
@@ -985,28 +905,6 @@ fn remember_size(width: f64, height: f64) {
     *LAST_SIZE.lock().unwrap_or_else(|err| err.into_inner()) = (width, height);
 }
 
-static LAST_PRINT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-static LAST_FIELD: AtomicBool = AtomicBool::new(false);
-
-fn remember_print(print: Vec<u8>) {
-    *LAST_PRINT.lock().unwrap_or_else(|err| err.into_inner()) = print;
-}
-
-fn last_print() -> Vec<u8> {
-    LAST_PRINT
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .clone()
-}
-
-fn remember_field(yes: bool) {
-    LAST_FIELD.store(yes, Ordering::Relaxed);
-}
-
-fn last_has_field() -> bool {
-    LAST_FIELD.load(Ordering::Relaxed)
-}
-
 fn require_point(x: f64, y: f64) -> Result<()> {
     let (width, height) = last_size();
     if width <= 0.0 || height <= 0.0 {
@@ -1018,22 +916,24 @@ fn require_point(x: f64, y: f64) -> Result<()> {
     Ok(())
 }
 
-fn shot_fingerprint(path: &str) -> Option<Vec<u8>> {
+fn last_size() -> (f64, f64) {
+    *LAST_SIZE.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// The verification shot after a click: whatever the last picture showed.
+fn confirm_click() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let image = image::open(path).ok()?;
-        let small = image.resize_exact(48, 48, image::imageops::FilterType::Nearest);
-        Some(small.to_luma8().into_raw())
+        proto::confirm_picture(|| {
+            let (origin_x, origin_y) = last_origin();
+            let (width, height) = last_size();
+            capture_rect(origin_x, origin_y, width, height, None)
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = path;
-        None
+        Ok(())
     }
-}
-
-fn last_size() -> (f64, f64) {
-    *LAST_SIZE.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 #[cfg(target_os = "macos")]
@@ -1464,40 +1364,11 @@ fn click_at(x: f64, y: f64) -> Result<()> {
         let (origin_x, origin_y) = last_origin();
         crate::computer_contrl::click_point(x + origin_x, y + origin_y)
             .map_err(anyhow::Error::msg)?;
-        confirm_picture()
+        confirm_click()
     }
     #[cfg(not(target_os = "macos"))]
     {
         bail!("clicking runs on macOS");
-    }
-}
-
-fn confirm_picture() -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        let before = last_print();
-        if before.is_empty() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(280));
-        let (origin_x, origin_y) = last_origin();
-        let (width, height) = last_size();
-        let shot = match capture_rect(origin_x, origin_y, width, height, None) {
-            Ok(shot) => shot,
-            Err(_) => return Ok(()),
-        };
-        let after = shot_fingerprint(&shot.path).unwrap_or_default();
-        let _ = fs::remove_file(&shot.path);
-        if picture_changed(&before, &after) {
-            remember_print(after);
-            Ok(())
-        } else {
-            bail!("这一下没有点到。画面没有变化。先看一眼屏幕，再点一次。");
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
     }
 }
 

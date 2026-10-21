@@ -5,10 +5,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -17,9 +15,8 @@ use serde_json::Value;
 use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::util::{
-    combine_output, command_from_cli, finish_oneshot_after_pipes_closed, force_stop_child,
-    format_tool_status, is_runtime_log_line, is_runtime_stderr_noise, join_reader, push_capped,
-    summarize, tool_chip, tool_input_detail, turn_error, SessionClock,
+    combine_output, command_from_cli, format_tool_status, is_runtime_log_line,
+    is_runtime_stderr_noise, summarize, tool_chip, tool_input_detail, turn_error,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
@@ -133,15 +130,18 @@ fn run_openclaw(
         on_event(event);
     };
 
-    let result = pump_lines(
+    let result = super::pump::pump_oneshot(
         &session_id,
         &mut child,
         timeout_sec,
         cancel.handle(),
-        ToolTraceState {
+        "failed waiting for openclaw ask",
+        &mut OpenClawPump {
             trace: tool_trace.as_ref(),
             emitted_tools: &mut emitted_tools,
             trace_len: &mut tool_trace_len,
+            stderr_filter: OpenClawStderrFilter::default(),
+            next_tool_poll: Instant::now(),
         },
         &mut emit,
     );
@@ -442,163 +442,67 @@ fn build_openclaw_command(
     Ok(cmd)
 }
 
-struct ToolTraceState<'a> {
+/// OpenClaw's half of the shared pump. `--json` prints one final JSON blob, so
+/// stdout is never streamed; tool chips come from polling the session trace
+/// file while the child runs.
+struct OpenClawPump<'a> {
     trace: Option<&'a OpenClawSessionTrace>,
     emitted_tools: &'a mut std::collections::HashSet<String>,
     trace_len: &'a mut u64,
+    stderr_filter: OpenClawStderrFilter,
+    next_tool_poll: Instant,
 }
 
-fn pump_lines<F>(
-    session_id: &str,
-    child: &mut Child,
-    timeout_sec: u64,
-    cancel: Arc<AtomicBool>,
-    tool_trace: ToolTraceState<'_>,
-    on_event: &mut F,
-) -> Result<super::PumpResult>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let pid = child.id();
-    let queue = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
-    let stdout_acc = Arc::new(Mutex::new(String::new()));
-    let stderr_acc = Arc::new(Mutex::new(String::new()));
+impl super::pump::OneShotHandler for OpenClawPump<'_> {
+    fn on_stdout(
+        &mut self,
+        _session_id: &str,
+        _line: &str,
+        _on_event: &mut dyn FnMut(PromptSessionEvent),
+    ) {
+        // JSON is parsed at completion; never stream fragments into the chat bubble.
+    }
 
-    let stdout = child.stdout.take().context("missing stdout pipe")?;
-    let stderr = child.stderr.take().context("missing stderr pipe")?;
+    fn hides_stderr(&mut self, line: &str) -> bool {
+        self.stderr_filter.hides(line)
+    }
 
-    let q_out = Arc::clone(&queue);
-    let acc_out = Arc::clone(&stdout_acc);
-    let stdout_eof = Arc::new(AtomicBool::new(false));
-    let stdout_eof_flag = Arc::clone(&stdout_eof);
-    let stdout_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_out, &line);
-            if let Ok(mut guard) = q_out.lock() {
-                guard.push((true, line));
-            }
-        }
-        stdout_eof_flag.store(true, Ordering::SeqCst);
-    });
-
-    let q_err = Arc::clone(&queue);
-    let acc_err = Arc::clone(&stderr_acc);
-    let stderr_eof = Arc::new(AtomicBool::new(false));
-    let stderr_eof_flag = Arc::clone(&stderr_eof);
-    let stderr_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_err, &line);
-            if let Ok(mut guard) = q_err.lock() {
-                guard.push((false, line));
-            }
-        }
-        stderr_eof_flag.store(true, Ordering::SeqCst);
-    });
-
-    let mut stderr_filter = OpenClawStderrFilter::default();
-    let mut drain = |on_event: &mut F| -> bool {
-        let drained = {
-            let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
-            guard.drain(..).collect::<Vec<_>>()
-        };
-        let saw = !drained.is_empty();
-        for (is_stdout, line) in drained {
-            if is_stdout {
-                // JSON is parsed at completion; never stream fragments into the chat bubble.
-                continue;
-            }
-            if stderr_filter.hides(&line) {
-                continue;
-            }
-            on_event(PromptSessionEvent::StderrLine {
-                session_id: session_id.to_string(),
-                line,
-            });
-        }
-        saw
-    };
-
-    let mut clock = SessionClock::new(timeout_sec);
-    let mut next_tool_poll = Instant::now();
-    let mut pipes_closed_at: Option<Instant> = None;
-    let mut timeout_note = None;
-    let (status, exit_code) = loop {
-        let saw_output = drain(on_event);
-        let trace_before = *tool_trace.trace_len;
-        if Instant::now() >= next_tool_poll {
-            if let Some(trace) = tool_trace.trace {
+    fn poll(&mut self, session_id: &str, on_event: &mut dyn FnMut(PromptSessionEvent)) -> bool {
+        let trace_before = *self.trace_len;
+        if Instant::now() >= self.next_tool_poll {
+            if let Some(trace) = self.trace {
                 emit_openclaw_tools_from_trace(
                     session_id,
                     trace,
-                    &mut *tool_trace.emitted_tools,
-                    &mut *tool_trace.trace_len,
+                    self.emitted_tools,
+                    self.trace_len,
                     on_event,
                 );
             }
-            next_tool_poll = Instant::now() + Duration::from_millis(120);
+            self.next_tool_poll = Instant::now() + Duration::from_millis(120);
         }
-        if saw_output || *tool_trace.trace_len != trace_before {
-            clock.touch();
-        }
-        if cancel.load(Ordering::SeqCst) {
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::Cancelled, None);
-        }
-        if clock.expired() {
-            let last_tool = tool_trace
-                .trace
-                .map(OpenClawSessionTrace::last_turn_tools)
-                .and_then(|tools| tools.into_iter().next_back())
-                .map(|tool| tool_chip(&tool.name, &tool.detail))
-                .unwrap_or_default();
-            timeout_note = Some(clock.timeout_note(&last_tool));
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::TimedOut, None);
-        }
-        if let Some(done) = finish_oneshot_after_pipes_closed(
-            child,
-            pid,
-            &stdout_eof,
-            &stderr_eof,
-            &mut pipes_closed_at,
-        ) {
-            break done;
-        }
-        match child.try_wait() {
-            Ok(Some(wait_status)) => {
-                let code = wait_status.code();
-                let status = if wait_status.success() {
-                    PromptSessionStatus::Succeeded
-                } else {
-                    PromptSessionStatus::Failed
-                };
-                break (status, code);
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
-            Err(error) => return Err(error).context("failed waiting for openclaw ask"),
-        }
-    };
-
-    join_reader(stdout_handle, Duration::from_millis(500));
-    join_reader(stderr_handle, Duration::from_millis(500));
-    drain(on_event);
-    if let Some(trace) = tool_trace.trace {
-        emit_openclaw_tools_from_trace(
-            session_id,
-            trace,
-            &mut *tool_trace.emitted_tools,
-            &mut *tool_trace.trace_len,
-            on_event,
-        );
+        *self.trace_len != trace_before
     }
 
-    let stdout = stdout_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    let stderr = stderr_acc.lock().map(|g| g.clone()).unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr, timeout_note))
+    fn timeout_label(&self) -> String {
+        self.trace
+            .map(OpenClawSessionTrace::last_turn_tools)
+            .and_then(|tools| tools.into_iter().next_back())
+            .map(|tool| tool_chip(&tool.name, &tool.detail))
+            .unwrap_or_default()
+    }
+
+    fn finish(&mut self, session_id: &str, on_event: &mut dyn FnMut(PromptSessionEvent)) {
+        if let Some(trace) = self.trace {
+            emit_openclaw_tools_from_trace(
+                session_id,
+                trace,
+                self.emitted_tools,
+                self.trace_len,
+                on_event,
+            );
+        }
+    }
 }
 
 fn emit_openclaw_turn_tools<F>(
@@ -715,15 +619,13 @@ struct OpenClawToolCall {
     detail: String,
 }
 
-fn emit_openclaw_tools_from_trace<F>(
+fn emit_openclaw_tools_from_trace(
     session_id: &str,
     trace: &OpenClawSessionTrace,
     emitted_tools: &mut std::collections::HashSet<String>,
     trace_len: &mut u64,
-    emit: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
+    emit: &mut dyn FnMut(PromptSessionEvent),
+) {
     let Some(current_len) = trace.marker() else {
         return;
     };

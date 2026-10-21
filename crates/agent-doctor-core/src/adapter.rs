@@ -15,6 +15,16 @@ pub struct RuntimeProfile {
     pub key_source: Option<String>,
 }
 
+impl RuntimeProfile {
+    /// A runtime with no gateway or key on record.
+    pub fn missing() -> Self {
+        Self {
+            gateway_url: None,
+            key_source: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeModelState {
     pub provider: Option<String>,

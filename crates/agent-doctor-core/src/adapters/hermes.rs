@@ -343,10 +343,7 @@ impl RuntimeAdapter for HermesAdapter {
     fn read_profile(&self) -> Result<RuntimeProfile> {
         let path = Self::config_path();
         if !path.exists() {
-            return Ok(RuntimeProfile {
-                gateway_url: None,
-                key_source: None,
-            });
+            return Ok(RuntimeProfile::missing());
         }
 
         let model = self.read_model()?.unwrap_or(RuntimeModelState {

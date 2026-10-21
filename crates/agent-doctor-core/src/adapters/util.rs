@@ -1083,6 +1083,108 @@ fn read_version_result_with_flags(
     Err(last_error.unwrap_or_else(|| "version command failed".to_string()))
 }
 
+/// Where one desktop app installs, per platform. Desktop adapters feed their
+/// names into [`desktop_app_candidates`] instead of copying the platform
+/// plumbing; tests only ever see the per-user candidates, so each platform's
+/// lists are dead code everywhere but that platform's real builds.
+pub(crate) struct DesktopAppSpec {
+    /// macOS bundle names, most specific first: `~/Applications/<name>` and
+    /// then `/Applications/<name>`.
+    pub(crate) macos_apps: &'static [&'static str],
+    /// Windows executables relative to `%LOCALAPPDATA%`.
+    #[cfg_attr(not(all(target_os = "windows", not(test))), allow(dead_code))]
+    pub(crate) windows_local: &'static [&'static str],
+    /// Windows executables relative to `%ProgramFiles%`, then `%ProgramW6432%`.
+    #[cfg_attr(not(all(target_os = "windows", not(test))), allow(dead_code))]
+    pub(crate) windows_machine: &'static [&'static str],
+    /// Linux paths; a `~/` prefix resolves against the user's home.
+    #[cfg_attr(not(all(target_os = "linux", not(test))), allow(dead_code))]
+    pub(crate) linux_paths: &'static [&'static str],
+}
+
+/// Every install location this spec knows, most preferred first. The
+/// per-user `~/Applications/<name>` candidate runs on every platform, the
+/// way the per-adapter code did.
+pub(crate) fn desktop_app_candidates(spec: &DesktopAppSpec) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for name in spec.macos_apps {
+        paths.push(home_join(&format!("Applications/{name}")));
+    }
+
+    #[cfg(all(not(test), target_os = "macos"))]
+    for name in spec.macos_apps {
+        paths.push(PathBuf::from("/Applications").join(name));
+    }
+
+    #[cfg(all(not(test), target_os = "windows"))]
+    {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let local = PathBuf::from(local);
+            for relative in spec.windows_local {
+                paths.push(local.join(relative));
+            }
+        }
+        for key in ["ProgramFiles", "ProgramW6432"] {
+            if let Some(root) = std::env::var_os(key) {
+                let root = PathBuf::from(root);
+                for relative in spec.windows_machine {
+                    paths.push(root.join(relative));
+                }
+            }
+        }
+    }
+
+    #[cfg(all(not(test), target_os = "linux"))]
+    for relative in spec.linux_paths {
+        if let Some(rest) = relative.strip_prefix("~/") {
+            paths.push(home_join(rest));
+        } else {
+            paths.push(PathBuf::from(relative));
+        }
+    }
+
+    paths
+}
+
+/// The first install location from [`desktop_app_candidates`] that exists.
+pub(crate) fn desktop_app_path(spec: &DesktopAppSpec) -> Option<PathBuf> {
+    desktop_app_candidates(spec)
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+/// A CLI binary that answers `--version`: installed with that version.
+pub(crate) fn discovery_from_cli(path: PathBuf) -> AdapterDiscovery {
+    let version = read_version_result(&path).ok().flatten();
+    AdapterDiscovery {
+        installed: true,
+        version,
+        binary_path: Some(path),
+    }
+}
+
+/// A found install whose version is not worth a probe (a desktop app, a home
+/// directory): installed without a version.
+pub(crate) fn discovery_present(path: PathBuf) -> AdapterDiscovery {
+    AdapterDiscovery {
+        installed: true,
+        version: None,
+        binary_path: Some(path),
+    }
+}
+
+/// Profile for runtimes whose credential hint is simply which config file
+/// exists: the first existing path names the key source.
+pub(crate) fn profile_from_config_paths(paths: Vec<PathBuf>) -> crate::adapter::RuntimeProfile {
+    crate::adapter::RuntimeProfile {
+        gateway_url: None,
+        key_source: paths
+            .into_iter()
+            .find(|path| path.exists())
+            .map(|path| path.display().to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,6 +8,7 @@ mod npm_target;
 pub mod openclaw;
 pub mod qoder;
 mod runner;
+mod shell_script;
 mod uninstall;
 pub mod workbuddy;
 pub mod zcode;

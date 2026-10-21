@@ -7,13 +7,11 @@
 //! the ask window cannot answer.
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde_json::Value;
 
 use super::backend::AskBackend;
@@ -21,13 +19,12 @@ use super::control::PromptSessionControl;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
 use super::util::{
-    combine_output, finish_oneshot_after_pipes_closed, force_stop_child, format_tool_status,
-    is_runtime_log_line, is_runtime_stderr_noise, join_reader, push_capped, stderr_event,
-    summarize, tool_activity_detail, tool_chip, turn_error, SessionClock, ToolWatch,
+    combine_output, format_tool_status, is_runtime_log_line, stderr_event, summarize,
+    tool_activity_detail, tool_chip, turn_error, ToolWatch,
 };
 use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
-    PromptSessionReport, PromptSessionStatus, PumpResult, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
+    PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use agent_doctor_core::adapters::locate_zcode_headless;
 use agent_doctor_core::session_env::format_command_display;
@@ -94,11 +91,13 @@ fn run_zcode(
         }
         on_event(event);
     };
-    let result = pump_lines(
+    let result = super::pump::pump_oneshot(
         &session_id,
         &mut child,
         timeout_sec,
         cancel.handle(),
+        "ZCode 问答中断了",
+        &mut ZcodePump::default(),
         &mut emit,
     );
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -280,139 +279,56 @@ fn build_zcode_command(
     Ok(cmd)
 }
 
-fn pump_lines<F>(
-    session_id: &str,
-    child: &mut Child,
-    timeout_sec: u64,
-    cancel: Arc<AtomicBool>,
-    on_event: &mut F,
-) -> Result<PumpResult>
-where
-    F: FnMut(PromptSessionEvent),
-{
-    let pid = child.id();
-    let queue = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
-    let stdout_acc = Arc::new(Mutex::new(String::new()));
-    let stderr_acc = Arc::new(Mutex::new(String::new()));
-    let stdout = child.stdout.take().context("missing stdout pipe")?;
-    let stderr = child.stderr.take().context("missing stderr pipe")?;
+/// ZCode's half of the shared pump: stream-json stdout becomes live
+/// deltas and tool chips; plain runtime failures on stderr become turn errors.
+#[derive(Default)]
+struct ZcodePump {
+    plan_board: PlanBoard,
+    tools: ToolWatch,
+    turn: ZcodeTurn,
+}
 
-    let q_out = Arc::clone(&queue);
-    let acc_out = Arc::clone(&stdout_acc);
-    let stdout_eof = Arc::new(AtomicBool::new(false));
-    let stdout_eof_flag = Arc::clone(&stdout_eof);
-    let stdout_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_out, &line);
-            if let Ok(mut guard) = q_out.lock() {
-                guard.push((true, line));
-            }
-        }
-        stdout_eof_flag.store(true, Ordering::SeqCst);
-    });
+impl super::pump::OneShotHandler for ZcodePump {
+    fn on_stdout(
+        &mut self,
+        session_id: &str,
+        line: &str,
+        on_event: &mut dyn FnMut(PromptSessionEvent),
+    ) {
+        handle_zcode_stream_line(
+            session_id,
+            line,
+            &mut self.turn,
+            &mut self.plan_board,
+            &mut self.tools,
+            on_event,
+        );
+    }
 
-    let q_err = Arc::clone(&queue);
-    let acc_err = Arc::clone(&stderr_acc);
-    let stderr_eof = Arc::new(AtomicBool::new(false));
-    let stderr_eof_flag = Arc::clone(&stderr_eof);
-    let stderr_handle = thread::spawn(move || {
-        use std::io::BufRead;
-        let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc_err, &line);
-            if let Ok(mut guard) = q_err.lock() {
-                guard.push((false, line));
-            }
-        }
-        stderr_eof_flag.store(true, Ordering::SeqCst);
-    });
+    fn hides_stderr(&mut self, line: &str) -> bool {
+        is_runtime_log_line(line) || is_zcode_refresh_note(line)
+    }
 
-    let mut plan_board = PlanBoard::default();
-    let mut tools = ToolWatch::default();
-    let mut turn = ZcodeTurn::default();
-    let mut drain = |on_event: &mut F, tools: &mut ToolWatch| -> bool {
-        let drained = {
-            let mut guard = queue.lock().unwrap_or_else(|err| err.into_inner());
-            guard.drain(..).collect::<Vec<_>>()
-        };
-        let saw = !drained.is_empty();
-        for (is_stdout, line) in drained {
-            if is_stdout {
-                handle_zcode_stream_line(
-                    session_id,
-                    &line,
-                    &mut turn,
-                    &mut plan_board,
-                    tools,
-                    on_event,
-                );
-                continue;
-            }
-            if is_runtime_stderr_noise(&line)
-                || is_runtime_log_line(&line)
-                || is_zcode_refresh_note(&line)
-            {
-                continue;
-            }
-            on_event(stderr_event(session_id, &line));
-        }
-        saw
-    };
+    fn on_stderr(
+        &mut self,
+        session_id: &str,
+        line: &str,
+        on_event: &mut dyn FnMut(PromptSessionEvent),
+    ) {
+        on_event(stderr_event(session_id, line));
+    }
 
-    let mut clock = SessionClock::new(timeout_sec);
-    let mut pipes_closed_at = None;
-    let mut timeout_note = None;
-    let (status, exit_code) = loop {
-        if drain(on_event, &mut tools) {
-            clock.touch();
-        }
-        clock.set_tool_running(tools.running());
-        if cancel.load(Ordering::SeqCst) {
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::Cancelled, None);
-        }
-        if clock.expired() || clock.stalled() {
-            timeout_note = Some(clock.timeout_note(tools.last_label()));
-            force_stop_child(child, pid);
-            break (PromptSessionStatus::TimedOut, None);
-        }
-        if let Some(done) = finish_oneshot_after_pipes_closed(
-            child,
-            pid,
-            &stdout_eof,
-            &stderr_eof,
-            &mut pipes_closed_at,
-        ) {
-            break done;
-        }
-        match child.try_wait() {
-            Ok(Some(wait_status)) => {
-                let code = wait_status.code();
-                let status = if wait_status.success() {
-                    PromptSessionStatus::Succeeded
-                } else {
-                    PromptSessionStatus::Failed
-                };
-                break (status, code);
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
-            Err(error) => return Err(error).context("ZCode 问答中断了"),
-        }
-    };
-    join_reader(stdout_handle, Duration::from_millis(500));
-    join_reader(stderr_handle, Duration::from_millis(500));
-    drain(on_event, &mut tools);
-    let stdout = stdout_acc
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
-    let stderr = stderr_acc
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
-    Ok((status, exit_code, stdout, stderr, timeout_note))
+    fn tool_running(&self) -> bool {
+        self.tools.running()
+    }
+
+    fn stall_guard(&self) -> bool {
+        true
+    }
+
+    fn timeout_label(&self) -> String {
+        self.tools.last_label().to_string()
+    }
 }
 
 #[derive(Default)]
@@ -422,16 +338,14 @@ struct ZcodeTurn {
     error: Option<String>,
 }
 
-fn handle_zcode_stream_line<F>(
+fn handle_zcode_stream_line(
     session_id: &str,
     line: &str,
     turn: &mut ZcodeTurn,
     plan_board: &mut PlanBoard,
     tools: &mut ToolWatch,
-    on_event: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return;
@@ -474,10 +388,12 @@ fn handle_zcode_stream_line<F>(
     }
 }
 
-fn emit_stream_delta<F>(session_id: &str, payload: &Value, turn: &mut ZcodeTurn, on_event: &mut F)
-where
-    F: FnMut(PromptSessionEvent),
-{
+fn emit_stream_delta(
+    session_id: &str,
+    payload: &Value,
+    turn: &mut ZcodeTurn,
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) {
     let stream_kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
     let delta = text_field(payload, &["delta", "text"]).unwrap_or_default();
     if delta.is_empty() {
@@ -499,16 +415,14 @@ where
     }
 }
 
-fn emit_tool<F>(
+fn emit_tool(
     session_id: &str,
     payload: &Value,
     _turn: &mut ZcodeTurn,
     plan_board: &mut PlanBoard,
     tools: &mut ToolWatch,
-    on_event: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
+    on_event: &mut dyn FnMut(PromptSessionEvent),
+) {
     let update = payload.get("kind").and_then(Value::as_str).unwrap_or("");
     let name = text_field(payload, &["toolName", "name", "tool", "tool_name"])
         .unwrap_or_else(|| "tool".into());

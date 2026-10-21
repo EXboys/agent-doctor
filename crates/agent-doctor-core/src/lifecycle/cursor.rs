@@ -1,28 +1,27 @@
 //! Cursor Agent CLI native installer (https://cursor.com/install).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use super::runner::run_shell_command;
+use super::shell_script::ShellScriptLifecycle;
 
 pub const CURSOR_INSTALL_SCRIPT_URL: &str = "https://cursor.com/install";
 
-#[cfg(not(target_os = "windows"))]
-const CURSOR_INSTALL_UNIX: &str =
-    "bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
-    https://cursor.com/install -o $tmp && bash $tmp; \
-    status=$?; rm -f $tmp; exit $status'";
+const SHELL: ShellScriptLifecycle = ShellScriptLifecycle {
+    display_name: "Cursor",
+    update_cli: "agent",
+    update_bash_args: "",
+    unix_script_url,
+    windows_irm_arg,
+};
 
-#[cfg(not(target_os = "windows"))]
-const CURSOR_UPDATE_UNIX: &str =
-    "agent update || bash -c 'tmp=$(mktemp) && curl -fsSL --proto \"=https\" --tlsv1.2 \
-    https://cursor.com/install -o $tmp && bash $tmp; \
-    status=$?; rm -f $tmp; exit $status'";
+fn unix_script_url() -> &'static str {
+    CURSOR_INSTALL_SCRIPT_URL
+}
 
-#[cfg(target_os = "windows")]
-const CURSOR_INSTALL_WINDOWS: &str = r#"powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://cursor.com/install?win32=true' | iex""#;
-
-#[cfg(target_os = "windows")]
-const CURSOR_UPDATE_WINDOWS: &str = r#"agent update || powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://cursor.com/install?win32=true' | iex""#;
+fn windows_irm_arg() -> &'static str {
+    // The query string needs quoting inside the PowerShell command.
+    "'https://cursor.com/install?win32=true'"
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorLifecycleAction {
@@ -31,41 +30,18 @@ pub enum CursorLifecycleAction {
 }
 
 pub fn cursor_install_shell_command() -> String {
-    #[cfg(target_os = "windows")]
-    {
-        CURSOR_INSTALL_WINDOWS.to_string()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        CURSOR_INSTALL_UNIX.to_string()
-    }
+    SHELL.install_command()
 }
 
 pub fn cursor_update_shell_command() -> String {
-    #[cfg(target_os = "windows")]
-    {
-        CURSOR_UPDATE_WINDOWS.to_string()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        CURSOR_UPDATE_UNIX.to_string()
-    }
+    SHELL.update_command()
 }
 
 pub fn run_cursor_lifecycle(action: CursorLifecycleAction) -> Result<()> {
-    let command = match action {
-        CursorLifecycleAction::Install => cursor_install_shell_command(),
-        CursorLifecycleAction::Update => cursor_update_shell_command(),
-    };
-    run_shell_command(&command).with_context(|| {
-        format!(
-            "Cursor {} failed",
-            match action {
-                CursorLifecycleAction::Install => "install",
-                CursorLifecycleAction::Update => "update",
-            }
-        )
-    })
+    match action {
+        CursorLifecycleAction::Install => SHELL.run_install(),
+        CursorLifecycleAction::Update => SHELL.run_update(),
+    }
 }
 
 #[cfg(test)]
