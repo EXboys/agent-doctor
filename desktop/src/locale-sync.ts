@@ -11,7 +11,7 @@ let revision = 0;
 /** Save the language once, then tell every open window. */
 export async function publishLocale(next: Locale): Promise<void> {
   revision += 1;
-  setLocale(next);
+  await setLocale(next);
   await setAppLocale(next).catch(() => {});
 }
 
@@ -20,8 +20,7 @@ export function bindLocaleSync(apply: () => void): void {
   void listen<string>("locale-changed", (event) => {
     if (!isLocale(event.payload) || event.payload === getLocale()) return;
     revision += 1;
-    setLocale(event.payload);
-    apply();
+    void setLocale(event.payload).then(apply);
   });
   const ticket = revision;
   void (async () => {
@@ -34,8 +33,7 @@ export function bindLocaleSync(apply: () => void): void {
     if (ticket !== revision) return;
     if (isLocale(saved)) {
       if (saved !== getLocale()) {
-        setLocale(saved);
-        apply();
+        void setLocale(saved).then(apply);
       }
       return;
     }
