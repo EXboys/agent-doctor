@@ -1,5 +1,5 @@
 import { cancelDeepDiagnose, readImageTexts, deepDiagnoseChat, deepRepair } from "../ipc";
-import { escapeHtml } from "../format";
+
 //! Deep diagnose = Agent Doctor's own agent loop on top of the rule checks.
 //! The runtime under diagnosis never answers for itself.
 
@@ -21,7 +21,7 @@ import {
 } from "../chat/voice";
 import { accountBlockMessage, explainLlmAccountBlock, withErrorDetail, type LlmAccountBlock } from "../friendly-error";
 import { getLocale, t } from "../i18n";
-import { renderMarkdown } from "../markdown";
+import { escapeHtml, renderMarkdown } from "../markdown";
 import * as dom from "./dom";
 import { describeRepairSummary } from "./repair-summary";
 import type { DiagnoseSession } from "./session";

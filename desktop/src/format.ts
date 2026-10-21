@@ -1,12 +1,6 @@
 import { getLocale, t } from "./i18n";
 
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+export { escapeHtml } from "./markdown";
 
 export function formatTime(date: Date): string {
   const locale = getLocale() === "zh" ? "zh-CN" : "en-US";

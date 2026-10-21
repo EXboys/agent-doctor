@@ -33,34 +33,34 @@ function assert(cond: boolean, msg: string) {
 const now = Date.parse("2026-10-17T03:10:00Z");
 const at = (ms: number) => now - ms;
 
-setLocale("zh");
+await setLocale("zh");
 assert(replyAgeLabel(at(20_000), now) === "刚刚", "chinese just now");
 assert(replyAgeLabel(at(8 * 60_000), now) === "8分钟前", "chinese minutes");
 assert(replyAgeLabel(at(8 * 3_600_000), now) === "8小时前", "chinese hours");
 assert(replyAgeLabel(at(2 * 86_400_000), now) === "2天前", "chinese days");
 
-setLocale("en");
+await setLocale("en");
 assert(replyAgeLabel(at(20_000), now) === "just now", "english just now");
 assert(replyAgeLabel(at(8 * 60_000), now) === "8m ago", "english minutes");
 assert(replyAgeLabel(at(8 * 3_600_000), now) === "8h ago", "english hours");
 assert(replyAgeLabel(at(2 * 86_400_000), now) === "2d ago", "english days");
 
-setLocale("zh");
+await setLocale("zh");
 assert(replyAgeLabel(at(8 * 3_600_000), now) === "8小时前", "switching back to chinese");
 
 const old = Date.parse("2026-09-01T01:05:00Z");
-setLocale("en");
+await setLocale("en");
 const englishDate = replyAgeLabel(old, now);
 assert(englishDate.includes("Sep") && englishDate.includes("1"), `english date, got ${englishDate}`);
-setLocale("zh");
+await setLocale("zh");
 const chineseDate = replyAgeLabel(old, now);
 assert(chineseDate.includes("9") && chineseDate.includes("1"), `chinese date, got ${chineseDate}`);
 assert(!chineseDate.includes("Sep"), "chinese date does not keep the english month");
 
 const stamp = Date.parse("2026-10-17T03:04:00Z");
-setLocale("en");
+await setLocale("en");
 const exactEn = replyExactLabel(stamp);
-setLocale("zh");
+await setLocale("zh");
 const exactZh = replyExactLabel(stamp);
 assert(exactEn.length > 0 && exactZh.length > 0 && exactEn !== exactZh, "exact time follows the language");
 assert(replyAgeLabel(0, now) === "", "missing time stays blank");

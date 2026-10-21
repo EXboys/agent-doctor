@@ -25,8 +25,13 @@ function detectLocale(): Locale {
 }
 
 async function loadDict(which: Locale): Promise<Dict> {
-  const mod = await import(`./i18n/${which}`);
-  return (which === "zh" ? mod.zh : mod.en) as Dict;
+  // Literal specifiers: Rollup splits each dictionary into its own lazy chunk.
+  if (which === "zh") {
+    const mod = await import("./i18n/zh");
+    return mod.zh;
+  }
+  const mod = await import("./i18n/en");
+  return mod.en;
 }
 
 function ensureLoaded(which: Locale): Promise<void> {
