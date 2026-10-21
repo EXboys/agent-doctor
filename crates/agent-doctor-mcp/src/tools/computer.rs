@@ -349,12 +349,7 @@ fn number_controls(text: &str) -> (String, Vec<Target>) {
 }
 
 fn ask_hand(tool: &str, args: &Value) -> Result<Value> {
-    // The hand only answers requests carrying the token its desktop app
-    // wrote; a missing file means the app has not started the hand yet.
-    let token = agent_doctor_core::store::hand_token::load().context(
-        "the app is not ready to click. Keep Agent Doctor open, and allow it to control this computer.",
-    )?;
-    let line = json!({ "token": token, "tool": tool, "args": args }).to_string();
+    let line = json!({ "tool": tool, "args": args }).to_string();
     #[cfg(unix)]
     {
         let reply = ask_hand_unix(&line)?;

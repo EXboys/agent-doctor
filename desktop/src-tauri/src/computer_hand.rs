@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,27 +35,11 @@ fn socket_path() -> Result<PathBuf> {
     Ok(dir.join("computer.sock"))
 }
 
-static HAND_TOKEN: OnceLock<String> = OnceLock::new();
-
-fn ensure_hand_token(req: &Value) -> Result<()> {
-    let expected = HAND_TOKEN
-        .get()
-        .context("computer hand token is not loaded yet")?;
-    let got = req.get("token").and_then(Value::as_str).unwrap_or("");
-    if !agent_doctor_core::store::hand_token::tokens_match(expected, got) {
-        bail!("computer hand token mismatch");
-    }
-    Ok(())
-}
-
 fn serve() -> Result<()> {
     let path = socket_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let token = agent_doctor_core::store::hand_token::load_or_create()
-        .context("could not prepare the computer hand token")?;
-    let _ = HAND_TOKEN.set(token);
     let _ = fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
     #[cfg(unix)]
@@ -90,7 +74,6 @@ fn serve() -> Result<()> {
 
 fn handle_line(line: &str) -> Result<Value> {
     let req: Value = serde_json::from_str(line).context("bad request")?;
-    ensure_hand_token(&req)?;
     let tool = req.get("tool").and_then(Value::as_str).unwrap_or("");
     let args = req.get("args").cloned().unwrap_or(json!({}));
     if let Some(done) = try_cua(tool, &args) {

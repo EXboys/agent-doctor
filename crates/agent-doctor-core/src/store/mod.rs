@@ -5,7 +5,6 @@
 
 pub mod chats;
 pub mod db;
-pub mod hand_token;
 pub mod migrate;
 pub mod secrets;
 
