@@ -1,0 +1,14 @@
+# cargo-audit policy. Every ignore names the chain that pins the advisory and
+# what has to change upstream before it can be dropped. Unmaintained-crate
+# notices stay warnings (they do not fail the run).
+
+[advisories]
+ignore = [
+    # zip 4.x reaches the tree only through tauri-plugin-updater 2.x, which
+    # extracts our own minisign-signed update bundles. Our direct zip
+    # dependency is on 9.x, where these three are fixed. Drop once
+    # tauri-plugin-updater ships a stable release on zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

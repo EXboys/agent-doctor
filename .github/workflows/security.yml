@@ -1,0 +1,48 @@
+name: Security audit
+
+# Runs weekly, and again whenever a lockfile or manifest changes on main, so a
+# new advisory for a pinned dependency surfaces without waiting for a release.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "**/Cargo.toml"
+      - "desktop/package-lock.json"
+      - "desktop/package.json"
+      - ".github/workflows/security.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # rustsec/audit-check files an issue per new advisory on scheduled runs.
+  issues: write
+
+jobs:
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-audit:
+    name: npm audit (desktop)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high

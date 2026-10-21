@@ -30,6 +30,8 @@ if [[ -z "$workspace_version" ]]; then
   exit 1
 fi
 
+bash "$ROOT/scripts/check-versions.sh"
+
 if [[ -n "$version_arg" ]]; then
   tag="${version_arg#v}"
   tag="v$tag"
