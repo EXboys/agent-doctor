@@ -514,7 +514,14 @@ fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            if let Err(error) =
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            {
+                eprintln!(
+                    "! could not chmod 600 {} (it holds an API key): {error}",
+                    path.display()
+                );
+            }
         }
     }
     Ok(path)

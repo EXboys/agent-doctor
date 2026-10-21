@@ -386,7 +386,12 @@ fn stash_codex_auth() {
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(dest, raw);
+    if let Err(error) = fs::write(&dest, raw) {
+        eprintln!(
+            "! could not stash the Codex login into {}: {error}",
+            dest.display()
+        );
+    }
 }
 
 fn forget_saved_login(runtime_id: &str) {
@@ -453,7 +458,12 @@ fn restore_codex_auth() {
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::copy(src, dest);
+    if let Err(error) = fs::copy(&src, &dest) {
+        eprintln!(
+            "! could not restore the Codex login into {}: {error}",
+            dest.display()
+        );
+    }
 }
 
 fn spawn_official_login(runtime_id: &str) -> Result<()> {

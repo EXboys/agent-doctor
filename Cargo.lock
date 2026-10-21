@@ -108,7 +108,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
- "toml 0.8.2",
+ "toml 1.1.2+spec-1.1.0",
  "toml_edit 0.22.27",
  "tungstenite",
  "windows 0.58.0",
