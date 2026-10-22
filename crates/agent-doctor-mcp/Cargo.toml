@@ -18,7 +18,7 @@ toml_edit.workspace = true
 tungstenite = { workspace = true, features = ["handshake"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
