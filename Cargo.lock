@@ -38,7 +38,7 @@ name = "agent-doctor-core"
 version = "0.1.93-beta.3"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "dirs 6.0.0",
  "filetime",
  "hmac 0.12.1",
@@ -71,7 +71,7 @@ dependencies = [
  "agent-doctor-repair",
  "agent-doctor-voice",
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "block2",
  "calamine",
  "dirs 6.0.0",
@@ -103,7 +103,7 @@ version = "0.1.93-beta.3"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -130,7 +130,7 @@ version = "0.1.93-beta.3"
 dependencies = [
  "agent-doctor-core",
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "dirs 6.0.0",
  "image",
  "rusqlite",
