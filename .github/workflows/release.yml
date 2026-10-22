@@ -139,7 +139,7 @@ jobs:
     needs: build-cli
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: cli-artifacts
           pattern: cli-*
@@ -524,7 +524,7 @@ jobs:
       - name: Download desktop artifacts
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ./desktop-artifacts
           pattern: agent-doctor-desktop-*
@@ -597,7 +597,7 @@ jobs:
       - name: Download desktop artifacts
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ./desktop-artifacts
           pattern: agent-doctor-desktop-${{ matrix.edition }}-*
