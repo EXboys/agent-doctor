@@ -18,7 +18,7 @@ toml.workspace = true
 toml_edit.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 zip = "9"
-sha2 = "0.10"
+sha2 = "0.11"
 hmac = "0.12"
 base64 = "0.23"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
