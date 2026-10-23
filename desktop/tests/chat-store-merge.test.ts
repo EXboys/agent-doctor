@@ -24,7 +24,7 @@ Object.defineProperty(globalThis, "document", {
   value: { documentElement: { lang: "zh" } },
 });
 
-const { mergeChatStores } = await import("../src/chat/store");
+const { mergeChatStores, stripContextCompactSummaries } = await import("../src/chat/store");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -111,3 +111,23 @@ assert(fromLegacy?.sessions[0].messages[0].content === "v1 里的话", "a browse
 const placeholder = store("new", [session("new", Date.now(), [])]);
 const restored = mergeChatStores(disk, placeholder);
 assert(restored?.sessions.length === 1 && restored.sessions[0].id === "a", "a fresh empty window does not hide the saved chats");
+
+const withSummary = store("a", [
+  session("a", 10, [
+    message("s", "meta", "此前对话摘要（共 89 条）：\n- 用户: 你好", 1),
+    message("u", "user", "你好", 2),
+    message("a1", "assistant", "你好，有什么需要操作的尽管说。", 3),
+    message("n", "meta", "这一步没完成。", 4),
+  ]),
+]);
+assert(stripContextCompactSummaries(withSummary), "a saved compact summary is removed");
+assert(withSummary.sessions[0].messages.length === 3, "the summary line is the only one removed");
+assert(withSummary.sessions[0].messages[0].content === "你好", "the kept turns stay in their original order");
+assert(withSummary.sessions[0].messages[2].role === "meta", "a normal notice stays");
+assert(!stripContextCompactSummaries(withSummary), "a second pass finds nothing to remove");
+
+const englishSummary = store("a", [
+  session("a", 10, [message("s", "meta", "Earlier conversation summary (4 messages):\n- User: hi", 1)]),
+]);
+assert(stripContextCompactSummaries(englishSummary), "an English compact summary is removed");
+assert(englishSummary.sessions[0].messages.length === 0, "the English summary does not stay as a message");

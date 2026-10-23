@@ -35,7 +35,7 @@ import {
 import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
 import { paintReplyAge, refreshReplyAges } from "./reply-age";
 import { mountReplyChangeCard } from "./reply-changes";
-import { uid } from "./store";
+import { stripContextCompactSummaries, uid } from "./store";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -555,6 +555,7 @@ export function createBubblesController(deps: BubblesDeps) {
   function renderActiveMessages(): void {
     const previous = Array.from(deps.logEl.childNodes);
     try {
+      if (stripContextCompactSummaries(deps.getStore())) deps.saveStore();
       deps.logEl.replaceChildren();
       deps.setAssistantBubble(null);
       deps.setActivityEl(null);

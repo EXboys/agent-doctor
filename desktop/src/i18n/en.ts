@@ -601,7 +601,6 @@ export const en = {
     "chat.contextCompactHint": "Keep the latest turns; drop older detail",
     "chat.contextCompactDone": "Compacted. You can keep chatting.",
     "chat.contextCompactNeedMore": "Need a few more turns before compacting.",
-    "chat.contextCompactSummary": "Earlier conversation summary ({n} messages):",
     "chat.attach": "Attach files or images",
     "chat.attachFile": "Attach file",
     "chat.attachImage": "Attach image",

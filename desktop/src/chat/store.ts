@@ -15,6 +15,27 @@ export function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const COMPACT_SUMMARY_PREFIXES = ["此前对话摘要（共 ", "Earlier conversation summary ("];
+
+/** The old compact action stored a transcript of dropped turns. That text is not a message. */
+export function isContextCompactSummary(message: ChatMessage): boolean {
+  if (message.role !== "meta" || message.log) return false;
+  const text = message.content.trimStart();
+  return COMPACT_SUMMARY_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+/** Drop saved compact summaries. Returns whether any session changed. */
+export function stripContextCompactSummaries(store: SessionStore): boolean {
+  let changed = false;
+  for (const session of store.sessions) {
+    const messages = session.messages.filter((message) => !isContextCompactSummary(message));
+    if (messages.length === session.messages.length) continue;
+    session.messages = messages;
+    changed = true;
+  }
+  return changed;
+}
+
 export function normalizeChatMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
@@ -187,7 +208,8 @@ export function loadStore(fallbackRuntime: AskRuntime): SessionStore {
   const loaded = loadStoreFromLocalKeys();
   if (loaded) {
     const cleaned = dropPreviewPrompts(loaded);
-    if (cleaned !== loaded) persistStore(cleaned);
+    const stripped = stripContextCompactSummaries(cleaned);
+    if (cleaned !== loaded || stripped) persistStore(cleaned);
     return cleaned;
   }
   const session = createEmptySession(fallbackRuntime);

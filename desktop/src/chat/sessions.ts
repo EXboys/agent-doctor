@@ -1,9 +1,9 @@
 import type { AskRuntime, WorkspaceDoc } from "../ask-resources";
 import { setAgentBrandIcon } from "../agent-brand";
-import { getLocale, t } from "../i18n";
+import { t } from "../i18n";
 import { listInstalledAskAgents } from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
-import { createEmptySession, noteSessionDropped, uid } from "./store";
+import { createEmptySession, noteSessionDropped } from "./store";
 import {
   defaultWorkspaceName,
   listProjectGroupsForSidebar,
@@ -31,7 +31,6 @@ import { backgroundChoiceCount, isChatRunning, runningCount } from "./live-runs"
 import {
   COMPACT_KEEP_TURNS,
   MAX_SESSIONS,
-  type ChatMessage,
   type ChatSession,
   type PendingPermission,
   type SessionStore,
@@ -1109,32 +1108,10 @@ export function createSessionsController(deps: SessionsDeps) {
       return;
     }
     const keep = turns.slice(-COMPACT_KEEP_TURNS);
-    const dropped = turns.slice(0, -COMPACT_KEEP_TURNS);
-    const summaryLines = dropped
-      .map((m) => {
-        const role =
-          m.role === "user"
-            ? getLocale() === "zh"
-              ? "用户"
-              : "User"
-            : getLocale() === "zh"
-              ? "助手"
-              : "Assistant";
-        const text = m.content.trim().replace(/\s+/g, " ");
-        const short = text.length > 72 ? `${text.slice(0, 72)}…` : text || "(…)";
-        return `- ${role}: ${short}`;
-      })
-      .slice(0, 16);
-    const summary: ChatMessage = {
-      id: uid(),
-      role: "meta",
-      content: `${t("chat.contextCompactSummary", { n: String(dropped.length) })}\n${summaryLines.join("\n")}`,
-      at: Date.now(),
-    };
     const pendingPermissions = session.messages.filter(
       (m) => m.role === "permission" && m.permission?.allowed == null,
     );
-    session.messages = [...pendingPermissions, summary, ...keep];
+    session.messages = [...pendingPermissions, ...keep];
     session.runtimeThreadId = null;
     session.interrupted = null;
     deps.touchSession(session);

@@ -601,7 +601,6 @@ export const zh = {
     "chat.contextCompactHint": "保留最近几轮，丢掉较早细节",
     "chat.contextCompactDone": "已精简，可以继续聊。",
     "chat.contextCompactNeedMore": "再多聊几轮再精简会更合适。",
-    "chat.contextCompactSummary": "此前对话摘要（共 {n} 条）：",
     "chat.attach": "上传文件或图片",
     "chat.attachFile": "上传文件",
     "chat.attachImage": "上传图片",

@@ -569,6 +569,12 @@ body.chat-is-resizing * {
   display: none !important;
 }
 
+/* The settings menu is positioned against the whole window, over the project list.
+   The chat column is positioned for the question ticks; that must not move this menu. */
+.chat-main.is-settings {
+  position: static;
+}
+
 .chat-main.is-settings .chat-settings {
   display: block;
   height: 100%;
@@ -1952,6 +1958,8 @@ html[data-theme="dark"] .kw-search.chat-knowledge-input {
 }
 
 .chat-settings-main {
+  width: 85%;
+  box-sizing: border-box;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -1972,7 +1980,7 @@ html[data-theme="dark"] .kw-search.chat-knowledge-input {
 }
 
 .chat-settings-card {
-  width: min(720px, 100%);
+  width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
@@ -3430,6 +3438,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   box-sizing: border-box;
   width: 100%;
   max-width: min(36rem, 100%);
+  /* The log is a column. overflow:hidden would otherwise let this card shrink and clip the file row. */
+  flex-shrink: 0;
   margin: 10px 2px 6px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 10px;
@@ -4347,16 +4357,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   z-index: 1;
 }
 
-.chat-main:has(#chat-question-rail:not([hidden])) > .chat-log,
-.chat-main:has(#chat-question-rail:not([hidden])) > .chat-composer {
-  padding-left: 52px;
-  padding-right: 20px;
-}
-
-.chat-main.is-files-open.is-files-split:has(#chat-question-rail:not([hidden])) > .chat-log,
-.chat-main.is-files-open.is-files-split:has(#chat-question-rail:not([hidden])) > .chat-composer {
-  padding-left: 40px;
-  padding-right: 12px;
+/* Centered column, about 85% of the chat area. Ticks stay on the far left. */
+.chat-main > .chat-log,
+.chat-main > .chat-composer {
+  padding-left: max(36px, 7.5%);
+  padding-right: max(36px, 7.5%);
 }
 
 .chat-question-rail {

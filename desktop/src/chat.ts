@@ -120,6 +120,7 @@ import {
   mergeChatStores,
   parseStoreRaw,
   persistStore,
+  stripContextCompactSummaries,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
 import { diffChatWrite, memoryFromStore, type ChatWriteMemory } from "./chat/store-patch";
@@ -202,9 +203,12 @@ export async function hydrateDurableChatStore(): Promise<void> {
     return;
   }
   const merged = mergeChatStores(disk, chatState.store);
+  // Remember the rows still on disk, including a compact summary, before dropping it.
+  // The save below then rewrites from that row, so the summary does not stay in front.
   chatWriteMemory = disk ? memoryFromStore(chatStoreForDisk(disk)) : null;
   markChatStoreDurableReady();
   if (merged) chatState.store = merged;
+  stripContextCompactSummaries(chatState.store);
   try {
     chatState.store = persistStore(chatState.store);
   } catch (error) {
