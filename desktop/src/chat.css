@@ -23,6 +23,8 @@
   --fill: rgba(15, 23, 42, 0.04);
   --chat-topbar-h: 44px;
   --chat-side-w: 250px;
+  /* Shared content column: chat transcript, knowledge, resources and schedule pages all align to it. */
+  --chat-content-w: 1080px;
   --chat-splitter-w: 5px;
   /* Folder open: chat stays wide enough for one composer row. Leftover space goes to the files. */
   --chat-split-chat-min: 410px;
@@ -697,7 +699,6 @@ body.chat-is-resizing * {
 .chat-resources-page .chat-knowledge-inner {
   flex: 1;
   min-height: 0;
-  max-width: 920px;
   margin: 0 auto;
   padding-bottom: 10px;
   overflow: hidden;
@@ -907,7 +908,8 @@ body.chat-is-resizing * {
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  max-width: none;
+  max-width: var(--chat-content-w);
+  margin: 0 auto;
   padding: 28px 32px 48px;
   box-sizing: border-box;
 }
@@ -917,7 +919,6 @@ body.chat-is-resizing * {
 }
 
 #chat-knowledge .chat-knowledge-inner {
-  max-width: 1080px;
   height: 100%;
   margin: 0 auto;
   padding-bottom: 0;
@@ -4463,11 +4464,15 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   z-index: 1;
 }
 
-/* Centered column, about 85% of the chat area. Ticks stay on the far left. */
+/* Centered column matching the overlay pages' --chat-content-w. Ticks stay on the far left. */
 .chat-main > .chat-log,
 .chat-main > .chat-composer {
-  padding-left: max(36px, 7.5%);
-  padding-right: max(36px, 7.5%);
+  width: 100%;
+  max-width: calc(var(--chat-content-w) + 64px);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 32px;
+  padding-right: 32px;
 }
 
 .chat-question-rail {
@@ -5609,7 +5614,6 @@ html[data-theme="dark"] .chat-code-block.is-source .syntax-function {
 .chat-main > .chat-composer {
   grid-row: 3;
   min-width: 0;
-  max-width: 100%;
 }
 
 .chat-top {
