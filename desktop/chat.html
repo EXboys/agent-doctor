@@ -445,6 +445,7 @@
               <h2 data-i18n="chat.resourcesPanelTitle">技能 / 工具</h2>
               <div class="chat-knowledge-head-tools">
                 <div class="chat-resources-page-actions">
+                  <button id="chat-subagent-create" type="button" class="kw-btn kw-btn-solid" hidden data-i18n="chat.subagentNew">+ 新建</button>
                   <div id="chat-resources-add" class="chat-skill-add">
                     <button id="chat-resources-add-skill" type="button" class="kw-btn kw-btn-solid" aria-haspopup="menu" aria-expanded="false" data-i18n="chat.skillInstall">增加技能</button>
                     <div id="chat-resources-add-menu" class="chat-skill-add-menu" role="menu" hidden>
@@ -523,34 +524,8 @@
               </section>
               <section id="chat-resources-subagents-section" class="chat-knowledge-block" data-resource-section="subagents" role="tabpanel" hidden>
                 <div id="chat-subagent-list-view">
-                  <div class="chat-subagent-toolbar">
-                    <div class="chat-subagent-scope">
-                      <span id="chat-subagent-project" class="chat-subagent-scope-name"></span>
-                      <span id="chat-subagent-count" class="chat-subagent-count"></span>
-                    </div>
-                    <div class="chat-subagent-toolbar-actions">
-                      <label class="chat-subagent-search">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                          <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.8"/>
-                          <path d="M16 16.5 20 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                        </svg>
-                        <input id="chat-subagent-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="chat.subagentSearch" placeholder="搜索子助手…" />
-                      </label>
-                      <button id="chat-subagent-refresh" type="button" class="chat-subagent-iconbtn" aria-label="刷新">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                          <path d="M20 12a8 8 0 1 1-2.3-5.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                          <path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                      </button>
-                      <button id="chat-subagent-create" type="button" class="chat-subagent-new" data-i18n="chat.subagentNew">+ 新建</button>
-                    </div>
-                  </div>
-                  <div id="chat-resources-subagents-list" class="chat-subagent-list" role="list"></div>
-                  <div id="chat-resources-subagents-empty" class="chat-subagent-empty" hidden>
-                    <p id="chat-subagent-empty-title" class="chat-subagent-empty-title"></p>
-                    <p id="chat-subagent-empty-hint" class="chat-subagent-empty-hint"></p>
-                    <button id="chat-subagent-create-empty" type="button" class="chat-subagent-new" data-i18n="chat.subagentNew">+ 新建</button>
-                  </div>
+                  <div id="chat-resources-subagents-list" class="chat-res-list" role="list"></div>
+                  <p id="chat-resources-subagents-empty" class="chat-knowledge-empty" hidden></p>
                 </div>
                 <form id="chat-resources-subagent-form" class="chat-subagent-form" hidden>
                   <h3 id="chat-subagent-form-title" class="chat-subagent-form-title" data-i18n="chat.subagentCreateTitle">新建子助手</h3>
@@ -566,8 +541,8 @@
                     </label>
                     <div class="chat-subagent-form-actions">
                       <button id="chat-subagent-delete" type="button" class="chat-subagent-textbtn" hidden data-i18n="chat.subagentDelete">删除</button>
-                      <button id="chat-subagent-cancel" type="button" class="chat-subagent-quiet" data-i18n="chat.subagentCancel">取消</button>
-                      <button id="chat-subagent-save" type="submit" class="chat-subagent-quiet is-primary" data-i18n="chat.subagentSave">保存</button>
+                      <button id="chat-subagent-cancel" type="button" class="chat-knowledge-textbtn" data-i18n="chat.subagentCancel">取消</button>
+                      <button id="chat-subagent-save" type="submit" class="chat-knowledge-save" data-i18n="chat.subagentSave">保存</button>
                     </div>
                   </div>
                 </form>
