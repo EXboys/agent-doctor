@@ -1,6 +1,7 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
 import { isChatRunning, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
+import { syncQuestionRail } from "./chat/question-rail";
 
 import {
   elevatedEl,
@@ -23,6 +24,7 @@ import {
   resourcesSearchEl,
   resourcesRefreshEl,
   openResourcesEl,
+  logEl,
 } from "./chat-dom";
 
 import {
@@ -462,6 +464,7 @@ export function bootChat(): void {
     });
     refreshConfirmCopy();
     paintChannel();
+    if (chatState.store?.sessions) syncQuestionRail(activeSession().messages, logEl);
   });
 
   void ensureListener();

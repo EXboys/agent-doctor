@@ -46,12 +46,6 @@ function fitTune(): void {
   m.style.bottom = "";
   m.style.width = "";
 
-  const model = tools.querySelector<HTMLElement>(".chat-model-btn");
-  const modelWrap = model?.parentElement;
-  const modelMax = model?.style.maxWidth ?? "";
-  const modelShrink = modelWrap?.style.flexShrink ?? "";
-  if (model) model.style.maxWidth = "none";
-  if (modelWrap) modelWrap.style.flexShrink = "0";
   let others = 0;
   let visible = 0;
   for (const child of Array.from(tools.children) as HTMLElement[]) {
@@ -65,12 +59,16 @@ function fitTune(): void {
     visible += 1;
   }
   const chips = m.offsetWidth;
-  if (model) model.style.maxWidth = modelMax;
-  if (modelWrap) modelWrap.style.flexShrink = modelShrink;
+  const voice = send.querySelector<HTMLElement>(".chat-voice-mode");
+  const button = send.querySelector<HTMLElement>(".btn-send");
+  const sendGap = parseFloat(getComputedStyle(send).columnGap) || 0;
+  const voiceW = voice?.offsetWidth ?? 0;
+  const buttonW = button?.offsetWidth ?? 0;
+  const sendWidth = 120 + voiceW + buttonW + sendGap * (voiceW > 0 && buttonW > 0 ? 2 : voiceW + buttonW > 0 ? 1 : 0);
 
   const toolGap = parseFloat(getComputedStyle(tools).columnGap) || 0;
   const barGap = parseFloat(getComputedStyle(bar).columnGap) || 0;
-  const available = bar.clientWidth - send.offsetWidth - barGap;
+  const available = bar.clientWidth - sendWidth - barGap;
   const need = others + chips + toolGap * Math.max(0, visible - 1);
   const slack = wasInline ? 0 : 20;
   const inline = available >= need + slack;

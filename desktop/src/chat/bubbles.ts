@@ -23,6 +23,7 @@ import { renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
+import { syncQuestionRail } from "./question-rail";
 import {
   assistantMsgWrap,
   bubblePlainText,
@@ -335,6 +336,7 @@ export function createBubblesController(deps: BubblesDeps) {
     const message = session.messages.find((m) => m.id === id);
     if (!message) return;
     message.content = content;
+    if (session.id === deps.activeSession().id) syncQuestionRail(session.messages, deps.logEl);
     if (opts?.persist === false) return;
     message.at = Date.now();
     deps.touchSession(session);
@@ -495,6 +497,7 @@ export function createBubblesController(deps: BubblesDeps) {
       deps.logEl.appendChild(wrap);
       syncReplyChangeCard();
       pinChatLog(deps.logEl);
+      syncQuestionRail(deps.activeSession().messages, deps.logEl);
       return bubble;
     }
     const bubble = document.createElement("div");
@@ -567,6 +570,7 @@ export function createBubblesController(deps: BubblesDeps) {
       if (!sessionHasChatContent(session)) {
         deps.logEl.appendChild(renderEmptyChat());
         paintChatPlan(deps.logEl, session.plan);
+        syncQuestionRail(session.messages, deps.logEl);
         return;
       }
       const messages = placeToolsBeforeReply(session.messages);
@@ -715,6 +719,7 @@ export function createBubblesController(deps: BubblesDeps) {
       syncTurnCopyButtons();
       paintChatPlan(deps.logEl, session.plan);
       pinChatLog(deps.logEl);
+      syncQuestionRail(session.messages, deps.logEl);
       deps.updateContextMeter();
     } catch (error) {
       console.error("Ask: failed to render messages", error);
