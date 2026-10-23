@@ -893,6 +893,26 @@ export function repeatRuns(faces: string[]): number[] {
 
 const STEP_KINDS: ToolActivityKind[] = ["read", "write", "edit", "terminal", "search", "other"];
 
+const subagentNames = new Map<string, string>();
+
+/** The name the user wrote, keyed by the id each assistant actually calls. */
+export function rememberSubagentNames(records: { id: string; name: string }[]): void {
+  subagentNames.clear();
+  for (const record of records) {
+    const name = record.name.trim();
+    if (!record.id || !name) continue;
+    subagentNames.set(`role-${record.id}`, name);
+    subagentNames.set(`ad-role-${record.id}`, name);
+  }
+}
+
+function subagentFace(title: string): string {
+  const who = title.replace(/\s+/g, " ").trim();
+  if (!who) return t("chat.subagentSomeone");
+  const known = subagentNames.get(who) ?? who;
+  return known.length > 40 ? `${known.slice(0, 40)}…` : known;
+}
+
 function oneLine(text: string, max = 96): string {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length > max ? `${line.slice(0, max)}…` : line;
@@ -900,6 +920,21 @@ function oneLine(text: string, max = 96): string {
 
 /** The row for a structured step: what it did, and to which file. */
 export function stepActivityInfo(step: ToolStep): ToolActivityInfo {
+  if (step.kind === "subagent") {
+    const name = subagentFace(step.title || "");
+    return {
+      kind: "other",
+      label: t("chat.subagentWatch", { name }),
+      target: "",
+      path: "",
+      lineStart: 0,
+      lineEnd: 0,
+      additions: 0,
+      deletions: 0,
+      addedLines: [],
+      deletedLines: [],
+    };
+  }
   const kind = STEP_KINDS.includes(step.kind as ToolActivityKind)
     ? (step.kind as ToolActivityKind)
     : "other";

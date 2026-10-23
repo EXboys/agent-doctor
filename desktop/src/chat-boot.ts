@@ -113,7 +113,7 @@ import type { SendAskResult } from "./chat/send";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
 import { bindKnowledge } from "./chat/knowledge-page";
-import { bindResourcesPage } from "./chat/resources-page";
+import { bindResourcesPage, syncSubagentNames } from "./chat/resources-page";
 import { bindSchedule } from "./chat/schedule-page";
 import { orderedProjectNames } from "./chat/project-order";
 import { syncKnowledgeFolder } from "./chat/knowledge-sync";
@@ -228,6 +228,7 @@ export function bootChat(): void {
     await loadAskResources();
     syncKnowledgeFolder(null);
     const projectName = sessionWorkspaceName(activeSession(), chatState.workspaceDoc);
+    void syncSubagentNames(projectName ?? "");
     const projectPath = projectName ? chatState.workspaceDoc?.workspaces[projectName]?.path?.trim() : "";
     if (projectPath) syncKnowledgeFolder(projectPath);
     syncSessionWorkspaceUi();

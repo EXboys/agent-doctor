@@ -703,6 +703,9 @@ pub fn run() {
             knowledge_import_command,
             skill_install_command,
             skill_remove_command,
+            list_project_subagents_command,
+            save_project_subagent_command,
+            delete_project_subagent_command,
             knowledge_add_source_command,
             knowledge_save_page_command,
             knowledge_delete_page_command,
@@ -995,7 +998,13 @@ mod tests {
     #[test]
     fn tooltip_shows_busy_over_status() {
         assert_eq!(
-            format_tray_tooltip(Some((2, 4)), Some("demo"), "personal", Some("Doctor…")),
+            format_tray_tooltip(
+                Some((2, 4)),
+                Some("demo"),
+                "personal",
+                Some("Doctor…"),
+                false
+            ),
             "Agent Doctor · Busy · Doctor…"
         );
     }
@@ -1003,20 +1012,50 @@ mod tests {
     #[test]
     fn tooltip_compact_status_ok_partial_attention() {
         assert_eq!(
-            format_tray_tooltip(Some((4, 4)), Some("demo"), "team", None),
+            format_tray_tooltip(Some((4, 4)), Some("demo"), "team", None, false),
             "Agent Doctor · OK 4/4 · ws:demo · team"
         );
         assert_eq!(
-            format_tray_tooltip(Some((1, 4)), None, "personal", None),
+            format_tray_tooltip(Some((1, 4)), None, "personal", None, false),
             "Agent Doctor · Partial 1/4 · ws:— · personal"
         );
         assert_eq!(
-            format_tray_tooltip(Some((0, 4)), Some("x"), "unset", None),
+            format_tray_tooltip(Some((0, 4)), Some("x"), "unset", None, false),
             "Agent Doctor · Attention · ws:x · unset"
         );
         assert_eq!(
-            format_tray_tooltip(None, None, "personal", None),
+            format_tray_tooltip(None, None, "personal", None, false),
             "Agent Doctor · Health — · ws:— · personal"
+        );
+    }
+
+    #[test]
+    fn tooltip_uses_chinese_when_locale_is_zh() {
+        assert_eq!(
+            format_tray_tooltip(
+                Some((2, 4)),
+                Some("demo"),
+                "personal",
+                Some("正在诊断…"),
+                true
+            ),
+            "Agent Doctor · 忙碌 · 正在诊断…"
+        );
+        assert_eq!(
+            format_tray_tooltip(Some((4, 4)), Some("demo"), "team", None, true),
+            "Agent Doctor · 正常 4/4 · 项目:demo · 团队"
+        );
+        assert_eq!(
+            format_tray_tooltip(Some((1, 4)), None, "personal", None, true),
+            "Agent Doctor · 部分 1/4 · 项目:— · 个人"
+        );
+        assert_eq!(
+            format_tray_tooltip(Some((0, 4)), Some("x"), "unset", None, true),
+            "Agent Doctor · 需要处理 · 项目:x · 未设置"
+        );
+        assert_eq!(
+            format_tray_tooltip(None, None, "personal", None, true),
+            "Agent Doctor · 还没检查 · 项目:— · 个人"
         );
     }
 }

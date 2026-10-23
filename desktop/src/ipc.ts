@@ -195,6 +195,29 @@ export function skillRemove(args: {
   return invoke("skill_remove_command", args);
 }
 
+export type ProjectSubagent = {
+  id: string;
+  name: string;
+  responsibility: string;
+};
+
+export function listProjectSubagents(args: { projectName: string }): Promise<ProjectSubagent[]> {
+  return invoke("list_project_subagents_command", args);
+}
+
+export function saveProjectSubagent(args: {
+  projectName: string;
+  id?: string | null;
+  name: string;
+  responsibility: string;
+}): Promise<{ subagent: ProjectSubagent; notes: string[] }> {
+  return invoke("save_project_subagent_command", args);
+}
+
+export function deleteProjectSubagent(args: { projectName: string; id: string }): Promise<void> {
+  return invoke("delete_project_subagent_command", args);
+}
+
 export function skillInstall(args: {
   scope: "global" | "project" | "agent";
   projectName?: string | null;

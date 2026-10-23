@@ -220,7 +220,50 @@ pub(crate) fn tool_step(id: &str, name: &str, input: &Value) -> ToolStep {
     if step.title.is_empty() {
         step.title = action_subject(name, obj);
     }
+    if let Some(role) = subagent_role(name, obj) {
+        step.kind = "subagent".into();
+        step.title = role;
+        step.path.clear();
+        step.command.clear();
+        step.query.clear();
+    }
     step
+}
+
+/// The name of the helper a delegation tool is calling. Empty when this tool is not one.
+fn subagent_role(name: &str, obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let leaf = name.rsplit(['/', '.']).next().unwrap_or(name);
+    let leaf = leaf.rsplit("__").next().unwrap_or(leaf);
+    let folded = key(leaf);
+    let named = matches!(
+        folded.as_str(),
+        "agent"
+            | "delegatetask"
+            | "sessionspawn"
+            | "spawnagent"
+            | "subagent"
+            | "collabtoolcall"
+            | "collab"
+    ) || folded.contains("subagent")
+        || folded.contains("delegatetask")
+        || folded.contains("sessionspawn");
+    let task =
+        folded == "task" && (obj.contains_key("subagent_type") || obj.contains_key("subagentType"));
+    if !named && !task {
+        return None;
+    }
+    Some(text(
+        obj,
+        &[
+            "subagent_type",
+            "subagentType",
+            "agentId",
+            "agent_id",
+            "profile",
+            "agent",
+            "name",
+        ],
+    ))
 }
 
 /// App, button, or words for a computer or browser tool. Coordinates stay off the row.
@@ -413,6 +456,25 @@ pub(crate) fn codex_tool_steps(item: &Value, item_type: &str, completed: bool) -
             path: command_text(item.get("path")),
             ..base
         }],
+        "collabtoolcall" => {
+            let role = item
+                .as_object()
+                .map(|obj| {
+                    text(
+                        obj,
+                        &["agentType", "agent_type", "agent", "name", "receiver"],
+                    )
+                })
+                .unwrap_or_default();
+            let mut step = base;
+            step.kind = "subagent".into();
+            step.title = role;
+            if completed {
+                step.output =
+                    cap_output(&item.get("result").map(tool_result_text).unwrap_or_default());
+            }
+            vec![step]
+        }
         _ => {
             let server = item.get("server").and_then(Value::as_str).unwrap_or("");
             let tool = item.get("tool").and_then(Value::as_str).unwrap_or("");
@@ -695,6 +757,13 @@ mod tests {
             ("edit", "notes.md")
         );
 
+        let helper = tool_step(
+            "a1",
+            "Agent",
+            &json!({"subagent_type": "reviewer", "description": "看一下"}),
+        );
+        assert_eq!(helper.kind, "subagent");
+        assert_eq!(helper.title, "reviewer");
         assert_eq!(bash("npm run build 2>&1 > /dev/null").kind, "terminal");
         assert_eq!(bash("ls -la /tmp 2>&1").kind, "terminal");
         assert_eq!(bash("curl -s https://example.com").kind, "search");

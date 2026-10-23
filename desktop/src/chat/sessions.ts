@@ -26,6 +26,7 @@ import {
 } from "./session-sidebar";
 import { formatTime } from "./copy-ui";
 import { leaveChatOverlayPages } from "./overlay-pages";
+import { syncSubagentNames } from "./resources-page";
 import { closeChatSettings } from "./settings-page";
 import { backgroundChoiceCount, isChatRunning, runningCount } from "./live-runs";
 import {
@@ -832,6 +833,7 @@ export function createSessionsController(deps: SessionsDeps) {
       // Opened after finishing elsewhere — clear 【完成】 badge.
     }
     deps.renderActiveMessages();
+    void syncSubagentNames(sessionWorkspaceName(session, deps.getWorkspaceDoc()) ?? "");
     if (enteringRunning) {
       deps.restoreRunningView();
       reattachLiveUi();

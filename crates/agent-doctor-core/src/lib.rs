@@ -27,6 +27,7 @@ pub mod session_launch;
 pub mod setup;
 pub mod skills;
 pub mod store;
+pub mod subagents;
 pub mod usage;
 pub mod version_check;
 pub mod workspace;
@@ -211,6 +212,10 @@ pub use skills::{
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,
     PersonalProviderRecord, SettingsStore, SkillsSourceKind, SkillsSourceSettings, TeamSettings,
+};
+pub use subagents::{
+    delete_project_subagent, list_project_subagents, save_project_subagent, SubagentError,
+    SubagentRecord, SubagentSaveReport,
 };
 pub use version_check::{
     check_runtime_versions, check_runtime_versions_cached, RuntimeVersionStatus,

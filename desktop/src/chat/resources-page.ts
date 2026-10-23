@@ -15,8 +15,16 @@ import {
   saveSkillOrder,
   togglePinnedSkillId,
 } from "./skill-order";
+import { rememberSubagentNames } from "./format";
 import { t, tNamed } from "../i18n";
-import { skillInstall, skillRemove } from "../ipc";
+import {
+  deleteProjectSubagent,
+  listProjectSubagents,
+  saveProjectSubagent,
+  skillInstall,
+  skillRemove,
+  type ProjectSubagent,
+} from "../ipc";
 import { isAskRuntime, runtimeDisplayName } from "./runtime";
 import { closeKnowledgePage, closeResourcesMainPage, closeSchedulePage } from "./overlay-pages";
 import { SKILL_CATEGORY_ORDER } from "../skill-categories";
@@ -53,7 +61,12 @@ let tab: ResourcesScopeTab = "global";
 let projectPick = "";
 let agentPick: string = AGENTS[0];
 let query = "";
-let resourceKind: "skills" | "mcp" = "skills";
+let subagentQuery = "";
+let resourceKind: "skills" | "mcp" | "subagents" = "skills";
+let subagents: ProjectSubagent[] = [];
+let editingSubagentId = "";
+let pendingSubagentDelete = "";
+let subagentEditor = false;
 let skillCategory: SkillListCategory = "all";
 let installing = false;
 let pendingDelete = "";
@@ -310,6 +323,209 @@ async function installSkills(directory: boolean): Promise<void> {
   }
 }
 
+function subagentNote(code: string): string {
+  switch (code) {
+    case "hermes-unnamed":
+      return t("chat.subagentHermesUnnamed");
+    case "hermes-model-map":
+      return t("chat.subagentHermesModelMap");
+    case "hermes-config":
+      return t("chat.subagentHermesConfig");
+    case "openclaw-unready":
+      return t("chat.subagentOpenclawUnready");
+    case "occupied":
+      return t("chat.subagentOccupied");
+    case "write-failed":
+      return t("chat.subagentWriteFailed");
+    default:
+      return "";
+  }
+}
+
+function subagentProject(): string {
+  return deps.currentProject()?.trim() || projectPick.trim();
+}
+
+function clearSubagentForm(): void {
+  editingSubagentId = "";
+  pendingSubagentDelete = "";
+  subagentEditor = false;
+  const nameInput = document.querySelector<HTMLInputElement>("#chat-subagent-name");
+  const dutyInput = document.querySelector<HTMLTextAreaElement>("#chat-subagent-duty");
+  if (nameInput) nameInput.value = "";
+  if (dutyInput) dutyInput.value = "";
+  syncSubagentView();
+}
+
+function openSubagentEditor(item?: ProjectSubagent): void {
+  if (!subagentProject()) {
+    setInstallNote(t("chat.subagentNeedProject"));
+    return;
+  }
+  editingSubagentId = item?.id ?? "";
+  pendingSubagentDelete = "";
+  const nameInput = document.querySelector<HTMLInputElement>("#chat-subagent-name");
+  const dutyInput = document.querySelector<HTMLTextAreaElement>("#chat-subagent-duty");
+  if (nameInput) nameInput.value = item?.name ?? "";
+  if (dutyInput) dutyInput.value = item?.responsibility ?? "";
+  subagentEditor = true;
+  syncSubagentView();
+  nameInput?.focus();
+}
+
+function syncSubagentView(): void {
+  const listView = document.querySelector<HTMLElement>("#chat-subagent-list-view");
+  const form = document.querySelector<HTMLElement>("#chat-resources-subagent-form");
+  if (listView) listView.hidden = subagentEditor;
+  if (form) {
+    form.hidden = !subagentEditor;
+    form.classList.toggle("is-open", subagentEditor);
+  }
+  const title = document.querySelector<HTMLElement>("#chat-subagent-form-title");
+  if (title) title.textContent = editingSubagentId ? t("chat.subagentEditTitle") : t("chat.subagentCreateTitle");
+  const remove = document.querySelector<HTMLButtonElement>("#chat-subagent-delete");
+  if (remove) {
+    remove.hidden = !editingSubagentId;
+    remove.textContent =
+      pendingSubagentDelete === editingSubagentId
+        ? t("chat.subagentConfirmDelete")
+        : t("chat.subagentDelete");
+  }
+}
+
+/** Remember the names a chat should say, for the project that is open now. */
+export async function syncSubagentNames(projectName: string): Promise<void> {
+  const project = projectName.trim();
+  if (!project) {
+    rememberSubagentNames([]);
+    return;
+  }
+  try {
+    rememberSubagentNames(await listProjectSubagents({ projectName: project }));
+  } catch {
+    /* the row keeps the name the assistant used */
+  }
+}
+
+async function paintSubagents(): Promise<void> {
+  const list = document.querySelector<HTMLElement>("#chat-resources-subagents-list");
+  const empty = document.querySelector<HTMLElement>("#chat-resources-subagents-empty");
+  const title = document.querySelector<HTMLElement>("#chat-subagent-empty-title");
+  const hint = document.querySelector<HTMLElement>("#chat-subagent-empty-hint");
+  const projectLabel = document.querySelector<HTMLElement>("#chat-subagent-project");
+  const count = document.querySelector<HTMLElement>("#chat-subagent-count");
+  const create = document.querySelector<HTMLButtonElement>("#chat-subagent-create");
+  const createEmpty = document.querySelector<HTMLButtonElement>("#chat-subagent-create-empty");
+  const search = document.querySelector<HTMLElement>(".chat-subagent-search");
+  if (!list || !empty || !title || !hint) return;
+  const project = subagentProject();
+  const toolbar = document.querySelector<HTMLElement>(".chat-subagent-toolbar");
+  if (projectLabel) projectLabel.textContent = project ? t("chat.subagentProject", { name: project }) : "";
+  if (toolbar) toolbar.hidden = !project;
+  if (!project) {
+    subagents = [];
+    list.replaceChildren();
+    empty.hidden = false;
+    title.textContent = t("chat.subagentNeedProject");
+    hint.hidden = true;
+    if (count) count.hidden = true;
+    if (create) create.hidden = true;
+    if (createEmpty) createEmpty.hidden = true;
+    if (search) search.hidden = true;
+    syncSubagentView();
+    return;
+  }
+  try {
+    subagents = await listProjectSubagents({ projectName: project });
+  } catch {
+    subagents = [];
+  }
+  rememberSubagentNames(subagents);
+  const shown = subagents.filter((item) => {
+    if (!subagentQuery) return true;
+    const hay = `${item.name}\n${item.responsibility}`.toLowerCase();
+    return hay.includes(subagentQuery.toLowerCase());
+  });
+  list.replaceChildren();
+  const searching = Boolean(subagentQuery) && shown.length === 0;
+  empty.hidden = shown.length > 0;
+  title.textContent = searching ? t("chat.subagentNoMatch") : t("chat.subagentsEmpty");
+  hint.hidden = searching;
+  hint.textContent = t("chat.subagentEmptyHint");
+  if (count) {
+    count.hidden = false;
+    count.textContent = t("chat.subagentCount", { count: String(subagents.length) });
+  }
+  if (search) search.hidden = false;
+  if (create) create.hidden = false;
+  if (createEmpty) createEmpty.hidden = searching;
+  for (const item of shown) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "chat-subagent-card";
+    const name = document.createElement("span");
+    name.className = "chat-subagent-card-name";
+    name.textContent = item.name;
+    const duty = document.createElement("span");
+    duty.className = "chat-subagent-card-duty";
+    duty.textContent = item.responsibility.replace(/\s+/g, " ").trim();
+    card.append(name, duty);
+    card.addEventListener("click", () => openSubagentEditor(item));
+    list.append(card);
+  }
+  syncSubagentView();
+}
+
+async function saveSubagentFromForm(): Promise<void> {
+  const project = subagentProject();
+  const name = document.querySelector<HTMLInputElement>("#chat-subagent-name")?.value.trim() ?? "";
+  const duty = document.querySelector<HTMLTextAreaElement>("#chat-subagent-duty")?.value.trim() ?? "";
+  if (!project) {
+    setInstallNote(t("chat.subagentNeedProject"));
+    return;
+  }
+  if (!name) {
+    setInstallNote(t("chat.subagentEmptyName"));
+    return;
+  }
+  if (!duty) {
+    setInstallNote(t("chat.subagentEmptyDuty"));
+    return;
+  }
+  const save = document.querySelector<HTMLButtonElement>("#chat-subagent-save");
+  if (save) save.disabled = true;
+  try {
+    const report = await saveProjectSubagent({
+      projectName: project,
+      id: editingSubagentId || null,
+      name,
+      responsibility: duty,
+    });
+    clearSubagentForm();
+    const extra = report.notes.map(subagentNote).filter(Boolean);
+    setInstallNote([t("chat.subagentSaved"), ...extra].join(" "));
+    await paintSubagents();
+  } catch (error) {
+    setInstallNote(String(error).replace(/^Error:\s*/, "") || t("chat.subagentWriteFailed"));
+  } finally {
+    if (save) save.disabled = false;
+  }
+}
+
+async function removeSubagent(id: string): Promise<void> {
+  const project = subagentProject();
+  pendingSubagentDelete = "";
+  if (!project) return;
+  try {
+    await deleteProjectSubagent({ projectName: project, id });
+    if (editingSubagentId === id) clearSubagentForm();
+    setInstallNote(t("chat.subagentDeleted"));
+    await paintSubagents();
+  } catch (error) {
+    setInstallNote(String(error).replace(/^Error:\s*/, "") || t("chat.subagentWriteFailed"));
+  }
+}
+
 function paintResourceKind(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-resource-kind]").forEach((button) => {
     const on = button.dataset.resourceKind === resourceKind;
@@ -323,6 +539,9 @@ function paintResourceKind(): void {
   const add = document.querySelector<HTMLElement>("#chat-resources-add");
   if (add) add.hidden = resourceKind !== "skills";
   if (resourceKind !== "skills") setAddMenu(false);
+  const foot = document.querySelector<HTMLElement>(".chat-resources-page-foot");
+  if (foot) foot.hidden = resourceKind === "subagents";
+  if (resourceKind === "subagents") void paintSubagents();
 }
 
 function paint(): void {
@@ -335,6 +554,21 @@ function paint(): void {
   paintResourceKind();
   paintPicks();
   paintContent();
+  paintSubagentChrome();
+}
+
+function paintSubagentChrome(): void {
+  const on = resourceKind === "subagents";
+  pageEl()?.classList.toggle("is-subagents", on);
+  const heading = document.querySelector<HTMLElement>("#chat-resources-page h2");
+  if (heading) heading.textContent = on ? t("chat.subagentsTitle") : t("chat.resourcesPanelTitle");
+  const scopeTabs = document.querySelector<HTMLElement>(".chat-resources-scope-tabs");
+  const scope = document.querySelector<HTMLElement>("#chat-resources-scope");
+  const picks = document.querySelector<HTMLElement>("#chat-resources-picks");
+  if (scopeTabs) scopeTabs.hidden = on;
+  if (scope) scope.hidden = on;
+  if (on && picks) picks.hidden = true;
+  syncSubagentView();
 }
 
 export function syncResourcesPageLabels(): void {
@@ -403,17 +637,47 @@ export function bindResourcesPage(next: Deps): void {
   kindTabs?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-resource-kind]");
     const nextKind = button?.dataset.resourceKind;
-    if (nextKind !== "skills" && nextKind !== "mcp") return;
+    if (nextKind !== "skills" && nextKind !== "mcp" && nextKind !== "subagents") return;
     resourceKind = nextKind;
     pendingDelete = "";
-    paintResourceKind();
+    paint();
   });
   kindTabs?.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    resourceKind = resourceKind === "skills" ? "mcp" : "skills";
-    paintResourceKind();
+    const order = ["skills", "mcp", "subagents"] as const;
+    const index = order.indexOf(resourceKind);
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    resourceKind = order[(index + step + order.length) % order.length] ?? "skills";
+    paint();
     kindTabs.querySelector<HTMLButtonElement>(`[data-resource-kind="${resourceKind}"]`)?.focus();
+  });
+  document.querySelector("#chat-resources-subagent-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveSubagentFromForm();
+  });
+  document.querySelector("#chat-subagent-create")?.addEventListener("click", () => openSubagentEditor());
+  document.querySelector("#chat-subagent-create-empty")?.addEventListener("click", () => openSubagentEditor());
+  document.querySelector("#chat-subagent-cancel")?.addEventListener("click", () => {
+    subagentEditor = false;
+    pendingSubagentDelete = "";
+    syncSubagentView();
+  });
+  document.querySelector("#chat-subagent-refresh")?.addEventListener("click", () => {
+    void paintSubagents();
+  });
+  document.querySelector<HTMLInputElement>("#chat-subagent-search")?.addEventListener("input", (event) => {
+    subagentQuery = (event.target as HTMLInputElement).value.trim();
+    void paintSubagents();
+  });
+  document.querySelector("#chat-subagent-delete")?.addEventListener("click", () => {
+    if (!editingSubagentId) return;
+    if (pendingSubagentDelete !== editingSubagentId) {
+      pendingSubagentDelete = editingSubagentId;
+      syncSubagentView();
+      return;
+    }
+    void removeSubagent(editingSubagentId);
   });
   document.querySelector("#chat-resources-content")?.addEventListener("click", (event) => {
     const row = (event.target as HTMLElement).closest(".chat-res-row");

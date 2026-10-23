@@ -7,7 +7,7 @@ import { syncAccountBarLabels } from "./chat/account-bar";
 import { syncTuneLabels } from "./chat/tune-menu";
 import { openKnowledgePage, syncKnowledgeLabels } from "./chat/knowledge-page";
 import { KNOWLEDGE_RUN_PREFIX } from "./chat/knowledge-wiki";
-import { openSkillsManagePage, syncResourcesPageLabels } from "./chat/resources-page";
+import { openSkillsManagePage, syncResourcesPageLabels, syncSubagentNames } from "./chat/resources-page";
 import { syncScheduleLabels } from "./chat/schedule-page";
 import type { PromptSessionEvent, ToolStep } from "./chat/types";
 import {
@@ -310,6 +310,7 @@ export function assignActiveSessionWorkspace(name: string): boolean {
     return true;
   }
   session.workspaceName = name;
+  void syncSubagentNames(name);
   session.runtimeThreadId = null;
   session.interrupted = null;
   touchSession(session);

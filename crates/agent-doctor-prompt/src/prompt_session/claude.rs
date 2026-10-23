@@ -1,6 +1,6 @@
 //! Claude Code ask backend (`claude -p` + optional control_request permissions).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -547,6 +547,7 @@ where
     let turn_done = Arc::new(AtomicBool::new(false));
     let mut plan_board = PlanBoard::default();
     let mut background = BackgroundTasks::default();
+    let mut subagent_text: HashMap<String, String> = HashMap::new();
     let mut tools = ToolWatch::default();
     let mut thinking = ThinkingLine::default();
     let mut drain = |on_event: &mut F,
@@ -560,8 +561,11 @@ where
             if is_stdout {
                 let value = serde_json::from_str::<serde_json::Value>(&line).ok();
                 // A subagent's own text and tools share this stdout. They are not
-                // the reply, and landing them here cuts the sentence into pieces.
-                if value.as_ref().is_some_and(from_subagent) {
+                // the reply. Keep them on one collapsed row for that helper.
+                if let Some(value) = value.as_ref().filter(|value| from_subagent(value)) {
+                    if let Some(event) = subagent_notice(session_id, value, &mut subagent_text) {
+                        on_event(event);
+                    }
                     continue;
                 }
                 if let Some(text) = value.as_ref().and_then(claude_thinking_delta) {
@@ -966,6 +970,62 @@ fn background_task_finished(text: &str) -> bool {
     ]
     .iter()
     .any(|status| text.contains(status))
+}
+
+/// One collapsed row for a helper's own words. The reply stream never sees them.
+fn subagent_notice(
+    session_id: &str,
+    value: &serde_json::Value,
+    acc: &mut HashMap<String, String>,
+) -> Option<PromptSessionEvent> {
+    let id = value
+        .get("parent_tool_use_id")
+        .and_then(|item| item.as_str())
+        .filter(|id| !id.is_empty())?;
+    let text = claude_message_text(value);
+    if text.is_empty() {
+        return None;
+    }
+    let buf = acc.entry(id.to_string()).or_default();
+    if !buf.is_empty() {
+        buf.push('\n');
+    }
+    buf.push_str(&text);
+    if buf.chars().count() > 6_000 {
+        let cut = buf.chars().count() - 6_000;
+        *buf = buf.chars().skip(cut).collect();
+    }
+    Some(PromptSessionEvent::Tool {
+        session_id: session_id.to_string(),
+        step: Box::new(ToolStep {
+            id: id.to_string(),
+            kind: "subagent".into(),
+            status: "running".into(),
+            output: buf.clone(),
+            ..ToolStep::default()
+        }),
+    })
+}
+
+fn claude_message_text(value: &serde_json::Value) -> String {
+    match value.pointer("/message/content") {
+        Some(serde_json::Value::String(text)) => text.trim().to_string(),
+        Some(serde_json::Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| {
+                if block.get("type").and_then(|item| item.as_str()) != Some("text") {
+                    return None;
+                }
+                block
+                    .get("text")
+                    .and_then(|item| item.as_str())
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
 }
 
 /// Subagent traffic on the same stdout. `parent_tool_use_id` is null for the reply.
@@ -1405,6 +1465,7 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use crate::prompt_session::util::TEST_ENV_LOCK;
+    use std::collections::HashMap;
     use std::fs;
     #[cfg(unix)]
     use std::path::PathBuf;
@@ -1667,6 +1728,16 @@ mod tests {
             &mut BackgroundTasks::default(),
         );
         assert!(events.is_empty());
+        let notice = subagent_notice("s1", &serde_json::from_str(r#"{"type":"assistant","parent_tool_use_id":"parent-1","message":{"content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"src/app.ts"}},{"type":"text","text":"子任务的句子"}]}}"#).unwrap(), &mut HashMap::new());
+        match notice {
+            Some(PromptSessionEvent::Tool { step, .. }) => {
+                assert_eq!(step.kind, "subagent");
+                assert_eq!(step.id, "parent-1");
+                assert!(step.output.contains("子任务的句子"));
+                assert!(!step.output.contains("src/app.ts"));
+            }
+            other => panic!("expected a helper row, got {other:?}"),
+        }
     }
 
     #[test]
