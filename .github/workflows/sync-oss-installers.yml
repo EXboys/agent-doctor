@@ -111,6 +111,10 @@ jobs:
         env:
           TAG: ${{ steps.meta.outputs.tag }}
           EDITIONS: ${{ steps.meta.outputs.editions }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
         run: |
           set -euo pipefail
           for edition in $EDITIONS; do
