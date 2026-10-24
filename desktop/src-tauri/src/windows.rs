@@ -23,9 +23,9 @@ const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 const MAIN_WINDOW_HEIGHT: f64 = 800.0;
 
 fn main_inner_height(work_h: f64) -> f64 {
-    // macOS stretches with the screen. Windows keeps the designed height so a
-    // large monitor does not turn the home into a full-height column.
-    fit_main_inner_height(work_h, cfg!(target_os = "windows"))
+    // Cap at the designed home height on every OS. Tall monitors should not
+    // turn the agent home into a full-screen column beside Ask.
+    fit_main_inner_height(work_h, true)
 }
 
 fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
@@ -85,7 +85,12 @@ fn window_decoration_width(window: &tauri::WebviewWindow, scale: f64) -> f64 {
     ((outer.width as f64 - inner.width as f64) / scale).max(0.0)
 }
 
-/// Dock main (left) + secondary (right: Ask / Resources / Diagnose): same top/bottom, side by side.
+fn emit_main_dock_layout(main: &tauri::WebviewWindow, docked: bool) {
+    let _ = main.emit("main-dock-layout", serde_json::json!({ "docked": docked }));
+}
+
+/// Dock main (left) + secondary (right: Ask / Resources / Diagnose): top-aligned;
+/// the main window keeps its own height (design cap), not the secondary height.
 fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -99,9 +104,6 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let gap = ASK_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
-    // Alone, the home stays at the designed height. Beside Ask / Resources /
-    // Diagnose it grows to that window so the two bottoms line up.
-
     let (current_main_w, _) = main_window_logical_size(&main).unwrap_or((420.0, 720.0));
     let main_outer_w = current_main_w.clamp(
         MAIN_WINDOW_MIN_WIDTH,
@@ -110,8 +112,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let secondary_deco_w = window_decoration_width(&secondary, scale);
     let secondary_deco_h = window_decoration_height(&secondary, scale);
-    let main_deco_h = window_decoration_height(&main, scale);
-    let main_h = docked_inner_height(work_h, main_deco_h, MAIN_WINDOW_MIN_HEIGHT);
+    let main_h = main_inner_height(work_h);
 
     let room = work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w;
     let max_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
@@ -142,6 +143,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
     let _ = main.set_position(LogicalPosition::new(main_x, y));
     let _ = secondary.set_size(LogicalSize::new(secondary_inner_w, secondary_inner_h));
     let _ = secondary.set_position(LogicalPosition::new(secondary_x, y));
+    emit_main_dock_layout(&main, true);
 }
 
 pub(crate) fn layout_main_and_ask_side_by_side(app: &AppHandle) {
@@ -256,6 +258,7 @@ fn position_main_window_left(window: &tauri::WebviewWindow) {
     let y = work_y + MAIN_WINDOW_MARGIN;
     let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(LogicalPosition::new(x, y));
+    emit_main_dock_layout(window, false);
 }
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
@@ -763,6 +766,11 @@ pub(crate) fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), Str
     };
     dismiss_secondary_window(&window, destroy);
     crate::island::on_ask_closed(app);
+    if !another_secondary_is_visible(app, ASK_WINDOW_LABEL) {
+        if let Some(main) = app.get_webview_window("main") {
+            position_main_window_left(&main);
+        }
+    }
     Ok(())
 }
 
@@ -1131,5 +1139,19 @@ mod tests {
         let main_title = docked_inner_height(work_h, 40.0, 480.0);
         let ask_title = docked_inner_height(work_h, 28.0, 480.0);
         assert_eq!(main_title + 40.0, ask_title + 28.0);
+    }
+
+    #[test]
+    fn home_stays_designed_height_when_ask_is_taller() {
+        let work_h = 1040.0;
+        let home = fit_main_inner_height(work_h, true);
+        let ask = docked_inner_height(work_h, 32.0, 480.0);
+        assert_eq!(home, 800.0);
+        assert!(ask > home);
+    }
+
+    #[test]
+    fn mac_home_uses_design_cap_not_full_monitor() {
+        assert_eq!(fit_main_inner_height(1040.0, true), 800.0);
     }
 }

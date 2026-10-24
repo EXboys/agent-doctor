@@ -1,3 +1,4 @@
+import "../platform";
 import { fitTextarea } from "../fit-textarea";
 import { parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";

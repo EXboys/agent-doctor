@@ -1,3 +1,17 @@
+html[data-os="windows"] .resources-page {
+  height: 100%;
+  height: 100dvh;
+}
+
+html[data-os="windows"] .resources-rail {
+  flex-basis: 176px;
+}
+
+html[data-os="windows"] .resources-section-tab {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 .resources-page {
   margin: 0;
   height: 100%;

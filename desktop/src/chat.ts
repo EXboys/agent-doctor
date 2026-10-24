@@ -1,3 +1,4 @@
+import "./platform";
 import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";

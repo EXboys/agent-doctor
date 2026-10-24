@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <title>Agent Doctor</title>
+    <script>
+      if (/\bWindows\b/.test(navigator.userAgent)) document.documentElement.dataset.os = "windows";
+    </script>
     <link rel="stylesheet" href="/src/island.css" />
   </head>
   <body>

@@ -78,6 +78,54 @@ html, body {
   background: var(--bg);
 }
 
+/* Windows WebView2 has no PingFang / SF Pro. Asking for them first makes
+   Chinese fall back late and the project list looks cramped or clipped. */
+html[data-os="windows"] {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --chat-side-w: 272px;
+}
+
+html[data-os="windows"] .chat-side {
+  padding: 0 12px 12px;
+  gap: 8px;
+}
+
+html[data-os="windows"] .chat-side-tools {
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-bottom-color: var(--line);
+}
+
+html[data-os="windows"] .chat-session-label {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-os="windows"] .chat-session-group-head,
+html[data-os="windows"] .chat-session-group-label,
+html[data-os="windows"] .chat-account-name,
+html[data-os="windows"] .chat-resources-toggle,
+html[data-os="windows"] .chat-knowledge-open,
+html[data-os="windows"] .chat-schedule-open {
+  letter-spacing: 0;
+}
+
+html[data-os="windows"] .btn-side,
+html[data-os="windows"] .btn-primary,
+html[data-os="windows"] .chat-account-name,
+html[data-os="windows"] .chat-account-avatar,
+html[data-os="windows"] .chat-update {
+  font-weight: 600;
+}
+
+html[data-os="windows"] .chat-session-group-head {
+  min-height: 28px;
+}
+
+html[data-os="windows"] .chat-side-foot {
+  padding-top: 4px;
+}
+
 .chat-shell {
   display: grid;
   grid-template-columns: var(--chat-side-w) var(--chat-splitter-w) minmax(0, 1fr);
@@ -8256,7 +8304,10 @@ html[data-theme="dark"] .chat-hands-notice {
   40% { transform: translateY(-4px); opacity: 1; }
 }
 
-@media (max-width: 760px) {
+/* The Ask window cannot go below 720px. A 760px stack breakpoint was firing
+   on Windows laptops (125–150% scale, snapped or beside another app) and
+   turned the project list into a short strip on top of the chat. */
+@media (max-width: 560px) {
   .chat-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto minmax(0, 1fr);

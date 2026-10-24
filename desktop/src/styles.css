@@ -80,6 +80,51 @@ html.is-opaque-shell .widget {
   backdrop-filter: none;
 }
 
+/* Beside Ask: window height follows content up to the design cap, not Ask height. */
+html.is-main-docked,
+html.is-main-docked body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.is-main-docked .widget {
+  height: auto;
+  max-height: 100%;
+  flex: 0 0 auto;
+}
+
+html.is-main-docked .widget[data-fit="compact"] .main-panels {
+  flex: 0 1 auto;
+  overflow: visible;
+}
+
+html.is-main-docked .widget[data-fit="tall"] {
+  height: 100%;
+}
+
+html.is-main-docked .widget[data-fit="tall"] .main-panels {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+html[data-os="windows"] {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+
+html[data-os="windows"] .widget {
+  padding: 10px 12px;
+}
+
+html[data-os="windows"] .health-card-copy h2,
+html[data-os="windows"] .agents-security-copy h2,
+html[data-os="windows"] .main-tab,
+html[data-os="windows"] .btn-scan,
+html[data-os="windows"] .health-pill {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 body::before {
   content: "";
   position: fixed;

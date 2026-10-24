@@ -1,3 +1,4 @@
+import "./platform";
 import { listen } from "@tauri-apps/api/event";
 import { getLocale, t } from "./i18n";
 import { bindLocaleSync } from "./locale-sync";

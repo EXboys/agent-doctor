@@ -5,7 +5,7 @@ body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   color: #fff;
   user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -157,6 +157,10 @@ body {
 
 .island.is-done .island-title::before {
   content: "✓ ";
+}
+
+html[data-os="windows"] {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
 }
 
 /* Windows has no camera housing, so the chip is a rounded bar with a gap above it. */
