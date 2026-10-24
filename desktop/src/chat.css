@@ -6880,21 +6880,10 @@ body.chat-skill-dragging .chat-res-grip {
   min-width: 0;
 }
 
-.chat-msg-assistant.is-compact,
-.chat-msg-user.is-compact {
-  flex-direction: row;
-  align-items: center;
-  gap: 4px;
-}
-
-.chat-msg-assistant.is-compact {
-  align-self: flex-start;
-  width: fit-content;
-  max-width: 100%;
-}
-
 .chat-msg-user.is-compact {
   flex-direction: row-reverse;
+  align-items: center;
+  gap: 4px;
 }
 
 .chat-msg-assistant .chat-bubble.assistant {
@@ -6907,12 +6896,6 @@ body.chat-skill-dragging .chat-res-grip {
   max-width: 100%;
   min-width: 0;
   flex-shrink: 1;
-}
-
-.chat-msg-assistant.is-compact .chat-bubble.assistant {
-  width: max-content;
-  max-width: 100%;
-  min-width: min-content;
 }
 
 .chat-msg-user.is-compact .chat-bubble.user {
@@ -6932,10 +6915,6 @@ body.chat-skill-dragging .chat-res-grip {
   max-width: 100%;
 }
 
-.chat-msg-assistant.is-compact .chat-bubble.assistant {
-  align-self: center;
-}
-
 .chat-msg-actions {
   display: flex;
   align-items: center;
@@ -6949,7 +6928,6 @@ body.chat-skill-dragging .chat-res-grip {
   display: none;
 }
 
-.chat-msg-assistant.is-compact .chat-msg-actions,
 .chat-msg-user.is-compact .chat-msg-actions {
   min-height: 0;
   padding: 0;
@@ -7023,14 +7001,21 @@ body.chat-skill-dragging .chat-res-grip {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+/* The time rides along with the copy button: same hover, plus the copied flash. */
+.chat-msg-user:hover .chat-msg-time,
+.chat-msg-assistant:hover .chat-msg-time,
+.chat-msg-user:focus-within .chat-msg-time,
+.chat-msg-assistant:focus-within .chat-msg-time,
+.chat-msg-copy.is-copied ~ .chat-msg-time {
+  opacity: 1;
 }
 
 .chat-msg-time[hidden] {
   display: none;
-}
-
-.chat-msg-assistant.is-compact .chat-msg-time {
-  line-height: 1.2;
 }
 
 .chat-msg-copy svg {

@@ -137,7 +137,10 @@ export function syncMessageCopyActions(
   const copyVisible = Boolean(btn && !btn.hidden);
   const timeVisible = Boolean(time && !time.hidden);
   if (actions) actions.hidden = !copyVisible && !timeVisible;
-  wrap.classList.toggle("is-compact", show && isShortCopyLayout(bubble, layoutSource));
+  // Inline copy is a user-bubble layout; the assistant copy always sits below the text.
+  const compact =
+    show && isShortCopyLayout(bubble, layoutSource) && wrap.classList.contains("chat-msg-user");
+  wrap.classList.toggle("is-compact", compact);
 }
 
 function fenceLanguage(pre: HTMLElement): string {
