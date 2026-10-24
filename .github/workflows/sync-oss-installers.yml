@@ -1,9 +1,16 @@
 name: Sync installers to OSS
 
-# 把 GitHub Release 里的用户安装包（.dmg / setup.exe）同步到国内 OSS，
-# 供 TeamUps /download 同源反代。updater 的 latest.json 仍用 sync-oss-latest。
+# Release 工作流跑完（全部资产挂齐）后，自动把 .dmg / setup.exe 同步到国内 OSS，
+# 供 TeamUps /download 同源反代；也可手动触发补同步。updater 的 latest.json
+# 仍用 sync-oss-latest。
+#
+# 资产缺失会直接失败——宁可不同步，也不生成只有 Mac 的残缺清单（0.1.93-beta.5
+# 首发时 Windows 包就是这么丢的）。
 
 on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -24,49 +31,58 @@ permissions:
 
 jobs:
   sync:
-    name: Upload installers to China OSS (${{ inputs.edition }})
+    name: Upload installers to China OSS
     runs-on: ubuntu-latest
+    # 手动触发直接跑；自动触发只在 Release 整体成功后跑——失败/取消的发布
+    # 不该把半成品资产推给官网。
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Resolve edition
-        id: edition
+      - name: Resolve tag and editions
+        id: meta
         run: |
-          eval "$(bash desktop/scripts/edition-meta.sh "${{ inputs.edition }}")"
-          # 测试版 tag（vX.Y.Z-beta.N）写到 <prefix>/beta/，不碰正式版清单和安装包
-          case "${{ inputs.release_tag }}" in
-            *-beta.*) echo "dest=$OSS_PREFIX/beta" >> "$GITHUB_OUTPUT"; echo "channel=beta" >> "$GITHUB_OUTPUT" ;;
-            *) echo "dest=$OSS_PREFIX" >> "$GITHUB_OUTPUT"; echo "channel=stable" >> "$GITHUB_OUTPUT" ;;
-          esac
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # tag push 触发的 Release：head_branch 就是 tag 名（vX.Y.Z-beta.N）
+            echo "tag=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+            echo "editions=personal team" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "editions=${{ inputs.edition }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Download installers from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          EDITIONS: ${{ steps.meta.outputs.editions }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.release_tag }}"
           mkdir -p ./oss-installers
-          if [ "${{ inputs.edition }}" = team ]; then
-            gh release download "${TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --pattern 'Agent.Doctor.Team_*.dmg' \
-              --pattern 'Agent.Doctor.Team_*-setup.exe' \
-              --dir ./oss-installers \
-              || true
-          else
-            gh release download "${TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --pattern 'Agent.Doctor_*.dmg' \
-              --pattern 'Agent.Doctor_*-setup.exe' \
-              --dir ./oss-installers \
-              || true
-            # gh pattern 可能仍拉到 Team；删掉
-            rm -f ./oss-installers/Agent.Doctor.Team_*
-          fi
-          ls -la ./oss-installers
-          test "$(find ./oss-installers -type f | wc -l)" -gt 0
+          for edition in $EDITIONS; do
+            dir="./oss-installers/$edition"
+            mkdir -p "$dir"
+            if [ "$edition" = team ]; then
+              gh release download "$TAG" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --pattern 'Agent.Doctor.Team_*.dmg' \
+                --pattern 'Agent.Doctor.Team_*-setup.exe' \
+                --dir "$dir"
+            else
+              gh release download "$TAG" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --pattern 'Agent.Doctor_*.dmg' \
+                --pattern 'Agent.Doctor_*-setup.exe' \
+                --dir "$dir"
+              # gh pattern 可能仍拉到 Team；删掉
+              rm -f "$dir"/Agent.Doctor.Team_*
+            fi
+            ls -la "$dir"
+            # 不带 || true：缺任一平台的包就整个失败，不同步残缺清单
+            test "$(find "$dir" -type f | wc -l)" -ge 2
+          done
 
-      - name: Upload to Aliyun OSS
+      - name: Prepare ossutil
         env:
           OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
@@ -78,7 +94,6 @@ jobs:
             echo "::error::OSS secrets missing"
             exit 1
           fi
-          DEST="${{ steps.edition.outputs.dest }}"
           curl -fsSL -o ossutil.zip \
             "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
           unzip -qo ossutil.zip -d ossutil-bin
@@ -90,22 +105,39 @@ jobs:
             -k "${OSS_ACCESS_KEY_SECRET}" \
             -L CH \
             --config-file .ossutilconfig
-          CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${DEST}"
-          # 先写下载清单，避免大包上传慢时 TeamUps 一直读不到清单
-          python3 scripts/build-download-manifest.py \
-            --installers ./oss-installers \
-            --version "${{ inputs.release_tag }}" \
-            --cdn-base "${CDN_BASE}" \
-            --edition "${{ inputs.edition }}" \
-            --channel "${{ steps.edition.outputs.channel }}" \
-            --out ./download.json
-          "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${DEST}/download.json" -f --config-file .ossutilconfig
-          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/download.json" public-read -f --config-file .ossutilconfig || true
-          echo "Uploaded ${DEST}/download.json"
-          for f in ./oss-installers/*; do
-            [ -f "$f" ] || continue
-            base="$(basename "$f" | tr ' ' '.')"
-            "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${DEST}/${base}" -f --config-file .ossutilconfig
-            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${DEST}/${base}" public-read -f --config-file .ossutilconfig || true
-            echo "Uploaded oss://${OSS_BUCKET}/${DEST}/${base}"
+          echo "OSSUTIL=$OSSUTIL" >> "$GITHUB_ENV"
+
+      - name: Upload to Aliyun OSS
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          EDITIONS: ${{ steps.meta.outputs.editions }}
+        run: |
+          set -euo pipefail
+          for edition in $EDITIONS; do
+            eval "$(bash desktop/scripts/edition-meta.sh "$edition")"
+            # 测试版 tag（vX.Y.Z-beta.N）写到 <prefix>/beta/，不碰正式版清单和安装包
+            case "$TAG" in
+              *-beta.*) dest="$OSS_PREFIX/beta"; channel=beta ;;
+              *) dest="$OSS_PREFIX"; channel=stable ;;
+            esac
+            CDN_BASE="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/${dest}"
+            dir="./oss-installers/$edition"
+            # 先写下载清单，避免大包上传慢时 TeamUps 一直读不到清单
+            python3 scripts/build-download-manifest.py \
+              --installers "$dir" \
+              --version "$TAG" \
+              --cdn-base "$CDN_BASE" \
+              --edition "$edition" \
+              --channel "$channel" \
+              --out ./download.json
+            "$OSSUTIL" cp ./download.json "oss://${OSS_BUCKET}/${dest}/download.json" -f --config-file .ossutilconfig
+            "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${dest}/download.json" public-read -f --config-file .ossutilconfig || true
+            echo "Uploaded ${dest}/download.json"
+            for f in "$dir"/*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f" | tr ' ' '.')"
+              "$OSSUTIL" cp "$f" "oss://${OSS_BUCKET}/${dest}/${base}" -f --config-file .ossutilconfig
+              "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/${dest}/${base}" public-read -f --config-file .ossutilconfig || true
+              echo "Uploaded oss://${OSS_BUCKET}/${dest}/${base}"
+            done
           done
