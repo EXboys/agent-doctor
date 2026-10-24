@@ -41,25 +41,37 @@ const QUIET_GIVEUP_MS: u64 = 2500;
 const QUIET_GIVEUP_WAIT_MS: u64 = 3000;
 /// Fallback when iFlytek never says the sentence ended.
 const QUIET_FORCE_END_MS: u64 = EOS_MS + 3000;
+/// Parked silence after the words that ends the sentence even while the next one is being spoken.
+const PARKED_END_MS: u64 = EOS_MS + 1000;
 /// iFlytek stops at 60 s of audio. Roll to a new socket before that and keep the words.
 const MAX_SESSION_MS: u64 = 55_000;
+/// Spark returns its first words 2–5 s into speech. A spare socket still silent this long
+/// after the first voiced frame went out is stuck, and the sentence moves to a fresh one.
+const NO_WORDS_WAIT: Duration = Duration::from_secs(7);
 /// A connection that lasted this long was working; a later drop is not a refusal.
 const HEALTHY_SESSION: Duration = Duration::from_secs(5);
 /// Signed links are checked against a 300 s clock window.
 const TICKET_TTL: Duration = Duration::from_secs(240);
-const LOUD_RMS: f32 = 0.08;
-const LOUD_HOLD_MS: u64 = 300;
-
 static CLOUD_SPEAKING: AtomicBool = AtomicBool::new(false);
 static CLOUD_BARGE: AtomicBool = AtomicBool::new(false);
-static LOUD_MS: AtomicU64 = AtomicU64::new(0);
+/// Present while a reply is audible. The microphone hears the speakers with no echo
+/// cancellation here, so the gate learns that bleed before a voice can cut in.
+static BLEED_GATE: Mutex<Option<voice::BleedGate>> = Mutex::new(None);
 /// Dictation services this iFlytek app refused. Tried again after `REFUSED_TTL_SECS`.
 static REFUSED: AtomicU8 = AtomicU8::new(0);
 static REFUSED_SINCE: AtomicU64 = AtomicU64::new(0);
 const REFUSED_TTL_SECS: u64 = 30 * 60;
 /// A spare socket opened while waiting for a voice. The network here needs 1.5–3 s to connect.
 const WARM_TTL: Duration = Duration::from_secs(7);
+/// The next spare starts connecting this early, so an open one is always on hand.
+const WARM_RENEW: Duration = Duration::from_secs(4);
 static TICKET_CACHE: Mutex<Option<(Instant, Ticket)>> = Mutex::new(None);
+/// A connected voice socket and when it connected, opened while the reply is still being written.
+static SPEAK_SPARE: Mutex<Option<(Instant, Socket)>> = Mutex::new(None);
+/// Bumped when a reply starts reading, so the keeper stops renewing.
+static SPEAK_WARM_GEN: AtomicU64 = AtomicU64::new(0);
+/// Long enough for most replies; afterwards the voice connects when it is needed.
+const SPEAK_WARM_FOR: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Dialect {
@@ -213,10 +225,28 @@ pub fn listen_session(
 struct Mic {
     rx: Receiver<(Vec<u8>, f32)>,
     error: Arc<Mutex<Option<SpeechError>>>,
+    stop: Arc<AtomicBool>,
 }
 
 impl Mic {
+    /// Releases the microphone. Audio already captured can still be drained.
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    fn drain(&self) -> Vec<u8> {
+        let mut pcm = Vec::new();
+        while let Ok((chunk, _)) = self.rx.try_recv() {
+            pcm.extend_from_slice(&chunk);
+        }
+        pcm
+    }
+
     fn next(&self, app: Events) -> Result<Option<(Vec<u8>, f32)>, SpeechError> {
+        if self.stop.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+            return Ok(None);
+        }
         match self.rx.recv_timeout(Duration::from_millis(FRAME_MS)) {
             Ok((pcm, rms)) => {
                 note_loudness(rms, pcm_ms(&pcm), app);
@@ -266,8 +296,131 @@ impl Warm {
         }
     }
 
-    fn take(self, wait: Duration) -> Option<Socket> {
-        self.rx.recv_timeout(wait).ok().flatten()
+    /// `None` while still connecting; `Some(None)` once the connect failed.
+    fn poll(&self) -> Option<Option<Socket>> {
+        match self.rx.try_recv() {
+            Ok(socket) => Some(socket),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+        }
+    }
+}
+
+enum Dial {
+    Ready(Box<Socket>),
+    Refused(u16),
+    Failed(String),
+}
+
+fn dial(url: String) -> Receiver<Dial> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = match connect(url.as_str()) {
+            Ok((socket, _)) => Dial::Ready(Box::new(socket)),
+            Err(WsError::Http(response)) => Dial::Refused(response.status().as_u16()),
+            Err(err) => Dial::Failed(err.to_string()),
+        };
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+enum Opened {
+    Ready { socket: Box<Socket>, reused: bool },
+    Refused,
+    Failed,
+    Cancelled,
+}
+
+/// Total wait for a socket. The microphone keeps filling `opening` meanwhile.
+const CONNECT_WAIT: Duration = Duration::from_secs(10);
+/// After a stop, how much longer to wait so the words already spoken still go out.
+const STOP_CONNECT_WAIT: Duration = Duration::from_secs(4);
+/// After our end frame, words can trail the audio by several seconds behind a slow uplink.
+/// The wait ends once words stop arriving for `TAIL_WORDS_SETTLE`, after a floor.
+const TAIL_FLOOR: Duration = Duration::from_secs(3);
+/// Floor when no word has come back yet. Spark V2 has taken over 7 s for the first one.
+const TAIL_FIRST_WORDS_WAIT: Duration = Duration::from_secs(8);
+const TAIL_WORDS_SETTLE: Duration = Duration::from_millis(1500);
+const TAIL_CAP: Duration = Duration::from_secs(15);
+/// Synthesis that sends nothing new for this long has failed. Long replies stream for longer.
+const SYNTH_IDLE: Duration = Duration::from_secs(15);
+/// Queued audio that has not moved for this long means the connection is gone.
+const SEND_STALL: Duration = Duration::from_secs(10);
+
+/// Uses a spare socket the moment it is ready, and races a fresh connect when it is not,
+/// so a slow spare never holds the sentence back.
+fn open_socket(
+    app: Events,
+    mic: &Mic,
+    engine: &IatEngine,
+    spare: Option<Warm>,
+    opening: &mut Vec<u8>,
+    should_cancel: &dyn Fn() -> bool,
+    finish_on_stop: bool,
+) -> Opened {
+    let mut spare = spare;
+    if let Some(socket) = spare.as_ref().and_then(Warm::poll) {
+        spare = None;
+        if let Some(socket) = socket {
+            return Opened::Ready {
+                socket: Box::new(socket),
+                reused: true,
+            };
+        }
+    }
+    let fresh = dial(engine.url.clone());
+    let mut fresh_failed = false;
+    let mut deadline = Instant::now() + CONNECT_WAIT;
+    let mut stopped = false;
+    loop {
+        if fresh_failed && spare.is_none() {
+            return Opened::Failed;
+        }
+        if !stopped && should_cancel() {
+            if !finish_on_stop || peak_level(opening) < START_RMS {
+                return Opened::Cancelled;
+            }
+            stopped = true;
+            mic.stop();
+            opening.extend(mic.drain());
+            deadline = deadline.min(Instant::now() + STOP_CONNECT_WAIT);
+        }
+        if let Some(socket) = spare.as_ref().and_then(Warm::poll) {
+            spare = None;
+            if let Some(socket) = socket {
+                return Opened::Ready {
+                    socket: Box::new(socket),
+                    reused: true,
+                };
+            }
+        }
+        match fresh.try_recv() {
+            Ok(Dial::Ready(socket)) => {
+                return Opened::Ready {
+                    socket,
+                    reused: false,
+                }
+            }
+            Ok(Dial::Refused(status)) => {
+                trace(&format!("handshake refused {status}"));
+                return Opened::Refused;
+            }
+            Ok(Dial::Failed(err)) => {
+                trace(&format!("connect failed: {err}"));
+                fresh_failed = true;
+            }
+            Err(_) => {}
+        }
+        if Instant::now() >= deadline {
+            trace("connect timed out");
+            return Opened::Failed;
+        }
+        match mic.next(app) {
+            Ok(Some((pcm, _))) => opening.extend_from_slice(&pcm),
+            Ok(None) => {}
+            Err(_) => return Opened::Failed,
+        }
     }
 }
 
@@ -307,6 +460,7 @@ fn run_ear(
     let mic = Mic {
         rx: audio_rx,
         error: capture_error,
+        stop: capture_cancel.clone(),
     };
     trace("listen started");
     let result = ear_loop(app, &mic, should_cancel, once, on_final);
@@ -325,6 +479,13 @@ fn ear_loop(
     once: bool,
     on_final: &mut dyn FnMut(&str),
 ) -> Result<(), SpeechError> {
+    // In a voice chat every sentence gets a spoken reply, so its socket connects during the thinking.
+    let on_final = &mut |text: &str| {
+        if !once {
+            warm_speak();
+        }
+        on_final(text);
+    };
     let mut preroll: VecDeque<u8> = VecDeque::new();
     let mut replay: Option<Vec<u8>> = None;
     let mut sentence = Sentence::default();
@@ -333,6 +494,9 @@ fn ear_loop(
     let mut warm: Vec<Warm> = Vec::new();
     loop {
         if should_cancel() {
+            if once {
+                deliver(app, &mut sentence, on_final);
+            }
             return Ok(());
         }
         let opening = match replay.take() {
@@ -349,7 +513,11 @@ fn ear_loop(
                             spare.started.elapsed() < WARM_TTL && refused & spare.dialect.bit() == 0
                         });
                         for engine in ticket.iat.iter().filter(|e| refused & e.dialect.bit() == 0) {
-                            if !warm.iter().any(|spare| spare.dialect == engine.dialect) {
+                            let renewed = warm.iter().any(|spare| {
+                                spare.dialect == engine.dialect
+                                    && spare.started.elapsed() < WARM_RENEW
+                            });
+                            if !renewed {
                                 warm.push(Warm::start(engine));
                             }
                         }
@@ -367,8 +535,7 @@ fn ear_loop(
             .iter()
             .position(|spare| spare.dialect == engine.dialect)
             .map(|index| warm.remove(index))
-            .filter(|spare| spare.started.elapsed() < WARM_TTL + Duration::from_secs(3))
-            .and_then(|spare| spare.take(Duration::from_secs(4)));
+            .filter(|spare| spare.started.elapsed() < WARM_TTL + Duration::from_secs(3));
         let opened = Instant::now();
         let mut session_audio = Vec::new();
         let mut handoff = Vec::new();
@@ -384,6 +551,7 @@ fn ear_loop(
             &mut handoff,
             on_final,
             should_cancel,
+            once,
         )?;
         trace(&format!("{:?}: {outcome:?}", engine.dialect));
         if replay.is_none() && loud_pcm(&handoff) {
@@ -546,33 +714,42 @@ fn run_session(
     mic: &Mic,
     app_id: &str,
     engine: &IatEngine,
-    spare: Option<Socket>,
-    opening: Vec<u8>,
+    spare: Option<Warm>,
+    mut opening: Vec<u8>,
     sentence: &mut Sentence,
     session_audio: &mut Vec<u8>,
     handoff: &mut Vec<u8>,
     on_final: &mut dyn FnMut(&str),
     should_cancel: &dyn Fn() -> bool,
+    finish_on_stop: bool,
 ) -> Result<Outcome, SpeechError> {
-    session_audio.extend_from_slice(&opening);
-    let reused = spare.is_some();
     let connecting = Instant::now();
-    let mut socket = match spare {
-        Some(socket) => socket,
-        None => match connect(engine.url.as_str()) {
-            Ok((socket, _)) => socket,
-            Err(WsError::Http(response)) => {
-                trace(&format!("handshake refused {}", response.status()));
-                return Ok(Outcome::Refused);
-            }
-            Err(err) => {
-                trace(&format!("connect failed: {err}"));
-                return Ok(Outcome::Dropped {
-                    heard: false,
-                    silent: false,
-                });
-            }
-        },
+    let opened = open_socket(
+        app,
+        mic,
+        engine,
+        spare,
+        &mut opening,
+        should_cancel,
+        finish_on_stop,
+    );
+    session_audio.extend_from_slice(&opening);
+    let (mut socket, reused) = match opened {
+        Opened::Ready { socket, reused } => (*socket, reused),
+        Opened::Refused => return Ok(Outcome::Refused),
+        Opened::Failed => {
+            return Ok(Outcome::Dropped {
+                heard: false,
+                silent: false,
+            })
+        }
+        Opened::Cancelled => {
+            trace(&format!(
+                "cancelled while connecting, {} ms of audio not sent",
+                opening.len() / BYTES_PER_MS
+            ));
+            return Ok(Outcome::Cancelled);
+        }
     };
     trace(&format!(
         "{:?} socket ready in {} ms (spare: {reused}), opening {} ms of audio",
@@ -599,6 +776,8 @@ fn run_session(
         handoff,
         on_final,
         should_cancel,
+        finish_on_stop,
+        reused,
     );
     let _ = socket.close(None);
     trace(&format!(
@@ -646,6 +825,8 @@ fn session_loop(
     handoff: &mut Vec<u8>,
     on_final: &mut dyn FnMut(&str),
     should_cancel: &dyn Fn() -> bool,
+    finish_on_stop: bool,
+    spare: bool,
 ) -> Result<Outcome, SpeechError> {
     let mut pending = opening;
     let mut sent_ms = 0u64;
@@ -655,48 +836,48 @@ fn session_loop(
     let mut closing: Option<Closing> = None;
     // When the quiet give-up sent its end frame. The final words are still read until this expires.
     let mut quiet_end_at: Option<Instant> = None;
+    let mut stopping = false;
+    // The end frame went out after words were heard; wait for the words still on their way.
+    let mut tail_wait = false;
+    // Silence sent in place of audio that belongs to the next sentence.
+    let mut parked_ms = 0u64;
+    let mut voice_sent_at: Option<Instant> = None;
+    let mut last_out = Instant::now();
+    let mut last_words = Instant::now();
     let begun = Instant::now();
     loop {
-        if should_cancel() {
-            let _ = sender.finish(socket);
-            return Ok(Outcome::Cancelled);
-        }
-        if CLOUD_SPEAKING.load(Ordering::Relaxed) {
-            if !heard {
-                return Ok(Outcome::Paused);
-            }
-            if closing.is_none() {
+        if !stopping && should_cancel() {
+            let worth_finishing = finish_on_stop
+                && closing != Some(Closing::Roll)
+                && (heard || peak_level(session_audio) >= START_RMS);
+            if !worth_finishing {
                 let _ = sender.finish(socket);
-                closing = Some(Closing::End);
+                return Ok(Outcome::Cancelled);
             }
+            // A stop on the dictation button means "that was the sentence", not "throw it away".
+            stopping = true;
+            trace("stop pressed, finishing the sentence");
+            mic.stop();
+            let rest = mic.drain();
+            session_audio.extend_from_slice(&rest);
+            if closing.is_none() {
+                pending.extend_from_slice(&rest);
+            }
+            // The wait for the last words starts once the end frame has left.
+            quiet_end_at = None;
         }
-        if closing.is_none() {
-            while pending.len() >= FRAME_BYTES {
-                let frame: Vec<u8> = pending.drain(..FRAME_BYTES).collect();
-                if sender.audio(socket, &frame).is_err() {
-                    return Ok(Outcome::Dropped {
-                        heard,
-                        silent: !answered,
-                    });
-                }
-                sent_ms += FRAME_MS;
-            }
-            if sent_ms >= MAX_SESSION_MS {
-                if sender.finish(socket).is_err() {
-                    return Ok(Outcome::Dropped {
-                        heard,
-                        silent: !answered,
-                    });
-                }
-                closing = Some(Closing::Roll);
-            }
-        }
+        // Replies first: iFlytek closes right after the last words, and a send into the
+        // closed socket would otherwise lose them.
         loop {
             let raw = match read_message(socket) {
                 Ok(Some(raw)) => raw,
                 Ok(None) => break,
                 Err(_) => {
                     trace("socket closed while reading");
+                    if closing == Some(Closing::End) && heard {
+                        let delivered = deliver(app, sentence, on_final);
+                        return Ok(Outcome::Finished { delivered });
+                    }
                     return Ok(Outcome::Dropped {
                         heard,
                         silent: !answered,
@@ -720,6 +901,7 @@ fn session_loop(
                 }
             };
             if let Some(piece) = reply.piece {
+                last_words = Instant::now();
                 let before = sentence.text();
                 sentence.apply(piece);
                 if !heard {
@@ -743,13 +925,95 @@ fn session_loop(
                 return Ok(Outcome::Finished { delivered });
             }
         }
-        // Quiet counts only once earlier audio has left; buffered silence is not yet heard.
-        let caught_up = pending.len() < FRAME_BYTES;
+        if stopping && closing.is_none() && pending.len() < FRAME_BYTES {
+            if !pending.is_empty() {
+                let tail: Vec<u8> = std::mem::take(&mut pending);
+                if sender.audio(socket, &tail).is_err() {
+                    return Ok(Outcome::Dropped {
+                        heard,
+                        silent: !answered,
+                    });
+                }
+            }
+            if sender.finish(socket).is_err() {
+                return Ok(Outcome::Dropped {
+                    heard,
+                    silent: !answered,
+                });
+            }
+            closing = Some(Closing::End);
+        }
+        match push_out(socket) {
+            Ok(true) => {
+                last_out = Instant::now();
+                if stopping && closing.is_some() && quiet_end_at.is_none() {
+                    quiet_end_at = Some(Instant::now());
+                }
+            }
+            Ok(false) if last_out.elapsed() < SEND_STALL => {}
+            failed => {
+                if failed.is_ok() {
+                    trace("send stalled");
+                }
+                // The sentence was already ended and words came back: hand them over.
+                if closing == Some(Closing::End) && heard {
+                    let delivered = deliver(app, sentence, on_final);
+                    return Ok(Outcome::Finished { delivered });
+                }
+                return Ok(Outcome::Dropped {
+                    heard,
+                    silent: !answered,
+                });
+            }
+        }
+        if CLOUD_SPEAKING.load(Ordering::Relaxed) {
+            if !heard {
+                return Ok(Outcome::Paused);
+            }
+            if closing.is_none() {
+                let _ = sender.finish(socket);
+                closing = Some(Closing::End);
+            }
+        }
+        if closing.is_none() {
+            let allowed_ms = paced_allowance(sender.dialect, begun.elapsed());
+            while pending.len() >= FRAME_BYTES && sent_ms < allowed_ms {
+                let frame: Vec<u8> = pending.drain(..FRAME_BYTES).collect();
+                if voice_sent_at.is_none() && loud_pcm(&frame) {
+                    voice_sent_at = Some(Instant::now());
+                }
+                if sender.audio(socket, &frame).is_err() {
+                    return Ok(Outcome::Dropped {
+                        heard,
+                        silent: !answered,
+                    });
+                }
+                sent_ms += FRAME_MS;
+            }
+            if spare && !heard && voice_sent_at.is_some_and(|at| at.elapsed() >= NO_WORDS_WAIT) {
+                trace(&format!(
+                    "spare socket gave no words after {sent_ms} ms of audio, reconnecting"
+                ));
+                return Ok(Outcome::Dropped {
+                    heard: false,
+                    silent: false,
+                });
+            }
+            if sent_ms >= MAX_SESSION_MS {
+                if sender.finish(socket).is_err() {
+                    return Ok(Outcome::Dropped {
+                        heard,
+                        silent: !answered,
+                    });
+                }
+                closing = Some(Closing::Roll);
+            }
+        }
         if let Some((pcm, rms)) = mic.next(app)? {
             let ms = pcm_ms(&pcm);
             if rms >= START_RMS {
                 quiet_ms = 0;
-            } else if caught_up {
+            } else {
                 quiet_ms += ms;
             }
             session_audio.extend_from_slice(&pcm);
@@ -758,18 +1022,18 @@ fn session_loop(
                 handoff.extend_from_slice(&pcm);
                 if closing.is_none() {
                     pending.extend(std::iter::repeat(0).take(pcm.len()));
+                    parked_ms += ms;
                 }
             } else {
                 pending.extend_from_slice(&pcm);
             }
         }
-        if !caught_up {
-            continue;
-        }
+        // Quiet still waiting in `pending` has not reached iFlytek yet.
+        let heard_quiet = quiet_ms.saturating_sub((pending.len() / BYTES_PER_MS) as u64);
         if quiet_end_at.is_none()
             && !heard
             && closing.is_none()
-            && quiet_ms >= QUIET_GIVEUP_MS
+            && heard_quiet >= QUIET_GIVEUP_MS
             && begun.elapsed() >= Duration::from_millis(QUIET_GIVEUP_MS)
         {
             if sender.finish(socket).is_err() {
@@ -781,13 +1045,26 @@ fn session_loop(
             closing = Some(Closing::End);
             quiet_end_at = Some(Instant::now());
         }
-        if quiet_end_at
-            .is_some_and(|at| at.elapsed() >= Duration::from_millis(QUIET_GIVEUP_WAIT_MS))
-        {
+        let waited_enough = quiet_end_at.is_some_and(|at| {
+            if !(stopping || tail_wait) {
+                return at.elapsed() >= Duration::from_millis(QUIET_GIVEUP_WAIT_MS);
+            }
+            let floor = if heard {
+                TAIL_FLOOR
+            } else {
+                TAIL_FIRST_WORDS_WAIT
+            };
+            at.elapsed() >= TAIL_CAP
+                || (at.elapsed() >= floor && last_words.elapsed() >= TAIL_WORDS_SETTLE)
+        });
+        if waited_enough {
             let delivered = deliver(app, sentence, on_final);
             return Ok(Outcome::Finished { delivered });
         }
-        if closing.is_none() && quiet_ms >= QUIET_FORCE_END_MS {
+        // Spark dictation sometimes never says the sentence ended. Once it has the words and
+        // enough silence after them, end it here; the next sentence is already parked.
+        let parked_heard = parked_ms.saturating_sub((pending.len() / BYTES_PER_MS) as u64);
+        if closing.is_none() && heard && parked_heard >= PARKED_END_MS {
             if sender.finish(socket).is_err() {
                 return Ok(Outcome::Dropped {
                     heard,
@@ -795,7 +1072,30 @@ fn session_loop(
                 });
             }
             closing = Some(Closing::End);
+            quiet_end_at = Some(Instant::now());
+            tail_wait = true;
         }
+        if closing.is_none() && heard_quiet >= QUIET_FORCE_END_MS {
+            if sender.finish(socket).is_err() {
+                return Ok(Outcome::Dropped {
+                    heard,
+                    silent: !answered,
+                });
+            }
+            closing = Some(Closing::End);
+            quiet_end_at = Some(Instant::now());
+            tail_wait = true;
+        }
+    }
+}
+
+/// Audio (ms) that may have been sent `elapsed` into a session.
+/// Spark dictation must get audio at real time: a burst returns no words, and even 1.25x
+/// truncates sentences and gets the connection reset. Classic dictation takes a burst.
+fn paced_allowance(dialect: Dialect, elapsed: Duration) -> u64 {
+    match dialect {
+        Dialect::Classic => u64::MAX,
+        Dialect::SparkV1 | Dialect::SparkV2 => elapsed.as_millis() as u64 + FRAME_MS,
     }
 }
 
@@ -827,19 +1127,24 @@ fn deliver(app: Events, sentence: &mut Sentence, on_final: &mut dyn FnMut(&str))
 }
 
 fn note_loudness(rms: f32, frame_ms: u64, app: Events) {
-    if !CLOUD_SPEAKING.load(Ordering::Relaxed) {
-        LOUD_MS.store(0, Ordering::Relaxed);
-        return;
-    }
-    let held = if rms >= LOUD_RMS {
-        LOUD_MS.fetch_add(frame_ms.max(1), Ordering::Relaxed) + frame_ms.max(1)
-    } else {
-        let next = LOUD_MS.load(Ordering::Relaxed).saturating_sub(frame_ms / 2);
-        LOUD_MS.store(next, Ordering::Relaxed);
-        next
+    let interrupt = {
+        let Ok(mut slot) = BLEED_GATE.lock() else {
+            return;
+        };
+        let Some(gate) = slot.as_mut() else {
+            return;
+        };
+        if gate.push(rms, frame_ms.max(1)) != voice::BargeAction::Interrupt {
+            return;
+        }
+        trace(&format!(
+            "barge: voice {rms:.3} over speaker bleed {:.3}",
+            gate.floor()
+        ));
+        *slot = None;
+        true
     };
-    if held >= LOUD_HOLD_MS {
-        LOUD_MS.store(0, Ordering::Relaxed);
+    if interrupt {
         CLOUD_BARGE.store(true, Ordering::Relaxed);
         emit(app, SpeechEvent::Barge);
     }
@@ -989,7 +1294,7 @@ impl Sender<'_> {
         let status = if self.started { 1 } else { 0 };
         self.seq += 1;
         self.started = true;
-        send_text(
+        queue_text(
             socket,
             frame(self.dialect, self.app_id, pcm, status, self.seq),
         )
@@ -1000,7 +1305,7 @@ impl Sender<'_> {
             return Ok(());
         }
         self.seq += 1;
-        send_text(socket, frame(self.dialect, self.app_id, &[], 2, self.seq))
+        queue_text(socket, frame(self.dialect, self.app_id, &[], 2, self.seq))
     }
 }
 
@@ -1071,8 +1376,9 @@ fn frame(dialect: Dialect, app_id: &str, pcm: &[u8], status: i32, seq: u32) -> S
     body.to_string()
 }
 
-/// Queues the frame once, then waits for it to leave. Retrying `send` would queue it twice.
-fn send_text(socket: &mut Socket, body: String) -> Result<(), SpeechError> {
+/// Queues the frame without waiting for it to leave, so a slow uplink does not stop the
+/// microphone from being read. `push_out` moves queued frames onto the network.
+fn queue_text(socket: &mut Socket, body: String) -> Result<(), SpeechError> {
     match socket.write(Message::Text(body.into())) {
         Ok(()) => {}
         Err(WsError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {}
@@ -1081,21 +1387,17 @@ fn send_text(socket: &mut Socket, body: String) -> Result<(), SpeechError> {
             return Err(down());
         }
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match socket.flush() {
-            Ok(()) => return Ok(()),
-            Err(WsError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
-                if Instant::now() > deadline {
-                    trace("send stalled");
-                    return Err(down());
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(err) => {
-                trace(&format!("send failed: {err}"));
-                return Err(down());
-            }
+    push_out(socket).map(|_| ())
+}
+
+/// `Ok(true)` once everything queued has left.
+fn push_out(socket: &mut Socket) -> Result<bool, SpeechError> {
+    match socket.flush() {
+        Ok(()) => Ok(true),
+        Err(WsError::Io(err)) if err.kind() == ErrorKind::WouldBlock => Ok(false),
+        Err(err) => {
+            trace(&format!("send failed: {err}"));
+            Err(down())
         }
     }
 }
@@ -1107,21 +1409,148 @@ pub fn speak(text: &str, should_cancel: &dyn Fn() -> bool) -> Result<(), SpeechE
     }
     CLOUD_BARGE.store(false, Ordering::Relaxed);
     CLOUD_SPEAKING.store(true, Ordering::Relaxed);
+    let started = Instant::now();
     let result = (|| {
-        let pcm = synthesize(spoken)?;
-        voice::play_pcm16_mono(&pcm, &|| {
-            should_cancel() || CLOUD_BARGE.load(Ordering::Relaxed)
-        })
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let text = spoken.to_string();
+        let writer = std::thread::spawn(move || {
+            let mut first = true;
+            synthesize_into(&text, &mut |chunk| {
+                if first {
+                    first = false;
+                    trace(&format!(
+                        "speak: first audio after {} ms",
+                        started.elapsed().as_millis()
+                    ));
+                }
+                tx.send(chunk).is_ok()
+            })
+        });
+        // The bleed is learned from the first moments of sound, not from the wait before it.
+        let played = voice::play_pcm16_stream(
+            &rx,
+            &|| should_cancel() || CLOUD_BARGE.load(Ordering::Relaxed),
+            &|| set_bleed_gate(Some(voice::BleedGate::new())),
+        );
+        set_bleed_gate(None);
+        drop(rx);
+        // After a stop the writer ends at its next chunk; nobody needs to wait for it.
+        let written = if played.is_ok() && !CLOUD_BARGE.load(Ordering::Relaxed) {
+            writer.join().unwrap_or_else(|_| Err(down()))
+        } else {
+            Ok(0)
+        };
+        trace(&format!(
+            "speak: {} ms of audio, done after {} ms, barge {}, stopped {}, {:?}",
+            written.as_ref().map_or(0, |bytes| bytes / BYTES_PER_MS),
+            started.elapsed().as_millis(),
+            CLOUD_BARGE.load(Ordering::Relaxed),
+            should_cancel(),
+            played.as_ref().err().map(|err| err.detail.as_str())
+        ));
+        played?;
+        written.map(|_| ())
     })();
+    if let Err(err) = &result {
+        trace(&format!("speak failed: {}", err.detail));
+    }
     CLOUD_SPEAKING.store(false, Ordering::Relaxed);
     result
 }
 
+fn set_bleed_gate(gate: Option<voice::BleedGate>) {
+    if let Ok(mut slot) = BLEED_GATE.lock() {
+        *slot = gate;
+    }
+}
+
+#[cfg(test)]
 fn synthesize(text: &str) -> Result<Vec<u8>, SpeechError> {
+    let mut pcm = Vec::new();
+    synthesize_into(text, &mut |chunk| {
+        pcm.extend_from_slice(&chunk);
+        true
+    })?;
+    Ok(pcm)
+}
+
+/// Hands each audio chunk over as iFlytek sends it; `on_audio` returns false to stop.
+/// Returns the total bytes.
+/// Keeps a fresh voice socket ready while the reply is written, so reading starts without a connect.
+pub fn warm_speak() {
+    let generation = SPEAK_WARM_GEN.fetch_add(1, Ordering::Relaxed) + 1;
+    std::thread::spawn(move || {
+        let until = Instant::now() + SPEAK_WARM_FOR;
+        while Instant::now() < until {
+            let Ok(ticket) = load_ticket() else {
+                return;
+            };
+            let socket = match connect(ticket.tts_url.as_str()) {
+                Ok((socket, _)) => socket,
+                Err(err) => {
+                    trace(&format!("speak warm failed: {err}"));
+                    return;
+                }
+            };
+            if SPEAK_WARM_GEN.load(Ordering::Relaxed) != generation {
+                return;
+            }
+            if let Ok(mut slot) = SPEAK_SPARE.lock() {
+                *slot = Some((Instant::now(), socket));
+            }
+            let renew = Instant::now() + WARM_RENEW;
+            while Instant::now() < renew {
+                if SPEAK_WARM_GEN.load(Ordering::Relaxed) != generation {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
+}
+
+fn take_speak_spare() -> Option<Socket> {
+    SPEAK_WARM_GEN.fetch_add(1, Ordering::Relaxed);
+    let (connected, socket) = SPEAK_SPARE.lock().ok()?.take()?;
+    (connected.elapsed() < WARM_TTL).then_some(socket)
+}
+
+fn synthesize_into(
+    text: &str,
+    on_audio: &mut dyn FnMut(Vec<u8>) -> bool,
+) -> Result<usize, SpeechError> {
+    let begun = Instant::now();
     let ticket = load_ticket()?;
-    let (mut socket, _) = connect(ticket.tts_url.as_str()).map_err(|_| down())?;
+    if let Some(socket) = take_speak_spare() {
+        let mut heard = false;
+        let result = synthesize_on(socket, &ticket.app_id, text, &mut |chunk| {
+            heard = true;
+            on_audio(chunk)
+        });
+        match result {
+            Err(_) if !heard => trace("speak: spare socket closed, connecting"),
+            result => {
+                trace("speak: spare socket");
+                return result;
+            }
+        }
+    }
+    let (socket, _) = connect(ticket.tts_url.as_str()).map_err(|_| down())?;
+    trace(&format!(
+        "speak: connected after {} ms",
+        begun.elapsed().as_millis()
+    ));
+    synthesize_on(socket, &ticket.app_id, text, on_audio)
+}
+
+fn synthesize_on(
+    mut socket: Socket,
+    app_id: &str,
+    text: &str,
+    on_audio: &mut dyn FnMut(Vec<u8>) -> bool,
+) -> Result<usize, SpeechError> {
     let body = json!({
-        "header": { "app_id": ticket.app_id, "status": 2 },
+        "header": { "app_id": app_id, "status": 2 },
         "parameter": {
             "oral": { "oral_level": "mid" },
             "tts": {
@@ -1156,8 +1585,8 @@ fn synthesize(text: &str) -> Result<Vec<u8>, SpeechError> {
     socket
         .send(Message::Text(body.to_string().into()))
         .map_err(|_| down())?;
-    let mut pcm = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut total = 0usize;
+    let mut deadline = Instant::now() + SYNTH_IDLE;
     loop {
         if Instant::now() > deadline {
             return Err(down());
@@ -1188,7 +1617,14 @@ fn synthesize(text: &str) -> Result<Vec<u8>, SpeechError> {
             .and_then(|item| item.as_str())
         {
             if let Ok(chunk) = STANDARD.decode(encoded) {
-                pcm.extend_from_slice(&chunk);
+                if !chunk.is_empty() {
+                    total += chunk.len();
+                    deadline = Instant::now() + SYNTH_IDLE;
+                    if !on_audio(chunk) {
+                        let _ = socket.close(None);
+                        return Ok(total);
+                    }
+                }
             }
         }
         let header_done = value
@@ -1203,10 +1639,10 @@ fn synthesize(text: &str) -> Result<Vec<u8>, SpeechError> {
             break;
         }
     }
-    if pcm.is_empty() {
+    if total == 0 {
         return Err(down());
     }
-    Ok(pcm)
+    Ok(total)
 }
 
 fn read_message(socket: &mut Socket) -> Result<Option<String>, SpeechError> {
@@ -1334,6 +1770,20 @@ mod tests {
     }
 
     #[test]
+    fn spark_gets_buffered_audio_at_real_time() {
+        let after_two_seconds = Duration::from_secs(2);
+        assert_eq!(
+            paced_allowance(Dialect::Classic, after_two_seconds),
+            u64::MAX
+        );
+        assert_eq!(
+            paced_allowance(Dialect::SparkV2, after_two_seconds),
+            2_000 + FRAME_MS
+        );
+        assert_eq!(paced_allowance(Dialect::SparkV1, Duration::ZERO), FRAME_MS);
+    }
+
+    #[test]
     fn first_spark_frame_names_the_model() {
         let first: Value =
             serde_json::from_str(&frame(Dialect::SparkV2, "app", &[0; 4], 0, 1)).unwrap();
@@ -1383,7 +1833,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
-            for _ in 0..20 {
+            for _ in 0..150 {
                 let _ = tx.send((silence.clone(), 0.0));
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -1391,6 +1841,7 @@ mod tests {
         let mic = Mic {
             rx,
             error: Arc::new(Mutex::new(None)),
+            stop: Arc::new(AtomicBool::new(false)),
         };
         let events = |event: SpeechEvent| match event {
             SpeechEvent::Partial { text } => println!("partial: {text}"),
@@ -1400,13 +1851,18 @@ mod tests {
         if let Ok(skip) = std::env::var("EAR_SKIP") {
             REFUSED.store(skip.parse().unwrap_or(0), Ordering::Relaxed);
         }
+        // `EAR_STOP_MS`: press stop on the dictation button this long after the first word starts.
+        let stop_ms = std::env::var("EAR_STOP_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok());
         let started = Instant::now();
+        let limit = Duration::from_millis(stop_ms.map_or(40_000, |ms| 3_000 + ms));
         let mut finals = Vec::new();
         let result = ear_loop(
             &events,
             &mic,
-            &|| started.elapsed() > Duration::from_secs(40),
-            false,
+            &|| started.elapsed() > limit,
+            stop_ms.is_some(),
             &mut |text| finals.push(text.to_string()),
         );
         println!(
@@ -1453,6 +1909,7 @@ mod tests {
             let opened = Instant::now();
             let mut verdict = "no reply".to_string();
             while opened.elapsed() < Duration::from_secs(4) {
+                let _ = push_out(&mut socket);
                 match read_message(&mut socket) {
                     Ok(Some(raw)) => match parse_reply(engine.dialect, &raw) {
                         Ok(reply) => {
@@ -1479,5 +1936,52 @@ mod tests {
             Ok(pcm) => println!("speak ok: {} bytes", pcm.len()),
             Err(err) => println!("speak failed: {}", err.detail),
         }
+    }
+
+    /// Writes one cloud reading to `/tmp/agent-doctor-voice.pcm` (16 kHz mono s16le) to listen to.
+    #[test]
+    #[ignore]
+    fn live_voice_to_file() {
+        let pcm = synthesize("你好，我已经检查了这个项目，密钥过期了，请重新登录一次。")
+            .expect("synthesize");
+        std::fs::write("/tmp/agent-doctor-voice.pcm", &pcm).expect("write");
+        println!("voice: {} bytes", pcm.len());
+    }
+
+    /// Reads a long reply out loud through the real cloud path. Timings land in the ear log.
+    #[test]
+    #[ignore]
+    fn live_speak_streams() {
+        let text = "我检查了这个项目。它连不上，是因为密钥已经过期了。你可以在设置里重新登录一次，登录以后我会自动再连一遍。如果还是不行，我会告诉你下一步该点哪里。";
+        // `SPEAK_THINK_MS`: the person finished talking this long before the reply is read.
+        if let Some(ms) = std::env::var("SPEAK_THINK_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            warm_speak();
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+        let started = Instant::now();
+        let result = speak(text, &|| false);
+        println!(
+            "speak {:?} in {} ms",
+            result.err().map(|e| e.detail),
+            started.elapsed().as_millis()
+        );
+    }
+
+    /// Plays `/tmp/agent-doctor-voice.pcm` through the cloud player out loud and times it.
+    #[test]
+    #[ignore]
+    fn live_voice_play() {
+        let pcm = std::fs::read("/tmp/agent-doctor-voice.pcm").expect("pcm");
+        let started = Instant::now();
+        let result = voice::play_pcm16_mono(&pcm, &|| false);
+        println!(
+            "played {:?} in {} ms for {} ms of audio",
+            result.err().map(|e| e.detail),
+            started.elapsed().as_millis(),
+            pcm.len() / BYTES_PER_MS
+        );
     }
 }

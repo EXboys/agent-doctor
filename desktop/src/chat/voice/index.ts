@@ -142,7 +142,8 @@ export function createVoiceInputController(deps: VoiceInputDeps) {
         onPartial: (text) => applyPartial(text),
       });
       // Final text replaces the partial preview built on baseline.
-      const live = prompt();
+      // A send during the cloud finish already took the words; writing them back would repeat them.
+      const live = deps.isComposerLocked() ? null : prompt();
       if (live) {
         live.value = baseline;
         appendToPrompt(live, result.text);

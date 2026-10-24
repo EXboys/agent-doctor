@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -79,15 +80,8 @@ extern "C" fn fill_buffer(user: *mut c_void, queue: AudioQueueRef, buffer: Audio
     let capacity = header.audio_data_bytes_capacity as usize;
     let mut copied = 0usize;
     if let Ok(mut pcm) = state.pcm.lock() {
-        while copied + 1 < capacity {
-            let Some(byte) = pcm.pop_front() else {
-                break;
-            };
-            unsafe {
-                *header.audio_data.add(copied) = byte;
-            }
-            copied += 1;
-        }
+        let out = unsafe { std::slice::from_raw_parts_mut(header.audio_data, capacity) };
+        copied = take_whole_samples(&mut pcm, out);
     }
     if copied == 0 {
         if state.finished.load(Ordering::Relaxed) {
@@ -106,16 +100,50 @@ extern "C" fn fill_buffer(user: *mut c_void, queue: AudioQueueRef, buffer: Audio
     }
 }
 
+/// Moves whole 16-bit samples only. A buffer ending on half a sample shifts every
+/// later sample by one byte, which plays as loud hiss.
+fn take_whole_samples(pcm: &mut VecDeque<u8>, out: &mut [u8]) -> usize {
+    let count = pcm.len().min(out.len()) & !1;
+    for (slot, byte) in out.iter_mut().zip(pcm.drain(..count)) {
+        *slot = byte;
+    }
+    count
+}
+
 pub(crate) fn play_pcm16_mono(
     pcm: &[u8],
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<(), SpeechError> {
-    if pcm.len() < 2 {
-        return Ok(());
-    }
+    let (tx, rx) = mpsc::channel();
+    let _ = tx.send(pcm.to_vec());
+    drop(tx);
+    play_pcm16_stream(&rx, should_cancel, &|| {})
+}
+
+/// Starts playing at the first chunk and keeps taking chunks until the sender is dropped.
+/// `on_start` runs once the speakers have audio to play.
+pub(crate) fn play_pcm16_stream(
+    chunks: &Receiver<Vec<u8>>,
+    should_cancel: &dyn Fn() -> bool,
+    on_start: &dyn Fn(),
+) -> Result<(), SpeechError> {
+    let first = loop {
+        if should_cancel() {
+            return Err(SpeechError::new(
+                SpeechErrorCode::Cancelled,
+                "speech cancelled",
+            ));
+        }
+        match chunks.recv_timeout(Duration::from_millis(30)) {
+            Ok(chunk) if chunk.is_empty() => continue,
+            Ok(chunk) => break chunk,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+        }
+    };
     let state = Arc::new(QueueState {
-        pcm: Mutex::new(pcm.iter().copied().collect()),
-        finished: AtomicBool::new(true),
+        pcm: Mutex::new(first.into_iter().collect()),
+        finished: AtomicBool::new(false),
         drained: AtomicBool::new(false),
     });
     let format = AudioStreamBasicDescription {
@@ -167,6 +195,7 @@ pub(crate) fn play_pcm16_mono(
             "could not start cloud playback",
         ));
     }
+    on_start();
     let result = loop {
         if should_cancel() {
             break Err(SpeechError::new(
@@ -177,6 +206,22 @@ pub(crate) fn play_pcm16_mono(
         if state.drained.load(Ordering::Relaxed) {
             break Ok(());
         }
+        if !state.finished.load(Ordering::Relaxed) {
+            loop {
+                match chunks.try_recv() {
+                    Ok(chunk) => {
+                        if let Ok(mut pcm) = state.pcm.lock() {
+                            pcm.extend(chunk);
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        state.finished.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(30));
     };
     unsafe {
@@ -184,4 +229,21 @@ pub(crate) fn play_pcm16_mono(
         AudioQueueDispose(queue, 1);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buffers_never_split_a_sample() {
+        let mut pcm: VecDeque<u8> = (0..10u8).collect();
+        let mut out = [0u8; 3];
+        assert_eq!(take_whole_samples(&mut pcm, &mut out), 2);
+        assert_eq!(&out[..2], &[0, 1]);
+        assert_eq!(pcm.front(), Some(&2));
+        let mut rest = [0u8; 16];
+        assert_eq!(take_whole_samples(&mut pcm, &mut rest), 8);
+        assert_eq!(&rest[..8], &[2, 3, 4, 5, 6, 7, 8, 9]);
+    }
 }

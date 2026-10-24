@@ -30,6 +30,8 @@ mod unsupported;
 mod windows;
 #[cfg(windows)]
 mod windows_barge;
+#[cfg(windows)]
+mod windows_pcm;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -37,6 +39,7 @@ use std::time::{Duration, Instant};
 
 use backend::active_backend;
 
+pub use barge::{BargeAction, BleedGate};
 pub use policy::{
     ack_sentence, asks_about_permission, classify_decision, classify_utterance, failure_sentence,
     permission_brief, permission_sentence, reduce, spoken_reply, status_sentence, HostedEffect,
@@ -165,9 +168,39 @@ pub fn play_pcm16_mono(pcm: &[u8], should_cancel: &dyn Fn() -> bool) -> Result<(
     {
         macos_pcm::play_pcm16_mono(pcm, should_cancel)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        windows_pcm::play_pcm16_mono(pcm, should_cancel)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = (pcm, should_cancel);
+        Err(SpeechError::new(
+            SpeechErrorCode::Unavailable,
+            "cloud voice playback is unavailable",
+        ))
+    }
+}
+
+/// Like [`play_pcm16_mono`], but starts at the first chunk while later ones are still coming.
+/// Playback ends after the sender is dropped and everything received has played.
+/// `on_start` runs once the speakers have audio to play.
+pub fn play_pcm16_stream(
+    chunks: &std::sync::mpsc::Receiver<Vec<u8>>,
+    should_cancel: &dyn Fn() -> bool,
+    on_start: &dyn Fn(),
+) -> Result<(), SpeechError> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_pcm::play_pcm16_stream(chunks, should_cancel, on_start)
+    }
+    #[cfg(windows)]
+    {
+        windows_pcm::play_pcm16_stream(chunks, should_cancel, on_start)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = (chunks, should_cancel, on_start);
         Err(SpeechError::new(
             SpeechErrorCode::Unavailable,
             "cloud voice playback is unavailable",
