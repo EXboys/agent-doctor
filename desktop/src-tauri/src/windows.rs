@@ -22,11 +22,9 @@ const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 /// logical work areas (150% on 1080p) use the work area itself.
 const MAIN_WINDOW_HEIGHT: f64 = 800.0;
 
-fn main_inner_height(work_h: f64) -> f64 {
-    // Home alone uses the work area on every platform, same as after Ask closes.
-    fit_main_inner_height(work_h, false)
-}
-
+/// Kept so the old design-height cap stays covered by a unit test.
+/// Live layout uses [`docked_inner_height`] and fills the work area.
+#[cfg_attr(not(test), allow(dead_code))]
 fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
     let available = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
     if limit_to_design {
@@ -38,9 +36,22 @@ fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
     }
 }
 
+/// Windows first open already fills the work area. A vertical margin only
+/// appeared after Ask opened, so the home looked shorter. Mac keeps the inset.
+fn vertical_inset() -> f64 {
+    #[cfg(target_os = "windows")]
+    {
+        0.0
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        MAIN_WINDOW_MARGIN
+    }
+}
+
 /// Outer height shared by the home and the window beside it.
 fn docked_outer_height(work_h: f64) -> f64 {
-    (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT)
+    (work_h - vertical_inset() * 2.0).max(MAIN_WINDOW_MIN_HEIGHT)
 }
 
 /// `set_size` is the webview. Subtract only this window's title bar so both
@@ -99,7 +110,7 @@ fn emit_main_dock_layout(main: &tauri::WebviewWindow, docked: bool, work_h: f64,
 }
 
 /// Dock main (left) + secondary (right: Ask / Resources / Diagnose).
-/// Both platforms share one top and bottom with Ask.
+/// Windows stays the first-open height. Mac keeps its top and bottom inset.
 fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -112,7 +123,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
     };
 
     let gap = ASK_WINDOW_MARGIN;
-    let y = work_y + MAIN_WINDOW_MARGIN;
+    let y = work_y + vertical_inset();
     let (current_main_w, _) =
         main_window_logical_size(&main).unwrap_or((420.0, MAIN_WINDOW_HEIGHT));
     let main_outer_w = current_main_w.clamp(
@@ -256,7 +267,7 @@ fn show_secondary_window(
 }
 
 fn position_main_window_left(window: &tauri::WebviewWindow) {
-    let Some((work_x, work_y, work_w, work_h, _)) = monitor_work_area(window) else {
+    let Some((work_x, work_y, work_w, work_h, scale)) = monitor_work_area(window) else {
         return;
     };
     let (current_w, _) = main_window_logical_size(window).unwrap_or((420.0, MAIN_WINDOW_HEIGHT));
@@ -264,9 +275,13 @@ fn position_main_window_left(window: &tauri::WebviewWindow) {
         MAIN_WINDOW_MIN_WIDTH,
         (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
-    let height = main_inner_height(work_h);
+    let height = docked_inner_height(
+        work_h,
+        window_decoration_height(window, scale),
+        MAIN_WINDOW_MIN_HEIGHT,
+    );
     let x = work_x + MAIN_WINDOW_MARGIN;
-    let y = work_y + MAIN_WINDOW_MARGIN;
+    let y = work_y + vertical_inset();
     let _ = window.set_size(LogicalSize::new(width, height));
     let _ = window.set_position(LogicalPosition::new(x, y));
     emit_main_dock_layout(window, false, work_h, 0.0);
@@ -697,7 +712,7 @@ fn place_ask_alone(window: &tauri::WebviewWindow) {
     let outer_w = max_outer.min(ASK_WINDOW_WIDTH + deco_w);
     let inner_w = (outer_w - deco_w).max(360.0);
     let x = work_x + work_w - MAIN_WINDOW_MARGIN - (inner_w + deco_w);
-    let y = work_y + MAIN_WINDOW_MARGIN;
+    let y = work_y + vertical_inset();
     let _ = window.set_size(LogicalSize::new(inner_w, inner_h));
     let _ = window.set_position(LogicalPosition::new(x.max(work_x + MAIN_WINDOW_MARGIN), y));
 }
@@ -1142,19 +1157,15 @@ mod tests {
         let main = docked_inner_height(work_h, 32.0, 480.0);
         let ask = docked_inner_height(work_h, 32.0, 480.0);
         assert_eq!(main, ask);
-        assert_eq!(main + 32.0, 1040.0 - 32.0);
+        // Windows is flush with the work area. Mac keeps the 16px inset.
+        #[cfg(target_os = "windows")]
+        assert_eq!(main + 32.0, work_h);
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(main + 32.0, work_h - 32.0);
 
         let main_title = docked_inner_height(work_h, 40.0, 480.0);
         let ask_title = docked_inner_height(work_h, 28.0, 480.0);
         assert_eq!(main_title + 40.0, ask_title + 28.0);
-    }
-
-    #[test]
-    fn home_alone_uses_the_screen_like_the_docked_height() {
-        let work_h = 1040.0;
-        let alone = fit_main_inner_height(work_h, false);
-        let docked = docked_inner_height(work_h, 32.0, 480.0);
-        assert_eq!(alone, 1008.0);
-        assert_eq!(docked + 32.0, alone);
+        assert_eq!(main_title + 40.0, main + 32.0);
     }
 }

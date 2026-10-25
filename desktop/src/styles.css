@@ -3201,6 +3201,7 @@ body.is-diagnose-open .diagnose-detail {
   grid-template-columns: 7px 22px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
+  align-content: center;
   column-gap: 6px;
   row-gap: 2px;
   border: 1px solid var(--border);
@@ -3208,12 +3209,18 @@ body.is-diagnose-open .diagnose-detail {
   background: var(--surface-muted);
   color: var(--text-muted);
   padding: 8px 10px;
+  /* About half again as tall as the original two-line block. */
+  min-height: 66px;
   font-size: 0.66rem;
   font-weight: 700;
   text-align: left;
   cursor: pointer;
   min-width: 0;
   transition: all 0.15s ease;
+}
+
+html[data-os="windows"] .runtime-tab {
+  min-height: 70px;
 }
 
 .runtime-tab:not(.is-active) {
@@ -3570,6 +3577,46 @@ body.is-diagnose-open .diagnose-detail {
 .resources-hub-footnote {
   margin: 0;
   min-height: 1.1em;
+}
+
+/* The resources card fills the tall Windows window. Keep the three entries
+   packed at the top instead of stretching each one to share the height. */
+html[data-os="windows"] .resources-hub {
+  align-content: start;
+  gap: 8px;
+}
+
+html[data-os="windows"] .resources-hub-cards {
+  gap: 6px;
+  align-content: start;
+}
+
+html[data-os="windows"] .resources-hub-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title meta"
+    "desc desc";
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 10px 12px;
+}
+
+html[data-os="windows"] .resources-hub-card-kicker {
+  display: none;
+}
+
+html[data-os="windows"] .resources-hub-card-title {
+  grid-area: title;
+}
+
+html[data-os="windows"] .resources-hub-card-meta {
+  grid-area: meta;
+  justify-self: end;
+}
+
+html[data-os="windows"] .resources-hub-card-desc {
+  grid-area: desc;
 }
 
 @media (max-width: 520px) {
