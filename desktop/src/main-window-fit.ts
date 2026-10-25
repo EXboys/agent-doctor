@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { resizeMainWindow } from "./ipc";
-import { dockedHomeHeight } from "./main-window-height";
+import { dockedHomeHeight } from "./layout-rules";
 
 type DockLayout = {
   docked?: boolean;

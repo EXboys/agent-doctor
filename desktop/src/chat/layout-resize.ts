@@ -1,21 +1,13 @@
+import { chatSideDefault, layout } from "../layout-rules";
+
 const SIDE_KEY = "agent-doctor-ask-side-w";
 const CHAT_SPLIT_KEY = "agent-doctor-ask-chat-split-w";
 const TREE_KEY = "agent-doctor-ask-files-tree-w";
-const SIDE_DEFAULT = 250;
-const CHAT_SPLIT_DEFAULT = 410;
-const TREE_DEFAULT = 280;
-
-const SIDE_MIN = 200;
-const SIDE_MAX = 420;
-const FILES_MIN = 280;
-const TREE_MIN = 96;
-/** File preview keeps this much so the folder list cannot cover it. */
-const PREVIEW_MIN = 160;
 
 function chatSplitMinPx(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-split-chat-min").trim();
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 410;
+  return Number.isFinite(n) && n > 0 ? n : layout.chatSplit;
 }
 
 function readPx(key: string, fallback: number): number {
@@ -31,19 +23,22 @@ function savePx(key: string, value: number): void {
 function currentSidePx(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-side-w").trim();
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : readPx(SIDE_KEY, SIDE_DEFAULT);
+  return Number.isFinite(n) ? n : readPx(SIDE_KEY, chatSideDefault(document.documentElement.dataset.os));
 }
 
 function currentChatSplitPx(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--chat-split-chat-w").trim();
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) ? n : readPx(CHAT_SPLIT_KEY, CHAT_SPLIT_DEFAULT);
+  return Number.isFinite(n) ? n : readPx(CHAT_SPLIT_KEY, layout.chatSplit);
 }
 
 export function applyLayoutVars(): void {
   const root = document.documentElement;
-  root.style.setProperty("--chat-side-w", `${readPx(SIDE_KEY, SIDE_DEFAULT)}px`);
-  const chatW = Math.max(readPx(CHAT_SPLIT_KEY, CHAT_SPLIT_DEFAULT), chatSplitMinPx());
+  root.style.setProperty(
+    "--chat-side-w",
+    `${readPx(SIDE_KEY, chatSideDefault(root.dataset.os))}px`,
+  );
+  const chatW = Math.max(readPx(CHAT_SPLIT_KEY, layout.chatSplit), chatSplitMinPx());
   root.style.setProperty("--chat-split-chat-w", `${chatW}px`);
   fitFilesTree();
 }
@@ -53,7 +48,7 @@ function preferredTreePx(panelW: number): number {
   const raw = localStorage.getItem(TREE_KEY);
   const saved = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(saved) && saved > 0) return saved;
-  return Math.max(TREE_DEFAULT, Math.round(panelW * 0.5));
+  return Math.max(layout.tree, Math.round(panelW * 0.5));
 }
 
 /** Keep the folder list inside the files area. A narrow panel shrinks it; the saved width stays. */
@@ -65,8 +60,8 @@ function fitFilesTree(): void {
   const panelW = panel.getBoundingClientRect().width;
   if (panelW < 40) return;
   const splitW = handle?.getBoundingClientRect().width ?? 0;
-  const max = Math.max(TREE_MIN, panelW - PREVIEW_MIN - splitW);
-  const next = clamp(preferredTreePx(panelW), TREE_MIN, max);
+  const max = Math.max(layout.treeMin, panelW - layout.previewMin - splitW);
+  const next = clamp(preferredTreePx(panelW), layout.treeMin, max);
   panel.style.setProperty("--files-tree-w-user", `${Math.round(next)}px`);
 }
 
@@ -150,7 +145,7 @@ export function bindLayoutResize(): void {
       (clientX, ctx) => {
         if (!ctx.startW) ctx.startW = currentSidePx();
         const delta = clientX - ctx.startX;
-        const next = clamp(ctx.startW + delta, SIDE_MIN, SIDE_MAX);
+        const next = clamp(ctx.startW + delta, layout.sideMin, layout.sideMax);
         document.documentElement.style.setProperty("--chat-side-w", `${next}px`);
       },
       () => savePx(SIDE_KEY, currentSidePx()),
@@ -165,12 +160,12 @@ export function bindLayoutResize(): void {
       (clientX, ctx) => {
         if (!ctx.startW) {
           const tree = filesPanel.querySelector(".chat-files-tree-col");
-          ctx.startW = tree?.getBoundingClientRect().width || readPx(TREE_KEY, TREE_DEFAULT);
+          ctx.startW = tree?.getBoundingClientRect().width || readPx(TREE_KEY, layout.tree);
         }
         const panelW = filesPanel.getBoundingClientRect().width;
         const splitW = filesTree.getBoundingClientRect().width;
-        const max = Math.max(TREE_MIN, panelW - PREVIEW_MIN - splitW);
-        const next = clamp(ctx.startW + (ctx.startX - clientX), TREE_MIN, max);
+        const max = Math.max(layout.treeMin, panelW - layout.previewMin - splitW);
+        const next = clamp(ctx.startW + (ctx.startX - clientX), layout.treeMin, max);
         filesPanel.style.setProperty("--files-tree-w-user", `${Math.round(next)}px`);
       },
       () => {
@@ -191,8 +186,8 @@ export function bindLayoutResize(): void {
       (clientX, ctx) => {
         if (!ctx.startW) ctx.startW = currentChatSplitPx();
         const mainW = main.getBoundingClientRect().width;
-        const splitterW = chatFiles.getBoundingClientRect().width || 5;
-        const max = Math.max(chatSplitMinPx(), mainW - FILES_MIN - splitterW);
+        const splitterW = chatFiles.getBoundingClientRect().width || layout.splitter;
+        const max = Math.max(chatSplitMinPx(), mainW - layout.filesMin - splitterW);
         const delta = clientX - ctx.startX;
         const next = clamp(ctx.startW + delta, chatSplitMinPx(), max);
         document.documentElement.style.setProperty("--chat-split-chat-w", `${Math.round(next)}px`);
