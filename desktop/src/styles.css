@@ -1507,6 +1507,41 @@ body.is-diagnose-open .diagnose-detail {
   background: var(--danger-bg);
 }
 
+/* The summary sits above the agent tiles. A little more height keeps it primary. */
+.agents-security-overview {
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px 14px;
+  margin-bottom: 10px;
+}
+
+.agents-security-overview .agents-readiness-ring {
+  width: 72px;
+  height: 72px;
+}
+
+.agents-security-overview .agents-readiness-ring strong {
+  font-size: 1rem;
+}
+
+.agents-security-overview .agents-security-copy h2 {
+  margin-bottom: 4px;
+  font-size: 0.96rem;
+}
+
+.agents-security-overview .agents-security-copy p {
+  font-size: 0.7rem;
+}
+
+.agents-security-overview .agents-security-stats {
+  margin-top: 10px;
+}
+
+.agents-security-overview .agents-security-stats span {
+  padding: 4px 9px;
+  font-size: 0.62rem;
+}
+
 .health-card-stat.is-warn {
   color: var(--warn);
   background: var(--warn-bg);
@@ -3198,21 +3233,21 @@ body.is-diagnose-open .diagnose-detail {
 
 .runtime-tab {
   display: grid;
-  grid-template-columns: 7px 22px minmax(0, 1fr);
+  grid-template-columns: 7px 26px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
   align-content: center;
-  column-gap: 6px;
-  row-gap: 2px;
+  column-gap: 7px;
+  row-gap: 1px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-muted);
   color: var(--text-muted);
   padding: 8px 10px;
-  /* About half again as tall as the original two-line block. */
   min-height: 66px;
-  font-size: 0.66rem;
-  font-weight: 700;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.2;
   text-align: left;
   cursor: pointer;
   min-width: 0;
@@ -3220,7 +3255,9 @@ body.is-diagnose-open .diagnose-detail {
 }
 
 html[data-os="windows"] .runtime-tab {
+  grid-template-columns: 7px 28px minmax(0, 1fr);
   min-height: 70px;
+  font-size: 0.8rem;
 }
 
 .runtime-tab:not(.is-active) {
@@ -3259,12 +3296,17 @@ html[data-os="windows"] .runtime-tab {
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   overflow: hidden;
   background: #fff;
   color: #111827;
+}
+
+html[data-os="windows"] .runtime-tab-logo {
+  width: 28px;
+  height: 28px;
 }
 
 .runtime-tab-logo .agent-brand-img,
@@ -3280,11 +3322,15 @@ html[data-os="windows"] .runtime-tab {
   min-width: 0;
   overflow: hidden;
   color: var(--text-soft);
-  font-size: 0.58rem;
+  font-size: 0.64rem;
   font-weight: 500;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+html[data-os="windows"] .runtime-tab-meta {
+  font-size: 0.68rem;
 }
 
 .runtime-tab-dot {
@@ -4799,6 +4845,18 @@ html[data-os="windows"] .resources-hub-card-desc {
   .agents-readiness-ring {
     width: 52px;
     height: 52px;
+  }
+
+  .agents-security-overview {
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .agents-security-overview .agents-readiness-ring {
+    width: 64px;
+    height: 64px;
   }
 
   .runtime-section {
