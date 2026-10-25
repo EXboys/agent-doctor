@@ -88,21 +88,11 @@ html.is-main-docked body {
 }
 
 html.is-main-docked .widget {
-  height: auto;
-  max-height: 100%;
-  flex: 0 0 auto;
-}
-
-html.is-main-docked .widget[data-fit="compact"] .main-panels {
-  flex: 0 1 auto;
-  overflow: visible;
-}
-
-html.is-main-docked .widget[data-fit="tall"] {
   height: 100%;
+  max-height: 100%;
 }
 
-html.is-main-docked .widget[data-fit="tall"] .main-panels {
+html.is-main-docked .main-panels {
   flex: 1;
   min-height: 0;
   overflow: auto;
