@@ -23,9 +23,8 @@ const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
 const MAIN_WINDOW_HEIGHT: f64 = 800.0;
 
 fn main_inner_height(work_h: f64) -> f64 {
-    // macOS stretches with the screen. Windows keeps the designed height so a
-    // large monitor does not turn the home into a full-height column.
-    fit_main_inner_height(work_h, cfg!(target_os = "windows"))
+    // Home alone uses the work area on every platform, same as after Ask closes.
+    fit_main_inner_height(work_h, false)
 }
 
 fn fit_main_inner_height(work_h: f64, limit_to_design: bool) -> f64 {
@@ -92,15 +91,15 @@ fn emit_main_dock_layout(main: &tauri::WebviewWindow, docked: bool, work_h: f64,
             "docked": docked,
             "workHeight": work_h,
             "secondaryHeight": secondary_h,
-            // Opening Ask must not resize the home. macOS matches Ask in
-            // this function; Windows keeps the height it already had.
+            // Both platforms match Ask height here. Windows fills the extra
+            // page height in CSS instead of leaving a blank column.
             "fitHeight": false,
         }),
     );
 }
 
 /// Dock main (left) + secondary (right: Ask / Resources / Diagnose).
-/// macOS: same top and bottom as Ask. Windows: keep the home height as it was.
+/// Both platforms share one top and bottom with Ask.
 fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -114,7 +113,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
 
     let gap = ASK_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
-    let (current_main_w, current_main_h) =
+    let (current_main_w, _) =
         main_window_logical_size(&main).unwrap_or((420.0, MAIN_WINDOW_HEIGHT));
     let main_outer_w = current_main_w.clamp(
         MAIN_WINDOW_MIN_WIDTH,
@@ -124,14 +123,7 @@ fn layout_main_and_secondary_side_by_side(app: &AppHandle, secondary_label: &str
     let secondary_deco_w = window_decoration_width(&secondary, scale);
     let secondary_deco_h = window_decoration_height(&secondary, scale);
     let main_deco_h = window_decoration_height(&main, scale);
-    // macOS lines the home up with Ask. Windows keeps the height from before
-    // Ask opened, so the home does not jump taller or shorter.
-    let main_h = if cfg!(target_os = "windows") {
-        let max_h = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
-        current_main_h.clamp(MAIN_WINDOW_MIN_HEIGHT, max_h)
-    } else {
-        docked_inner_height(work_h, main_deco_h, MAIN_WINDOW_MIN_HEIGHT)
-    };
+    let main_h = docked_inner_height(work_h, main_deco_h, MAIN_WINDOW_MIN_HEIGHT);
 
     let room = work_w - MAIN_WINDOW_MARGIN * 2.0 - gap - main_outer_w;
     let max_outer_w = (work_w - MAIN_WINDOW_MARGIN * 2.0).max(360.0);
@@ -267,20 +259,12 @@ fn position_main_window_left(window: &tauri::WebviewWindow) {
     let Some((work_x, work_y, work_w, work_h, _)) = monitor_work_area(window) else {
         return;
     };
-    let (current_w, current_h) =
-        main_window_logical_size(window).unwrap_or((420.0, MAIN_WINDOW_HEIGHT));
+    let (current_w, _) = main_window_logical_size(window).unwrap_or((420.0, MAIN_WINDOW_HEIGHT));
     let width = current_w.clamp(
         MAIN_WINDOW_MIN_WIDTH,
         (work_w * 0.38).clamp(MAIN_WINDOW_MIN_WIDTH, 480.0),
     );
-    // Windows keeps the height the user already has, including after Ask
-    // closes. macOS uses the screen height when the home is alone.
-    let height = if cfg!(target_os = "windows") {
-        let max_h = (work_h - MAIN_WINDOW_MARGIN * 2.0).max(MAIN_WINDOW_MIN_HEIGHT);
-        current_h.clamp(MAIN_WINDOW_MIN_HEIGHT, max_h)
-    } else {
-        main_inner_height(work_h)
-    };
+    let height = main_inner_height(work_h);
     let x = work_x + MAIN_WINDOW_MARGIN;
     let y = work_y + MAIN_WINDOW_MARGIN;
     let _ = window.set_size(LogicalSize::new(width, height));
@@ -1145,13 +1129,10 @@ mod tests {
     use super::{docked_inner_height, fit_main_inner_height};
 
     #[test]
-    fn windows_home_keeps_design_height_and_does_not_shrink_further() {
-        // Tall screen: stay at the designed height instead of filling the monitor.
+    fn design_height_cap_stops_at_800_unless_the_screen_is_shorter() {
         assert_eq!(fit_main_inner_height(1040.0, true), 800.0);
-        // 125% on 1080p still has room for the designed height.
         assert_eq!(fit_main_inner_height(832.0, true), 800.0);
-        // 150% on 1080p: logical work area is under the design height. Use it all.
-        // The old 72% cap landed near 495 and forced the home to scroll.
+        // 150% on 1080p: logical work area is under the design height.
         assert_eq!(fit_main_inner_height(688.0, true), 656.0);
     }
 
@@ -1169,16 +1150,11 @@ mod tests {
     }
 
     #[test]
-    fn home_stays_designed_height_when_ask_is_taller() {
+    fn home_alone_uses_the_screen_like_the_docked_height() {
         let work_h = 1040.0;
-        let home = fit_main_inner_height(work_h, true);
-        let ask = docked_inner_height(work_h, 32.0, 480.0);
-        assert_eq!(home, 800.0);
-        assert!(ask > home);
-    }
-
-    #[test]
-    fn mac_home_uses_the_screen_when_it_is_not_capped() {
-        assert_eq!(fit_main_inner_height(1040.0, false), 1008.0);
+        let alone = fit_main_inner_height(work_h, false);
+        let docked = docked_inner_height(work_h, 32.0, 480.0);
+        assert_eq!(alone, 1008.0);
+        assert_eq!(docked + 32.0, alone);
     }
 }
