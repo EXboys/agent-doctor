@@ -2,55 +2,65 @@
  * Model suggestions shared by home wiring, diagnose, and Ask composer.
  * Single source of truth — keep in sync with PROVIDER_PRESETS consumers.
  *
- * Each preset lists current vendor-recommended chat IDs (Sep 2026), not examples.
- * Order: balanced default → stronger → lighter / faster.
+ * Each preset lists current vendor-recommended chat IDs (Oct 2026), not examples.
+ * Order: latest recommended → stronger → lighter / faster.
  */
 
 /** Fallback when protocol is known but no URL preset matched (custom endpoint). */
 export const CUSTOM_MODELS_BY_PROTOCOL: Record<"openai" | "anthropic", string[]> = {
   openai: ["deepseek-flash", "gpt-5.6-terra", "gemini-3.8-flash"],
-  anthropic: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
+  anthropic: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"],
 };
 
+/**
+ * Menu text when the API id hides the product name.
+ * The saved value stays the API id. DeepSeek calls V4.1-Flash `deepseek-flash`.
+ */
+const MODEL_OPTION_LABEL: Record<string, string> = {
+  "deepseek-flash": "deepseek-flash（V4.1-Flash）",
+};
+
+export function modelOptionLabel(modelId: string): string {
+  return MODEL_OPTION_LABEL[modelId] ?? modelId;
+}
+
 export const PRESET_MODELS_BY_ID: Record<string, string[]> = {
-  // https://api-docs.deepseek.com/quick_start/pricing
-  deepseek: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"],
+  // https://api-docs.deepseek.com/quick_start/pricing — deepseek-flash is V4.1-Flash.
+  deepseek: ["deepseek-flash", "deepseek-v4-pro"],
   // https://www.alibabacloud.com/help/en/model-studio/models
-  qwen: ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash"],
-  // Zhipu BigModel
-  glm: ["glm-5.3", "glm-5.2", "glm-5.3-flash", "glm-4.6"],
-  // https://platform.minimax.io/docs/guides/models-intro
-  // M3.1 Flash Preview only answers on a subscription key (M Plan / MiniMax Code).
-  minimax: ["MiniMax-M3", "MiniMax-M3.1-Flash-Preview", "MiniMax-M2.5", "MiniMax-M2.1"],
-  // Moonshot / Kimi
-  moonshot: ["kimi-k2.6", "kimi-k2.5", "kimi-latest"],
+  qwen: ["qwen3.8-max", "qwen3.7-plus", "qwen3.8-flash"],
+  // https://docs.z.ai — FlashX is the faster multimodal tier. Dots, not dashes.
+  glm: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-5.2"],
+  // https://platform.minimax.io/docs — API enum is MiniMax-M3.1-Flash and MiniMax-M3.
+  minimax: ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.5"],
+  // https://platform.kimi.ai — K2.5 and kimi-latest are discontinued.
+  moonshot: ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "kimi-k3", "kimi-k2.6"],
   // https://developers.openai.com/api/docs/models
   openai: ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"],
-  // https://docs.anthropic.com/en/docs/about-claude/models
-  anthropic: ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"],
+  // https://platform.claude.com/docs — Sonnet / Opus / Haiku 5.5.
+  anthropic: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"],
   // https://ai.google.dev/gemini-api/docs/models
-  gemini: ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"],
+  gemini: ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.6-flash"],
+  // 火山方舟。evolving 指向最新豆包；deepseek-v4-1-flash-261017 是方舟上的 V4.1-Flash。
   volcengine: [
-    "doubao-seed-2-1-pro-260628",
     "doubao-seed-evolving",
-    "doubao-seed-2-0-lite-260428",
+    "doubao-seed-2-1-pro-260915",
+    "doubao-seed-2-1-lite-260915",
+    "deepseek-v4-1-flash-261017",
   ],
-  qianfan: ["ernie-4.5-turbo-128k", "deepseek-v3.2", "ernie-4.5-8k"],
+  // https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j — 文心 5.1，DeepSeek 用千帆自己的接入点。
+  qianfan: ["ernie-5.1", "ernie-5.0", "deepseek-v4.1-flash"],
   siliconflow: [
-    "deepseek-ai/DeepSeek-V3.2",
-    "Qwen/Qwen3-235B-A22B",
-    "moonshotai/Kimi-K2-Instruct",
+    "deepseek-ai/DeepSeek-V4.1-Flash",
+    "Qwen/Qwen3.8-2.4T-A95B",
+    "moonshotai/Kimi-K3",
   ],
   openrouter: [
-    "anthropic/claude-sonnet-5",
+    "anthropic/claude-sonnet-5-5",
     "google/gemini-3.8-flash",
-    "openai/gpt-5.6-terra",
+    "openai/gpt-5.6-sol",
   ],
-  groq: [
-    "llama-3.3-70b-versatile",
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "openai/gpt-oss-120b",
-  ],
+  groq: ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"],
 };
 
 /** Short chip labels shown in Ask composer (mirrors wiring chips). */

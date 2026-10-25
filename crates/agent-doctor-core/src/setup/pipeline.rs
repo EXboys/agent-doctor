@@ -598,16 +598,16 @@ pub fn coerce_gateway_model(url: &str, model: &str) -> Option<String> {
     let (fits, default) = if host.contains("open.bigmodel.cn") || host.contains("api.z.ai") {
         (model_l.starts_with("glm"), "glm-5.3")
     } else if host.contains("api.deepseek.com") {
-        (model_l.starts_with("deepseek"), "deepseek-v4-flash")
+        (model_l.starts_with("deepseek"), "deepseek-flash")
     } else if host.contains("dashscope") {
-        (model_l.starts_with("qwen"), "qwen3.7-plus")
+        (model_l.starts_with("qwen"), "qwen3.8-max")
     } else if host.contains("api.kimi.") || host.contains("moonshot.") {
         (
             model_l.starts_with("kimi") || model_l.starts_with("moonshot"),
-            "kimi-k2.6",
+            "kimi-k3.1-pro",
         )
     } else if host.contains("minimax") {
-        (model_l.starts_with("minimax"), "MiniMax-M3")
+        (model_l.starts_with("minimax"), "MiniMax-M3.1-Flash")
     } else {
         return None;
     };

@@ -1,5 +1,6 @@
 import { t, type MessageKey } from "../i18n";
 import {
+  modelOptionLabel,
   modelsForCustomProtocol,
   modelsForPresetId,
 } from "../provider-models";
@@ -179,7 +180,7 @@ export function createPresetsController() {
       for (const model of models) {
         const option = document.createElement("option");
         option.value = model;
-        option.textContent = model;
+        option.textContent = modelOptionLabel(model);
         if (model === current) {
           option.selected = true;
         }

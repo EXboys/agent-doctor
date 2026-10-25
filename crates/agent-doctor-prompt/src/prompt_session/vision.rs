@@ -67,6 +67,8 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
     if id.starts_with("deepseek") {
         return id.starts_with("deepseek-flash")
             || id.starts_with("deepseek-v4-flash")
+            || id.contains("v4-1-flash")
+            || id.contains("v4.1-flash")
             || id.contains("vision")
             || id.contains("-vl");
     }
@@ -74,12 +76,13 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
     if id.starts_with("minimax") {
         return id.starts_with("minimax-m3");
     }
-    // Qwen: 3.5+ chat IDs are native multimodal. Older `qwen3-*` text MoE stays out.
+    // Qwen: 3.5+ chat IDs are native multimodal. The open `Qwen3.8-2.4T` weight is text-only.
+    // Older `qwen3-*` text MoE stays out.
     if id.starts_with("qwen") {
         return id.starts_with("qwen3.5")
             || id.starts_with("qwen3.6")
             || id.starts_with("qwen3.7")
-            || id.starts_with("qwen3.8")
+            || (id.starts_with("qwen3.8") && !id.contains("2.4t"))
             || id.contains("vision")
             || id.contains("-vl")
             || id.contains("omni");
@@ -104,6 +107,7 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
         "glm-4v",
         "glm-4.5v",
         "glm-5.3-flash",
+        "ernie-5",
         "llama-4",
         "pixtral",
     ];
@@ -324,6 +328,9 @@ mod tests {
         assert!(model_sees_images("deepseek-flash"));
         assert!(model_sees_images("deepseek-v4-flash"));
         assert!(model_sees_images("deepseek-v4-flash-vision-exp"));
+        assert!(model_sees_images("deepseek-v4-1-flash-261017"));
+        assert!(model_sees_images("MiniMax-M3.1-Flash"));
+        assert!(model_sees_images("kimi-k3.1-pro"));
         assert!(!model_sees_images("deepseek-v4-pro"));
         assert!(!model_sees_images("deepseek-chat"));
         assert!(!model_sees_images("deepseek-reasoner"));
@@ -337,6 +344,9 @@ mod tests {
         assert!(!model_sees_images("MiniMax-M2.5"));
         assert!(!model_sees_images("MiniMax-M2.1"));
         assert!(model_sees_images("qwen3.8-max"));
+        assert!(!model_sees_images("Qwen/Qwen3.8-2.4T-A95B"));
+        assert!(model_sees_images("ernie-5.1"));
+        assert!(model_sees_images("deepseek-v4.1-flash"));
         assert!(model_sees_images("qwen3.7-plus"));
         assert!(model_sees_images("qwen3-vl-plus"));
         assert!(!model_sees_images("qwen3-235b-a22b"));
