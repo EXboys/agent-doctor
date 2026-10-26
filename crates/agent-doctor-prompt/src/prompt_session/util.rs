@@ -74,6 +74,18 @@ impl SessionClock {
             last_tool: last_tool.trim().to_string(),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn pretend_quiet(&mut self, quiet: Duration) {
+        self.last_activity = Instant::now()
+            .checked_sub(quiet)
+            .unwrap_or(self.last_activity);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pretend_elapsed(&mut self, elapsed: Duration) {
+        self.started = Instant::now().checked_sub(elapsed).unwrap_or(self.started);
+    }
 }
 
 /// Tool calls that have started and not reported back yet.
