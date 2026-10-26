@@ -5,7 +5,7 @@ use agent_doctor_core::{
 };
 
 use crate::browser::discover_chrome;
-use crate::config::{command_path_for_runtime, configure_stdio_mcp};
+use crate::config::{configure_stdio_mcp, mcp_server_command};
 use crate::wire::wire_browser_mcp;
 
 struct McpWireBackend;
@@ -19,7 +19,7 @@ impl BrowserMcpWireBackend for McpWireBackend {
 
     fn wire_computer(&self, options: &WireBrowserMcpOptions) -> BrowserMcpWireReport {
         let args = vec!["mcp".to_string(), "computer".to_string()];
-        let command = command_path_for_runtime(&options.binary);
+        let command = mcp_server_command(&options.binary);
         let runtimes: Vec<String> = if options.runtimes.is_empty() {
             agent_doctor_core::BROWSER_MCP_WIRE_RUNTIMES
                 .iter()

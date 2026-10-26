@@ -363,6 +363,7 @@ where
     // Every assistant starts its tools as part of sending. Drop missing
     // programs first so that failure never shows up on the message.
     agent_doctor_core::setup::merge::drop_unreachable_ask_tools(&cwd);
+    agent_doctor_core::setup::merge::retarget_windows_mcp_hosts(&cwd);
     let mut used = TokenUsage::default();
     let mut used_model: Option<String> = None;
     let mut report = backend.run(options, cancel, control, &mut |event| {

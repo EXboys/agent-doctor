@@ -125,7 +125,8 @@ jobs:
           $out = "agent-doctor-$version-${{ matrix.name }}"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" dist/
-          Compress-Archive -Path "dist/${{ matrix.bin }}" -DestinationPath "$out.zip"
+          Copy-Item "target/${{ matrix.target }}/release/agent-doctor-mcp.exe" dist/
+          Compress-Archive -Path "dist/${{ matrix.bin }}","dist/agent-doctor-mcp.exe" -DestinationPath "$out.zip"
 
       - uses: actions/upload-artifact@v7
         with:

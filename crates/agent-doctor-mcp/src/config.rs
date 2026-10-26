@@ -42,7 +42,16 @@ pub struct McpConfigureOptions {
     pub openclaw_workspace: Option<PathBuf>,
 }
 
-/// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
+/// Executable an agent should spawn for an Agent Doctor MCP server.
+///
+/// On Windows this is the GUI launcher beside the CLI when that file is
+/// present, so starting the server does not open a terminal. The arguments
+/// stay `mcp browser` / `mcp computer`.
+pub(crate) fn mcp_server_command(binary: &Path) -> String {
+    let launch = agent_doctor_core::workspace::mcp_inventory::mcp_server_launch_path(binary);
+    command_path_for_runtime(&launch)
+}
+
 /// Path string another program can pass to CreateProcess.
 ///
 /// Windows `canonicalize` / `current_exe` often return `\\?\D:\...`. That form
@@ -61,6 +70,7 @@ pub fn command_path_for_runtime(path: &Path) -> String {
     raw.into_owned()
 }
 
+/// Build `agent-doctor mcp browser …` args. Headed (visible UI) is the default.
 pub fn browser_mcp_args(
     port: u16,
     headless: bool,
@@ -375,7 +385,7 @@ pub fn configure_for(_discovery: &BrowserDiscovery, options: &McpConfigureOption
         options.hermes_home.as_deref(),
         options.openclaw_workspace.as_deref(),
     )?;
-    let command = command_path_for_runtime(&options.binary);
+    let command = mcp_server_command(&options.binary);
     let args = browser_mcp_args(
         options.port,
         options.headless,

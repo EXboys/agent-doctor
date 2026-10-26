@@ -30,9 +30,13 @@ cargo build -p agent-doctor --release
 if [[ "$IS_WINDOWS" -eq 1 ]]; then
   SRC="$ROOT/target/release/agent-doctor.exe"
   DEST="$RESOURCES/agent-doctor-cli.exe"
+  HOST_SRC="$ROOT/target/release/agent-doctor-mcp.exe"
+  HOST_DEST="$RESOURCES/agent-doctor-mcp.exe"
 else
   SRC="$ROOT/target/release/agent-doctor"
   DEST="$RESOURCES/agent-doctor-cli"
+  HOST_SRC=""
+  HOST_DEST=""
 fi
 
 if [[ ! -f "$SRC" ]]; then
@@ -43,6 +47,17 @@ fi
 cp -f "$SRC" "$DEST"
 chmod +x "$DEST" 2>/dev/null || true
 echo "Bundled CLI: $DEST"
+
+# GUI-subsystem launcher. Agents spawn this for MCP so Windows does not open
+# a terminal on every message. The real server stays agent-doctor-cli.exe.
+if [[ "$IS_WINDOWS" -eq 1 ]]; then
+  if [[ ! -f "$HOST_SRC" ]]; then
+    echo "ERROR: MCP launcher not found at $HOST_SRC" >&2
+    exit 1
+  fi
+  cp -f "$HOST_SRC" "$HOST_DEST"
+  echo "Bundled MCP launcher: $HOST_DEST"
+fi
 
 # macOS: sign resource binary so notarization includes it (Tauri signs main exe only).
 if [[ "$OSTYPE" == "darwin"* && -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then

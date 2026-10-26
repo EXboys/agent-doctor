@@ -1056,25 +1056,150 @@ fn refresh_managed_cli(source: Option<&str>, dest: Option<&str>, source_newer: b
     }
 }
 
+/// File name of the GUI-subsystem MCP launcher shipped next to the CLI.
+///
+/// Agents spawn this instead of `agent-doctor.exe`. A console-subsystem image
+/// gets a new terminal when its parent has no console; a GUI image does not.
+pub const WINDOWS_MCP_HOST_FILE: &str = "agent-doctor-mcp.exe";
+
+pub fn is_windows_console_cli_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name == "agent-doctor.exe" || name == "agent-doctor-cli.exe"
+}
+
+fn sibling_host_path(cli: &Path) -> Option<PathBuf> {
+    let name = cli.file_name()?.to_str()?;
+    if !is_windows_console_cli_name(name) {
+        return None;
+    }
+    Some(cli.with_file_name(WINDOWS_MCP_HOST_FILE))
+}
+
+/// Command string to write when `command` is our console CLI and the launcher
+/// is already beside it. Does not search the disk beyond that sibling, so a
+/// missing launcher leaves the existing command alone.
+pub fn retargeted_mcp_command(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let host = sibling_host_path(Path::new(trimmed)).filter(|path| path.is_file())?;
+    let text = launchable_path(&host).to_string_lossy().into_owned();
+    if dir_key(trimmed) == dir_key(&text) {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Copy the launcher next to `cli` when a newer one is installed with the app.
+/// The managed CLI lives under the user config directory; the launcher is
+/// shipped beside the app, so the first message has to bring them together.
+pub fn prepare_windows_mcp_host(cli: &Path) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        let _ = cli;
+        return None;
+    }
+    let host = sibling_host_path(cli)?;
+    if let Some(source) = discover_mcp_host_file() {
+        if !same_launchable_file(&source, &host) {
+            let refresh = !host.is_file() || mtime_or_epoch(&source) > mtime_or_epoch(&host);
+            if refresh {
+                let _ = install_host_from(cli, &source);
+            }
+        }
+    }
+    host.is_file().then_some(host)
+}
+
+/// The program an agent should spawn for MCP. On Windows that is the GUI
+/// launcher when it is next to this CLI; otherwise the CLI itself.
+pub fn mcp_server_launch_path(cli: &Path) -> PathBuf {
+    prepare_windows_mcp_host(cli).unwrap_or_else(|| cli.to_path_buf())
+}
+
+fn install_host_from(cli: &Path, source: &Path) -> Option<PathBuf> {
+    let host = sibling_host_path(cli)?;
+    if same_launchable_file(source, &host) {
+        return host.is_file().then_some(host);
+    }
+    if let Some(parent) = host.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).ok()?;
+        }
+    }
+    fs::copy(source, &host).ok()?;
+    host.is_file().then_some(host)
+}
+
+fn discover_mcp_host_file() -> Option<PathBuf> {
+    host_search_dirs()
+        .into_iter()
+        .map(|dir| dir.join(WINDOWS_MCP_HOST_FILE))
+        .find(|path| path.is_file())
+        .map(|path| launchable_path(&path))
+}
+
+fn host_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+            dirs.push(dir.join("resources"));
+            if let Some(parent) = dir.parent() {
+                dirs.push(parent.join("Resources"));
+                dirs.push(parent.join("resources"));
+            }
+            // `tauri dev` runs from desktop/src-tauri/target. The launcher is
+            // built into the workspace target, four directories up.
+            dirs.push(dir.join("../../../../target/debug"));
+            dirs.push(dir.join("../../../../target/release"));
+        }
+    }
+    if let Ok(target) = std::env::var("CARGO_TARGET_DIR") {
+        let root = PathBuf::from(target);
+        dirs.push(root.join("debug"));
+        dirs.push(root.join("release"));
+    }
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let root = PathBuf::from(manifest);
+        for rel in [
+            "target/debug",
+            "target/release",
+            "../target/debug",
+            "../target/release",
+            "../../target/debug",
+            "../../target/release",
+        ] {
+            dirs.push(root.join(rel));
+        }
+    }
+    dirs
+}
+
 /// Keep a stable MCP command path under the user config bin.
 ///
 /// Ephemeral Cursor/cargo builds are always copied. A newer resolved CLI, or a
 /// newer file of the same version, refreshes the managed copy so it does not
 /// stay on a build that lacks a subcommand the app just started shipping.
 pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
+    let finish = |path: PathBuf| -> Result<PathBuf> {
+        let _ = prepare_windows_mcp_host(&path);
+        Ok(path)
+    };
     let Some(dest) = managed_cli_dest() else {
-        return Ok(resolved.to_path_buf());
+        return finish(resolved.to_path_buf());
     };
     if same_launchable_file(resolved, &dest) {
-        return Ok(dest);
+        return finish(dest);
     }
     if !should_refresh_managed_cli(resolved, &dest) {
         // Prefer the managed path when it already tracks the same-or-newer CLI,
         // so runtime configs converge on one refreshable command.
         if dest.is_file() {
-            return Ok(dest);
+            return finish(dest);
         }
-        return Ok(resolved.to_path_buf());
+        return finish(resolved.to_path_buf());
     }
 
     let bin_dir = dest.parent().unwrap_or(Path::new("."));
@@ -1091,7 +1216,7 @@ pub fn ensure_stable_agent_doctor_cli(resolved: &Path) -> Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))?;
     }
-    Ok(dest)
+    finish(dest)
 }
 
 fn looks_like_desktop_gui(path: &Path) -> bool {
@@ -1471,5 +1596,42 @@ args = ["mcp", "browser", "--port", "9222"]
         let items = read_servers_from_dsh_patch(&path, "dsh-home", "deepseek-harness");
         let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
         assert_eq!(names, vec!["computer", "browser"], "{names:?}");
+    }
+
+    #[test]
+    fn retarget_uses_the_launcher_beside_the_console_cli() {
+        let dir = tempdir().unwrap();
+        let cli = dir.path().join("agent-doctor.exe");
+        let host = dir.path().join(WINDOWS_MCP_HOST_FILE);
+        fs::write(&cli, b"cli").unwrap();
+        fs::write(&host, b"host").unwrap();
+        let updated = retargeted_mcp_command(&cli.display().to_string()).unwrap();
+        assert_eq!(updated, host.display().to_string());
+        assert!(retargeted_mcp_command(&host.display().to_string()).is_none());
+        assert!(retargeted_mcp_command("npx").is_none());
+    }
+
+    #[test]
+    fn retarget_leaves_the_cli_when_the_launcher_is_absent() {
+        let dir = tempdir().unwrap();
+        let cli = dir.path().join("agent-doctor-cli.exe");
+        fs::write(&cli, b"cli").unwrap();
+        assert!(retargeted_mcp_command(&cli.display().to_string()).is_none());
+    }
+
+    #[test]
+    fn install_host_from_copies_the_launcher_next_to_the_cli() {
+        let dir = tempdir().unwrap();
+        let source_dir = dir.path().join("app");
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&bin_dir).unwrap();
+        let source = source_dir.join(WINDOWS_MCP_HOST_FILE);
+        fs::write(&source, b"launcher").unwrap();
+        let cli = bin_dir.join("agent-doctor.exe");
+        fs::write(&cli, b"cli").unwrap();
+        let installed = install_host_from(&cli, &source).unwrap();
+        assert_eq!(installed, bin_dir.join(WINDOWS_MCP_HOST_FILE));
+        assert_eq!(fs::read(&installed).unwrap(), b"launcher");
     }
 }

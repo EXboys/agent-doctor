@@ -2,6 +2,7 @@
 ; `agent-doctor-cli.exe` leaves Ask/MCP/terminal using a stale or missing binary.
 !macro NSIS_HOOK_PREINSTALL
   nsExec::ExecToLog 'taskkill /F /IM "agent-doctor-cli.exe" /T'
+  nsExec::ExecToLog 'taskkill /F /IM "agent-doctor-mcp.exe" /T'
   Sleep 800
   ; Tauri copies resources into $INSTDIR (the directory the user picked,
   ; including a custom one). Older builds used $INSTDIR\resources. Clear both
@@ -11,10 +12,20 @@
     IfFileExists "$INSTDIR\agent-doctor-cli.exe" 0 ad_cli_root_done
       Delete /REBOOTOK "$INSTDIR\agent-doctor-cli.exe"
   ad_cli_root_done:
-  IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_preinstall_done
+  IfFileExists "$INSTDIR\agent-doctor-mcp.exe" 0 ad_mcp_root_done
+    Delete "$INSTDIR\agent-doctor-mcp.exe"
+    IfFileExists "$INSTDIR\agent-doctor-mcp.exe" 0 ad_mcp_root_done
+      Delete /REBOOTOK "$INSTDIR\agent-doctor-mcp.exe"
+  ad_mcp_root_done:
+  IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_resources_done
     Delete "$INSTDIR\resources\agent-doctor-cli.exe"
-    IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_preinstall_done
+    IfFileExists "$INSTDIR\resources\agent-doctor-cli.exe" 0 ad_cli_resources_done
       Delete /REBOOTOK "$INSTDIR\resources\agent-doctor-cli.exe"
+  ad_cli_resources_done:
+  IfFileExists "$INSTDIR\resources\agent-doctor-mcp.exe" 0 ad_cli_preinstall_done
+    Delete "$INSTDIR\resources\agent-doctor-mcp.exe"
+    IfFileExists "$INSTDIR\resources\agent-doctor-mcp.exe" 0 ad_cli_preinstall_done
+      Delete /REBOOTOK "$INSTDIR\resources\agent-doctor-mcp.exe"
   ad_cli_preinstall_done:
 !macroend
 
@@ -46,5 +57,6 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   nsExec::ExecToLog 'taskkill /F /IM "agent-doctor-cli.exe" /T'
+  nsExec::ExecToLog 'taskkill /F /IM "agent-doctor-mcp.exe" /T'
   Sleep 400
 !macroend

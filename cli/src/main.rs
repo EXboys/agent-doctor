@@ -1,4 +1,5 @@
 mod commands;
+mod windows_mcp_console;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -640,6 +641,7 @@ enum McpChromeAction {
     },
 }
 fn main() -> Result<()> {
+    windows_mcp_console::release_mcp_server_console();
     agent_doctor_mcp::register_browser_mcp_wire_backend();
     agent_doctor_repair::register();
     let cli = Cli::parse();

@@ -10,6 +10,10 @@ authors.workspace = true
 name = "agent-doctor"
 path = "src/main.rs"
 
+[[bin]]
+name = "agent-doctor-mcp"
+path = "src/mcp_host.rs"
+
 [dependencies]
 agent-doctor-core.workspace = true
 agent-doctor-mcp.workspace = true
