@@ -19,7 +19,7 @@ import {
   toolSignature,
 } from "./format";
 import { followChatLog, pinChatLog, renderToolHistoryGroup } from "./activity";
-import { renderThinkingBlock } from "./thinking";
+import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
@@ -614,11 +614,7 @@ export function createBubblesController(deps: BubblesDeps) {
             const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
             if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
             const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
-            const label = lastThink?.querySelector<HTMLElement>(".chat-thinking-label");
-            if (lastThink && label) {
-              lastThink.classList.add("is-live");
-              label.textContent = t("chat.thinkingLive");
-            }
+            if (lastThink instanceof HTMLDetailsElement) markThinkingLive(lastThink);
           }
           if (rows.length === 1) deps.logEl.appendChild(rows[0]);
           else if (rows.length > 1) deps.logEl.appendChild(wrapProcessRows(rows, live));

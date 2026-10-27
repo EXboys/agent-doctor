@@ -11,6 +11,7 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
   if (opts?.id) block.dataset.messageId = opts.id;
   block.innerHTML = `
     <summary class="chat-thinking-summary">
+      <span class="chat-thinking-icon" aria-hidden="true"></span>
       <span class="chat-thinking-label"></span>
       <span class="chat-activity-elapsed"></span>
       <span class="chat-thinking-chevron" aria-hidden="true"></span>
@@ -18,23 +19,25 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
     <div class="chat-thinking-body"></div>
   `;
   block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = text;
-  // Thinking is part of the work timeline, not an accordion. Keeping it open
-  // prevents the transcript from shrinking and jumping whenever the next
-  // phase starts.
-  block.open = true;
+  // While thinking the row stays open so the peek keeps streaming; once done
+  // the block folds into its header row and that row opens it again.
   block.querySelector("summary")?.addEventListener("click", (event) => {
-    event.preventDefault();
+    if (block.classList.contains("is-live")) event.preventDefault();
   });
   if (opts?.live) {
-    markLive(block);
+    markThinkingLive(block);
   } else {
+    block.open = false;
     block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = t("chat.thinkingSaved");
   }
   return block;
 }
 
-function markLive(block: HTMLDetailsElement): void {
+/** Live, fresh or after a redraw: open, shimmering, and about to show the newest lines. */
+export function markThinkingLive(block: HTMLDetailsElement): void {
   block.classList.add("is-live");
+  block.open = true;
+  block.dataset.follow = "1";
   block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = t("chat.thinkingLive");
   noteThinkingLive(block);
 }
@@ -69,7 +72,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     if (!deps.isViewingRunningSession()) return null;
     const found = findBlock();
     if (found) {
-      if (!found.classList.contains("is-live")) markLive(found);
+      if (!found.classList.contains("is-live")) markThinkingLive(found);
       return found;
     }
     deps.beforeBlock();
@@ -92,8 +95,11 @@ export function createThinkingController(deps: ThinkingDeps) {
     const block = liveBlock();
     if (!block) return;
     const body = block.querySelector<HTMLElement>(".chat-thinking-body")!;
+    // The peek keeps showing the newest lines unless the reader scrolled up inside it.
+    const follow = block.dataset.follow === "1" || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+    delete block.dataset.follow;
     body.textContent = text;
-    body.scrollTop = body.scrollHeight;
+    if (follow) body.scrollTop = body.scrollHeight;
     followChatLog(deps.logEl);
   }
 
@@ -102,7 +108,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     const block = findBlock();
     if (block) {
       block.classList.remove("is-live");
-      block.open = true;
+      block.open = false;
       const elapsed = durationLabel(Date.now() - startedAt);
       block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = elapsed
         ? t("chat.thinkingDone", { elapsed })

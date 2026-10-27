@@ -874,7 +874,6 @@ export const zh = {
     "chat.workOtherActions": "其他 {count} 项",
     "chat.workAliasCount": "{name} {count} 次",
     "chat.toolTimes": "{count} 次",
-    "chat.toolsLive": "正在调用工具 · {count}",
     "chat.noReply": "报错了，这次没有回话。再发一次试试。",
     "chat.noReplyBare": "这次没有回话。再发一次试试。",
     "chat.agentFailed": "{name} 报错了，这次没有回话。再发一次试试。",

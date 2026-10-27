@@ -16,7 +16,6 @@ import {
   repeatRuns,
   rowActivityInfo,
   splitToolActivity,
-  summarizeToolActivities,
   toolSignature,
   toolStepText,
 } from "./format";
@@ -25,7 +24,16 @@ import { rememberFileChange } from "./file-changes";
 import { interleaveLines } from "./file-diff";
 import { fileLinkRoot } from "./file-links";
 import type { ToolStep } from "./types";
-import { clipStepForPage, earlierToolRange, laterToolRange, MAX_SHOWN_TOOL_ROWS, MAX_TOOL_DOM_ROWS } from "./tool-records";
+import {
+  clipStepForPage,
+  earlierToolRange,
+  laterToolRange,
+  MAX_SHOWN_TOOL_ROWS,
+  MAX_TOOL_DOM_ROWS,
+  toolRecordKey,
+  turnSegmentRecords,
+  type ToolRecord,
+} from "./tool-records";
 import { markTurnNoticeShown, pushChatTurnError, pushChatTurnReport } from "./turn-errors";
 import { placeProcessBlock, sealWorkTrail } from "./work-trail";
 
@@ -251,24 +259,17 @@ export function createToolRowElement(text: string, step?: ToolStep): HTMLDetails
   return row;
 }
 
-export type ToolRecord = string | { text: string; step?: ToolStep; skipped?: number };
+export { toolRecordKey, type ToolRecord } from "./tool-records";
 
+/**
+ * A tool group is bookkeeping, not a fold: it holds one segment's steps for the
+ * scroll pager and shows them as flat rows. The work trail around it folds.
+ */
 const heldToolRecords = new WeakMap<HTMLDetailsElement, ToolRecord[]>();
 let ignoreLogScroll = 0;
 
-function recordSkipped(record: ToolRecord): number {
-  return typeof record === "string" ? 0 : record.skipped ?? 0;
-}
-
-export function toolRecordKey(record: ToolRecord): string {
-  if (typeof record !== "string" && record.step?.id) return `id:${record.step.id}`;
-  const text = typeof record === "string" ? record : record.text;
-  return `t:${toolSignature(text)}`;
-}
-
 function holdToolRecords(group: HTMLDetailsElement, records: ToolRecord[]): void {
   heldToolRecords.set(group, records);
-  group.dataset.toolTotal = String(records.length + records.reduce((n, record) => n + recordSkipped(record), 0));
 }
 
 function mountToolRecord(record: ToolRecord): HTMLDetailsElement {
@@ -299,25 +300,25 @@ export function followChatLog(logEl: HTMLElement): void {
   pinChatLog(logEl);
 }
 
-/** Collapsed history of one turn's tool calls. Click a row for the command. */
-export function renderToolHistoryGroup(records: ToolRecord[], open = false): HTMLDetailsElement {
+/**
+ * The holder for one segment's rows. Always open, with its summary hidden: a
+ * closed details would hide the rows, and a details without a summary grows a
+ * default disclosure marker.
+ */
+function createToolGroupElement(): HTMLDetailsElement {
   const group = document.createElement("details");
   group.className = "chat-tool-group";
-  group.open = open;
+  group.open = true;
+  group.innerHTML = `<summary hidden></summary><div class="chat-tool-list"></div>`;
+  return group;
+}
+
+/** One segment's tool calls, a row each, in order. Click a row for the command. */
+export function renderToolHistoryGroup(records: ToolRecord[]): HTMLDetailsElement {
+  const group = createToolGroupElement();
   holdToolRecords(group, records);
-  const shown = records.slice(-MAX_SHOWN_TOOL_ROWS);
-  const count = records.length + records.reduce((n, record) => n + recordSkipped(record), 0);
-  const summary = document.createElement("summary");
-  summary.className = "chat-tool-group-summary";
-  summary.innerHTML = `<span class="chat-tool-group-icon" aria-hidden="true">$</span><span class="chat-tool-group-label"></span><span class="chat-tool-group-chevron" aria-hidden="true"></span>`;
-  const label = summary.querySelector<HTMLElement>(".chat-tool-group-label");
-  if (label) {
-    label.textContent = t("chat.permissionGroupTools", { count: String(count) });
-  }
-  const list = document.createElement("div");
-  list.className = "chat-tool-list";
-  for (const record of shown) list.appendChild(mountToolRecord(record));
-  group.append(summary, list);
+  const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
+  for (const record of records.slice(-MAX_SHOWN_TOOL_ROWS)) list.appendChild(mountToolRecord(record));
   foldRepeatedToolRows(list);
   return group;
 }
@@ -369,8 +370,32 @@ export function createActivityController(deps: ActivityDeps) {
     deps.setLifecycleActivityEl(null);
   }
 
+  /** Every tool chip since the latest user message, including those folded into a work trail. */
+  function turnToolGroups(): HTMLDetailsElement[] {
+    const groups: HTMLDetailsElement[] = [];
+    for (
+      let node = deps.logEl.lastElementChild as HTMLElement | null;
+      node && !node.classList.contains("chat-msg-user");
+      node = node.previousElementSibling as HTMLElement | null
+    ) {
+      if (node.classList.contains("chat-tool-group")) groups.push(node as HTMLDetailsElement);
+      else groups.push(...node.querySelectorAll<HTMLDetailsElement>(".chat-tool-group"));
+    }
+    return groups;
+  }
+
+  /** This turn's steps that no chip other than `own` already shows: the chip after the latest reply. */
+  function segmentRecords(own: HTMLDetailsElement | null): ToolRecord[] {
+    const shown: string[] = [];
+    for (const group of turnToolGroups()) {
+      if (group === own) continue;
+      for (const record of heldToolRecords.get(group) ?? []) shown.push(toolRecordKey(record));
+    }
+    return turnSegmentRecords(deps.toolRecordsForTurn(), shown);
+  }
+
   function liveRecords(group: HTMLDetailsElement): ToolRecord[] {
-    const records = deps.toolRecordsForTurn();
+    const records = segmentRecords(group);
     holdToolRecords(group, records);
     return records;
   }
@@ -445,7 +470,7 @@ export function createActivityController(deps: ActivityDeps) {
     withoutLogJump(() => {
       log.scrollTop = top + (log.scrollHeight - before);
     });
-    updateToolGroupSummary(group, group === deps.getToolGroupEl());
+    syncToolGroup(group, group === deps.getToolGroupEl());
   }
 
   function revealLater(group: HTMLDetailsElement): void {
@@ -458,7 +483,7 @@ export function createActivityController(deps: ActivityDeps) {
     if (!range) return;
     for (let i = range.from; i < range.to; i += 1) list.appendChild(mountToolRecord(records[i]!));
     dropOffscreenRows(list, "top");
-    updateToolGroupSummary(group, group === deps.getToolGroupEl());
+    syncToolGroup(group, group === deps.getToolGroupEl());
   }
 
   deps.logEl.addEventListener("scroll", () => {
@@ -478,21 +503,10 @@ export function createActivityController(deps: ActivityDeps) {
     }
   });
 
-  function updateToolGroupSummary(group: HTMLDetailsElement, live: boolean): void {
+  /** Fold repeated rows and mark whether the group is still taking steps. */
+  function syncToolGroup(group: HTMLDetailsElement, live: boolean): void {
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
     if (list) foldRepeatedToolRows(list);
-    const rows = group.querySelectorAll<HTMLElement>(
-      ".chat-tool-list > .chat-tool-row, .chat-permission-stack > .chat-tool-row",
-    );
-    const label = group.querySelector<HTMLElement>(".chat-tool-group-label");
-    if (!label) return;
-    const total = Number(group.dataset.toolTotal || "0");
-    const count = total > rows.length ? total : rows.length;
-    const summary = count > rows.length ? "" : summarizeToolActivities([...rows].map(rowActivityInfo));
-    label.textContent =
-      summary || (live
-        ? t("chat.toolsLive", { count: String(count) })
-        : t("chat.permissionGroupTools", { count: String(count) }));
     group.classList.toggle("is-live", live);
   }
 
@@ -508,25 +522,14 @@ export function createActivityController(deps: ActivityDeps) {
       !last.classList.contains("chat-turn-tools")
     ) {
       deps.setToolGroupEl(last);
-      last.classList.add("is-live");
       last.open = true;
-      updateToolGroupSummary(last, true);
+      syncToolGroup(last, true);
       return last;
     }
-    const group = document.createElement("details");
-    group.className = "chat-tool-group is-live";
-    group.open = true;
-    group.innerHTML = `
-    <summary class="chat-tool-group-summary">
-      <span class="chat-tool-group-icon" aria-hidden="true">$</span>
-      <span class="chat-tool-group-label"></span>
-      <span class="chat-tool-group-chevron" aria-hidden="true"></span>
-    </summary>
-    <div class="chat-tool-list"></div>
-  `;
+    const group = createToolGroupElement();
+    group.classList.add("is-live");
     placeProcessBlock(deps.logEl, group);
     deps.setToolGroupEl(group);
-    updateToolGroupSummary(group, true);
     return group;
   }
 
@@ -536,8 +539,7 @@ export function createActivityController(deps: ActivityDeps) {
     liveRecords(group);
     const activity = deps.getActivityEl();
     if (activity && group.contains(activity)) settleActivity();
-    updateToolGroupSummary(group, false);
-    group.open = true;
+    syncToolGroup(group, false);
     deps.setToolGroupEl(null);
   }
 
@@ -585,8 +587,10 @@ export function createActivityController(deps: ActivityDeps) {
   function ensureTurnToolsVisible(lastAssistant: HTMLElement | null, seen: ToolRecord[] = []): void {
     const filled = (record: ToolRecord) =>
       typeof record === "string" ? Boolean(record.trim()) : Boolean(record.step || record.text.trim());
-    const stored = deps.toolRecordsForTurn().filter(filled);
-    const texts = stored.length > 0 ? stored : seen.filter(filled);
+    // Only the steps no chip shows yet; the chips above earlier replies keep theirs.
+    // The rows read off the page stand in only when this turn lost its chips.
+    const stored = segmentRecords(null).filter(filled);
+    const texts = stored.length > 0 || turnToolGroups().length > 0 ? stored : seen.filter(filled);
     if (!lastAssistant) {
       if (texts.length === 0 || deps.logEl.querySelector(":scope > .chat-tool-group, :scope > .chat-work")) return;
       deps.logEl.appendChild(renderToolHistoryGroup(texts));
@@ -607,12 +611,14 @@ export function createActivityController(deps: ActivityDeps) {
       if (hasRows || texts.length === 0) return;
       previous.remove();
     }
-    const stray = [...parent.querySelectorAll<HTMLElement>(":scope > .chat-tool-group, :scope > .chat-turn-tools")].find(
-      (group) => group !== block.previousElementSibling,
-    );
+    // Only this turn's top-level chips count as stray; earlier turns keep theirs.
+    const stray = turnToolGroups()
+      .filter((group) => group.parentElement === parent && group !== block.previousElementSibling)
+      .pop();
     if (stray) {
       parent.insertBefore(stray, block);
-      if (stray instanceof HTMLDetailsElement) stray.open = false;
+      // A plain group must stay open or its rows vanish; only the permission fold closes.
+      if (stray.classList.contains("chat-turn-tools")) stray.open = false;
       return;
     }
     if (texts.length === 0) return;
@@ -754,7 +760,7 @@ export function createActivityController(deps: ActivityDeps) {
       applyToolRow(known, "", mergeToolStep(readRowStep(known), step));
       const group = known.closest<HTMLDetailsElement>(".chat-tool-group");
       if (group && group === deps.getToolGroupEl()) liveRecords(group);
-      if (group) updateToolGroupSummary(group, group === deps.getToolGroupEl());
+      if (group) syncToolGroup(group, group === deps.getToolGroupEl());
       if (step.status !== "running" && deps.getActivityEl() === known) settleActivity();
       deps.syncReplyChangeCard?.();
       return;
@@ -774,7 +780,7 @@ export function createActivityController(deps: ActivityDeps) {
     }
     applyToolRow(row, "", step);
     const owner = row.closest<HTMLDetailsElement>(".chat-tool-group");
-    if (owner) updateToolGroupSummary(owner, true);
+    if (owner) syncToolGroup(owner, true);
     deps.syncReplyChangeCard?.();
   }
 
@@ -801,14 +807,14 @@ export function createActivityController(deps: ActivityDeps) {
       last.classList.add("is-live");
       last.classList.remove("is-done");
       deps.setActivityEl(last);
-      updateToolGroupSummary(group, true);
+      syncToolGroup(group, true);
       if (!last.dataset.toolKey) last.dataset.toolKey = `t:${signature}`;
       return last;
     }
 
     const records = liveRecords(group);
     if (deps.logEl.dataset.pin === "0" && !windowShowsTail(records, list)) {
-      updateToolGroupSummary(group, true);
+      syncToolGroup(group, true);
       return null;
     }
 
@@ -822,7 +828,7 @@ export function createActivityController(deps: ActivityDeps) {
     if (deps.logEl.dataset.pin !== "0") trimLiveToolRows(group);
     else dropOffscreenRows(list, "top");
     deps.setActivityEl(row);
-    updateToolGroupSummary(group, true);
+    syncToolGroup(group, true);
     followChatLog(deps.logEl);
     deps.syncReplyChangeCard?.();
     return row;

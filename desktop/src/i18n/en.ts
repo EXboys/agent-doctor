@@ -872,7 +872,6 @@ export const en = {
     "chat.workOtherActions": "{count} other actions",
     "chat.workAliasCount": "{name} × {count}",
     "chat.toolTimes": "{count} times",
-    "chat.toolsLive": "Using tools · {count}",
     "chat.noReply": "It reported an error and did not reply. Try sending again.",
     "chat.noReplyBare": "No reply this time. Try sending again.",
     "chat.agentFailed": "{name} reported an error and did not reply. Try sending again.",

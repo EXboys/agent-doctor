@@ -1,5 +1,33 @@
-import { mergeToolStep, toolStepText } from "./format";
+import { mergeToolStep, toolSignature, toolStepText } from "./format";
 import type { ChatMessage, ToolStep } from "./types";
+
+export type ToolRecord = string | { text: string; step?: ToolStep; skipped?: number };
+
+export function toolRecordKey(record: ToolRecord): string {
+  if (typeof record !== "string" && record.step?.id) return `id:${record.step.id}`;
+  const text = typeof record === "string" ? record : record.text;
+  return `t:${toolSignature(text)}`;
+}
+
+/**
+ * The steps a new tool chip owns: everything after the last step an earlier
+ * chip of this turn already shows. Steps are stored in order, so the earlier
+ * chips always cover a prefix. A key is matched at its first occurrence so a
+ * command repeated in this chip is not mistaken for the earlier run.
+ */
+export function turnSegmentRecords(all: ToolRecord[], shownKeys: Iterable<string>): ToolRecord[] {
+  const firstIndex = new Map<string, number>();
+  all.forEach((record, index) => {
+    const key = toolRecordKey(record);
+    if (!firstIndex.has(key)) firstIndex.set(key, index);
+  });
+  let start = 0;
+  for (const key of shownKeys) {
+    const at = firstIndex.get(key);
+    if (at !== undefined && at >= start) start = at + 1;
+  }
+  return all.slice(start);
+}
 
 const SAVED_OUTPUT_CHARS = 1_500;
 const SAVED_LINES = 80;

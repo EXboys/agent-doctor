@@ -207,6 +207,31 @@ check("scrolling back down loads the next page", later?.from === 40 && later?.to
 check("the newest page has nothing after it", laterToolRange(49, 50) === null);
 check("the previous reply is untouched", messages.filter((message) => message.role === "tool").length === 2);
 
+// A chip that opens after a reply owns only the steps after that reply, not
+// the whole turn's list (src/chat/tool-records.ts#turnSegmentRecords).
+const { toolRecordKey, turnSegmentRecords } = await import("../src/chat/tool-records");
+type SegmentRecord = Parameters<typeof turnSegmentRecords>[0][number];
+const stepOf = (id: string, command: string) => ({ id, kind: "terminal" as const, status: "done" as const, command });
+const turn: SegmentRecord[] = [
+  { text: "call a", step: stepOf("a", "echo a") },
+  { text: "call b", step: stepOf("b", "echo b") },
+  "plain status row",
+  { text: "call c", step: stepOf("c", "echo c") },
+];
+check("a fresh chip takes the whole turn", turnSegmentRecords(turn, []).length === 4);
+const afterFirstChip = turnSegmentRecords(turn, [toolRecordKey(turn[0]!), toolRecordKey(turn[1]!)]);
+check(
+  "a chip after the reply owns only the steps after it",
+  afterFirstChip.length === 2 &&
+    afterFirstChip[0] === "plain status row" &&
+    afterFirstChip[1]?.step?.id === "c",
+  afterFirstChip,
+);
+check(
+  "a command repeated in the new chip is not mistaken for the earlier run",
+  turnSegmentRecords(turn, [toolRecordKey(turn[0]!)]).length === 3,
+);
+
 if (failures > 0) {
   console.log(`${failures} failed`);
   process.exit(1);
