@@ -1,6 +1,7 @@
 import { explainChatFailure, formatChatFailureLine } from "../friendly-error";
 import { t } from "../i18n";
-import { resolvePermissionSession } from "../ipc";
+import { cancelPromptSession, resolvePermissionSession } from "../ipc";
+import { consumeAllowStop, requestAllowStop, resolveChoiceAllow, shareAllow } from "./permission-allow";
 import { noteChannelAsk } from "./channel-ask";
 import {
   activityKind,
@@ -138,11 +139,23 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
           }
         }
       }
+      const allowStopped = payload.status === "cancelled" && consumeAllowStop(chatId);
+      if (allowStopped) {
+        session.messages.push({
+          id: uid(),
+          role: "meta",
+          content: t("chat.permissionAllowStopped"),
+          at: Date.now(),
+        });
+      }
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
       if (ctx.getActiveId() !== chatId) ctx.noteUnseen(chatId);
       ctx.endRun(chatId);
-      ctx.setStatus(payload.status === "succeeded" ? t("chat.doneElsewhere") : t("chat.doneElsewhere"), "ok");
+      ctx.setStatus(
+        allowStopped ? t("chat.permissionAllowStopped") : t("chat.doneElsewhere"),
+        payload.status === "succeeded" || !allowStopped ? "ok" : "warn",
+      );
       ctx.scheduleSessionListRender();
       return;
     }
@@ -222,11 +235,19 @@ function notePermission(
       ? payload.input_mode
       : "choice";
   if (inputMode === "choice" && session.autoApprove === true) {
-    void resolvePermissionSession({
-      sessionId: payload.session_id,
-      requestId: payload.request_id,
-      allow: true,
-    }).catch(() => {});
+    void resolveChoiceAllow(() =>
+      shareAllow(payload.request_id, true, () =>
+        resolvePermissionSession({
+          sessionId: payload.session_id,
+          requestId: payload.request_id,
+          allow: true,
+        }),
+      ),
+    ).catch((error) => {
+      if (/no active ask session/i.test(String(error))) return;
+      requestAllowStop(session.id);
+      void cancelPromptSession(session.id).catch(() => {});
+    });
     return;
   }
   const message: ChatMessage = {

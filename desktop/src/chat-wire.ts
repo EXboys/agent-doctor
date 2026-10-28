@@ -90,6 +90,9 @@ import {
   clearEphemeralActivity,
   appendStderrLine,
   pushActivity,
+  holdRunningForAllow,
+  releaseRunningHold,
+  stopAfterMissedAllow,
   pushToolStep,
   settleActivity,
   flushPendingTextSync,
@@ -486,6 +489,9 @@ export function wireChatControllers(): void {
     setAssistantRaw: (raw) => {
       chatState.assistantRaw = raw;
     },
+    holdForAllow: (kind) => holdRunningForAllow(kind),
+    releaseAllowHold: (text) => releaseRunningHold(text),
+    stopAfterMissedAllow: () => stopAfterMissedAllow(),
     resendBefore: (messageId) => {
       const session = chatState.store?.sessions.find((item) =>
         item.messages.some((message) => message.id === messageId),

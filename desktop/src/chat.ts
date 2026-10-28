@@ -3,6 +3,7 @@ import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
 import { HAND_MISSING_PHASE } from "./chat/format";
+import { permissionHoldKind, requestAllowStop } from "./chat/permission-allow";
 import { releaseStalePins } from "./chat/model-picker";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
@@ -136,7 +137,7 @@ import {
   looksLikeBrowserToolCall,
   withTimeoutChat,
 } from "./chat/verify";
-import { loadChatStore, openSession, removeWorkspace, saveChatStore, setWorkspaceTitle } from "./ipc";
+import { cancelPromptSession, loadChatStore, openSession, removeWorkspace, saveChatStore, setWorkspaceTitle } from "./ipc";
 
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
@@ -748,8 +749,44 @@ export function clearEphemeralActivity(dropStderr = false): void {
 export function appendStderrLine(line: string): void {
   chatState.activity.appendStderrLine(line);
 }
+export function holdRunningForAllow(kind: "allow" | "answer" | "missed" | "sending"): string {
+  const text =
+    kind === "answer"
+      ? t("chat.permissionWaitAnswer")
+      : kind === "missed"
+        ? t("chat.permissionAllowMissed")
+        : kind === "sending"
+          ? t("chat.permissionAllowSending")
+          : t("chat.permissionWaitAllow");
+  chatState.latestActivityText = text;
+  chatState.running?.setPaused(true);
+  chatState.running?.setText(text);
+  return text;
+}
+
+/** Automatic allow did not go through. Stop this turn instead of leaving it waiting. */
+export function stopAfterMissedAllow(): void {
+  const id = chatState.runningChatSessionId || chatState.store.activeId;
+  requestAllowStop(id);
+  const text = t("chat.permissionAllowStopped");
+  chatState.latestActivityText = text;
+  chatState.running?.setPaused(true);
+  chatState.running?.setText(text);
+  void cancelPromptSession(id).catch(() => {});
+}
+
+export function releaseRunningHold(text: string): void {
+  chatState.running?.setPaused(false);
+  if (!text.trim()) return;
+  chatState.latestActivityText = text.trim();
+  chatState.running?.setText(text);
+}
+
 export function pushActivity(phase: string, message: string): void {
-  if (phase !== HAND_MISSING_PHASE) {
+  if (phase === "permission") {
+    holdRunningForAllow(permissionHoldKind(message));
+  } else if (phase !== HAND_MISSING_PHASE) {
+    chatState.running?.setPaused(false);
     chatState.latestActivityText = message.trim();
     chatState.running?.setText(message);
   }

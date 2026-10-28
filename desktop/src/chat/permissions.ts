@@ -9,6 +9,7 @@ import { assistantMsgWrap, bubblePlainText } from "./copy-ui";
 import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from "./types";
 import { resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
+import { ackAllow, isAskSessionGone, resolveChoiceAllow, shareAllow } from "./permission-allow";
 
 function permissionToolLabel(name: string): string {
   const key = name.trim().toLowerCase();
@@ -52,6 +53,12 @@ export type PermissionsDeps = {
   setAssistantRaw: (raw: string) => void;
   /** Sends again the message that led to this card, or null when there is none. */
   resendBefore: (messageId: string) => (() => void) | null;
+  /** Pause the running line while a confirm is unanswered, or after an allow did not go out. */
+  holdForAllow: (kind: "allow" | "answer" | "missed" | "sending") => void;
+  /** Automatic allow failed. Stop the turn so it does not sit on the confirm. */
+  stopAfterMissedAllow: () => void;
+  /** The confirm was answered. The running line can count time again. */
+  releaseAllowHold: (text: string) => void;
 };
 
 export type PermissionsApi = ReturnType<typeof createPermissionsController>;
@@ -271,8 +278,10 @@ function renderStructuredQuestion(
 export function createPermissionsController(deps: PermissionsDeps) {
   let pendingPermissionBatch: PendingPermission[] = [];
   let permissionPaintTimer = 0;
+  const missedAllowIds = new Set<string>();
 
   function expireLivePermissionCards(): void {
+    missedAllowIds.clear();
     if (permissionPaintTimer) {
       window.clearTimeout(permissionPaintTimer);
       permissionPaintTimer = 0;
@@ -312,23 +321,27 @@ export function createPermissionsController(deps: PermissionsDeps) {
     // A running turn was started before the switch was on, so each tool still asks.
     // Allow those here. A question still needs an answer.
     if (!needsTypedReply(inputMode) && deps.runTargetSession().autoApprove === true) {
-      void resolvePermissionSession({
-        sessionId: payload.session_id,
-        requestId: payload.request_id,
-        allow: true,
-      }).catch((error) => {
-        const raw = String(error);
-        if (/no active ask session/i.test(raw)) {
+      deps.holdForAllow("sending");
+      void resolveChoiceAllow(() =>
+        shareAllow(payload.request_id, true, () =>
+          resolvePermissionSession({
+            sessionId: payload.session_id,
+            requestId: payload.request_id,
+            allow: true,
+          }),
+        ),
+      ).catch((error) => {
+        if (isAskSessionGone(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
+          deps.releaseAllowHold(t("chat.permissionSessionGone"));
           return;
         }
-        deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
-        presentPermission(payload, inputMode);
+        deps.stopAfterMissedAllow();
       });
       return;
     }
 
-    presentPermission(payload, inputMode);
+    presentPermission(payload, inputMode, false);
   }
 
   function presentPermission(
@@ -340,6 +353,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       input_json?: string;
     },
     inputMode: "choice" | "line" | "secret" | "options",
+    missed: boolean,
   ): void {
     deps.flushPendingTextSync();
     deps.sealAssistantBubble();
@@ -347,10 +361,12 @@ export function createPermissionsController(deps: PermissionsDeps) {
       deps.settleActivity();
       deps.dismissLifecycleActivity();
       scrubToolFragmentsBeforePermission(payload.detail);
-      deps.setStatus(t("chat.needYourChoice"), "warn");
+      deps.setStatus(missed ? t("chat.permissionAllowMissed") : t("chat.needYourChoice"), "warn");
+      deps.holdForAllow(missed ? "missed" : needsTypedReply(inputMode) ? "answer" : "allow");
     } else {
       deps.setStatus(t("chat.waitingPermissionElsewhere"), "warn");
     }
+    if (missed) missedAllowIds.add(payload.request_id);
     noteChannelAsk({
       chatSessionId: deps.runTargetSession().id,
       requestId: payload.request_id,
@@ -406,21 +422,27 @@ export function createPermissionsController(deps: PermissionsDeps) {
       const message = session.messages.find((entry) => entry.id === item.messageId);
       return !needsTypedReply(message?.permission?.inputMode);
     });
+    if (items.length > 0) deps.holdForAllow("sending");
     for (const item of items) {
       try {
-        await resolvePermissionSession({
-          sessionId: item.sessionId,
-          requestId: item.requestId,
-          allow: true,
-        });
+        await resolveChoiceAllow(() =>
+          shareAllow(item.requestId, true, () =>
+            resolvePermissionSession({
+              sessionId: item.sessionId,
+              requestId: item.requestId,
+              allow: true,
+            }),
+          ),
+        );
       } catch (error) {
-        const raw = String(error);
-        if (/no active ask session/i.test(raw)) {
+        if (isAskSessionGone(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
+          deps.releaseAllowHold(t("chat.permissionSessionGone"));
           expireLivePermissionCards();
           return;
         }
-        deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
+        deps.stopAfterMissedAllow();
+        return;
       }
     }
   }
@@ -485,6 +507,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       const message = deps.runTargetSession().messages.find((m) => m.id === only.messageId);
       if (message) {
         const card = renderPermissionCard(message, true);
+        if (missedAllowIds.has(only.requestId)) appendMissedHint(card);
         deps.logEl.appendChild(card);
         deps.logEl.scrollTop = deps.logEl.scrollHeight;
       }
@@ -522,20 +545,29 @@ export function createPermissionsController(deps: PermissionsDeps) {
       const items = [...pendingPermissionBatch];
       try {
         for (const item of items) {
-          await resolvePermissionSession({
-            sessionId: item.sessionId,
-            requestId: item.requestId,
-            allow,
-          });
+          await ackAllow(() =>
+            shareAllow(item.requestId, allow, () =>
+              resolvePermissionSession({
+                sessionId: item.sessionId,
+                requestId: item.requestId,
+                allow,
+              }),
+            ),
+          );
         }
       } catch (error) {
         setBusyLocal(false);
-        const raw = String(error);
-        if (/no active ask session/i.test(raw)) {
+        if (isAskSessionGone(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
+          deps.releaseAllowHold(t("chat.permissionSessionGone"));
           expireLivePermissionCards();
+        } else if (allow) {
+          for (const item of pendingPermissionBatch) missedAllowIds.add(item.requestId);
+          deps.holdForAllow("missed");
+          deps.setStatus(t("chat.permissionAllowMissed"), "warn");
+          schedulePaintLivePermissionBatch();
         } else {
-          deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
+          deps.setStatus(t("chat.permissionFailed"), "error");
         }
       }
     };
@@ -575,8 +607,18 @@ export function createPermissionsController(deps: PermissionsDeps) {
       list.appendChild(li);
     }
     card.appendChild(list);
+    if (pendingPermissionBatch.some((item) => missedAllowIds.has(item.requestId))) {
+      appendMissedHint(card);
+    }
     deps.logEl.appendChild(card);
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
+  }
+
+  function appendMissedHint(card: HTMLElement): void {
+    const hint = document.createElement("p");
+    hint.className = "chat-permission-hint chat-permission-missed";
+    hint.textContent = t("chat.permissionAllowMissed");
+    card.appendChild(hint);
   }
 
   function scrubToolFragmentsBeforePermission(detail: string): void {
@@ -748,19 +790,28 @@ export function createPermissionsController(deps: PermissionsDeps) {
         if (card.dataset.resolved === "1") return;
         setLocalBusy(true);
         try {
-          await resolvePermissionSession({
-            sessionId: meta.backendSessionId ?? "",
-            requestId: meta.requestId,
-            allow,
-          });
+          await ackAllow(() =>
+            shareAllow(meta.requestId, allow, () =>
+              resolvePermissionSession({
+                sessionId: meta.backendSessionId ?? "",
+                requestId: meta.requestId,
+                allow,
+              }),
+            ),
+          );
         } catch (error) {
           setLocalBusy(false);
-          const raw = String(error);
-          if (/no active ask session/i.test(raw)) {
+          if (isAskSessionGone(error)) {
             deps.setStatus(t("chat.permissionSessionGone"), "warn");
+            deps.releaseAllowHold(t("chat.permissionSessionGone"));
             expireLivePermissionCards();
+          } else if (allow) {
+            missedAllowIds.add(meta.requestId);
+            deps.holdForAllow("missed");
+            deps.setStatus(t("chat.permissionAllowMissed"), "warn");
+            if (!card.querySelector(".chat-permission-missed")) appendMissedHint(card);
           } else {
-            deps.setStatus(t("chat.permissionFailed", { error: raw }), "error");
+            deps.setStatus(t("chat.permissionFailed"), "error");
           }
         }
       };
@@ -990,6 +1041,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
 
     const wasInBatch = pendingPermissionBatch.some((item) => item.requestId === requestId);
     pendingPermissionBatch = pendingPermissionBatch.filter((item) => item.requestId !== requestId);
+    missedAllowIds.delete(requestId);
     const stillPending = pendingPermissionBatch.length > 0;
 
     // Always update the card in the open log if present (even if busy just cleared).
@@ -1000,6 +1052,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
       card.dataset.resolved = "1";
       card.classList.remove("is-pending", "is-expired");
       card.classList.add(allowed ? "is-allowed" : "is-denied");
+      card.querySelector(".chat-permission-missed")?.remove();
       const actions = card.querySelector(".chat-permission-actions");
       if (actions) {
         actions.replaceChildren();
@@ -1041,13 +1094,18 @@ export function createPermissionsController(deps: PermissionsDeps) {
 
     deps.hideDecisionDock();
     if (stillPending) {
-      deps.setStatus(t("chat.needYourChoice"), "warn");
+      const waitingOnMiss = pendingPermissionBatch.some((item) => missedAllowIds.has(item.requestId));
+      deps.holdForAllow(waitingOnMiss ? "missed" : "allow");
+      deps.setStatus(waitingOnMiss ? t("chat.permissionAllowMissed") : t("chat.needYourChoice"), "warn");
     } else {
       const typed = message?.permission?.inputMode === "line" || message?.permission?.inputMode === "secret" || message?.permission?.inputMode === "options";
-      deps.setStatus(
-        typed ? t("chat.inputSubmitted") : allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"),
-        "ok",
-      );
+      const line = typed
+        ? t("chat.inputSubmitted")
+        : allowed
+          ? t("chat.permissionContinuing")
+          : t("chat.permissionDenied");
+      deps.setStatus(typed ? t("chat.inputSubmitted") : allowed ? t("chat.permissionAllowed") : t("chat.permissionDenied"), "ok");
+      deps.releaseAllowHold(line);
     }
     deps.flushSessionListRender();
   }

@@ -21,13 +21,22 @@ export function createRunningIndicator(boxEl: HTMLElement) {
   const timeEl = el.querySelector<HTMLElement>(".chat-running-time")!;
   let text = "";
   let timer = 0;
+  let paused = false;
 
   function paint(): void {
     textEl.textContent = text || t("chat.runningDefault");
-    timeEl.textContent = elapsedLabel();
+    timeEl.textContent = paused ? "" : elapsedLabel();
+    el.classList.toggle("is-paused", paused);
+  }
+
+  function setPaused(on: boolean): void {
+    paused = on;
+    boxEl.classList.toggle("is-waiting-allow", on);
+    if (!el.hidden) paint();
   }
 
   function setRunning(on: boolean): void {
+    if (!on) setPaused(false);
     boxEl.classList.toggle("is-running", on);
     el.hidden = !on;
     if (on && !timer) timer = window.setInterval(paint, 1000);
@@ -45,5 +54,5 @@ export function createRunningIndicator(boxEl: HTMLElement) {
     if (!el.hidden) paint();
   }
 
-  return { setRunning, setText };
+  return { setRunning, setText, setPaused };
 }

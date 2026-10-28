@@ -4,6 +4,7 @@ import { formatChatFailureLine, type ChatFailureExplain } from "../friendly-erro
 import { getLocale, t } from "../i18n";
 import type { PlanStep } from "../plan";
 import { markTurnStarted } from "./activity";
+import { consumeAllowStop } from "./permission-allow";
 import { preferPlainSummary } from "./format";
 import {
   chatFailureBubbleAlreadyShown,
@@ -224,7 +225,13 @@ export function createStreamController(deps: StreamDeps) {
             deps.getUnseenCompletedSessionIds().add(completedSessionId);
           }
           if (payload.status === "cancelled") {
-            deps.setStatus(t("chat.forceStopped"), "warn");
+            if (consumeAllowStop(completedSessionId)) {
+              const notice = t("chat.permissionAllowStopped");
+              if (viewing) deps.appendBubble("meta", notice, { persist: true });
+              deps.setStatus(notice, "warn");
+            } else {
+              deps.setStatus(t("chat.forceStopped"), "warn");
+            }
           } else if (payload.status === "timed_out") {
             const notice = timedOutNotice(payload.timeout);
             if (viewing) {

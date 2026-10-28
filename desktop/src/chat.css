@@ -7819,6 +7819,16 @@ html[data-theme="dark"] .chat-hands-notice {
   animation: chat-running-ping 1.4s ease-out infinite;
 }
 
+.chat-composer-box.is-waiting-allow,
+.chat-composer-box.is-waiting-allow:focus-within {
+  animation: none;
+}
+
+.chat-running.is-paused .chat-running-dot::after {
+  animation: none;
+  opacity: 0;
+}
+
 @keyframes chat-running-ping {
   from {
     transform: scale(1);
