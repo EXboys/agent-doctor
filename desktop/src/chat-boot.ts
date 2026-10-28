@@ -41,6 +41,7 @@ import {
   positionModelMenu,
   openModelMenu,
   refreshWiredProvider,
+  releasePinnedProviderModels,
   flushStorePersist,
   applyI18n,
   publishActiveRuntime,
@@ -448,7 +449,8 @@ export function bootChat(): void {
   });
 
   void listen("personal-provider-changed", () => {
-    void refreshWiredProvider();
+    // Refresh first: releasing pins needs the newly active provider's id.
+    void refreshWiredProvider().then(() => releasePinnedProviderModels());
     if (runningCount() > 0) setStatus(t("chat.providerChangedMidTurn"), "warn");
   });
 

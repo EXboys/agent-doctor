@@ -63,6 +63,28 @@ export function sessionKeepsSavedService(session: ChatSession | null | undefined
   );
 }
 
+/**
+ * The main window activated another provider, and the ask window follows it.
+ * Chats pinned to a different saved service would keep quietly asking the old
+ * one, so release those pins; a pin on the newly active provider already
+ * agrees with it and stays. Returns whether anything changed.
+ */
+export function releaseStalePins(
+  sessions: Array<{ providerId?: string | null; model?: string | null; providerTag?: string | null }>,
+  activeId: string | null | undefined,
+): boolean {
+  if (!activeId) return false;
+  let touched = false;
+  for (const session of sessions) {
+    if (!session.providerId || session.providerId === activeId) continue;
+    session.providerId = null;
+    session.model = "";
+    session.providerTag = null;
+    touched = true;
+  }
+  return touched;
+}
+
 type SubscriptionCatalog = {
   models: string[];
   label: string;

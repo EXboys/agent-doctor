@@ -52,6 +52,18 @@ async function main() {
   );
   assert(waiting.replace === false && waiting.model === "deepseek-flash", "empty catalog does not clear it");
 
+  const { releaseStalePins } = await import("../src/chat/model-picker");
+  const sessions = [
+    { providerId: "minimax", model: "MiniMax-M3", providerTag: "minimax|minimax.io" },
+    { providerId: "deepseek", model: "deepseek-reasoner", providerTag: "deepseek|api.deepseek.com" },
+    { providerId: null, model: "", providerTag: null },
+  ];
+  assert(releaseStalePins(sessions, "deepseek") === true, "a switch with stale pins reports a change");
+  assert(sessions[0]?.providerId === null && sessions[0]?.model === "" && sessions[0]?.providerTag === null, "the minimax pin is released");
+  assert(sessions[1]?.providerId === "deepseek" && sessions[1]?.model === "deepseek-reasoner", "a pin on the active provider stays");
+  assert(releaseStalePins(sessions, "deepseek") === false, "a second pass finds nothing to release");
+  assert(releaseStalePins([{ providerId: "minimax", model: "MiniMax-M3" }], null) === false, "no active provider releases nothing");
+
   console.log("model-picker-subscription.test.ts ok");
 }
 

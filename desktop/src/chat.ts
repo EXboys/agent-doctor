@@ -3,6 +3,7 @@ import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
 import { HAND_MISSING_PHASE } from "./chat/format";
+import { releaseStalePins } from "./chat/model-picker";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
 import { syncAccountBarLabels } from "./chat/account-bar";
 import { syncTuneLabels } from "./chat/tune-menu";
@@ -454,6 +455,17 @@ export function openModelMenu(): void {
 }
 export async function refreshWiredProvider(): Promise<void> {
   await chatState.modelPicker.refreshWiredProvider();
+}
+
+/**
+ * The main window activated another provider: chats pinned to a different
+ * saved service are released so they follow it (see `releaseStalePins`).
+ */
+export function releasePinnedProviderModels(): void {
+  if (!releaseStalePins(chatState.store?.sessions ?? [], chatState.wiredProvider?.id)) return;
+  saveStore();
+  renderModelPickerLabel();
+  renderSessionList();
 }
 export function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: boolean }): void {
   const changed = chatState.currentRuntime !== runtime;
