@@ -675,6 +675,7 @@ export const zh = {
     "chat.checkingAgents": "正在查看已安装的 Agent…",
     "chat.noInstalledAgent": "还没有装好的 Agent。回主页装一个，再来新建会话。",
     "chat.sessionShowMore": "更多",
+    "chat.sessionDaysAgo": "{count} 天",
     "chat.sessionShowLess": "收起列表",
     "chat.sessionGroupFold": "收起该项目下的会话",
     "chat.sessionGroupExpand": "展开该项目下的会话",

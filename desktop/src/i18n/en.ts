@@ -675,6 +675,7 @@ export const en = {
     "chat.checkingAgents": "Checking installed agents…",
     "chat.noInstalledAgent": "No agent is installed yet. Install one on the home screen, then start a chat.",
     "chat.sessionShowMore": "More",
+    "chat.sessionDaysAgo": "{count}d",
     "chat.sessionShowLess": "Show less",
     "chat.sessionGroupFold": "Collapse chats in this project",
     "chat.sessionGroupExpand": "Expand chats in this project",

@@ -250,12 +250,24 @@ export function assistantMsgWrap(bubble: HTMLElement): HTMLElement {
   return msgWrap(bubble, "assistant");
 }
 
+/** Today keeps the clock time; anything older counts the days since. */
 export function formatTime(ts: number): string {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(ts));
+    const date = new Date(ts);
+    const now = new Date();
+    const sameDay =
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth() &&
+      date.getDate() === now.getDate();
+    if (sameDay) {
+      return new Intl.DateTimeFormat(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date);
+    }
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.max(1, Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000));
+    return t("chat.sessionDaysAgo", { count: String(days) });
   } catch {
     return "";
   }
