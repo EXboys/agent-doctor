@@ -9123,11 +9123,13 @@ html[data-theme="dark"] .chat-permission-deny {
   min-width: min-content;
 }
 
+/* Roomy bars show the whole model name; the wrap still shrinks (ellipsis)
+   before it can crowd the send button. */
 .chat-composer-send .chat-model-wrap {
-  flex: 0 1 120px;
+  flex: 0 1 auto;
   width: auto;
   min-width: 0;
-  max-width: 120px;
+  max-width: min(320px, 60vw);
   overflow: hidden;
 }
 
