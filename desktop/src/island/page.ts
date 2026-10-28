@@ -1,6 +1,6 @@
 import "../platform";
 import { fitTextarea } from "../fit-textarea";
-import { parseStoreRaw } from "../chat/store";
+import { applyOpenChatId, parseStoreRaw } from "../chat/store";
 import { STORAGE_KEY } from "../chat/types";
 import { applyStaticI18n, t } from "../i18n";
 import { bindLocaleSync } from "../locale-sync";
@@ -561,8 +561,9 @@ function renderPlain(raw: string): void {
 function rowsFromChat(): IslandFeedRow[] {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
-  const store = parseStoreRaw(raw);
-  if (!store) return [];
+  const parsed = parseStoreRaw(raw);
+  if (!parsed) return [];
+  const store = applyOpenChatId(parsed);
   return buildIslandRows(
     store.sessions.map((session) => ({
       id: session.id,

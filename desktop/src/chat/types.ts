@@ -172,6 +172,8 @@ export type PendingPermission = {
 };
 
 export const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
+/** Which chat is open. Kept separate so switching does not rewrite the transcript. */
+export const OPEN_CHAT_KEY = `${STORAGE_KEY}.open`;
 export const STORAGE_BACKUP_KEY = "agent-doctor.chat.sessions.v2.backup";
 export const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 export const CHAT_STORE_MAX_BYTES = 2_500_000;

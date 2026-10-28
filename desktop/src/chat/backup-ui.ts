@@ -6,6 +6,7 @@ import {
 } from "./store";
 import {
   LEGACY_STORAGE_KEY,
+  OPEN_CHAT_KEY,
   STORAGE_BACKUP_KEY,
   STORAGE_KEY,
   type ChatSession,
@@ -101,6 +102,7 @@ export function createBackupUiController(deps: BackupUiDeps) {
         const current = localStorage.getItem(STORAGE_KEY);
         if (current) backupStoreRaw(current);
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(OPEN_CHAT_KEY);
         localStorage.removeItem(LEGACY_STORAGE_KEY);
         window.location.reload();
       });

@@ -22,7 +22,7 @@ function assert(cond: boolean, msg: string) {
 }
 
 async function main() {
-  const { STORAGE_KEY } = await import("../src/chat/types");
+  const { OPEN_CHAT_KEY, STORAGE_KEY } = await import("../src/chat/types");
   const { readActiveSessionRuntime } = await import("../src/chat/store");
 
   assert(readActiveSessionRuntime() === null, "missing store");
@@ -50,6 +50,10 @@ async function main() {
     }),
   );
   assert(readActiveSessionRuntime() === null, "active id missing");
+
+  localStorage.setItem(OPEN_CHAT_KEY, "a");
+  assert(readActiveSessionRuntime() === "codex", "open-chat key wins over the blob");
+  localStorage.removeItem(OPEN_CHAT_KEY);
 
   console.log("active-session-runtime ok");
 }

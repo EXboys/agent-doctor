@@ -286,6 +286,11 @@ function withoutLogJump(work: () => void): void {
   });
 }
 
+/** Programmatic scroll should not look like the reader left the latest line. */
+export function withoutChatLogJump(work: () => void): void {
+  withoutLogJump(work);
+}
+
 /** Jump to the latest line. Opening a chat or sending a message starts here. */
 export function pinChatLog(logEl: HTMLElement): void {
   logEl.dataset.pin = "1";

@@ -81,9 +81,12 @@ function hideCard(): void {
 }
 
 function jumpTo(log: HTMLElement, id: string): void {
-  const bubble = log.querySelector<HTMLElement>(
-    `.chat-bubble.user[data-message-id="${CSS.escape(id)}"]`,
-  );
+  const selector = `.chat-bubble.user[data-message-id="${CSS.escape(id)}"]`;
+  let bubble = log.querySelector<HTMLElement>(selector);
+  if (!bubble) {
+    log.dispatchEvent(new CustomEvent("chat-flush-history"));
+    bubble = log.querySelector<HTMLElement>(selector);
+  }
   if (!bubble) return;
   bubble.scrollIntoView({ block: "start", behavior: "smooth" });
   highlighted?.classList.remove(HIGHLIGHT);

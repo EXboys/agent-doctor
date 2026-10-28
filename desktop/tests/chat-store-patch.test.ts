@@ -2,7 +2,7 @@
  * Run from desktop/: node --import tsx tests/chat-store-patch.test.ts
  */
 import type { ChatMessage, ChatSession, SessionStore } from "../src/chat/types";
-import { diffChatWrite, memoryFromStore } from "../src/chat/store-patch";
+import { chatBodyStamp, diffChatWrite, memoryFromStore } from "../src/chat/store-patch";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -58,3 +58,10 @@ assert(tail?.sessions[0].fromSeq === 1 && tail.sessions[0].messages[0].content =
 const removed = store("b", [session("b", 2, [message("b1", "user", "别动", 1)], "旁边")]);
 const deletion = diffChatWrite(removed, remembered).patch;
 assert(deletion?.deletedIds.includes("a") && deletion.sessions.length === 0, "a removed chat is a delete, not a rewrite");
+
+const openA = chatBodyStamp(base);
+const openB = chatBodyStamp(store("b", base.sessions));
+assert(openA === openB, "which chat is open is not part of the transcript stamp");
+const edited = base.sessions[0]!.messages[0]!;
+edited.content = "你好！";
+assert(chatBodyStamp(base) !== openA, "editing a line changes the transcript stamp");

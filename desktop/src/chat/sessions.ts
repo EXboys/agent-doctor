@@ -793,6 +793,45 @@ export function createSessionsController(deps: SessionsDeps) {
       ?.scrollIntoView({ block: "nearest" });
   }
 
+  function refreshSessionRowFace(row: HTMLElement, session: ChatSession): void {
+    const isRunning = isChatRunning(session.id);
+    const awaitingConfirm =
+      isRunning &&
+      (session.id === deps.getStore().activeId
+        ? deps.getPendingPermissionBatch().length > 0
+        : backgroundChoiceCount(session.id) > 0);
+    const doneUnseen = !isRunning && deps.getUnseenCompletedSessionIds().has(session.id);
+    row.classList.toggle("is-active", session.id === deps.getStore().activeId);
+    row.classList.toggle("is-awaiting-confirm", awaitingConfirm);
+    row.classList.toggle("is-running", isRunning && !awaitingConfirm);
+    row.classList.toggle("is-done-unseen", doneUnseen);
+    const metaText = sessionMetaLine(session, isRunning, awaitingConfirm, doneUnseen);
+    const meta = row.querySelector(".chat-session-meta");
+    if (meta) meta.textContent = metaText;
+    const agent = row.querySelector(".chat-session-agent");
+    if (agent) {
+      agent.textContent =
+        awaitingConfirm || isRunning || doneUnseen ? metaText : runtimeDisplayName(session.runtime);
+    }
+    const when = row.querySelector(".chat-session-when");
+    if (when) when.textContent = awaitingConfirm || isRunning || doneUnseen ? "…" : formatTime(session.updatedAt);
+  }
+
+  /** Move the open mark onto a row that is already on screen. False when the list must be rebuilt. */
+  function markSessionOpen(id: string): boolean {
+    if (renamingSessionId) return false;
+    const next = deps.sessionListEl.querySelector<HTMLElement>(
+      `.chat-session[data-session-id="${CSS.escape(id)}"]`,
+    );
+    if (!next) return false;
+    const sessions = deps.getStore().sessions;
+    for (const row of deps.sessionListEl.querySelectorAll<HTMLElement>(".chat-session")) {
+      const session = sessions.find((item) => item.id === row.dataset.sessionId);
+      if (session) refreshSessionRowFace(row, session);
+    }
+    return sessions.some((item) => item.id === id);
+  }
+
   function switchSession(id: string, focus = true): void {
     const hadOverlay = leaveChatOverlayPages();
     closeChatSettings();
@@ -827,12 +866,13 @@ export function createSessionsController(deps: SessionsDeps) {
     }
 
     deps.getStore().activeId = id;
-    deps.saveStore();
     deps.setCurrentRuntime(session.runtime);
     if (deps.getUnseenCompletedSessionIds().delete(id)) {
       // Opened after finishing elsewhere — clear 【完成】 badge.
     }
+    if (!markSessionOpen(id)) renderSessionList();
     deps.renderActiveMessages();
+    deps.saveStore();
     void syncSubagentNames(sessionWorkspaceName(session, deps.getWorkspaceDoc()) ?? "");
     if (enteringRunning) {
       deps.restoreRunningView();
@@ -844,7 +884,6 @@ export function createSessionsController(deps: SessionsDeps) {
     }
     deps.syncComposerUi();
     deps.syncSessionWorkspaceUi();
-    renderSessionList();
     deps.titleEl.textContent = deps.sessionTitle(session);
     deps.updateContextMeter();
     if (focus) deps.promptEl.focus();

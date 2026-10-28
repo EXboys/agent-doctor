@@ -625,13 +625,23 @@ fn classify_command(step: &mut ToolStep) {
         }
     }
     segments.push(&words[start..]);
-    let segments: Vec<&[String]> = segments
-        .into_iter()
-        .filter(|s| !s.is_empty() && s[0] != "cd")
-        .collect();
+    // `cd /tmp && cat > lat.sh` writes /tmp/lat.sh. A bare name would be
+    // looked up in the project and the click would appear to do nothing.
+    let mut cwd = String::new();
+    let mut actions: Vec<(String, &[String])> = Vec::new();
+    for seg in segments {
+        if seg.is_empty() {
+            continue;
+        }
+        if seg[0] == "cd" {
+            note_cd(&mut cwd, seg);
+            continue;
+        }
+        actions.push((cwd.clone(), seg));
+    }
 
     let written = heredoc_lines(&command);
-    for seg in &segments {
+    for (dir, seg) in &actions {
         let echoed: Vec<String> = match seg[0].as_str() {
             "echo" | "printf" => seg[1..]
                 .iter()
@@ -689,13 +699,13 @@ fn classify_command(step: &mut ToolStep) {
         }
         if let Some((kind, path)) = found {
             step.kind = kind.into();
-            step.path = path;
+            step.path = place_in_dir(dir, &path);
             step.additions = added.len() as u64;
             step.added_lines = added;
             return;
         }
     }
-    for seg in &segments {
+    for (dir, seg) in &actions {
         let cmd = seg[0].as_str();
         let has_redirect = seg.iter().any(|w| w.contains('>') || w.starts_with('<'));
         if matches!(
@@ -705,12 +715,12 @@ fn classify_command(step: &mut ToolStep) {
         {
             if let Some(path) = seg[1..].iter().rev().find_map(|w| file_word(w)) {
                 step.kind = "read".into();
-                step.path = path;
+                step.path = place_in_dir(dir, &path);
                 return;
             }
         }
     }
-    if let Some(seg) = segments.first() {
+    if let Some((_, seg)) = actions.first() {
         if matches!(
             seg[0].as_str(),
             "curl" | "wget" | "rg" | "grep" | "egrep" | "find" | "fd" | "ag"
@@ -718,6 +728,48 @@ fn classify_command(step: &mut ToolStep) {
             step.kind = "search".into();
         }
     }
+}
+
+/// The directory a leading `cd` established, when that directory is absolute.
+fn note_cd(dir: &mut String, words: &[String]) {
+    let Some(target) = words.get(1) else {
+        return;
+    };
+    let target = target.trim_matches(|c| c == '"' || c == '\'');
+    if target.is_empty() || target.starts_with('$') {
+        return;
+    }
+    if target.starts_with('/') || target.starts_with("~/") {
+        *dir = target.to_string();
+        return;
+    }
+    if !(dir.starts_with('/') || dir.starts_with("~/")) {
+        return;
+    }
+    let base = dir.trim_end_matches('/');
+    let rest = target.trim_start_matches("./");
+    if rest == ".." {
+        *dir = match base.rfind('/') {
+            Some(0) | None => "/".to_string(),
+            Some(cut) => base[..cut].to_string(),
+        };
+    } else if rest != "." && !rest.is_empty() {
+        *dir = format!("{base}/{rest}");
+    }
+}
+
+fn place_in_dir(dir: &str, path: &str) -> String {
+    if path.starts_with('/') || path.starts_with("~/") || dir.is_empty() {
+        return path.to_string();
+    }
+    if !(dir.starts_with('/') || dir.starts_with("~/")) {
+        return path.to_string();
+    }
+    format!(
+        "{}/{}",
+        dir.trim_end_matches('/'),
+        path.trim_start_matches("./")
+    )
 }
 
 #[cfg(test)]
@@ -748,7 +800,13 @@ mod tests {
         let step = bash("cd /repo && head -n 20 src/chat.ts | grep foo");
         assert_eq!(
             (step.kind.as_str(), step.path.as_str()),
-            ("read", "src/chat.ts")
+            ("read", "/repo/src/chat.ts")
+        );
+
+        let step = bash("cd /tmp && cat > lat_test.sh <<'EOF'\nline\nEOF");
+        assert_eq!(
+            (step.kind.as_str(), step.path.as_str()),
+            ("write", "/tmp/lat_test.sh")
         );
 
         let step = bash("sed -i '' 's/a/b/' notes.md");

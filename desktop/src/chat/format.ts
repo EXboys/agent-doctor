@@ -413,6 +413,36 @@ function shellPath(raw: string): string {
   return looksLikeFile ? path : "";
 }
 
+/** `cd /tmp && cat > lat.sh` names /tmp/lat.sh. A bare name is not in the project. */
+function placeInShellDir(line: string, path: string): string {
+  if (!path || path.startsWith("/") || path.startsWith("~/")) return path;
+  const at = line.lastIndexOf(path);
+  const before = at < 0 ? line.length : at;
+  let dir = "";
+  const cd = /(?:^|&&|\|\||;)\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;|&]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = cd.exec(line))) {
+    if (match.index >= before) break;
+    const target = match[1] || match[2] || match[3] || "";
+    if (!target || target.startsWith("$")) continue;
+    if (target.startsWith("/") || target.startsWith("~/")) {
+      dir = target;
+      continue;
+    }
+    if (!(dir.startsWith("/") || dir.startsWith("~/"))) continue;
+    const base = dir.replace(/\/+$/, "");
+    const rest = target.replace(/^\.\//, "");
+    if (rest === "..") {
+      const cut = base.lastIndexOf("/");
+      dir = cut <= 0 ? "/" : base.slice(0, cut);
+    } else if (rest !== ".") {
+      dir = `${base}/${rest}`;
+    }
+  }
+  if (!(dir.startsWith("/") || dir.startsWith("~/"))) return path;
+  return `${dir.replace(/\/+$/, "")}/${path.replace(/^\.\//, "")}`;
+}
+
 function heredocLines(command: string): string[] {
   const start = command.match(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n/);
   if (!start || start.index == null) return [];
@@ -439,7 +469,7 @@ function shellFileAction(
     ["read", new RegExp(String.raw`\b(?:cat|head|tail|less|more|wc|nl|stat|md5|md5sum)\s+(?:-\S+\s+)*${SHELL_PATH}`)],
   ];
   for (const [kind, pattern] of tries) {
-    const path = shellPath(first.match(pattern)?.[1] ?? "");
+    const path = placeInShellDir(first, shellPath(first.match(pattern)?.[1] ?? ""));
     if (path) return { kind, path, added: kind === "read" ? [] : written };
   }
   return null;
@@ -938,7 +968,7 @@ export function stepActivityInfo(step: ToolStep): ToolActivityInfo {
   const kind = STEP_KINDS.includes(step.kind as ToolActivityKind)
     ? (step.kind as ToolActivityKind)
     : "other";
-  const path = step.path?.trim() ?? "";
+  const path = placeInShellDir(step.command ?? "", step.path?.trim() ?? "");
   const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
   const lineStart = step.line_start ?? 0;
   const lineEnd = step.line_end ?? lineStart;

@@ -18,7 +18,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
-import { followChatLog, pinChatLog, renderToolHistoryGroup } from "./activity";
+import { followChatLog, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, storeToolStep } from "./tool-records";
@@ -29,9 +29,11 @@ import {
   bubblePlainText,
   createCopyActionButton,
   enhanceCodeBlocks,
+  releaseDeferredHighlights,
   renderAttachmentStrip,
   syncMessageCopyActions,
 } from "./copy-ui";
+import { HISTORY_BATCH, historyRenderCut, messageContinuesRun } from "./history-window";
 import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
 import { paintReplyAge, refreshReplyAges } from "./reply-age";
 import { mountReplyChangeCard } from "./reply-changes";
@@ -97,13 +99,30 @@ export type BubblesDeps = {
 
 export type BubblesApi = ReturnType<typeof createBubblesController>;
 
+const STREAM_PAINT_MIN_MS = 80;
+const STREAM_HEAVY_CHARS = 2_500;
+
 export function createBubblesController(deps: BubblesDeps) {
   let flushRaf = 0;
+  let streamPaintTimer = 0;
+  let streamPaintAt = 0;
+  let historyToken = 0;
+  let historyFrame = 0;
+  let historyJob: {
+    token: number;
+    messages: ChatMessage[];
+    covered: { hidden: Set<number>; failedLogs: Set<number> };
+    cursor: number;
+    sessionRuntime: ChatSession["runtime"];
+  } | null = null;
   const refreshAges = () => refreshReplyAges(deps.logEl);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") refreshAges();
   });
   window.setInterval(refreshAges, 30_000);
+  deps.logEl.addEventListener("chat-flush-history", () => {
+    flushPendingHistory();
+  });
 
   function flushPendingTextSync(): void {
     if (flushRaf) {
@@ -116,9 +135,20 @@ export function createBubblesController(deps: BubblesDeps) {
     appendAssistantChunk(chunk);
   }
   function sealAssistantBubble(): void {
+    if (streamPaintTimer) {
+      window.clearTimeout(streamPaintTimer);
+      streamPaintTimer = 0;
+    }
     if (!deps.getAssistantMessageId() && !deps.getAssistantBubble()) {
       deps.setAssistantRaw("");
       return;
+    }
+    if (deps.getAssistantBubble()?.isConnected && deps.getAssistantRaw().trim()) {
+      const raw = deps.getAssistantRaw();
+      setAssistantMarkdown(deps.getAssistantBubble()!, raw, {
+        deferHighlight: raw.length > STREAM_HEAVY_CHARS,
+        skipCopySync: true,
+      });
     }
     if (deps.getAssistantBubble()?.isConnected) {
       deps.getAssistantBubble()!.classList.remove("is-streaming");
@@ -212,9 +242,31 @@ export function createBubblesController(deps: BubblesDeps) {
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);
-    setAssistantMarkdown(bubble, deps.getAssistantRaw());
+    paintStreamingMarkdown(bubble);
     syncReplyChangeCard();
     followChatLog(deps.logEl);
+  }
+  function paintStreamingMarkdown(bubble: HTMLElement): void {
+    const markdown = deps.getAssistantRaw();
+    const heavy = markdown.length > STREAM_HEAVY_CHARS;
+    const now = performance.now();
+    if (heavy && now - streamPaintAt < STREAM_PAINT_MIN_MS) {
+      if (!streamPaintTimer) {
+        streamPaintTimer = window.setTimeout(() => {
+          streamPaintTimer = 0;
+          const live = deps.getAssistantBubble();
+          if (!live?.isConnected) return;
+          streamPaintAt = performance.now();
+          const raw = deps.getAssistantRaw();
+          setAssistantMarkdown(live, raw, { deferHighlight: true, skipCopySync: true });
+          syncReplyChangeCard();
+          followChatLog(deps.logEl);
+        }, STREAM_PAINT_MIN_MS);
+      }
+      return;
+    }
+    streamPaintAt = now;
+    setAssistantMarkdown(bubble, markdown, { deferHighlight: heavy, skipCopySync: true });
   }
   function persistMessage(
     role: ChatRole,
@@ -465,13 +517,17 @@ export function createBubblesController(deps: BubblesDeps) {
     syncMessageCopyActions(wrap, bubble, false, getText());
     return { wrap, bubble };
   }
-  function setAssistantMarkdown(bubble: HTMLElement, markdown: string): void {
+  function setAssistantMarkdown(
+    bubble: HTMLElement,
+    markdown: string,
+    opts?: { deferHighlight?: boolean; skipCopySync?: boolean },
+  ): void {
     bubble.innerHTML = markdown.trim() ? renderMarkdown(markdown) : "";
     if (markdown.trim()) {
-      enhanceCodeBlocks(bubble);
+      enhanceCodeBlocks(bubble, { defer: opts?.deferHighlight });
       linkFileMentions(bubble);
     }
-    syncAssistantCopyButton(bubble);
+    if (!opts?.skipCopySync) syncAssistantCopyButton(bubble);
   }
   function appendBubble(
     kind: ChatRole,
@@ -552,7 +608,225 @@ export function createBubblesController(deps: BubblesDeps) {
     return wrap;
   }
 
+  function cancelHistoryPaint(): void {
+    historyToken += 1;
+    historyJob = null;
+    if (historyFrame) {
+      window.cancelAnimationFrame(historyFrame);
+      historyFrame = 0;
+    }
+  }
+  function prependKeepingScroll(nodes: HTMLElement[]): void {
+    if (nodes.length === 0) return;
+    const log = deps.logEl;
+    for (const node of nodes) node.style.setProperty("content-visibility", "visible");
+    const pinned = log.dataset.pin !== "0";
+    const before = log.scrollHeight;
+    const top = log.scrollTop;
+    withoutChatLogJump(() => {
+      log.prepend(...nodes);
+      const delta = log.scrollHeight - before;
+      log.scrollTop = pinned ? log.scrollHeight : top + Math.max(0, delta);
+    });
+    window.requestAnimationFrame(() => {
+      for (const node of nodes) {
+        if (node.isConnected) node.style.removeProperty("content-visibility");
+      }
+    });
+  }
+  function mountHistoryBatch(): boolean {
+    const job = historyJob;
+    if (!job || job.token !== historyToken || job.cursor <= 0) return false;
+    const end = job.cursor;
+    let start = Math.max(0, end - HISTORY_BATCH);
+    while (start > 0 && messageContinuesRun(job.messages, start)) start -= 1;
+    const bucket = document.createElement("div");
+    renderMessageRange(job.messages, start, end, bucket, job.covered, job.sessionRuntime);
+    prependKeepingScroll(Array.from(bucket.children) as HTMLElement[]);
+    job.cursor = start;
+    return start > 0;
+  }
+  function flushPendingHistory(): void {
+    if (!historyJob || historyJob.token !== historyToken) return;
+    try {
+      while (mountHistoryBatch()) {
+        // Keep going until the older rows exist, so a question jump can find its bubble.
+      }
+    } catch (error) {
+      console.error("Ask: failed to render earlier messages", error);
+    }
+    if (historyJob?.token === historyToken) {
+      historyJob = null;
+      syncTurnCopyButtons();
+    }
+  }
+  function pumpHistory(): void {
+    historyFrame = 0;
+    if (!historyJob || historyJob.token !== historyToken) return;
+    const started = performance.now();
+    try {
+      let more = true;
+      do {
+        more = mountHistoryBatch();
+      } while (more && performance.now() - started < 12);
+      if (more && historyJob?.token === historyToken) {
+        historyFrame = window.requestAnimationFrame(pumpHistory);
+        return;
+      }
+    } catch (error) {
+      console.error("Ask: failed to render earlier messages", error);
+      historyJob = null;
+      return;
+    }
+    if (historyJob?.token === historyToken) {
+      historyJob = null;
+      syncTurnCopyButtons();
+    }
+  }
+  function renderMessageRange(
+    messages: ChatMessage[],
+    start: number,
+    end: number,
+    target: HTMLElement,
+    covered: { hidden: Set<number>; failedLogs: Set<number> },
+    runtime: ChatSession["runtime"],
+  ): void {
+    for (let i = start; i < end; ) {
+      const message = messages[i];
+      if (message.role === "tool" || message.role === "thinking") {
+        const rows: HTMLElement[] = [];
+        while (i < end) {
+          const current = messages[i];
+          if (current.role === "tool") {
+            const run: ChatMessage[] = [current];
+            while (i + run.length < end && messages[i + run.length].role === "tool") {
+              run.push(messages[i + run.length]);
+            }
+            rows.push(
+              renderToolHistoryGroup(
+                run.map((item) =>
+                  item.step || item.skippedTools
+                    ? { text: item.content, step: item.step, skipped: item.skippedTools }
+                    : item.content,
+                ),
+              ),
+            );
+            i += run.length;
+            continue;
+          }
+          if (current.role === "thinking") {
+            if (current.content.trim()) {
+              rows.push(renderThinkingBlock(current.content, { id: current.id }));
+            }
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        const live = deps.getBusy() && deps.isViewingRunningSession() && i >= messages.length;
+        if (live) {
+          const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
+          if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
+          const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
+          if (lastThink instanceof HTMLDetailsElement) markThinkingLive(lastThink);
+        }
+        if (rows.length === 1) target.appendChild(rows[0]);
+        else if (rows.length > 1) target.appendChild(wrapProcessRows(rows, live));
+        continue;
+      }
+      if (message.role === "permission") {
+        const pendingLive =
+          deps.isViewingRunningSession() &&
+          message.permission?.allowed == null &&
+          deps.getPendingPermissionBatch().some((p) => p.requestId === message.permission?.requestId);
+        if (pendingLive) {
+          i += 1;
+          continue;
+        }
+        // Unanswered asks stay as standalone cards — never fold into "$ N tools".
+        if (message.permission?.allowed == null) {
+          const needsReply =
+            message.permission?.inputMode === "line" ||
+            message.permission?.inputMode === "secret" ||
+            message.permission?.inputMode === "options";
+          target.appendChild(deps.renderPermissionCard(message, needsReply));
+          i += 1;
+          continue;
+        }
+        const run: ChatMessage[] = [message];
+        while (i + run.length < end && messages[i + run.length].role === "permission") {
+          const next = messages[i + run.length];
+          if (next.permission?.allowed == null) break;
+          const nextPending =
+            deps.isViewingRunningSession() &&
+            deps.getPendingPermissionBatch().some((p) => p.requestId === next.permission?.requestId);
+          if (nextPending) break;
+          run.push(next);
+        }
+        if (run.length >= 2) {
+          try {
+            target.appendChild(deps.renderPermissionGroup(run, false));
+          } catch {
+            for (const item of run) target.appendChild(deps.renderPermissionCard(item, false));
+          }
+        } else {
+          target.appendChild(deps.renderPermissionCard(message, false));
+        }
+        i += run.length;
+        continue;
+      }
+      if (message.role === "assistant") {
+        const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
+        const liveContent =
+          deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()
+            ? deps.getAssistantRaw()
+            : message.content;
+        const streaming = Boolean(deps.getBusy() && message.id === deps.getAssistantMessageId());
+        if (streaming) {
+          bubble.classList.add("is-streaming");
+          deps.setAssistantBubble(bubble);
+        }
+        setAssistantMarkdown(bubble, liveContent, { deferHighlight: true, skipCopySync: true });
+        syncAssistantTime(bubble, message.at, streaming);
+        target.appendChild(wrap);
+      } else if (message.role === "user") {
+        const { wrap } = createUserBubbleEl({
+          id: message.id,
+          text: message.content,
+          attachments: message.attachments,
+        });
+        target.appendChild(wrap);
+      } else if (covered.hidden.has(i)) {
+        i += 1;
+        continue;
+      } else if (isLogMessage(message)) {
+        const failed = covered.failedLogs.has(i);
+        const row = appendRunLog(
+          target,
+          message.content,
+          failed ? runLogFailureLabel(message.content, runtime) : undefined,
+        );
+        if (failed && row) deps.attachRunLogFailure?.(row, message.content);
+      } else {
+        const bubble = document.createElement("div");
+        bubble.className = `chat-bubble ${message.role}`;
+        bubble.dataset.messageId = message.id;
+        const shown = isRunLogPointer(message.content) ? agentFailedLine(runtime) : message.content;
+        if (!mountFailedCommand(bubble, shown)) bubble.textContent = shown;
+        const strip = renderAttachmentStrip(message.attachments);
+        if (strip) bubble.appendChild(strip);
+        target.appendChild(bubble);
+      }
+      i += 1;
+    }
+  }
   function renderActiveMessages(): void {
+    cancelHistoryPaint();
+    if (streamPaintTimer) {
+      window.clearTimeout(streamPaintTimer);
+      streamPaintTimer = 0;
+    }
+    releaseDeferredHighlights(deps.logEl);
     const previous = Array.from(deps.logEl.childNodes);
     try {
       if (stripContextCompactSummaries(deps.getStore())) deps.saveStore();
@@ -576,148 +850,24 @@ export function createBubblesController(deps: BubblesDeps) {
       }
       const messages = placeToolsBeforeReply(session.messages);
       const covered = coveredRunLogPointers(messages);
-      for (let i = 0; i < messages.length; ) {
-        const message = messages[i];
-        if (message.role === "tool" || message.role === "thinking") {
-          const rows: HTMLElement[] = [];
-          while (i < messages.length) {
-            const current = messages[i];
-            if (current.role === "tool") {
-              const run: ChatMessage[] = [current];
-              while (i + run.length < messages.length && messages[i + run.length].role === "tool") {
-                run.push(messages[i + run.length]);
-              }
-              rows.push(
-                renderToolHistoryGroup(
-                  run.map((item) =>
-                    item.step || item.skippedTools
-                      ? { text: item.content, step: item.step, skipped: item.skippedTools }
-                      : item.content,
-                  ),
-                ),
-              );
-              i += run.length;
-              continue;
-            }
-            if (current.role === "thinking") {
-              if (current.content.trim()) {
-                rows.push(renderThinkingBlock(current.content, { id: current.id }));
-              }
-              i += 1;
-              continue;
-            }
-            break;
-          }
-          const live =
-            deps.getBusy() && deps.isViewingRunningSession() && i >= messages.length;
-          if (live) {
-            const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
-            if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
-            const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
-            if (lastThink instanceof HTMLDetailsElement) markThinkingLive(lastThink);
-          }
-          if (rows.length === 1) deps.logEl.appendChild(rows[0]);
-          else if (rows.length > 1) deps.logEl.appendChild(wrapProcessRows(rows, live));
-          continue;
-        }
-        if (message.role === "permission") {
-          const pendingLive =
-            deps.isViewingRunningSession() &&
-            message.permission?.allowed == null &&
-            deps.getPendingPermissionBatch().some((p) => p.requestId === message.permission?.requestId);
-          if (pendingLive) {
-            i += 1;
-            continue;
-          }
-          // Unanswered asks stay as standalone cards — never fold into "$ N tools".
-          if (message.permission?.allowed == null) {
-            const needsReply =
-              message.permission?.inputMode === "line" ||
-              message.permission?.inputMode === "secret" ||
-              message.permission?.inputMode === "options";
-            deps.logEl.appendChild(deps.renderPermissionCard(message, needsReply));
-            i += 1;
-            continue;
-          }
-          const run: ChatMessage[] = [message];
-          while (
-            i + run.length < messages.length &&
-            messages[i + run.length].role === "permission"
-          ) {
-            const next = messages[i + run.length];
-            if (next.permission?.allowed == null) break;
-            const nextPending =
-              deps.isViewingRunningSession() &&
-              deps.getPendingPermissionBatch().some((p) => p.requestId === next.permission?.requestId);
-            if (nextPending) break;
-            run.push(next);
-          }
-          if (run.length >= 2) {
-            try {
-              deps.logEl.appendChild(deps.renderPermissionGroup(run, false));
-            } catch {
-              for (const item of run) {
-                deps.logEl.appendChild(deps.renderPermissionCard(item, false));
-              }
-            }
-          } else {
-            deps.logEl.appendChild(deps.renderPermissionCard(message, false));
-          }
-          i += run.length;
-          continue;
-        }
-        if (message.role === "assistant") {
-          const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
-          const liveContent =
-            deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()
-              ? deps.getAssistantRaw()
-              : message.content;
-          const streaming = Boolean(deps.getBusy() && message.id === deps.getAssistantMessageId());
-          if (streaming) {
-            bubble.classList.add("is-streaming");
-            deps.setAssistantBubble(bubble);
-          }
-          setAssistantMarkdown(bubble, liveContent);
-          syncAssistantTime(bubble, message.at, streaming);
-          deps.logEl.appendChild(wrap);
-        } else if (message.role === "user") {
-          const { wrap } = createUserBubbleEl({
-            id: message.id,
-            text: message.content,
-            attachments: message.attachments,
-          });
-          deps.logEl.appendChild(wrap);
-        } else if (covered.hidden.has(i)) {
-          i += 1;
-          continue;
-        } else if (isLogMessage(message)) {
-          const failed = covered.failedLogs.has(i);
-          const row = appendRunLog(
-            deps.logEl,
-            message.content,
-            failed ? runLogFailureLabel(message.content, session.runtime) : undefined,
-          );
-          if (failed && row) deps.attachRunLogFailure?.(row, message.content);
-        } else {
-          const bubble = document.createElement("div");
-          bubble.className = `chat-bubble ${message.role}`;
-          bubble.dataset.messageId = message.id;
-          const shown = isRunLogPointer(message.content)
-            ? agentFailedLine(session.runtime)
-            : message.content;
-          if (!mountFailedCommand(bubble, shown)) bubble.textContent = shown;
-          const strip = renderAttachmentStrip(message.attachments);
-          if (strip) bubble.appendChild(strip);
-          deps.logEl.appendChild(bubble);
-        }
-        i += 1;
-      }
+      const cut = historyRenderCut(messages);
+      renderMessageRange(messages, cut, messages.length, deps.logEl, covered, session.runtime);
       syncReplyChangeCard();
       syncTurnCopyButtons();
       paintChatPlan(deps.logEl, session.plan);
       pinChatLog(deps.logEl);
       syncQuestionRail(session.messages, deps.logEl);
       deps.updateContextMeter();
+      if (cut > 0) {
+        historyJob = {
+          token: historyToken,
+          messages,
+          covered,
+          cursor: cut,
+          sessionRuntime: session.runtime,
+        };
+        historyFrame = window.requestAnimationFrame(pumpHistory);
+      }
     } catch (error) {
       console.error("Ask: failed to render messages", error);
       if (previous.length > 0) {

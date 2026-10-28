@@ -50,6 +50,16 @@ const write = stepActivityInfo({
 check("a terminal write shows the file, not the command", write.kind === "write" && write.target === "test_demo.txt", write);
 check("the file stays clickable", write.path === "/tmp/test_demo.txt");
 
+const tmpWrite = stepActivityInfo({
+  id: "tmp",
+  kind: "write",
+  status: "done",
+  path: "lat_test.sh",
+  command: "cd /tmp && cat > lat_test.sh <<'EOF'",
+  additions: 14,
+});
+check("a file written after cd keeps that directory", tmpWrite.path === "/tmp/lat_test.sh", tmpWrite);
+
 const read = stepActivityInfo({ id: "r", kind: "read", status: "done", path: "src/send.ts", line_start: 330, line_end: 409 });
 check("a read names its lines", read.target.includes("send.ts") && read.target.includes("330"), read);
 

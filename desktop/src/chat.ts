@@ -126,7 +126,7 @@ import {
   stripContextCompactSummaries,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
-import { diffChatWrite, memoryFromStore, type ChatWriteMemory } from "./chat/store-patch";
+import { chatBodyStamp, diffChatWrite, memoryFromStore, type ChatWriteMemory } from "./chat/store-patch";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
   contextUsagePercent as contextUsagePercentBase,
@@ -147,6 +147,8 @@ let durableSaveWarned = false;
 let durablePending: SessionStore | null = null;
 let durableDrain: Promise<void> | null = null;
 let chatWriteMemory: ChatWriteMemory | null = null;
+/** Body stamp of the last successful database write. An open-chat change skips the transcript diff. */
+let durableBodyStamp = "";
 
 export function saveStore(): void {
   try {
@@ -173,15 +175,43 @@ async function drainDurableWrites(): Promise<void> {
   while (durablePending) {
     const snapshot = durablePending;
     durablePending = null;
+    const stamp = chatBodyStamp(snapshot);
+    if (chatWriteMemory && stamp === durableBodyStamp) {
+      if (chatWriteMemory.activeId === snapshot.activeId) continue;
+      const order = snapshot.sessions.map((session) => session.id);
+      try {
+        await saveChatStore(
+          JSON.stringify({
+            v: 2,
+            activeId: snapshot.activeId,
+            order,
+            deletedIds: [],
+            sessions: [],
+          }),
+        );
+        chatWriteMemory = { ...chatWriteMemory, activeId: snapshot.activeId, order };
+        durableSaveWarned = false;
+      } catch (error) {
+        console.warn("Ask: chat db save failed", error);
+        if (!durableSaveWarned) {
+          durableSaveWarned = true;
+          setStatus(t("chat.historySaveFailed"), "warn");
+        }
+        if (!durablePending) break;
+      }
+      continue;
+    }
     const projected = chatStoreForDisk(snapshot);
     const diff = diffChatWrite(projected, chatWriteMemory);
     if (!diff.patch) {
       chatWriteMemory = diff.next;
+      durableBodyStamp = stamp;
       continue;
     }
     try {
       await saveChatStore(JSON.stringify(diff.patch));
       chatWriteMemory = diff.next;
+      durableBodyStamp = stamp;
       durableSaveWarned = false;
     } catch (error) {
       console.warn("Ask: chat db save failed", error);

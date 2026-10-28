@@ -187,15 +187,59 @@ function bindCodeBlockWheel(pre: HTMLElement): void {
   );
 }
 
-export function enhanceCodeBlocks(root: HTMLElement): void {
+let pendingCodeObserver: IntersectionObserver | null = null;
+
+function highlightWrappedCode(wrap: HTMLElement): void {
+  if (wrap.dataset.highlighted === "1") return;
+  const code = wrap.querySelector("pre code");
+  const language = wrap.dataset.language ?? "";
+  if (code && language && !isPlainFenceLanguage(language)) {
+    code.innerHTML = highlightCode(code.textContent ?? "", language);
+  }
+  wrap.dataset.highlighted = "1";
+  delete wrap.dataset.highlightPending;
+}
+
+function codeHighlightObserver(): IntersectionObserver | null {
+  if (typeof IntersectionObserver !== "function") return null;
+  if (!pendingCodeObserver) {
+    pendingCodeObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const wrap = entry.target;
+          if (!(wrap instanceof HTMLElement)) continue;
+          if (!wrap.isConnected || !entry.isIntersecting) {
+            if (!wrap.isConnected) pendingCodeObserver?.unobserve(wrap);
+            continue;
+          }
+          pendingCodeObserver?.unobserve(wrap);
+          highlightWrappedCode(wrap);
+        }
+      },
+      { root: null, rootMargin: "800px 0px" },
+    );
+  }
+  return pendingCodeObserver;
+}
+
+/** Drop highlight watches inside a log that is about to be rebuilt. */
+export function releaseDeferredHighlights(root: HTMLElement): void {
+  if (!pendingCodeObserver) return;
+  for (const wrap of root.querySelectorAll<HTMLElement>("[data-highlight-pending]")) {
+    pendingCodeObserver.unobserve(wrap);
+  }
+}
+
+export function enhanceCodeBlocks(root: HTMLElement, opts?: { defer?: boolean }): void {
+  const defer = opts?.defer === true;
   for (const pre of Array.from(root.querySelectorAll("pre"))) {
     if (pre.parentElement?.classList.contains("chat-code-block")) continue;
     const code = pre.querySelector("code");
     const language = fenceLanguage(pre);
     const plain = isPlainFenceLanguage(language);
-    if (!plain && code) code.innerHTML = highlightCode(code.textContent ?? "", language);
     const wrap = document.createElement("div");
     wrap.className = plain ? "chat-code-block is-plain" : "chat-code-block is-source";
+    if (!plain) wrap.dataset.language = language;
     pre.replaceWith(wrap);
 
     const bar = document.createElement("div");
@@ -209,13 +253,21 @@ export function enhanceCodeBlocks(root: HTMLElement): void {
     setCopyButtonState(btn, "idle", "code");
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
-      const code = pre.querySelector("code");
-      const text = code?.textContent ?? pre.textContent ?? "";
+      const source = pre.querySelector("code");
+      const text = source?.textContent ?? pre.textContent ?? "";
       void runCopyButton(btn, () => text, "code");
     });
     bar.append(lang, btn);
     wrap.append(bar, pre);
     bindCodeBlockWheel(pre);
+    if (plain || !code) continue;
+    const observer = defer ? codeHighlightObserver() : null;
+    if (observer) {
+      wrap.dataset.highlightPending = "1";
+      observer.observe(wrap);
+    } else {
+      highlightWrappedCode(wrap);
+    }
   }
 }
 

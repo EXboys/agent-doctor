@@ -2,11 +2,13 @@ import type { AskRuntime } from "../ask-resources";
 import { readAutoApproveDefault } from "./confirm-pref";
 import { normalizePlan } from "../plan";
 import type { ChatMessage, ChatSession, SessionStore } from "./types";
+import { chatBodyStamp } from "./store-patch";
 import {
   CHAT_STORE_MAX_BYTES,
   LEGACY_STORAGE_KEY,
   MAX_MESSAGES_PER_SESSION,
   MAX_SESSIONS,
+  OPEN_CHAT_KEY,
   STORAGE_BACKUP_KEY,
   STORAGE_KEY,
 } from "./types";
@@ -141,7 +143,10 @@ export function readActiveSessionRuntime(): string | null {
       sessions?: { id?: unknown; runtime?: unknown }[];
     };
     if (!Array.isArray(parsed.sessions)) return null;
-    const active = parsed.sessions.find((session) => session.id === parsed.activeId);
+    const open = localStorage.getItem(OPEN_CHAT_KEY)?.trim();
+    const activeId =
+      open && parsed.sessions.some((session) => session.id === open) ? open : parsed.activeId;
+    const active = parsed.sessions.find((session) => session.id === activeId);
     return typeof active?.runtime === "string" && active.runtime.trim()
       ? active.runtime.trim()
       : null;
@@ -167,9 +172,35 @@ export function loadStoreFromLocalKeys(): SessionStore | null {
     if (key !== STORAGE_KEY) {
       console.warn(`Ask: restored chat store from ${key}`);
     }
-    return loaded;
+    return applyOpenChatId(loaded);
   }
   return null;
+}
+
+/** The open chat lives in a tiny key so a switch does not depend on the transcript blob. */
+export function applyOpenChatId(store: SessionStore): SessionStore {
+  let open = "";
+  try {
+    open = localStorage.getItem(OPEN_CHAT_KEY)?.trim() ?? "";
+  } catch {
+    return store;
+  }
+  if (!open || open === store.activeId) return store;
+  if (!store.sessions.some((session) => session.id === open)) return store;
+  return { ...store, activeId: open };
+}
+
+function rememberOpenChat(id: string): void {
+  try {
+    localStorage.setItem(OPEN_CHAT_KEY, id);
+  } catch {
+    // The chat is already open in memory for this visit.
+  }
+}
+
+/** Drop the "transcript unchanged" memory after a restore replaces the blob. */
+export function forgetChatMirror(): void {
+  lastBodyStamp = "";
 }
 
 export function createEmptySession(
@@ -250,7 +281,15 @@ export function chatStoreForDisk(store: SessionStore): SessionStore {
   };
 }
 
+let lastBodyStamp = "";
+
 export function persistStore(store: SessionStore): SessionStore {
+  const stamp = chatBodyStamp(store);
+  // Opening another chat does not change the transcript. Remember the id and skip the blob.
+  if (lastBodyStamp && stamp === lastBodyStamp) {
+    rememberOpenChat(store.activeId);
+    return store;
+  }
   const previous = localStorage.getItem(STORAGE_KEY);
   if (previous) backupStoreRaw(previous);
   const projected = chatStoreForDisk(store);
@@ -266,9 +305,13 @@ export function persistStore(store: SessionStore): SessionStore {
       : projected;
   try {
     localStorage.setItem(STORAGE_KEY, disk === projected ? payload : JSON.stringify(disk));
+    lastBodyStamp = stamp;
+    rememberOpenChat(store.activeId);
   } catch (error) {
     console.warn("Ask: saveStore failed, trimming history", error);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(finalizeSessionStore(trimStoreForSize(projected))));
+    lastBodyStamp = stamp;
+    rememberOpenChat(store.activeId);
   }
   // The open chat keeps every step so scrolling up can load them. Disk may keep less.
   return store;
@@ -284,6 +327,8 @@ export function restoreChatStoreFromBackup(): SessionStore | null {
   const loaded = parseStoreRaw(raw);
   if (!loaded) return null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+  rememberOpenChat(loaded.activeId);
+  forgetChatMirror();
   return loaded;
 }
 

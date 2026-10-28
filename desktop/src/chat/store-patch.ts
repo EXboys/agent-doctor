@@ -68,16 +68,73 @@ function sessionCursor(session: ChatSession): SessionCursor {
   };
 }
 
+type StampCache = {
+  content: string;
+  step: string;
+  detail: string;
+  at: number;
+  role: string;
+  log: boolean;
+  stamp: string;
+};
+
+const stampCache = new WeakMap<ChatMessage, StampCache>();
+
 function stampMessage(message: ChatMessage): string {
-  return [
+  const step = message.step?.output ?? "";
+  const detail = message.permission?.detail ?? "";
+  const log = Boolean(message.log);
+  const hit = stampCache.get(message);
+  if (
+    hit &&
+    hit.content === message.content &&
+    hit.step === step &&
+    hit.detail === detail &&
+    hit.at === message.at &&
+    hit.role === message.role &&
+    hit.log === log
+  ) {
+    return hit.stamp;
+  }
+  const stamp = [
     message.id,
     message.at,
     message.role,
-    message.log ? 1 : 0,
+    log ? 1 : 0,
     textHash(message.content),
-    textHash(message.step?.output ?? ""),
-    textHash(message.permission?.detail ?? ""),
+    textHash(step),
+    textHash(detail),
   ].join("\t");
+  stampCache.set(message, {
+    content: message.content,
+    step,
+    detail,
+    at: message.at,
+    role: message.role,
+    log,
+    stamp,
+  });
+  return stamp;
+}
+
+function mixStamp(hash: number, text: string): number {
+  for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash, 16777619) ^ text.charCodeAt(i);
+  return hash;
+}
+
+/**
+ * Fingerprint of everything except which chat is open.
+ * Switching chats keeps the same stamp, so the save can skip rewriting the transcript.
+ */
+export function chatBodyStamp(store: SessionStore): string {
+  let hash = 2166136261;
+  store.sessions.forEach((session, index) => {
+    hash = mixStamp(hash, String(index));
+    const cursor = sessionCursor(session);
+    hash = mixStamp(hash, cursor.header);
+    for (const stamp of cursor.stamps) hash = mixStamp(hash, stamp);
+  });
+  return (hash >>> 0).toString(16);
 }
 
 function textHash(text: string): number {
