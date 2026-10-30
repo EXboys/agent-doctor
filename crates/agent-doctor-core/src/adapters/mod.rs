@@ -11,6 +11,7 @@ mod zcode;
 
 pub use claude_code::ClaudeCodeAdapter;
 pub use codex::CodexAdapter;
+pub(crate) use cursor::cursor_desktop_installs;
 pub use cursor::CursorAdapter;
 pub use deepseek_harness::{
     DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, DEEPSEEK_HARNESS_CLI,

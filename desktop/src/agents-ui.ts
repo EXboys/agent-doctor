@@ -256,8 +256,10 @@ export function canOpenSession(runtimeId: string): boolean {
 
 function canUninstallRuntime(runtime: RuntimeDoctorResult): boolean {
   if (runtime.id !== "cursor") return true;
-  const path = runtime.binary_path ?? "";
-  return path.includes("cursor-agent") || path.includes("/.local/bin/agent") || /[/\\]agent\.exe$/i.test(path);
+  const path = (runtime.binary_path ?? "").replaceAll("\\", "/");
+  if (!path) return false;
+  // A settings folder alone is not the program. The saved files stay after uninstall.
+  return !path.endsWith("/.cursor");
 }
 
 export function runtimeHasProblems(preview?: RepairPreviewResponse): boolean {

@@ -31,6 +31,11 @@ fn desktop_app_path() -> Option<PathBuf> {
     crate::adapters::util::desktop_app_path(&DESKTOP_APP)
 }
 
+/// Install locations the uninstall step may remove. Settings under `~/.cursor` are not included.
+pub(crate) fn cursor_desktop_installs() -> Vec<PathBuf> {
+    crate::adapters::util::desktop_app_candidates(&DESKTOP_APP)
+}
+
 impl RuntimeAdapter for CursorAdapter {
     fn id(&self) -> &'static str {
         "cursor"

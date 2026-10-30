@@ -123,6 +123,36 @@ assert(
   "uninstall stays on the main row",
 );
 
+const cursorCard = {
+  confirmPending: false,
+  diagnoseOpenForRuntime: false,
+  dismissed: false,
+  hasActiveWorkspace: true,
+  isAskRuntime: false,
+  supportsBrowserMcp: false,
+} as const;
+const cursorApp: RuntimeDoctorResult = {
+  id: "cursor",
+  display_name: "Cursor",
+  installed: true,
+  version: null,
+  binary_path: "/Applications/Cursor.app",
+  config_paths: [],
+  profile: { gateway_url: null, key_source: null },
+};
+assert(
+  renderRuntimeCardActions(cursorApp, "", cursorCard).includes('data-action="uninstall-runtime"'),
+  "cursor app shows uninstall",
+);
+assert(
+  !renderRuntimeCardActions(
+    { ...cursorApp, binary_path: "/Users/me/.cursor" },
+    "",
+    cursorCard,
+  ).includes('data-action="uninstall-runtime"'),
+  "cursor settings folder is not an uninstall",
+);
+
 const card = renderRuntimeCard(
   runtime,
   null,

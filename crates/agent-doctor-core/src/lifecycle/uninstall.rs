@@ -37,7 +37,10 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
             );
         }
         "cursor" => {
-            return Ok("rm -f \"$HOME/.local/bin/agent\"".to_string());
+            return Ok(
+                "rm -rf \"$HOME/Applications/Cursor.app\" \"/Applications/Cursor.app\" \"$HOME/.local/share/cursor-agent\"; rm -f \"$HOME/.local/bin/agent\""
+                    .to_string(),
+            );
         }
         "zcode" => {
             return Ok(
@@ -341,11 +344,24 @@ fn uninstall_native_cli(binary_names: &[&str], npm_package: &str, npm_binary: &s
     bail!("没找到能卸的安装。可能是用别的方式装的。");
 }
 
-fn uninstall_cursor_cli() -> Result<()> {
+fn uninstall_cursor() -> Result<()> {
     ensure_managed_runtime_path();
+    let apps: Vec<_> = crate::adapters::cursor_desktop_installs()
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect();
+    if !apps.is_empty() && cursor_app_is_running() {
+        bail!("先退出 Cursor，再点一次卸载。");
+    }
+
     let mut removed = false;
+    for path in apps {
+        remove_cursor_install(&path)?;
+        removed = true;
+    }
+
     let local_agent = home_join(".local/bin/agent");
-    if local_agent.is_file() {
+    if local_agent.is_file() || local_agent.is_symlink() {
         std::fs::remove_file(&local_agent)?;
         removed = true;
     }
@@ -355,10 +371,55 @@ fn uninstall_cursor_cli() -> Result<()> {
             removed = true;
         }
     }
+    let share = home_join(".local/share/cursor-agent");
+    if share.is_dir() {
+        std::fs::remove_dir_all(&share)?;
+        removed = true;
+    }
     if removed {
         return Ok(());
     }
-    bail!("没找到 Cursor 命令行。电脑上的 Cursor 窗口不会被卸掉。");
+    bail!("没找到能卸的 Cursor。");
+}
+
+fn remove_cursor_install(path: &std::path::Path) -> Result<()> {
+    let target = cursor_install_root(path);
+    let removed = if target.is_dir() && !target.is_symlink() {
+        std::fs::remove_dir_all(target)
+    } else {
+        std::fs::remove_file(target)
+    };
+    match removed {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => bail!("先退出 Cursor，再点一次卸载。"),
+    }
+}
+
+/// `Cursor.exe` is the program file. The folder around it is the install.
+fn cursor_install_root(path: &std::path::Path) -> &std::path::Path {
+    if path.is_file() {
+        if let Some(parent) = path.parent() {
+            let name = parent.file_name().and_then(|item| item.to_str());
+            if name.is_some_and(|item| item.eq_ignore_ascii_case("cursor")) {
+                return parent;
+            }
+        }
+    }
+    path
+}
+
+fn cursor_app_is_running() -> bool {
+    #[cfg(all(not(test), target_os = "macos"))]
+    {
+        std::process::Command::new("pgrep")
+            .args(["-x", "Cursor"])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(any(test, not(target_os = "macos")))]
+    false
 }
 
 fn uninstall_zcode() -> Result<()> {
@@ -389,7 +450,7 @@ pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
             "@tencent-ai/codebuddy-code",
             "codebuddy",
         ),
-        "cursor" => uninstall_cursor_cli(),
+        "cursor" => uninstall_cursor(),
         "zcode" => uninstall_zcode(),
         "hermes" if cfg!(windows) => uninstall_hermes_windows(),
         "hermes" => {
@@ -503,6 +564,35 @@ mod tests {
             .collect();
         assert_eq!(String::from_utf16(&units).unwrap(), "Write-Output '卸载'");
         assert!(line.starts_with("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass"));
+    }
+
+    #[test]
+    fn cursor_uninstall_removes_the_app_and_keeps_settings() {
+        use crate::adapters::util::with_test_home;
+
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let app = home.join("Applications/Cursor.app/Contents/MacOS");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("Cursor"), "").unwrap();
+        let settings = home.join(".cursor");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("argv.json"), "{}").unwrap();
+        let cli = home.join(".local/bin");
+        std::fs::create_dir_all(&cli).unwrap();
+        std::fs::write(cli.join("agent"), "").unwrap();
+        let share = home.join(".local/share/cursor-agent");
+        std::fs::create_dir_all(&share).unwrap();
+
+        with_test_home(home, || uninstall_runtime("cursor").unwrap());
+
+        assert!(!home.join("Applications/Cursor.app").exists());
+        assert!(!cli.join("agent").exists());
+        assert!(!share.exists());
+        assert_eq!(
+            std::fs::read_to_string(settings.join("argv.json")).unwrap(),
+            "{}"
+        );
     }
 
     #[test]
