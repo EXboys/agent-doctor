@@ -6924,6 +6924,12 @@ body.chat-skill-dragging .chat-res-grip {
   box-shadow: none;
 }
 
+/* Windows scrollbars take width from the text. Reserve that strip so a growing
+   answer does not reflow when the bar appears. */
+html[data-os="windows"] .chat-log {
+  scrollbar-gutter: stable;
+}
+
 /* Skip layout and paint for rows above and below the window. */
 .chat-log > :is(
   .chat-msg,
@@ -6938,7 +6944,16 @@ body.chat-skill-dragging .chat-res-grip {
   .chat-plan
 ) {
   content-visibility: auto;
+  /* 88px is only the stand-in until the row's real height is recorded.
+     Flex would otherwise squash that stand-in, so the recorded height never sticks. */
   contain-intrinsic-size: auto 88px;
+  flex-shrink: 0;
+}
+
+/* The live reply changes height on every token. A stand-in height would jump. */
+.chat-log > .chat-msg:has(.is-streaming) {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
 }
 
 /* A new chat lifts the two start cards into the open area, clear of the composer. */

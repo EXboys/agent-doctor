@@ -18,7 +18,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
-import { followChatLog, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
+import { followChatLog, lockChatRowHeights, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, storeToolStep } from "./tool-records";
@@ -177,6 +177,7 @@ export function createBubblesController(deps: BubblesDeps) {
           ? deps.runTargetSession().messages.find((message) => message.id === id)
           : undefined;
         syncAssistantTime(bubble, stamped?.at, false);
+        lockChatRowHeights([assistantMsgWrap(bubble)], true);
       }
     }
     syncTurnCopyButtons();
@@ -537,6 +538,9 @@ export function createBubblesController(deps: BubblesDeps) {
     clearEmptyChatStart(deps.logEl);
     if (kind === "assistant") {
       const { wrap, bubble } = createAssistantBubbleEl({ id: opts?.id });
+      if (opts?.id && opts.id === deps.getAssistantMessageId() && deps.getBusy()) {
+        bubble.classList.add("is-streaming");
+      }
       setAssistantMarkdown(bubble, text);
       deps.logEl.appendChild(wrap);
       syncTurnCopyButtons();
@@ -628,11 +632,12 @@ export function createBubblesController(deps: BubblesDeps) {
       const delta = log.scrollHeight - before;
       log.scrollTop = pinned ? log.scrollHeight : top + Math.max(0, delta);
     });
-    window.requestAnimationFrame(() => {
-      for (const node of nodes) {
-        if (node.isConnected) node.style.removeProperty("content-visibility");
-      }
-    });
+    lockChatRowHeights(nodes);
+    if (pinned) {
+      withoutChatLogJump(() => {
+        log.scrollTop = log.scrollHeight;
+      });
+    }
   }
   function mountHistoryBatch(): boolean {
     const job = historyJob;

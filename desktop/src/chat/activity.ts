@@ -291,8 +291,71 @@ export function withoutChatLogJump(work: () => void): void {
   withoutLogJump(work);
 }
 
+const CHAT_ROW = new Set([
+  "chat-msg",
+  "chat-work",
+  "chat-work-stream",
+  "chat-thinking",
+  "chat-tool-group",
+  "chat-bubble",
+  "chat-activity",
+  "chat-permission",
+  "chat-reply-changes",
+  "chat-plan",
+]);
+const sizedRows = new WeakSet<HTMLElement>();
+const watchedLogs = new WeakSet<HTMLElement>();
+
+function isChatRow(node: HTMLElement): boolean {
+  for (const name of node.classList) {
+    if (CHAT_ROW.has(name)) return true;
+  }
+  return false;
+}
+
+/**
+ * Record each row's real height so an off-screen stand-in matches it.
+ * Rows already recorded are left alone unless `refresh` is set.
+ */
+export function lockChatRowHeights(nodes: ArrayLike<Element>, refresh = false): void {
+  const pending: HTMLElement[] = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i];
+    if (!(node instanceof HTMLElement) || !node.isConnected || !isChatRow(node)) continue;
+    if (!refresh && (sizedRows.has(node) || node.querySelector(".is-streaming"))) continue;
+    pending.push(node);
+  }
+  if (pending.length === 0) return;
+  for (const node of pending) node.style.setProperty("content-visibility", "visible");
+  for (const node of pending) {
+    const height = node.getBoundingClientRect().height;
+    if (height > 0) {
+      node.style.setProperty("contain-intrinsic-block-size", `auto ${height}px`);
+      sizedRows.add(node);
+    }
+  }
+  for (const node of pending) node.style.removeProperty("content-visibility");
+}
+
+/** Measure rows the first time they join the transcript, including ones appended while scrolled up. */
+function watchChatLogRowHeights(logEl: HTMLElement): void {
+  if (watchedLogs.has(logEl)) return;
+  watchedLogs.add(logEl);
+  const observer = new MutationObserver((records) => {
+    const added: HTMLElement[] = [];
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node instanceof HTMLElement) added.push(node);
+      }
+    }
+    if (added.length > 0) lockChatRowHeights(added);
+  });
+  observer.observe(logEl, { childList: true });
+}
+
 /** Jump to the latest line. Opening a chat or sending a message starts here. */
 export function pinChatLog(logEl: HTMLElement): void {
+  lockChatRowHeights(logEl.children);
   logEl.dataset.pin = "1";
   withoutLogJump(() => {
     logEl.scrollTop = logEl.scrollHeight;
@@ -357,6 +420,7 @@ export function foldRepeatedToolRows(list: HTMLElement): void {
 }
 
 export function createActivityController(deps: ActivityDeps) {
+  watchChatLogRowHeights(deps.logEl);
   window.setInterval(() => {
     const label = elapsedLabel();
     for (const el of deps.logEl.querySelectorAll<HTMLElement>(
