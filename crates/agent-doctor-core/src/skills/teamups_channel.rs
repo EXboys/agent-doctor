@@ -245,8 +245,8 @@ mod tests {
     #[test]
     fn the_official_site_uses_a_secure_socket() {
         assert_eq!(
-            teamups_channel_ws_url("https://teamups.vip"),
-            "wss://teamups.vip/api/v1/doctor/channel"
+            teamups_channel_ws_url("https://agentdoctor.cn"),
+            "wss://agentdoctor.cn/api/v1/doctor/channel"
         );
         assert_eq!(
             teamups_channel_ws_url("http://127.0.0.1:3000/"),

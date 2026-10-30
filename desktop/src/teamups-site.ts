@@ -1,5 +1,5 @@
 /** Default TeamUps origin (no trailing slash). Keep in sync with `default_teamups_base_url` in core. */
-export const DEFAULT_TEAMUPS_BASE_URL = "https://teamups.vip";
+export const DEFAULT_TEAMUPS_BASE_URL = "https://agentdoctor.cn";
 
 let activeBaseUrl = DEFAULT_TEAMUPS_BASE_URL;
 
