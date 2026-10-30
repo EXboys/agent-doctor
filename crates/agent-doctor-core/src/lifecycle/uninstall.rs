@@ -412,10 +412,8 @@ fn cursor_install_root(path: &std::path::Path) -> &std::path::Path {
 fn cursor_app_is_running() -> bool {
     #[cfg(all(not(test), target_os = "macos"))]
     {
-        std::process::Command::new("pgrep")
-            .args(["-x", "Cursor"])
-            .status()
-            .map(|status| status.success())
+        crate::exec::run_output("pgrep", &["-x", "Cursor"], crate::exec::SHORT_PROBE_TIMEOUT)
+            .map(|output| output.status.success())
             .unwrap_or(false)
     }
     #[cfg(any(test, not(target_os = "macos")))]
