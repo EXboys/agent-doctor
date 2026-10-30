@@ -260,21 +260,29 @@ pub fn evotown_status() -> Result<EvotownStatus> {
             runtime_target: Some(config.runtime_target),
             bundle_id: Some(config.bundle_id),
         }),
-        Err(_) => Ok(EvotownStatus {
-            configured: false,
-            base_url: read_company_baseline().ok().flatten().and_then(|profile| {
-                profile
-                    .gateway_url
-                    .map(|url| evotown_base_from_gateway(&url))
-            }),
-            api_key_hint: read_company_baseline()
-                .ok()
-                .flatten()
-                .and_then(|profile| profile.api_key.map(|key| mask_key(&key))),
-            config_source: None,
-            runtime_target: None,
-            bundle_id: None,
-        }),
+        Err(_) => {
+            let fallback =
+                if crate::edition::product_edition() == crate::edition::ProductEdition::Team {
+                    Some(crate::store::default_teamups_base_url())
+                } else {
+                    read_company_baseline().ok().flatten().and_then(|profile| {
+                        profile
+                            .gateway_url
+                            .map(|url| evotown_base_from_gateway(&url))
+                    })
+                };
+            Ok(EvotownStatus {
+                configured: false,
+                base_url: fallback,
+                api_key_hint: read_company_baseline()
+                    .ok()
+                    .flatten()
+                    .and_then(|profile| profile.api_key.map(|key| mask_key(&key))),
+                config_source: None,
+                runtime_target: None,
+                bundle_id: None,
+            })
+        }
     }
 }
 

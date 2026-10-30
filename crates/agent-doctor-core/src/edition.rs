@@ -1,8 +1,7 @@
-//! Build-time product edition: personal (TeamUps) vs team (enterprise).
+//! Build-time product edition: personal (TeamUps) vs team.
 //!
-//! Editions are locked at compile/package time. Unlike runtime LLM *mode*,
-//! an edition does not switch: personal builds only wire personal providers;
-//! team builds only wire Evotown.
+//! Editions stay separate packages. Both wire the same model services.
+//! Team also keeps the company job channel and the subscription pool.
 
 use anyhow::{bail, Result};
 
@@ -13,7 +12,7 @@ use crate::setup::{MODE_PERSONAL, MODE_TEAM};
 pub enum ProductEdition {
     /// TeamUps / consumer: personal provider wiring only.
     Personal,
-    /// Enterprise: Evotown / team gateway wiring only.
+    /// Enterprise package: same model services as personal, plus the company channel.
     Team,
 }
 
@@ -33,10 +32,10 @@ impl ProductEdition {
     }
 
     pub fn allows_mode(self, mode: &str) -> bool {
-        matches!(
-            (self, mode),
-            (Self::Personal, MODE_PERSONAL) | (Self::Team, MODE_TEAM)
-        )
+        match self {
+            Self::Personal => mode == MODE_PERSONAL,
+            Self::Team => mode == MODE_PERSONAL || mode == MODE_TEAM,
+        }
     }
 }
 
@@ -71,7 +70,7 @@ pub fn ensure_edition_allows_mode(mode: &str) -> Result<()> {
         ),
         ProductEdition::Team => bail!(
             "this Agent Doctor build is the team edition; \
-             personal provider wiring is not available — use the personal/TeamUps package"
+             that wiring path is not available"
         ),
     }
 }
@@ -93,6 +92,6 @@ mod tests {
         assert!(ProductEdition::Personal.allows_mode(MODE_PERSONAL));
         assert!(!ProductEdition::Personal.allows_mode(MODE_TEAM));
         assert!(ProductEdition::Team.allows_mode(MODE_TEAM));
-        assert!(!ProductEdition::Team.allows_mode(MODE_PERSONAL));
+        assert!(ProductEdition::Team.allows_mode(MODE_PERSONAL));
     }
 }

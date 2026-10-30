@@ -2038,6 +2038,155 @@ body.is-diagnose-open .diagnose-detail {
   display: inline-flex;
 }
 
+.subscription-pool {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.subscription-pool[hidden] {
+  display: none !important;
+}
+
+.subscription-pool-empty[hidden],
+#subscription-add[hidden] {
+  display: none !important;
+}
+
+.subscription-pool .section-label {
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.subscription-pool .provider-list {
+  margin-top: 0;
+}
+
+.subscription-pool-list:empty {
+  display: none;
+}
+
+.subscription-pool-item {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subscription-pool-item .provider-item-title {
+  width: 100%;
+}
+
+.subscription-pool-status {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--text-soft);
+}
+
+.subscription-pool-item.is-in-use .subscription-pool-status,
+.subscription-pool-status.is-in-use {
+  color: var(--primary-deep);
+}
+
+.subscription-pool-item.is-bad .subscription-pool-status,
+.subscription-pool-status.is-bad {
+  color: var(--text-muted);
+}
+
+.subscription-pool-chevron {
+  color: var(--text-soft);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.subscription-pool-meta,
+.subscription-pool-holder {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+#personal-list-view.is-pool-detail > :not(#subscription-detail):not(#subscription-login) {
+  display: none;
+}
+
+.subscription-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.subscription-detail[hidden] {
+  display: none !important;
+}
+
+.subscription-detail .section-label h2 {
+  font-size: 0.95rem;
+}
+
+.subscription-detail-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.subscription-detail-block .section-footnote {
+  margin: 0;
+}
+
+.subscription-detail-block .btn-primary,
+.subscription-detail-block .btn-secondary {
+  justify-self: start;
+}
+
+.subscription-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.subscription-detail-actions .btn-secondary,
+.subscription-detail-actions .btn-primary {
+  flex: 1;
+}
+
+.subscription-kind-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.subscription-kind {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.subscription-kind[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: #eff6ff;
+  color: var(--primary-deep);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+}
+
+.subscription-kind[aria-pressed="true"]::before {
+  content: "✓";
+  font-weight: 700;
+}
+
 .evotown-engine {
   margin-top: 12px;
   padding-top: 10px;

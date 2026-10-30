@@ -531,16 +531,34 @@ where
                 }
             }
         }
+        if !opened.load(Ordering::SeqCst) {
+            if let Some(url) = login_url_at_end(&pending) {
+                let _ = crate::session_launch::open_url(&url);
+            }
+        }
     });
 }
 
+/// A login link is only ready once a space or quote follows it. The address is
+/// long, and the first read often stops in the middle.
 fn first_login_url(text: &str) -> Option<String> {
+    let start = text.find("https://")?;
+    let rest = &text[start..];
+    let end = rest.find(|ch: char| ch.is_whitespace() || ch == '"' || ch == '\'')?;
+    trimmed_login_url(&rest[..end])
+}
+
+fn login_url_at_end(text: &str) -> Option<String> {
     let start = text.find("https://")?;
     let rest = &text[start..];
     let end = rest
         .find(|ch: char| ch.is_whitespace() || ch == '"' || ch == '\'')
         .unwrap_or(rest.len());
-    let url = rest[..end].trim_end_matches(['.', ',', ')']);
+    trimmed_login_url(&rest[..end])
+}
+
+fn trimmed_login_url(raw: &str) -> Option<String> {
+    let url = raw.trim_end_matches(['.', ',', ')']);
     if url.len() > "https://".len() {
         Some(url.to_string())
     } else {
@@ -661,9 +679,19 @@ mod tests {
     #[test]
     fn login_output_url_is_taken_without_the_trailing_punctuation() {
         assert_eq!(
-            first_login_url("open https://auth.openai.com/codex/device)."),
+            first_login_url("open https://auth.openai.com/codex/device).\n"),
             Some("https://auth.openai.com/codex/device".to_string())
         );
         assert_eq!(first_login_url("no link"), None);
+    }
+
+    #[test]
+    fn login_output_url_waits_until_the_address_is_finished() {
+        let partial = "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth";
+        assert_eq!(first_login_url(partial), None);
+        assert_eq!(
+            first_login_url(&format!("{partial}&state=abc\n")),
+            Some(format!("{partial}&state=abc"))
+        );
     }
 }

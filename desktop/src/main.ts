@@ -217,10 +217,9 @@ afterFirstPaint(() => {
   void bootAgents.loadProfiles();
   void bootWorkspace.loadWorkspaces();
   void bootWorkspace.loadRemoteProjects();
+  void bootWiring.loadPersonalProviderStatus();
   if (isTeamEdition()) {
     void bootWiring.loadEvotownStatus();
-  } else {
-    void bootWiring.loadPersonalProviderStatus();
   }
   void bootWiring.loadModeStatus();
   // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not

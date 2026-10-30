@@ -198,12 +198,95 @@
                 <p id="usage-overview-note" class="usage-empty" hidden></p>
               </section>
               <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
+              <div id="subscription-pool" class="subscription-pool" hidden>
+                <div class="section-label section-label-compact">
+                  <h3 data-i18n="pool.title">订阅号</h3>
+                  <button id="subscription-add" type="button" class="btn-primary btn-compact" data-i18n="pool.add">新增</button>
+                </div>
+                <ul id="subscription-pool-empty" class="provider-list subscription-pool-empty" hidden>
+                  <li class="provider-item">
+                    <span id="subscription-empty-claude-icon" class="provider-avatar is-brand" aria-hidden="true"></span>
+                    <div class="provider-item-main">
+                      <p class="provider-item-title"><span class="provider-item-name" data-i18n="pool.kindClaude">Claude Code</span></p>
+                      <p class="provider-item-sub">
+                        <span class="provider-item-meta" data-i18n="native.chipClaude">Claude</span>
+                        <span class="provider-item-note" data-i18n="native.onlyTool">用订阅账号</span>
+                      </p>
+                    </div>
+                    <div class="provider-item-actions">
+                      <button id="subscription-empty-claude" type="button" class="btn-secondary btn-compact" data-i18n="pool.signIn">登录</button>
+                    </div>
+                  </li>
+                  <li class="provider-item">
+                    <span id="subscription-empty-codex-icon" class="provider-avatar is-brand" aria-hidden="true"></span>
+                    <div class="provider-item-main">
+                      <p class="provider-item-title"><span class="provider-item-name" data-i18n="pool.kindCodex">Codex</span></p>
+                      <p class="provider-item-sub">
+                        <span class="provider-item-meta" data-i18n="native.chipChatgpt">ChatGPT</span>
+                        <span class="provider-item-note" data-i18n="native.onlyTool">用订阅账号</span>
+                      </p>
+                    </div>
+                    <div class="provider-item-actions">
+                      <button id="subscription-empty-codex" type="button" class="btn-secondary btn-compact" data-i18n="pool.signIn">登录</button>
+                    </div>
+                  </li>
+                </ul>
+                <ul id="subscription-pool-list" class="provider-list subscription-pool-list" aria-live="polite"></ul>
+                <p id="subscription-pool-result" class="section-footnote"></p>
+              </div>
               <details id="native-accounts" class="native-fold" hidden>
                 <summary id="native-accounts-label"></summary>
                 <ul id="native-account-list" class="provider-list"></ul>
               </details>
               <p id="personal-list-hint" class="section-footnote" hidden></p>
               <p id="wiring-mode-footnote" class="section-footnote wiring-mode-footnote" aria-live="polite"></p>
+              <div id="subscription-detail" class="subscription-detail" hidden>
+                <div class="section-label">
+                  <button id="subscription-detail-back" type="button" class="btn-ghost btn-compact" data-i18n="personal.back">返回</button>
+                  <h2 id="subscription-detail-name">订阅号</h2>
+                  <span id="subscription-detail-status" class="subscription-pool-status"></span>
+                </div>
+                <p id="subscription-detail-meta" class="subscription-pool-meta"></p>
+                <p id="subscription-detail-holder" class="subscription-pool-holder"></p>
+                <div class="subscription-detail-block">
+                  <label class="field-row" for="subscription-proxy">
+                    <span class="field-label" data-i18n="pool.proxyField">出口</span>
+                    <input id="subscription-proxy" class="field-input" type="text" spellcheck="false" autocomplete="off" data-i18n-placeholder="pool.proxyPlaceholder" placeholder="代理地址，如 1.2.3.4:8080" />
+                  </label>
+                  <p class="section-footnote" data-i18n="pool.proxyHint">留空再绑定，这个号走这台电脑自己的网络。</p>
+                  <button id="subscription-proxy-save" type="button" class="btn-primary" data-i18n="pool.proxySet">绑定</button>
+                </div>
+                <div class="subscription-detail-block">
+                  <label class="field-row" for="subscription-cap">
+                    <span class="field-label" data-i18n="pool.capField">这一次最多用多少</span>
+                    <input id="subscription-cap" class="field-input" type="number" min="1" data-i18n-placeholder="pool.capPlaceholder" placeholder="这一次最多用多少" />
+                  </label>
+                  <p class="section-footnote" data-i18n="pool.capHint">留空再设置，就取消这一次的上限。</p>
+                  <button id="subscription-cap-save" type="button" class="btn-secondary" data-i18n="pool.capSet">设一次上限</button>
+                </div>
+                <div class="subscription-detail-actions">
+                  <button id="subscription-disable" type="button" class="btn-secondary" data-i18n="pool.disable">停用</button>
+                  <button id="subscription-reclaim" type="button" class="btn-secondary" data-i18n="pool.reclaim">收回</button>
+                </div>
+                <p id="subscription-detail-result" class="section-footnote" role="status"></p>
+              </div>
+              <div id="subscription-login" class="subscription-detail" hidden>
+                <div class="section-label">
+                  <button id="subscription-login-back" type="button" class="btn-ghost btn-compact" data-i18n="personal.back">返回</button>
+                  <h2 data-i18n="pool.addTitle">新增订阅号</h2>
+                </div>
+                <p class="section-footnote" data-i18n="pool.addHint">选一种，写个名字，再登录。登录只留在这个号自己的目录里。</p>
+                <div class="subscription-kind-pick" role="group">
+                  <button id="subscription-login-claude" type="button" class="subscription-kind" data-runtime="claude-code" aria-pressed="false" data-i18n="pool.kindClaude">Claude Code</button>
+                  <button id="subscription-login-codex" type="button" class="subscription-kind" data-runtime="codex" aria-pressed="false" data-i18n="pool.kindCodex">Codex</button>
+                </div>
+                <label class="field-row" for="subscription-login-name">
+                  <span class="field-label" data-i18n="pool.name">名字</span>
+                  <input id="subscription-login-name" class="field-input" type="text" maxlength="64" data-i18n-placeholder="pool.namePlaceholder" placeholder="用来认出这个号" />
+                </label>
+                <button id="subscription-login-start" type="button" class="btn-primary" data-i18n="pool.loginStart">开始登录</button>
+                <p id="subscription-login-result" class="section-footnote" role="status"></p>
+              </div>
             </div>
 
             <div id="personal-form-view" hidden>
@@ -332,15 +415,15 @@
 
           <section class="widget-section evotown-section provider-panel" id="evotown-section" data-provider-panel="evotown" hidden>
             <div class="section-label">
-              <h2 data-i18n="evotown.title">Evotown</h2>
-              <span id="evotown-badge" class="badge muted" hidden></span>
+              <h2 data-i18n="evotown.title">公司连接</h2>
+              <span id="evotown-badge" class="badge ok">已连接</span>
             </div>
-            <p id="evotown-status" class="section-hint" data-i18n="evotown.loading">正在检查连接…</p>
-            <div id="evotown-connected" class="evotown-connected" hidden>
-              <p class="evotown-connected-line"><strong id="evotown-connected-url">—</strong></p>
-              <p class="evotown-connected-meta" id="evotown-connected-meta"></p>
+            <p id="evotown-status" class="section-hint" hidden></p>
+            <div id="evotown-connected" class="evotown-connected">
+              <p class="evotown-connected-line"><strong id="evotown-connected-url">https://agentdoctor.cn</strong></p>
+              <p class="evotown-connected-meta" id="evotown-connected-meta" data-i18n="evotown.fixedHost">地址已固定，不用填写。</p>
             </div>
-            <form id="evotown-form" class="evotown-form" autocomplete="off">
+            <form id="evotown-form" class="evotown-form" autocomplete="off" hidden>
               <label class="field-row field-row-inline">
                 <span class="field-label" data-i18n="evotown.url">URL</span>
                 <input id="evotown-url" class="field-input" type="url" placeholder="https://evotown.example.com" />

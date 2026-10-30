@@ -6,6 +6,8 @@ mod jobs;
 mod policy;
 mod preferred_runtime;
 mod register;
+mod subscription_login;
+mod subscription_pool;
 mod sync;
 
 pub use client::{check_evotown_connectivity, EvotownClient, EvotownHealthReport};
@@ -38,6 +40,12 @@ pub use preferred_runtime::{
 pub use register::{
     execute_register, resolve_engine_type, RegisterOptions, RegisterReport,
     BOOTSTRAP_INGEST_TOKEN_ENV, ENGINE_ID_ENV, ENGINE_INGEST_TOKEN_ENV,
+};
+pub use subscription_login::start_subscription_login;
+pub use subscription_pool::{
+    forget_reported_subscription, list_subscription_pool, load_reported_subscriptions,
+    reclaim_subscription, remember_reported_subscription, set_subscription_cap,
+    set_subscription_disabled, set_subscription_proxy, ReportedSubscription, SubscriptionPoolRow,
 };
 pub use sync::{execute_sync, SkillSyncOutcome, SyncOptions, SyncReport};
 

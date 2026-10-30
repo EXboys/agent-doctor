@@ -102,15 +102,18 @@ pub use edition::{ensure_edition_allows_mode, product_edition, ProductEdition};
 pub use evotown::{
     build_inventory_payload, check_evotown_connectivity, evotown_status,
     execute_evotown_onboarding, execute_job, execute_policy_pull, execute_register, execute_sync,
-    is_known_dispatch_runtime, known_dispatch_runtimes, list_skills_inventory,
-    list_skills_inventory_with_options, load_doctor_node_config, load_evotown_config,
-    mount_synced_skills, normalize_runtime, preferred_runtime_status, resolve_preferred_runtime,
-    resolve_runtime, run_connect_loop, set_preferred_runtime, skill_mount_runtime_ids,
-    unmount_synced_skills, AssignedJob, ConnectOptions, DoctorNodeConfig, EvotownConfig,
-    EvotownHealthReport, EvotownStatus, JobResult, OnboardingOptions, OnboardingReport,
-    PolicyPullReport, PreferredRuntimeStatus, RegisterOptions, RegisterReport, SkillAgentUsage,
-    SkillInventoryItem, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncOptions, SyncReport,
+    forget_reported_subscription, is_known_dispatch_runtime, known_dispatch_runtimes,
+    list_skills_inventory, list_skills_inventory_with_options, list_subscription_pool,
+    load_doctor_node_config, load_evotown_config, load_reported_subscriptions, mount_synced_skills,
+    normalize_runtime, preferred_runtime_status, reclaim_subscription,
+    remember_reported_subscription, resolve_preferred_runtime, resolve_runtime, run_connect_loop,
+    set_preferred_runtime, set_subscription_cap, set_subscription_disabled, set_subscription_proxy,
+    skill_mount_runtime_ids, start_subscription_login, unmount_synced_skills, AssignedJob,
+    ConnectOptions, DoctorNodeConfig, EvotownConfig, EvotownHealthReport, EvotownStatus, JobResult,
+    OnboardingOptions, OnboardingReport, PolicyPullReport, PreferredRuntimeStatus, RegisterOptions,
+    RegisterReport, ReportedSubscription, SkillAgentUsage, SkillInventoryItem, SkillMountOptions,
+    SkillMountReport, SkillsInventoryOptions, SkillsInventoryReport, SubscriptionPoolRow,
+    SyncOptions, SyncReport,
 };
 pub use exec::{ExecBackend, ExecOutput, LocalBackend};
 pub use install::{

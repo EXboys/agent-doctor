@@ -2,8 +2,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { setAgentBrandIcon } from "../agent-brand";
+import { isTeamEdition } from "../edition";
 import { appState, applyNativeAccounts } from "../app-state";
-import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { formatProviderFailure, missingProviderFieldsMessage, teamupsLoginFailure, withProviderFailure, type ProviderField } from "../friendly-error";
 import { getLocale, t } from "../i18n";
@@ -75,9 +75,9 @@ function stopOfficialLoginPoll(): void {
   officialLoginWaiting = false;
 }
 
-/** Personal edition always shows 官方, even before sign-in creates the saved row. */
+/** Both editions show 官方, even before sign-in creates the saved row. */
 function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderListItem[] {
-  if (!isPersonalEdition() || doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {
+  if (doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {
     return doc.providers;
   }
   const placeholder: PersonalProviderListItem = {
@@ -184,8 +184,7 @@ export function createPersonalController(deps: PersonalDeps) {
       return;
     }
 
-    const personalModeActive =
-      isPersonalEdition() || appState.lastModeStatus?.mode === "personal";
+    const personalModeActive = appState.lastModeStatus?.mode !== "team";
     for (const item of providers) {
       const officialProvider = item.id === OFFICIAL_PROVIDER_ID;
       const officialSignedIn = officialProvider && officialAccount?.signed_in === true;
@@ -403,8 +402,9 @@ export function createPersonalController(deps: PersonalDeps) {
   }
 
   function renderNativeAccounts() {
-    if (!isPersonalEdition()) {
+    if (isTeamEdition()) {
       nativeFoldEl.hidden = true;
+      nativeAccountListEl.replaceChildren();
       return;
     }
     const rows = appState.nativeAccounts.filter((row) => row.visible);
@@ -471,7 +471,6 @@ export function createPersonalController(deps: PersonalDeps) {
   }
 
   async function loadNativeAccounts(probe: boolean) {
-    if (!isPersonalEdition()) return;
     try {
       const status = await nativeAccountStatus(probe);
       applyNativeAccounts(status.rows, probe);

@@ -11,7 +11,6 @@ import {
   settingsApplyKind,
   type DiagnoseStepId,
 } from "../diagnose-flow";
-import { isPersonalEdition } from "../edition";
 import {
   explainLlmAccountBlock,
   missingProviderFieldsMessage,
@@ -34,7 +33,7 @@ import type { DiagnosePaintApi } from "./paint";
 import type { DiagnoseSession } from "./session";
 import { friendlyDeepError } from "./deep-chat";
 import { describeRepairSummary } from "./repair-summary";
-import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, getEvotownStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
+import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
 
 export type DiagnoseActionsDeps = {
   session: DiagnoseSession;
@@ -256,13 +255,8 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         paint.paintScore(session.lastScore, { animateFromZero: true });
         paint.paintChecks(session.preview, { mode: "pending" });
         paint.setScanMeter(0, session.preview.checks.length, t("diagnose.flow.confirming"));
-        if (isPersonalEdition()) {
-          const status = await getPersonalProviderStatus();
-          providerOk = status.configured;
-        } else {
-          const status = await getEvotownStatus();
-          providerOk = status.configured;
-        }
+        const status = await getPersonalProviderStatus();
+        providerOk = status.configured;
       } else {
         paint.paintScore(
           { pass: 0, warn: 0, fail: 0, total: 0, percent: 0 },
@@ -272,11 +266,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         const [nextPreview, ok] = await Promise.all([
           deps.loadPreview(),
           (async () => {
-            if (isPersonalEdition()) {
-              const status = await getPersonalProviderStatus();
-              return status.configured;
-            }
-            const status = await getEvotownStatus();
+            const status = await getPersonalProviderStatus();
             return status.configured;
           })(),
         ]);

@@ -1,6 +1,6 @@
 
 import { appState } from "../app-state";
-import { isPersonalEdition, isTeamEdition, productEdition } from "../edition";
+import { isTeamEdition, productEdition } from "../edition";
 import { withErrorDetail } from "../friendly-error";
 import { t } from "../i18n";
 import type { ModeStatus } from "../types";
@@ -45,11 +45,10 @@ export function createModeController(deps: ModeDeps) {
     }
   }
 
-  /** Provider panel is locked to the build edition — no Personal/Team switch tabs. */
+  /** Both editions use the model-service list. Team only adds the subscription pool. */
   function syncProviderPanelToEdition() {
-    const tab = isTeamEdition() ? "evotown" : "personal";
     for (const panel of providerPanels) {
-      const active = panel.dataset.providerPanel === tab;
+      const active = panel.dataset.providerPanel === "personal";
       panel.classList.toggle("is-active", active);
       panel.hidden = !active;
     }
@@ -99,28 +98,22 @@ export function createModeController(deps: ModeDeps) {
 
   function setModeSwitchBusy(busy: boolean) {
     modeSwitchInFlight = busy;
-    if (isPersonalEdition()) {
-      personalApplyEl.disabled = busy;
-      personalVerifyEl.disabled = busy;
-      personalSaveEl.disabled = busy;
-    } else {
-      evotownConnectEl.disabled = busy;
-      evotownResyncEl.disabled = busy;
-    }
+    personalApplyEl.disabled = busy;
+    personalVerifyEl.disabled = busy;
+    personalSaveEl.disabled = busy;
+    evotownConnectEl.disabled = busy;
+    evotownResyncEl.disabled = busy;
     wiringModeFootnoteEl.classList.toggle("is-busy", busy);
   }
 
   async function rewireCurrentMode(hintEl?: HTMLElement | null) {
     if (modeSwitchInFlight) return;
-    const locked = productEdition();
     const mode = appState.lastModeStatus?.mode;
-    if (mode !== locked) {
-      // Edition package only rewires its own path; jump to wiring to configure.
+    const canRewire = mode === "personal" || (isTeamEdition() && mode === "team");
+    if (!canRewire) {
       deps.setMainTab("provider");
       syncProviderPanelToEdition();
-      showModeHint(
-        isTeamEdition() ? t("mode.teamNotReady") : t("mode.personalNotReady"),
-      );
+      showModeHint(t("mode.personalNotReady"));
       if (hintEl) {
         hintEl.hidden = false;
         hintEl.textContent = t("runtime.installWireNext");

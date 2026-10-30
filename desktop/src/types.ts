@@ -156,6 +156,18 @@ export interface EngineRegisterStatus {
   env_path: string | null;
 }
 
+export interface SubscriptionPoolRow {
+  name: string;
+  remaining: number;
+  expires_at: string;
+  disabled: boolean;
+  holder: string;
+  cap: number | null;
+  proxy: string;
+  runtime: string;
+  quota_known: boolean;
+}
+
 export interface RegisterReport {
   base_url: string;
   engine_id: string;

@@ -5,7 +5,6 @@ import {
   type DiagnoseScore,
   stepStatesFor,
 } from "../diagnose-flow";
-import { isPersonalEdition } from "../edition";
 import { escapeHtml } from "../format";
 import { applyStaticI18n, t } from "../i18n";
 import { opensOwnWindowOnly, supportsBrowserMcp } from "../agents-ui";
@@ -449,8 +448,8 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
     if (session.activeStep !== "test") {
       hideScanMeter();
     }
-    dom.configPersonalEl.hidden = !isPersonalEdition();
-    dom.configTeamEl.hidden = isPersonalEdition();
+    dom.configPersonalEl.hidden = false;
+    dom.configTeamEl.hidden = true;
 
     if (session.activeStep === "install") {
       paintHeroTone("neutral");
@@ -468,44 +467,31 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       paintHeroTone(session.configured ? "ok" : "busy");
       if (session.guideFillConfig && !session.configured) {
         dom.headlineEl.textContent = t("diagnose.flow.configGuideHeadline");
-        dom.detailEl.textContent = isPersonalEdition()
-          ? t("diagnose.flow.configGuideDetail")
-          : t("diagnose.flow.configGuideDetailTeam");
+        dom.detailEl.textContent = t("diagnose.flow.configGuideDetail");
       } else {
         dom.headlineEl.textContent = session.configured
           ? t("diagnose.flow.configDoneHeadline")
           : t("diagnose.flow.configHeadline");
-        dom.detailEl.textContent = isPersonalEdition()
-          ? t("diagnose.flow.configDetail")
-          : t("diagnose.flow.configDetailTeam");
+        dom.detailEl.textContent = t("diagnose.flow.configDetail");
       }
       if (session.canAutoFix) {
         session.primaryAction = "auto-fix";
         dom.primaryEl.hidden = false;
         dom.primaryEl.textContent = t("diagnose.flow.autoFixCta");
         dom.secondaryEl.hidden = false;
-        dom.secondaryEl.textContent = isPersonalEdition()
-          ? session.guideFillConfig
-            ? t("diagnose.flow.configGuideCta")
-            : t("diagnose.flow.configCta")
-          : t("diagnose.flow.openTeamWiring");
-        dom.secondaryEl.dataset.fallback = isPersonalEdition()
-          ? "verify-save"
-          : "open-team-wiring";
-      } else if (isPersonalEdition()) {
+        dom.secondaryEl.textContent = session.guideFillConfig
+          ? t("diagnose.flow.configGuideCta")
+          : t("diagnose.flow.configCta");
+        dom.secondaryEl.dataset.fallback = "verify-save";
+      } else {
         session.primaryAction = "verify-save";
         dom.primaryEl.hidden = false;
         dom.primaryEl.textContent = session.guideFillConfig
           ? t("diagnose.flow.configGuideCta")
           : t("diagnose.flow.configCta");
         dom.secondaryEl.hidden = true;
-      } else {
-        session.primaryAction = "open-team-wiring";
-        dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = t("diagnose.flow.openTeamWiring");
-        dom.secondaryEl.hidden = true;
       }
-      if (session.guideFillConfig && !session.configured && isPersonalEdition()) {
+      if (session.guideFillConfig && !session.configured) {
         window.requestAnimationFrame(() => focusConfigFill());
       }
     } else {

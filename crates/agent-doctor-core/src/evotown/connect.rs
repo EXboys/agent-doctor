@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -16,6 +16,10 @@ use url::Url;
 use crate::doctor::run_doctor;
 use crate::evotown::jobs::{execute_job, AssignedJob, JobResult};
 use crate::evotown::preferred_runtime::resolve_preferred_runtime;
+use crate::evotown::subscription_pool::{
+    load_reported_subscriptions, prefer_account, server_ack_enables_pool, team_pool_build,
+    PoolSession, PoolStep,
+};
 use crate::setup::evotown_agent_env_path;
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -205,6 +209,10 @@ pub fn build_inventory_payload() -> Value {
                 .any(|rt| rt.id == *pref && rt.installed)
         })
         .unwrap_or(false);
+    let mut capabilities = vec!["presence", "inventory", "job.assign"];
+    if team_pool_build() {
+        capabilities.push("subscription.pool");
+    }
     json!({
         "runtimes": runtimes,
         "preferred_runtime": preferred_runtime,
@@ -212,7 +220,7 @@ pub fn build_inventory_payload() -> Value {
         "company_gateway_url": report.company_gateway_url,
         "active_preset": report.active_preset,
         "profile_env_exists": report.profile_env_exists,
-        "capabilities": ["presence", "inventory", "job.assign"],
+        "capabilities": capabilities,
     })
 }
 
@@ -239,6 +247,7 @@ fn node_id() -> String {
 
 enum Outbound {
     Json(Value),
+    JobFinished { job_id: String, body: Value },
 }
 
 /// Blocking connect loop with exponential backoff.
@@ -307,6 +316,20 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
             .unwrap_or(0)
     );
 
+    let pool_on = team_pool_build() && server_ack_enables_pool(&ack);
+    let mut pool = PoolSession::new(pool_on);
+    let mut waiting_jobs: HashMap<String, AssignedJob> = HashMap::new();
+    if pool_on {
+        let reported = load_reported_subscriptions().unwrap_or_default();
+        for frame in pool.sync_reports(&reported) {
+            send_json(&mut socket, frame)?;
+        }
+        eprintln!(
+            "✓ subscription pool on — reported {} accounts",
+            reported.len()
+        );
+    }
+
     let (tx, rx): (Sender<Outbound>, Receiver<Outbound>) = mpsc::channel();
     let inventory_every = Duration::from_secs(options.inventory_interval_secs.max(10));
     let heartbeat_every = Duration::from_secs(options.heartbeat_interval_secs.max(5));
@@ -320,6 +343,13 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
         loop {
             match rx.try_recv() {
                 Ok(Outbound::Json(value)) => send_json(&mut socket, value)?,
+                Ok(Outbound::JobFinished { job_id, body }) => {
+                    send_json(&mut socket, body)?;
+                    waiting_jobs.remove(&job_id);
+                    if let Some(frame) = pool.finish(&job_id) {
+                        send_json(&mut socket, frame)?;
+                    }
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => bail!("worker channel disconnected"),
             }
@@ -327,7 +357,7 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
 
         match socket.read() {
             Ok(Message::Text(text)) => {
-                handle_server_text(&mut socket, &text, &tx)?;
+                handle_server_text(&mut socket, &text, &tx, &mut pool, &mut waiting_jobs)?;
             }
             Ok(Message::Ping(payload)) => {
                 socket.send(Message::Pong(payload))?;
@@ -344,7 +374,14 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
 
         if last_heartbeat.elapsed() >= heartbeat_every {
             send_json(&mut socket, json!({ "type": "heartbeat" }))?;
+            for frame in pool.renew_frames() {
+                send_json(&mut socket, frame)?;
+            }
             last_heartbeat = std::time::Instant::now();
+        }
+
+        for step in pool.expire(Instant::now()) {
+            apply_pool_step(&mut socket, &tx, &mut waiting_jobs, step)?;
         }
 
         if last_inventory.elapsed() >= inventory_every {
@@ -356,6 +393,12 @@ fn run_one_session(config: &DoctorNodeConfig, options: &ConnectOptions) -> Resul
                     "inventory": inventory,
                 }),
             )?;
+            if pool.enabled() {
+                let reported = load_reported_subscriptions().unwrap_or_default();
+                for frame in pool.sync_reports(&reported) {
+                    send_json(&mut socket, frame)?;
+                }
+            }
             last_inventory = std::time::Instant::now();
             eprintln!("→ inventory refreshed");
         }
@@ -366,6 +409,8 @@ fn handle_server_text(
     socket: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
     text: &str,
     tx: &Sender<Outbound>,
+    pool: &mut PoolSession,
+    waiting_jobs: &mut HashMap<String, AssignedJob>,
 ) -> Result<()> {
     let msg: Value = serde_json::from_str(text).context("invalid server JSON")?;
     match msg.get("type").and_then(|v| v.as_str()).unwrap_or("") {
@@ -404,17 +449,27 @@ fn handle_server_text(
                     "run_id": job.run_id,
                 }),
             )?;
-            let tx_worker = tx.clone();
-            thread::spawn(move || {
-                let _ = tx_worker.send(Outbound::Json(json!({
-                    "type": "job.event",
-                    "job_id": job.job_id,
-                    "event": "started",
-                    "runtime": crate::evotown::jobs::resolve_runtime(&job),
-                })));
-                let result = execute_job(&job);
-                let _ = tx_worker.send(Outbound::Json(complete_message(&job, &result)));
-            });
+            if pool.enabled() {
+                let prefer = prefer_account(&job.payload);
+                let job_id = job.job_id.clone();
+                waiting_jobs.insert(job_id.clone(), job);
+                let steps = pool.begin(&job_id, prefer.as_deref(), Instant::now());
+                for step in steps {
+                    apply_pool_step(socket, tx, waiting_jobs, step)?;
+                }
+            } else {
+                spawn_job(tx, job, None);
+            }
+        }
+        other if other.starts_with("subscription.") && pool.enabled() => {
+            match pool.on_server(text) {
+                Ok(steps) => {
+                    for step in steps {
+                        apply_pool_step(socket, tx, waiting_jobs, step)?;
+                    }
+                }
+                Err(err) => eprintln!("! subscription frame: {err:#}"),
+            }
         }
         other => {
             eprintln!("! unknown server message type={other}");
@@ -423,7 +478,76 @@ fn handle_server_text(
     Ok(())
 }
 
-fn complete_message(job: &AssignedJob, result: &JobResult) -> Value {
+fn apply_pool_step(
+    socket: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+    tx: &Sender<Outbound>,
+    waiting_jobs: &mut HashMap<String, AssignedJob>,
+    step: PoolStep,
+) -> Result<()> {
+    match step {
+        PoolStep::Send(frame) => send_json(socket, frame)?,
+        PoolStep::Start {
+            job_id,
+            account,
+            notice,
+        } => {
+            let Some(job) = waiting_jobs.get(&job_id).cloned() else {
+                return Ok(());
+            };
+            if let Some(notice) = notice.as_deref() {
+                send_json(
+                    socket,
+                    json!({
+                        "type": "job.event",
+                        "job_id": job_id,
+                        "event": "subscription",
+                        "text": notice,
+                    }),
+                )?;
+            }
+            spawn_job(tx, job, Some(account));
+        }
+        PoolStep::Stop { job_id, sentence } => {
+            let Some(job) = waiting_jobs.remove(&job_id) else {
+                return Ok(());
+            };
+            eprintln!("! subscription job_id={job_id} {sentence}");
+            send_json(socket, stopped_message(&job, &sentence))?;
+        }
+        PoolStep::Notice { job_id, sentence } => {
+            send_json(
+                socket,
+                json!({
+                    "type": "job.event",
+                    "job_id": job_id,
+                    "event": "subscription",
+                    "text": sentence,
+                }),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn spawn_job(tx: &Sender<Outbound>, job: AssignedJob, account: Option<String>) {
+    let tx_worker = tx.clone();
+    thread::spawn(move || {
+        let _ = tx_worker.send(Outbound::Json(json!({
+            "type": "job.event",
+            "job_id": job.job_id,
+            "event": "started",
+            "runtime": crate::evotown::jobs::resolve_runtime(&job),
+            "subscription": account,
+        })));
+        let result = execute_job(&job);
+        let _ = tx_worker.send(Outbound::JobFinished {
+            job_id: job.job_id.clone(),
+            body: complete_message(&job, &result, account.as_deref()),
+        });
+    });
+}
+
+fn complete_message(job: &AssignedJob, result: &JobResult, account: Option<&str>) -> Value {
     json!({
         "type": "job.complete",
         "job_id": job.job_id,
@@ -435,7 +559,25 @@ fn complete_message(job: &AssignedJob, result: &JobResult) -> Value {
         "signals": {
             "runtime": result.runtime,
             "via": "agent-doctor",
+            "subscription": account,
             "extra": result.signals,
+        },
+    })
+}
+
+fn stopped_message(job: &AssignedJob, sentence: &str) -> Value {
+    json!({
+        "type": "job.complete",
+        "job_id": job.job_id,
+        "run_id": job.run_id,
+        "status": "failed",
+        "exit_code": 1,
+        "result_summary": sentence,
+        "log_excerpt": sentence,
+        "signals": {
+            "runtime": "",
+            "via": "agent-doctor",
+            "extra": { "subscription": sentence },
         },
     })
 }

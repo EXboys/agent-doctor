@@ -1,13 +1,15 @@
 use agent_doctor_core::{
     activate_personal_provider, browser_mcp_wire_options_for_active_workspace,
     delete_personal_provider, execute_personal_provider_setup, list_personal_providers,
-    load_mode_status, load_personal_provider_status, native_account_status, refresh_account_models,
-    resign_native_subscription, resolve_agent_doctor_binary, switch_to_personal_mode,
-    switch_to_team_mode, upsert_personal_provider, use_current_service, use_native_subscription,
+    list_subscription_pool, load_mode_status, load_personal_provider_status, native_account_status,
+    reclaim_subscription, refresh_account_models, resign_native_subscription,
+    resolve_agent_doctor_binary, set_subscription_cap, set_subscription_disabled,
+    set_subscription_proxy, start_subscription_login, switch_to_personal_mode, switch_to_team_mode,
+    upsert_personal_provider, use_current_service, use_native_subscription,
     verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
     ModeSwitchReport, NativeAccountStatus, NativeAccountSwitch, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
-    PersonalProvidersDocument, UpsertPersonalProviderOptions,
+    PersonalProvidersDocument, SubscriptionPoolRow, UpsertPersonalProviderOptions,
 };
 use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::{Deserialize, Serialize};
@@ -246,18 +248,13 @@ pub async fn rewire_current_mode_command(
     let edition = agent_doctor_core::product_edition();
     let status = load_mode_status().map_err(|error| error.to_string())?;
     match (edition, status.mode.as_str()) {
-        (agent_doctor_core::ProductEdition::Personal, "personal") => {
+        (_, "personal") => {
             switch_to_personal_mode_command(app, status.personal_active_id, with_browser_mcp).await
         }
         (agent_doctor_core::ProductEdition::Team, "team") => {
             switch_to_team_mode_command(app, with_browser_mcp).await
         }
-        (agent_doctor_core::ProductEdition::Personal, _) => {
-            Err("Personal edition: configure a personal provider first, then rewire.".into())
-        }
-        (agent_doctor_core::ProductEdition::Team, _) => {
-            Err("Team edition: connect Evotown first, then rewire.".into())
-        }
+        _ => Err("Configure a model service first, then rewire.".into()),
     }
 }
 
@@ -324,4 +321,49 @@ pub async fn use_current_service_command(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub fn list_subscription_pool_command() -> Vec<SubscriptionPoolRow> {
+    list_subscription_pool().unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn set_subscription_disabled_command(
+    name: String,
+    disabled: bool,
+) -> Result<SubscriptionPoolRow, String> {
+    set_subscription_disabled(&name, disabled).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn reclaim_subscription_command(name: String) -> Result<SubscriptionPoolRow, String> {
+    reclaim_subscription(&name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_subscription_cap_command(
+    name: String,
+    cap: Option<i64>,
+) -> Result<SubscriptionPoolRow, String> {
+    set_subscription_cap(&name, cap).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_subscription_proxy_command(
+    name: String,
+    proxy: Option<String>,
+) -> Result<SubscriptionPoolRow, String> {
+    set_subscription_proxy(&name, proxy).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn start_subscription_login_command(
+    runtime: String,
+    name: String,
+) -> Result<SubscriptionPoolRow, String> {
+    tauri::async_runtime::spawn_blocking(move || start_subscription_login(&runtime, &name))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }

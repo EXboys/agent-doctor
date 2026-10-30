@@ -88,6 +88,7 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
       if (lastEvotown) {
         evotown.renderEvotownStatus(lastEvotown, { refreshSkills: false });
       }
+      evotown.renderSubscriptionPool();
       if (appState.personalProvidersDoc) {
         personal.renderPersonalProviderList(appState.personalProvidersDoc);
       }

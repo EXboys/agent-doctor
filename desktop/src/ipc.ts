@@ -38,6 +38,7 @@ import type {
   RepairPreviewResponse,
   RestoreSummary,
   RuntimeVersionStatus,
+  SubscriptionPoolRow,
   SkillMountReport,
   SkillsInventoryReport,
   SyncReport,
@@ -166,6 +167,30 @@ export function runSync(): Promise<SyncReport> {
 
 export function getEngineRegisterStatus(): Promise<EngineRegisterStatus> {
   return invoke("get_engine_register_status_command");
+}
+
+export function listSubscriptionPool(): Promise<SubscriptionPoolRow[]> {
+  return invoke("list_subscription_pool_command");
+}
+
+export function setSubscriptionDisabled(name: string, disabled: boolean): Promise<SubscriptionPoolRow> {
+  return invoke("set_subscription_disabled_command", { name, disabled });
+}
+
+export function reclaimSubscription(name: string): Promise<SubscriptionPoolRow> {
+  return invoke("reclaim_subscription_command", { name });
+}
+
+export function setSubscriptionCap(name: string, cap: number | null): Promise<SubscriptionPoolRow> {
+  return invoke("set_subscription_cap_command", { name, cap });
+}
+
+export function setSubscriptionProxy(name: string, proxy: string | null): Promise<SubscriptionPoolRow> {
+  return invoke("set_subscription_proxy_command", { name, proxy });
+}
+
+export function startSubscriptionLogin(runtime: string, name: string): Promise<SubscriptionPoolRow> {
+  return invoke("start_subscription_login_command", { runtime, name });
 }
 
 export function runEngineRegister(args: {
