@@ -2,17 +2,16 @@
 
 **Tauri 2** tray + window that calls the same Rust core as the CLI (`agent-doctor-core`).
 
-Typical loop: **scan → diagnose → confirm repair → Ask re-check**.
+Two windows share the Rust core: **chat** for daily use, and the tray **home** window for scan and repair.
 
 ![Agent Doctor desktop](../docs/screenshot-desktop.png)
 
 ## Features
 
-- System tray: **Show**, **Run doctor**, **Check for updates**, **Quit** (tooltip: health + workspace + personal/team mode; busy while tray actions run)
-- **Agents** — environment health, runtime inventory, Diagnose → Repair → Ask drawer
-- **Resources** — Skills / MCP inventory; Browser MCP into Codex / Claude / Hermes / OpenClaw
-- **Wiring** — locked by build edition: personal provider (TeamUps) **or** Evotown (enterprise), not both
-- **Workspace** — list/switch project isolation, remote VPS read-only doctor, Hermes scene presets
+- **Chat** — projects, the conversation, the current folder, knowledge base, scheduled tasks, skills and tools. A signed-in computer accepts a Feishu sentence. Voice is in settings.
+- **Home** — health, then Agent, resources, model service, and projects. Scan, diagnose, confirm a repair.
+- System tray: **Show**, **Run doctor**, **Check for updates**, **Quit** (tooltip: health + workspace + edition; busy while tray actions run)
+- Personal builds show your model service. Team builds show the company gateway. Two installers, two update channels.
 - Auto-update via Tauri Updater (China CDN first, GitHub fallback) — see [docs/desktop-auto-update.md](../docs/desktop-auto-update.md)
 - Repair apply / rollback for supported runtimes (Hermes, OpenClaw, DeepSeek Harness, plus Claude/Codex gateway + Browser MCP)
 - No separate business logic in the TypeScript UI layer
@@ -24,10 +23,8 @@ See [docs/product-boundary.md](../docs/product-boundary.md) for personal vs team
 ```bash
 cd desktop
 npm install
-# Personal edition (default / TeamUps)
-npm run tauri:dev:personal
-# Team edition (enterprise)
-npm run tauri:dev:team
+npm run tauri:dev:personal   # TeamUps, the default package
+npm run tauri:dev:team       # enterprise package
 ```
 
 ## Build

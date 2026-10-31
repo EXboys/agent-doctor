@@ -1,8 +1,8 @@
 # Agent Doctor 中文说明
 
-**Agent Doctor** 在本机诊断、修复并隔离多种 AI Agent runtime（OpenClaw、Hermes、DeepSeek Harness、Claude Code、Codex 等）。
+**Agent Doctor** 在本机跟 Agent 对话，也能诊断、修复并隔离这些 runtime（OpenClaw、Hermes、DeepSeek Harness、Claude Code、Codex 等）。
 
-默认是**个人本机运维**工具；需要团队合规时，再接 Evotown。边界见 [product-boundary.md](product-boundary.md)。
+默认安装包是**个人版**。团队合规是另一套安装包，接 Evotown。边界见 [product-boundary.md](product-boundary.md)。
 
 ![Agent Doctor 桌面：环境健康度、Runtime 清单与待处理建议](../screenshot-desktop.png)
 
@@ -20,58 +20,58 @@
 
 Agent Doctor 提供：
 
-1. **发现** — 装了哪些、版本、配置在哪
-2. **诊断** — `doctor` 检查安装、配置、网关与密钥来源
-3. **修复** — 备份后按 playbook 修好（运维语义，不是切换管家）
-4. **复验** — `ask` / 桌面 Ask，用该 runtime 再跑一遍确认
-5. **隔离** — `workspace` 避免项目记忆 / MCP / Skill 串味
+1. **对话** — 在项目里问答，能用技能、工具、知识库，也能定时再发一句
+2. **发现** — 装了哪些、版本、配置在哪
+3. **诊断** — `doctor` 检查安装、配置、网关与密钥来源
+4. **修复** — 备份后按 playbook 修好
+5. **隔离** — `workspace` 让项目的记忆、工具、技能各管各的
 6. **（团队）合规** — 对照公司 baseline、Skill sync、policy、派活与审计
 
-## 个人（C）与团队（B）
+## 个人版与团队版
 
-| | 个人（C） | 团队（B） |
+两套安装包，应用内不切换。共同内核仍是 **doctor / repair / workspace**。
+
+| | 个人版 | 团队版 |
 |--|----------|----------|
-| 入口 | CLI + 桌面「本机修好」 | 同客户端 + Evotown / 公司 profile |
-| 价值 | 坏了能查、能修、项目不串味 | 合规、基线、同步、派活、审计 |
-| LLM | 只走个人 Provider | 只走 Evotown 中转（互斥） |
-| 不做 | 不做中转市场/用量看板 | 不依赖个人中转生态 |
-| 增量 | 零配置就位、个人 provider、一键修好 | `setup` / `sync` / `policy` / `connect` + 审计导出 |
-
-共同内核：**doctor / repair / workspace**。桌面「接线」页可在个人版 / 团队版之间切换。
+| 安装包 | 默认，TeamUps | 企业定制 |
+| 入口 | 问答窗口 + CLI | 同一套桌面能力 + Evotown |
+| 价值 | 能对话、坏了能查能修、项目不串味 | 合规、基线、同步、派活、审计 |
+| 模型 | 自己的模型服务 | 公司网关 |
+| 增量 | 知识库、定时任务、飞书把话送到这台电脑 | `setup` / `sync` / `policy` / `connect` |
 
 ## 桌面
 
-托盘 + 窗口，和 CLI 共用同一套 Rust 内核。常见路径：**扫描 → 诊断 → 确认修复 → Ask 复验**。
+和 CLI 共用同一套 Rust 内核。两个窗口：
 
-| 页签 | 作用 |
+| 窗口 | 作用 |
 |------|------|
-| **Agents** | 环境健康度、Runtime 清单、诊断/修复抽屉 |
-| **资源** | Skills / MCP 清单，Browser MCP「诊断并写入」（自动识别已装的 Codex / Claude / Hermes / OpenClaw） |
-| **接线** | 个人 Provider 与 Evotown 团队模式（互斥） |
-| **工作区** | 项目隔离切换、远程 VPS 只读 doctor、Hermes 场景预设 |
+| **问答** | 平时用的。左边是项目，中间是对话，旁边是当前文件夹。知识库、定时任务、技能和工具。登录后，飞书的一句话可以送到这台电脑。语音在设置里。 |
+| **主页** | 托盘打开。健康度，然后是 Agent、资源、模型服务、项目。扫描、诊断、确认后修复。 |
 
 ```bash
-cd desktop && npm install && npm run tauri dev
+cd desktop && npm install
+npm run tauri:dev:personal   # 个人版
+npm run tauri:dev:team       # 团队版
 ```
 
 ## 和 ClawPanel 的区别
 
 - [ClawPanel](https://github.com/qingchencloud/clawpanel) 侧重 OpenClaw + Hermes 图形化管理。
-- Agent Doctor 侧重跨 runtime 的本机诊断、备份、修复与项目隔离；团队场景再叠加合规与 Evotown。
+- Agent Doctor 是本机上的对话，加上跨 runtime 的诊断、备份、修复和项目隔离。团队合规走单独的 Evotown 安装包。
 
-## 团队控制面（可选）
+## 团队版
 
-若团队部署了 Evotown，可通过 `setup` / `sync` / `policy pull` / `connect` 对接。见 [enterprise.md](../enterprise.md)。
+团队安装包通过 `setup` / `sync` / `policy pull` / `connect` 对接 Evotown。见 [enterprise.md](../enterprise.md)。
 
 ## 当前状态
 
-**尚未到 1.0** — CLI + 桌面本机运维已可用。当前版本见 [GitHub Releases](https://github.com/EXboys/agent-doctor/releases)。
+**尚未到 1.0** — 桌面问答和 CLI 已经能用。当前版本见 [GitHub Releases](https://github.com/EXboys/agent-doctor/releases)。
 
-已交付：五类 runtime 发现与探测、`repair --apply` / 回滚、桌面 Diagnose → Repair → Ask、工作区隔离、Browser MCP、个人/团队模式切换、Evotown 上线、SSH 只读 `remote` doctor。
+已交付：五类 runtime 发现与探测、`repair --apply` / 回滚、问答（项目、知识库、定时任务、技能和工具、语音、飞书发到这台电脑）、主页扫描和修复、个人版与团队版两套安装包、工作区隔离、Browser MCP、团队包上的 Evotown `setup` / `sync` / `connect`、SSH 只读 `remote` doctor。密钥写在本机 `settings.db` 旁边的 secrets 文件里（macOS / Linux 是 `secrets.json`，Windows 是 DPAPI），不走系统钥匙串。
 
 桌面自动更新（国内 CDN 优先）：见 [desktop-auto-update.md](../desktop-auto-update.md)。
 
-尚未交付：合规报告导出、钥匙串存密钥、远程 SSH 修复、自动填入密钥。详见 [ROADMAP.md](../ROADMAP.md)。
+尚未交付：合规报告导出、远程 SSH 修复、自动填入密钥。详见 [ROADMAP.md](../ROADMAP.md)。
 
 ## 常用命令
 
