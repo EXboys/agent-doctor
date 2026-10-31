@@ -81,7 +81,7 @@ const LIVE_ELAPSED =
   ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed, .chat-running:not([hidden]) .chat-running-time";
 
 function paintLiveElapsed(): void {
-  if (typeof document === "undefined") return;
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return;
   const label = elapsedLabel();
   for (const el of document.querySelectorAll<HTMLElement>(LIVE_ELAPSED)) el.textContent = label;
 }
