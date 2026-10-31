@@ -290,11 +290,37 @@ export function teamupsChannelReply(
     text?: string;
     thinking: string;
     tools: { name: string; status: string; detail: string; output: string }[];
+    files?: {
+      path: string;
+      name: string;
+      kind: "change" | "output";
+      additions: number;
+      deletions: number;
+      addedLines: string[];
+      deletedLines: string[];
+    }[];
   },
 ): Promise<void> {
   const payload =
-    trace && (trace.delta || trace.thinking || trace.text || trace.tools.length > 0) ? trace : undefined;
+    trace &&
+    (trace.delta || trace.thinking || trace.text || trace.tools.length > 0 || (trace.files?.length ?? 0) > 0)
+      ? trace
+      : undefined;
   return invoke("teamups_channel_reply_command", { id, text, ok, done, trace: payload });
+}
+
+export type PhoneChatState = "running" | "waiting" | "done" | "failed";
+
+export type PhoneChatSnapshot = {
+  chat: string;
+  title: string;
+  state: PhoneChatState;
+  updatedAt: number;
+};
+
+/** Tell the phone how each of its chats is doing on this computer. */
+export function teamupsChannelChats(chats: PhoneChatSnapshot[]): Promise<void> {
+  return invoke("teamups_channel_chats_command", { chats });
 }
 
 /** One step of a Feishu message, written to this computer's channel log. */

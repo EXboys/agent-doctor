@@ -23,12 +23,23 @@ use crate::store::open_settings_store;
 use crate::store::default_teamups_base_url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamupsChannelFile {
+    pub name: String,
+    pub mime: String,
+    /// `image` or `file`.
+    pub kind: String,
+    /// Standard base64, no data-URL prefix.
+    pub data: String,
+}
+
 pub struct TeamupsChannelJob {
     pub id: String,
     pub text: String,
     /// Which Feishu conversation this sentence belongs to. Empty when the site
     /// did not say, so every such job stays in one desktop chat.
     pub chat: String,
+    /// Pictures and files the phone attached. Empty for a text-only sentence.
+    pub files: Vec<TeamupsChannelFile>,
 }
 
 pub fn teamups_channel_ws_url(http_base: &str) -> String {
@@ -232,8 +243,13 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         return None;
     }
     let id = value.get("id").and_then(Value::as_str)?.trim();
-    let text = value.get("text").and_then(Value::as_str)?.trim();
-    if id.is_empty() || text.is_empty() {
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let files = parse_job_files(value.get("files"));
+    if id.is_empty() || (text.is_empty() && files.is_empty()) {
         return None;
     }
     let chat = value
@@ -245,7 +261,68 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         id: id.to_string(),
         text: text.to_string(),
         chat: chat.chars().take(128).collect(),
+        files,
     })
+}
+
+fn parse_job_files(value: Option<&Value>) -> Vec<TeamupsChannelFile> {
+    let Some(list) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    let mut total = 0usize;
+    for item in list {
+        if files.len() >= 4 {
+            break;
+        }
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let data = obj.get("data").and_then(Value::as_str).unwrap_or("").trim();
+        if data.is_empty() || data.len() > 1_400_000 || !is_base64(data) {
+            continue;
+        }
+        if total + data.len() > 3_200_000 {
+            break;
+        }
+        total += data.len();
+        let mime: String = obj
+            .get("mime")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .chars()
+            .take(80)
+            .collect();
+        let kind_raw = obj.get("kind").and_then(Value::as_str).unwrap_or("");
+        let kind = if kind_raw == "image" || mime.starts_with("image/") {
+            "image"
+        } else {
+            "file"
+        };
+        files.push(TeamupsChannelFile {
+            name: clip_file_name(obj.get("name").and_then(Value::as_str).unwrap_or("file")),
+            mime,
+            kind: kind.to_string(),
+            data: data.to_string(),
+        });
+    }
+    files
+}
+
+fn is_base64(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'/' || byte == b'=')
+}
+
+fn clip_file_name(raw: &str) -> String {
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw).trim();
+    let name: String = base.chars().take(80).collect();
+    if name.is_empty() {
+        "file".to_string()
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]
@@ -278,6 +355,15 @@ mod tests {
             parse_teamups_channel_job(r#"{"type":"job","id":"b","text":"下一句","chat":"oc_123"}"#)
                 .unwrap();
         assert_eq!(named.chat, "oc_123");
+        assert!(named.files.is_empty());
+        let with_file = parse_teamups_channel_job(
+            r#"{"type":"job","id":"c","text":"看看","files":[{"name":"a.png","mime":"image/png","kind":"image","data":"aGVsbG8="}]}"#,
+        )
+        .unwrap();
+        assert_eq!(with_file.files.len(), 1);
+        assert_eq!(with_file.files[0].name, "a.png");
+        assert_eq!(with_file.files[0].kind, "image");
+        assert!(parse_teamups_channel_job(r#"{"type":"job","id":"d","text":""}"#).is_none());
         assert!(parse_channel_stop(r#"{"type":"stop","id":"job-1"}"#).as_deref() == Some("job-1"));
         assert!(parse_channel_stop(r#"{"type":"stop","id":"  "}"#).is_none());
         assert!(parse_teamups_channel_job(r#"{"type":"hello"}"#).is_none());

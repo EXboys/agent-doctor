@@ -4,6 +4,7 @@ import {
   type TeamupsChannelQuestion,
 } from "../ipc";
 import { formatPermissionDetail } from "./format";
+import { publishPhoneChats } from "./phone-chats";
 
 type AskMode = "choice" | "line" | "options";
 
@@ -30,6 +31,13 @@ export function channelSessionForJob(jobId: string): string | null {
     if (id === jobId) return sessionId;
   }
   return null;
+}
+
+export function channelSessionWaiting(sessionId: string): boolean {
+  for (const ask of pendingByRequest.values()) {
+    if (ask.chatSessionId === sessionId) return true;
+  }
+  return false;
 }
 
 export function endChannelJob(sessionId: string): void {
@@ -91,6 +99,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     true,
     input.inputMode === "options" ? questions : undefined,
   ).catch(() => {});
+  publishPhoneChats();
 }
 
 /** 1 / 允许, or 2 / 拒绝. Anything else is a normal sentence. */
@@ -127,6 +136,7 @@ export async function takePendingChoices(sessionId: string, text: string): Promi
       }),
     ),
   );
+  publishPhoneChats();
   return matches.length;
 }
 
@@ -153,6 +163,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
         allow: true,
         text: JSON.stringify({ answers }),
       });
+      publishPhoneChats();
       return;
     }
     const picked = pickOption(raw, current.options);
@@ -179,6 +190,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
       allow: true,
       text: JSON.stringify({ answers: { [current.question]: picked } }),
     });
+    publishPhoneChats();
     return;
   }
   pendingByRequest.delete(requestId);
@@ -188,6 +200,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
     allow: true,
     text: raw,
   });
+  publishPhoneChats();
 }
 
 function optionPrompt(question: string, options: string[], multiSelect = false): string {

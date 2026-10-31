@@ -87,6 +87,47 @@ const traced = channelTurnTrace(live, 29, "看一下桌面");
 assert(traced.thinking === "先看屏幕上有什么。", "thinking from this sentence is included");
 assert(traced.tools.length === 1 && traced.tools[0]?.name === "screen_snapshot", "the tool run is included");
 assert(traced.tools[0]?.output === "三个窗口", "the tool result is included");
+assert(traced.files.length === 0, "a look at the screen is not a file change");
+const edited = channelTurnTrace(
+  [
+    { role: "user", content: "改一下", at: 40 },
+    {
+      role: "tool",
+      content: "调用工具 edit…",
+      at: 41,
+      step: {
+        kind: "edit",
+        path: "/proj/src/app.ts",
+        additions: 2,
+        deletions: 1,
+        added_lines: ["const next = 1;", "return next;"],
+        deleted_lines: ["return 0;"],
+      },
+    },
+    {
+      role: "tool",
+      content: "调用工具 write…",
+      at: 42,
+      step: {
+        kind: "write",
+        path: "/proj/notes.md",
+        additions: 1,
+        added_lines: ["# 记录"],
+      },
+    },
+  ],
+  39,
+  "改一下",
+);
+assert(
+  edited.files.length === 2 &&
+    edited.files[0]?.kind === "change" &&
+    edited.files[0]?.name === "app.ts" &&
+    edited.files[0]?.addedLines[0] === "const next = 1;" &&
+    edited.files[1]?.kind === "output" &&
+    edited.files[1]?.name === "notes.md",
+  "edits and written files travel with the turn",
+);
 assert(
   traced.tools[0]?.status === "done",
   "a finished tool says it is done",

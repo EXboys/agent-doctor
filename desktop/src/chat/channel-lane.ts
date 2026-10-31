@@ -1,8 +1,15 @@
+export type ChannelUpload = {
+  name: string;
+  path: string;
+  kind: "image" | "file";
+};
+
 export type ChannelQueued = {
   id: string;
   sessionId: string;
   text: string;
   noticed: boolean;
+  files?: ChannelUpload[];
 };
 
 const queues = new Map<string, ChannelQueued[]>();
@@ -69,6 +76,7 @@ export function takeNextChannelJob(sessionId: string): ChannelQueued | undefined
 
 type TurnStep = {
   id?: string;
+  kind?: string;
   name?: string;
   status?: string;
   title?: string;
@@ -76,6 +84,10 @@ type TurnStep = {
   command?: string;
   query?: string;
   output?: string;
+  additions?: number;
+  deletions?: number;
+  added_lines?: string[];
+  deleted_lines?: string[];
 };
 
 type TurnMessage = { role: string; content: string; at: number; step?: TurnStep };
@@ -124,15 +136,30 @@ export type ChannelDelta = {
 
 const DELTA_CAP = 2000;
 
+export type ChannelFile = {
+  path: string;
+  name: string;
+  /** `change` is an edit. `output` is a file this turn wrote. */
+  kind: "change" | "output";
+  additions: number;
+  deletions: number;
+  addedLines: string[];
+  deletedLines: string[];
+};
+
 export type ChannelTrace = {
   thinking: string;
   tools: ChannelToolTrace[];
+  files: ChannelFile[];
 };
 
 const THINKING_CAP = 8000;
 const TOOL_DETAIL_CAP = 500;
 const TOOL_OUTPUT_CAP = 2000;
 const MAX_TOOLS = 30;
+const MAX_FILES = 12;
+const FILE_LINES = 24;
+const FILE_LINE_CHARS = 160;
 
 /** Thinking and tool runs for this sentence, capped so the channel can carry them. */
 export function channelTurnTrace(
@@ -158,7 +185,7 @@ export function channelTurnTrace(
     const tool = toolTrace(message, i);
     if (tool) tools.push(tool);
   }
-  return { thinking, tools: tools.slice(-MAX_TOOLS) };
+  return { thinking, tools: tools.slice(-MAX_TOOLS), files: channelFiles(slice) };
 }
 
 function turnMessages(messages: TurnMessage[], startedAt: number, userText: string): TurnMessage[] {
@@ -183,13 +210,14 @@ function turnMessages(messages: TurnMessage[], startedAt: number, userText: stri
 
 /** The new piece since `previous`. Callers send this and keep the rest locally. */
 export function channelDelta(
-  previous: { text: string; thinking: string; tools: ChannelToolTrace[] },
-  next: { text: string; thinking: string; tools: ChannelToolTrace[] },
-): ChannelDelta | null {
+  previous: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
+  next: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
+): (ChannelDelta & { files: ChannelFile[] }) | null {
   const text = takePiece(previous.text, next.text);
   const thinking = takePiece(previous.thinking, next.thinking);
   const tools = changedTools(previous.tools, next.tools);
-  if (!text.piece && !thinking.piece && tools.length === 0) return null;
+  const files = changedFiles(previous.files ?? [], next.files ?? []);
+  if (!text.piece && !thinking.piece && tools.length === 0 && files.length === 0) return null;
   return {
     delta: true,
     text: text.piece,
@@ -197,18 +225,20 @@ export function channelDelta(
     resetText: text.reset,
     resetThinking: thinking.reset,
     tools,
+    files,
   };
 }
 
 /** Advance the cursor by the piece that was actually sent. */
 export function advanceChannelCursor(
-  previous: { text: string; thinking: string; tools: ChannelToolTrace[] },
-  delta: ChannelDelta,
-): { text: string; thinking: string; tools: ChannelToolTrace[] } {
+  previous: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
+  delta: ChannelDelta & { files?: ChannelFile[] },
+): { text: string; thinking: string; tools: ChannelToolTrace[]; files: ChannelFile[] } {
   return {
     text: delta.resetText ? delta.text : previous.text + delta.text,
     thinking: delta.resetThinking ? delta.thinking : previous.thinking + delta.thinking,
     tools: mergeToolCursor(previous.tools, delta.tools),
+    files: mergeFiles(previous.files ?? [], delta.files ?? []),
   };
 }
 
@@ -219,6 +249,84 @@ function takePiece(previous: string, next: string): { piece: string; reset: bool
     return { piece: next.slice(start, start + DELTA_CAP), reset: false };
   }
   return { piece: next.slice(0, DELTA_CAP), reset: true };
+}
+
+function channelFiles(slice: TurnMessage[]): ChannelFile[] {
+  const byPath = new Map<string, ChannelFile>();
+  for (const message of slice) {
+    if (message.role !== "tool") continue;
+    const step = message.step;
+    const path = step?.path?.trim() ?? "";
+    if (!path) continue;
+    const addedLines = clipLines(step?.added_lines);
+    const deletedLines = clipLines(step?.deleted_lines);
+    const additions = step?.additions || addedLines.length;
+    const deletions = step?.deletions || deletedLines.length;
+    const kind =
+      step?.kind === "write"
+        ? "output"
+        : step?.kind === "edit" || deletions > 0
+          ? "change"
+          : additions > 0
+            ? "output"
+            : "";
+    if (!kind) continue;
+    const next: ChannelFile = {
+      path: path.slice(0, 180),
+      name: fileName(path),
+      kind,
+      additions,
+      deletions,
+      addedLines,
+      deletedLines,
+    };
+    const seen = byPath.get(next.path);
+    if (!seen) {
+      byPath.set(next.path, next);
+      continue;
+    }
+    seen.additions += next.additions;
+    seen.deletions += next.deletions;
+    seen.addedLines = [...seen.addedLines, ...next.addedLines].slice(-FILE_LINES);
+    seen.deletedLines = [...seen.deletedLines, ...next.deletedLines].slice(-FILE_LINES);
+    if (next.kind === "change") seen.kind = "change";
+  }
+  return [...byPath.values()].slice(0, MAX_FILES);
+}
+
+function fileName(path: string): string {
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  return (parts[parts.length - 1] || path).slice(0, 80);
+}
+
+function clipLines(lines: string[] | undefined): string[] {
+  if (!lines?.length) return [];
+  return lines
+    .slice(0, FILE_LINES)
+    .map((line) => {
+      const text = line.replace(/\s+$/g, "");
+      return text.length > FILE_LINE_CHARS ? `${text.slice(0, FILE_LINE_CHARS)}…` : text;
+    })
+    .filter(Boolean);
+}
+
+function changedFiles(previous: ChannelFile[], next: ChannelFile[]): ChannelFile[] {
+  const seen = new Map(previous.map((file) => [file.path, fileKey(file)]));
+  return next.filter((file) => seen.get(file.path) !== fileKey(file));
+}
+
+function mergeFiles(previous: ChannelFile[], updates: ChannelFile[]): ChannelFile[] {
+  const files = previous.slice();
+  for (const update of updates) {
+    const at = files.findIndex((file) => file.path === update.path);
+    if (at >= 0) files[at] = update;
+    else files.push(update);
+  }
+  return files.slice(-MAX_FILES);
+}
+
+function fileKey(file: ChannelFile): string {
+  return `${file.kind}|${file.additions}|${file.deletions}|${file.addedLines.length}|${file.deletedLines.length}|${file.addedLines.at(-1) ?? ""}|${file.deletedLines.at(-1) ?? ""}`;
 }
 
 function changedTools(previous: ChannelToolTrace[], next: ChannelToolTrace[]): ChannelToolTrace[] {

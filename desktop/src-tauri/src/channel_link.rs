@@ -1,14 +1,18 @@
 //! Outbound socket to the TeamUps site. Feishu messages arrive as jobs.
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
+
 use agent_doctor_core::{
     parse_channel_stop, parse_teamups_channel_job, set_teamups_channel_enabled, settings_db_path,
     teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello,
-    teamups_channel_reply, teamups_channel_signed_in,
+    teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -76,10 +80,18 @@ pub struct ChannelPref {
 }
 
 #[derive(Clone, Serialize)]
+struct JobFilePayload {
+    name: String,
+    path: String,
+    kind: String,
+}
+
+#[derive(Clone, Serialize)]
 struct JobPayload {
     id: String,
     text: String,
     chat: String,
+    files: Vec<JobFilePayload>,
 }
 
 #[derive(Clone, Serialize)]
@@ -214,10 +226,12 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         if let Some(job) = parse_teamups_channel_job(&text) {
+                            let files = write_phone_files(&job.id, &job.files);
                             note(&format!(
-                                "job {} in chat={} text={}",
+                                "job {} in chat={} files={} text={}",
                                 job.id,
                                 if job.chat.is_empty() { "-" } else { job.chat.as_str() },
+                                files.len(),
                                 clip(&job.text)
                             ));
                             if !send_within(
@@ -236,6 +250,7 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                     id: job.id,
                                     text: job.text,
                                     chat: job.chat,
+                                    files,
                                 },
                             );
                         } else if let Some(answer) = parse_channel_answer(&text) {
@@ -265,6 +280,76 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
     }
     set_connected(app, false);
     Err("stopped".to_string())
+}
+
+/// Save phone uploads beside the settings database and return paths the chat can read.
+fn write_phone_files(job_id: &str, files: &[TeamupsChannelFile]) -> Vec<JobFilePayload> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let Some(root) = settings_db_path().and_then(|path| path.parent().map(PathBuf::from)) else {
+        return Vec::new();
+    };
+    let dir = root.join("phone-inbox").join(safe_job_id(job_id));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return Vec::new();
+    }
+    let mut saved = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        let Ok(bytes) = STANDARD.decode(file.data.trim()) else {
+            continue;
+        };
+        if bytes.is_empty() || bytes.len() > 1_200_000 {
+            continue;
+        }
+        let name = safe_upload_name(&file.name, index);
+        let path = dir.join(&name);
+        if std::fs::write(&path, &bytes).is_err() {
+            continue;
+        }
+        saved.push(JobFilePayload {
+            name,
+            path: path.to_string_lossy().into_owned(),
+            kind: if file.kind == "image" {
+                "image"
+            } else {
+                "file"
+            }
+            .to_string(),
+        });
+    }
+    saved
+}
+
+fn safe_job_id(id: &str) -> String {
+    let cleaned: String = id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+        .take(80)
+        .collect();
+    if cleaned.is_empty() {
+        "job".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn safe_upload_name(raw: &str, index: usize) -> String {
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw).trim();
+    let mut name = String::new();
+    for ch in base.chars().take(80) {
+        if ch.is_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+            name.push(ch);
+        }
+    }
+    let name = name.trim_matches('.').to_string();
+    if name.is_empty() {
+        format!("file-{index}")
+    } else if index == 0 {
+        name
+    } else {
+        format!("{index}-{name}")
+    }
 }
 
 #[tauri::command]
@@ -324,6 +409,25 @@ pub fn teamups_channel_reply_command(
         "飞书这条线还没连上。".to_string()
     })?;
     tx.send(frame).map_err(|_| "回复没送回官网。".to_string())
+}
+
+/// The phone's conversation list. Each item is one chat on this computer.
+#[tauri::command]
+pub fn teamups_channel_chats_command(
+    app: AppHandle,
+    chats: serde_json::Value,
+) -> Result<(), String> {
+    let list = chats.as_array().cloned().unwrap_or_default();
+    let frame = json!({ "type": "chats", "chats": list }).to_string();
+    let Some(outbound) = app.try_state::<Outbound>() else {
+        return Ok(());
+    };
+    let guard = outbound.0.lock().expect("channel");
+    let Some(tx) = guard.as_ref() else {
+        return Ok(());
+    };
+    let _ = tx.send(frame);
+    Ok(())
 }
 
 /// Steps the chat window takes for one Feishu message, for `channel.log`.

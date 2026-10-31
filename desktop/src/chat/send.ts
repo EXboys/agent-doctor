@@ -38,6 +38,7 @@ import {
 } from "../ipc";
 import { markTurnStarted } from "./activity";
 import { beginChannelJob, endChannelJob } from "./channel-ask";
+import { publishPhoneChats } from "./phone-chats";
 import { handsBlockForText, promptRequestsComputerUse } from "./hands-intent";
 import { hideHandsNotice, showHandsNotice } from "./hands-notice";
 import { readBrowserToolsEnabled, readComputerUseEnabled } from "./hands-pref";
@@ -441,7 +442,10 @@ export function createSendController(deps: SendDeps) {
     deps.setBusy(true, chatSessionId);
     const turnGen = deps.getBusyGen();
     try {
-    if (channel && draft.channelJobId) beginChannelJob(draft.channelJobId, chatSessionId);
+    if (channel && draft.channelJobId) {
+      beginChannelJob(draft.channelJobId, chatSessionId);
+      publishPhoneChats();
+    }
     if (foreground) {
       deps.clearQuickReplies();
       deps.setAssistantBubble(null);

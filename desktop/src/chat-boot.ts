@@ -88,6 +88,7 @@ import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
 import {
   cancelPromptSession,
+  teamupsChannelChats,
   teamupsChannelConnected,
   teamupsChannelNote,
   teamupsChannelPref,
@@ -97,10 +98,12 @@ import {
 import {
   applyChannelAnswer,
   channelSessionForJob,
+  channelSessionWaiting,
   choiceVerdict,
   pendingChoiceCount,
   takePendingChoices,
 } from "./chat/channel-ask";
+import { bindPhoneChats, publishPhoneChats } from "./chat/phone-chats";
 import {
   advanceChannelCursor,
   assistantForChannelTurn,
@@ -547,9 +550,37 @@ export function bootChat(): void {
       paintChannel();
     });
   });
+  bindPhoneChats(() => {
+    const sessions = chatState.store?.sessions ?? [];
+    const chats: {
+      chat: string;
+      title: string;
+      state: "running" | "waiting" | "done" | "failed";
+      updatedAt: number;
+    }[] = [];
+    for (const session of sessions) {
+      const key = session.channelKey?.trim() ?? "";
+      if (!key.startsWith("phone:")) continue;
+      const state = channelSessionWaiting(session.id)
+        ? "waiting"
+        : isChatRunning(session.id)
+          ? "running"
+          : session.interrupted
+            ? "failed"
+            : "done";
+      chats.push({
+        chat: key,
+        title: (session.title || "新会话").slice(0, 40),
+        state,
+        updatedAt: session.updatedAt || 0,
+      });
+    }
+    void teamupsChannelChats(chats.slice(0, 30)).catch(() => {});
+  });
   void listen<boolean>("teamups-channel-status", (event) => {
     channelOn = event.payload === true;
     paintChannel();
+    if (channelOn) publishPhoneChats();
   });
   void listen("teamups-account-changed", () => {
     loadChannelPref();
@@ -558,6 +589,7 @@ export function bootChat(): void {
     .then((on) => {
       channelOn = on;
       paintChannel();
+      if (on) publishPhoneChats();
     })
     .catch(() => paintChannel());
   loadChannelPref();
@@ -570,9 +602,15 @@ export function bootChat(): void {
       }
     })(),
   );
-  function finishChannel(id: string, text: string, ok: boolean): void {
+  function finishChannel(
+    id: string,
+    text: string,
+    ok: boolean,
+    trace?: Parameters<typeof teamupsChannelReply>[4],
+  ): void {
     channelLedger.finish(id, text, ok);
-    void teamupsChannelReply(id, text, ok, true).catch(() => {});
+    void teamupsChannelReply(id, text, ok, true, trace).catch(() => {});
+    publishPhoneChats();
   }
   const phoneStops = new Set<string>();
   async function stopAsked(id: string): Promise<void> {
@@ -607,11 +645,22 @@ export function bootChat(): void {
     if (!next) return;
     void runChannelTurn(next);
   });
-  void listen<{ id?: string; text?: string; chat?: string }>("teamups-channel-job", (event) => {
+  void listen<{
+    id?: string;
+    text?: string;
+    chat?: string;
+    files?: { name?: string; path?: string; kind?: string }[];
+  }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
-    const text = event.payload?.text?.trim() ?? "";
+    const files = (event.payload?.files ?? []).flatMap((file) => {
+      const path = file.path?.trim() ?? "";
+      const name = file.name?.trim() || path.split(/[/\\]/).pop() || "";
+      if (!path || !name) return [];
+      return [{ name, path, kind: file.kind === "image" ? ("image" as const) : ("file" as const) }];
+    });
+    const text = event.payload?.text?.trim() || (files.length ? "看看这个。" : "");
     const chat = event.payload?.chat?.trim() ?? "";
-    void runChannelJob(id, text, chat);
+    void runChannelJob(id, text, chat, files);
   });
   function sessionForChannel(chat: string, text: string): string {
     const store = chatState.store;
@@ -651,13 +700,23 @@ export function bootChat(): void {
       const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
       return assistantForChannelTurn(session?.messages ?? [], started, job.text);
     };
-    let cursor = { text: "", thinking: "", tools: [] as ReturnType<typeof channelTurnTrace>["tools"] };
+    let cursor = {
+      text: "",
+      thinking: "",
+      tools: [] as ReturnType<typeof channelTurnTrace>["tools"],
+      files: [] as ReturnType<typeof channelTurnTrace>["files"],
+    };
     const pump = window.setInterval(() => {
       const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
       const messages = session?.messages ?? [];
       const text = assistantForChannelTurn(messages, started, job.text);
       const trace = channelTurnTrace(messages, started, job.text);
-      const delta = channelDelta(cursor, { text, thinking: trace.thinking, tools: trace.tools });
+      const delta = channelDelta(cursor, {
+        text,
+        thinking: trace.thinking,
+        tools: trace.tools,
+        files: trace.files,
+      });
       if (!delta) return;
       cursor = advanceChannelCursor(cursor, delta);
       void teamupsChannelReply(job.id, "", true, false, delta).catch(() => {});
@@ -671,7 +730,12 @@ export function bootChat(): void {
           id: crypto.randomUUID(),
           sessionId: job.sessionId,
           text: job.text,
-          attachments: [],
+          attachments: (job.files ?? []).map((file) => ({
+            id: crypto.randomUUID(),
+            path: file.path,
+            name: file.name,
+            kind: file.kind,
+          })),
           mentions: [],
           channelJobId: job.id,
         },
@@ -710,11 +774,28 @@ export function bootChat(): void {
         ? `${t("chat.channelStopped")}\n\n${answer}`
         : t("chat.channelStopped")
       : answer || (stopped ? t("chat.channelFailed") : t("chat.channelDone"));
-    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped);
+    const trace = channelTurnTrace(session?.messages ?? [], started, job.text);
+    const shown = trace.files.filter((file) => file.addedLines.length + file.deletedLines.length > 0);
+    teamupsChannelNote(
+      job.id,
+      shown.length
+        ? `files ${shown.map((file) => `${file.name} +${file.addedLines.length}/-${file.deletedLines.length}`).join(", ")}`
+        : "files 0",
+    );
+    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped, {
+      thinking: trace.thinking,
+      tools: trace.tools,
+      files: trace.files,
+    });
   }
-  async function runChannelJob(id: string, text: string, chat: string): Promise<void> {
+  async function runChannelJob(
+    id: string,
+    text: string,
+    chat: string,
+    files: { name: string; path: string; kind: "image" | "file" }[] = [],
+  ): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
-    if (!id || !text || !chatState.send || !chatState.store) {
+    if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
       teamupsChannelNote(id, "chat window not ready");
       void teamupsChannelReply(id, t("chat.channelNotReady"), false).catch(() => {});
       return;
@@ -741,7 +822,7 @@ export function bootChat(): void {
     }
     try {
       const sessionId = sessionForChannel(chat, text);
-      const job: ChannelQueued = { id, sessionId, text, noticed: false };
+      const job: ChannelQueued = { id, sessionId, text, noticed: false, files };
       const busy = isChatRunning(sessionId) || channelQueueLength(sessionId) > 0;
       const action = channelConfirmAction({
         confirmToken: choiceVerdict(text) !== null,

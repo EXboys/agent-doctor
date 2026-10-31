@@ -208,9 +208,9 @@ pub use skills::{
     teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
     teamups_channel_ws_url, teamups_voice_ticket, LocalSkillsLayout, ResolvedSkillsSource,
     SkillInstallError, SkillInstallReport, SkillsSyncOptions, TeamupsAccountStatus,
-    TeamupsCatalogItem, TeamupsChannelJob, TeamupsClient, TeamupsIatUrl, TeamupsLoginPoll,
-    TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog, TeamupsOfficialStatus,
-    TeamupsPackManifest, TeamupsSkillEntry, TeamupsVoiceTicket,
+    TeamupsCatalogItem, TeamupsChannelFile, TeamupsChannelJob, TeamupsClient, TeamupsIatUrl,
+    TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog,
+    TeamupsOfficialStatus, TeamupsPackManifest, TeamupsSkillEntry, TeamupsVoiceTicket,
 };
 pub use store::{
     default_skills_cache_dir, default_teamups_base_url, open_settings_store, settings_db_path,
