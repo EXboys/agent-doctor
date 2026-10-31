@@ -1,5 +1,6 @@
 //! Claude Code ask backend (`claude -p` + optional control_request permissions).
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -16,7 +17,7 @@ use super::mcp_ensure::wire_hands;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result, ToolStep};
 use super::util::{
-    combine_output, command_from_cli, force_stop_child, format_tool_status,
+    combine_output, command_from_cli, event_is_model_reply, force_stop_child, format_tool_status,
     is_runtime_stderr_noise, summarize, tool_activity_detail, tool_chip, turn_error, SessionClock,
     ThinkingLine, ToolWatch, THINKING_AFTER_TOOL,
 };
@@ -550,6 +551,7 @@ where
     let mut subagent_text: HashMap<String, String> = HashMap::new();
     let mut tools = ToolWatch::default();
     let mut thinking = ThinkingLine::default();
+    let heard_reply = Cell::new(false);
     let mut drain = |on_event: &mut F,
                      tools: &mut ToolWatch,
                      pipes: &LivePipes,
@@ -572,6 +574,7 @@ where
                     continue;
                 }
                 if let Some(text) = value.as_ref().and_then(claude_thinking_delta) {
+                    heard_reply.set(true);
                     on_event(PromptSessionEvent::Thinking {
                         session_id: session_id.to_string(),
                         text: text.to_string(),
@@ -601,6 +604,9 @@ where
                     &mut plan_board,
                     &mut *background,
                 ) {
+                    if event_is_model_reply(&event) {
+                        heard_reply.set(true);
+                    }
                     on_event(event);
                 }
             } else if !is_runtime_stderr_noise(&line) {
@@ -630,7 +636,12 @@ where
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if claude_turn_timed_out(&clock, background.pending()) {
+        let answered = heard_reply.get()
+            || background.pending()
+            || control.is_some_and(PromptSessionControl::has_pending);
+        if claude_turn_timed_out(&clock, background.pending())
+            || clock.awaiting_first_reply(answered)
+        {
             timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);

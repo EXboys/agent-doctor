@@ -278,6 +278,24 @@ function mountToolRecord(record: ToolRecord): HTMLDetailsElement {
   return row;
 }
 
+/** Where this row sits in the saved list. Repeated blank rows share a key, so the key alone is not a position. */
+function recordIndexOf(row: HTMLElement, records: ToolRecord[]): number {
+  const raw = row.dataset.recordIndex;
+  if (raw) {
+    const index = Number(raw);
+    const key = row.dataset.toolKey || "";
+    if (Number.isInteger(index) && index >= 0 && index < records.length && toolRecordKey(records[index]!) === key) {
+      return index;
+    }
+  }
+  const key = row.dataset.toolKey || "";
+  return records.findIndex((record) => toolRecordKey(record) === key);
+}
+
+function stampRecord(row: HTMLElement, index: number): void {
+  row.dataset.recordIndex = String(index);
+}
+
 function withoutLogJump(work: () => void): void {
   ignoreLogScroll += 1;
   work();
@@ -386,7 +404,13 @@ export function renderToolHistoryGroup(records: ToolRecord[]): HTMLDetailsElemen
   const group = createToolGroupElement();
   holdToolRecords(group, records);
   const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
-  for (const record of records.slice(-MAX_SHOWN_TOOL_ROWS)) list.appendChild(mountToolRecord(record));
+  const page = records.slice(-MAX_SHOWN_TOOL_ROWS);
+  const offset = records.length - page.length;
+  page.forEach((record, index) => {
+    const row = mountToolRecord(record);
+    stampRecord(row, offset + index);
+    list.appendChild(row);
+  });
   foldRepeatedToolRows(list);
   return group;
 }
@@ -478,9 +502,9 @@ export function createActivityController(deps: ActivityDeps) {
   function windowShowsTail(records: ToolRecord[], list: HTMLElement): boolean {
     const last = list.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
     if (!last || records.length === 0) return true;
-    const key = last.dataset.toolKey || "";
-    if (key === toolRecordKey(records[records.length - 1]!)) return true;
-    return records.length >= 2 && key === toolRecordKey(records[records.length - 2]!);
+    const index = recordIndexOf(last, records);
+    if (index >= 0) return index >= records.length - 2;
+    return false;
   }
 
   function dropRow(row: HTMLElement): void {
@@ -526,14 +550,17 @@ export function createActivityController(deps: ActivityDeps) {
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
     const first = list?.querySelector<HTMLElement>(":scope > .chat-tool-row");
     if (!list || !first?.dataset.toolKey) return;
-    const start = records.findIndex((record) => toolRecordKey(record) === first.dataset.toolKey);
+    const start = recordIndexOf(first, records);
+    if (start < 0) return;
     const range = earlierToolRange(start);
     if (!range) return;
     const log = deps.logEl;
     const before = log.scrollHeight;
     const top = log.scrollTop;
     for (let i = range.to - 1; i >= range.from; i -= 1) {
-      list.insertBefore(mountToolRecord(records[i]!), list.firstChild);
+      const row = mountToolRecord(records[i]!);
+      stampRecord(row, i);
+      list.insertBefore(row, list.firstChild);
     }
     dropOffscreenRows(list, "bottom");
     withoutLogJump(() => {
@@ -547,10 +574,15 @@ export function createActivityController(deps: ActivityDeps) {
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
     const last = list?.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
     if (!list || !last?.dataset.toolKey) return;
-    const lastIndex = records.findIndex((record) => toolRecordKey(record) === last.dataset.toolKey);
+    const lastIndex = recordIndexOf(last, records);
+    if (lastIndex < 0) return;
     const range = laterToolRange(lastIndex, records.length);
     if (!range) return;
-    for (let i = range.from; i < range.to; i += 1) list.appendChild(mountToolRecord(records[i]!));
+    for (let i = range.from; i < range.to; i += 1) {
+      const row = mountToolRecord(records[i]!);
+      stampRecord(row, i);
+      list.appendChild(row);
+    }
     dropOffscreenRows(list, "top");
     syncToolGroup(group, group === deps.getToolGroupEl());
   }
@@ -893,6 +925,7 @@ export function createActivityController(deps: ActivityDeps) {
     row.classList.remove("is-done");
     row.dataset.phase = phase;
     row.dataset.toolKey = `t:${signature}`;
+    stampRecord(row, Math.max(0, records.length - 1));
     list.appendChild(row);
     if (deps.logEl.dataset.pin !== "0") trimLiveToolRows(group);
     else dropOffscreenRows(list, "top");

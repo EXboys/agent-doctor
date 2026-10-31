@@ -1,6 +1,7 @@
 import { focusMainTab } from "./ipc";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { mountReplyChangeCard } from "./chat/reply-changes";
+import { omitBareToolStarts } from "./chat/tool-records";
 import { isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 import { normalizePlanItems, paintChatPlan } from "./plan";
@@ -229,14 +230,16 @@ export function wireChatControllers(): void {
           break;
         }
       }
-      return messages
-        .slice(start)
-        .filter((message) => message.role === "tool")
-        .map((message) =>
-          message.step || message.skippedTools
-            ? { text: message.content, step: message.step, skipped: message.skippedTools }
-            : message.content,
-        );
+      return omitBareToolStarts(
+        messages
+          .slice(start)
+          .filter((message) => message.role === "tool")
+          .map((message) =>
+            message.step || message.skippedTools
+              ? { text: message.content, step: message.step, skipped: message.skippedTools }
+              : message.content,
+          ),
+      );
     },
     onChatConnectionFailure: (explain) => showChatFailureBubble(explain),
   });

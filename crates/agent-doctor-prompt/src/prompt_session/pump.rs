@@ -10,6 +10,7 @@
 //! [`super::claude`] and [`super::codex_app_server`], over the shared
 //! [`super::warm::LivePipes`], whose pipes live across turns.)
 
+use std::cell::Cell;
 use std::io::Read;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,8 +21,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use super::util::{
-    finish_oneshot_after_pipes_closed, force_stop_child, is_runtime_stderr_noise, join_reader,
-    push_capped, SessionClock,
+    event_is_model_reply, finish_oneshot_after_pipes_closed, force_stop_child,
+    is_runtime_stderr_noise, join_reader, push_capped, SessionClock,
 };
 use super::{PromptSessionEvent, PromptSessionStatus, PumpResult};
 
@@ -175,6 +176,7 @@ where
         ),
     );
 
+    let heard_reply = Cell::new(false);
     let drain = |handler: &mut H, on_event: &mut F| -> bool {
         let drained = {
             let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
@@ -183,7 +185,12 @@ where
         let saw = !drained.is_empty();
         for (is_stdout, line) in drained {
             if is_stdout {
-                handler.on_stdout(session_id, &line, on_event);
+                handler.on_stdout(session_id, &line, &mut |event| {
+                    if event_is_model_reply(&event) {
+                        heard_reply.set(true);
+                    }
+                    on_event(event);
+                });
                 continue;
             }
             if handler.hides_stderr(&line) || is_runtime_stderr_noise(&line) {
@@ -200,7 +207,12 @@ where
     let (status, exit_code) = loop {
         let saw_output = drain(handler, on_event);
         // Poll even after output: OpenClaw's trace must keep ticking.
-        let saw_poll = handler.poll(session_id, on_event);
+        let saw_poll = handler.poll(session_id, &mut |event| {
+            if event_is_model_reply(&event) {
+                heard_reply.set(true);
+            }
+            on_event(event);
+        });
         if saw_output || saw_poll {
             clock.touch();
         }
@@ -209,7 +221,10 @@ where
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if clock.expired() || (handler.stall_guard() && clock.stalled()) {
+        if clock.expired()
+            || (handler.stall_guard() && clock.stalled())
+            || clock.awaiting_first_reply(heard_reply.get())
+        {
             timeout_note = Some(clock.timeout_note(&handler.timeout_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);

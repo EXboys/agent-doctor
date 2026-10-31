@@ -189,6 +189,11 @@ void listen("workspace-changed", () => {
   void refs.resources!.loadMcpStatus();
 });
 
+void listen("personal-provider-changed", () => {
+  void refs.wiring?.loadPersonalProviderStatus();
+  void refs.wiring?.loadModeStatus();
+});
+
 bindLocaleSync(() => applyMainLocale());
 applyStaticI18n();
 refs.wiring.syncProviderPanelToEdition();

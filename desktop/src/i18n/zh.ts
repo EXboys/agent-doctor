@@ -497,6 +497,8 @@ export const zh = {
     "chat.replyFileOne": "改了 1 个文件",
     "chat.replyFileMany": "改了 {count} 个文件",
     "chat.replyFileReview": "查看",
+    "chat.replyFileMore": "还有 {count} 个",
+    "chat.replyFileFold": "收起",
     "chat.filesRemoved": "删掉的",
     "chat.filesAdded": "加上的",
     "chat.filesNotFound": "没找到这个文件，可能已经被删掉或挪走了。",

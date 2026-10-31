@@ -15,6 +15,10 @@ use super::{PromptSessionEvent, PromptSessionStatus, MAX_CAPTURE_CHARS, SUMMARY_
 /// Quiet this long with no step running and nobody asked anything: the turn is stuck.
 const STALL_LIMIT: Duration = Duration::from_secs(10 * 60);
 
+/// The model has not said anything yet. A status line such as "requesting" does
+/// not count: a dead provider can sit there until the long stall limit.
+const FIRST_REPLY: Duration = Duration::from_secs(20);
+
 /// Wall clock for one ask turn.
 ///
 /// Quiet time alone does not stop the turn. A build that prints nothing keeps
@@ -56,6 +60,12 @@ impl SessionClock {
     /// Callers touch the clock while a question waits on the user.
     pub(crate) fn stalled(&self) -> bool {
         !self.tool_running && self.last_activity.elapsed() >= STALL_LIMIT
+    }
+
+    /// No reply yet, and nobody is waiting on the user or a tool.
+    /// `heard_reply` is text, thinking, or a tool — not a status heartbeat.
+    pub(crate) fn awaiting_first_reply(&self, heard_reply: bool) -> bool {
+        !heard_reply && !self.tool_running && self.started.elapsed() >= FIRST_REPLY
     }
 
     pub(crate) fn timeout_note(&self, last_tool: &str) -> super::TimeoutNote {
@@ -453,6 +463,18 @@ pub(crate) fn command_from_cli(bin: &str) -> Command {
     cmd
 }
 
+/// The model has started answering. A status heartbeat is not an answer.
+pub(crate) fn event_is_model_reply(event: &super::PromptSessionEvent) -> bool {
+    match event {
+        super::PromptSessionEvent::Delta { text, .. }
+        | super::PromptSessionEvent::Thinking { text, .. }
+        | super::PromptSessionEvent::StdoutLine { line: text, .. } => !text.trim().is_empty(),
+        super::PromptSessionEvent::Tool { .. }
+        | super::PromptSessionEvent::PermissionRequest { .. } => true,
+        _ => false,
+    }
+}
+
 pub(crate) fn force_stop_child(child: &mut Child, pid: u32) {
     #[cfg(unix)]
     {
@@ -798,6 +820,17 @@ mod tests {
         clock.touch();
         assert!(clock.expired());
         assert_eq!(clock.timeout_note("npm test").kind, "absolute");
+    }
+
+    #[test]
+    fn no_reply_yet_is_a_short_timeout() {
+        let mut clock = SessionClock::new(600);
+        assert!(!clock.awaiting_first_reply(false));
+        clock.started -= FIRST_REPLY;
+        assert!(clock.awaiting_first_reply(false));
+        assert!(!clock.awaiting_first_reply(true));
+        clock.set_tool_running(true);
+        assert!(!clock.awaiting_first_reply(false));
     }
 
     #[test]

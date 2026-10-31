@@ -314,12 +314,11 @@ export function isQuietPhase(phase: string): boolean {
 
 /** Short name on the first line; command or path on the following lines. */
 export function splitToolActivity(text: string): { summary: string; detail: string } {
-  const stripped = text
-    .replace(/^(?:调用工具|call(?:ing)? tool)\s*/i, "")
-    .replace(/[….\s]+$/g, "")
-    .trim();
+  const stripped = text.replace(/^(?:调用工具|call(?:ing)? tool)\s*/i, "").trim();
   const breakAt = stripped.indexOf("\n");
-  const head = (breakAt === -1 ? stripped : stripped.slice(0, breakAt)).trim();
+  // The start notice is "Bash…". The finished line is "Bash…\n<command>".
+  // The dots belong to the notice, so both lines name the same tool.
+  const head = (breakAt === -1 ? stripped : stripped.slice(0, breakAt)).trim().replace(/[….]+$/g, "");
   const detail = breakAt === -1 ? "" : stripped.slice(breakAt + 1).trim();
   const aliases = head.split("__").filter(Boolean);
   const summary = (aliases.length > 1 ? aliases[aliases.length - 1] : head) || text.trim();

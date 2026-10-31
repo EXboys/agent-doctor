@@ -21,7 +21,7 @@ import {
 import { followChatLog, lockChatRowHeights, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
-import { appendRunLogMessage, storeToolStep } from "./tool-records";
+import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
 import { sealWorkTrail, wrapProcessRows } from "./work-trail";
 import { syncQuestionRail } from "./question-rail";
 import {
@@ -709,10 +709,12 @@ export function createBubblesController(deps: BubblesDeps) {
             }
             rows.push(
               renderToolHistoryGroup(
-                run.map((item) =>
-                  item.step || item.skippedTools
-                    ? { text: item.content, step: item.step, skipped: item.skippedTools }
-                    : item.content,
+                omitBareToolStarts(
+                  run.map((item) =>
+                    item.step || item.skippedTools
+                      ? { text: item.content, step: item.step, skipped: item.skippedTools }
+                      : item.content,
+                  ),
                 ),
               ),
             );

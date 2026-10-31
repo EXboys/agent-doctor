@@ -279,6 +279,12 @@ pub enum PromptSessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<TimeoutNote>,
     },
+    /// This turn moved to another saved provider. The checked provider moves with it.
+    ProviderSwitched {
+        session_id: String,
+        provider_id: String,
+        model: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,8 +370,100 @@ where
     // programs first so that failure never shows up on the message.
     agent_doctor_core::setup::merge::drop_unreachable_ask_tools(&cwd);
     agent_doctor_core::setup::merge::retarget_windows_mcp_hosts(&cwd);
+    let mut options_slot = options.clone();
+    let mut switched = false;
+    if !cfg!(test) && failover_allowed(&runtime, &options_slot) {
+        if let Some(choice) =
+            agent_doctor_core::setup::failover_while_cooling(options_slot.provider_id.as_deref())
+        {
+            commit_failover(&mut options_slot, &choice, &mut on_event);
+            switched = true;
+        }
+    }
+
+    let cancel_again = cancel.clone();
+    let control_again = control.clone();
+    let mut driven = drive_prompt(backend, &options_slot, cancel, control, &mut on_event)?;
+    if !cfg!(test)
+        && !switched
+        && failover_allowed(&runtime, &options_slot)
+        && driven.report.status != PromptSessionStatus::Cancelled
+        && !driven.saw_work
+        && !cancel_again.is_requested()
+    {
+        // A hang stops as a timeout and often has no error text. Name it so
+        // the outage check can see it.
+        let hung = matches!(driven.report.status, PromptSessionStatus::TimedOut);
+        let blob = format!(
+            "{}\n{}\n{}{}",
+            driven.report.summary,
+            driven.report.log_excerpt,
+            driven.notes,
+            if hung { "\ntimeout" } else { "" }
+        );
+        if let Some(choice) = agent_doctor_core::setup::failover_after_outage(
+            options_slot.provider_id.as_deref(),
+            &blob,
+        ) {
+            record_turn_usage(&runtime, &options_slot, &driven);
+            commit_failover(&mut options_slot, &choice, &mut on_event);
+            let second = drive_prompt(
+                backend,
+                &options_slot,
+                cancel_again,
+                control_again,
+                &mut on_event,
+            )?;
+            if second.report.status != PromptSessionStatus::Cancelled && !second.saw_work {
+                let second_blob = format!(
+                    "{}\n{}\n{}",
+                    second.report.summary, second.report.log_excerpt, second.notes
+                );
+                agent_doctor_core::setup::remember_provider_outage(
+                    options_slot.provider_id.as_deref(),
+                    &second_blob,
+                );
+            }
+            driven = second;
+        }
+    }
+    for event in driven.held.drain(..) {
+        on_event(event);
+    }
+    if let Some(event) = driven.completed.take() {
+        on_event(event);
+    }
+    record_turn_usage(&runtime, &options_slot, &driven);
+    Ok(driven.report)
+}
+
+struct DrivenPrompt {
+    report: PromptSessionReport,
+    saw_work: bool,
+    notes: String,
+    used_model: Option<String>,
+    /// Errors from a turn that has not answered yet. Dropped when this turn
+    /// switches provider, so the raw failure is not the thing left on screen.
+    held: Vec<PromptSessionEvent>,
+    completed: Option<PromptSessionEvent>,
+}
+
+fn drive_prompt<F>(
+    backend: AskSession,
+    options: &PromptSessionOptions,
+    cancel: PromptSessionCancel,
+    control: Option<PromptSessionControl>,
+    on_event: &mut F,
+) -> Result<DrivenPrompt>
+where
+    F: FnMut(PromptSessionEvent),
+{
     let mut used = TokenUsage::default();
-    let mut used_model: Option<String> = None;
+    let mut used_model = None;
+    let mut saw_work = false;
+    let mut notes = String::new();
+    let mut held = Vec::new();
+    let mut completed = None;
     let mut report = backend.run(options, cancel, control, &mut |event| {
         if let PromptSessionEvent::Usage { usage, model, .. } = &event {
             used.add(usage);
@@ -373,28 +471,147 @@ where
                 used_model = model.clone();
             }
         }
-        on_event(event);
+        if event_is_work(&event) {
+            saw_work = true;
+            for pending in held.drain(..) {
+                on_event(pending);
+            }
+        }
+        if let Some(line) = event_failure_line(&event) {
+            push_failure_note(&mut notes, line);
+            if !saw_work {
+                held.push(event);
+                return;
+            }
+        }
+        if matches!(event, PromptSessionEvent::Completed { .. }) {
+            completed = Some(event);
+        } else {
+            on_event(event);
+        }
     })?;
     if !used.is_empty() {
         report.usage = Some(used);
-        if !cfg!(test) {
-            // DeepSeek Harness ignores the chat's saved model and talks only to
-            // DeepSeek. A GLM model left on the chat must not be written down.
-            let harness = runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID;
-            let model = if harness {
-                used_model.as_deref()
-            } else {
-                used_model.as_deref().or(options.model.as_deref())
-            };
-            let provider_id = if harness {
-                None
-            } else {
-                options.provider_id.as_deref()
-            };
-            let _ = agent_doctor_core::usage::record_turn(&runtime, provider_id, model, &used);
-        }
     }
-    Ok(report)
+    Ok(DrivenPrompt {
+        report,
+        saw_work,
+        notes,
+        used_model,
+        held,
+        completed,
+    })
+}
+
+fn event_is_work(event: &PromptSessionEvent) -> bool {
+    match event {
+        PromptSessionEvent::Delta { text, .. }
+        | PromptSessionEvent::Thinking { text, .. }
+        | PromptSessionEvent::StdoutLine { line: text, .. } => !text.trim().is_empty(),
+        PromptSessionEvent::Tool { .. } | PromptSessionEvent::PermissionRequest { .. } => true,
+        _ => false,
+    }
+}
+
+fn event_failure_line(event: &PromptSessionEvent) -> Option<&str> {
+    match event {
+        PromptSessionEvent::StderrLine { line, .. } => Some(line.as_str()),
+        PromptSessionEvent::TurnError { message, .. } => Some(message.as_str()),
+        _ => None,
+    }
+}
+
+fn push_failure_note(notes: &mut String, line: &str) {
+    const LIMIT: usize = 8_000;
+    if notes.len() >= LIMIT {
+        return;
+    }
+    if !notes.is_empty() {
+        notes.push('\n');
+    }
+    let room = LIMIT.saturating_sub(notes.len());
+    let line = line.trim();
+    if line.len() <= room {
+        notes.push_str(line);
+    } else {
+        notes.push_str(&line[..room]);
+    }
+}
+
+fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
+    if runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID {
+        return false;
+    }
+    // A ChatGPT or Claude login is not one of the saved providers.
+    if agent_doctor_core::is_native_subscription(runtime)
+        && !agent_doctor_core::session_env::chat_uses_saved_service(
+            options.model.as_deref(),
+            options.provider_id.as_deref(),
+        )
+    {
+        return false;
+    }
+    true
+}
+
+fn apply_failover(
+    options: &mut PromptSessionOptions,
+    choice: &agent_doctor_core::setup::FailoverSwitch,
+) {
+    options.provider_id = Some(choice.id.clone());
+    options.model = Some(choice.model.clone());
+    options.resume_thread_id = None;
+}
+
+fn commit_failover<F>(
+    options: &mut PromptSessionOptions,
+    choice: &agent_doctor_core::setup::FailoverSwitch,
+    on_event: &mut F,
+) where
+    F: FnMut(PromptSessionEvent),
+{
+    // The same switch a click on the provider card performs, so the checked
+    // row and the next message follow this provider.
+    let _ = agent_doctor_core::activate_personal_provider(&choice.id);
+    retire_warm_sessions();
+    apply_failover(options, choice);
+    on_event(failover_notice(&choice.notice));
+    on_event(PromptSessionEvent::ProviderSwitched {
+        session_id: String::new(),
+        provider_id: choice.id.clone(),
+        model: choice.model.clone(),
+    });
+}
+
+fn failover_notice(message: &str) -> PromptSessionEvent {
+    PromptSessionEvent::TurnError {
+        session_id: String::new(),
+        message: message.to_string(),
+        plain: true,
+    }
+}
+
+fn record_turn_usage(runtime: &str, options: &PromptSessionOptions, driven: &DrivenPrompt) {
+    let Some(used) = driven.report.usage else {
+        return;
+    };
+    if cfg!(test) {
+        return;
+    }
+    // DeepSeek Harness ignores the chat's saved model and talks only to
+    // DeepSeek. A GLM model left on the chat must not be written down.
+    let harness = runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID;
+    let model = if harness {
+        None
+    } else {
+        driven.used_model.as_deref().or(options.model.as_deref())
+    };
+    let provider_id = if harness {
+        None
+    } else {
+        options.provider_id.as_deref()
+    };
+    let _ = agent_doctor_core::usage::record_turn(runtime, provider_id, model, &used);
 }
 
 #[cfg(test)]

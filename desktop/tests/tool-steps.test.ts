@@ -25,7 +25,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { repeatRuns, stepActivityInfo, mergeToolStep, summarizeToolActivities } = await import("../src/chat/format");
-const { earlierToolRange, laterToolRange, storeToolStep } = await import("../src/chat/tool-records");
+const { earlierToolRange, laterToolRange, omitBareToolStarts, storeToolStep } = await import("../src/chat/tool-records");
 type ChatMessage = import("../src/chat/types").ChatMessage;
 
 let failures = 0;
@@ -240,6 +240,27 @@ check(
 check(
   "a command repeated in the new chip is not mistaken for the earlier run",
   turnSegmentRecords(turn, [toolRecordKey(turn[0]!)]).length === 3,
+);
+
+const { splitToolActivity } = await import("../src/chat/format");
+const started = splitToolActivity("调用工具 Bash…");
+const finished = splitToolActivity("调用工具 Bash…\ngit status --short");
+check("a started command and the finished command name the same tool", started.summary === finished.summary && started.summary === "Bash", started);
+
+const doubled = omitBareToolStarts([
+  "调用工具 Bash…",
+  { text: "调用工具 Bash…\ngit commit", step: { id: "c1", kind: "terminal", status: "failed", name: "Bash", title: "Branch and commit remaining changes" } },
+  "调用工具 Bash…",
+  { text: "调用工具 Bash…\ngit status", step: { id: "c2", kind: "terminal", status: "done", name: "Bash", title: "Inspect branch commit state" } },
+]);
+check(
+  "the blank start row is not shown again under the real command",
+  doubled.length === 2 && doubled[0]?.step?.id === "c1" && doubled[1]?.step?.id === "c2",
+  doubled,
+);
+check(
+  "a command that never finished still keeps its row",
+  omitBareToolStarts(["调用工具 Bash…"]).length === 1,
 );
 
 if (failures > 0) {

@@ -111,7 +111,9 @@ function openFile(file: ReplyFileChange): void {
   );
 }
 
-function renderReplyChangeCard(files: ReplyFileChange[]): HTMLElement {
+const PREVIEW_FILES = 5;
+
+function renderReplyChangeCard(files: ReplyFileChange[], open: boolean): HTMLElement {
   const card = document.createElement("section");
   card.className = "chat-reply-changes";
   const head = document.createElement("div");
@@ -129,7 +131,8 @@ function renderReplyChangeCard(files: ReplyFileChange[]): HTMLElement {
   });
   head.append(title, review);
   card.append(head);
-  for (const file of files) {
+  const extra = files.length - PREVIEW_FILES;
+  files.forEach((file, index) => {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "chat-reply-changes-file";
@@ -155,18 +158,42 @@ function renderReplyChangeCard(files: ReplyFileChange[]): HTMLElement {
       row.append(stats);
     }
     row.addEventListener("click", () => openFile(file));
+    if (index >= PREVIEW_FILES) {
+      row.classList.add("is-extra");
+      row.hidden = !open;
+    }
     card.append(row);
+  });
+  if (extra > 0) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "chat-reply-changes-more";
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+    const paint = (shown: boolean) => {
+      more.textContent = shown
+        ? t("chat.replyFileFold")
+        : t("chat.replyFileMore", { count: String(extra) });
+      more.setAttribute("aria-expanded", shown ? "true" : "false");
+      card.classList.toggle("is-open", shown);
+      card.querySelectorAll<HTMLElement>(".chat-reply-changes-file.is-extra").forEach((row) => {
+        row.hidden = !shown;
+      });
+    };
+    paint(open);
+    more.addEventListener("click", () => paint(!card.classList.contains("is-open")));
+    card.append(more);
   }
   return card;
 }
 
 /** One card under the latest reply. Nothing to show once the user has sent again. */
 export function mountReplyChangeCard(logEl: HTMLElement, messages: readonly ChatMessage[]): void {
+  const wasOpen = logEl.querySelector(".chat-reply-changes")?.classList.contains("is-open") ?? false;
   logEl.querySelector(".chat-reply-changes")?.remove();
   const fromMessages = latestReplyFileChanges(messages);
   const files = fromMessages.length ? fromMessages : visibleReplyFileChanges(logEl);
   if (!files.length) return;
-  const card = renderReplyChangeCard(files);
+  const card = renderReplyChangeCard(files, wasOpen);
   const children = [...logEl.children];
   let lastUser = -1;
   for (let i = children.length - 1; i >= 0; i -= 1) {

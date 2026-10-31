@@ -3705,6 +3705,10 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   background: var(--fill);
 }
 
+.chat-reply-changes-file[hidden] {
+  display: none;
+}
+
 .chat-reply-changes-mark {
   flex: 0 0 auto;
   color: #7c6af7;
@@ -3733,6 +3737,25 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-reply-changes-del {
   color: #cf222e;
+}
+
+.chat-reply-changes-more {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 12px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-reply-changes-more:hover {
+  color: var(--text);
+  background: var(--fill);
 }
 
 .chat-work-summary::-webkit-details-marker {
@@ -6930,7 +6953,8 @@ html[data-os="windows"] .chat-log {
   scrollbar-gutter: stable;
 }
 
-/* Skip layout and paint for rows above and below the window. */
+/* Rows keep their real height. A fixed stand-in made a short sentence between
+   tools 88px tall, so the next tool sat in the empty part of that box. */
 .chat-log > :is(
   .chat-msg,
   .chat-work,
@@ -6943,17 +6967,9 @@ html[data-os="windows"] .chat-log {
   .chat-reply-changes,
   .chat-plan
 ) {
-  content-visibility: auto;
-  /* 88px is only the stand-in until the row's real height is recorded.
-     Flex would otherwise squash that stand-in, so the recorded height never sticks. */
-  contain-intrinsic-size: auto 88px;
-  flex-shrink: 0;
-}
-
-/* The live reply changes height on every token. A stand-in height would jump. */
-.chat-log > .chat-msg:has(.is-streaming) {
   content-visibility: visible;
   contain-intrinsic-size: none;
+  flex-shrink: 0;
 }
 
 /* A new chat lifts the two start cards into the open area, clear of the composer. */
@@ -7018,6 +7034,20 @@ html[data-os="windows"] .chat-log {
   width: 100%;
   max-width: 100%;
   margin-block: -1px;
+  position: relative;
+}
+
+/* Copy and the time stay invisible until hover. They must not hold a blank
+   line, or the next tool sits far below the sentence between two tools. */
+.chat-msg-assistant > .chat-msg-actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  min-height: 0;
+  height: 24px;
+  padding: 0;
+  overflow: visible;
 }
 
 .chat-msg-user {

@@ -41,6 +41,9 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
 
   switch (payload.type) {
     case "started":
+      run.turnNoticeSaved = false;
+      run.turnErrors = [];
+      run.turnReports = [];
       ctx.scheduleSessionListRender();
       return;
     case "status":

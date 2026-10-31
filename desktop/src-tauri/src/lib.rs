@@ -338,7 +338,8 @@ fn event_session_id(event: &PromptSessionEvent) -> Option<&str> {
         | PromptSessionEvent::Plan { session_id, .. }
         | PromptSessionEvent::Tool { session_id, .. }
         | PromptSessionEvent::Usage { session_id, .. }
-        | PromptSessionEvent::Completed { session_id, .. } => session_id.as_str(),
+        | PromptSessionEvent::Completed { session_id, .. }
+        | PromptSessionEvent::ProviderSwitched { session_id, .. } => session_id.as_str(),
     })
 }
 
@@ -458,6 +459,13 @@ async fn start_prompt_session_command(
             control_for_run,
             |event: PromptSessionEvent| {
                 let event = stamp_client_run(event, &client_for_events);
+                if let PromptSessionEvent::ProviderSwitched { .. } = &event {
+                    agent_doctor_prompt::retire_warm_sessions();
+                    let _ = app_for_emit.emit(
+                        "personal-provider-changed",
+                        serde_json::json!({ "failover": true }),
+                    );
+                }
                 if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
                     if let Some(backend_id) = event_session_id(&event) {
                         sessions.note_backend(backend_id, &client_for_events);

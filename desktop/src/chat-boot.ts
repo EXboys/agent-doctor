@@ -448,10 +448,14 @@ export function bootChat(): void {
     promptEl.focus();
   });
 
-  void listen("personal-provider-changed", () => {
+  void listen<{ failover?: boolean }>("personal-provider-changed", (event) => {
     // Refresh first: releasing pins needs the newly active provider's id.
     void refreshWiredProvider().then(() => releasePinnedProviderModels());
-    if (runningCount() > 0) setStatus(t("chat.providerChangedMidTurn"), "warn");
+    // A failover already moved this turn. The mid-turn warning is for a click
+    // on another provider while a reply is still on the old one.
+    if (runningCount() > 0 && !event.payload?.failover) {
+      setStatus(t("chat.providerChangedMidTurn"), "warn");
+    }
   });
 
   void listen("workspace-changed", () => {

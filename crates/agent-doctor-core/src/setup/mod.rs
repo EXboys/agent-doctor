@@ -5,6 +5,7 @@ mod mode;
 mod native_login;
 mod personal;
 mod pipeline;
+mod provider_failover;
 mod zhipu;
 
 pub use account_models::{
@@ -44,6 +45,9 @@ pub use pipeline::{
     anthropic_gateway_for_provider_url, apply_mode_switch, coerce_gateway_model, effector_label,
     probe_endpoint_bundle, project_bundle, runtime_strategies, strategy_for, BundleProbeReport,
     EffectorKind, EndpointBundle, ModeSwitchTarget, RuntimeStrategy, WriteSemantics,
+};
+pub use provider_failover::{
+    failover_after_outage, failover_while_cooling, remember_provider_outage, FailoverSwitch,
 };
 
 use std::fs;

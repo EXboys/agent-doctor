@@ -1,7 +1,32 @@
-import { mergeToolStep, toolSignature, toolStepText } from "./format";
+import { mergeToolStep, splitToolActivity, toolSignature, toolStepText } from "./format";
 import type { ChatMessage, ToolStep } from "./types";
 
 export type ToolRecord = string | { text: string; step?: ToolStep; skipped?: number };
+
+function toolFace(text: string): string {
+  return splitToolActivity(text).summary.replace(/[….]+$/g, "").toLowerCase();
+}
+
+/**
+ * A tool is announced once before its command arrives, then saved again with the
+ * step. The announcement has no command. Drop it when the next record is that step,
+ * so the list does not show a blank row above every real one.
+ */
+export function omitBareToolStarts(records: ToolRecord[]): ToolRecord[] {
+  const out: ToolRecord[] = [];
+  for (let i = 0; i < records.length; i += 1) {
+    const record = records[i];
+    const next = records[i + 1];
+    if (record && typeof record === "string" && next && typeof next !== "string" && next.step) {
+      const name = toolFace(record);
+      const stepName = toolFace(next.step.name || next.text);
+      const { detail } = splitToolActivity(record);
+      if (!detail && name && name === stepName) continue;
+    }
+    if (record) out.push(record);
+  }
+  return out;
+}
 
 export function toolRecordKey(record: ToolRecord): string {
   if (typeof record !== "string" && record.step?.id) return `id:${record.step.id}`;

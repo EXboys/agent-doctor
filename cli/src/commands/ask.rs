@@ -92,7 +92,8 @@ pub fn run(
             | PromptSessionEvent::Thinking { .. }
             | PromptSessionEvent::Tool { .. }
             | PromptSessionEvent::Usage { .. }
-            | PromptSessionEvent::Completed { .. } => {}
+            | PromptSessionEvent::Completed { .. }
+            | PromptSessionEvent::ProviderSwitched { .. } => {}
         }
         let _ = io::stdout().flush();
         let _ = io::stderr().flush();

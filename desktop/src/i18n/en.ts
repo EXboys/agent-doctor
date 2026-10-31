@@ -497,6 +497,8 @@ export const en = {
     "chat.replyFileOne": "1 file changed",
     "chat.replyFileMany": "{count} files changed",
     "chat.replyFileReview": "Review",
+    "chat.replyFileMore": "{count} more",
+    "chat.replyFileFold": "Show less",
     "chat.filesRemoved": "Removed",
     "chat.filesAdded": "Added",
     "chat.filesNotFound": "Could not find this file. It may have been deleted or moved.",
