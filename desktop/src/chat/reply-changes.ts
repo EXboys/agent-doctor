@@ -186,34 +186,18 @@ function renderReplyChangeCard(files: ReplyFileChange[], open: boolean): HTMLEle
   return card;
 }
 
-/** One card under the latest reply. Nothing to show once the user has sent again. */
-export function mountReplyChangeCard(logEl: HTMLElement, messages: readonly ChatMessage[]): void {
+/** One card at the end of the latest reply. Hidden while that reply is still running, so it does not jump through the transcript. */
+export function mountReplyChangeCard(
+  logEl: HTMLElement,
+  messages: readonly ChatMessage[],
+  opts?: { running?: boolean },
+): void {
   const wasOpen = logEl.querySelector(".chat-reply-changes")?.classList.contains("is-open") ?? false;
   logEl.querySelector(".chat-reply-changes")?.remove();
+  if (opts?.running) return;
   const fromMessages = latestReplyFileChanges(messages);
   const files = fromMessages.length ? fromMessages : visibleReplyFileChanges(logEl);
   if (!files.length) return;
   const card = renderReplyChangeCard(files, wasOpen);
-  const children = [...logEl.children];
-  let lastUser = -1;
-  for (let i = children.length - 1; i >= 0; i -= 1) {
-    if (children[i]?.classList.contains("chat-msg-user")) {
-      lastUser = i;
-      break;
-    }
-  }
-  let anchor: Element | null = null;
-  for (let i = children.length - 1; i > lastUser; i -= 1) {
-    if (children[i]?.classList.contains("chat-msg-assistant")) {
-      anchor = children[i] ?? null;
-      break;
-    }
-  }
-  if (anchor) {
-    anchor.after(card);
-    return;
-  }
-  const plan = logEl.querySelector(".chat-plan");
-  if (plan) plan.before(card);
-  else logEl.append(card);
+  logEl.append(card);
 }

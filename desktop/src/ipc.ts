@@ -280,8 +280,21 @@ export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
   return invoke("teamups_channel_set_enabled_command", { enabled });
 }
 
-export function teamupsChannelReply(id: string, text: string, ok: boolean, done = true): Promise<void> {
-  return invoke("teamups_channel_reply_command", { id, text, ok, done });
+export function teamupsChannelReply(
+  id: string,
+  text: string,
+  ok: boolean,
+  done = true,
+  trace?: {
+    delta?: boolean;
+    text?: string;
+    thinking: string;
+    tools: { name: string; status: string; detail: string; output: string }[];
+  },
+): Promise<void> {
+  const payload =
+    trace && (trace.delta || trace.thinking || trace.text || trace.tools.length > 0) ? trace : undefined;
+  return invoke("teamups_channel_reply_command", { id, text, ok, done, trace: payload });
 }
 
 /** One step of a Feishu message, written to this computer's channel log. */

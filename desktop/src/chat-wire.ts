@@ -4,7 +4,7 @@ import { mountReplyChangeCard } from "./chat/reply-changes";
 import { omitBareToolStarts } from "./chat/tool-records";
 import { isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
-import { normalizePlanItems, paintChatPlan } from "./plan";
+import { normalizePlanItems, paintChatPlan, planStepsFromMessages } from "./plan";
 
 import {
   elevatedEl,
@@ -216,7 +216,8 @@ export function wireChatControllers(): void {
       const onScreen = activeSession();
       const source = chatState.busy && isViewingRunningSession() ? runTargetSession() : onScreen;
       if (source.id !== onScreen.id) return;
-      mountReplyChangeCard(logEl, source.messages);
+      const running = Boolean(chatState.busy && isViewingRunningSession());
+      mountReplyChangeCard(logEl, source.messages, { running });
     },
     rememberRuntimeLog: (text) => chatState.bubbles.rememberRuntimeLog(text),
     rememberTurnNotice: (text) => chatState.bubbles.rememberTurnNotice(text),
@@ -713,6 +714,15 @@ export function wireChatControllers(): void {
       showQuickReplies(sourceText);
     },
     renderSessionList: () => renderSessionList(),
+    showReplyChanges: () => {
+      if (chatState.busy) return;
+      const session = activeSession();
+      mountReplyChangeCard(logEl, session.messages);
+      const items = session.plan?.items.length
+        ? session.plan.items
+        : planStepsFromMessages(session.messages, true);
+      paintChatPlan(logEl, items.length ? { items, at: session.plan?.at ?? Date.now() } : null);
+    },
     onPlan: (items) => {
       const steps = normalizePlanItems(items);
       const id = chatState.runningChatSessionId;

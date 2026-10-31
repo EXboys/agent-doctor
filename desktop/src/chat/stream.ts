@@ -3,7 +3,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { formatChatFailureLine, type ChatFailureExplain } from "../friendly-error";
 import { getLocale, t } from "../i18n";
 import type { PlanStep } from "../plan";
-import { markTurnStarted } from "./activity";
+import { markModelRequest, markTurnStarted } from "./activity";
 import { consumeAllowStop } from "./permission-allow";
 import { preferPlainSummary } from "./format";
 import {
@@ -76,6 +76,7 @@ export type StreamDeps = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   showQuickReplies: (sourceText: string) => void;
   renderSessionList: () => void;
+  showReplyChanges: () => void;
   onPlan: (items: PlanStep[]) => void;
   onTurnCompleted: (text: string, status: string) => void;
   onPermissionNeeded: (payload: {
@@ -136,6 +137,7 @@ export function createStreamController(deps: StreamDeps) {
           deps.flushSessionListRender();
           break;
         case "status":
+          if (payload.phase === "requesting") markModelRequest();
           if (!(thinkingStatus && deps.thinking.isLive())) {
             deps.pushActivity(payload.phase, payload.message);
           }
@@ -247,6 +249,7 @@ export function createStreamController(deps: StreamDeps) {
           }
           deps.onTurnCompleted(finalAssistantText, payload.status);
           deps.renderSessionList();
+          if (viewing) deps.showReplyChanges();
           break;
         }
       }

@@ -36,6 +36,7 @@ import {
   startPromptSession,
   type PromptSessionFinished,
 } from "../ipc";
+import { markTurnStarted } from "./activity";
 import { beginChannelJob, endChannelJob } from "./channel-ask";
 import { handsBlockForText, promptRequestsComputerUse } from "./hands-intent";
 import { hideHandsNotice, showHandsNotice } from "./hands-notice";
@@ -435,6 +436,8 @@ export function createSendController(deps: SendDeps) {
 
     if (foreground) deps.allowQuickRepliesAgain();
     // Claim this chat before the first await, so a second send sees it and queues.
+    // The running clock starts with this message, not the previous one.
+    if (foreground) markTurnStarted();
     deps.setBusy(true, chatSessionId);
     const turnGen = deps.getBusyGen();
     try {

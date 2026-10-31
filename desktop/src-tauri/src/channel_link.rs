@@ -262,13 +262,27 @@ pub fn teamups_channel_reply_command(
     text: String,
     ok: bool,
     done: Option<bool>,
+    trace: Option<serde_json::Value>,
 ) -> Result<(), String> {
     let done = done.unwrap_or(true);
     note(&format!(
         "job {id} reply ok={ok} done={done} text={}",
         clip(&text)
     ));
-    let frame = teamups_channel_reply(&id, &text, ok, done);
+    let mut frame_value: serde_json::Value =
+        serde_json::from_str(&teamups_channel_reply(&id, &text, ok, done))
+            .map_err(|err| err.to_string())?;
+    if let Some(trace) = trace {
+        let keep = match &trace {
+            serde_json::Value::Object(map) => !map.is_empty(),
+            serde_json::Value::Null => false,
+            _ => false,
+        };
+        if keep {
+            frame_value["trace"] = trace;
+        }
+    }
+    let frame = frame_value.to_string();
     let outbound = app
         .try_state::<Outbound>()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;

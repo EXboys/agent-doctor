@@ -95,7 +95,10 @@ import {
 } from "./ipc";
 import { applyChannelAnswer, choiceVerdict, pendingChoiceCount, takePendingChoices } from "./chat/channel-ask";
 import {
+  advanceChannelCursor,
   assistantForChannelTurn,
+  channelDelta,
+  channelTurnTrace,
   settleChannelAnswer,
   channelConfirmAction,
   channelQueueLength,
@@ -608,12 +611,16 @@ export function bootChat(): void {
       const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
       return assistantForChannelTurn(session?.messages ?? [], started, job.text);
     };
-    let sent = "";
+    let cursor = { text: "", thinking: "", tools: [] as ReturnType<typeof channelTurnTrace>["tools"] };
     const pump = window.setInterval(() => {
-      const text = replyText();
-      if (!text || text === sent) return;
-      sent = text;
-      void teamupsChannelReply(job.id, text, true, false).catch(() => {});
+      const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
+      const messages = session?.messages ?? [];
+      const text = assistantForChannelTurn(messages, started, job.text);
+      const trace = channelTurnTrace(messages, started, job.text);
+      const delta = channelDelta(cursor, { text, thinking: trace.thinking, tools: trace.tools });
+      if (!delta) return;
+      cursor = advanceChannelCursor(cursor, delta);
+      void teamupsChannelReply(job.id, "", true, false, delta).catch(() => {});
     }, 400);
     let result: SendAskResult = "empty";
     channelLedger.start(job.id);

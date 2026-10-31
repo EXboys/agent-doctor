@@ -74,10 +74,35 @@ export type ActivityDeps = {
 export type ActivityApi = ReturnType<typeof createActivityController>;
 
 let turnStartedAt = 0;
+/** The first model request of this turn has already started the clock. */
+let modelRequestMarked = false;
 
-/** The live row counts from here, the way the agent's own window does. */
+const LIVE_ELAPSED =
+  ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed, .chat-running:not([hidden]) .chat-running-time";
+
+function paintLiveElapsed(): void {
+  if (typeof document === "undefined") return;
+  const label = elapsedLabel();
+  for (const el of document.querySelectorAll<HTMLElement>(LIVE_ELAPSED)) el.textContent = label;
+}
+
+/** A new user message starts clean, so the previous turn's minutes do not carry over. */
 export function markTurnStarted(): void {
   turnStartedAt = Date.now();
+  modelRequestMarked = false;
+  paintLiveElapsed();
+}
+
+/**
+ * The clock used to start when the runtime process launched, so the model
+ * request already showed that earlier time. The first request of this turn
+ * starts the clock; a later request keeps counting.
+ */
+export function markModelRequest(): void {
+  if (modelRequestMarked) return;
+  modelRequestMarked = true;
+  turnStartedAt = Date.now();
+  paintLiveElapsed();
 }
 
 export function elapsedLabel(): string {
@@ -545,31 +570,80 @@ export function createActivityController(deps: ActivityDeps) {
     }
   }
 
+  /** One page at a time. A scroll event must not stack another page before the first settles. */
+  let toolPageLock = 0;
+
+  function mountedRecordIndexes(list: HTMLElement): Set<string> {
+    const mounted = new Set<string>();
+    for (const row of list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row")) {
+      if (row.dataset.recordIndex) mounted.add(row.dataset.recordIndex);
+    }
+    return mounted;
+  }
+
+  function releaseToolPage(): void {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        toolPageLock = Math.max(0, toolPageLock - 1);
+      });
+    });
+  }
+
+  /**
+   * Keep the reader on the row they were looking at. Setting scrollTop inside
+   * the scroll event is ignored on Windows, so the new rows stayed on screen
+   * and the next event loaded another page.
+   */
+  function settleToolPage(beforeHeight: number, beforeTop: number): void {
+    const log = deps.logEl;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const delta = log.scrollHeight - beforeHeight;
+        if (delta) {
+          withoutLogJump(() => {
+            log.scrollTop = beforeTop + delta;
+          });
+        }
+        requestAnimationFrame(() => {
+          toolPageLock = Math.max(0, toolPageLock - 1);
+        });
+      });
+    });
+  }
+
   function revealEarlier(group: HTMLDetailsElement): void {
+    if (toolPageLock > 0) return;
     const records = recordsFor(group);
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
-    const first = list?.querySelector<HTMLElement>(":scope > .chat-tool-row");
-    if (!list || !first?.dataset.toolKey) return;
-    const start = recordIndexOf(first, records);
+    const anchor = list?.querySelector<HTMLElement>(":scope > .chat-tool-row");
+    if (!list || !anchor?.dataset.toolKey) return;
+    const start = recordIndexOf(anchor, records);
     if (start < 0) return;
     const range = earlierToolRange(start);
     if (!range) return;
+    const mounted = mountedRecordIndexes(list);
+    const indexes: number[] = [];
+    for (let i = range.from; i < range.to; i += 1) {
+      if (!mounted.has(String(i))) indexes.push(i);
+    }
+    if (indexes.length === 0) return;
+    toolPageLock += 1;
     const log = deps.logEl;
-    const before = log.scrollHeight;
-    const top = log.scrollTop;
-    for (let i = range.to - 1; i >= range.from; i -= 1) {
+    const beforeHeight = log.scrollHeight;
+    const beforeTop = log.scrollTop;
+    for (let n = indexes.length - 1; n >= 0; n -= 1) {
+      const i = indexes[n]!;
       const row = mountToolRecord(records[i]!);
       stampRecord(row, i);
       list.insertBefore(row, list.firstChild);
     }
     dropOffscreenRows(list, "bottom");
-    withoutLogJump(() => {
-      log.scrollTop = top + (log.scrollHeight - before);
-    });
     syncToolGroup(group, group === deps.getToolGroupEl());
+    settleToolPage(beforeHeight, beforeTop);
   }
 
   function revealLater(group: HTMLDetailsElement): void {
+    if (toolPageLock > 0) return;
     const records = recordsFor(group);
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
     const last = list?.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
@@ -578,13 +652,21 @@ export function createActivityController(deps: ActivityDeps) {
     if (lastIndex < 0) return;
     const range = laterToolRange(lastIndex, records.length);
     if (!range) return;
+    const mounted = mountedRecordIndexes(list);
+    const indexes: number[] = [];
     for (let i = range.from; i < range.to; i += 1) {
+      if (!mounted.has(String(i))) indexes.push(i);
+    }
+    if (indexes.length === 0) return;
+    toolPageLock += 1;
+    for (const i of indexes) {
       const row = mountToolRecord(records[i]!);
       stampRecord(row, i);
       list.appendChild(row);
     }
     dropOffscreenRows(list, "top");
     syncToolGroup(group, group === deps.getToolGroupEl());
+    releaseToolPage();
   }
 
   deps.logEl.addEventListener("scroll", () => {
@@ -592,14 +674,16 @@ export function createActivityController(deps: ActivityDeps) {
     const log = deps.logEl;
     const gap = log.scrollHeight - log.scrollTop - log.clientHeight;
     log.dataset.pin = gap < 64 ? "1" : "0";
+    if (toolPageLock > 0) return;
     const logRect = log.getBoundingClientRect();
     for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
-      if (!group.open) continue;
+      if (!group.open || toolPageLock > 0) continue;
       const list = group.querySelector<HTMLElement>(".chat-tool-list");
       if (!list) continue;
       const rect = list.getBoundingClientRect();
       if (rect.height < 1) continue;
       if (rect.top > logRect.top - 24 && rect.top < logRect.top + 200) revealEarlier(group);
+      if (toolPageLock > 0) continue;
       if (rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24) revealLater(group);
     }
   });

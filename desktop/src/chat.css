@@ -3862,6 +3862,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   font-size: 0.72rem;
 }
 
+/* `display: block` above beats the UA `[hidden]` rule, so a folded repeat stayed on screen. */
+.chat-activity.kind-tool[hidden] {
+  display: none;
+}
+
 .chat-tool-row-summary {
   display: flex;
   align-items: center;
@@ -7037,17 +7042,14 @@ html[data-os="windows"] .chat-log {
   position: relative;
 }
 
-/* Copy and the time stay invisible until hover. They must not hold a blank
-   line, or the next tool sits far below the sentence between two tools. */
+/* The copy and the time are their own row under the reply. Hidden actions
+   take no space, so a sentence between tools does not grow a gap. */
 .chat-msg-assistant > .chat-msg-actions {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  min-height: 0;
-  height: 24px;
+  position: static;
+  align-self: flex-start;
+  height: auto;
+  margin: 0;
   padding: 0;
-  overflow: visible;
 }
 
 .chat-msg-user {
@@ -9100,17 +9102,126 @@ html[data-theme="dark"] .chat-permission-deny {
   color: #d4d4d4;
 }
 
-.chat-plan {
+.chat-plan-dock {
+  position: absolute;
+  top: calc(var(--chat-topbar-h) + 8px);
+  right: 18px;
+  z-index: 6;
+  width: max-content;
+  max-width: min(420px, calc(100% - 48px));
+}
+
+/* The chip sits in its own band. The first message starts under it, so the two do not stack. */
+.chat-main:has(#chat-plan-dock:not([hidden])) > .chat-log {
+  padding-top: 56px;
+}
+
+.chat-plan-dock[hidden] {
+  display: none;
+}
+
+.chat-plan-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 14px 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--md-strong);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.chat-plan-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-plan-dock.is-open .chat-plan-pill {
+  display: none;
+}
+
+.chat-plan-panel {
+  display: none;
+  width: min(360px, 100%);
+  padding: 12px 14px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--md-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+}
+
+.chat-plan-dock.is-open .chat-plan-panel {
   display: grid;
   gap: 8px;
-  align-self: flex-start;
-  width: min(560px, 100%);
-  margin: 8px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
+}
+
+.chat-plan-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-plan-panel-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-plan-panel-count {
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-plan-fold,
+.chat-plan-done-toggle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-plan-fold {
+  margin-left: auto;
+}
+
+.chat-plan-fold:hover,
+.chat-plan-done-toggle:hover {
   color: var(--text);
+}
+
+.chat-plan-done-toggle {
+  justify-self: start;
+}
+
+.chat-plan-done-toggle::before {
+  content: "▾ ";
+}
+
+.chat-plan-dock.is-done-folded .chat-plan-done-toggle::before {
+  content: "▸ ";
+}
+
+.chat-plan-dock.is-done-folded .plan-item[data-state="done"] {
+  display: none;
+}
+
+.chat-plan {
+  display: none;
 }
 
 .chat-plan .plan-head {
@@ -9130,49 +9241,61 @@ html[data-theme="dark"] .chat-permission-deny {
   color: var(--muted);
 }
 
-.chat-plan .plan-list {
+.chat-plan-panel .plan-list {
   display: grid;
-  gap: 6px;
-  margin: 0;
+  gap: 0;
+  margin: 4px 0 0;
   padding: 0;
   list-style: none;
 }
 
-.chat-plan .plan-item {
+.chat-plan-panel .plan-item {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--line);
   font-size: 13px;
   line-height: 1.4;
 }
 
-.chat-plan .plan-mark {
+.chat-plan-panel .plan-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-plan-pill .plan-mark,
+.chat-plan-panel .plan-mark {
   flex: none;
-  width: 14px;
-  height: 14px;
-  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
   border: 1.5px solid var(--faint);
   border-radius: 50%;
+  background: transparent;
   box-sizing: border-box;
 }
 
-.chat-plan .plan-item[data-state="doing"] .plan-mark {
+.chat-plan-pill .plan-mark[data-state="doing"],
+.chat-plan-panel .plan-item[data-state="doing"] .plan-mark {
   border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.chat-plan .plan-item[data-state="done"] {
-  color: var(--muted);
-}
-
-.chat-plan .plan-item[data-state="done"] .plan-mark {
+.chat-plan-pill .plan-mark[data-state="done"],
+.chat-plan-panel .plan-item[data-state="done"] .plan-mark {
   display: grid;
   place-items: center;
   border-color: var(--ok);
   color: var(--ok);
-  font-size: 10px;
+  font-size: 9px;
+  font-weight: 700;
   line-height: 1;
+}
+
+html[data-theme="dark"] .chat-plan-pill,
+html[data-theme="dark"] .chat-plan-panel {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: #242426;
 }
 
 /* Composer toolbar stays on one line. A wide bar shows auto-approve and chat size; a narrow one folds them. */

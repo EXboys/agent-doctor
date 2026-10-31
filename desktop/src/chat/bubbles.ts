@@ -1,6 +1,6 @@
 import { t } from "../i18n";
 import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
-import { paintChatPlan } from "../plan";
+import { paintChatPlan, planStepsFromMessages } from "../plan";
 import { renderMarkdown } from "../markdown";
 import {
   cleanToolLabel,
@@ -181,6 +181,7 @@ export function createBubblesController(deps: BubblesDeps) {
       }
     }
     syncTurnCopyButtons();
+    syncVisiblePlan();
     deps.setAssistantBubble(null);
     deps.setAssistantMessageId(null);
     deps.setAssistantRaw("");
@@ -245,6 +246,7 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);
     paintStreamingMarkdown(bubble);
     syncReplyChangeCard();
+    syncVisiblePlan();
     followChatLog(deps.logEl);
   }
   function paintStreamingMarkdown(bubble: HTMLElement): void {
@@ -453,11 +455,22 @@ export function createBubblesController(deps: BubblesDeps) {
       );
     });
   }
+  function syncVisiblePlan(): void {
+    const onScreen = deps.activeSession();
+    const source = deps.getBusy() && deps.isViewingRunningSession() ? deps.runTargetSession() : onScreen;
+    if (source.id !== onScreen.id) return;
+    const finished = !(deps.getBusy() && deps.isViewingRunningSession());
+    const items = source.plan?.items.length
+      ? source.plan.items
+      : planStepsFromMessages(source.messages, finished);
+    paintChatPlan(deps.logEl, items.length ? { items, at: source.plan?.at ?? Date.now() } : null);
+  }
   function syncReplyChangeCard(): void {
     const onScreen = deps.activeSession();
     const source = deps.getBusy() && deps.isViewingRunningSession() ? deps.runTargetSession() : onScreen;
     if (source.id !== onScreen.id) return;
-    mountReplyChangeCard(deps.logEl, source.messages);
+    const running = deps.getBusy() && deps.isViewingRunningSession();
+    mountReplyChangeCard(deps.logEl, source.messages, { running });
   }
   function syncAssistantCopyButton(bubble: HTMLElement): void {
     // A bubble that is not in the transcript yet is picked up after it is appended.
@@ -851,7 +864,7 @@ export function createBubblesController(deps: BubblesDeps) {
       const session = deps.activeSession();
       if (!sessionHasChatContent(session)) {
         deps.logEl.appendChild(renderEmptyChat());
-        paintChatPlan(deps.logEl, session.plan);
+        syncVisiblePlan();
         syncQuestionRail(session.messages, deps.logEl);
         return;
       }
@@ -861,7 +874,7 @@ export function createBubblesController(deps: BubblesDeps) {
       renderMessageRange(messages, cut, messages.length, deps.logEl, covered, session.runtime);
       syncReplyChangeCard();
       syncTurnCopyButtons();
-      paintChatPlan(deps.logEl, session.plan);
+      syncVisiblePlan();
       pinChatLog(deps.logEl);
       syncQuestionRail(session.messages, deps.logEl);
       deps.updateContextMeter();
