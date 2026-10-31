@@ -326,7 +326,9 @@ function mergeFiles(previous: ChannelFile[], updates: ChannelFile[]): ChannelFil
 }
 
 function fileKey(file: ChannelFile): string {
-  return `${file.kind}|${file.additions}|${file.deletions}|${file.addedLines.length}|${file.deletedLines.length}|${file.addedLines.at(-1) ?? ""}|${file.deletedLines.at(-1) ?? ""}`;
+  const lastAdded = file.addedLines[file.addedLines.length - 1] ?? "";
+  const lastDeleted = file.deletedLines[file.deletedLines.length - 1] ?? "";
+  return `${file.kind}|${file.additions}|${file.deletions}|${file.addedLines.length}|${file.deletedLines.length}|${lastAdded}|${lastDeleted}`;
 }
 
 function changedTools(previous: ChannelToolTrace[], next: ChannelToolTrace[]): ChannelToolTrace[] {
