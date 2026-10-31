@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use agent_doctor_core::{
-    parse_teamups_channel_job, set_teamups_channel_enabled, settings_db_path, teamups_channel_auth,
-    teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello, teamups_channel_reply,
-    teamups_channel_signed_in,
+    parse_channel_stop, parse_teamups_channel_job, set_teamups_channel_enabled, settings_db_path,
+    teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello,
+    teamups_channel_reply, teamups_channel_signed_in,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
@@ -27,6 +27,9 @@ static LOG_LOCK: Mutex<()> = Mutex::new(());
 /// is gone, even when the operating system still calls it open.
 const BEAT_EVERY: Duration = Duration::from_secs(25);
 const SILENT_LIMIT: Duration = Duration::from_secs(70);
+/// A dead socket must not sit inside `send` forever. That stalls the read loop,
+/// so a phone stop never arrives and this computer never redials.
+const WRITE_LIMIT: Duration = Duration::from_secs(8);
 const LOG_MAX_BYTES: u64 = 1_000_000;
 
 /// One line per step a Feishu message takes on this computer.
@@ -129,6 +132,18 @@ fn set_connected(app: &AppHandle, connected: bool) {
     let _ = app.emit("teamups-channel-status", connected);
 }
 
+async fn send_within<S>(write: &mut S, frame: Message) -> Result<bool, String>
+where
+    S: Sink<Message> + Unpin,
+    <S as Sink<Message>>::Error: std::fmt::Display,
+{
+    match tokio::time::timeout(WRITE_LIMIT, write.send(frame)).await {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(_) => Ok(false),
+    }
+}
+
 async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String> {
     let mut request = url.into_client_request().map_err(|err| err.to_string())?;
     let header = format!("Bearer {license}");
@@ -142,10 +157,9 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
         .map_err(|err| err.to_string())?;
     let (socket, _) = connected;
     let (mut write, mut read) = socket.split();
-    write
-        .send(Message::Text(teamups_channel_hello().into()))
-        .await
-        .map_err(|err| err.to_string())?;
+    if !send_within(&mut write, Message::Text(teamups_channel_hello().into())).await? {
+        return Err("write stalled".to_string());
+    }
     let (tx, mut rx) = mpsc::unbounded_channel();
     if let Some(outbound) = app.try_state::<Outbound>() {
         *outbound.0.lock().expect("channel") = Some(tx);
@@ -165,7 +179,11 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                     open = false;
                     continue;
                 }
-                if write.send(Message::Ping(Vec::new().into())).await.is_err() {
+                if !send_within(&mut write, Message::Ping(Vec::new().into()))
+                    .await
+                    .unwrap_or(false)
+                {
+                    note("line write stalled, reconnecting");
                     open = false;
                 }
             }
@@ -174,7 +192,11 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                     open = false;
                     continue;
                 };
-                if write.send(Message::Text(frame.into())).await.is_err() {
+                if !send_within(&mut write, Message::Text(frame.into()))
+                    .await
+                    .unwrap_or(false)
+                {
+                    note("line write stalled, reconnecting");
                     open = false;
                 }
             }
@@ -198,11 +220,14 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                 if job.chat.is_empty() { "-" } else { job.chat.as_str() },
                                 clip(&job.text)
                             ));
-                            if write
-                                .send(Message::Text(teamups_channel_heard(&job.id).into()))
-                                .await
-                                .is_err()
+                            if !send_within(
+                                &mut write,
+                                Message::Text(teamups_channel_heard(&job.id).into()),
+                            )
+                            .await
+                            .unwrap_or(false)
                             {
+                                note("line write stalled, reconnecting");
                                 open = false;
                             }
                             let _ = app.emit(
@@ -215,10 +240,17 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                             );
                         } else if let Some(answer) = parse_channel_answer(&text) {
                             let _ = app.emit("teamups-channel-answer", answer);
+                        } else if let Some(id) = parse_channel_stop(&text) {
+                            note(&format!("stop {id}"));
+                            let _ = app.emit("teamups-channel-stop", serde_json::json!({ "id": id }));
                         }
                     }
                     Some(Ok(Message::Ping(data))) => {
-                        if write.send(Message::Pong(data)).await.is_err() {
+                        if !send_within(&mut write, Message::Pong(data))
+                            .await
+                            .unwrap_or(false)
+                        {
+                            note("line write stalled, reconnecting");
                             open = false;
                         }
                     }

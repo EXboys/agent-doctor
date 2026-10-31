@@ -450,6 +450,7 @@ export const zh = {
     "chat.channelStarted": "收到，开始做。",
     "chat.channelFailed": "这次没做成。",
     "chat.channelDone": "做完了。",
+    "chat.channelStopped": "已停止。",
     "chat.channelCut": "软件关掉时这句做到一半，已经停下。要接着做，请再发一次。",
     "chat.settingsLanguage": "语言",
     "chat.settingsLanguageLabel": "界面文字",

@@ -450,6 +450,7 @@ export const en = {
     "chat.channelStarted": "Got it. Starting now.",
     "chat.channelFailed": "That did not finish.",
     "chat.channelDone": "Done.",
+    "chat.channelStopped": "Stopped.",
     "chat.channelCut": "The app closed halfway through this one, so it stopped. Send it again to carry on.",
     "chat.settingsLanguage": "Language",
     "chat.settingsLanguageLabel": "Words on screen",

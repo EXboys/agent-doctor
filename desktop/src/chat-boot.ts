@@ -1,5 +1,5 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
-import { isChatRunning, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
+import { isChatRunning, liveRuns, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 import { syncQuestionRail } from "./chat/question-rail";
 
@@ -87,13 +87,20 @@ import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
 import {
+  cancelPromptSession,
   teamupsChannelConnected,
   teamupsChannelNote,
   teamupsChannelPref,
   teamupsChannelReply,
   teamupsChannelSetEnabled,
 } from "./ipc";
-import { applyChannelAnswer, choiceVerdict, pendingChoiceCount, takePendingChoices } from "./chat/channel-ask";
+import {
+  applyChannelAnswer,
+  channelSessionForJob,
+  choiceVerdict,
+  pendingChoiceCount,
+  takePendingChoices,
+} from "./chat/channel-ask";
 import {
   advanceChannelCursor,
   assistantForChannelTurn,
@@ -102,6 +109,7 @@ import {
   settleChannelAnswer,
   channelConfirmAction,
   channelQueueLength,
+  dropChannelJob,
   enqueueChannelJob,
   setChannelSessionIdle,
   takeNextChannelJob,
@@ -566,6 +574,34 @@ export function bootChat(): void {
     channelLedger.finish(id, text, ok);
     void teamupsChannelReply(id, text, ok, true).catch(() => {});
   }
+  const phoneStops = new Set<string>();
+  async function stopAsked(id: string): Promise<void> {
+    const jobId = id.trim();
+    if (!jobId) return;
+    phoneStops.add(jobId);
+    dropChannelJob(jobId);
+    let sessionId = channelSessionForJob(jobId);
+    if (!sessionId) {
+      const running = [...liveRuns()].map((run) => run.chatSessionId);
+      if (running.length === 1) sessionId = running[0];
+    }
+    const activeId = chatState.store?.activeId ?? "";
+    if (sessionId && (isChatRunning(sessionId) || activeId === sessionId)) {
+      teamupsChannelNote(jobId, `stop in ${sessionId}`);
+      try {
+        if (activeId === sessionId) await cancelAsk();
+        else await cancelPromptSession(sessionId);
+      } catch {
+        finishChannel(jobId, t("chat.cancelFailed"), false);
+      }
+      return;
+    }
+    finishChannel(jobId, t("chat.channelStopped"), true);
+  }
+  void listen<{ id?: string }>("teamups-channel-stop", (event) => {
+    const id = event.payload?.id?.trim() ?? "";
+    if (id) void stopAsked(id);
+  });
   setChannelSessionIdle((sessionId) => {
     const next = takeNextChannelJob(sessionId);
     if (!next) return;
@@ -604,6 +640,10 @@ export function bootChat(): void {
     void teamupsChannelReply(job.id, t("chat.channelQueued"), true, false).catch(() => {});
   }
   async function runChannelTurn(job: ChannelQueued): Promise<void> {
+    if (phoneStops.has(job.id)) {
+      finishChannel(job.id, t("chat.channelStopped"), true);
+      return;
+    }
     teamupsChannelNote(job.id, `start in ${job.sessionId}`);
     void teamupsChannelReply(job.id, t("chat.channelStarted"), true, false).catch(() => {});
     const started = Date.now();
@@ -660,10 +700,17 @@ export function bootChat(): void {
     }
     const answer = await settleChannelAnswer(replyText, { flush: flushPendingTextSync });
     const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
-    const stopped = Boolean(session?.interrupted && session.interrupted.at >= started);
+    const halted =
+      phoneStops.has(job.id) &&
+      Boolean(session?.interrupted && session.interrupted.at >= started);
+    const stopped = halted || Boolean(session?.interrupted && session.interrupted.at >= started);
     teamupsChannelNote(job.id, stopped ? "stopped" : `done chars=${answer.length}`);
-    const final = answer || (stopped ? t("chat.channelFailed") : t("chat.channelDone"));
-    finishChannel(job.id, final, Boolean(answer) || !stopped);
+    const final = halted
+      ? answer
+        ? `${t("chat.channelStopped")}\n\n${answer}`
+        : t("chat.channelStopped")
+      : answer || (stopped ? t("chat.channelFailed") : t("chat.channelDone"));
+    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped);
   }
   async function runChannelJob(id: string, text: string, chat: string): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
@@ -688,6 +735,10 @@ export function bootChat(): void {
       return;
     }
     channelLedger.take(id);
+    if (phoneStops.has(id)) {
+      finishChannel(id, t("chat.channelStopped"), true);
+      return;
+    }
     try {
       const sessionId = sessionForChannel(chat, text);
       const job: ChannelQueued = { id, sessionId, text, noticed: false };

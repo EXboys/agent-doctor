@@ -25,6 +25,13 @@ export function beginChannelJob(jobId: string, sessionId: string): void {
   jobsBySession.set(sessionId, jobId);
 }
 
+export function channelSessionForJob(jobId: string): string | null {
+  for (const [sessionId, id] of jobsBySession) {
+    if (id === jobId) return sessionId;
+  }
+  return null;
+}
+
 export function endChannelJob(sessionId: string): void {
   const jobId = jobsBySession.get(sessionId);
   jobsBySession.delete(sessionId);

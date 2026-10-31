@@ -48,6 +48,17 @@ export function unshiftChannelJob(job: ChannelQueued): void {
   queues.set(job.sessionId, list);
 }
 
+export function dropChannelJob(jobId: string): ChannelQueued | undefined {
+  for (const [sessionId, list] of queues) {
+    const index = list.findIndex((job) => job.id === jobId);
+    if (index < 0) continue;
+    const [job] = list.splice(index, 1);
+    if (list.length === 0) queues.delete(sessionId);
+    return job;
+  }
+  return undefined;
+}
+
 export function takeNextChannelJob(sessionId: string): ChannelQueued | undefined {
   const list = queues.get(sessionId);
   if (!list?.length) return undefined;

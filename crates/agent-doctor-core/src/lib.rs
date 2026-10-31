@@ -201,11 +201,11 @@ pub use setup::{
 };
 pub use skills::{
     execute_skills_sync, install_local_skills, install_teamups_mall_item,
-    list_teamups_mall_catalog, load_local_skills_layout, parse_teamups_channel_job,
-    poll_teamups_login, remove_local_skill, resolve_skills_source, save_skills_source_override,
-    set_teamups_channel_enabled, sign_out_teamups, skill_roots, start_teamups_login,
-    teamups_account_status, teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard,
-    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
+    list_teamups_mall_catalog, load_local_skills_layout, parse_channel_stop,
+    parse_teamups_channel_job, poll_teamups_login, remove_local_skill, resolve_skills_source,
+    save_skills_source_override, set_teamups_channel_enabled, sign_out_teamups, skill_roots,
+    start_teamups_login, teamups_account_status, teamups_channel_auth, teamups_channel_enabled,
+    teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
     teamups_channel_ws_url, teamups_voice_ticket, LocalSkillsLayout, ResolvedSkillsSource,
     SkillInstallError, SkillInstallReport, SkillsSyncOptions, TeamupsAccountStatus,
     TeamupsCatalogItem, TeamupsChannelJob, TeamupsClient, TeamupsIatUrl, TeamupsLoginPoll,

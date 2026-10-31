@@ -213,6 +213,19 @@ pub fn teamups_channel_reply(id: &str, text: &str, ok: bool, done: bool) -> Stri
     json!({ "type": "reply", "id": id, "ok": ok, "text": text, "done": done }).to_string()
 }
 
+pub fn parse_channel_stop(frame: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(frame).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("stop") {
+        return None;
+    }
+    let id = value.get("id").and_then(Value::as_str)?.trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
 pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
     let value: Value = serde_json::from_str(frame).ok()?;
     if value.get("type").and_then(Value::as_str) != Some("job") {
@@ -238,7 +251,7 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_hello_frame, parse_teamups_channel_job, teamups_channel_reply,
+        channel_hello_frame, parse_channel_stop, parse_teamups_channel_job, teamups_channel_reply,
         teamups_channel_ws_url,
     };
 
@@ -265,6 +278,8 @@ mod tests {
             parse_teamups_channel_job(r#"{"type":"job","id":"b","text":"下一句","chat":"oc_123"}"#)
                 .unwrap();
         assert_eq!(named.chat, "oc_123");
+        assert!(parse_channel_stop(r#"{"type":"stop","id":"job-1"}"#).as_deref() == Some("job-1"));
+        assert!(parse_channel_stop(r#"{"type":"stop","id":"  "}"#).is_none());
         assert!(parse_teamups_channel_job(r#"{"type":"hello"}"#).is_none());
         assert!(parse_teamups_channel_job(r#"{"type":"job","id":"","text":"hi"}"#).is_none());
     }
