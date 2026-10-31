@@ -3358,7 +3358,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-self: stretch;
   box-sizing: border-box;
   width: 100%;
-  max-width: min(520px, 100%);
+  max-width: 100%;
   min-width: 0;
   flex-shrink: 0;
   margin: 1px 0;
@@ -3436,7 +3436,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-self: stretch;
   box-sizing: border-box;
   width: 100%;
-  max-width: min(640px, 100%);
+  max-width: 100%;
   min-width: 0;
   flex-shrink: 0;
   margin: 1px 0;
@@ -3572,7 +3572,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-self: stretch;
   box-sizing: border-box;
   width: 100%;
-  max-width: min(640px, 100%);
+  max-width: 100%;
   min-width: 0;
   flex-shrink: 0;
   margin: 1px 0;
