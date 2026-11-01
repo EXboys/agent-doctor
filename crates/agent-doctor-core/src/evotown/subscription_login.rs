@@ -82,6 +82,7 @@ pub fn start_subscription_login(runtime: &str, name: &str) -> Result<Subscriptio
     }
     let mut child = cmd.spawn()?;
     let opened = Arc::new(AtomicBool::new(false));
+    // Both tools open the page themselves. A second open stops on the signed-in account.
     if let Some(pipe) = child.stdout.take() {
         watch_login_output(pipe, Arc::clone(&opened));
     }
@@ -91,8 +92,7 @@ pub fn start_subscription_login(runtime: &str, name: &str) -> Result<Subscriptio
     let started = Instant::now();
     loop {
         if credential_ready(runtime, &dir) {
-            let _ = child.kill();
-            let _ = child.wait();
+            wait_for_login_exit(&mut child);
             break;
         }
         if started.elapsed() > LOGIN_WAIT {
@@ -204,18 +204,40 @@ where
                 break;
             }
             pending.push_str(&String::from_utf8_lossy(&chunk[..n]));
-            if let Some(url) = first_https(&pending) {
-                if !opened.swap(true, Ordering::SeqCst) {
-                    let _ = crate::session_launch::open_url(&url);
-                }
-            }
+            maybe_open(&pending, &opened, false);
         }
-        if !opened.load(Ordering::SeqCst) {
-            if let Some(url) = https_at_end(&pending) {
-                let _ = crate::session_launch::open_url(&url);
-            }
-        }
+        maybe_open(&pending, &opened, true);
     });
+}
+
+fn maybe_open(text: &str, opened: &AtomicBool, at_end: bool) {
+    let lower = text.to_ascii_lowercase();
+    if !lower.contains("failed to open browser") && !lower.contains("couldn't open your browser") {
+        return;
+    }
+    let url = if at_end {
+        https_at_end(text)
+    } else {
+        first_https(text)
+    };
+    let Some(url) = url else {
+        return;
+    };
+    if !opened.swap(true, Ordering::SeqCst) {
+        let _ = crate::session_launch::open_url(&url);
+    }
+}
+
+fn wait_for_login_exit(child: &mut std::process::Child) {
+    let grace = Instant::now();
+    while grace.elapsed() < Duration::from_secs(5) {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Wait until whitespace follows the link. A half-printed authorize URL is

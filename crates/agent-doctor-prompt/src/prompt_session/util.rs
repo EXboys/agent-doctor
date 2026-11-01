@@ -239,7 +239,11 @@ pub(crate) fn push_capped(acc: &Arc<Mutex<String>>, line: &str) {
             }
             guard.push_str(line);
         } else {
-            guard.push_str(&line[..remain]);
+            // `remain` is a byte index, so it can land inside a multi-byte
+            // UTF-8 character — CJK text is the common case here. Slice on a
+            // char boundary: panicking here would kill the reader thread and
+            // strand the turn with no output and no way to stop it.
+            guard.push_str(agent_doctor_core::text::clip_bytes(line, remain));
         }
     }
 }
@@ -939,5 +943,25 @@ mod tests {
             "Invalid request: unknown variant `workspaceWrite`, expected one of `read-only`",
         );
         assert!(msg.contains("沙箱") || msg.contains("Codex"));
+    }
+
+    #[test]
+    fn a_cjk_line_over_the_cap_does_not_panic() {
+        // The cap used to slice on a raw byte index, so a long Chinese line
+        // cut inside a character and panicked the reader thread — the turn
+        // then produced no output at all and could not be stopped.
+        let acc = Arc::new(Mutex::new(String::new()));
+        push_capped(&acc, "前缀");
+        let line = "定".repeat(MAX_CAPTURE_CHARS);
+        push_capped(&acc, &line);
+
+        let guard = acc.lock().unwrap();
+        assert!(guard.len() <= MAX_CAPTURE_CHARS);
+        let rest = guard.strip_prefix("前缀").expect("prefix kept");
+        assert!(
+            line.starts_with(rest),
+            "capture must stay a prefix of the line"
+        );
+        assert!(rest.len() < line.len(), "the line must actually be capped");
     }
 }

@@ -198,6 +198,17 @@ stdout_log="$log_dir/${bundle_id}.stdout.log"
 stderr_log="$log_dir/${bundle_id}.stderr.log"
 touch "$stdout_log" "$stderr_log"
 
+# A previous run may have left orphaned followers behind: the tauri CLI kills
+# this script with SIGKILL when it rebuilds, SIGKILL skips the EXIT trap, and
+# `tail -F` never exits on its own — so it survives with PPID 1. Reap only the
+# orphans (PPID 1); a live instance's followers still have a parent.
+for pid in $(pgrep -f "tail -n 0 -F $log_dir" 2>/dev/null); do
+  ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  if [ "$ppid" = "1" ]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+done
+
 tail -n 0 -F "$stdout_log" 2>/dev/null &
 tail_stdout_pid=$!
 tail -n 0 -F "$stderr_log" >&2 2>/dev/null &
@@ -208,9 +219,14 @@ cleanup() {
     kill "$open_pid" 2>/dev/null || true
   fi
   kill "$tail_stdout_pid" "$tail_stderr_pid" 2>/dev/null || true
+  # Reap them so they do not sit around as zombies.
+  wait "$tail_stdout_pid" 2>/dev/null || true
+  wait "$tail_stderr_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+trap 'exit 129' HUP
+trap 'exit 131' QUIT
 
 env_args=()
 for var in AGENT_DOCTOR_EDITION RUST_LOG RUST_BACKTRACE TAURI_ENV_DEBUG TAURI_DEV_HOST; do

@@ -7,6 +7,7 @@ import {
   advanceChannelCursor,
   assistantForChannelTurn,
   channelDelta,
+  channelProgressCue,
   channelTurnTrace,
   settleChannelAnswer,
   channelConfirmAction,
@@ -17,6 +18,7 @@ import {
   unshiftChannelJob,
 } from "../src/chat/channel-lane";
 import { channelKeyOf, placeChannelSession } from "../src/chat/channel-route";
+import { beginLiveRun, busyGenFor, endLiveRun } from "../src/chat/live-runs";
 
 function assert(cond: boolean, message: string): void {
   if (!cond) throw new Error(message);
@@ -160,6 +162,12 @@ const second = channelDelta(cursor, {
 });
 assert(second?.text === "世界" && second.thinking === "屏幕", "later pieces are only the new tail");
 assert(second?.tools.length === 1 && second.tools[0]?.id === "tool-1", "a new tool is one row, not the whole list");
+assert(
+  channelProgressCue(second!)?.kind === "tool" && channelProgressCue(second!)?.name === "看屏幕",
+  "a tool step is what the phone shows while the reply is still empty",
+);
+assert(channelProgressCue(opening!)?.kind === "reply", "new reply words tell the phone a reply is being written");
+assert(channelProgressCue({ text: "", thinking: "先看", tools: [] })?.kind === "thinking", "thinking alone is still progress");
 assert(channelDelta(advanceChannelCursor(cursor, second!), {
   text: "你好世界",
   thinking: "先看屏幕",
@@ -195,5 +203,12 @@ assert(
   channelConfirmAction({ confirmToken: false, pendingChoices: 0, busy: false }) === "run",
   "an idle chat starts now",
 );
+
+beginLiveRun("chat-a").busyGen = 1;
+beginLiveRun("chat-b").busyGen = 2;
+assert(busyGenFor("chat-a") === 1, "one chat keeps its own turn");
+assert(busyGenFor("chat-b") === 2, "another chat starting does not replace the first");
+endLiveRun("chat-a");
+endLiveRun("chat-b");
 
 console.log("channel-session ok");

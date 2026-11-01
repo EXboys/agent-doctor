@@ -534,7 +534,8 @@ fn push_failure_note(notes: &mut String, line: &str) {
     if line.len() <= room {
         notes.push_str(line);
     } else {
-        notes.push_str(&line[..room]);
+        // `room` is a byte count, so it can land inside a multi-byte character.
+        notes.push_str(agent_doctor_core::text::clip_bytes(line, room));
     }
 }
 
@@ -758,5 +759,19 @@ time.sleep(30)
         std::env::remove_var("AGENT_DOCTOR_CODEX_BIN");
         assert_eq!(report.status, PromptSessionStatus::Cancelled);
         assert!(report.duration_ms < 10_000);
+    }
+
+    #[test]
+    fn a_cjk_failure_note_over_the_cap_does_not_panic() {
+        // The cap used to slice on a raw byte index, so a long Chinese line cut
+        // inside a character and panicked the turn.
+        let mut notes = String::new();
+        let line = "错".repeat(3_000);
+        push_failure_note(&mut notes, &line);
+        assert!(notes.len() <= 8_000);
+        assert!(
+            line.starts_with(&notes),
+            "the note stays a prefix of the line"
+        );
     }
 }

@@ -62,7 +62,11 @@ where
         use std::io::BufRead;
         let reader = std::io::BufReader::new(reader);
         for line in reader.lines().map_while(Result::ok) {
-            push_capped(&sink.capture, &line);
+            // Capturing is best-effort: a failure here must not take the
+            // reader thread down, or the turn loses its output and its EOF.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                push_capped(&sink.capture, &line);
+            }));
             if let Ok(mut guard) = sink.queue.lock() {
                 guard.push((sink.is_stdout, line));
             }

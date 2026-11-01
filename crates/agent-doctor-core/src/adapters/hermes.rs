@@ -98,11 +98,12 @@ impl HermesAdapter {
         if trimmed.len() <= 8 {
             return "****".to_string();
         }
-        format!(
-            "{}****{}",
-            &trimmed[..3.min(trimmed.len())],
-            &trimmed[trimmed.len().saturating_sub(4)..]
-        )
+        // Both ends are byte counts, so they can land inside a multi-byte
+        // character: pull them back to a character boundary instead of panicking.
+        let prefix_end = crate::text::floor_char_boundary(trimmed, 3);
+        let suffix_start =
+            crate::text::ceil_char_boundary(trimmed, trimmed.len().saturating_sub(4));
+        format!("{}****{}", &trimmed[..prefix_end], &trimmed[suffix_start..])
     }
 
     fn read_env_value(path: &Path, key: &str) -> Result<Option<String>> {
@@ -493,5 +494,12 @@ mod tests {
         assert!(optional
             .iter()
             .any(|path| { path.file_name().and_then(|name| name.to_str()) == Some(".env") }));
+    }
+
+    #[test]
+    fn mask_api_key_handles_a_cjk_value() {
+        // The hint kept the first three and last four bytes, which cut inside a
+        // character for a key that is not pure ASCII.
+        assert_eq!(HermesAdapter::mask_api_key("a中文密钥"), "a****钥");
     }
 }

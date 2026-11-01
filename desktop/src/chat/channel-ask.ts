@@ -40,12 +40,15 @@ export function channelSessionWaiting(sessionId: string): boolean {
   return false;
 }
 
-export function endChannelJob(sessionId: string): void {
-  const jobId = jobsBySession.get(sessionId);
+export function endChannelJob(sessionId: string, jobId?: string): void {
+  const current = jobsBySession.get(sessionId);
+  if (!current) return;
+  // A newer sentence in this chat already replaced the map. Leave that one alone.
+  if (jobId && current !== jobId) return;
   jobsBySession.delete(sessionId);
-  if (!jobId) return;
+  const jobIdToClear = current;
   for (const [requestId, ask] of pendingByRequest) {
-    if (ask.jobId === jobId) pendingByRequest.delete(requestId);
+    if (ask.jobId === jobIdToClear) pendingByRequest.delete(requestId);
   }
 }
 

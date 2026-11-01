@@ -446,7 +446,7 @@ export function createPersonalController(deps: PersonalDeps) {
           ? t("native.using", { account })
           : t("native.onlyTool");
       note.textContent = noteText;
-      note.title = noteText;
+      note.title = busy ? t("native.loggingInHint") : noteText;
       sub.append(chip, note);
       main.append(title, sub);
       const actions = document.createElement("div");
@@ -486,7 +486,7 @@ export function createPersonalController(deps: PersonalDeps) {
     renderNativeAccounts();
     personalListHintEl.hidden = false;
     personalListHintEl.textContent =
-      action === "use-subscription" ? t("native.loggingIn") : t("personal.applying");
+      action === "use-subscription" ? t("native.loggingInHint") : t("personal.applying");
     try {
       const result =
         action === "use-subscription"

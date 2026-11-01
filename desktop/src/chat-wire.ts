@@ -2,7 +2,7 @@ import { focusMainTab } from "./ipc";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { mountReplyChangeCard } from "./chat/reply-changes";
 import { omitBareToolStarts } from "./chat/tool-records";
-import { isChatRunning, runningCount } from "./chat/live-runs";
+import { busyGenFor, isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
 import { normalizePlanItems, paintChatPlan, planStepsFromMessages } from "./plan";
 
@@ -746,6 +746,7 @@ export function wireChatControllers(): void {
     getStore: () => chatState.store,
     getBusy: () => chatState.busy,
     getBusyGen: () => chatState.busyGen,
+    runBusyGen: (id) => busyGenFor(id),
     isChatRunning: (id) => isChatRunning(id),
     runningCount: () => runningCount(),
     getRunningChatSessionId: () => chatState.runningChatSessionId,

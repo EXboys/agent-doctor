@@ -208,6 +208,24 @@ function turnMessages(messages: TurnMessage[], startedAt: number, userText: stri
   return slice;
 }
 
+/**
+ * One line for the phone while this turn is still going.
+ * Progress frames used to send an empty `text`, so the phone looked idle.
+ */
+export function channelProgressCue(delta: {
+  text: string;
+  thinking: string;
+  tools: { name: string; status: string }[];
+}): { kind: "tool" | "reply" | "thinking"; name: string } | null {
+  const tool = [...delta.tools].reverse().find((item) => item.name.trim());
+  if (tool) {
+    return { kind: "tool", name: tool.name.trim().slice(0, 40) };
+  }
+  if (delta.text.trim()) return { kind: "reply", name: "" };
+  if (delta.thinking.trim()) return { kind: "thinking", name: "" };
+  return null;
+}
+
 /** The new piece since `previous`. Callers send this and keep the rest locally. */
 export function channelDelta(
   previous: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },

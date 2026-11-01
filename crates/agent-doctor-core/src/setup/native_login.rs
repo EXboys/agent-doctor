@@ -486,6 +486,9 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
         .stderr(Stdio::piped())
         .spawn()?;
     let opened = Arc::new(AtomicBool::new(false));
+    // Codex and Claude each open the authorize page themselves. Opening that
+    // same address again shows the account that is already signed in, and that
+    // page never comes back to this computer.
     if let Some(pipe) = child.stdout.take() {
         watch_login_output(pipe, Arc::clone(&opened));
     }
@@ -495,8 +498,9 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     let started = Instant::now();
     loop {
         if logged_in(runtime_id) {
-            let _ = child.kill();
-            let _ = child.wait();
+            // The tool writes the account, then tells the browser where to go.
+            // Killing it in that gap leaves the signed-in page with nowhere to jump.
+            wait_for_login_exit(&mut child);
             return Ok(());
         }
         if started.elapsed() > LOGIN_WAIT {
@@ -525,18 +529,46 @@ where
                 break;
             }
             pending.push_str(&String::from_utf8_lossy(&chunk[..n]));
-            if let Some(url) = first_login_url(&pending) {
-                if !opened.swap(true, Ordering::SeqCst) {
-                    let _ = crate::session_launch::open_url(&url);
-                }
-            }
+            maybe_open_login_url(&pending, &opened, false);
         }
-        if !opened.load(Ordering::SeqCst) {
-            if let Some(url) = login_url_at_end(&pending) {
-                let _ = crate::session_launch::open_url(&url);
-            }
-        }
+        maybe_open_login_url(&pending, &opened, true);
     });
+}
+
+fn maybe_open_login_url(text: &str, opened: &AtomicBool, at_end: bool) {
+    if !login_url_should_open(text) {
+        return;
+    }
+    let url = if at_end {
+        login_url_at_end(text)
+    } else {
+        first_login_url(text)
+    };
+    let Some(url) = url else {
+        return;
+    };
+    if !opened.swap(true, Ordering::SeqCst) {
+        let _ = crate::session_launch::open_url(&url);
+    }
+}
+
+/// Both tools open the page, then print a hint in case that open failed.
+/// The hint is not a failure. Open the address only after the tool says so.
+fn login_url_should_open(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("failed to open browser") || lower.contains("couldn't open your browser")
+}
+
+fn wait_for_login_exit(child: &mut std::process::Child) {
+    let grace = Instant::now();
+    while grace.elapsed() < Duration::from_secs(5) {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// A login link is only ready once a space or quote follows it. The address is
@@ -683,6 +715,20 @@ mod tests {
             Some("https://auth.openai.com/codex/device".to_string())
         );
         assert_eq!(first_login_url("no link"), None);
+    }
+
+    #[test]
+    fn login_page_stays_with_the_tool_unless_its_open_failed() {
+        let codex = "Starting local login server on http://localhost:1455.\nIf your browser did not open, navigate to this URL to authenticate:\n\nhttps://auth.openai.com/oauth/authorize?x=1\n";
+        let claude = "Opening browser to sign in…\nhttps://claude.com/cai/oauth/authorize?x=1\nPaste code here if prompted > ";
+        assert!(!login_url_should_open(codex));
+        assert!(!login_url_should_open(claude));
+        assert!(login_url_should_open(
+            "failed to open browser for login URL: no display\nhttps://auth.openai.com/oauth/authorize?x=1\n"
+        ));
+        assert!(login_url_should_open(
+            "Couldn't open your browser. Visit https://claude.com/cai/oauth/authorize?x=1\n"
+        ));
     }
 
     #[test]

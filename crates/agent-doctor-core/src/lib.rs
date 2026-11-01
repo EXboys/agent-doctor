@@ -28,6 +28,8 @@ pub mod setup;
 pub mod skills;
 pub mod store;
 pub mod subagents;
+/// Character-boundary helpers for text that gets cut by byte count.
+pub mod text;
 pub mod usage;
 pub mod version_check;
 pub mod workspace;

@@ -108,6 +108,7 @@ import {
   advanceChannelCursor,
   assistantForChannelTurn,
   channelDelta,
+  channelProgressCue,
   channelTurnTrace,
   settleChannelAnswer,
   channelConfirmAction,
@@ -615,7 +616,8 @@ export function bootChat(): void {
   const phoneStops = new Set<string>();
   async function stopAsked(id: string): Promise<void> {
     const jobId = id.trim();
-    if (!jobId) return;
+    // The phone repeats stop while the screen stays quiet. One request is enough.
+    if (!jobId || phoneStops.has(jobId)) return;
     phoneStops.add(jobId);
     dropChannelJob(jobId);
     let sessionId = channelSessionForJob(jobId);
@@ -706,6 +708,7 @@ export function bootChat(): void {
       tools: [] as ReturnType<typeof channelTurnTrace>["tools"],
       files: [] as ReturnType<typeof channelTurnTrace>["files"],
     };
+    let spoken = "";
     const pump = window.setInterval(() => {
       const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
       const messages = session?.messages ?? [];
@@ -719,7 +722,17 @@ export function bootChat(): void {
       });
       if (!delta) return;
       cursor = advanceChannelCursor(cursor, delta);
-      void teamupsChannelReply(job.id, "", true, false, delta).catch(() => {});
+      const cue = channelProgressCue(delta);
+      const line = !cue
+        ? ""
+        : cue.kind === "tool"
+          ? t("chat.channelWorking", { name: cue.name })
+          : cue.kind === "reply"
+            ? t("chat.channelWriting")
+            : t("chat.channelThinking");
+      const say = line && line !== spoken ? line : "";
+      if (say) spoken = line;
+      void teamupsChannelReply(job.id, say, true, false, delta).catch(() => {});
     }, 400);
     let result: SendAskResult = "empty";
     channelLedger.start(job.id);

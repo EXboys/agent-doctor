@@ -15,7 +15,7 @@ use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::{Deserialize, Serialize};
 
 use crate::update_tray_tooltip;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 fn notify_provider_changed(app: &tauri::AppHandle) {
     agent_doctor_prompt::retire_warm_sessions();
@@ -290,6 +290,13 @@ pub async fn use_native_subscription_command(
     .map_err(|error| error.to_string())??;
     if switched.outcome == "using" {
         notify_provider_changed(&app);
+        // The browser tries to open the Codex app after sign-in. This window
+        // is the one that should come forward.
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     }
     Ok(switched)
 }
@@ -308,6 +315,13 @@ pub async fn resign_native_subscription_command(
     agent_doctor_prompt::retire_warm_sessions();
     if switched.outcome == "using" {
         notify_provider_changed(&app);
+        // The browser tries to open the Codex app after sign-in. This window
+        // is the one that should come forward.
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     }
     Ok(switched)
 }

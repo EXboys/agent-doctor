@@ -54,7 +54,7 @@ impl EvotownClient {
                 "HTTP {} {}: {}",
                 status.as_u16(),
                 url,
-                &String::from_utf8_lossy(&body)[..body.len().min(500)]
+                clip_error_body(&String::from_utf8_lossy(&body))
             );
         }
         Ok(body.to_vec())
@@ -80,7 +80,7 @@ impl EvotownClient {
                 "HTTP {} {}: {}",
                 status.as_u16(),
                 url,
-                &text[..text.len().min(500)]
+                clip_error_body(&text)
             );
         }
         if text.trim().is_empty() {
@@ -113,4 +113,34 @@ pub fn check_evotown_connectivity(client: &EvotownClient) -> Result<EvotownHealt
 pub struct EvotownHealthReport {
     pub health: Value,
     pub gateway: Value,
+}
+
+/// A failed response body, cut to 500 bytes for the error message.
+fn clip_error_body(text: &str) -> &str {
+    crate::text::clip_bytes(text, 500)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cjk_error_body_does_not_panic() {
+        // The clip used a raw byte index, so a Chinese body cut inside a
+        // character and panicked while building the error message.
+        let body = "错".repeat(300);
+        let clipped = clip_error_body(&body);
+        assert!(clipped.len() <= 500);
+        assert!(body.starts_with(clipped));
+    }
+
+    #[test]
+    fn a_lossy_error_body_does_not_panic() {
+        // A body that is not valid UTF-8 becomes replacement characters, three
+        // bytes each, so the byte index lands inside one of them.
+        let body = vec![0xFF_u8; 600];
+        let text = String::from_utf8_lossy(&body);
+        let clipped = clip_error_body(&text);
+        assert!(clipped.len() <= 500);
+    }
 }

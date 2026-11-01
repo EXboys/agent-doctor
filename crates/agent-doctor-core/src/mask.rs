@@ -102,13 +102,11 @@ pub fn mask_secret_value(value: &str) -> String {
     if trimmed.len() <= 8 {
         return "***".to_string();
     }
-    let prefix_len = 3.min(trimmed.len());
-    let suffix_len = 3.min(trimmed.len().saturating_sub(prefix_len));
-    format!(
-        "{}***{}",
-        &trimmed[..prefix_len],
-        &trimmed[trimmed.len().saturating_sub(suffix_len)..]
-    )
+    // Both ends are byte counts, so they can land inside a multi-byte
+    // character: pull them back to a character boundary instead of panicking.
+    let prefix_end = crate::text::floor_char_boundary(trimmed, 3);
+    let suffix_start = crate::text::ceil_char_boundary(trimmed, trimmed.len().saturating_sub(3));
+    format!("{}***{}", &trimmed[..prefix_end], &trimmed[suffix_start..])
 }
 
 pub fn looks_secret_env_key(key: &str) -> bool {
@@ -265,5 +263,12 @@ mod tests {
     #[test]
     fn mask_secret_value_keeps_prefix_and_suffix() {
         assert_eq!(mask_secret_value("sk-abcdefghijklmnop"), "sk-***nop");
+    }
+
+    #[test]
+    fn mask_secret_value_handles_a_cjk_value() {
+        // The mask kept the first and last three bytes, which cut inside a
+        // character for a value that is not pure ASCII.
+        assert_eq!(mask_secret_value("a中文密钥"), "a***钥");
     }
 }

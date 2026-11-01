@@ -300,5 +300,19 @@ fn mask_key(key: &str) -> String {
     if key.len() <= 12 {
         return "evk_…".to_string();
     }
-    format!("{}…", &key[..12])
+    // 12 is a byte count, so it can land inside a multi-byte character.
+    format!("{}…", crate::text::clip_bytes(key, 12))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cjk_key_does_not_panic() {
+        // The hint used to slice on a raw byte index, so a key that is not pure
+        // ASCII cut inside a character and panicked while reading the config.
+        assert_eq!(mask_key("a中文密钥测试值"), "a中文密…");
+        assert_eq!(mask_key("evk_short"), "evk_…");
+    }
 }

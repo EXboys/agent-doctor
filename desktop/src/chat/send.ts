@@ -62,6 +62,8 @@ export type SendDeps = {
   getStore: () => SessionStore;
   getBusy: () => boolean;
   getBusyGen: () => number;
+  /** This chat's own turn generation. Falls back to the global counter. */
+  runBusyGen?: (id: string) => number;
   /** When set, a chat can run while other chats are still working. */
   isChatRunning?: (id: string) => boolean;
   runningCount?: () => number;
@@ -440,7 +442,7 @@ export function createSendController(deps: SendDeps) {
     // The running clock starts with this message, not the previous one.
     if (foreground) markTurnStarted();
     deps.setBusy(true, chatSessionId);
-    const turnGen = deps.getBusyGen();
+    const turnGen = deps.runBusyGen?.(chatSessionId) ?? deps.getBusyGen();
     try {
     if (channel && draft.channelJobId) {
       beginChannelJob(draft.channelJobId, chatSessionId);
@@ -606,8 +608,9 @@ export function createSendController(deps: SendDeps) {
         }
       }
     } finally {
-      if (turnGen !== 0 && deps.getBusyGen() !== turnGen) {
-        if (channel) endChannelJob(chatSessionId);
+      const liveGen = deps.runBusyGen?.(chatSessionId) ?? deps.getBusyGen();
+      if (turnGen !== 0 && liveGen !== turnGen) {
+        if (channel && draft.channelJobId) endChannelJob(chatSessionId, draft.channelJobId);
         return "started";
       }
       if (foreground && here()) {
@@ -620,7 +623,7 @@ export function createSendController(deps: SendDeps) {
       // Yield so any trailing `completed` / delta events from this invoke are
       // handled before we tear down this chat's run (avoids dropping the rest of the turn).
       await Promise.resolve();
-      if (channel) endChannelJob(chatSessionId);
+      if (channel && draft.channelJobId) endChannelJob(chatSessionId, draft.channelJobId);
       deps.setBusy(false, chatSessionId);
       if (here()) deps.expireLivePermissionCards();
       deps.settleRunRouting(chatSessionId);

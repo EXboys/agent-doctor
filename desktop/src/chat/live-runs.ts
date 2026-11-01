@@ -37,6 +37,11 @@ export function liveRun(id: string | null | undefined): LiveRun | undefined {
   return runs.get(id);
 }
 
+/** Generation of this chat's current turn. Another chat starting does not change it. */
+export function busyGenFor(id: string | null | undefined): number {
+  return liveRun(id)?.busyGen ?? 0;
+}
+
 export function liveRuns(): Iterable<LiveRun> {
   return runs.values();
 }

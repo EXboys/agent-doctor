@@ -876,7 +876,8 @@ fn permission_detail(
     if compact.len() <= 280 {
         compact
     } else {
-        format!("{}…", &compact[..277])
+        // 277 is a byte count, so it can land inside a multi-byte character.
+        format!("{}…", agent_doctor_core::text::clip_bytes(&compact, 277))
     }
 }
 
@@ -2378,5 +2379,15 @@ print(json.dumps({"type":"result","is_error":False,"result":"allowed-ok"}), flus
             e,
             PromptSessionEvent::PermissionRequest { tool_name, .. } if tool_name == "Bash"
         )));
+    }
+
+    #[test]
+    fn a_cjk_permission_detail_over_the_cap_does_not_panic() {
+        // The detail used to slice the tool input JSON on a raw byte index, so a
+        // Chinese input cut inside a character and panicked the reader thread.
+        let input = serde_json::json!({"note": "错".repeat(100)});
+        let detail = permission_detail("Bash", &serde_json::json!({}), &input);
+        assert!(detail.ends_with('…'));
+        assert!(detail.len() <= 280);
     }
 }

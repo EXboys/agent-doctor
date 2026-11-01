@@ -13,7 +13,8 @@ Object.defineProperty(globalThis, "navigator", {
   value: { language: "zh" },
 });
 
-const { choiceVerdict, structuredAnswers } = await import("../src/chat/channel-ask");
+const { beginChannelJob, channelSessionForJob, choiceVerdict, endChannelJob, structuredAnswers } =
+  await import("../src/chat/channel-ask");
 
 assert.equal(choiceVerdict("允许"), true);
 assert.equal(choiceVerdict("2"), false);
@@ -71,5 +72,14 @@ assert.equal(
   ),
   null,
 );
+
+beginChannelJob("job-a", "chat-a");
+beginChannelJob("job-b", "chat-b");
+endChannelJob("chat-a", "job-old");
+assert.equal(channelSessionForJob("job-a"), "chat-a", "an older sentence must not clear the chat that replaced it");
+assert.equal(channelSessionForJob("job-b"), "chat-b", "ending one chat leaves the other running");
+endChannelJob("chat-a", "job-a");
+assert.equal(channelSessionForJob("job-a"), null);
+assert.equal(channelSessionForJob("job-b"), "chat-b");
 
 console.log("channel ask tests passed");

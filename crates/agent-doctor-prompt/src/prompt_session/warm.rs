@@ -98,7 +98,11 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
         use std::io::BufRead;
         let reader = std::io::BufReader::new(pipe);
         for line in reader.lines().map_while(Result::ok) {
-            push_capped(&acc, &line);
+            // Capturing is best-effort: a failure here must not take the
+            // reader thread down, or the turn loses its output and its EOF.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                push_capped(&acc, &line);
+            }));
             if let Ok(mut guard) = queue.lock() {
                 guard.push((is_stdout, line));
             }

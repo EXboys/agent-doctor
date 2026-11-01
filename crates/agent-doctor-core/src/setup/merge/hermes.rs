@@ -233,6 +233,12 @@ fn restore_version_dot_ci(model: &str, prefix_lower: &str) -> Option<String> {
     if model.len() < prefix_lower.len() {
         return None;
     }
+    // The split index is a byte count: when it lands inside a multi-byte
+    // character the model cannot start with this ASCII prefix anyway, so it is
+    // not a match instead of a panic.
+    if !model.is_char_boundary(prefix_lower.len()) {
+        return None;
+    }
     let (prefix, rest) = model.split_at(prefix_lower.len());
     if !prefix.eq_ignore_ascii_case(prefix_lower) {
         return None;
@@ -352,5 +358,13 @@ mod tests {
         ));
         assert!(model_is_claude("claude-sonnet-5"));
         assert!(!model_is_claude("glm-5.3"));
+    }
+
+    #[test]
+    fn a_cjk_model_name_does_not_panic() {
+        // The prefix split used a raw byte index, so a model name that is not
+        // pure ASCII cut inside a character and panicked while wiring Hermes.
+        let model = "GLM-中文模型";
+        assert_eq!(restore_hyphenated_vendor_model(model), model);
     }
 }
