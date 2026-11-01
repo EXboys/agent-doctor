@@ -38,6 +38,8 @@ pub struct TeamupsChannelJob {
     /// Which Feishu conversation this sentence belongs to. Empty when the site
     /// did not say, so every such job stays in one desktop chat.
     pub chat: String,
+    /// Registered project the phone asked this sentence to use. Empty keeps the chat's project.
+    pub project: String,
     /// Pictures and files the phone attached. Empty for a text-only sentence.
     pub files: Vec<TeamupsChannelFile>,
 }
@@ -257,10 +259,16 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim();
+    let project = value
+        .get("project")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     Some(TeamupsChannelJob {
         id: id.to_string(),
         text: text.to_string(),
         chat: chat.chars().take(128).collect(),
+        project: project.chars().take(80).collect(),
         files,
     })
 }

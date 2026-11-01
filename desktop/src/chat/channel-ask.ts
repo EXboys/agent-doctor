@@ -77,7 +77,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
   const questions = parseQuestions(input.inputJson);
   const question = questions[0];
   const options = question?.options.map((option) => option.label) ?? [];
-  const summary = clip(formatPermissionDetail(input.detail).summary || input.detail || input.toolName);
+  const summary = usefulSummary(input.detail, input.toolName);
   const prompt = questions.length > 1
     ? `有 ${questions.length} 件事要选。请在手机上逐项选择；飞书暂时请到电脑上处理。`
     : question
@@ -300,6 +300,14 @@ function parseQuestions(raw: string | undefined): TeamupsChannelQuestion[] {
   } catch {
     return [];
   }
+}
+
+function usefulSummary(detail: string, toolName: string): string {
+  const summary = formatPermissionDetail(detail).summary.trim();
+  if (summary && summary !== "{}" && summary !== "[]" && !/^[[{]/.test(summary)) return clip(summary);
+  const name = toolName.trim();
+  if (name && name !== "{}" && !/^[[{]/.test(name)) return clip(name);
+  return "这一步需要你允许后才会继续。";
 }
 
 function clip(value: string): string {

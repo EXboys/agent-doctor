@@ -299,11 +299,25 @@ export function teamupsChannelReply(
       addedLines: string[];
       deletedLines: string[];
     }[];
+    steps?: {
+      kind: string;
+      text?: string;
+      id?: string;
+      name?: string;
+      status?: string;
+      detail?: string;
+      output?: string;
+    }[];
   },
 ): Promise<void> {
   const payload =
     trace &&
-    (trace.delta || trace.thinking || trace.text || trace.tools.length > 0 || (trace.files?.length ?? 0) > 0)
+    (trace.delta ||
+      trace.thinking ||
+      trace.text ||
+      trace.tools.length > 0 ||
+      (trace.files?.length ?? 0) > 0 ||
+      (trace.steps?.length ?? 0) > 0)
       ? trace
       : undefined;
   return invoke("teamups_channel_reply_command", { id, text, ok, done, trace: payload });
@@ -316,11 +330,15 @@ export type PhoneChatSnapshot = {
   title: string;
   state: PhoneChatState;
   updatedAt: number;
+  folder?: string;
 };
 
-/** Tell the phone how each of its chats is doing on this computer. */
-export function teamupsChannelChats(chats: PhoneChatSnapshot[]): Promise<void> {
-  return invoke("teamups_channel_chats_command", { chats });
+/** Tell the phone how each of its chats is doing, and which projects it can use. */
+export function teamupsChannelChats(
+  chats: PhoneChatSnapshot[],
+  projects: { name: string; label: string }[] = [],
+): Promise<void> {
+  return invoke("teamups_channel_chats_command", { chats: { chats, projects } });
 }
 
 /** One step of a Feishu message, written to this computer's channel log. */

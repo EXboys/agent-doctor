@@ -878,6 +878,8 @@ export const zh = {
     "chat.workEditedFiles": "更改 {count} 个文件",
     "chat.workSearches": "搜索 {count} 次",
     "chat.workCommands": "执行 {count} 条命令",
+    "chat.workSubagents": "子智能体 {count} 次",
+    "chat.subagentKind": "子智能体",
     "chat.workOtherActions": "其他 {count} 项",
     "chat.workAliasCount": "{name} {count} 次",
     "chat.toolTimes": "{count} 次",

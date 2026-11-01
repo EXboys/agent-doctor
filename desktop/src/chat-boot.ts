@@ -109,6 +109,7 @@ import {
   assistantForChannelTurn,
   channelDelta,
   channelProgressCue,
+  channelTurnSteps,
   channelTurnTrace,
   settleChannelAnswer,
   channelConfirmAction,
@@ -123,7 +124,11 @@ import {
 import { channelSessionTitle, placeChannelSession } from "./chat/channel-route";
 import { createChannelLedger } from "./chat/channel-ledger";
 import { createEmptySession } from "./chat/store";
-import { defaultWorkspaceName } from "./chat/session-workspace";
+import {
+  defaultWorkspaceName,
+  projectDisplayLabel,
+  sessionWorkspacePath,
+} from "./chat/session-workspace";
 import { MAX_SESSIONS } from "./chat/types";
 import type { SendAskResult } from "./chat/send";
 import { bindLayoutResize } from "./chat/layout-resize";
@@ -551,6 +556,16 @@ export function bootChat(): void {
       paintChannel();
     });
   });
+  const phoneFolder = (session: (typeof chatState.store.sessions)[number]): string => {
+    const doc = chatState.workspaceDoc;
+    const path = sessionWorkspacePath(session, doc);
+    if (path) {
+      const parts = path.split(/[/\\]/).filter(Boolean);
+      return parts.slice(-2).join("/").slice(0, 80);
+    }
+    const name = sessionWorkspaceName(session, doc);
+    return name ? projectDisplayLabel(name, doc).slice(0, 40) : "";
+  };
   bindPhoneChats(() => {
     const sessions = chatState.store?.sessions ?? [];
     const chats: {
@@ -558,6 +573,7 @@ export function bootChat(): void {
       title: string;
       state: "running" | "waiting" | "done" | "failed";
       updatedAt: number;
+      folder?: string;
     }[] = [];
     for (const session of sessions) {
       const key = session.channelKey?.trim() ?? "";
@@ -569,14 +585,25 @@ export function bootChat(): void {
           : session.interrupted
             ? "failed"
             : "done";
+      const folder = phoneFolder(session);
       chats.push({
         chat: key,
         title: (session.title || "新会话").slice(0, 40),
         state,
         updatedAt: session.updatedAt || 0,
+        ...(folder ? { folder } : {}),
       });
     }
-    void teamupsChannelChats(chats.slice(0, 30)).catch(() => {});
+    const doc = chatState.workspaceDoc;
+    const projects = doc
+      ? orderedProjectNames(doc)
+          .slice(0, 40)
+          .map((name) => ({
+            name: name.slice(0, 80),
+            label: projectDisplayLabel(name, doc).slice(0, 40),
+          }))
+      : [];
+    void teamupsChannelChats(chats.slice(0, 30), projects).catch(() => {});
   });
   void listen<boolean>("teamups-channel-status", (event) => {
     channelOn = event.payload === true;
@@ -651,6 +678,7 @@ export function bootChat(): void {
     id?: string;
     text?: string;
     chat?: string;
+    project?: string;
     files?: { name?: string; path?: string; kind?: string }[];
   }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
@@ -662,15 +690,28 @@ export function bootChat(): void {
     });
     const text = event.payload?.text?.trim() || (files.length ? "看看这个。" : "");
     const chat = event.payload?.chat?.trim() ?? "";
-    void runChannelJob(id, text, chat, files);
+    const project = event.payload?.project?.trim() ?? "";
+    void runChannelJob(id, text, chat, files, project);
   });
-  function sessionForChannel(chat: string, text: string): string {
+  function pinChannelWorkspace(sessionId: string, project: string): void {
+    const name = project.trim();
+    const doc = chatState.workspaceDoc;
+    if (!name || !doc?.workspaces[name]) return;
+    const session = chatState.store?.sessions.find((item) => item.id === sessionId);
+    if (!session || session.workspaceName === name || isChatRunning(sessionId)) return;
+    session.workspaceName = name;
+    session.runtimeThreadId = null;
+    session.updatedAt = Date.now();
+    saveStore();
+    renderSessionList();
+    publishPhoneChats();
+  }
+  function sessionForChannel(chat: string, text: string, project = ""): string {
     const store = chatState.store;
+    const doc = chatState.workspaceDoc;
+    const pinned = project && doc?.workspaces[project] ? project : defaultWorkspaceName(doc);
     const placed = placeChannelSession(store.sessions, chat, () => {
-      const session = createEmptySession(
-        selectedRuntime(),
-        defaultWorkspaceName(chatState.workspaceDoc),
-      );
+      const session = createEmptySession(selectedRuntime(), pinned);
       session.title = channelSessionTitle(text);
       return session;
     });
@@ -691,6 +732,7 @@ export function bootChat(): void {
     void teamupsChannelReply(job.id, t("chat.channelQueued"), true, false).catch(() => {});
   }
   async function runChannelTurn(job: ChannelQueued): Promise<void> {
+    if (job.project) pinChannelWorkspace(job.sessionId, job.project);
     if (phoneStops.has(job.id)) {
       finishChannel(job.id, t("chat.channelStopped"), true);
       return;
@@ -707,6 +749,7 @@ export function bootChat(): void {
       thinking: "",
       tools: [] as ReturnType<typeof channelTurnTrace>["tools"],
       files: [] as ReturnType<typeof channelTurnTrace>["files"],
+      steps: [] as ReturnType<typeof channelTurnSteps>,
     };
     let spoken = "";
     const pump = window.setInterval(() => {
@@ -714,11 +757,13 @@ export function bootChat(): void {
       const messages = session?.messages ?? [];
       const text = assistantForChannelTurn(messages, started, job.text);
       const trace = channelTurnTrace(messages, started, job.text);
+      const steps = channelTurnSteps(messages, started, job.text);
       const delta = channelDelta(cursor, {
         text,
         thinking: trace.thinking,
         tools: trace.tools,
         files: trace.files,
+        steps,
       });
       if (!delta) return;
       cursor = advanceChannelCursor(cursor, delta);
@@ -799,6 +844,7 @@ export function bootChat(): void {
       thinking: trace.thinking,
       tools: trace.tools,
       files: trace.files,
+      steps: channelTurnSteps(session?.messages ?? [], started, job.text),
     });
   }
   async function runChannelJob(
@@ -806,6 +852,7 @@ export function bootChat(): void {
     text: string,
     chat: string,
     files: { name: string; path: string; kind: "image" | "file" }[] = [],
+    project = "",
   ): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
     if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
@@ -834,8 +881,16 @@ export function bootChat(): void {
       return;
     }
     try {
-      const sessionId = sessionForChannel(chat, text);
-      const job: ChannelQueued = { id, sessionId, text, noticed: false, files };
+      const sessionId = sessionForChannel(chat, text, project);
+      pinChannelWorkspace(sessionId, project);
+      const job: ChannelQueued = {
+        id,
+        sessionId,
+        text,
+        noticed: false,
+        files,
+        ...(project ? { project } : {}),
+      };
       const busy = isChatRunning(sessionId) || channelQueueLength(sessionId) > 0;
       const action = channelConfirmAction({
         confirmToken: choiceVerdict(text) !== null,

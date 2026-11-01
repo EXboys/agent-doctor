@@ -91,6 +91,7 @@ struct JobPayload {
     id: String,
     text: String,
     chat: String,
+    project: String,
     files: Vec<JobFilePayload>,
 }
 
@@ -250,6 +251,7 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                     id: job.id,
                                     text: job.text,
                                     chat: job.chat,
+                                    project: job.project,
                                     files,
                                 },
                             );
@@ -417,8 +419,22 @@ pub fn teamups_channel_chats_command(
     app: AppHandle,
     chats: serde_json::Value,
 ) -> Result<(), String> {
-    let list = chats.as_array().cloned().unwrap_or_default();
-    let frame = json!({ "type": "chats", "chats": list }).to_string();
+    let (list, projects) = if let Some(items) = chats.as_array() {
+        (items.clone(), serde_json::Value::Array(Vec::new()))
+    } else {
+        (
+            chats
+                .get("chats")
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default(),
+            chats
+                .get("projects")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+        )
+    };
+    let frame = json!({ "type": "chats", "chats": list, "projects": projects }).to_string();
     let Some(outbound) = app.try_state::<Outbound>() else {
         return Ok(());
     };

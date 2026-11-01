@@ -8,6 +8,7 @@ import {
   assistantForChannelTurn,
   channelDelta,
   channelProgressCue,
+  channelTurnSteps,
   channelTurnTrace,
   settleChannelAnswer,
   channelConfirmAction,
@@ -90,6 +91,25 @@ assert(traced.thinking === "先看屏幕上有什么。", "thinking from this se
 assert(traced.tools.length === 1 && traced.tools[0]?.name === "screen_snapshot", "the tool run is included");
 assert(traced.tools[0]?.output === "三个窗口", "the tool result is included");
 assert(traced.files.length === 0, "a look at the screen is not a file change");
+const ordered = channelTurnSteps(
+  [
+    ...live,
+    {
+      role: "tool",
+      content: "调用工具 edit…",
+      at: 34,
+      step: { name: "edit", status: "running", path: "app.ts" },
+    },
+  ],
+  29,
+  "看一下桌面",
+);
+assert(
+  ordered.map((step) => step.kind).join(",") === "thinking,tool,text,tool",
+  "a reply stays in the order it happened",
+);
+assert(ordered[2]?.kind === "text" && ordered[2].text === "桌面上有三个窗口。", "words sit between the tools");
+assert(ordered[ordered.length - 1]?.kind === "tool", "the newest step is last");
 const edited = channelTurnTrace(
   [
     { role: "user", content: "改一下", at: 40 },
@@ -152,6 +172,22 @@ assert(
 );
 
 const blank = { text: "", thinking: "", tools: [] as { id: string; name: string; status: "done"; detail: string; output: string }[] };
+const stepped = channelDelta(blank, {
+  text: "桌面上有三个窗口。",
+  thinking: "先看屏幕上有什么。",
+  tools: [],
+  steps: ordered,
+});
+assert(stepped?.steps?.length === ordered.length, "a changed timeline is sent with the piece");
+assert(
+  channelDelta(advanceChannelCursor(blank, stepped!), {
+    text: "桌面上有三个窗口。",
+    thinking: "先看屏幕上有什么。",
+    tools: [],
+    steps: ordered,
+  }) === null,
+  "the same timeline is not sent again",
+);
 const opening = channelDelta(blank, { text: "你好", thinking: "先看", tools: [] });
 assert(opening?.text === "你好" && opening.thinking === "先看" && !opening.resetText, "the first piece is the whole start");
 const cursor = advanceChannelCursor(blank, opening!);

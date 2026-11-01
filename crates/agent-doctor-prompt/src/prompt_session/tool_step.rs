@@ -223,9 +223,9 @@ pub(crate) fn tool_step(id: &str, name: &str, input: &Value) -> ToolStep {
     if let Some(role) = subagent_role(name, obj) {
         step.kind = "subagent".into();
         step.title = role;
+        step.query = subagent_brief(obj);
         step.path.clear();
         step.command.clear();
-        step.query.clear();
     }
     step
 }
@@ -316,6 +316,31 @@ fn click_subject(obj: &serde_json::Map<String, Value>) -> String {
         return short_words(&named);
     }
     text(obj, &["app"])
+}
+
+/// The one line shown after the helper's name. The long prompt stays off the row.
+fn subagent_brief(obj: &serde_json::Map<String, Value>) -> String {
+    let named = text(obj, &["description", "task"]);
+    let raw = if named.is_empty() {
+        text(obj, &["prompt"])
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    } else {
+        named
+    };
+    brief_line(&raw, 48)
+}
+
+fn brief_line(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let kept: String = flat.chars().take(max).collect();
+    format!("{kept}…")
 }
 
 fn short_words(text: &str) -> String {
@@ -469,6 +494,9 @@ pub(crate) fn codex_tool_steps(item: &Value, item_type: &str, completed: bool) -
             let mut step = base;
             step.kind = "subagent".into();
             step.title = role;
+            if let Some(obj) = item.as_object() {
+                step.query = subagent_brief(obj);
+            }
             if completed {
                 step.output =
                     cap_output(&item.get("result").map(tool_result_text).unwrap_or_default());
@@ -822,6 +850,7 @@ mod tests {
         );
         assert_eq!(helper.kind, "subagent");
         assert_eq!(helper.title, "reviewer");
+        assert_eq!(helper.query, "看一下");
         assert_eq!(bash("npm run build 2>&1 > /dev/null").kind, "terminal");
         assert_eq!(bash("ls -la /tmp 2>&1").kind, "terminal");
         assert_eq!(bash("curl -s https://example.com").kind, "search");

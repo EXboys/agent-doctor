@@ -10,6 +10,7 @@ export type ChannelQueued = {
   text: string;
   noticed: boolean;
   files?: ChannelUpload[];
+  project?: string;
 };
 
 const queues = new Map<string, ChannelQueued[]>();
@@ -147,6 +148,18 @@ export type ChannelFile = {
   deletedLines: string[];
 };
 
+export type ChannelStep =
+  | { kind: "thinking"; text: string }
+  | { kind: "text"; text: string }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      status: ChannelToolTrace["status"];
+      detail: string;
+      output: string;
+    };
+
 export type ChannelTrace = {
   thinking: string;
   tools: ChannelToolTrace[];
@@ -186,6 +199,47 @@ export function channelTurnTrace(
     if (tool) tools.push(tool);
   }
   return { thinking, tools: tools.slice(-MAX_TOOLS), files: channelFiles(slice) };
+}
+
+const MAX_STEPS = 40;
+const STEP_TEXT = 4000;
+
+/** Tool, then the words that followed it, then the next tool. Newest last. */
+export function channelTurnSteps(
+  messages: TurnMessage[],
+  startedAt: number,
+  userText: string,
+): ChannelStep[] {
+  const slice = turnMessages(messages, startedAt, userText);
+  const steps: ChannelStep[] = [];
+  const pushText = (kind: "thinking" | "text", text: string) => {
+    const clipped = clipTail(text, STEP_TEXT);
+    if (!clipped) return;
+    const last = steps[steps.length - 1];
+    if (last && last.kind === kind) {
+      last.text = clipTail(`${last.text}\n\n${clipped}`, STEP_TEXT);
+      return;
+    }
+    steps.push({ kind, text: clipped });
+  };
+  for (let i = 0; i < slice.length; i += 1) {
+    const message = slice[i];
+    if (message.role === "thinking") {
+      pushText("thinking", message.content);
+      continue;
+    }
+    if (message.role === "assistant") {
+      pushText("text", message.content);
+      continue;
+    }
+    if (message.role !== "tool") continue;
+    const next = slice[i + 1];
+    if (!message.step && next?.role === "tool" && next.step && sameTool(message, next)) continue;
+    const tool = toolTrace(message, i);
+    if (!tool) continue;
+    steps.push({ kind: "tool", ...tool });
+  }
+  return steps.slice(-MAX_STEPS);
 }
 
 function turnMessages(messages: TurnMessage[], startedAt: number, userText: string): TurnMessage[] {
@@ -228,14 +282,29 @@ export function channelProgressCue(delta: {
 
 /** The new piece since `previous`. Callers send this and keep the rest locally. */
 export function channelDelta(
-  previous: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
-  next: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
-): (ChannelDelta & { files: ChannelFile[] }) | null {
+  previous: {
+    text: string;
+    thinking: string;
+    tools: ChannelToolTrace[];
+    files?: ChannelFile[];
+    steps?: ChannelStep[];
+  },
+  next: {
+    text: string;
+    thinking: string;
+    tools: ChannelToolTrace[];
+    files?: ChannelFile[];
+    steps?: ChannelStep[];
+  },
+): (ChannelDelta & { files: ChannelFile[]; steps?: ChannelStep[] }) | null {
   const text = takePiece(previous.text, next.text);
   const thinking = takePiece(previous.thinking, next.thinking);
   const tools = changedTools(previous.tools, next.tools);
   const files = changedFiles(previous.files ?? [], next.files ?? []);
-  if (!text.piece && !thinking.piece && tools.length === 0 && files.length === 0) return null;
+  const stepsChanged = next.steps !== undefined && stepsKey(previous.steps) !== stepsKey(next.steps);
+  if (!text.piece && !thinking.piece && tools.length === 0 && files.length === 0 && !stepsChanged) {
+    return null;
+  }
   return {
     delta: true,
     text: text.piece,
@@ -244,19 +313,37 @@ export function channelDelta(
     resetThinking: thinking.reset,
     tools,
     files,
+    ...(stepsChanged && next.steps ? { steps: next.steps } : {}),
   };
+}
+
+function stepsKey(steps: ChannelStep[] | undefined): string {
+  return JSON.stringify(steps ?? []);
 }
 
 /** Advance the cursor by the piece that was actually sent. */
 export function advanceChannelCursor(
-  previous: { text: string; thinking: string; tools: ChannelToolTrace[]; files?: ChannelFile[] },
-  delta: ChannelDelta & { files?: ChannelFile[] },
-): { text: string; thinking: string; tools: ChannelToolTrace[]; files: ChannelFile[] } {
+  previous: {
+    text: string;
+    thinking: string;
+    tools: ChannelToolTrace[];
+    files?: ChannelFile[];
+    steps?: ChannelStep[];
+  },
+  delta: ChannelDelta & { files?: ChannelFile[]; steps?: ChannelStep[] },
+): {
+  text: string;
+  thinking: string;
+  tools: ChannelToolTrace[];
+  files: ChannelFile[];
+  steps: ChannelStep[];
+} {
   return {
     text: delta.resetText ? delta.text : previous.text + delta.text,
     thinking: delta.resetThinking ? delta.thinking : previous.thinking + delta.thinking,
     tools: mergeToolCursor(previous.tools, delta.tools),
     files: mergeFiles(previous.files ?? [], delta.files ?? []),
+    steps: delta.steps ?? previous.steps ?? [],
   };
 }
 

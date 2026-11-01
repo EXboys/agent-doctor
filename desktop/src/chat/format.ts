@@ -325,12 +325,15 @@ export function splitToolActivity(text: string): { summary: string; detail: stri
   return { summary, detail };
 }
 
-export type ToolActivityKind = "read" | "write" | "edit" | "terminal" | "search" | "other";
+export type ToolActivityKind = "read" | "write" | "edit" | "terminal" | "search" | "subagent" | "other";
 
 export type ToolActivityInfo = {
   kind: ToolActivityKind;
   label: string;
   target: string;
+  /** Set when this row is a helper sent to do one job. */
+  agentName?: string;
+  agentTask?: string;
   path: string;
   lineStart: number;
   lineEnd: number;
@@ -539,6 +542,7 @@ export function toolKindLabel(kind: ToolActivityKind): string {
     edit: "chat.toolEdit",
     terminal: "chat.toolTerminal",
     search: "chat.toolSearch",
+    subagent: "chat.subagentKind",
     other: "chat.toolOther",
   };
   return t(keys[kind]);
@@ -937,7 +941,7 @@ export function rememberSubagentNames(records: { id: string; name: string }[]): 
 
 function subagentFace(title: string): string {
   const who = title.replace(/\s+/g, " ").trim();
-  if (!who) return t("chat.subagentSomeone");
+  if (!who) return "";
   const known = subagentNames.get(who) ?? who;
   return known.length > 40 ? `${known.slice(0, 40)}…` : known;
 }
@@ -950,11 +954,15 @@ function oneLine(text: string, max = 96): string {
 /** The row for a structured step: what it did, and to which file. */
 export function stepActivityInfo(step: ToolStep): ToolActivityInfo {
   if (step.kind === "subagent") {
-    const name = subagentFace(step.title || "");
+    const agentName = subagentFace(step.title || "");
+    const agentTask = oneLine(step.query || "", 48);
+    const label = [agentName, agentTask].filter(Boolean).join(" · ") || t("chat.subagentKind");
     return {
-      kind: "other",
-      label: t("chat.subagentWatch", { name }),
+      kind: "subagent",
+      label,
       target: "",
+      agentName,
+      agentTask,
       path: "",
       lineStart: 0,
       lineEnd: 0,
@@ -1044,7 +1052,9 @@ export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
   const named = new Map<string, number>();
   const genericOther = toolKindLabel("other");
   for (const info of infos) {
-    if (info.kind === "read" || info.kind === "write" || info.kind === "edit") {
+    if (info.kind === "subagent") {
+      counts.set("subagent", (counts.get("subagent") ?? 0) + 1);
+    } else if (info.kind === "read" || info.kind === "write" || info.kind === "edit") {
       const seen = files.get(info.kind) ?? new Set<string>();
       seen.add(info.target || `${info.kind}-${seen.size}`);
       files.set(info.kind, seen);
@@ -1065,6 +1075,7 @@ export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
   add("edit", "chat.workEditedFiles");
   add("search", "chat.workSearches");
   add("terminal", "chat.workCommands");
+  add("subagent", "chat.workSubagents");
   for (const [name, count] of named) {
     parts.push(count > 1 ? t("chat.workAliasCount", { name, count: String(count) }) : name);
   }

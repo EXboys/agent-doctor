@@ -876,6 +876,8 @@ export const en = {
     "chat.workEditedFiles": "edited {count} files",
     "chat.workSearches": "{count} searches",
     "chat.workCommands": "ran {count} commands",
+    "chat.workSubagents": "{count} subagents",
+    "chat.subagentKind": "Subagent",
     "chat.workOtherActions": "{count} other actions",
     "chat.workAliasCount": "{name} × {count}",
     "chat.toolTimes": "{count} times",

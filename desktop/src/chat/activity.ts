@@ -16,6 +16,7 @@ import {
   repeatRuns,
   rowActivityInfo,
   splitToolActivity,
+  type ToolActivityInfo,
   toolSignature,
   toolStepText,
 } from "./format";
@@ -129,6 +130,60 @@ function shortFolder(path: string): string {
   return cut > 0 ? `${rel.slice(0, cut)}/` : "";
 }
 
+/** `cat -n` and `N|text` dumps. A plain file is left as prose lines. */
+function parseNumberedLine(line: string): { no: string; text: string } | null {
+  const match = line.match(/^\s*(\d+)(?:\t|\s*\|)\s?(.*)$/);
+  if (!match) return null;
+  return { no: String(Number(match[1])), text: match[2] ?? "" };
+}
+
+/** One row per source line. A wrapped fragment with no number stays on the line above it. */
+function readRows(body: string): { no: string; text: string }[] {
+  const lines = body.replace(/\n$/, "").split("\n");
+  const parsed = lines.map(parseNumberedLine);
+  const numbered = parsed.filter(Boolean).length >= Math.max(2, Math.ceil(lines.length * 0.6));
+  if (!numbered) return lines.map((text) => ({ no: "", text }));
+  const rows: { no: string; text: string }[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const hit = parsed[i];
+    if (hit) {
+      rows.push({ no: hit.no, text: hit.text });
+      continue;
+    }
+    const prev = rows[rows.length - 1];
+    if (prev) prev.text += lines[i] ?? "";
+    else rows.push({ no: "", text: lines[i] ?? "" });
+  }
+  return rows;
+}
+
+/** A read opens as lines of text. A command stays a single block of output. */
+function paintToolBody(cmd: HTMLElement, body: string, asRead: boolean): void {
+  const read = asRead && Boolean(body);
+  cmd.classList.toggle("is-read", read);
+  if (!read) {
+    cmd.replaceChildren();
+    cmd.textContent = body;
+    return;
+  }
+  cmd.replaceChildren();
+  for (const line of readRows(body)) {
+    const row = document.createElement("div");
+    row.className = "chat-tool-read-line";
+    if (line.no) {
+      const no = document.createElement("span");
+      no.className = "chat-tool-read-no";
+      no.textContent = line.no;
+      row.append(no);
+    }
+    const text = document.createElement("span");
+    text.className = "chat-tool-read-text";
+    text.textContent = line.text;
+    row.append(text);
+    cmd.append(row);
+  }
+}
+
 function paintDiffLines(box: HTMLElement, deleted: string[], added: string[]): void {
   box.replaceChildren();
   for (const line of interleaveLines(deleted, added)) {
@@ -138,6 +193,26 @@ function paintDiffLines(box: HTMLElement, deleted: string[], added: string[]): v
     row.dataset.kind = line.kind;
     row.textContent = line.text.length ? line.text : " ";
     box.append(row);
+  }
+}
+
+function paintSubagentFace(row: HTMLElement, info: ToolActivityInfo): void {
+  const face = row.querySelector<HTMLElement>(".chat-subagent");
+  if (!face) return;
+  const on = info.kind === "subagent";
+  face.hidden = !on;
+  if (!on) return;
+  const kind = face.querySelector<HTMLElement>(".chat-subagent-kind");
+  const agent = face.querySelector<HTMLElement>(".chat-subagent-name");
+  const task = face.querySelector<HTMLElement>(".chat-subagent-task");
+  if (kind) kind.textContent = t("chat.subagentKind");
+  if (agent) {
+    agent.textContent = info.agentName ?? "";
+    agent.hidden = !info.agentName;
+  }
+  if (task) {
+    task.textContent = info.agentTask ?? "";
+    task.hidden = !info.agentTask;
   }
 }
 
@@ -163,6 +238,9 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
   row.dataset.deletions = String(info.deletions);
   const name = row.querySelector<HTMLElement>(".chat-tool-name");
   const preview = row.querySelector<HTMLElement>(".chat-tool-preview");
+  const subagent = info.kind === "subagent";
+  row.classList.toggle("is-subagent", subagent);
+  paintSubagentFace(row, info);
   const folder = row.querySelector<HTMLElement>(".chat-tool-folder");
   const cmd = row.querySelector<HTMLElement>(".chat-tool-cmd");
   const diff = row.querySelector<HTMLElement>(".chat-tool-diff");
@@ -234,7 +312,9 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
   }
 
   let body = "";
-  if (current) {
+  if (subagent) {
+    body = "";
+  } else if (current) {
     const head = current.command ? `$ ${current.command}` : (current.query ?? "");
     if (!fileAction || info.kind === "read") {
       const output = current.output && !isMachineToolDump(current.output) ? current.output : "";
@@ -247,7 +327,7 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
     if (fileAction && info.addedLines.length + info.deletedLines.length > 0) body = "";
   }
   if (cmd) {
-    cmd.textContent = body;
+    paintToolBody(cmd, body, info.kind === "read");
     cmd.hidden = !body;
   }
   const hasDiff = fileAction && info.kind !== "read" && info.addedLines.length + info.deletedLines.length > 0;
@@ -276,7 +356,7 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
 export function createToolRowElement(text: string, step?: ToolStep): HTMLDetailsElement {
   const row = document.createElement("details");
   row.className = "chat-activity is-done kind-tool chat-tool-row";
-  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-tool-repeat" hidden></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
+  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-subagent" hidden><span class="chat-subagent-mark" aria-hidden="true"></span><span class="chat-subagent-kind"></span><span class="chat-subagent-name" hidden></span><span class="chat-subagent-task" hidden></span></span><span class="chat-tool-repeat" hidden></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
   row.querySelector("summary")?.addEventListener("click", (event) => {
     if (!row.dataset.expandable) event.preventDefault();
   });

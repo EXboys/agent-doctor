@@ -156,6 +156,23 @@ const typed = stepActivityInfo({
 });
 check("a key press uses a plain name", typed.label === "按下了全选", typed);
 
+const helper = stepActivityInfo({
+  id: "h",
+  kind: "subagent",
+  status: "running",
+  title: "general-purpose",
+  query: "批量加固剩余 ETL 类型匹配",
+});
+check(
+  "a helper is its own row, with the name and the job",
+  helper.kind === "subagent" && helper.agentName === "general-purpose" && helper.agentTask === "批量加固剩余 ETL 类型匹配",
+  helper,
+);
+const unnamed = stepActivityInfo({ id: "h2", kind: "subagent", status: "done", title: "" });
+check("a helper without a name does not say 它", unnamed.agentName === "" && unnamed.label === "子智能体", unnamed);
+const helperSummary = summarizeToolActivities([helper, helper, unnamed]);
+check("helpers count apart from other steps", helperSummary === "子智能体 3 次", helperSummary);
+
 const runs = repeatRuns(["点一下", "点一下", "点一下", "打开应用\n微信", "打开应用\n微信"]);
 check("identical rows fold into one count", runs.join(",") === "3,0,0,2,0", runs);
 

@@ -3417,14 +3417,19 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-group-chevron {
-  width: 5px;
-  height: 5px;
-  margin: 0 1px 1px 2px;
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 0.16s ease;
-  opacity: 0.4;
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-tool-group > .chat-tool-group-summary:is(:hover, :focus-within) .chat-tool-group-chevron,
+.chat-tool-group[open]:is(:hover, :focus-within) .chat-tool-group-chevron {
+  opacity: 0.85;
 }
 
 .chat-tool-group[open] .chat-tool-group-chevron {
@@ -3521,21 +3526,26 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   }
 }
 
-/* Once the thought is done, the header row carries the arrow that reopens it. */
+/* The reopen arrow stays out of the way until the pointer is on this row. */
 .chat-thinking-chevron {
   display: none;
-  width: 5px;
-  height: 5px;
-  margin: 0 1px 1px 2px;
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 0.16s ease;
-  opacity: 0.4;
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
 .chat-thinking:not(.is-live) .chat-thinking-chevron {
   display: block;
+}
+
+.chat-thinking:not(.is-live) > .chat-thinking-summary:is(:hover, :focus-within) .chat-thinking-chevron,
+.chat-thinking:not(.is-live)[open]:is(:hover, :focus-within) .chat-thinking-chevron {
+  opacity: 0.85;
 }
 
 .chat-thinking[open] .chat-thinking-chevron {
@@ -3650,13 +3660,14 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 .chat-reply-changes {
   align-self: stretch;
   box-sizing: border-box;
+  /* Same column as the composer: the log and the input share one content width. */
   width: 100%;
-  max-width: min(36rem, 100%);
+  max-width: 100%;
   /* The log is a column. overflow:hidden would otherwise let this card shrink and clip the file row. */
   flex-shrink: 0;
-  margin: 10px 2px 6px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 10px;
+  margin: 8px 0 2px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 12px;
   background: transparent;
   overflow: hidden;
 }
@@ -3666,43 +3677,49 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px 4px;
+  padding: 7px 12px 1px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
+  font-weight: 500;
 }
 
 .chat-reply-changes-review {
-  margin: 0;
-  padding: 0;
+  margin: 0 -4px 0 0;
+  padding: 2px 6px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   font: inherit;
+  font-size: 0.74rem;
   cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .chat-reply-changes-review:hover {
   color: var(--text);
+  background: var(--fill);
 }
 
 .chat-reply-changes-file {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   margin: 0;
-  padding: 6px 12px 8px;
+  padding: 4px 12px 8px;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.84rem;
+  font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .chat-reply-changes-file:hover {
-  background: var(--fill);
+  background: color-mix(in srgb, var(--fill) 80%, transparent);
 }
 
 .chat-reply-changes-file[hidden] {
@@ -3711,8 +3728,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-reply-changes-mark {
   flex: 0 0 auto;
-  color: #7c6af7;
-  font-weight: 600;
+  color: var(--faint);
+  font-weight: 500;
 }
 
 .chat-reply-changes-name {
@@ -3726,36 +3743,38 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 .chat-reply-changes-stats {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-reply-changes-add {
-  color: #1a7f37;
+  color: var(--ok);
 }
 
 .chat-reply-changes-del {
-  color: #cf222e;
+  color: var(--danger);
 }
 
 .chat-reply-changes-more {
   display: block;
   width: 100%;
   margin: 0;
-  padding: 6px 12px 8px;
+  padding: 4px 12px 8px;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--faint);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   text-align: left;
   cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .chat-reply-changes-more:hover {
   color: var(--text);
-  background: var(--fill);
+  background: color-mix(in srgb, var(--fill) 80%, transparent);
 }
 
 .chat-work-summary::-webkit-details-marker {
@@ -3777,14 +3796,19 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-work-chevron {
-  width: 5px;
-  height: 5px;
-  margin: 0 1px 1px 2px;
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 0.16s ease;
-  opacity: 0.4;
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-work > .chat-work-summary:is(:hover, :focus-within) .chat-work-chevron,
+.chat-work[open]:is(:hover, :focus-within) .chat-work-chevron {
+  opacity: 0.85;
 }
 
 .chat-work[open] .chat-work-chevron {
@@ -3868,16 +3892,19 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-row-summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
   min-height: 24px;
-  padding: 3px 6px;
+  padding: 2px 6px;
   list-style: none;
   cursor: default;
   overflow: hidden;
+  vertical-align: top;
+  transition: background 0.15s ease;
 }
 
 .chat-tool-row:has(.chat-tool-preview.is-file) > .chat-tool-row-summary:hover {
@@ -3914,7 +3941,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-tool-preview.is-file {
   color: var(--text);
-  font-weight: 560;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -3967,7 +3994,10 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 /* While a step runs, a light sweeps across its words. */
 .chat-tool-row.is-live .chat-tool-name,
-.chat-tool-row.is-live .chat-tool-preview {
+.chat-tool-row.is-live .chat-tool-preview,
+.chat-tool-row.is-live .chat-subagent-kind,
+.chat-tool-row.is-live .chat-subagent-name,
+.chat-tool-row.is-live .chat-subagent-task {
   background: linear-gradient(
     90deg,
     var(--muted) 0%,
@@ -3993,15 +4023,17 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-diff {
-  margin: 0 8px 6px 18px;
-  padding: 4px 0;
-  border-radius: 8px;
-  background: var(--fill);
-  max-height: 18em;
-  overflow: auto;
+  margin: 2px 0 8px 28px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  max-height: 240px;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.7rem;
-  line-height: 1.45;
+  font-size: 0.75rem;
+  line-height: 1.55;
 }
 
 .chat-tool-diff[hidden],
@@ -4010,9 +4042,9 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-diff-line {
-  padding: 0 8px;
+  padding: 0 8px 0 0;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .chat-tool-diff-line[data-kind="add"] {
@@ -4026,14 +4058,20 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-tool-chevron {
-  width: 5px;
-  height: 5px;
-  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  opacity: 0.7;
+  opacity: 0;
   flex: 0 0 auto;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-tool-row > .chat-tool-row-summary:is(:hover, :focus-within) .chat-tool-chevron,
+.chat-tool-row[open]:is(:hover, :focus-within) .chat-tool-chevron {
+  opacity: 0.85;
 }
 
 .chat-tool-row[open] .chat-tool-chevron {
@@ -4058,6 +4096,77 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   line-height: 1.35;
 }
 
+.chat-subagent {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-tool-row.is-subagent {
+  font-size: 0.8125rem;
+}
+
+.chat-tool-row.is-subagent > .chat-tool-row-summary {
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 2px;
+}
+
+.chat-tool-row.is-subagent .chat-subagent {
+  display: inline-flex;
+}
+
+.chat-tool-row.is-subagent .chat-subagent[hidden],
+.chat-tool-row.is-subagent .chat-tool-step,
+.chat-tool-row.is-subagent .chat-tool-name,
+.chat-tool-row.is-subagent .chat-tool-preview,
+.chat-tool-row.is-subagent .chat-tool-folder,
+.chat-tool-row.is-subagent .chat-tool-changes {
+  display: none;
+}
+
+.chat-subagent-mark {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: currentColor;
+  color: var(--faint);
+  opacity: 0.9;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='2'/%3E%3Cpath d='M2 14h2'/%3E%3Cpath d='M20 14h2'/%3E%3Cpath d='M15 13v2'/%3E%3Cpath d='M9 13v2'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8V4H8'/%3E%3Crect width='16' height='12' x='4' y='8' rx='2'/%3E%3Cpath d='M2 14h2'/%3E%3Cpath d='M20 14h2'/%3E%3Cpath d='M15 13v2'/%3E%3Cpath d='M9 13v2'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+}
+
+.chat-subagent-kind {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+}
+
+.chat-subagent-name {
+  flex: 0 0 auto;
+  color: #0b8fbf;
+  font-weight: 600;
+}
+
+.chat-subagent-name[hidden],
+.chat-subagent-task[hidden] {
+  display: none;
+}
+
+.chat-subagent-task {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+}
+
+.chat-subagent-task::before {
+  content: "·";
+  margin-right: 6px;
+}
+
 .chat-tool-repeat {
   flex: 0 0 auto;
   color: var(--faint);
@@ -4077,34 +4186,44 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   display: grid;
   place-items: center;
   color: var(--faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.72rem;
-  font-weight: 700;
+}
+
+.chat-tool-step::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  background: currentColor;
   opacity: 0.8;
+  -webkit-mask: var(--step-icon) center / 12px 12px no-repeat;
+  mask: var(--step-icon) center / 12px 12px no-repeat;
 }
 
-.chat-tool-row[data-tool-kind="read"] .chat-tool-step::before {
-  content: "◫";
+.chat-tool-row[data-tool-kind="read"] .chat-tool-step {
+  --step-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z'/%3E%3Cpath d='M14 2v6h6'/%3E%3C/svg%3E");
 }
 
-.chat-tool-row[data-tool-kind="write"] .chat-tool-step::before {
-  content: "+";
+.chat-tool-row[data-tool-kind="write"] .chat-tool-step {
+  --step-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14'/%3E%3Cpath d='M5 12h14'/%3E%3C/svg%3E");
 }
 
-.chat-tool-row[data-tool-kind="edit"] .chat-tool-step::before {
-  content: "✎";
+.chat-tool-row[data-tool-kind="edit"] .chat-tool-step {
+  --step-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E");
 }
 
-.chat-tool-row[data-tool-kind="terminal"] .chat-tool-step::before {
-  content: "›";
+.chat-tool-row[data-tool-kind="terminal"] .chat-tool-step {
+  --step-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 17 6-5-6-5'/%3E%3Cpath d='M12 19h8'/%3E%3C/svg%3E");
 }
 
-.chat-tool-row[data-tool-kind="search"] .chat-tool-step::before {
-  content: "⌕";
+.chat-tool-row[data-tool-kind="search"] .chat-tool-step {
+  --step-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
 }
 
 .chat-tool-row[data-tool-kind="other"] .chat-tool-step::before {
-  content: "·";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  -webkit-mask: none;
+  mask: none;
 }
 
 .chat-activity.kind-tool.is-live .chat-tool-step {
@@ -4126,20 +4245,67 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-tool-cmd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.7rem;
-  line-height: 1.45;
+  font-size: 0.75rem;
+  line-height: 1.55;
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  overflow: auto;
-  max-height: 18em;
+  word-break: normal;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 240px;
   min-width: 0;
   max-width: 100%;
-  margin: 0 8px 6px 18px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: var(--fill);
+  margin: 2px 0 8px 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
+}
+
+/* A read is one source line per row. Wrapping used to drop the rest of a sentence between the line numbers. */
+.chat-tool-cmd.is-read {
+  margin-left: 6px;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: normal;
+  color: color-mix(in srgb, var(--text) 92%, var(--muted));
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.chat-tool-read-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 12px;
+  width: max-content;
+  min-width: 100%;
+  min-height: 1.6em;
+}
+
+.chat-tool-read-no {
+  position: sticky;
+  left: 0;
+  flex: 0 0 auto;
+  min-width: 1.5rem;
+  padding-top: 0.12em;
+  background: var(--main-bg);
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  text-align: right;
+  user-select: none;
+  z-index: 1;
+}
+
+.chat-tool-read-text {
+  flex: 0 0 auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .chat-tool-cmd[hidden] {
@@ -8966,18 +9132,6 @@ html[data-theme="dark"] .chat-thinking.is-live .chat-thinking-label {
   );
 }
 
-html[data-theme="dark"] .chat-reply-changes {
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-html[data-theme="dark"] .chat-reply-changes-add {
-  color: #3ecf8e;
-}
-
-html[data-theme="dark"] .chat-reply-changes-del {
-  color: #f07178;
-}
-
 html[data-theme="dark"] .chat-tool-group-icon {
   background: currentColor;
   color: inherit;
@@ -8986,6 +9140,10 @@ html[data-theme="dark"] .chat-tool-group-icon {
 html[data-theme="dark"] .chat-tool-list,
 html[data-theme="dark"] .chat-permission-stack {
   border-left-color: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme="dark"] .chat-subagent-name {
+  color: #5dccff;
 }
 
 html[data-theme="dark"] .chat-activity,
