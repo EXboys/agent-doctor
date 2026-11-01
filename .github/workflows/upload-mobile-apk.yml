@@ -72,11 +72,14 @@ jobs:
           fi
           apk="$(find apk -type f -name '*.apk' | head -n 1)"
           test -n "$apk"
-          name="Agent-Doctor-${VERSION}.apk"
-          "$OSSUTIL" cp "$apk" "oss://${OSS_BUCKET}/mobile/${name}" \
-            --meta "Content-Type:application/vnd.android.package-archive" \
+          # OSS 默认域名禁止直接下发 .apk。对象用 .bin，官网地址仍是 .apk，由 Caddy 改写。
+          object="Agent-Doctor-${VERSION}.bin"
+          "$OSSUTIL" cp "$apk" "oss://${OSS_BUCKET}/mobile/${object}" \
+            --meta "Content-Type:application/octet-stream" \
             -f --config-file .ossutilconfig
-          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/mobile/${name}" public-read \
+          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/mobile/${object}" public-read \
+            -f --config-file .ossutilconfig || true
+          "$OSSUTIL" rm "oss://${OSS_BUCKET}/mobile/Agent-Doctor-${VERSION}.apk" \
             -f --config-file .ossutilconfig || true
           python3 -c 'import json,os; v=os.environ["VERSION"]; open("latest.json","w").write(json.dumps({"version":v,"url":f"https://agentdoctor.cn/releases/mobile/Agent-Doctor-{v}.apk","notes":""})+"\n")'
           "$OSSUTIL" cp latest.json "oss://${OSS_BUCKET}/mobile/latest.json" \
