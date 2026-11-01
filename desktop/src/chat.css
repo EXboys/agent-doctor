@@ -3939,6 +3939,11 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   cursor: default;
 }
 
+/* A disabled button inside summary swallows the click, so the row never opens. */
+.chat-tool-preview:disabled {
+  pointer-events: none;
+}
+
 .chat-tool-preview.is-file {
   color: var(--text);
   font-weight: 500;
