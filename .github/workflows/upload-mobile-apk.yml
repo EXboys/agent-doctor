@@ -1,7 +1,8 @@
 name: Upload mobile APK to OSS
 
 # 手动把手机安装包传到 OSS mobile/，供官网 /releases/mobile/ 反代下载。
-# 先在本仓库建一个含 .apk 的 draft release，再用 workflow_dispatch 指定 tag。
+# 先在本仓库建一个含 .apk 的 release（不能是 draft，Actions 读不到草稿），
+# 再用 workflow_dispatch 指定 tag。传完可以删掉这个 release。
 # 只写 mobile/，不改 desktop/ 的电脑安装包。
 
 on:
@@ -87,4 +88,4 @@ jobs:
             -f --config-file .ossutilconfig
           "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/mobile/latest.json" public-read \
             -f --config-file .ossutilconfig || true
-          echo "Uploaded mobile/${name} and mobile/latest.json"
+          echo "Uploaded mobile/${object} and mobile/latest.json"
