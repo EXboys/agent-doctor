@@ -1,0 +1,87 @@
+name: Upload mobile APK to OSS
+
+# 手动把手机安装包传到 OSS mobile/，供官网 /releases/mobile/ 反代下载。
+# 先在本仓库建一个含 .apk 的 draft release，再用 workflow_dispatch 指定 tag。
+# 只写 mobile/，不改 desktop/ 的电脑安装包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "含 APK 的 draft release tag"
+        required: true
+        type: string
+      version:
+        description: "写入 mobile/latest.json 的版本，如 1.0.0"
+        required: true
+        default: "1.0.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Upload APK to China OSS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK from draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p apk
+          gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --pattern '*.apk' --dir apk
+          find apk -type f -name '*.apk' -exec ls -lh {} \;
+
+      - name: Prepare ossutil
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::error::OSS secrets missing"
+            exit 1
+          fi
+          curl -fsSL -o ossutil.zip \
+            "https://gosspublic.alicdn.com/ossutil/current/ossutil-linux-amd64.zip"
+          unzip -qo ossutil.zip -d ossutil-bin
+          OSSUTIL="$(find ossutil-bin -type f -name 'ossutil*' ! -name '*.zip' | head -n 1)"
+          chmod +x "$OSSUTIL"
+          "$OSSUTIL" config \
+            -e "${OSS_ENDPOINT}" \
+            -i "${OSS_ACCESS_KEY_ID}" \
+            -k "${OSS_ACCESS_KEY_SECRET}" \
+            -L CH \
+            --config-file .ossutilconfig
+          echo "OSSUTIL=$OSSUTIL" >> "$GITHUB_ENV"
+
+      - name: Upload mobile APK and latest.json
+        env:
+          VERSION: ${{ inputs.version }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must look like 1.2.3"
+            exit 1
+          fi
+          apk="$(find apk -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          name="Agent-Doctor-${VERSION}.apk"
+          "$OSSUTIL" cp "$apk" "oss://${OSS_BUCKET}/mobile/${name}" \
+            --meta "Content-Type:application/vnd.android.package-archive" \
+            -f --config-file .ossutilconfig
+          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/mobile/${name}" public-read \
+            -f --config-file .ossutilconfig || true
+          python3 -c 'import json,os; v=os.environ["VERSION"]; open("latest.json","w").write(json.dumps({"version":v,"url":f"https://agentdoctor.cn/releases/mobile/Agent-Doctor-{v}.apk","notes":""})+"\n")'
+          "$OSSUTIL" cp latest.json "oss://${OSS_BUCKET}/mobile/latest.json" \
+            --meta "Content-Type:application/json" \
+            -f --config-file .ossutilconfig
+          "$OSSUTIL" set-acl "oss://${OSS_BUCKET}/mobile/latest.json" public-read \
+            -f --config-file .ossutilconfig || true
+          echo "Uploaded mobile/${name} and mobile/latest.json"
