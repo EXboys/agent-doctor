@@ -28,9 +28,8 @@ function assert(cond: boolean, msg: string): void {
   console.log(`ok - ${msg}`);
 }
 
-const { CHAT_BACKUP_MAX_BYTES, CHAT_STORE_MAX_BYTES, STORAGE_BACKUP_KEY, STORAGE_KEY } = await import(
-  "../src/chat/types"
-);
+const { CHAT_BACKUP_MAX_BYTES, CHAT_STORE_MAX_BYTES, STORAGE_BACKUP_KEY, STORAGE_KEY, storageBytes } =
+  await import("../src/chat/types");
 const {
   loadStoreFromLocalKeys,
   mergeChatStores,
@@ -119,7 +118,7 @@ const session = (id: string, messages: Msg[], updatedAt = 1) => ({
     session(String(s), s === 0 ? (tool(120) as never) : (tool(120, 200) as never)),
   );
   const blob = JSON.stringify({ activeId: "0", sessions });
-  assert(blob.length > CHAT_STORE_MAX_BYTES, "the test copy is over the cap");
+  assert(storageBytes(blob) > CHAT_STORE_MAX_BYTES, "the test copy is over the cap");
   storage.set(STORAGE_KEY, blob);
 
   const started = Date.now();
@@ -128,7 +127,7 @@ const session = (id: string, messages: Msg[], updatedAt = 1) => ({
   assert(elapsed < 2000, `loading an oversized copy finishes (${elapsed}ms)`);
   assert(loaded != null && loaded.sessions.length === 34, "every chat survives the trim");
   assert(
-    (storage.get(STORAGE_KEY) ?? "").length <= CHAT_STORE_MAX_BYTES,
+    storageBytes(storage.get(STORAGE_KEY) ?? "") <= CHAT_STORE_MAX_BYTES,
     "the copy is healed to a size that fits",
   );
 }
@@ -194,8 +193,8 @@ const session = (id: string, messages: Msg[], updatedAt = 1) => ({
   const backup = storage.get(STORAGE_BACKUP_KEY) ?? "";
   assert(backup.length > 0, "a huge reply still leaves a backup");
   assert(
-    backup.length <= CHAT_BACKUP_MAX_BYTES,
-    `the backup of a huge reply stays inside its budget (${backup.length} bytes)`,
+    storageBytes(backup) <= CHAT_BACKUP_MAX_BYTES,
+    `the backup of a huge reply stays inside its budget (${storageBytes(backup)} bytes)`,
   );
   const parsed = JSON.parse(backup) as { sessions?: unknown[] };
   assert(Array.isArray(parsed.sessions) && parsed.sessions.length > 0, "the backup still reads back");
@@ -216,17 +215,17 @@ const session = (id: string, messages: Msg[], updatedAt = 1) => ({
   const backup = storage.get(STORAGE_BACKUP_KEY) ?? "";
   assert(backup.length > 0, "a backup is kept");
   assert(
-    backup.length <= CHAT_BACKUP_MAX_BYTES,
-    `the backup stays inside its own budget (${backup.length} bytes)`,
+    storageBytes(backup) <= CHAT_BACKUP_MAX_BYTES,
+    `the backup stays inside its own budget (${storageBytes(backup)} bytes)`,
   );
   assert(
-    (storage.get(STORAGE_KEY) ?? "").length <= CHAT_STORE_MAX_BYTES,
+    storageBytes(storage.get(STORAGE_KEY) ?? "") <= CHAT_STORE_MAX_BYTES,
     "the copy stays inside the cap",
   );
   const main = storage.get(STORAGE_KEY) ?? "";
   const backupCopy = storage.get(STORAGE_BACKUP_KEY) ?? "";
   assert(
-    main.length + backupCopy.length < 5_000_000,
+    storageBytes(main) + storageBytes(backupCopy) < 5_242_880,
     "the copy and its backup fit in one origin's storage",
   );
 }

@@ -178,6 +178,16 @@ export const STORAGE_BACKUP_KEY = "agent-doctor.chat.sessions.v2.backup";
 /** Which chats the browser copy holds only in part, and how many rows it kept. */
 export const STORAGE_PARTIAL_KEY = "agent-doctor.chat.sessions.v2.partial";
 export const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
+/**
+ * The webview keeps a localStorage value as UTF-16, so a string of N
+ * characters costs about 2N bytes of storage. The browser caps one origin at
+ * 5 MiB and the copy and its backup share that budget, so the numbers below
+ * are storage bytes — a budget counted in characters would double the real
+ * cost and fill the quota again.
+ */
+export function storageBytes(value: string): number {
+  return value.length * 2;
+}
 export const CHAT_STORE_MAX_BYTES = 2_500_000;
 /**
  * The backup is a safety net for a broken main key, not a second copy. It has

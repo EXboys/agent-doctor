@@ -13,6 +13,7 @@ import {
   STORAGE_BACKUP_KEY,
   STORAGE_KEY,
   STORAGE_PARTIAL_KEY,
+  storageBytes,
 } from "./types";
 
 export function uid(): string {
@@ -378,7 +379,7 @@ function storeCandidates(store: SessionStore, maxBytes: number): StoreCopy[] {
     if (!store.sessions.length) break;
     const trimmed = storeAtLevel(store, level);
     const json = JSON.stringify(trimmed);
-    if (json.length > maxBytes) continue;
+    if (storageBytes(json) > maxBytes) continue;
     out.push({ json, rows: rowsBySession(trimmed) });
   }
   if (!out.length && store.sessions.length) {
@@ -390,7 +391,7 @@ function storeCandidates(store: SessionStore, maxBytes: number): StoreCopy[] {
         sessions: [{ ...active, messages: trimSessionMessages(active.messages ?? [], rows) }],
       });
       const json = JSON.stringify(trimmed);
-      if (json.length > maxBytes) continue;
+      if (storageBytes(json) > maxBytes) continue;
       out.push({ json, rows: rowsBySession(trimmed) });
       break;
     }
