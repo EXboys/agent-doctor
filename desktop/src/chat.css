@@ -2411,8 +2411,8 @@ html[data-theme="dark"] .chat-settings-tabs .chat-mode-btn.is-on {
 .chat-session-group {
   margin: 0;
   padding: 0;
-  /* Session title column lines up with the project name, not folder / grip icons. */
-  --chat-session-group-label-inset: calc(2px + 22px + 4px + 14px + 4px);
+  /* Session title column lines up with the project name, past the folder button. */
+  --chat-session-group-label-inset: calc(2px + 22px + 4px);
   --chat-session-compact-dot: 6px;
   --chat-session-compact-dot-gap: 6px;
   --chat-session-compact-row-pad: 4px;
@@ -2629,53 +2629,6 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.chat-session-group-grip {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  padding: 6px 0;
-  margin: -6px 0;
-  color: var(--faint);
-  opacity: 0.55;
-  cursor: grab;
-}
-
-.chat-session-group-head:hover .chat-session-group-grip {
-  opacity: 0.9;
-}
-
-.chat-session-group-reorder {
-  display: inline-flex;
-  gap: 0;
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
-.chat-session-group-head:hover .chat-session-group-reorder,
-.chat-session-group-head:focus-within .chat-session-group-reorder {
-  opacity: 1;
-}
-
-.chat-session-group-nudge {
-  border: 0;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  font-size: 0.62rem;
-  line-height: 1;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  padding: 0;
-}
-
-.chat-session-group-nudge:hover {
-  color: var(--text);
-  background: rgba(127, 127, 127, 0.12);
-}
-
 .chat-session-group-new {
   flex-shrink: 0;
   border: none;
@@ -2687,7 +2640,14 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   width: 22px;
   height: 22px;
   border-radius: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.chat-session-group-head:is(:hover, :focus-within) .chat-session-group-new {
   opacity: 0.85;
+  pointer-events: auto;
 }
 
 .chat-session-group-new:hover {

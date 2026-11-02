@@ -56,16 +56,6 @@ export function orderedProjectNames(doc: WorkspaceDoc): string[] {
   return sortRegisteredProjectNames(doc);
 }
 
-export function moveProjectInOrder(order: string[], name: string, delta: -1 | 1): string[] {
-  const index = order.indexOf(name);
-  if (index < 0) return order;
-  const target = index + delta;
-  if (target < 0 || target >= order.length) return order;
-  const next = [...order];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
-}
-
 export function reorderProjectKeys(
   order: string[],
   fromKey: string,

@@ -12,7 +12,6 @@ import {
 } from "./session-workspace";
 import { attachProjectReorderPointer, consumeProjectDragClick } from "./project-drag";
 import {
-  moveProjectInOrder,
   orderedProjectNames,
   reorderProjectKeys,
   saveProjectOrder,
@@ -137,25 +136,6 @@ export function createSessionsController(deps: SessionsDeps) {
     const order = orderedProjectNames(doc);
     saveProjectOrder(reorderProjectKeys(order, from, to, position));
     renderSessionList();
-  }
-
-  function nudgeProjectOrder(name: string, delta: -1 | 1): void {
-    const doc = deps.getWorkspaceDoc();
-    if (!doc) return;
-    const order = orderedProjectNames(doc);
-    const next = moveProjectInOrder(order, name, delta);
-    if (next === order) return;
-    saveProjectOrder(next);
-    renderSessionList();
-  }
-
-  function createProjectGrip(): HTMLElement {
-    const grip = document.createElement("span");
-    grip.className = "chat-session-group-grip";
-    grip.title = t("chat.projectReorder");
-    grip.setAttribute("aria-label", t("chat.projectReorder"));
-    grip.innerHTML = `<svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="2" cy="10" r="1"/><circle cx="6" cy="10" r="1"/></svg>`;
-    return grip;
   }
 
   function sessionMetaLine(session: ChatSession, isRunning: boolean, awaitingConfirm: boolean, doneUnseen: boolean): string {
@@ -594,7 +574,6 @@ export function createSessionsController(deps: SessionsDeps) {
         renderSessionList();
       });
 
-      const grip = createProjectGrip();
       const label = document.createElement("span");
       label.className = "chat-session-group-label";
       label.textContent = group.label;
@@ -608,7 +587,7 @@ export function createSessionsController(deps: SessionsDeps) {
         });
       }
 
-      head.append(fold, grip, label);
+      head.append(fold, label);
 
       if (group.name) {
         const projectName = group.name;
@@ -618,30 +597,6 @@ export function createSessionsController(deps: SessionsDeps) {
           openProjectMenu(event.clientX, event.clientY, projectName, group.sessions);
         });
         attachProjectReorderPointer(deps.sessionListEl, head, projectName, commitProjectReorder);
-
-        const reorder = document.createElement("span");
-        reorder.className = "chat-session-group-reorder";
-        const up = document.createElement("button");
-        up.type = "button";
-        up.className = "chat-session-group-nudge";
-        up.title = t("chat.projectMoveUp");
-        up.setAttribute("aria-label", t("chat.projectMoveUp"));
-        up.textContent = "↑";
-        up.addEventListener("click", (event) => {
-          event.stopPropagation();
-          nudgeProjectOrder(projectName, -1);
-        });
-        const down = document.createElement("button");
-        down.type = "button";
-        down.className = "chat-session-group-nudge";
-        down.title = t("chat.projectMoveDown");
-        down.setAttribute("aria-label", t("chat.projectMoveDown"));
-        down.textContent = "↓";
-        down.addEventListener("click", (event) => {
-          event.stopPropagation();
-          nudgeProjectOrder(projectName, 1);
-        });
-        reorder.append(up, down);
 
         const add = document.createElement("button");
         add.type = "button";
@@ -654,7 +609,7 @@ export function createSessionsController(deps: SessionsDeps) {
           event.stopPropagation();
           void beginNewSessionInProject(projectName, add);
         });
-        head.append(reorder, add);
+        head.append(add);
       }
 
       block.append(head);
@@ -1172,7 +1127,7 @@ export function createSessionsController(deps: SessionsDeps) {
       if (!(target instanceof Element)) return;
       if (
         target.closest(
-          ".chat-session-delete, .chat-session-group-fold, .chat-session-group-new, .chat-session-group-nudge, .chat-session-group-more",
+          ".chat-session-delete, .chat-session-group-fold, .chat-session-group-new, .chat-session-group-more",
         )
       ) {
         return;
