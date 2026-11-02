@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { durationLabel, followChatLog } from "./activity";
+import { clearThinkingStarted, durationLabel, followChatLog, markThinkingStartedAt } from "./activity";
 import { noteThinkingLive, placeProcessBlock } from "./work-trail";
 import type { ChatMessage } from "./types";
 
@@ -86,6 +86,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     if (!messageId) {
       text = "";
       startedAt = Date.now();
+      markThinkingStartedAt(startedAt);
       deps.endReply();
       messageId = deps.persistMessage("").id;
     }
@@ -104,12 +105,16 @@ export function createThinkingController(deps: ThinkingDeps) {
   }
 
   function seal(): void {
-    if (!messageId) return;
+    const elapsed = messageId ? durationLabel(Date.now() - startedAt) : "";
+    if (!messageId) {
+      startedAt = 0;
+      clearThinkingStarted();
+      return;
+    }
     const block = findBlock();
     if (block) {
       block.classList.remove("is-live");
       block.open = false;
-      const elapsed = durationLabel(Date.now() - startedAt);
       block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = elapsed
         ? t("chat.thinkingDone", { elapsed })
         : t("chat.thinkingSaved");
@@ -118,6 +123,8 @@ export function createThinkingController(deps: ThinkingDeps) {
     messageId = null;
     text = "";
     el = null;
+    startedAt = 0;
+    clearThinkingStarted();
   }
 
   function exportState(): { messageId: string | null; text: string } {
@@ -129,6 +136,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     text = next.text;
     el = null;
     if (messageId && !startedAt) startedAt = Date.now();
+    if (messageId) markThinkingStartedAt(startedAt);
   }
 
   return { append, seal, isLive: () => messageId !== null, exportState, importState };

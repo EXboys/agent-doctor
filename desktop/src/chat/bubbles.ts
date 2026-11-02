@@ -18,7 +18,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
-import { followChatLog, lockChatRowHeights, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
+import { followChatLog, lockChatRowHeights, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
@@ -287,6 +287,7 @@ export function createBubblesController(deps: BubblesDeps) {
     };
     session.messages.push(message);
     if (role === "user") {
+      noteTurnUserAt(message.at);
       if (session.id === deps.getStore().activeId) clearEmptyChatStart(deps.logEl);
     }
     if (role === "user" && !session.title.trim()) {

@@ -672,8 +672,8 @@ export function wireChatControllers(): void {
     queueAssistantText: (text) => queueAssistantText(text),
     thinking: {
       append: (text) => {
-        chatState.running?.setText(t("chat.thinkingLive"));
         chatState.thinking.append(text);
+        if (chatState.thinking.isLive()) chatState.running?.setText(t("chat.thinkingLive"));
       },
       seal: () => chatState.thinking.seal(),
       isLive: () => chatState.thinking.isLive(),

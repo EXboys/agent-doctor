@@ -2,6 +2,7 @@ import "./platform";
 import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
+import { clearTurnClock } from "./chat/activity";
 import { HAND_MISSING_PHASE } from "./chat/format";
 import { permissionHoldKind, requestAllowStop } from "./chat/permission-allow";
 import { releaseStalePins } from "./chat/model-picker";
@@ -21,6 +22,7 @@ import {
   isChatRunning,
   liveRun,
   liveRuns,
+  runningCount,
 } from "./chat/live-runs";
 import { chatState, initChatStore } from "./chat-state";
 import {
@@ -793,6 +795,7 @@ export function setBusy(next: boolean, chatSessionId?: string | null): void {
   }
   const viewing = id === chatState.store.activeId && isChatRunning(id);
   endLiveRun(id);
+  if (runningCount() === 0) clearTurnClock();
   if (viewing) {
     chatState.busy = false;
     chatState.runningChatSessionId = null;
