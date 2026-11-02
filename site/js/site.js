@@ -82,19 +82,16 @@ function pointHero(asset, label) {
   const hero = document.querySelector("#hero-download");
   const nav = document.querySelector("#nav-download");
   if (!asset) return;
-  for (const node of [hero, nav]) {
-    if (!node) continue;
-    node.href = asset.browser_download_url;
-    node.textContent = label;
+  if (hero) {
+    hero.href = asset.browser_download_url;
+    hero.textContent = label;
   }
+  // The header button keeps a short label. "Download for macOS" is wider than
+  // a phone and pushes the nav off the screen.
+  if (nav) nav.href = asset.browser_download_url;
 }
 
 async function main() {
-  const header = document.querySelector(".site-header");
-  const onScroll = () => header?.classList.toggle("is-stuck", window.scrollY > 4);
-  onScroll();
-  window.addEventListener("scroll", onScroll, { passive: true });
-
   const mine = thisComputer();
   document.querySelector(`[data-slot="${mine}"]`)?.classList.add("is-yours");
   const hero = document.querySelector("#hero-download");
