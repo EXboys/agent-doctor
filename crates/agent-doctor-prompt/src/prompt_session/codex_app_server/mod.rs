@@ -13,9 +13,9 @@ use super::backend::AskBackend;
 use super::control::PromptSessionControl;
 use super::mcp_ensure::{wire_hands, Hands};
 use super::util::{
-    combine_output, command_from_cli, event_is_model_reply, force_stop_child,
-    humanize_runtime_error, is_runtime_stderr_noise, stderr_event, strip_runtime_stderr_noise,
-    summarize, turn_error, SessionClock, ThinkingLine, ToolWatch,
+    combine_output, command_from_cli, force_stop_child, humanize_runtime_error,
+    is_runtime_stderr_noise, stderr_event, strip_runtime_stderr_noise, summarize, turn_error,
+    SessionClock, ThinkingLine, ToolWatch,
 };
 use super::warm::{self, LivePipes};
 use super::{
@@ -691,7 +691,6 @@ where
 {
     let pid = child.id();
     let mut clock = SessionClock::new(timeout_sec);
-    let mut heard_reply = false;
     let status;
     let exit_code;
     let mut timeout_note = None;
@@ -705,12 +704,7 @@ where
         }
         for (is_stdout, line) in drained {
             if is_stdout {
-                handle_rpc_line(line, control, state, &mut |event| {
-                    if event_is_model_reply(&event) {
-                        heard_reply = true;
-                    }
-                    on_event(event);
-                })?;
+                handle_rpc_line(line, control, state, on_event)?;
             } else if !is_runtime_stderr_noise(&line) {
                 on_event(stderr_event(&state.session_id, &line));
             }
@@ -736,10 +730,7 @@ where
             exit_code = None;
             break;
         }
-        if clock.expired()
-            || clock.stalled()
-            || clock.awaiting_first_reply(heard_reply || control.has_pending())
-        {
+        if clock.expired() || clock.stalled() {
             timeout_note = Some(clock.timeout_note(state.tools.last_label()));
             force_stop_child(child, pid);
             status = PromptSessionStatus::TimedOut;

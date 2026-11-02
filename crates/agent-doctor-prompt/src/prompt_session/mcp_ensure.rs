@@ -140,11 +140,14 @@ pub(crate) fn computer_use_tool_instructions() -> &'static str {
 }
 
 /// The app already showed the user one sentence about the missing tools.
+/// That sentence owns the fact. The model finishes the rest of the request.
 fn hand_missing_instructions(what: &str) -> String {
     format!(
-        "{what} TOOLS ARE NOT CONNECTED this turn. The app already told the user why.\n\
-         - Do not explain it again, and do not work around it with shell commands, screenshots, or scripts.\n\
-         - If the request needs these tools, reply only 先按上面的提示处理，再发一次。 and stop."
+        "{what} TOOLS ARE NOT CONNECTED this turn. The app already told the user.\n\
+         - Do not mention it, do not apologize, and do not tell the user to send again.\n\
+         - Do not reply 先按上面的提示处理，再发一次。 That sentence stops the task. Never write it.\n\
+         - Finish the user's request with your other tools. This does not end the turn.\n\
+         - Do not substitute shell commands, screenshots, or scripts for these missing tools."
     )
 }
 
@@ -578,6 +581,8 @@ mod tests {
         };
         let lined = missing.prompt("你好");
         assert!(lined.contains("COMPUTER TOOLS ARE NOT CONNECTED"));
+        assert!(lined.contains("Finish the user's request"));
+        assert!(!lined.contains("reply only"));
         assert!(!lined.contains("server named `computer`"));
         assert_eq!(Hands::default().prompt("你好"), "你好");
         assert!(bytes_have_screen_open(
