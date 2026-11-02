@@ -400,11 +400,21 @@ assert(
 
 const noneInstalled: DoctorReport = {
   ...doctorReport,
-  runtimes: doctorReport.runtimes.map((r) => ({ ...r, installed: false })),
+  runtimes: [
+    ...doctorReport.runtimes.map((r) => ({ ...r, installed: false })),
+    {
+      ...runtime,
+      id: "claude-code",
+      display_name: "Claude Code",
+      installed: false,
+      version: null,
+      binary_path: null,
+    },
+  ],
 };
 const installTarget = pickBiggestFirstRunTarget(noneInstalled, new Map(), firstRunCopy);
 assert(installTarget.kind === "install", "no installs → install target");
-assert(installTarget.runtimeId === "hermes", "prefer hermes in FIRST_RUN_RUNTIME_ORDER");
+assert(installTarget.runtimeId === "claude-code", "prefer claude-code in FIRST_RUN_RUNTIME_ORDER");
 
 const allGoodTarget = pickBiggestFirstRunTarget(
   doctorReport,

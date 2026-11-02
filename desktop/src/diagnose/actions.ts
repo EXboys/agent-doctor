@@ -158,7 +158,8 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     }
   }
 
-  async function runVerifyAndSave(): Promise<void> {
+  async function runVerifyAndSave(opts?: { advance?: boolean }): Promise<boolean> {
+    const advance = opts?.advance !== false;
     const url = dom.urlEl.value.trim();
     const key = dom.keyEl.value.trim();
     const model = dom.modelEl.value.trim();
@@ -172,7 +173,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     if (!model) missing.push("model");
     if (missing.length > 0) {
       paint.setResult("error", missingProviderFieldsMessage(missing));
-      return;
+      return false;
     }
 
     paint.setBusy(true);
@@ -188,7 +189,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           "error",
           formatProviderFailure(verify.message, { statusCode: verify.status_code }),
         );
-        return;
+        return false;
       }
 
       paint.setResult("busy", t("diagnose.flow.saving"));
@@ -212,6 +213,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         id: targetId,
       });
       dom.keyEl.value = "";
+      session.keySaved = true;
       const probeOk = setup.verify?.ok !== false;
       if (!probeOk) {
         paint.setResult(
@@ -224,16 +226,38 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         session.configured = false;
         session.activeStep = "config";
         paint.paintAll();
-        return;
+        return false;
+      }
+      session.configured = true;
+      session.guideFillConfig = false;
+      if (!advance) {
+        paint.setResult("ok", t("diagnose.flow.savedNext"));
+        session.activeStep = "config";
+        paint.paintAll();
+        return true;
       }
       paint.setResult("ok", t("diagnose.flow.configOk", { name: setup.provider_name ?? name }));
-      session.guideFillConfig = false;
       await deps.refreshState({ preferStep: "test" });
+      return true;
     } catch (error) {
       paint.setResult("error", withProviderFailure("diagnose.flow.configFailed", error));
+      return false;
     } finally {
       paint.setBusy(false);
     }
+  }
+
+  /** Leave the key form. A key still in the box is saved first. */
+  async function goConfigNext(): Promise<void> {
+    if (dom.keyEl.value.trim()) {
+      await runVerifyAndSave({ advance: true });
+      return;
+    }
+    if (session.configured || session.keySaved) {
+      await deps.refreshState({ preferStep: "test" });
+      return;
+    }
+    paint.setResult("error", missingProviderFieldsMessage(["key"]));
   }
 
   async function runScoreTest(opts?: { reusePreview?: boolean }): Promise<void> {
@@ -459,6 +483,7 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     runAutoFix,
     runDeepRepair,
     runVerifyAndSave,
+    goConfigNext,
     runScoreTest,
     openAskYourself,
     openAskForVerify,

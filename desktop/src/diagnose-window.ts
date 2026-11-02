@@ -217,6 +217,16 @@ dom.checkTabsEl.addEventListener("click", (event) => {
   dom.checkScrollEl.scrollTop = 0;
 });
 
+dom.configSaveEl.addEventListener("click", () => {
+  if (session.busy) return;
+  void actions.runVerifyAndSave({ advance: false });
+});
+
+dom.configNextEl.addEventListener("click", () => {
+  if (session.busy) return;
+  void actions.goConfigNext();
+});
+
 dom.primaryEl.addEventListener("click", () => {
   if (session.busy) {
     return;

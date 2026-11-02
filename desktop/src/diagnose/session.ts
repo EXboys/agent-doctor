@@ -42,6 +42,8 @@ export type DiagnoseSession = {
   /** Model account refused the repair call. One-click repair cannot clear this. */
   accountBlock: LlmAccountBlock | null;
   checkFilter: CheckFilter;
+  /** This visit already wrote a key, so Next can leave the form. */
+  keySaved: boolean;
   guideFillConfig: boolean;
   /** Full repair panel (one-click / rollback / Chrome check). */
   deepOpen: boolean;
@@ -99,6 +101,7 @@ export function createDiagnoseSession(runtimeId: string): DiagnoseSession {
     repairNotice: null,
     accountBlock: null,
     checkFilter: "all",
+    keySaved: false,
     guideFillConfig: false,
     deepOpen: false,
     repairConfirmPending: false,

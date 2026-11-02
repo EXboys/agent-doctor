@@ -825,6 +825,10 @@ html:has(.diagnose-page) body {
   margin-bottom: 0;
 }
 
+.diagnose-hero .health-card:has(#diagnose-score-ring[hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .diagnose-result {
   margin: 6px 0 0 !important;
   padding: 8px 12px;
@@ -860,6 +864,13 @@ html:has(.diagnose-page) body {
 .diagnose-result.is-busy {
   background: rgba(59, 130, 246, 0.1);
   color: var(--primary-deep);
+}
+
+.diagnose-page .diagnose-hero-foot[hidden],
+.diagnose-page .diagnose-details[hidden],
+.diagnose-page #diagnose-score-ring[hidden],
+.diagnose-page #diagnose-stat-row[hidden] {
+  display: none !important;
 }
 
 .diagnose-hero-foot {
@@ -970,6 +981,49 @@ html:has(.diagnose-page) body {
   border-radius: var(--radius-md);
   background: var(--surface);
   border: 1px solid var(--border);
+}
+
+/* Config step scrolls as one page so the key field is never covered by the buttons. */
+.diagnose-body:has(#diagnose-panel-config:not([hidden])) {
+  overflow: auto;
+}
+
+#diagnose-panel-config:not([hidden]) {
+  flex: 0 0 auto;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+}
+
+#diagnose-panel-config .diagnose-config-personal {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.diagnose-config-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.diagnose-config-actions[hidden] {
+  display: none !important;
+}
+
+.diagnose-config-actions > button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+}
+
+.diagnose-config-actions > .diagnose-result {
+  flex: 1 0 100%;
+  margin: 0;
 }
 
 .diagnose-panel.is-guide {

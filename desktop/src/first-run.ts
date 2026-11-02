@@ -5,9 +5,9 @@ const STORAGE_KEY = "agent-doctor.personal-first-run.v1";
 
 /** Prefer these when choosing what to install or diagnose first. */
 export const FIRST_RUN_RUNTIME_ORDER = [
+  "claude-code",
   "hermes",
   "openclaw",
-  "claude-code",
   "codex",
   "deepseek-harness",
 ] as const;
