@@ -33,7 +33,20 @@
       </nav>
       <div class="nav-cta">
         <a class="btn btn-primary btn-small" href="/#download">Download</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-menu" aria-label="Open the menu">
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
       </div>
+    </div>
+    <div class="nav-menu" id="nav-menu">
+      <nav class="wrap" aria-label="Site">
+        <a href="/#product">Product</a>
+        <a href="/#agents">Agents</a>
+        <a href="/skills" aria-current="page">Skills</a>
+        <a href="/#safety">Safety</a>
+        <a href="/#download">Download</a>
+        <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
+      </nav>
     </div>
   </header>
 
@@ -48,10 +61,18 @@
     </div>
 
     <section class="wrap market">
-      <div class="filters" id="skill-filters" role="tablist" aria-label="Skill types"></div>
+      <div class="market-tools">
+        <div class="search">
+          <input id="skill-search" type="search" placeholder="Search the skills" autocomplete="off" aria-label="Search the skills">
+          <button class="search-clear" type="button" hidden aria-label="Clear the search">✕</button>
+        </div>
+        <div class="filters" id="skill-filters" role="tablist" aria-label="Skill types"></div>
+        <p class="market-count" id="skill-count" role="status"></p>
+      </div>
       <div class="skill-grid" id="skill-grid">
         <p class="market-status">Loading skills…</p>
       </div>
+      <p class="market-status" id="skill-empty" hidden>No skill matches that search.</p>
     </section>
 
     <section class="wrap section" id="add">
@@ -83,10 +104,14 @@
       <nav aria-label="Footer">
         <a href="/">Home</a>
         <a href="/#download">Download</a>
+        <a href="/skills">Skills</a>
         <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
+        <a href="https://github.com/EXboys/agent-doctor/releases">Releases</a>
+        <a href="https://github.com/EXboys/agent-doctor/blob/main/docs/zh-CN/README.md">中文说明</a>
       </nav>
     </div>
   </footer>
+  <script src="/js/nav.js"></script>
   <script src="/js/skills.js"></script>
 </body>
 </html>

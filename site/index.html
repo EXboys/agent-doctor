@@ -46,10 +46,22 @@
         <a href="#download">Download</a>
       </nav>
       <div class="nav-cta">
-        <a class="nav-skills" href="/skills">Skills</a>
         <a class="btn btn-ghost btn-small" href="https://github.com/EXboys/agent-doctor">GitHub</a>
         <a class="btn btn-primary btn-small" id="nav-download" href="#download">Download</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-menu" aria-label="Open the menu">
+          <span class="nav-toggle-bars" aria-hidden="true"></span>
+        </button>
       </div>
+    </div>
+    <div class="nav-menu" id="nav-menu">
+      <nav class="wrap" aria-label="Site">
+        <a href="#product">Product</a>
+        <a href="#agents">Agents</a>
+        <a href="/skills">Skills</a>
+        <a href="#safety">Safety</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
+      </nav>
     </div>
   </header>
 
@@ -308,6 +320,7 @@ tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
     <div class="wrap">
       <div>Agent Doctor · diagnose, repair, and keep projects separate.</div>
       <nav aria-label="Footer">
+        <a href="#download">Download</a>
         <a href="/skills">Skills</a>
         <a href="https://github.com/EXboys/agent-doctor">GitHub</a>
         <a href="https://github.com/EXboys/agent-doctor/blob/main/LICENSE">MIT</a>
@@ -316,6 +329,7 @@ tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
       </nav>
     </div>
   </footer>
+  <script src="/js/nav.js"></script>
   <script src="/js/site.js"></script>
 </body>
 </html>
