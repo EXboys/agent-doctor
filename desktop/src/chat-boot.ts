@@ -632,14 +632,18 @@ function bootChatTail(): void {
       }
     })(),
   );
+  function phoneChatKey(sessionId: string): string {
+    return chatState.store?.sessions.find((item) => item.id === sessionId)?.channelKey?.trim() || "";
+  }
   function finishChannel(
     id: string,
     text: string,
     ok: boolean,
+    chat = "",
     trace?: Parameters<typeof teamupsChannelReply>[4],
   ): void {
     channelLedger.finish(id, text, ok);
-    void teamupsChannelReply(id, text, ok, true, trace).catch(() => {});
+    void teamupsChannelReply(id, text, ok, true, trace, chat).catch(() => {});
     publishPhoneChats();
   }
   const phoneStops = new Set<string>();
@@ -661,11 +665,11 @@ function bootChatTail(): void {
         if (activeId === sessionId) await cancelAsk();
         else await cancelPromptSession(sessionId);
       } catch {
-        finishChannel(jobId, t("chat.cancelFailed"), false);
+        finishChannel(jobId, t("chat.cancelFailed"), false, phoneChatKey(sessionId));
       }
       return;
     }
-    finishChannel(jobId, t("chat.channelStopped"), true);
+    finishChannel(jobId, t("chat.channelStopped"), true, sessionId ? phoneChatKey(sessionId) : "");
   }
   void listen<{ id?: string }>("teamups-channel-stop", (event) => {
     const id = event.payload?.id?.trim() ?? "";
@@ -731,16 +735,16 @@ function bootChatTail(): void {
     if (chatState.store.activeId === job.sessionId) {
       setStatus(t("chat.channelQueued"), "muted");
     }
-    void teamupsChannelReply(job.id, t("chat.channelQueued"), true, false).catch(() => {});
+    void teamupsChannelReply(job.id, t("chat.channelQueued"), true, false, undefined, job.chat).catch(() => {});
   }
   async function runChannelTurn(job: ChannelQueued): Promise<void> {
     if (job.project) pinChannelWorkspace(job.sessionId, job.project);
     if (phoneStops.has(job.id)) {
-      finishChannel(job.id, t("chat.channelStopped"), true);
+      finishChannel(job.id, t("chat.channelStopped"), true, job.chat);
       return;
     }
     teamupsChannelNote(job.id, `start in ${job.sessionId}`);
-    void teamupsChannelReply(job.id, t("chat.channelStarted"), true, false).catch(() => {});
+    void teamupsChannelReply(job.id, t("chat.channelStarted"), true, false, undefined, job.chat).catch(() => {});
     const started = Date.now();
     const replyText = () => {
       const session = chatState.store.sessions.find((item) => item.id === job.sessionId);
@@ -779,7 +783,7 @@ function bootChatTail(): void {
             : t("chat.channelThinking");
       const say = line && line !== spoken ? line : "";
       if (say) spoken = line;
-      void teamupsChannelReply(job.id, say, true, false, delta).catch(() => {});
+      void teamupsChannelReply(job.id, say, true, false, delta, job.chat).catch(() => {});
     }, 400);
     let result: SendAskResult = "empty";
     channelLedger.start(job.id);
@@ -798,17 +802,18 @@ function bootChatTail(): void {
           })),
           mentions: [],
           channelJobId: job.id,
+          channelChat: job.chat,
         },
       });
     } catch (error) {
       window.clearInterval(pump);
       teamupsChannelNote(job.id, `failed ${String(error)}`);
-      finishChannel(job.id, t("chat.channelFailed"), false);
+      finishChannel(job.id, t("chat.channelFailed"), false, job.chat);
       return;
     }
     window.clearInterval(pump);
     if (result === "blocked") {
-      finishChannel(job.id, t("chat.handsBlockedChannel"), false);
+      finishChannel(job.id, t("chat.handsBlockedChannel"), false, job.chat);
       return;
     }
     if (result === "queued") {
@@ -819,7 +824,7 @@ function bootChatTail(): void {
     }
     if (result !== "started") {
       teamupsChannelNote(job.id, `not started ${result}`);
-      finishChannel(job.id, t("chat.channelFailed"), false);
+      finishChannel(job.id, t("chat.channelFailed"), false, job.chat);
       return;
     }
     const answer = await settleChannelAnswer(replyText, { flush: flushPendingTextSync });
@@ -842,7 +847,7 @@ function bootChatTail(): void {
         ? `files ${shown.map((file) => `${file.name} +${file.addedLines.length}/-${file.deletedLines.length}`).join(", ")}`
         : "files 0",
     );
-    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped, {
+    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped, job.chat, {
       thinking: trace.thinking,
       tools: trace.tools,
       files: trace.files,
@@ -859,7 +864,7 @@ function bootChatTail(): void {
     teamupsChannelNote(id, "reached chat window");
     if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
       teamupsChannelNote(id, "chat window not ready");
-      void teamupsChannelReply(id, t("chat.channelNotReady"), false).catch(() => {});
+      void teamupsChannelReply(id, t("chat.channelNotReady"), false, true, undefined, chat).catch(() => {});
       return;
     }
     const seen = channelLedger.seen(id);
@@ -869,17 +874,17 @@ function bootChatTail(): void {
     }
     if (seen.kind === "done") {
       teamupsChannelNote(id, "sent again, reply again");
-      void teamupsChannelReply(id, seen.reply || t("chat.channelDone"), seen.ok, true).catch(() => {});
+      void teamupsChannelReply(id, seen.reply || t("chat.channelDone"), seen.ok, true, undefined, chat).catch(() => {});
       return;
     }
     if (seen.kind === "cut") {
       teamupsChannelNote(id, "sent again, was cut off");
-      finishChannel(id, t("chat.channelCut"), false);
+      finishChannel(id, t("chat.channelCut"), false, chat);
       return;
     }
     channelLedger.take(id);
     if (phoneStops.has(id)) {
-      finishChannel(id, t("chat.channelStopped"), true);
+      finishChannel(id, t("chat.channelStopped"), true, chat);
       return;
     }
     try {
@@ -890,6 +895,7 @@ function bootChatTail(): void {
         sessionId,
         text,
         noticed: false,
+        chat,
         files,
         ...(project ? { project } : {}),
       };
@@ -902,7 +908,7 @@ function bootChatTail(): void {
       if (action === "confirm") {
         const taken = await takePendingChoices(sessionId, text);
         if (taken === 0) {
-          finishChannel(id, t("chat.channelAlreadyConfirmed"), true);
+          finishChannel(id, t("chat.channelAlreadyConfirmed"), true, chat);
           return;
         }
         const allow = choiceVerdict(text) === true;
@@ -910,11 +916,11 @@ function bootChatTail(): void {
           taken > 1
             ? t(allow ? "chat.channelAllowedAll" : "chat.channelDeniedAll")
             : t(allow ? "chat.channelAllowed" : "chat.channelDenied");
-        finishChannel(id, reply, true);
+        finishChannel(id, reply, true, chat);
         return;
       }
       if (action === "repeat") {
-        finishChannel(id, t("chat.channelAlreadyConfirmed"), true);
+        finishChannel(id, t("chat.channelAlreadyConfirmed"), true, chat);
         return;
       }
       if (action === "queue") {
@@ -925,7 +931,7 @@ function bootChatTail(): void {
       await runChannelTurn(job);
     } catch (error) {
       teamupsChannelNote(id, `failed ${String(error)}`);
-      finishChannel(id, t("chat.channelFailed"), false);
+      finishChannel(id, t("chat.channelFailed"), false, chat);
     }
   }
   void listen<{ requestId?: string; text?: string }>("teamups-channel-answer", (event) => {

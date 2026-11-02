@@ -36,7 +36,7 @@ import {
   startPromptSession,
   type PromptSessionFinished,
 } from "../ipc";
-import { markTurnStarted } from "./activity";
+import { markTurnStarted, noteTurnUserAt } from "./activity";
 import { beginChannelJob, endChannelJob } from "./channel-ask";
 import { publishPhoneChats } from "./phone-chats";
 import { handsBlockForText, promptRequestsComputerUse } from "./hands-intent";
@@ -159,6 +159,7 @@ function appendUserOnSession(
     attachments: attachments.length ? attachments : undefined,
   };
   session.messages.push(message);
+  noteTurnUserAt(message.at);
   if (!session.title?.trim()) {
     const seed = text.trim() || attachments[0]?.name || "";
     session.title = seed.split(/\n/)[0].slice(0, 48);
@@ -445,7 +446,7 @@ export function createSendController(deps: SendDeps) {
     const turnGen = deps.runBusyGen?.(chatSessionId) ?? deps.getBusyGen();
     try {
     if (channel && draft.channelJobId) {
-      beginChannelJob(draft.channelJobId, chatSessionId);
+      beginChannelJob(draft.channelJobId, chatSessionId, draft.channelChat ?? "");
       publishPhoneChats();
     }
     if (foreground) {

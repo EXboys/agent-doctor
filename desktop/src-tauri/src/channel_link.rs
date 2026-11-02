@@ -382,15 +382,21 @@ pub fn teamups_channel_reply_command(
     ok: bool,
     done: Option<bool>,
     trace: Option<serde_json::Value>,
+    chat: Option<String>,
 ) -> Result<(), String> {
     let done = done.unwrap_or(true);
     note(&format!(
         "job {id} reply ok={ok} done={done} text={}",
         clip(&text)
     ));
-    let mut frame_value: serde_json::Value =
-        serde_json::from_str(&teamups_channel_reply(&id, &text, ok, done))
-            .map_err(|err| err.to_string())?;
+    let mut frame_value: serde_json::Value = serde_json::from_str(&teamups_channel_reply(
+        &id,
+        &text,
+        ok,
+        done,
+        chat.as_deref().unwrap_or(""),
+    ))
+    .map_err(|err| err.to_string())?;
     if let Some(trace) = trace {
         let keep = match &trace {
             serde_json::Value::Object(map) => !map.is_empty(),
@@ -460,16 +466,24 @@ pub fn teamups_channel_ask_command(
     text: String,
     wait: Option<bool>,
     questions: Option<serde_json::Value>,
+    chat: Option<String>,
 ) -> Result<(), String> {
-    let frame = json!({
+    let mut frame_value = json!({
         "type": "ask",
         "id": id,
         "requestId": request_id,
         "text": text,
         "wait": wait.unwrap_or(true),
         "questions": questions,
-    })
-    .to_string();
+    });
+    if let Some(chat) = chat
+        .as_deref()
+        .map(str::trim)
+        .filter(|chat| !chat.is_empty())
+    {
+        frame_value["chat"] = json!(chat);
+    }
+    let frame = frame_value.to_string();
     let outbound = app
         .try_state::<Outbound>()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;

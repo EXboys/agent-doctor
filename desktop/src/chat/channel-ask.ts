@@ -20,10 +20,13 @@ type PendingAsk = {
 };
 
 const jobsBySession = new Map<string, string>();
+const chatBySession = new Map<string, string>();
 const pendingByRequest = new Map<string, PendingAsk>();
 
-export function beginChannelJob(jobId: string, sessionId: string): void {
+export function beginChannelJob(jobId: string, sessionId: string, chat = ""): void {
   jobsBySession.set(sessionId, jobId);
+  const key = chat.trim();
+  if (key) chatBySession.set(sessionId, key);
 }
 
 export function channelSessionForJob(jobId: string): string | null {
@@ -46,6 +49,7 @@ export function endChannelJob(sessionId: string, jobId?: string): void {
   // A newer sentence in this chat already replaced the map. Leave that one alone.
   if (jobId && current !== jobId) return;
   jobsBySession.delete(sessionId);
+  chatBySession.delete(sessionId);
   const jobIdToClear = current;
   for (const [requestId, ask] of pendingByRequest) {
     if (ask.jobId === jobIdToClear) pendingByRequest.delete(requestId);
@@ -65,12 +69,15 @@ type ChannelAskInput = {
 export function noteChannelAsk(input: ChannelAskInput): void {
   const jobId = jobsBySession.get(input.chatSessionId);
   if (!jobId) return;
+  const chat = chatBySession.get(input.chatSessionId) ?? "";
   if (input.inputMode === "secret") {
     void teamupsChannelAsk(
       jobId,
       input.requestId,
       "这一步要在电脑上填，飞书里填不安全。",
       false,
+      undefined,
+      chat,
     ).catch(() => {});
     return;
   }
@@ -101,6 +108,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     prompt,
     true,
     input.inputMode === "options" ? questions : undefined,
+    chat,
   ).catch(() => {});
   publishPhoneChats();
 }
@@ -150,7 +158,14 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
   if (!raw) return;
   if (current.mode === "choice") {
     if (choiceVerdict(raw) === null) {
-      void teamupsChannelAsk(current.jobId, current.requestId, "没看懂。回复 1 允许，回复 2 拒绝。", true).catch(() => {});
+      void teamupsChannelAsk(
+        current.jobId,
+        current.requestId,
+        "没看懂。回复 1 允许，回复 2 拒绝。",
+        true,
+        undefined,
+        chatBySession.get(current.chatSessionId) ?? "",
+      ).catch(() => {});
       return;
     }
     await takePendingChoices(current.chatSessionId, raw);
@@ -183,6 +198,7 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
             ),
         true,
         current.questions,
+        chatBySession.get(current.chatSessionId) ?? "",
       ).catch(() => {});
       return;
     }

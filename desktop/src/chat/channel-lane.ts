@@ -9,6 +9,8 @@ export type ChannelQueued = {
   sessionId: string;
   text: string;
   noticed: boolean;
+  /** Phone conversation this sentence belongs to. */
+  chat: string;
   files?: ChannelUpload[];
   project?: string;
 };
