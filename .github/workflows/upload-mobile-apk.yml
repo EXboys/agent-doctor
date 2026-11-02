@@ -1,9 +1,7 @@
 name: Upload mobile APK to OSS
 
-# 备用。平时不用跑：手机仓库的 Android APK 打包成功后会自己上传，并改 mobile/latest.json。
-# 只有自动发布失败时才用这里补传。先在本仓库建一个含 .apk 的 release（不能是 draft），
-# 再用 workflow_dispatch 指定 tag。传完可以删掉这个 release。
-# 只写 mobile/，不改 desktop/ 的电脑安装包。
+# 已停用。手机安装包改放在网站服务器本机目录，官网不再读 OSS 上的 mobile/。
+# 跑这个工作流只会改 OSS，不会更新手机上看到的下载。电脑安装包仍走各自的 OSS 流程。
 
 on:
   workflow_dispatch:
