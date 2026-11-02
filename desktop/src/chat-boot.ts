@@ -241,6 +241,20 @@ export function bootChat(): void {
   } catch {
     /* ignore */
   }
+  try {
+    bootChatTail();
+  } catch (error) {
+    // A late failure must not take the transcript or the phone lane down.
+    console.error("Ask: late boot failed", error);
+  }
+}
+
+/**
+ * Everything after the first paint: the phone lane, the island link and the
+ * rest of the wiring. It runs inside a try so a late failure can never take
+ * the transcript down with it, and never leaves the phone lane half wired.
+ */
+function bootChatTail(): void {
   window.addEventListener("beforeunload", () => {
     flushStorePersist();
   });
@@ -500,18 +514,6 @@ export function bootChat(): void {
   void refreshWiredProvider();
   autoResizePrompt();
   promptEl.focus();
-  startIslandPublisher(promptEl, () => ({
-    activeId: chatState.store?.activeId ?? "",
-    attentionId: chatState.runningChatSessionId || chatState.store?.activeId || "",
-    sessions: (chatState.store?.sessions ?? []).map((session) => ({
-      id: session.id,
-      runtime: session.runtime,
-      title: session.title,
-      updatedAt: session.updatedAt,
-      messages: session.messages ?? [],
-      plan: session.plan?.items,
-    })),
-  }));
   void listen<string>("island-open-session", (event) => {
     const id = event.payload;
     if (!id || !chatState.sessions?.openSessionFromIsland) return;
@@ -956,4 +958,17 @@ export function bootChat(): void {
     void chatState.send.sendAsk({ draft });
     report("sent");
   });
+
+  startIslandPublisher(promptEl, () => ({
+    activeId: chatState.store?.activeId ?? "",
+    attentionId: chatState.runningChatSessionId || chatState.store?.activeId || "",
+    sessions: (chatState.store?.sessions ?? []).map((session) => ({
+      id: session.id,
+      runtime: session.runtime,
+      title: session.title,
+      updatedAt: session.updatedAt,
+      messages: session.messages ?? [],
+      plan: session.plan?.items,
+    })),
+  }));
 }

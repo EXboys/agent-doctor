@@ -122,11 +122,13 @@ import {
   markChatStoreDurableReady,
   mergeChatStores,
   parseStoreRaw,
+  partialCopySessionIds,
   persistStore,
   stripContextCompactSummaries,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
 import { chatBodyStamp, diffChatWrite, memoryFromStore, type ChatWriteMemory } from "./chat/store-patch";
+import { sessionHasChatContent } from "./chat/empty-start";
 import {
   buildPromptWithHistory as buildPromptWithHistoryBase,
   contextUsagePercent as contextUsagePercentBase,
@@ -224,6 +226,9 @@ async function drainDurableWrites(): Promise<void> {
   }
 }
 
+/** How many times the disk read was retried before giving up for this window. */
+let durableHydrateAttempts = 0;
+
 /** Pull the on-disk log, keep anything the browser copy still has, then write the union back. */
 export async function hydrateDurableChatStore(): Promise<void> {
   let disk: SessionStore | null = null;
@@ -231,11 +236,25 @@ export async function hydrateDurableChatStore(): Promise<void> {
     const raw = await loadChatStore();
     disk = raw ? parseStoreRaw(raw) : null;
   } catch (error) {
+    // The disk could not be read. Writing to it now would look like every
+    // other chat was deleted: the store in hand never met the disk, so the
+    // next write would send a delete for each chat it does not know. Keep the
+    // durable writes closed and read the log again in a moment.
     console.warn("Ask: chat db unavailable", error);
-    markChatStoreDurableReady();
+    durableHydrateAttempts += 1;
+    if (durableHydrateAttempts < 5) {
+      window.setTimeout(() => {
+        void hydrateDurableChatStore();
+      }, 2000);
+    } else {
+      reportMissingTranscript(
+        "本地聊天数据库暂时读不出来，下面显示的只是浏览器里的缓存。稍后点「重新加载」再试一次，数据库里的记录没有丢。",
+      );
+    }
     return;
   }
-  const merged = mergeChatStores(disk, chatState.store);
+  durableHydrateAttempts = 0;
+  const merged = mergeChatStores(disk, chatState.store, undefined, partialCopySessionIds());
   // Remember the rows still on disk, including a compact summary, before dropping it.
   // The save below then rewrites from that row, so the summary does not stay in front.
   chatWriteMemory = disk ? memoryFromStore(chatStoreForDisk(disk)) : null;
@@ -254,7 +273,37 @@ export async function hydrateDurableChatStore(): Promise<void> {
   } catch (error) {
     console.warn("Ask: redraw after chat db load failed", error);
   }
+  reportMissingTranscript(
+    "对话记录没有显示出来。记录还在本地数据库里，点「重新加载」再试一次。",
+  );
   await persistDurableChatStore(chatState.store);
+}
+
+/**
+ * The store still holds the conversation but the screen does not show it. A
+ * blank panel reads like lost records, so say what happened and offer a way
+ * out instead of leaving the user to guess.
+ */
+function reportMissingTranscript(message: string): void {
+  const log = document.querySelector<HTMLElement>("#chat-log");
+  if (!log) return;
+  if (log.querySelector(".chat-bubble.user, .chat-bubble.assistant")) return;
+  if (!sessionHasChatContent(activeSession())) return;
+  if (document.getElementById("chat-transcript-missing")) return;
+  const box = document.createElement("div");
+  box.id = "chat-transcript-missing";
+  box.className = "chat-bubble meta";
+  box.style.margin = "12px";
+  box.textContent = message;
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.className = "btn-primary";
+  reload.style.marginTop = "10px";
+  reload.textContent = "重新加载";
+  reload.addEventListener("click", () => {
+    window.location.reload();
+  });
+  log.prepend(box, reload);
 }
 
 export function sessionTitle(session: ChatSession): string {

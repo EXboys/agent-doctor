@@ -47,3 +47,21 @@ assert(!messageContinuesRun(mixed, mixedCut), "the tool run starts a fresh block
 
 const heavy = [...Array.from({ length: 40 }, () => row("user", "a")), row("assistant", "x".repeat(30_000))];
 assert(historyRenderCut(heavy) === 40, "one huge reply does not drag the older rows into the first paint");
+
+// The newest rows of a long turn are all tool output. Those rows are painted
+// first, so without help the user's own words only appear once the older rows
+// are pumped in — and that pump does not run while the window is hidden.
+const talkThenTools = [
+  ...Array.from({ length: 10 }, () => row("user")),
+  ...Array.from({ length: 100 }, () => row("tool")),
+];
+const talkCut = historyRenderCut(talkThenTools);
+assert(talkCut <= 9, "the first screen reaches back to the conversation");
+assert(
+  talkThenTools.slice(talkCut).some((m) => m.role === "user"),
+  "what the user said is on the first screen",
+);
+
+// A first screen that already holds the conversation is left alone.
+const talkFirst = [...Array.from({ length: 10 }, () => row("user")), ...Array.from({ length: 30 }, () => row("assistant"))];
+assert(historyRenderCut(talkFirst) === 16, "a first screen with talk is not stretched");

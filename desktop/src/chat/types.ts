@@ -175,8 +175,17 @@ export const STORAGE_KEY = "agent-doctor.chat.sessions.v2";
 /** Which chat is open. Kept separate so switching does not rewrite the transcript. */
 export const OPEN_CHAT_KEY = `${STORAGE_KEY}.open`;
 export const STORAGE_BACKUP_KEY = "agent-doctor.chat.sessions.v2.backup";
+/** Which chats the browser copy holds only in part, and how many rows it kept. */
+export const STORAGE_PARTIAL_KEY = "agent-doctor.chat.sessions.v2.partial";
 export const LEGACY_STORAGE_KEY = "agent-doctor.chat.sessions.v1";
 export const CHAT_STORE_MAX_BYTES = 2_500_000;
+/**
+ * The backup is a safety net for a broken main key, not a second copy. It has
+ * its own budget: the browser caps one origin at 5 MiB, and a full copy of the
+ * main key next to the main key fills that budget — the mirror then fails to
+ * write and the transcript freezes at whatever it held.
+ */
+export const CHAT_BACKUP_MAX_BYTES = 700_000;
 export const CHAT_THEME_KEY = "ad.ask.theme";
 export const ASK_VERIFY_DRAFT_KEY = "agent-doctor.ask.verifyDraft";
 

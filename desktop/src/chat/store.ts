@@ -4,6 +4,7 @@ import { normalizePlan } from "../plan";
 import type { ChatMessage, ChatSession, SessionStore } from "./types";
 import { chatBodyStamp } from "./store-patch";
 import {
+  CHAT_BACKUP_MAX_BYTES,
   CHAT_STORE_MAX_BYTES,
   LEGACY_STORAGE_KEY,
   MAX_MESSAGES_PER_SESSION,
@@ -11,6 +12,7 @@ import {
   OPEN_CHAT_KEY,
   STORAGE_BACKUP_KEY,
   STORAGE_KEY,
+  STORAGE_PARTIAL_KEY,
 } from "./types";
 
 export function uid(): string {
@@ -102,10 +104,50 @@ export function finalizeSessionStore(parsed: SessionStore): SessionStore {
   return { activeId, sessions };
 }
 
+/**
+ * The browser copy of one chat. It is a contiguous tail of the log: the rows
+ * before it stay safe when the copy is written back to the database, and a
+ * tail cut is the only cut that keeps that property.
+ *
+ * When the tail holds no line of the conversation it reaches back for one, but
+ * no further than one tail's length. The tail of a long turn is all tool
+ * output, and a copy without the words in it reads like the chat is empty.
+ */
+export function trimSessionMessages(
+  messages: readonly ChatMessage[],
+  maxRows = MAX_MESSAGES_PER_SESSION,
+): ChatMessage[] {
+  if (messages.length <= maxRows) return [...messages];
+  const start = messages.length - maxRows;
+  let first = -1;
+  for (let index = start; index < messages.length; index += 1) {
+    if (isConversationMessage(messages[index])) {
+      first = index;
+      break;
+    }
+  }
+  if (first === -1) {
+    // Nothing was said inside the tail. Reach back for the last line of the
+    // conversation, but never further than one tail's length.
+    for (let index = start - 1; index >= Math.max(0, start - maxRows); index -= 1) {
+      if (isConversationMessage(messages[index])) {
+        first = index;
+        break;
+      }
+    }
+  }
+  if (first === -1) return messages.slice(start);
+  return messages.slice(first);
+}
+
+function isConversationMessage(message: ChatMessage | undefined): boolean {
+  return message?.role === "user" || message?.role === "assistant";
+}
+
 export function trimStoreForSize(data: SessionStore): SessionStore {
   const sessions = data.sessions.slice(0, MAX_SESSIONS).map((session) => ({
     ...session,
-    messages: session.messages.slice(-MAX_MESSAGES_PER_SESSION),
+    messages: trimSessionMessages(session.messages ?? []),
   }));
   const activeId = sessions.some((s) => s.id === data.activeId)
     ? data.activeId
@@ -116,11 +158,20 @@ export function trimStoreForSize(data: SessionStore): SessionStore {
 export function backupStoreRaw(raw: string): void {
   const trimmed = raw.trim();
   if (!trimmed) return;
+  const shrunk = shrinkRaw(trimmed, CHAT_BACKUP_MAX_BYTES);
+  if (!shrunk) return;
   try {
-    localStorage.setItem(STORAGE_BACKUP_KEY, trimmed);
+    localStorage.setItem(STORAGE_BACKUP_KEY, shrunk);
   } catch {
     /* quota — keep trying on next save */
   }
+}
+
+/** Trim a raw store until it fits a byte budget. Returns null when it cannot be read. */
+function shrinkRaw(raw: string, maxBytes: number): string | null {
+  const parsed = parseStoreRaw(raw);
+  if (!parsed) return null;
+  return fitStore(parsed, maxBytes);
 }
 
 export function parseStoreRaw(raw: string): SessionStore | null {
@@ -157,22 +208,28 @@ export function readActiveSessionRuntime(): string | null {
 
 export function loadStoreFromLocalKeys(): SessionStore | null {
   const keys = [STORAGE_KEY, STORAGE_BACKUP_KEY, LEGACY_STORAGE_KEY];
+  readPartialCopies();
   for (const key of keys) {
     const raw = localStorage.getItem(key);
     if (!raw) continue;
     backupStoreRaw(raw);
-    let loaded = parseStoreRaw(raw);
+    const loaded = parseStoreRaw(raw);
     if (!loaded) continue;
-    let json = JSON.stringify(loaded);
-    while (json.length > CHAT_STORE_MAX_BYTES && loaded.sessions.some((s) => s.messages.length > 8)) {
-      loaded = trimStoreForSize(loaded);
-      loaded = finalizeSessionStore(loaded);
-      json = JSON.stringify(loaded);
+    // The stored blob can be bigger than the browser accepts for a rewrite.
+    // Trim it down to something that fits. The old loop kept trimming until
+    // the blob was small enough, but a store that is already at the per
+    // session cap could not get any smaller — that loop never ended and the
+    // page never finished booting.
+    const fitted = parseStoreRaw(fitStore(loaded, CHAT_STORE_MAX_BYTES)) ?? loaded;
+    if (fitted !== loaded) {
+      // Heal the mirror: an oversized copy fills the storage quota and keeps
+      // every later write failing.
+      writeLocal(STORAGE_KEY, JSON.stringify(fitted));
     }
     if (key !== STORAGE_KEY) {
       console.warn(`Ask: restored chat store from ${key}`);
     }
-    return applyOpenChatId(loaded);
+    return applyOpenChatId(fitted);
   }
   return null;
 }
@@ -283,6 +340,158 @@ export function chatStoreForDisk(store: SessionStore): SessionStore {
 
 let lastBodyStamp = "";
 
+/** How much of the store survives, from the most to the least. */
+type TrimLevel = { sessions: number; rows: number };
+
+const TRIM_LEVELS: TrimLevel[] = [
+  { sessions: MAX_SESSIONS, rows: MAX_MESSAGES_PER_SESSION },
+  { sessions: MAX_SESSIONS, rows: 48 },
+  { sessions: MAX_SESSIONS, rows: 24 },
+  { sessions: 12, rows: MAX_MESSAGES_PER_SESSION },
+  { sessions: 4, rows: 48 },
+  { sessions: 1, rows: 24 },
+];
+
+function storeAtLevel(store: SessionStore, level: TrimLevel): SessionStore {
+  const sessions = store.sessions.slice(0, level.sessions).map((session) => ({
+    ...session,
+    messages: trimSessionMessages(session.messages ?? [], level.rows),
+  }));
+  const activeId = sessions.some((s) => s.id === store.activeId)
+    ? store.activeId
+    : (sessions[0]?.id ?? store.activeId);
+  return finalizeSessionStore({ activeId, sessions });
+}
+
+/** One way the store can be written, with the rows each chat kept. */
+type StoreCopy = { json: string; rows: Map<string, number> };
+
+/**
+ * Every payload the store can be written as, largest first. The rows of a chat
+ * are given up before the chats themselves, so the list of chats stays whole.
+ * Every copy fits the budget it was built for — a copy that is too big does not
+ * count as a copy, it just fills the storage the next write needs.
+ */
+function storeCandidates(store: SessionStore, maxBytes: number): StoreCopy[] {
+  const out: StoreCopy[] = [];
+  for (const level of TRIM_LEVELS) {
+    if (!store.sessions.length) break;
+    const trimmed = storeAtLevel(store, level);
+    const json = JSON.stringify(trimmed);
+    if (json.length > maxBytes) continue;
+    out.push({ json, rows: rowsBySession(trimmed) });
+  }
+  if (!out.length && store.sessions.length) {
+    // Nothing fit. Keep the open chat alone and give up its rows until it does.
+    const active = store.sessions.find((session) => session.id === store.activeId) ?? store.sessions[0]!;
+    for (const rows of [8, 4, 2, 1]) {
+      const trimmed = finalizeSessionStore({
+        activeId: active.id,
+        sessions: [{ ...active, messages: trimSessionMessages(active.messages ?? [], rows) }],
+      });
+      const json = JSON.stringify(trimmed);
+      if (json.length > maxBytes) continue;
+      out.push({ json, rows: rowsBySession(trimmed) });
+      break;
+    }
+  }
+  if (!out.length) {
+    // One row with its text cut down. This is small enough for any browser.
+    const minimal = minimalStoreCopy(store);
+    out.push({ json: JSON.stringify(minimal), rows: rowsBySession(minimal) });
+  }
+  return out;
+}
+
+/** The smallest copy worth writing: the open chat, its last row, short text. */
+function minimalStoreCopy(store: SessionStore): SessionStore {
+  const active = store.sessions.find((session) => session.id === store.activeId) ?? store.sessions[0];
+  if (!active) return { activeId: store.activeId, sessions: [] };
+  const messages = active.messages ?? [];
+  const last = messages[messages.length - 1];
+  const message = last
+    ? {
+        ...last,
+        content: capCopyText(last.content ?? "", 2_000),
+        step: last.step ? { ...last.step, output: capCopyText(last.step.output ?? "", 2_000) } : last.step,
+        permission: last.permission
+          ? { ...last.permission, detail: capCopyText(last.permission.detail ?? "", 2_000) }
+          : last.permission,
+      }
+    : null;
+  return finalizeSessionStore({
+    activeId: active.id,
+    sessions: [{ ...active, messages: message ? [message] : [] }],
+  });
+}
+
+/** Text kept in a copy that has to fit a small budget. */
+function capCopyText(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+function rowsBySession(store: SessionStore): Map<string, number> {
+  const rows = new Map<string, number>();
+  for (const session of store.sessions) rows.set(session.id, (session.messages ?? []).length);
+  return rows;
+}
+
+/** The largest copy of the store that fits a byte budget. */
+function fitStore(store: SessionStore, maxBytes: number): string {
+  return storeCandidates(store, maxBytes)[0]?.json ?? JSON.stringify(store);
+}
+
+/**
+ * Write to the browser copy. A full storage quota must not throw: the caller
+ * keeps the transcript in memory and the database has the real copy, so a
+ * failed mirror is a warning, never a crash.
+ */
+function writeLocal(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn("Ask: local chat mirror failed", error);
+    return false;
+  }
+}
+
+/** Chats the browser copy holds only in part. */
+let partialCopies = new Set<string>();
+
+/** The chats whose browser copy holds only part of the log. */
+export function partialCopySessionIds(): ReadonlySet<string> {
+  return partialCopies;
+}
+
+function rememberPartialCopies(store: SessionStore, rows: Map<string, number>): void {
+  const partial = new Set<string>();
+  for (const session of store.sessions) {
+    const kept = rows.get(session.id);
+    if (kept != null && kept < (session.messages ?? []).length) partial.add(session.id);
+  }
+  partialCopies = partial;
+  try {
+    if (partial.size) {
+      localStorage.setItem(STORAGE_PARTIAL_KEY, JSON.stringify([...partial]));
+    } else {
+      localStorage.removeItem(STORAGE_PARTIAL_KEY);
+    }
+  } catch {
+    /* the marker is a hint; the merge still has its own rules */
+  }
+}
+
+function readPartialCopies(): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_PARTIAL_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    partialCopies = new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : []);
+  } catch {
+    partialCopies = new Set();
+  }
+}
+
 export function persistStore(store: SessionStore): SessionStore {
   const stamp = chatBodyStamp(store);
   // Opening another chat does not change the transcript. Remember the id and skip the blob.
@@ -293,27 +502,15 @@ export function persistStore(store: SessionStore): SessionStore {
   const previous = localStorage.getItem(STORAGE_KEY);
   if (previous) backupStoreRaw(previous);
   const projected = chatStoreForDisk(store);
-  let payload = "";
-  try {
-    payload = JSON.stringify(projected);
-  } catch (error) {
-    console.warn("Ask: saveStore failed, trimming history", error);
-  }
-  const disk =
-    !payload || payload.length > CHAT_STORE_MAX_BYTES
-      ? finalizeSessionStore(trimStoreForSize(projected))
-      : projected;
-  try {
-    localStorage.setItem(STORAGE_KEY, disk === projected ? payload : JSON.stringify(disk));
+  for (const copy of storeCandidates(projected, CHAT_STORE_MAX_BYTES)) {
+    if (!writeLocal(STORAGE_KEY, copy.json)) continue;
     lastBodyStamp = stamp;
     rememberOpenChat(store.activeId);
-  } catch (error) {
-    console.warn("Ask: saveStore failed, trimming history", error);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(finalizeSessionStore(trimStoreForSize(projected))));
-    lastBodyStamp = stamp;
-    rememberOpenChat(store.activeId);
+    rememberPartialCopies(projected, copy.rows);
+    return store;
   }
-  // The open chat keeps every step so scrolling up can load them. Disk may keep less.
+  // Nothing fit. The mirror keeps what it had; the database still has the log.
+  rememberOpenChat(store.activeId);
   return store;
 }
 
@@ -353,22 +550,31 @@ export function markChatStoreDurableReady(): void {
  * Union of the on-disk projection and a browser copy (v1, v2, or the backup key).
  * Same message id keeps the later text, or the longer text when the time matches,
  * so a trimmed browser copy does not erase a full disk copy.
+ *
+ * `partialIds` names the chats whose browser copy holds only part of the log.
+ * Those chats keep both sides: the copy was cut to fit the browser, and it
+ * must not stand in for the log on disk.
  */
 export function mergeChatStores(
   disk: SessionStore | null,
   local: SessionStore | null,
   droppedIds?: ReadonlySet<string>,
+  partialIds?: ReadonlySet<string>,
 ): SessionStore | null {
   if (!disk && !local) return null;
   if (!disk) return local;
   if (!local) return disk;
   if (isFreshEmptyWindow(local, disk)) return disk;
   const dropped = droppedIds ?? droppedBeforeDurable;
+  const partial = partialIds ?? partialCopies;
   const byId = new Map<string, ChatSession>();
   const absorb = (session: ChatSession) => {
     if (dropped.has(session.id) && !local.sessions.some((item) => item.id === session.id)) return;
     const prev = byId.get(session.id);
-    byId.set(session.id, prev ? mergeChatSession(prev, session) : session);
+    byId.set(
+      session.id,
+      prev ? mergeChatSession(prev, session, partial.has(session.id)) : session,
+    );
   };
   for (const session of disk.sessions) absorb(session);
   for (const session of local.sessions) absorb(session);
@@ -396,17 +602,48 @@ function isFreshEmptyWindow(local: SessionStore, disk: SessionStore): boolean {
   );
 }
 
-function mergeChatSession(left: ChatSession, right: ChatSession): ChatSession {
+function mergeChatSession(left: ChatSession, right: ChatSession, partial = false): ChatSession {
   const newer = right.updatedAt >= left.updatedAt ? right : left;
   const older = newer === right ? left : right;
   return {
     ...older,
     ...newer,
-    messages:
-      newer.updatedAt === older.updatedAt
-        ? unionMessages(older.messages ?? [], newer.messages ?? [])
-        : authoritativeMessages(older.messages ?? [], newer.messages ?? []),
+    messages: mergeSessionMessages(
+      older.messages ?? [],
+      newer.messages ?? [],
+      newer.updatedAt === older.updatedAt,
+      partial,
+    ),
   };
+}
+
+/**
+ * The browser copy is capped before it is written to localStorage, so it can
+ * be the tail of a longer on-disk log. A capped copy must not replace the
+ * full history, or every reload cuts the beginning off the transcript. A
+ * newer save that dropped rows on purpose still wins.
+ */
+function mergeSessionMessages(
+  older: ChatMessage[],
+  newer: ChatMessage[],
+  sameClock: boolean,
+  partial = false,
+): ChatMessage[] {
+  if (sameClock || partial || isCappedTail(newer, older)) return unionMessages(older, newer);
+  return authoritativeMessages(older, newer);
+}
+
+/** True when `candidate` is the capped tail of a longer list. */
+function isCappedTail(candidate: ChatMessage[], full: ChatMessage[]): boolean {
+  if (candidate.length === 0 || candidate.length >= full.length) return false;
+  // A log that fits in one copy was not cut. A shorter copy of it means the
+  // rows were dropped on purpose, and that must not come back.
+  if (full.length <= MAX_MESSAGES_PER_SESSION) return false;
+  const offset = full.length - candidate.length;
+  for (let index = 0; index < candidate.length; index += 1) {
+    if (full[offset + index]?.id !== candidate[index]?.id) return false;
+  }
+  return true;
 }
 
 /** Same clock: keep lines that exist on only one side. A newer save replaces the list. */

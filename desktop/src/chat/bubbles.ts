@@ -862,7 +862,7 @@ export function createBubblesController(deps: BubblesDeps) {
         deps.setTurnHadAssistantText(false);
       }
       const session = deps.activeSession();
-      if (!sessionHasChatContent(session)) {
+      if (!session.messages.length) {
         deps.logEl.appendChild(renderEmptyChat());
         syncVisiblePlan();
         syncQuestionRail(session.messages, deps.logEl);
@@ -872,6 +872,15 @@ export function createBubblesController(deps: BubblesDeps) {
       const covered = coveredRunLogPointers(messages);
       const cut = historyRenderCut(messages);
       renderMessageRange(messages, cut, messages.length, deps.logEl, covered, session.runtime);
+      if (!sessionHasChatContent(session)) {
+        // Only the run's traces survived. The words are in the database and on
+        // their way back — say that, instead of leaving a bare tool log that
+        // reads like the conversation is gone.
+        const note = document.createElement("div");
+        note.className = "chat-bubble meta";
+        note.textContent = "这段对话的文字记录正在从本地数据库恢复，下面是这次运行留下的痕迹。";
+        deps.logEl.prepend(note);
+      }
       syncReplyChangeCard();
       syncTurnCopyButtons();
       syncVisiblePlan();
