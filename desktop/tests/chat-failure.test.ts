@@ -46,6 +46,11 @@ async function main() {
   assert(mac?.kind === "macos_denied", "codex eperm should map to macos_denied");
   assert(mac!.actions.includes("privacy"), "macos denied offers system settings");
 
+  const claudeMcp =
+    "Error: Invalid MCP configuration:\nFailed to read file: Error: EPERM: operation not permitted, open '/Users/me/Desktop/.mcp.json'";
+  const mcpFail = explainChatFailure(claudeMcp);
+  assert(mcpFail?.kind !== "macos_denied", "claude mcp eperm is not a files-and-folders switch");
+
   const noise = explainChatFailure("session_id: abc");
   assert(noise === null, "benign stderr should not classify");
 

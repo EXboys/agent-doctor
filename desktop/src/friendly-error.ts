@@ -327,9 +327,12 @@ function isGlmCodexResponses404(lower: string): boolean {
 }
 
 function isMacosFileDenied(lower: string): boolean {
+  // Only Codex failing while it loads its own config. Claude's
+  // `EPERM: operation not permitted, open '.mcp.json'` is a different miss
+  // and those four Files and Folders switches cannot clear it.
   return (
     /operation not permitted/.test(lower) &&
-    (/config error|loading default config|os error 1/.test(lower) || /eperm/.test(lower))
+    (/config error/.test(lower) || /loading default config/.test(lower))
   );
 }
 
