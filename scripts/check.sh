@@ -19,13 +19,14 @@ Commands:
   lint            fmt-check + clippy-cli (hard local gate; used by git hooks)
   test-cli        Test core + CLI
   build-cli       Release-build CLI
-  frontend        Build desktop frontend (npm)
+  frontend        Build desktop frontend (npm) and run its tests
+  site            Static checks for the marketing site (stamps, links, JS)
   cli             fmt-check + clippy-cli + test-cli + build-cli
   desktop         clippy-desktop
   release-preflight
                   fmt-check + clippy-cli + test-cli (+ desktop clippy when available)
                   Writes a stamp; required before pushing v* tags (see scripts/release.sh).
-  all             cli + frontend; desktop rust on macOS or AGENT_DOCTOR_CHECK_DESKTOP=1
+  all             cli + frontend + site; desktop rust on macOS or AGENT_DOCTOR_CHECK_DESKTOP=1
   help            Show this message
 
 Examples:
@@ -64,7 +65,11 @@ run_build_cli() {
 }
 
 run_frontend() {
-  (cd desktop && npm ci && npm run build)
+  (cd desktop && npm ci && npm run build && npm test)
+}
+
+run_site() {
+  node "$ROOT/scripts/check-site.mjs"
 }
 
 should_check_desktop() {
@@ -124,12 +129,14 @@ case "$command" in
   test-cli) run_test_cli ;;
   build-cli) run_build_cli ;;
   frontend) run_frontend ;;
+  site) run_site ;;
   cli) run_cli_suite ;;
   desktop) run_desktop_rust ;;
   release-preflight) run_release_preflight ;;
   all)
     run_cli_suite
     run_frontend
+    run_site
     if should_check_desktop; then
       run_desktop_rust
     else

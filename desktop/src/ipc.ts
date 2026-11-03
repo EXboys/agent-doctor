@@ -309,6 +309,7 @@ export function teamupsChannelReply(
       output?: string;
     }[];
   },
+  chat = "",
 ): Promise<void> {
   const payload =
     trace &&
@@ -320,7 +321,14 @@ export function teamupsChannelReply(
       (trace.steps?.length ?? 0) > 0)
       ? trace
       : undefined;
-  return invoke("teamups_channel_reply_command", { id, text, ok, done, trace: payload });
+  return invoke("teamups_channel_reply_command", {
+    id,
+    text,
+    ok,
+    done,
+    trace: payload,
+    chat: chat.trim(),
+  });
 }
 
 export type PhoneChatState = "running" | "waiting" | "done" | "failed";
@@ -358,8 +366,16 @@ export function teamupsChannelAsk(
   text: string,
   wait = true,
   questions?: TeamupsChannelQuestion[],
+  chat = "",
 ): Promise<void> {
-  return invoke("teamups_channel_ask_command", { id, requestId, text, wait, questions });
+  return invoke("teamups_channel_ask_command", {
+    id,
+    requestId,
+    text,
+    wait,
+    questions,
+    chat: chat.trim(),
+  });
 }
 
 export function signOutTeamups(): Promise<TeamupsAccountStatus> {

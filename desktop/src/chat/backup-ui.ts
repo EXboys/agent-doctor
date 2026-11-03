@@ -80,46 +80,68 @@ export function createBackupUiController(deps: BackupUiDeps) {
     deps.logEl.scrollTop = deps.logEl.scrollHeight;
   }
 
+  /**
+   * A boot failure must not throw away what is on screen. The transcript is
+   * the user's own work: the failure box explains what went wrong and offers
+   * a way out, but it never clears the transcript and never claims the
+   * records are broken — they are on disk and still there.
+   */
   function showBootFailure(error: unknown): void {
     console.error("Ask: boot failed", error);
     const shell = document.querySelector<HTMLElement>("#chat-shell");
     if (shell) shell.style.display = "grid";
     const log = document.querySelector<HTMLElement>("#chat-log");
     if (log) {
-      log.replaceChildren();
+      const hadContent = log.childElementCount > 0;
       const box = document.createElement("div");
       box.className = "chat-bubble meta";
       box.style.margin = "12px";
       box.style.lineHeight = "1.5";
-      box.textContent =
-        "对话页加载失败。多半是本地聊天记录损坏或过大。你可以点下方按钮清空缓存后重试；若仍白屏，请完全退出 Agent Doctor 再打开。";
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn-primary";
-      btn.style.marginTop = "10px";
-      btn.textContent = "清空对话缓存并重试";
-      btn.addEventListener("click", () => {
-        const current = localStorage.getItem(STORAGE_KEY);
-        if (current) backupStoreRaw(current);
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(OPEN_CHAT_KEY);
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      box.textContent = hadContent
+        ? "对话页有一处初始化没有完成。下面的记录仍然保留着；如果界面不对，请完全退出 Agent Doctor 再打开。"
+        : "对话页加载失败。请先点「重新加载」；若仍白屏，请完全退出 Agent Doctor 再打开。";
+      const reload = document.createElement("button");
+      reload.type = "button";
+      reload.className = "btn-primary";
+      reload.style.marginTop = "10px";
+      reload.textContent = "重新加载";
+      reload.addEventListener("click", () => {
         window.location.reload();
       });
       const restore = document.createElement("button");
       restore.type = "button";
       restore.className = "btn-secondary";
-      restore.style.marginTop = "8px";
+      restore.style.marginTop = "10px";
       restore.style.marginLeft = "8px";
       restore.textContent = t("chat.restoreBackup");
       restore.addEventListener("click", () => {
         if (restoreChatFromBackup()) {
           box.textContent = t("chat.restoreBackupOk");
-          btn.remove();
+          reload.remove();
           restore.remove();
         }
       });
-      log.append(box, btn, restore);
+      const actions: HTMLElement[] = [reload, restore];
+      if (!hadContent) {
+        // Only offer the cache reset when there is nothing on screen to lose.
+        // The store is copied to the backup key first, so it stays recoverable.
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn-secondary";
+        btn.style.marginTop = "10px";
+        btn.style.marginLeft = "8px";
+        btn.textContent = "清空对话缓存并重试";
+        btn.addEventListener("click", () => {
+          const current = localStorage.getItem(STORAGE_KEY);
+          if (current) backupStoreRaw(current);
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(OPEN_CHAT_KEY);
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+          window.location.reload();
+        });
+        actions.push(btn);
+      }
+      log.prepend(box, ...actions);
     }
     const list = document.querySelector<HTMLElement>("#chat-sessions");
     if (list && list.childElementCount === 0) {

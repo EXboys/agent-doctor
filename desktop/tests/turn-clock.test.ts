@@ -24,7 +24,16 @@ Object.defineProperty(globalThis, "navigator", {
   value: { language: "zh-CN" },
 });
 
-const { elapsedLabel, markModelRequest, markTurnStarted } = await import("../src/chat/activity");
+const {
+  clearThinkingStarted,
+  elapsedLabel,
+  markModelRequest,
+  markThinkingStartedAt,
+  markTurnStarted,
+  noteTurnUserAt,
+  thinkingClockActive,
+  thinkingElapsedLabel,
+} = await import("../src/chat/activity");
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: unknown): void {
@@ -56,6 +65,29 @@ check("the request then counts its own seconds", elapsedLabel() === "2 秒", ela
 now += 60_000;
 markModelRequest();
 check("a later request in the same turn keeps counting", elapsedLabel() === "1 分 2 秒", elapsedLabel());
+
+now += 80 * 60_000;
+check("the turn clock keeps the earlier work", elapsedLabel() === "81 分 2 秒", elapsedLabel());
+markThinkingStartedAt(now);
+check("a new thinking stretch does not inherit that time", thinkingElapsedLabel() === "", thinkingElapsedLabel());
+now += 5_000;
+check("thinking counts only its own seconds", thinkingElapsedLabel() === "5 秒", thinkingElapsedLabel());
+check("the turn clock still includes the earlier work", elapsedLabel() === "81 分 7 秒", elapsedLabel());
+clearThinkingStarted();
+check("thinking leaves the turn clock on the bar", thinkingClockActive() === false && elapsedLabel() === "81 分 7 秒", elapsedLabel());
+
+markTurnStarted();
+markThinkingStartedAt(now);
+now += 230 * 60 * 60_000;
+check("a clock left after the session stopped reads as 230 hours", elapsedLabel() === "13800 分 0 秒", elapsedLabel());
+noteTurnUserAt(now);
+check(
+  "the first message after it stopped starts from that message",
+  elapsedLabel() === "" && thinkingClockActive() === false,
+  elapsedLabel(),
+);
+now += 3_000;
+check("that message then counts its own seconds", elapsedLabel() === "3 秒", elapsedLabel());
 
 Date.now = realNow;
 

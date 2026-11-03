@@ -23,16 +23,25 @@ import {
 export type DiagnosePaintApi = ReturnType<typeof createDiagnosePaint>;
 
 export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepChatApi) {
-  function setResult(kind: "ok" | "error" | "warn" | "busy" | "hide", message = ""): void {
+  function paintResult(
+    el: HTMLElement,
+    kind: "ok" | "error" | "warn" | "busy" | "hide",
+    message = "",
+  ): void {
     if (kind === "hide" || !message) {
-      dom.resultEl.hidden = true;
-      dom.resultEl.textContent = "";
-      dom.resultEl.className = "diagnose-result is-slot";
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "diagnose-result is-slot";
       return;
     }
-    dom.resultEl.hidden = false;
-    dom.resultEl.textContent = message;
-    dom.resultEl.className = `diagnose-result is-slot is-${kind}`;
+    el.hidden = false;
+    el.textContent = message;
+    el.className = `diagnose-result is-slot is-${kind}`;
+  }
+
+  function setResult(kind: "ok" | "error" | "warn" | "busy" | "hide", message = ""): void {
+    paintResult(dom.resultEl, kind, message);
+    paintResult(dom.configResultEl, kind, message);
   }
 
   function paintSkeletonChecks(count = 8): void {
@@ -58,6 +67,8 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
     session.busy = next;
     dom.primaryEl.disabled = next;
     dom.secondaryEl.disabled = next;
+    dom.configSaveEl.disabled = next;
+    dom.configNextEl.disabled = next;
   }
 
   function syncStatFilterUi(score: DiagnoseScore | null): void {
@@ -418,6 +429,8 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
 
   function paintAll(): void {
     ensureDetailsOpen();
+    dom.heroFootEl.hidden = false;
+    dom.configActionsEl.hidden = true;
     paintSteps();
     if (session.activeStep === "test" || session.testedOk) {
       // Keep the score ring visible during the whole confirm animation.
@@ -465,32 +478,28 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       dom.secondaryEl.hidden = true;
     } else if (session.activeStep === "config") {
       paintHeroTone(session.configured ? "ok" : "busy");
-      if (session.guideFillConfig && !session.configured) {
+      if (session.configured) {
+        dom.headlineEl.textContent = t("diagnose.flow.configDoneHeadline");
+        dom.detailEl.textContent = t("diagnose.flow.savedNext");
+      } else if (session.guideFillConfig) {
         dom.headlineEl.textContent = t("diagnose.flow.configGuideHeadline");
         dom.detailEl.textContent = t("diagnose.flow.configGuideDetail");
       } else {
-        dom.headlineEl.textContent = session.configured
-          ? t("diagnose.flow.configDoneHeadline")
-          : t("diagnose.flow.configHeadline");
+        dom.headlineEl.textContent = t("diagnose.flow.configHeadline");
         dom.detailEl.textContent = t("diagnose.flow.configDetail");
       }
-      if (session.canAutoFix) {
-        session.primaryAction = "auto-fix";
-        dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = t("diagnose.flow.autoFixCta");
-        dom.secondaryEl.hidden = false;
-        dom.secondaryEl.textContent = session.guideFillConfig
-          ? t("diagnose.flow.configGuideCta")
-          : t("diagnose.flow.configCta");
-        dom.secondaryEl.dataset.fallback = "verify-save";
-      } else {
-        session.primaryAction = "verify-save";
-        dom.primaryEl.hidden = false;
-        dom.primaryEl.textContent = session.guideFillConfig
-          ? t("diagnose.flow.configGuideCta")
-          : t("diagnose.flow.configCta");
-        dom.secondaryEl.hidden = true;
-      }
+      // The key form owns Save and Next. Diagnosis actions stay on the later step.
+      session.primaryAction = "verify-save";
+      session.deepOpen = false;
+      dom.primaryEl.hidden = true;
+      dom.secondaryEl.hidden = true;
+      dom.heroFootEl.hidden = true;
+      dom.detailsEl.hidden = true;
+      dom.scoreRingEl.hidden = true;
+      dom.statRowEl.hidden = true;
+      dom.configActionsEl.hidden = false;
+      dom.configSaveEl.textContent = t("diagnose.flow.save");
+      dom.configNextEl.textContent = t("diagnose.flow.next");
       if (session.guideFillConfig && !session.configured) {
         window.requestAnimationFrame(() => focusConfigFill());
       }
@@ -578,6 +587,10 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       }
     }
     paintDeep();
+    if (session.activeStep === "config") {
+      dom.deepToggleEl.hidden = true;
+      dom.shellEl.classList.remove("is-deep-open");
+    }
   }
 
   return {

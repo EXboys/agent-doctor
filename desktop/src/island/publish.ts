@@ -114,16 +114,24 @@ export function startIslandPublisher(
   prompt.addEventListener("keydown", markTyping);
   prompt.addEventListener("compositionstart", markTyping);
 
-  void getCurrentWebviewWindow()
-    .listen<PromptSessionEvent>("prompt-session-event", (event) => {
-      if (event.payload.type === "plan") {
-        livePlan = normalizePlanItems(event.payload.items);
-      } else if (event.payload.type === "started") {
-        livePlan = null;
-      }
-      track = reduceIslandTrack(track, event.payload);
-      schedule();
-    })
-    .catch(() => {});
+  // The Tauri window handle can be missing — a page loaded outside the app, or
+  // a window that was recreated under us. `getCurrentWebviewWindow()` throws
+  // synchronously in that case, so the call has to sit inside a try: a throw
+  // here would abort the whole page boot and take the transcript with it.
+  try {
+    void getCurrentWebviewWindow()
+      .listen<PromptSessionEvent>("prompt-session-event", (event) => {
+        if (event.payload.type === "plan") {
+          livePlan = normalizePlanItems(event.payload.items);
+        } else if (event.payload.type === "started") {
+          livePlan = null;
+        }
+        track = reduceIslandTrack(track, event.payload);
+        schedule();
+      })
+      .catch(() => {});
+  } catch (error) {
+    console.warn("island: prompt-session-event listener unavailable", error);
+  }
   schedule();
 }

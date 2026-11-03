@@ -86,3 +86,7 @@ agent-doctor sync
 agent-doctor policy pull
 agent-doctor connect
 ```
+
+## 给贡献者
+
+改问答回合、电脑↔手机通道、配置与密钥、下载安装、官网这五条核心链路之前，先读 [core-flows.md](core-flows.md)——那里的不变量全部来自真实事故，改完按最后一节跑检查。

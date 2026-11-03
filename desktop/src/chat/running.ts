@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { elapsedLabel } from "./activity";
+import { elapsedLabel, thinkingClockActive, thinkingElapsedLabel } from "./activity";
 
 const MAX_TEXT = 60;
 
@@ -25,7 +25,7 @@ export function createRunningIndicator(boxEl: HTMLElement) {
 
   function paint(): void {
     textEl.textContent = text || t("chat.runningDefault");
-    timeEl.textContent = paused ? "" : elapsedLabel();
+    timeEl.textContent = paused ? "" : thinkingClockActive() ? thinkingElapsedLabel() : elapsedLabel();
     el.classList.toggle("is-paused", paused);
   }
 

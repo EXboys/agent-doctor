@@ -46,9 +46,9 @@ setChannelSessionIdle((id) => {
 });
 notifyChannelSessionIdle(sessionId);
 assert(idle === sessionId, "a finished chat can start its next sentence");
-enqueueChannelJob({ id: "j1", sessionId, text: "第一句", noticed: true });
-enqueueChannelJob({ id: "j2", sessionId, text: "第二句", noticed: true });
-unshiftChannelJob({ id: "j0", sessionId, text: "先做这句", noticed: true });
+enqueueChannelJob({ id: "j1", sessionId, text: "第一句", noticed: true, chat: "phone:a" });
+enqueueChannelJob({ id: "j2", sessionId, text: "第二句", noticed: true, chat: "phone:a" });
+unshiftChannelJob({ id: "j0", sessionId, text: "先做这句", noticed: true, chat: "phone:a" });
 assert(takeNextChannelJob(sessionId)?.id === "j0", "a sentence that lost the race stays first");
 assert(takeNextChannelJob(sessionId)?.id === "j1", "then the first queued sentence");
 assert(takeNextChannelJob(sessionId)?.id === "j2", "then the next sentence");

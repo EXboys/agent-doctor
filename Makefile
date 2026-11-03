@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check clippy-cli clippy-desktop lint test-cli build-cli frontend cli desktop check all hooks
+.PHONY: fmt fmt-check clippy-cli clippy-desktop lint test-cli build-cli frontend site cli desktop check all hooks
 
 fmt:
 	cargo fmt --all
@@ -26,13 +26,16 @@ build-cli:
 	cargo build --release -p agent-doctor
 
 frontend:
-	cd desktop && npm ci && npm run build
+	cd desktop && npm ci && npm run build && npm test
+
+site:
+	node scripts/check-site.mjs
 
 cli: lint test-cli build-cli
 
 desktop: clippy-desktop
 
-check: cli frontend
+check: cli frontend site
 
 all:
 	./scripts/check.sh all

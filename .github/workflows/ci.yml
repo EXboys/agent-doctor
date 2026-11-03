@@ -225,3 +225,15 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  site:
+    name: Marketing site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - run: node scripts/check-site.mjs

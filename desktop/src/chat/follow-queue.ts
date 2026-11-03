@@ -10,8 +10,10 @@ export type FollowDraft = {
   mentions: MentionRef[];
   fromVoice?: boolean;
   verifyMcp?: boolean;
-  /** Set when this sentence came from Feishu, so the reply can find the job. */
+  /** Set when this sentence came from the phone, so the reply can find the job. */
   channelJobId?: string;
+  /** Phone conversation id. The result has to go back to this chat, not the one on screen. */
+  channelChat?: string;
 };
 
 const queues = new Map<string, FollowDraft[]>();

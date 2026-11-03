@@ -221,9 +221,16 @@ fn computer_lan_ip() -> String {
     }
 }
 
-pub fn teamups_channel_reply(id: &str, text: &str, ok: bool, done: bool) -> String {
+pub fn teamups_channel_reply(id: &str, text: &str, ok: bool, done: bool, chat: &str) -> String {
     let text: String = text.chars().take(6000).collect();
-    json!({ "type": "reply", "id": id, "ok": ok, "text": text, "done": done }).to_string()
+    let mut value = json!({ "type": "reply", "id": id, "ok": ok, "text": text, "done": done });
+    let chat = chat.trim();
+    // Two chats can be running. The phone uses this to put the result back
+    // in the conversation that asked, not the one open on screen.
+    if !chat.is_empty() {
+        value["chat"] = json!(chat);
+    }
+    value.to_string()
 }
 
 pub fn parse_channel_stop(frame: &str) -> Option<String> {
@@ -392,11 +399,15 @@ mod tests {
 
     #[test]
     fn a_reply_names_the_same_job() {
-        let raw = teamups_channel_reply("a", "做完了", true, true);
+        let raw = teamups_channel_reply("a", "做完了", true, true, "phone:chat-1");
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["type"], "reply");
         assert_eq!(value["id"], "a");
         assert_eq!(value["ok"], true);
         assert_eq!(value["text"], "做完了");
+        assert_eq!(value["chat"], "phone:chat-1");
+        let bare: serde_json::Value =
+            serde_json::from_str(&teamups_channel_reply("a", "做完了", true, true, "  ")).unwrap();
+        assert!(bare.get("chat").is_none());
     }
 }

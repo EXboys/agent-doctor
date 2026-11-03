@@ -77,20 +77,55 @@ export type ActivityApi = ReturnType<typeof createActivityController>;
 let turnStartedAt = 0;
 /** The first model request of this turn has already started the clock. */
 let modelRequestMarked = false;
+/** This thinking stretch. The turn clock keeps the earlier web and tool time. */
+let thinkingStartedAt = 0;
 
 const LIVE_ELAPSED =
-  ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed, .chat-running:not([hidden]) .chat-running-time";
+  ".chat-activity.is-live > .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed, .chat-running:not([hidden]) .chat-running-time";
+const THINKING_ELAPSED = ".chat-thinking.is-live .chat-activity-elapsed";
 
 function paintLiveElapsed(): void {
   if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return;
   const label = elapsedLabel();
-  for (const el of document.querySelectorAll<HTMLElement>(LIVE_ELAPSED)) el.textContent = label;
+  const thinking = thinkingClockActive();
+  for (const el of document.querySelectorAll<HTMLElement>(LIVE_ELAPSED)) {
+    el.textContent = thinking && el.classList.contains("chat-running-time") ? thinkingElapsedLabel() : label;
+  }
+  paintThinkingElapsed();
+}
+
+function paintThinkingElapsed(): void {
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return;
+  const label = thinkingElapsedLabel();
+  for (const el of document.querySelectorAll<HTMLElement>(THINKING_ELAPSED)) el.textContent = label;
 }
 
 /** A new user message starts clean, so the previous turn's minutes do not carry over. */
 export function markTurnStarted(): void {
   turnStartedAt = Date.now();
   modelRequestMarked = false;
+  thinkingStartedAt = 0;
+  paintLiveElapsed();
+}
+
+/**
+ * The line the person just sent. If the module clock is still pointing at an
+ * older run — the session had already stopped — this message is the start.
+ */
+export function noteTurnUserAt(at: number): void {
+  if (!Number.isFinite(at) || at <= 0) return;
+  if (turnStartedAt && at <= turnStartedAt) return;
+  turnStartedAt = at;
+  modelRequestMarked = false;
+  thinkingStartedAt = 0;
+  paintLiveElapsed();
+}
+
+/** No chat is running. A stopped session must not keep a start time. */
+export function clearTurnClock(): void {
+  turnStartedAt = 0;
+  modelRequestMarked = false;
+  thinkingStartedAt = 0;
   paintLiveElapsed();
 }
 
@@ -119,6 +154,27 @@ export function durationLabel(ms: number): string {
   const min = Math.floor(sec / 60);
   const rest = sec % 60;
   return zh ? `${min} 分 ${rest} 秒` : `${min}m ${rest}s`;
+}
+
+/** The open thinking block counts from its own first line, not from the turn. */
+export function markThinkingStartedAt(at: number): void {
+  thinkingStartedAt = at;
+  paintThinkingElapsed();
+}
+
+export function clearThinkingStarted(): void {
+  if (!thinkingStartedAt) return;
+  thinkingStartedAt = 0;
+  paintThinkingElapsed();
+}
+
+export function thinkingClockActive(): boolean {
+  return thinkingStartedAt > 0;
+}
+
+export function thinkingElapsedLabel(): string {
+  if (!thinkingStartedAt) return "";
+  return durationLabel(Date.now() - thinkingStartedAt);
 }
 
 /** Folder of a file, relative to the project when it is inside it. */
@@ -553,10 +609,12 @@ export function createActivityController(deps: ActivityDeps) {
   window.setInterval(() => {
     const label = elapsedLabel();
     for (const el of deps.logEl.querySelectorAll<HTMLElement>(
-      ".chat-activity.is-live > .chat-activity-elapsed, .chat-thinking.is-live .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed",
+      ".chat-activity.is-live > .chat-activity-elapsed, .chat-work.is-live > .chat-work-summary .chat-activity-elapsed",
     )) {
       el.textContent = label;
     }
+    const thinking = thinkingElapsedLabel();
+    for (const el of deps.logEl.querySelectorAll<HTMLElement>(THINKING_ELAPSED)) el.textContent = thinking;
   }, 1000);
 
   /** Remove the transient lifecycle row once a more meaningful event replaces it. */

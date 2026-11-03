@@ -426,9 +426,21 @@ fn build_claude_command(
     // every later positional (the user prompt) as another config file, then
     // `open()` that text. `ENAMETOOLONG` is that failure when the prompt is long.
     // `=` keeps the path attached to the flag.
-    let mcp_config = cwd.join(".mcp.json");
-    if mcp_config.is_file() {
-        cmd.arg(format!("--mcp-config={}", mcp_config.display()));
+    // Claude is its own program. macOS Files and Folders granted to this app do
+    // not let it open Desktop, Documents, Downloads, or iCloud. Passing the
+    // project file there makes every turn die with EPERM before a reply.
+    match project_mcp_launch(cwd, dirs::home_dir().as_deref()) {
+        Ok(Some(launch)) => {
+            if launch.strict {
+                cmd.arg("--strict-mcp-config");
+            }
+            cmd.arg(launch.arg);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            cmd.arg("--strict-mcp-config");
+            eprintln!("! Claude project tools were left out this turn: {error:#}");
+        }
     }
     if computer_mcp {
         if let Some(path) = agent_doctor_core::claude_computer_mcp_config_path() {
@@ -501,13 +513,7 @@ fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf
     let body = settings.to_string();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     body.hash(&mut hasher);
-    #[cfg(test)]
-    let dir = std::env::temp_dir().join("agent-doctor-test-ask");
-    #[cfg(not(test))]
-    let dir = agent_doctor_core::store::agent_doctor_config_dir()
-        .context("could not resolve config directory")?
-        .join("ask");
-    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let dir = ask_private_dir()?;
     let path = dir.join(format!("claude-settings-{:016x}.json", hasher.finish()));
     if std::fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
         std::fs::write(&path, &body).with_context(|| format!("write {}", path.display()))?;
@@ -523,6 +529,76 @@ fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf
                 );
             }
         }
+    }
+    Ok(path)
+}
+
+struct ProjectMcpLaunch {
+    arg: String,
+    /// Skip every MCP file except the ones passed on the command line.
+    /// The project copy on Desktop would still be opened, and that open is EPERM.
+    strict: bool,
+}
+
+fn ask_private_dir() -> Result<std::path::PathBuf> {
+    #[cfg(test)]
+    let dir = std::env::temp_dir().join("agent-doctor-test-ask");
+    #[cfg(not(test))]
+    let dir = agent_doctor_core::store::agent_doctor_config_dir()
+        .context("could not resolve config directory")?
+        .join("ask");
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Desktop, Documents, Downloads, and iCloud. A grant on this app does not
+/// cover the separate Claude program.
+fn is_privacy_protected(path: &Path, home: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        const ROOTS: &[&str] = &[
+            "Desktop",
+            "Documents",
+            "Downloads",
+            "Library/Mobile Documents",
+            "Library/CloudStorage",
+        ];
+        ROOTS.iter().any(|rel| path.starts_with(home.join(rel)))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, home);
+        false
+    }
+}
+
+fn project_mcp_launch(cwd: &Path, home: Option<&Path>) -> Result<Option<ProjectMcpLaunch>> {
+    let src = cwd.join(".mcp.json");
+    if !src.is_file() {
+        return Ok(None);
+    }
+    let protected = home.is_some_and(|home| is_privacy_protected(&src, home));
+    if !protected {
+        return Ok(Some(ProjectMcpLaunch {
+            arg: format!("--mcp-config={}", src.display()),
+            strict: false,
+        }));
+    }
+    let staged = stage_mcp_for_claude(&src)?;
+    Ok(Some(ProjectMcpLaunch {
+        arg: format!("--mcp-config={}", staged.display()),
+        strict: true,
+    }))
+}
+
+fn stage_mcp_for_claude(src: &Path) -> Result<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let body = std::fs::read(src).with_context(|| format!("read {}", src.display()))?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    let path = ask_private_dir()?.join(format!("claude-mcp-{:016x}.json", hasher.finish()));
+    if std::fs::read(&path).ok().as_deref() != Some(body.as_slice()) {
+        std::fs::write(&path, &body).with_context(|| format!("write {}", path.display()))?;
     }
     Ok(path)
 }
@@ -2158,6 +2234,28 @@ mod tests {
         assert!(args[..dash]
             .iter()
             .any(|arg| arg == "--dangerously-skip-permissions"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_mcp_is_staged_outside_the_privacy_folder() {
+        let dir = tempdir().unwrap();
+        let home = dir.path().join("home");
+        let desktop = home.join("Desktop");
+        fs::create_dir_all(&desktop).unwrap();
+        let body = r#"{"mcpServers":{"browser":{"command":"agent-doctor"}}}"#;
+        fs::write(desktop.join(".mcp.json"), body).unwrap();
+        let launch = project_mcp_launch(&desktop, Some(&home)).unwrap().unwrap();
+        assert!(launch.strict);
+        let path = launch
+            .arg
+            .strip_prefix("--mcp-config=")
+            .expect("mcp config arg");
+        assert!(
+            !std::path::Path::new(path).starts_with(&desktop),
+            "claude must not be sent the Desktop path: {path}"
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), body);
     }
 
     #[test]

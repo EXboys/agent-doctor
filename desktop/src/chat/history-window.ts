@@ -6,11 +6,41 @@ export const HISTORY_FIRST_SCREEN = 24;
 export const HISTORY_BATCH = 8;
 /** Stop the first screen early once this much text is already included. */
 const FIRST_SCREEN_CHARS = 24_000;
+/** Lines of conversation to pull into the first screen when it holds none. */
+const FIRST_SCREEN_CONVERSATION = 4;
 
 type HistoryRow = { role: string; content?: string; log?: boolean };
 
 function asLogRow(row: HistoryRow): { role: string; content: string; log?: boolean } {
   return { role: row.role, content: row.content ?? "", log: row.log };
+}
+
+function isConversationRow(row: HistoryRow | undefined): boolean {
+  return row?.role === "user" || row?.role === "assistant";
+}
+
+/** True when the rows painted first contain something the user actually said. */
+function firstScreenHasConversation(messages: readonly HistoryRow[], index: number): boolean {
+  for (let cursor = index; cursor < messages.length; cursor += 1) {
+    if (isConversationRow(messages[cursor])) return true;
+  }
+  return false;
+}
+
+/**
+ * Pull the last lines of conversation into the first screen. The newest rows
+ * of a long turn are all tool output and those rows are painted first, so
+ * without this the user's own words wait for the older rows to be pumped in —
+ * and that pump does not run while the window is hidden.
+ */
+function extendToConversation(messages: readonly HistoryRow[], index: number): number {
+  let seen = 0;
+  let cursor = index;
+  while (cursor > 0 && seen < FIRST_SCREEN_CONVERSATION) {
+    if (isConversationRow(messages[cursor - 1])) seen += 1;
+    cursor -= 1;
+  }
+  return cursor;
 }
 
 /**
@@ -45,6 +75,13 @@ export function historyRenderCut(messages: readonly HistoryRow[]): number {
     chars += messages[index]?.content?.length ?? 0;
   }
   while (index > 0 && messageContinuesRun(messages, index)) index -= 1;
+  if (!firstScreenHasConversation(messages, index)) {
+    const extended = extendToConversation(messages, index);
+    if (extended < index) {
+      index = extended;
+      while (index > 0 && messageContinuesRun(messages, index)) index -= 1;
+    }
+  }
   // A short older section is cheaper to paint now than to schedule.
   if (index <= HISTORY_BATCH) return 0;
   return index;
