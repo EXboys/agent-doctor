@@ -45,3 +45,6 @@ desktop/src-tauri/.updater-*.key.pub
 .coverage
 __pycache__/
 *.log
+
+# Local session artifacts
+.zcode/
