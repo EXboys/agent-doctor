@@ -50,20 +50,77 @@ impl SecretVault {
 
 fn mask_inline_secrets_collecting(raw: &str, vault: &mut SecretVault) -> String {
     raw.lines()
-        .map(|line| {
-            if let Some((key, value)) = line.split_once('=') {
-                let key = key.trim().trim_start_matches("export ").trim();
-                let value = value.trim().trim_matches('"').trim_matches('\'');
-                if looks_secret_env_key(key) && !value.is_empty() && !value.contains("{{SECRET:") {
-                    let token = vault.insert(value.to_string());
-                    let prefix = line.find(key).map(|idx| &line[..idx]).unwrap_or("");
-                    return format!("{prefix}{key}={token}");
-                }
-            }
-            line.to_string()
-        })
+        .map(|line| mask_config_line(line, vault))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// One line, two shapes: `KEY=VALUE` (env files, TOML) and `key: value`
+/// (YAML, pretty-printed JSON). Configs like `auth.json` or `config.yaml`
+/// carry the same API keys as `.env` files. The value is replaced in place so
+/// quotes, indentation, and trailing commas survive — the token must still
+/// look restorable to `restore_tokens_in_text`.
+fn mask_config_line(line: &str, vault: &mut SecretVault) -> String {
+    if line.contains("{{SECRET:") {
+        // Already carries a vault token (an earlier mask round, or tool
+        // output echoing masked context) — masking again would wrap the
+        // token inside a fresh one.
+        return line.to_string();
+    }
+    for sep in ['=', ':'] {
+        if let Some(masked) = mask_kv_line(line, sep, vault) {
+            return masked;
+        }
+    }
+    line.to_string()
+}
+
+fn mask_kv_line(line: &str, sep: char, vault: &mut SecretVault) -> Option<String> {
+    // Scan every separator occurrence: on a one-line JSON blob the first
+    // `:` often belongs to an innocent key ("meta") while a later one holds
+    // the secret.
+    for (sep_idx, _) in line.match_indices(sep) {
+        let key = clean_config_key(&line[..sep_idx]);
+        if !looks_secret_env_key(&key) {
+            continue;
+        }
+        let tail = &line[sep_idx + sep.len_utf8()..];
+        let value = clean_config_value(tail);
+        if value.is_empty() || value.contains("{{SECRET:") {
+            continue;
+        }
+        // Locate the value inside the raw tail so everything around it
+        // (opening quote, trailing comma) is kept byte-for-byte.
+        let Some(value_idx) = tail.find(&value) else {
+            continue;
+        };
+        let value_len = value.len();
+        let token = vault.insert(value);
+        return Some(format!(
+            "{}{}{}{}",
+            &line[..sep_idx + sep.len_utf8()],
+            &tail[..value_idx],
+            token,
+            &tail[value_idx + value_len..]
+        ));
+    }
+    None
+}
+
+fn clean_config_key(key_raw: &str) -> String {
+    key_raw
+        .trim()
+        .trim_start_matches("export ")
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string()
+}
+
+fn clean_config_value(value_raw: &str) -> String {
+    let trimmed = value_raw.trim();
+    let trimmed = trimmed.strip_suffix(',').unwrap_or(trimmed);
+    trimmed.trim_matches('"').trim_matches('\'').to_string()
 }
 
 pub fn is_env_file(path: &Path) -> bool {
@@ -134,7 +191,7 @@ pub fn mask_env_file_content(raw: &str, vault: &mut SecretVault) -> String {
 
 fn mask_env_line(line: &str, vault: &mut SecretVault) -> String {
     let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with('#') {
+    if trimmed.is_empty() || trimmed.starts_with('#') || line.contains("{{SECRET:") {
         return line.to_string();
     }
     let assignment = trimmed.strip_prefix("export ").unwrap_or(trimmed);
@@ -270,5 +327,60 @@ mod tests {
         // The mask kept the first and last three bytes, which cut inside a
         // character for a value that is not pure ASCII.
         assert_eq!(mask_secret_value("a中文密钥"), "a***钥");
+    }
+
+    #[test]
+    fn masks_pretty_json_secrets_and_keeps_structure() {
+        let mut vault = SecretVault::default();
+        let raw = "{\n  \"apiKey\": \"sk-json-secret-key\",\n  \"model\": \"glm-4\"\n}";
+        let masked = mask_inline_secrets_collecting(raw, &mut vault);
+        assert!(masked.contains("\"apiKey\": \"{{SECRET:0}}\","));
+        assert!(masked.contains("\"model\": \"glm-4\""));
+        assert!(!masked.contains("sk-json-secret-key"));
+        assert_eq!(vault.get("{{SECRET:0}}"), Some("sk-json-secret-key"));
+        // Token restores the original line byte-for-byte.
+        let line = masked.lines().nth(1).unwrap();
+        assert_eq!(
+            vault.restore_tokens_in_text(line),
+            "  \"apiKey\": \"sk-json-secret-key\","
+        );
+    }
+
+    #[test]
+    fn masks_yaml_secrets() {
+        let mut vault = SecretVault::default();
+        let raw = "providers:\n  - api_key: sk-yaml-secret\n  model: glm-4";
+        let masked = mask_inline_secrets_collecting(raw, &mut vault);
+        assert!(masked.contains("- api_key: {{SECRET:0}}"));
+        assert!(!masked.contains("sk-yaml-secret"));
+        assert!(masked.contains("model: glm-4"));
+    }
+
+    #[test]
+    fn masks_toml_secrets_and_innocent_keys_stay() {
+        let mut vault = SecretVault::default();
+        let raw = "api_key = \"sk-toml-secret\"\nbase_url = \"https://api.example.com\"";
+        let masked = mask_inline_secrets_collecting(raw, &mut vault);
+        assert!(masked.contains("api_key = \"{{SECRET:0}}\""));
+        assert!(!masked.contains("sk-toml-secret"));
+        assert!(masked.contains("base_url = \"https://api.example.com\""));
+    }
+
+    #[test]
+    fn masks_secret_in_one_line_json_after_innocent_key() {
+        let mut vault = SecretVault::default();
+        let raw = r#"{"meta":"x","apiKey":"sk-inline-secret"}"#;
+        let masked = mask_inline_secrets_collecting(raw, &mut vault);
+        assert!(masked.contains("{{SECRET:0}}"));
+        assert!(!masked.contains("sk-inline-secret"));
+    }
+
+    #[test]
+    fn already_masked_lines_are_left_alone() {
+        let mut vault = SecretVault::default();
+        let raw = "DEEPSEEK_API_KEY={{SECRET:0}}";
+        let masked = mask_inline_secrets_collecting(raw, &mut vault);
+        assert_eq!(masked, "DEEPSEEK_API_KEY={{SECRET:0}}");
+        assert_eq!(vault.get("{{SECRET:0}}"), None);
     }
 }
