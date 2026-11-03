@@ -332,6 +332,8 @@ function subagentNote(code: string): string {
       return t("chat.subagentHermesConfig");
     case "openclaw-unready":
       return t("chat.subagentOpenclawUnready");
+    case "openclaw-rolled-back":
+      return t("chat.subagentOpenclawRolledBack");
     case "occupied":
       return t("chat.subagentOccupied");
     case "write-failed":

@@ -95,6 +95,7 @@ struct Flags {
 
 pub fn list_project_subagents(project_name: &str) -> Result<Vec<SubagentRecord>, SubagentError> {
     let project = project_dir(project_name)?;
+    strip_openclaw_markers(&live_homes());
     list_in(&project)
 }
 
@@ -264,7 +265,7 @@ fn write_stored(project: &Path, stored: &StoredSubagent) -> Result<(), SubagentE
         fs::create_dir_all(parent).map_err(|_| SubagentError::SaveFailed)?;
     }
     let body = serde_json::to_string_pretty(stored).map_err(|_| SubagentError::SaveFailed)?;
-    fs::write(&path, format!("{body}\n")).map_err(|_| SubagentError::SaveFailed)
+    write_config_atomic(&path, &format!("{body}\n")).map_err(|_| SubagentError::SaveFailed)
 }
 
 /// Write every installed assistant, then drop an older shape we no longer use.
@@ -350,7 +351,7 @@ fn write_text(path: &Path, body: &str, notes: &mut Vec<String>) {
             return;
         }
     }
-    if fs::write(path, body).is_err() {
+    if write_config_atomic(path, body).is_err() {
         notes.push("write-failed".into());
     }
 }
@@ -517,7 +518,7 @@ fn register_hermes_route(config: &Path, stored: &StoredSubagent) -> Result<Vec<S
     profiles.push(YamlValue::Mapping(entry));
     backup_once(config);
     let updated = serde_yaml::to_string(&root).map_err(|_| ())?;
-    fs::write(config, updated).map_err(|_| ())?;
+    write_config_atomic(config, &updated)?;
     Ok(notes)
 }
 
@@ -602,7 +603,7 @@ fn unregister_hermes_route(config: &Path, slug: &str) -> Result<(), ()> {
         }
     }
     let updated = serde_yaml::to_string(&root).map_err(|_| ())?;
-    fs::write(config, updated).map_err(|_| ())?;
+    write_config_atomic(config, &updated)?;
     Ok(())
 }
 
@@ -615,6 +616,10 @@ fn write_openclaw(homes: &Homes, flags: &Flags, stored: &StoredSubagent) -> Vec<
         .parent()
         .map(|dir| dir.join("agent-doctor-roles").join(&stored.slug))
         .unwrap_or_else(|| PathBuf::from("agent-doctor-roles").join(&stored.slug));
+    let managed_root = workspace
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("agent-doctor-roles"));
     let raw = match fs::read_to_string(&homes.openclaw_config) {
         Ok(raw) => raw,
         Err(_) => return vec!["openclaw-unready".into()],
@@ -634,13 +639,23 @@ fn write_openclaw(homes: &Homes, flags: &Flags, stored: &StoredSubagent) -> Vec<
     let Some(entries) = entries.as_object_mut() else {
         return vec!["openclaw-unready".into()];
     };
+    // Older builds dropped an `agentDoctorSubagent` marker into each entry,
+    // but OpenClaw's schema validator rejects unknown keys, which made the
+    // whole config invalid and took chats down with it. Strip any leftovers.
+    let mut stripped = false;
+    for entry in entries.values_mut() {
+        if let Some(entry) = entry.as_object_mut() {
+            stripped |= entry.remove("agentDoctorSubagent").is_some();
+        }
+    }
     let agent_id = format!("ad-{}", stored.slug);
-    if let Some(existing) = entries.get(&agent_id).and_then(JsonValue::as_object) {
-        let owned = existing
-            .get("agentDoctorSubagent")
-            .and_then(JsonValue::as_str)
-            == Some(stored.id.as_str());
-        if !owned && !existing.is_empty() {
+    if let Some(existing) = entries.get(&agent_id) {
+        let owned = openclaw_entry_is_ours(existing, &stored.slug, &managed_root);
+        let empty_object = existing.as_object().is_some_and(|object| object.is_empty());
+        if !owned && !empty_object {
+            if stripped {
+                write_openclaw_stripped(homes, &value);
+            }
             return vec!["occupied".into()];
         }
     }
@@ -652,6 +667,9 @@ fn write_openclaw(homes: &Homes, flags: &Flags, stored: &StoredSubagent) -> Vec<
         &mut notes,
     );
     if notes.iter().any(|note| note == "occupied") {
+        if stripped {
+            write_openclaw_stripped(homes, &value);
+        }
         return notes;
     }
     entries.insert(
@@ -659,7 +677,6 @@ fn write_openclaw(homes: &Homes, flags: &Flags, stored: &StoredSubagent) -> Vec<
         json!({
             "name": stored.name,
             "workspace": workspace.display().to_string(),
-            "agentDoctorSubagent": stored.id,
         }),
     );
     let parent = flags.openclaw_parent.trim();
@@ -679,15 +696,65 @@ fn write_openclaw(homes: &Homes, flags: &Flags, stored: &StoredSubagent) -> Vec<
             allow_agent(defaults, &agent_id);
         }
     }
-    backup_once(&homes.openclaw_config);
-    if serde_json::to_string_pretty(&value)
-        .ok()
-        .and_then(|body| fs::write(&homes.openclaw_config, format!("{body}\n")).ok())
-        .is_none()
-    {
-        notes.push("write-failed".into());
+    if let Some(note) = commit_openclaw_config(homes, &value, openclaw_config_validates) {
+        notes.push(note.into());
     }
     notes
+}
+
+/// True when an `agents.entries` node is one of our generated role entries.
+/// Ownership is derived from the workspace pointing into our managed
+/// `agent-doctor-roles/<slug>` directory — a schema-valid key — instead of a
+/// marker key of our own, which OpenClaw's validator rejects.
+fn openclaw_entry_is_ours(entry: &JsonValue, slug: &str, managed_root: &Path) -> bool {
+    let Some(workspace) = entry
+        .get("workspace")
+        .and_then(JsonValue::as_str)
+        .map(PathBuf::from)
+    else {
+        return false;
+    };
+    workspace.file_name().is_some_and(|name| name == slug)
+        && workspace
+            .parent()
+            .is_some_and(|parent| parent == managed_root)
+}
+
+/// Remove legacy `agentDoctorSubagent` marker keys from every entry in
+/// `agents.entries`. OpenClaw's validator rejects unknown keys, so a single
+/// leftover marker makes chats fail config validation. Best-effort heal: runs
+/// before the team pool lists anything, so an already-broken config repairs
+/// itself without waiting for a save.
+fn strip_openclaw_markers(homes: &Homes) -> bool {
+    if !homes.openclaw_config.is_file() {
+        return false;
+    }
+    let Ok(raw) = fs::read_to_string(&homes.openclaw_config) else {
+        return false;
+    };
+    let Ok(mut value) = serde_json::from_str::<JsonValue>(&raw) else {
+        return false;
+    };
+    let Some(entries) = value
+        .pointer_mut("/agents/entries")
+        .and_then(JsonValue::as_object_mut)
+    else {
+        return false;
+    };
+    let mut changed = false;
+    for entry in entries.values_mut() {
+        if let Some(entry) = entry.as_object_mut() {
+            changed |= entry.remove("agentDoctorSubagent").is_some();
+        }
+    }
+    if changed {
+        write_openclaw_stripped(homes, &value);
+    }
+    changed
+}
+
+fn write_openclaw_stripped(homes: &Homes, value: &JsonValue) {
+    commit_openclaw_config(homes, value, openclaw_config_validates);
 }
 
 fn allow_agent(entry: &mut serde_json::Map<String, JsonValue>, agent_id: &str) {
@@ -706,6 +773,11 @@ fn allow_agent(entry: &mut serde_json::Map<String, JsonValue>, agent_id: &str) {
 
 fn remove_openclaw(homes: &Homes, stored: &StoredSubagent) {
     let agent_id = format!("ad-{}", stored.slug);
+    let managed_root = homes
+        .openclaw_config
+        .parent()
+        .map(|dir| dir.join("agent-doctor-roles"))
+        .unwrap_or_else(|| PathBuf::from("agent-doctor-roles"));
     if homes.openclaw_config.is_file() {
         if let Ok(raw) = fs::read_to_string(&homes.openclaw_config) {
             if let Ok(mut value) = serde_json::from_str::<JsonValue>(&raw) {
@@ -715,11 +787,7 @@ fn remove_openclaw(homes: &Homes, stored: &StoredSubagent) {
                     .and_then(JsonValue::as_object_mut)
                 {
                     if let Some(existing) = entries.get(&agent_id) {
-                        if existing
-                            .get("agentDoctorSubagent")
-                            .and_then(JsonValue::as_str)
-                            == Some(stored.id.as_str())
-                        {
+                        if openclaw_entry_is_ours(existing, &stored.slug, &managed_root) {
                             entries.remove(&agent_id);
                             changed = true;
                         }
@@ -732,9 +800,7 @@ fn remove_openclaw(homes: &Homes, stored: &StoredSubagent) {
                     changed |= deny_agent(defaults, &agent_id);
                 }
                 if changed {
-                    if let Ok(body) = serde_json::to_string_pretty(&value) {
-                        let _ = fs::write(&homes.openclaw_config, format!("{body}\n"));
-                    }
+                    commit_openclaw_config(homes, &value, openclaw_config_validates);
                 }
             }
         }
@@ -840,6 +906,80 @@ fn backup_once(path: &Path) {
     if path.is_file() && !backup.exists() {
         let _ = fs::copy(path, backup);
     }
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config");
+    path.with_file_name(format!("{name}.agent-doctor-bak"))
+}
+
+/// Serialize to a temp file and rename over the target, so a crash mid-write
+/// can never leave a truncated config behind. The replacement keeps the
+/// original file's permissions (NamedTempFile starts at 0600).
+fn write_config_atomic(path: &Path, body: &str) -> Result<(), ()> {
+    use std::io::Write;
+    // A symlinked config (dotfiles setups) must keep being written through,
+    // not replaced by a regular file the way persist() would.
+    if fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return fs::write(path, body).map_err(|_| ());
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|_| ())?;
+    tmp.write_all(body.as_bytes()).map_err(|_| ())?;
+    tmp.flush().map_err(|_| ())?;
+    if let Ok(existing) = fs::metadata(path) {
+        let _ = tmp.as_file().set_permissions(existing.permissions());
+    }
+    tmp.persist(path).map_err(|_| ()).map(|_| ())
+}
+
+/// Ask the installed `openclaw` CLI to validate its own config. Runs
+/// best-effort: a missing binary or spawn failure counts as valid, so the
+/// safety net never blocks the other assistants' sync.
+fn openclaw_config_validates() -> bool {
+    use std::time::Duration;
+    let Some(binary) = find_binary("openclaw") else {
+        return true;
+    };
+    match crate::exec::run_output(&binary, &["config", "validate"], Duration::from_secs(30)) {
+        Ok(output) => output.status.success(),
+        Err(_) => true,
+    }
+}
+
+/// Atomically write the openclaw config, then have the CLI itself check the
+/// result. On failed validation the pre-write backup is restored, so a schema
+/// we do not know about can never leave the config invalid. Returns a note
+/// code on failure; `None` means the write is in place and validated.
+fn commit_openclaw_config(
+    homes: &Homes,
+    value: &JsonValue,
+    validate: impl Fn() -> bool,
+) -> Option<&'static str> {
+    let Ok(body) = serde_json::to_string_pretty(value) else {
+        return Some("write-failed");
+    };
+    backup_once(&homes.openclaw_config);
+    if write_config_atomic(&homes.openclaw_config, &format!("{body}\n")).is_err() {
+        return Some("write-failed");
+    }
+    if !validate() {
+        let backup = backup_path(&homes.openclaw_config);
+        if backup.is_file() {
+            let _ = fs::copy(&backup, &homes.openclaw_config);
+        }
+        return Some("openclaw-rolled-back");
+    }
+    None
 }
 
 fn remove_path(path: &Path) {
@@ -989,6 +1129,7 @@ mod tests {
         let openclaw = fs::read_to_string(root.join(".openclaw/openclaw.json")).unwrap();
         assert!(openclaw.contains(&format!("ad-role-{}", report.subagent.id)));
         assert!(openclaw.contains("allowAgents"));
+        assert!(!openclaw.contains("agentDoctorSubagent"));
         fs::write(
             project
                 .join(".claude/agents")
@@ -1090,5 +1231,170 @@ mod tests {
             .unwrap();
             assert_eq!(live_hermes_mode(), HermesMode::TooOld);
         });
+    }
+
+    #[test]
+    fn openclaw_entries_carry_no_custom_marker_key() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("home");
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        fs::write(
+            root.join(".openclaw/openclaw.json"),
+            r#"{"agents":{"entries":{"main":{"name":"main"}}}}"#,
+        )
+        .unwrap();
+        let homes = homes(&root);
+        let notes = write_openclaw(&homes, &flags(HermesMode::Off), &sample("abc123"));
+        assert!(notes.is_empty());
+        let raw = fs::read_to_string(homes.openclaw_config).unwrap();
+        assert!(!raw.contains("agentDoctorSubagent"));
+        let value: JsonValue = serde_json::from_str(&raw).unwrap();
+        let entry = &value["agents"]["entries"]["ad-role-abc123"];
+        assert_eq!(entry["name"], "审查员");
+        assert!(entry["workspace"]
+            .as_str()
+            .unwrap()
+            .ends_with("agent-doctor-roles/role-abc123"));
+    }
+
+    #[test]
+    fn a_foreign_openclaw_entry_is_not_clobbered_but_markers_still_strip() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("home");
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        fs::write(
+            root.join(".openclaw/openclaw.json"),
+            r#"{"agents":{"entries":{
+                "ad-role-abc123":{"name":"别人的","workspace":"/elsewhere/role-abc123","agentDoctorSubagent":"deadbeef"},
+                "other":{"name":"other","agentDoctorSubagent":"legacy"}
+            }}}"#,
+        )
+        .unwrap();
+        let homes = homes(&root);
+        let notes = write_openclaw(&homes, &flags(HermesMode::Off), &sample("abc123"));
+        assert!(notes.iter().any(|note| note == "occupied"));
+        let raw = fs::read_to_string(homes.openclaw_config).unwrap();
+        assert!(raw.contains("别人的"));
+        assert!(!raw.contains("agentDoctorSubagent"));
+    }
+
+    #[test]
+    fn strip_openclaw_markers_heals_a_legacy_config_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("home");
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        fs::write(
+            root.join(".openclaw/openclaw.json"),
+            r#"{"agents":{"entries":{"other":{"name":"other","agentDoctorSubagent":"legacy"}}}}"#,
+        )
+        .unwrap();
+        let homes = homes(&root);
+        assert!(strip_openclaw_markers(&homes));
+        let raw = fs::read_to_string(&homes.openclaw_config).unwrap();
+        assert!(!raw.contains("agentDoctorSubagent"));
+        let value: JsonValue = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["agents"]["entries"]["other"]["name"], "other");
+        assert!(!strip_openclaw_markers(&homes));
+    }
+
+    #[test]
+    fn delete_recognizes_legacy_entries_by_their_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let root = temp.path().join("home");
+        let homes = homes(&root);
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        let stored = sample("abc123");
+        let workspace = homes
+            .openclaw_config
+            .parent()
+            .unwrap()
+            .join("agent-doctor-roles")
+            .join(&stored.slug);
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(
+            &homes.openclaw_config,
+            format!(
+                r#"{{"agents":{{"entries":{{"ad-role-abc123":{{"name":"审查员","workspace":"{}","agentDoctorSubagent":"abc123"}}}}}}}}"#,
+                workspace.display()
+            ),
+        )
+        .unwrap();
+        forget(&project, &homes, &stored);
+        let raw = fs::read_to_string(&homes.openclaw_config).unwrap();
+        assert!(!raw.contains("ad-role-abc123"));
+    }
+
+    #[test]
+    fn failed_openclaw_validation_rolls_back_to_the_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("home");
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        let homes = homes(&root);
+        let original = r#"{"agents":{"entries":{"main":{"name":"main"}}}}"#;
+        fs::write(&homes.openclaw_config, original).unwrap();
+        let mut value: JsonValue = serde_json::from_str(original).unwrap();
+        value["agents"]["entries"]["ad-role-abc123"] =
+            json!({"name": "审查员", "workspace": "/nowhere/role-abc123"});
+        let note = commit_openclaw_config(&homes, &value, || false);
+        assert_eq!(note, Some("openclaw-rolled-back"));
+        let raw = fs::read_to_string(&homes.openclaw_config).unwrap();
+        assert_eq!(raw.trim(), original);
+        assert!(backup_path(&homes.openclaw_config).is_file());
+    }
+
+    #[test]
+    fn a_passing_openclaw_validation_keeps_the_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("home");
+        fs::create_dir_all(root.join(".openclaw")).unwrap();
+        let homes = homes(&root);
+        fs::write(
+            &homes.openclaw_config,
+            r#"{"agents":{"entries":{"main":{"name":"main"}}}}"#,
+        )
+        .unwrap();
+        let mut value: JsonValue =
+            serde_json::from_str(r#"{"agents":{"entries":{"main":{"name":"main"}}}}"#).unwrap();
+        value["agents"]["entries"]["ad-role-abc123"] =
+            json!({"name": "审查员", "workspace": "/nowhere/role-abc123"});
+        let note = commit_openclaw_config(&homes, &value, || true);
+        assert_eq!(note, None);
+        let raw = fs::read_to_string(&homes.openclaw_config).unwrap();
+        assert!(raw.contains("ad-role-abc123"));
+        assert!(raw.contains("main"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_keeps_the_original_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, "{}\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        write_config_atomic(&path, "{\"a\":1}\n").expect("atomic write");
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{\"a\":1}\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_follows_a_symlinked_config_instead_of_replacing_it() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("real-config.json");
+        fs::write(&target, "{}\n").unwrap();
+        let link = temp.path().join("openclaw.json");
+        symlink(&target, &link).unwrap();
+        write_config_atomic(&link, "{\"a\":1}\n").expect("atomic write");
+        // The link survives and the target got the new body.
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "{\"a\":1}\n");
     }
 }
