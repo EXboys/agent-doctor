@@ -124,16 +124,33 @@ pub(crate) fn claude_ask_updated_input(input: &Value, text: &str) -> Value {
     })
 }
 
-/// Bidirectional control channel for Ask permission prompts (Claude or Codex).
+/// Bidirectional control channel for Ask permission prompts (Claude or Codex,
+/// or the built-in doctor agent's in-process confirmations).
 #[derive(Clone, Default)]
 pub struct PromptSessionControl {
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     pending: Arc<Mutex<HashMap<String, PendingReply>>>,
+    /// Built-in doctor agent: request_id → one-shot allow/deny sender. The
+    /// loop blocks on the receiver; `respond_permission` delivers the verdict.
+    doctor: Arc<Mutex<HashMap<String, std::sync::mpsc::SyncSender<bool>>>>,
 }
 
 impl PromptSessionControl {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Arm one built-in doctor confirmation. The loop blocks on the returned
+    /// receiver until `respond_permission` delivers the user's verdict.
+    pub fn register_doctor_confirmation(
+        &self,
+        request_id: &str,
+    ) -> std::sync::mpsc::Receiver<bool> {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        if let Ok(mut guard) = self.doctor.lock() {
+            guard.insert(request_id.to_string(), sender);
+        }
+        receiver
     }
 
     pub(crate) fn attach_stdin(&self, stdin: ChildStdin) {
@@ -284,6 +301,13 @@ impl PromptSessionControl {
         let request_id = request_id.trim();
         if request_id.is_empty() {
             bail!("request_id is required");
+        }
+
+        if let Ok(mut guard) = self.doctor.lock() {
+            if let Some(sender) = guard.remove(request_id) {
+                let _ = sender.send(allow);
+                return Ok(());
+            }
         }
 
         let payload = match self.take_pending(request_id) {

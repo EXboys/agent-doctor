@@ -430,6 +430,7 @@ export function wireChatControllers(): void {
         setStatus(String(error), "error");
       });
     },
+    openDoctorChat: () => chatState.sessions.ensureRuntimeSession("doctor"),
     attachRunLogFailure: (row, content) => {
       const explain = explainChatFailure(content);
       if (!explain) return;

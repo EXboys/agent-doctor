@@ -442,7 +442,9 @@ async fn start_prompt_session_command(
         let claude_ask = runtime == "claude-code" && !options.dangerously_skip_permissions;
         let codex_ask = runtime == "codex" && !options.full_auto;
         let deepseek_ask = runtime == "deepseek-harness";
-        if claude_ask || codex_ask || deepseek_ask {
+        // The built-in doctor agent confirms writes through the same cards.
+        let doctor_ask = runtime == agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID;
+        if claude_ask || codex_ask || deepseek_ask || doctor_ask {
             Some(control)
         } else {
             None

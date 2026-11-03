@@ -177,3 +177,19 @@ Configure the planner LLM via environment:
 Without an API key, `--plan ai` falls back to the deterministic planner.
 
 Bash is **not** a free shell: only Hermes/OpenClaw install/update, `hermes|openclaw --version`, and `chmod` on `.env` paths are allowed. Edits are limited to runtime config paths from the adapter registry.
+
+## Official built-in agent (`doctor`)
+
+Agent Doctor ships its own resident agent loop (`agent-doctor-repair::official_agent`) as the chat runtime `doctor`. It answers without any external agent installed, and the desktop deep-diagnose Q&A runs the same loop in a read-only profile.
+
+| Surface | Behavior |
+|---------|----------|
+| Model | The active personal provider (OpenAI-compatible **or** Anthropic protocol). No provider → `doctor_no_provider` guidance. |
+| Read | `read_file` / `list_dir` / `grep_files` across every registered runtime's config roots + the project folder; secrets masked as `{{SECRET:n}}` into the session vault. |
+| Write | `search_replace` / `write_file` / `patch_config` **inside the project folder only**, each call gated by a chat permission card (auto-approve and phone forwarding reuse the existing flow). |
+| Runtime configs | Never written from chat: the loop refuses and points to the repair flow, where every write is backed up first. |
+| Bash | The union of the per-runtime allowlists (official install/update, version checks, `chmod` on `.env`), permission-gated. |
+| Plan | A lightweight `update_plan` control tool feeds the chat's existing plan UI; replans capped at 3. |
+| Mechanics | Ported from SkillLite: per-tool result profiles (`read_file` verbatim under a large cap, others head+tail at 12k), truncated-JSON recovery for write calls, repeated-failure loop detection, consecutive-failure stop (5), context-overflow recovery (tool-message shrink, 3 retries). |
+
+Deep diagnose keeps its public API, events, and error codes; `run_deep_diagnose_chat` now drives the same loop with `read_only = true`, and the Anthropic protocol is no longer rejected (`deep_diagnose_unsupported_protocol` remains for future unknown protocols). `run_deep_repair` still goes through `execute_repair_loop` (backup → plan → apply → re-probe → audit).

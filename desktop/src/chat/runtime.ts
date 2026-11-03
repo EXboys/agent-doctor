@@ -1,4 +1,5 @@
 import type { AskRuntime } from "../ask-resources";
+import { t } from "../i18n";
 
 /** Survives Ask soft-reload; beats the create-time `__AD_ASK_RUNTIME__` init script. */
 export const ASK_PENDING_RUNTIME_KEY = "ad.ask.pendingRuntime";
@@ -18,6 +19,7 @@ export function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "openclaw") return "OpenClaw";
   if (runtime === "deepseek-harness") return "DeepSeek Harness";
   if (runtime === "zcode") return "ZCode";
+  if (runtime === "doctor") return t("chat.doctorRuntimeName");
   return "Claude Code";
 }
 
@@ -28,7 +30,8 @@ export function isAskRuntime(value: string | null | undefined): value is AskRunt
     value === "hermes" ||
     value === "openclaw" ||
     value === "deepseek-harness" ||
-    value === "zcode"
+    value === "zcode" ||
+    value === "doctor"
   );
 }
 

@@ -6,4 +6,7 @@ mod policy;
 
 pub use agent_doctor_core::repair_types::{RepairToolKind, RepairToolResult};
 pub use executor::{parse_tool_call, RepairToolCall, RepairToolExecutor};
-pub use policy::{allowed_paths_for_runtime, bash_command_allowed};
+pub use policy::{
+    allowed_paths_for_official_agent, allowed_paths_for_runtime, bash_command_allowed,
+    path_is_allowed, OFFICIAL_AGENT_RUNTIME_ID,
+};

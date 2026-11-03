@@ -6,25 +6,26 @@
 
 use agent_doctor_core::repair_types::LlmConfig;
 use agent_doctor_core::repair_types::MaskedRepairContext;
-use agent_doctor_core::repair_types::RepairToolKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::llm::{chat_with_tool_set, max_agent_turns, read_only_tool_definitions};
+use super::llm::{max_agent_turns, official_llm_config};
+use super::official_agent::{
+    run_official_agent_turn, AutoApproveGate, OfficialAgentEvent, OfficialAgentOptions,
+};
 use super::planner::build_masked_repair_context;
 use super::repair_loop::{diff_probe_checks, execute_repair_loop};
-use super::tools::{parse_tool_call, RepairToolExecutor};
+use super::tools::allowed_paths_for_runtime;
 use super::SkippedRepairAction;
 use agent_doctor_core::probe::{probe_runtime, ProbeStatus};
 use agent_doctor_core::repair_types::probe_issue_score;
+#[cfg(test)]
+use agent_doctor_core::repair_types::RepairToolKind;
 use agent_doctor_core::repair_types::{CheckChange, RepairLoopOptions};
 use agent_doctor_core::runtime::suggest_runtime_repairs;
-use agent_doctor_core::setup::{
-    load_active_personal_provider, normalize_protocol, PROTOCOL_ANTHROPIC,
-};
 
 /// Error prefixes the desktop maps to plain-language guidance.
 pub const DEEP_DIAGNOSE_NO_PROVIDER: &str = "deep_diagnose_no_provider";
@@ -93,21 +94,16 @@ pub struct DeepRepairSummary {
 }
 
 /// Model for deep diagnose: the provider the user already wired in Agent Doctor.
+/// Both OpenAI-compatible and Anthropic protocols work here.
 pub fn deep_diagnose_llm_config() -> Result<LlmConfig> {
-    let Some(entry) = load_active_personal_provider()? else {
-        bail!("{DEEP_DIAGNOSE_NO_PROVIDER}: no active provider with an API key");
-    };
-    if normalize_protocol(&entry.protocol) == PROTOCOL_ANTHROPIC {
-        bail!(
-            "{DEEP_DIAGNOSE_UNSUPPORTED_PROTOCOL}: provider '{}' uses the Anthropic protocol",
-            entry.name
-        );
-    }
-    Ok(LlmConfig::from_gateway(
-        &entry.url,
-        &entry.api_key,
-        &entry.model,
-    ))
+    official_llm_config().map_err(|error| {
+        let message = format!("{error:#}");
+        if message.contains("no active personal provider") {
+            anyhow::anyhow!("{DEEP_DIAGNOSE_NO_PROVIDER}: no active provider with an API key")
+        } else {
+            anyhow::anyhow!(message)
+        }
+    })
 }
 
 pub fn run_deep_diagnose_chat(
@@ -135,79 +131,45 @@ pub fn run_deep_diagnose_chat(
     let zh = options.locale.as_deref() != Some("en");
     // The desktop only shows the repair button when checks still fail or warn.
     let repair_offered = open_issues > 0;
-    let mut messages = vec![
-        json!({ "role": "system", "content": system_prompt(&options.runtime_id, zh, repair_offered) }),
-        json!({ "role": "system", "content": context_message(&context)? }),
-    ];
-    messages.extend(history_messages(&options.history));
-    messages.push(json!({ "role": "user", "content": question }));
+    let mut prelude = vec![json!({ "role": "system", "content": context_message(&context)? })];
+    prelude.extend(history_messages(&options.history));
 
-    let tools = read_only_tool_definitions();
-    let mut executor = RepairToolExecutor::new(&options.runtime_id, context.take_vault(), false);
-    let mut tool_calls = 0usize;
+    let official_options = OfficialAgentOptions {
+        prompt: question.to_string(),
+        locale: options.locale.clone(),
+        workspace: None,
+        read_only: true,
+        apply_writes: false,
+        max_rounds: max_agent_turns(),
+        system_override: Some(system_prompt(&options.runtime_id, zh, repair_offered)),
+        system_extra: None,
+        allowed_paths_override: Some(allowed_paths_for_runtime(&options.runtime_id)),
+        vault: context.take_vault(),
+        prelude_messages: prelude,
+    };
 
-    for round in 1..=max_agent_turns() {
-        ensure_not_cancelled(cancel)?;
-        on_event(DeepDiagnoseEvent::Thinking {
-            round: round as u32,
-        });
-        let turn = chat_with_tool_set(config, &messages, Some(&tools))?;
-        if turn.tool_calls.is_empty() {
-            return Ok(DeepDiagnoseReport {
-                answer: turn.content.unwrap_or_default().trim().to_string(),
-                model: config.model.clone(),
-                tool_calls,
-                open_issues,
-            });
-        }
+    let report = run_official_agent_turn(
+        &official_options,
+        config,
+        cancel,
+        |event| match event {
+            OfficialAgentEvent::Thinking { round } => {
+                on_event(DeepDiagnoseEvent::Thinking { round })
+            }
+            OfficialAgentEvent::Tool { tool, target } => {
+                on_event(DeepDiagnoseEvent::Tool { tool, target })
+            }
+            OfficialAgentEvent::ToolResult { .. }
+            | OfficialAgentEvent::Plan { .. }
+            | OfficialAgentEvent::Confirmation { .. } => {}
+        },
+        &mut AutoApproveGate,
+    )?;
 
-        messages.push(json!({
-            "role": "assistant",
-            "content": turn.content,
-            "tool_calls": turn.tool_calls.iter().map(|call| json!({
-                "id": call.id,
-                "type": "function",
-                "function": { "name": call.name, "arguments": call.arguments }
-            })).collect::<Vec<_>>()
-        }));
-
-        for call in turn.tool_calls {
-            ensure_not_cancelled(cancel)?;
-            tool_calls += 1;
-            let content = match parse_tool_call(&call.name, &call.arguments) {
-                Ok(parsed) if is_read_only(parsed.kind) => {
-                    on_event(DeepDiagnoseEvent::Tool {
-                        tool: call.name.clone(),
-                        target: parsed.path.clone().or_else(|| parsed.pattern.clone()),
-                    });
-                    serde_json::to_string(&executor.execute(&parsed)?)?
-                }
-                Ok(_) => json!({ "error": "deep diagnose can only read files" }).to_string(),
-                Err(error) => json!({ "error": error.to_string() }).to_string(),
-            };
-            messages.push(json!({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": content
-            }));
-        }
-    }
-
-    // Out of tool rounds: ask for the answer with what it has.
-    ensure_not_cancelled(cancel)?;
-    messages.push(json!({
-        "role": "user",
-        "content": if zh {
-            "请根据目前看到的信息，直接给出结论，不要再调用工具。"
-        } else {
-            "Answer now with what you have. Do not call more tools."
-        }
-    }));
-    let turn = chat_with_tool_set(config, &messages, None)?;
     Ok(DeepDiagnoseReport {
-        answer: turn.content.unwrap_or_default().trim().to_string(),
-        model: config.model.clone(),
-        tool_calls,
+        answer: report.answer,
+        model: report.model,
+        tool_calls: report.tool_calls,
         open_issues,
     })
 }
@@ -245,13 +207,6 @@ pub fn run_deep_repair(runtime_id: &str, config: &LlmConfig) -> Result<DeepRepai
         new_issues: diff.new_issues,
         rolled_back_issues,
     })
-}
-
-fn is_read_only(kind: RepairToolKind) -> bool {
-    matches!(
-        kind,
-        RepairToolKind::Read | RepairToolKind::ListDir | RepairToolKind::GrepFiles
-    )
 }
 
 fn ensure_not_cancelled(cancel: &AtomicBool) -> Result<()> {
@@ -317,6 +272,13 @@ fn system_prompt(runtime_id: &str, zh: bool, repair_offered: bool) -> String {
 mod tests {
     use super::*;
 
+    fn is_read_only(kind: RepairToolKind) -> bool {
+        matches!(
+            kind,
+            RepairToolKind::Read | RepairToolKind::ListDir | RepairToolKind::GrepFiles
+        )
+    }
+
     #[test]
     fn gateway_url_gets_chat_completions_suffix() {
         let config = LlmConfig::from_gateway("https://api.deepseek.com/v1/", " k ", " m ");
@@ -339,7 +301,7 @@ mod tests {
 
     #[test]
     fn only_read_tools_are_offered() {
-        let tools = read_only_tool_definitions();
+        let tools = crate::repair::llm::read_only_tool_definitions();
         let names: Vec<&str> = tools
             .as_array()
             .unwrap()

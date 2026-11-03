@@ -86,6 +86,21 @@ pub fn bash_command_allowed_for_runtime(runtime_id: &str, command: &str) -> bool
     trimmed.starts_with("chmod ") && trimmed.contains(".env")
 }
 
+/// Union allowlist for the official built-in agent: it repairs any registered
+/// runtime, so it may run any of their allowlisted install/update/version
+/// commands plus the shared `chmod` rule.
+pub fn bash_command_allowed_for_official_agent(command: &str) -> bool {
+    [
+        "hermes",
+        "deepseek-harness",
+        "openclaw",
+        "claude-code",
+        "codex",
+    ]
+    .iter()
+    .any(|runtime| bash_command_allowed_for_runtime(runtime, command))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

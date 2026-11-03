@@ -93,6 +93,8 @@ export type BubblesDeps = {
   setLifecycleActivityEl: (el: HTMLElement | null) => void;
   addProject: () => void;
   openProvider: () => void;
+  /** Empty-state card: start a chat with the built-in doctor agent. */
+  openDoctorChat?: () => void;
   /** Buttons for a failed run log whose sentence is already on the row. */
   attachRunLogFailure?: (row: HTMLElement, content: string) => void;
 };
@@ -623,6 +625,16 @@ export function createBubblesController(deps: BubblesDeps) {
     provider.querySelector("span")!.textContent = t("chat.startProviderHint");
     provider.addEventListener("click", () => deps.openProvider());
     wrap.append(project, provider);
+    if (deps.openDoctorChat) {
+      const doctor = document.createElement("button");
+      doctor.type = "button";
+      doctor.className = "chat-start-card";
+      doctor.innerHTML = `<strong></strong><span></span>`;
+      doctor.querySelector("strong")!.textContent = t("chat.emptyDoctorAction");
+      doctor.querySelector("span")!.textContent = t("chat.emptyDoctorHint");
+      doctor.addEventListener("click", () => deps.openDoctorChat?.());
+      wrap.append(doctor);
+    }
     return wrap;
   }
 

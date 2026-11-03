@@ -4,6 +4,7 @@ pub(crate) mod dispatch;
 mod execute;
 mod explain;
 mod llm;
+pub mod official_agent;
 mod planner;
 mod playbooks;
 mod repair_loop;
@@ -24,6 +25,7 @@ pub use execute::{execute_repair, RepairExecuteOptions, RepairExecuteReport};
 pub use explain::explain_runtime;
 
 use agent_doctor_core::repair_types::LlmConfig;
+pub use llm::official_llm_config;
 pub use planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, PlannerOptions,
     PlannerResult, RepairPlanner,
@@ -46,8 +48,9 @@ pub use restore::{
     RestoreReport,
 };
 pub use tools::{
-    allowed_paths_for_runtime, bash_command_allowed, parse_tool_call, RepairToolCall,
-    RepairToolExecutor, RepairToolKind, RepairToolResult,
+    allowed_paths_for_official_agent, allowed_paths_for_runtime, bash_command_allowed,
+    parse_tool_call, RepairToolCall, RepairToolExecutor, RepairToolKind, RepairToolResult,
+    OFFICIAL_AGENT_RUNTIME_ID,
 };
 
 // The redaction/diagnostic/action vocabulary moved to `agent_doctor_core::repair_types`

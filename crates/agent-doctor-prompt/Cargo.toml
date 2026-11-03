@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 agent-doctor-core = { workspace = true }
+agent-doctor-repair = { workspace = true }
 anyhow.workspace = true
 dirs.workspace = true
 base64 = "0.23"

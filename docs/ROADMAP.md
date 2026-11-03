@@ -81,6 +81,7 @@
 - [x] Codex CODEX_HOME isolation marker + doctor guard
 - [ ] Team baseline drift — model provider / MCP / Skill full matrix
 - [ ] SkillLite adapter (optional runtime)
+- [x] Official built-in agent (`doctor`): chat Q&A without any installed runtime, same loop powers deep diagnose; OpenAI-compatible + Anthropic protocols; writes project files behind permission cards, runtime configs stay repair-flow-only
 - [x] Agentless remote doctor (SSH) — bootstrap (password→ed25519) + `remote host|project|doctor` read-only; see [remote.md](remote.md)
 - [ ] Remote repair / workspace over SSH
 

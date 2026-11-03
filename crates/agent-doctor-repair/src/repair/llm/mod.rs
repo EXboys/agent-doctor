@@ -3,12 +3,14 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use agent_doctor_core::repair_types::LlmConfig;
+use agent_doctor_core::repair_types::{LlmConfig, LlmProtocol};
 use serde_json::{json, Value};
+
+pub mod anthropic;
 
 const MAX_AGENT_TURNS: usize = 8;
 /// Reasoning models can think for a while before the first token.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmToolCall {
@@ -158,6 +160,13 @@ pub fn chat_with_tool_set(
     messages: &[Value],
     tools: Option<&Value>,
 ) -> Result<LlmTurn> {
+    match config.protocol {
+        LlmProtocol::OpenAi => chat_openai(config, messages, tools),
+        LlmProtocol::Anthropic => anthropic::chat(config, messages, tools),
+    }
+}
+
+fn chat_openai(config: &LlmConfig, messages: &[Value], tools: Option<&Value>) -> Result<LlmTurn> {
     let client = reqwest::blocking::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
@@ -233,6 +242,30 @@ fn parse_chat_completion(payload: &Value) -> Result<LlmTurn> {
     })
 }
 
-pub fn max_agent_turns() -> usize {
+pub const fn max_agent_turns() -> usize {
     MAX_AGENT_TURNS
+}
+
+/// LLM config for the official built-in agent from the active personal provider.
+/// Unlike the historical deep-diagnose gate, this supports both wire protocols;
+/// callers wrap errors with their own user-facing error-code prefix.
+pub fn official_llm_config() -> Result<LlmConfig> {
+    let Some(entry) = agent_doctor_core::setup::load_active_personal_provider()? else {
+        bail!("no active personal provider with an API key");
+    };
+    if agent_doctor_core::setup::normalize_protocol(&entry.protocol)
+        == agent_doctor_core::setup::PROTOCOL_ANTHROPIC
+    {
+        Ok(LlmConfig::from_anthropic_gateway(
+            &entry.url,
+            &entry.api_key,
+            &entry.model,
+        ))
+    } else {
+        Ok(LlmConfig::from_gateway(
+            &entry.url,
+            &entry.api_key,
+            &entry.model,
+        ))
+    }
 }
