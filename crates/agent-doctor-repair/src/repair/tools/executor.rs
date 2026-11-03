@@ -351,8 +351,11 @@ impl RepairToolExecutor {
             ));
         };
 
-        let command = self.vault.restore_tokens_in_text(command);
-        if !bash_command_allowed(&self.runtime_id, &command) {
+        // The allowlist runs against the restored command — that is what
+        // would actually execute — but previews echo the proposal as the
+        // model wrote it, so vault tokens never surface real secrets.
+        let restored = self.vault.restore_tokens_in_text(command);
+        if !bash_command_allowed(&self.runtime_id, &restored) {
             return Ok(failed(
                 RepairToolKind::Bash,
                 false,
@@ -369,7 +372,7 @@ impl RepairToolExecutor {
             ));
         }
 
-        let output = run_shell(&command)?;
+        let output = run_shell(&restored)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
@@ -378,13 +381,16 @@ impl RepairToolExecutor {
             } else {
                 stderr.trim().to_string()
             };
+            let mut snippet_vault = SecretVault::default();
+            let masked = snippet_vault.mask_text(&detail);
+            self.vault.absorb(snippet_vault);
             return Ok(failed(
                 RepairToolKind::Bash,
                 true,
-                if detail.is_empty() {
+                if masked.trim().is_empty() {
                     format!("command failed: {:?}", output.status.code())
                 } else {
-                    detail
+                    masked
                 },
             ));
         }
@@ -432,6 +438,18 @@ impl RepairToolExecutor {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        // The allowed-path check ran on un-normalized text (the file may not
+        // have existed yet). Now that parents exist, re-check the resolved
+        // path so symlinked parents cannot carry the write outside the roots.
+        let resolved = path.canonicalize().or_else(|_| {
+            path.parent()
+                .and_then(|parent| parent.canonicalize().ok())
+                .map(|parent| parent.join(path.file_name().unwrap_or_default()))
+                .ok_or_else(|| anyhow::anyhow!("failed to resolve {}", path.display()))
+        })?;
+        if !path_is_allowed(&resolved, &self.allowed_paths) {
+            anyhow::bail!("{} resolves outside allowed paths", path.display());
         }
         fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
 

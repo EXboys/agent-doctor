@@ -551,6 +551,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const doctorTab = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-doctor-tab]");
     if (doctorTab) {
       selectDoctorRuntime();
+      // The ask window listens for this to switch to the runtime's session;
+      // "doctor" is ask-capable in the runtime catalog, same as the CLIs.
+      void emit(ASK_SELECT_RUNTIME_EVENT, { runtime: DOCTOR_RUNTIME_ID }).catch(() => {});
       return;
     }
     const tab = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-runtime-tab]");

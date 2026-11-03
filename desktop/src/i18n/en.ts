@@ -1030,6 +1030,7 @@ export const en = {
     "chat.subagentOpenclawUnready": "OpenClaw is not ready, so this helper was not given to it.",
     "chat.subagentOccupied": "An assistant already has another role with this place, so that one was left as it is.",
     "chat.subagentWriteFailed": "One assistant did not get this helper. Save again.",
+    "chat.subagentOpenclawRolledBack": "OpenClaw rejected the change, so its config was restored. The helper was not given to it.",
     "chat.subagentWatch": "Asking {name} to take a look",
     "chat.subagentSomeone": "a helper",
     "chat.addTool": "Add a tool",

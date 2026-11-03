@@ -1029,6 +1029,7 @@ export const zh = {
     "chat.subagentOpenclawUnready": "OpenClaw 还没准备好，这次没有交给它。",
     "chat.subagentOccupied": "有一个助手里已经有别的角色占着这个位置，那一份没有改。",
     "chat.subagentWriteFailed": "有一个助手没有写上，再保存一次。",
+    "chat.subagentOpenclawRolledBack": "OpenClaw 没有接受这次改动，它的配置已恢复原样，这个角色没有交给它。",
     "chat.subagentWatch": "正在让{name}看一下",
     "chat.subagentSomeone": "它",
     "chat.addTool": "去添加工具",
