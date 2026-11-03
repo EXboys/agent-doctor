@@ -28,6 +28,7 @@ pub fn launch_args(bundle_id: Option<&str>, app_path: &str) -> Vec<String> {
 
 /// Open that app and bring it forward. The caller has already picked one exact app.
 pub fn open_app(bundle_id: Option<&str>, app_path: &str) -> std::io::Result<ExitStatus> {
+    // raw-spawn-ok: macOS open of a GUI app
     Command::new("/usr/bin/open")
         .args(launch_args(bundle_id, app_path))
         .status()

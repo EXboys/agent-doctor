@@ -6,8 +6,9 @@
 //! That bug class shipped four times between 0.1.87 and 0.1.90; this test is
 //! the fence. Route new spawns through `crate::exec::run_output` (captures)
 //! or `crate::exec::command_for_path` (pipes / long-lived). The marker is for
-//! intentional windows (session_launch terminals) and platform tools that
-//! cannot start on the other platform.
+//! intentional windows (session_launch terminals), platform tools that
+//! cannot start on the other platform, console-app parents whose children
+//! inherit the console, and GUI-subsystem targets (browsers, `open`).
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +18,9 @@ const MARKER: &str = "raw-spawn-ok";
 fn raw_command_spawn_is_confined_or_marked() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // core plus the prompt crate that was split out of it: prompt_session
-    // spawns more agent children than anywhere else in the workspace.
+    // spawns more agent children than anywhere else in the workspace. The
+    // mcp crate and the CLI run console-less under the desktop app, and
+    // src-tauri is the GUI app itself — all three painted stray terminals.
     let sources = [
         manifest.join("src"),
         manifest
@@ -28,6 +31,18 @@ fn raw_command_spawn_is_confined_or_marked() {
             .join("../agent-doctor-repair/src")
             .canonicalize()
             .expect("agent-doctor-repair/src next to agent-doctor-core"),
+        manifest
+            .join("../agent-doctor-mcp/src")
+            .canonicalize()
+            .expect("agent-doctor-mcp/src next to agent-doctor-core"),
+        manifest
+            .join("../../cli/src")
+            .canonicalize()
+            .expect("cli/src at the workspace root"),
+        manifest
+            .join("../../desktop/src-tauri/src")
+            .canonicalize()
+            .expect("desktop/src-tauri/src at the workspace root"),
     ];
     let mut offenders = Vec::new();
     for src in &sources {

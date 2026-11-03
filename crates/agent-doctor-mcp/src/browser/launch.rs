@@ -97,6 +97,7 @@ fn launch_chrome_once(
         )
     })?;
 
+    // raw-spawn-ok: browsers are GUI-subsystem; there is no console to paint
     let mut cmd = Command::new(&discovery.binary_path);
 
     cmd.arg(format!("--remote-debugging-port={}", port))

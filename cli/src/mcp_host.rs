@@ -49,6 +49,7 @@ fn relay() -> i32 {
         return 1;
     };
 
+    // raw-spawn-ok: re-exec of this console binary with inherited stdio
     let mut command = Command::new(real);
     command
         .args(std::env::args_os().skip(1))

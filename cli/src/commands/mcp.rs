@@ -319,17 +319,20 @@ pub fn run_smoke(
 
 fn quit_everyday_chrome(discovery: &BrowserDiscovery) -> Result<()> {
     if cfg!(target_os = "macos") {
+        // raw-spawn-ok: the CLI owns a console; children inherit it
         let _ = Command::new("osascript")
             .args(["-e", "tell application \"Google Chrome\" to quit"])
             .status();
         thread::sleep(Duration::from_millis(500));
     }
+    // raw-spawn-ok: the CLI owns a console; children inherit it
     let output = Command::new("pgrep")
         .args(["-f", &discovery.binary_path.display().to_string()])
         .output()
         .context("pgrep Chrome")?;
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Ok(pid) = line.trim().parse::<i32>() {
+            // raw-spawn-ok: the CLI owns a console; children inherit it
             let _ = Command::new("kill").args([pid.to_string()]).status();
         }
     }

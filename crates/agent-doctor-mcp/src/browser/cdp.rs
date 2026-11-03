@@ -218,6 +218,7 @@ pub fn stop_chrome(instance: &mut ChromeInstance) -> Result<()> {
 
 /// PIDs currently listening on a TCP port (best-effort via `lsof`).
 pub(crate) fn pids_listening_on_port(port: u16) -> Vec<u32> {
+    // raw-spawn-ok: unix process probe (lsof); windows never reaches here
     let output = Command::new("lsof")
         .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
         .output();
@@ -234,6 +235,7 @@ pub(crate) fn pids_listening_on_port(port: u16) -> Vec<u32> {
 }
 
 pub(crate) fn process_command_line(pid: u32) -> Option<String> {
+    // raw-spawn-ok: unix process probe (ps); windows never reaches here
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-ww", "-o", "command="])
         .output()
@@ -250,6 +252,7 @@ pub(crate) fn process_command_line(pid: u32) -> Option<String> {
 }
 
 pub(crate) fn process_parent_pid(pid: u32) -> Option<u32> {
+    // raw-spawn-ok: unix process probe (ps); windows never reaches here
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "ppid="])
         .output()
@@ -377,6 +380,7 @@ pub fn profile_locked_by_other_chrome(user_data_dir: &PathBuf, cdp_port: u16) ->
     let want = user_data_dir.to_string_lossy();
     let cdp_pids: std::collections::HashSet<u32> =
         pids_listening_on_port(cdp_port).into_iter().collect();
+    // raw-spawn-ok: unix process probe (ps); windows never reaches here
     let output = Command::new("ps")
         .args(["-ax", "-ww", "-o", "pid=,command="])
         .output();
@@ -432,6 +436,7 @@ pub fn kill_chrome_on_port(port: u16) -> Result<()> {
         return Ok(());
     }
     for pid in &pids {
+        // raw-spawn-ok: unix kill of the CDP browser this server started
         let _ = Command::new("kill").arg(pid.to_string()).status();
     }
     for _ in 0..20 {
@@ -442,6 +447,7 @@ pub fn kill_chrome_on_port(port: u16) -> Result<()> {
     }
     // Last resort
     for pid in pids_listening_on_port(port) {
+        // raw-spawn-ok: unix kill -9 of the CDP browser this server started
         let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
     }
     std::thread::sleep(Duration::from_millis(300));

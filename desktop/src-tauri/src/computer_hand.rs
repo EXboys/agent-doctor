@@ -549,6 +549,7 @@ fn spotlight_apps(query: &str) -> Vec<String> {
         ),
     ];
     for query in queries {
+        // raw-spawn-ok: macOS Spotlight probe, output captured
         let output = std::process::Command::new("/usr/bin/mdfind")
             .arg(&query)
             .output();
@@ -570,6 +571,7 @@ fn spotlight_apps(query: &str) -> Vec<String> {
 
 #[cfg(target_os = "macos")]
 fn spotlight_value(path: &str, field: &str) -> Option<String> {
+    // raw-spawn-ok: macOS Spotlight metadata probe, output captured
     let output = std::process::Command::new("/usr/bin/mdls")
         .args(["-name", field, "-raw", path])
         .output()
@@ -686,6 +688,7 @@ fn capture_rect(
         pt_w as i64,
         pt_h as i64
     );
+    // raw-spawn-ok: macOS silent screenshot (-x), file output
     let mut child = std::process::Command::new("/usr/sbin/screencapture")
         .args(["-x", "-R", &rect, &path])
         .spawn()

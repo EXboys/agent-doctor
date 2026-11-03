@@ -1246,15 +1246,21 @@ mod tests {
         let homes = homes(&root);
         let notes = write_openclaw(&homes, &flags(HermesMode::Off), &sample("abc123"));
         assert!(notes.is_empty());
-        let raw = fs::read_to_string(homes.openclaw_config).unwrap();
+        let raw = fs::read_to_string(&homes.openclaw_config).unwrap();
         assert!(!raw.contains("agentDoctorSubagent"));
         let value: JsonValue = serde_json::from_str(&raw).unwrap();
         let entry = &value["agents"]["entries"]["ad-role-abc123"];
         assert_eq!(entry["name"], "审查员");
-        assert!(entry["workspace"]
-            .as_str()
+        let expected_workspace = homes
+            .openclaw_config
+            .parent()
             .unwrap()
-            .ends_with("agent-doctor-roles/role-abc123"));
+            .join("agent-doctor-roles")
+            .join("role-abc123");
+        assert_eq!(
+            Path::new(entry["workspace"].as_str().unwrap()),
+            expected_workspace
+        );
     }
 
     #[test]
@@ -1313,12 +1319,20 @@ mod tests {
             .join("agent-doctor-roles")
             .join(&stored.slug);
         fs::create_dir_all(&workspace).unwrap();
+        // json! escapes the path for JSON; a format! would leak raw backslashes
+        // into the string on Windows and produce an invalid config.
+        let legacy = json!({
+            "agents": { "entries": {
+                "ad-role-abc123": {
+                    "name": "审查员",
+                    "workspace": workspace.display().to_string(),
+                    "agentDoctorSubagent": "abc123",
+                }
+            }}
+        });
         fs::write(
             &homes.openclaw_config,
-            format!(
-                r#"{{"agents":{{"entries":{{"ad-role-abc123":{{"name":"审查员","workspace":"{}","agentDoctorSubagent":"abc123"}}}}}}}}"#,
-                workspace.display()
-            ),
+            serde_json::to_string(&legacy).unwrap(),
         )
         .unwrap();
         forget(&project, &homes, &stored);

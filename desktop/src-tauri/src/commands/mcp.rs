@@ -528,6 +528,7 @@ fn open_system_settings(url: &str) -> Result<(), String> {
     if !url.starts_with("x-apple.systempreferences:") {
         return Err("refused".into());
     }
+    // raw-spawn-ok: macOS open of a URL
     let status = std::process::Command::new("/usr/bin/open")
         .arg(url)
         .status()
