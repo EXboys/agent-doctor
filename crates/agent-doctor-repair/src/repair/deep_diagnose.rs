@@ -65,6 +65,8 @@ pub enum DeepDiagnoseEvent {
         tool: String,
         target: Option<String>,
     },
+    /// Incremental reply text while the model writes it.
+    Delta { text: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,7 +161,11 @@ pub fn run_deep_diagnose_chat(
             OfficialAgentEvent::Tool { tool, target } => {
                 on_event(DeepDiagnoseEvent::Tool { tool, target })
             }
+            OfficialAgentEvent::Delta { text } => {
+                on_event(DeepDiagnoseEvent::Delta { text });
+            }
             OfficialAgentEvent::ToolResult { .. }
+            | OfficialAgentEvent::Reasoning { .. }
             | OfficialAgentEvent::Plan { .. }
             | OfficialAgentEvent::Confirmation { .. } => {}
         },

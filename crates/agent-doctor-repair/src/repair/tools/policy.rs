@@ -41,6 +41,11 @@ pub fn allowed_paths_for_official_agent(workspace: Option<&Path>) -> Vec<PathBuf
         paths.push(config_dir.join("agent-doctor").join("guides"));
         paths.push(config_dir.join("agent-doctor").join("logs"));
     }
+    // The doctor's own knowledge base (global variant); the per-project copy
+    // is already covered by the workspace root.
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".agent-doctor").join("knowledge"));
+    }
 
     paths.sort();
     paths.dedup();

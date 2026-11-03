@@ -35,12 +35,15 @@ type DeepBubble = {
   attachments?: ChatAttachment[];
   /** Offer Agent Doctor's repair loop under this answer. */
   offerRepair?: boolean;
+  /** The answer is still streaming; a final report will replace its text. */
+  streaming?: boolean;
 };
 
 type DeepDiagnoseEvent =
   | { type: "checking" }
   | { type: "thinking"; round: number }
-  | { type: "tool"; tool: string; target: string | null };
+  | { type: "tool"; tool: string; target: string | null }
+  | { type: "delta"; text: string };
 
 export type DeepChatHooks = {
   /** Re-run the left-side checks after a repair changed files. */
@@ -450,7 +453,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     role: DeepBubble["role"],
     text: string,
     attachments?: ChatAttachment[],
-    extra?: Pick<DeepBubble, "offerRepair">,
+    extra?: Pick<DeepBubble, "offerRepair" | "streaming">,
   ): string {
     const id = `deep-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     bubbles.push({
@@ -462,6 +465,55 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     });
     paint();
     return id;
+  }
+
+  // Streaming answer: deltas append into one live bubble, repainted throttled.
+  let streamBubbleId: string | null = null;
+  let streamPaintTimer: number | null = null;
+
+  function resetStream(): void {
+    if (streamPaintTimer !== null) {
+      window.clearTimeout(streamPaintTimer);
+      streamPaintTimer = null;
+    }
+    streamBubbleId = null;
+  }
+
+  function appendStreamDelta(text: string): void {
+    let bubble = streamBubbleId ? bubbles.find((item) => item.id === streamBubbleId) : undefined;
+    if (!bubble) {
+      streamBubbleId = pushBubble("assistant", "", undefined, { streaming: true });
+      bubble = bubbles.find((item) => item.id === streamBubbleId);
+    }
+    if (!bubble) {
+      return;
+    }
+    bubble.text += text;
+    if (streamPaintTimer === null) {
+      streamPaintTimer = window.setTimeout(() => {
+        streamPaintTimer = null;
+        paint();
+      }, 80);
+    }
+  }
+
+  function finalizeStreamBubble(finalText: string, offerRepair: boolean): void {
+    if (streamPaintTimer !== null) {
+      window.clearTimeout(streamPaintTimer);
+      streamPaintTimer = null;
+    }
+    const id = streamBubbleId;
+    streamBubbleId = null;
+    if (!id) {
+      return;
+    }
+    const bubble = bubbles.find((item) => item.id === id);
+    if (bubble) {
+      bubble.text = finalText || bubble.text;
+      bubble.streaming = false;
+      bubble.offerRepair = offerRepair;
+    }
+    paint();
   }
 
   function historyForLoop(): { role: string; content: string }[] {
@@ -497,6 +549,9 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
               );
               break;
             }
+            case "delta":
+              appendStreamDelta(payload.text);
+              break;
             default:
               break;
           }
@@ -540,6 +595,7 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
     attachmentsApi?.renderPendingAttachments();
     const bubbleText = (opts?.displayText ?? typed).trim() || text;
     pushBubble("user", bubbleText, attachments);
+    resetStream();
     await ensureListen();
 
     let readings: ImageReading[] = [];
@@ -572,10 +628,15 @@ export function createDeepChat(session: DiagnoseSession, hooks: DeepChatHooks = 
       for (const bubble of bubbles) {
         bubble.offerRepair = false;
       }
-      pushBubble("assistant", answer, undefined, { offerRepair: report.open_issues > 0 });
+      if (streamBubbleId) {
+        finalizeStreamBubble(answer, report.open_issues > 0);
+      } else {
+        pushBubble("assistant", answer, undefined, { offerRepair: report.open_issues > 0 });
+      }
     } catch (error) {
       const account = explainLlmAccountBlock(error);
       if (account) hooks.onAccountBlock?.(account);
+      finalizeStreamBubble("", false);
       pushBubble("meta", friendlyDeepError(error));
     } finally {
       busy = false;

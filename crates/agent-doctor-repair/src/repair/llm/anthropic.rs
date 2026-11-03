@@ -15,7 +15,7 @@ use super::{LlmToolCall, LlmTurn};
 /// Anthropic requires an explicit output budget; tool-heavy repair turns need
 /// room for several tool calls plus prose.
 const MAX_TOKENS: u32 = 8192;
-const ANTHROPIC_VERSION: &str = "2023-06-01";
+pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 pub fn messages_url(gateway_base: &str) -> String {
     let base = gateway_base.trim().trim_end_matches('/');
@@ -215,6 +215,17 @@ fn convert_tool_definitions(tools: &Value) -> Value {
             })
             .collect(),
     )
+}
+
+/// Same body with `stream: true` for the SSE endpoint.
+pub(crate) fn build_stream_request_body(
+    config: &LlmConfig,
+    messages: &[Value],
+    tools: Option<&Value>,
+) -> Value {
+    let mut body = build_request_body(config, messages, tools);
+    body["stream"] = Value::Bool(true);
+    body
 }
 
 fn parse_messages_response(payload: &Value) -> Result<LlmTurn> {

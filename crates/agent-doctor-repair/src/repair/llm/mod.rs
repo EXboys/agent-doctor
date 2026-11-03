@@ -7,6 +7,7 @@ use agent_doctor_core::repair_types::{LlmConfig, LlmProtocol};
 use serde_json::{json, Value};
 
 pub mod anthropic;
+pub mod stream;
 
 const MAX_AGENT_TURNS: usize = 8;
 /// Reasoning models can think for a while before the first token.

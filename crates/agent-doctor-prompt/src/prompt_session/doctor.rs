@@ -125,7 +125,7 @@ fn run_doctor(
     let agent_options = OfficialAgentOptions::for_chat(prompt, locale, Some(cwd.clone()));
 
     let mut step_seq = 0usize;
-    let mut display = String::new();
+    let mut _streamed_text = false;
     let mut gate = ControlGate {
         control,
         cancel: cancel.clone(),
@@ -169,6 +169,19 @@ fn run_doctor(
                     session_id: session_id.clone(),
                     phase: "tool".to_string(),
                     message: tool.clone(),
+                });
+            }
+            OfficialAgentEvent::Reasoning { text } => {
+                on_event(PromptSessionEvent::Thinking {
+                    session_id: session_id.clone(),
+                    text,
+                });
+            }
+            OfficialAgentEvent::Delta { text } => {
+                _streamed_text = true;
+                on_event(PromptSessionEvent::Delta {
+                    session_id: session_id.clone(),
+                    text,
                 });
             }
             OfficialAgentEvent::ToolResult { tool, success } => {
@@ -217,8 +230,8 @@ fn run_doctor(
     match result {
         Ok(report) => {
             let answer = report.answer;
-            if !answer.is_empty() {
-                display.push_str(&answer);
+            if !answer.is_empty() && !report.streamed {
+                _streamed_text = true;
                 on_event(PromptSessionEvent::Delta {
                     session_id: session_id.clone(),
                     text: answer.clone(),
