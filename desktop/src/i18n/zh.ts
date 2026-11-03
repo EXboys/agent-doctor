@@ -451,6 +451,7 @@ export const zh = {
     "chat.channelFailed": "这次没做成。",
     "chat.channelDone": "做完了。",
     "chat.channelStopped": "已停止。",
+    "chat.channelStopMissed": "电脑上没找到这句话。它要还在做，结果会直接发回来。",
     "chat.channelWorking": "正在处理：{name}",
     "chat.channelWriting": "正在写回复。",
     "chat.channelThinking": "还在想。",

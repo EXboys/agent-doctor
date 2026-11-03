@@ -123,6 +123,7 @@ import {
 } from "./chat/channel-lane";
 import { channelSessionTitle, placeChannelSession } from "./chat/channel-route";
 import { createChannelLedger } from "./chat/channel-ledger";
+import { decidePhoneStop } from "./chat/channel-stop";
 import { createEmptySession } from "./chat/store";
 import {
   defaultWorkspaceName,
@@ -650,16 +651,24 @@ function bootChatTail(): void {
   async function stopAsked(id: string): Promise<void> {
     const jobId = id.trim();
     // The phone repeats stop while the screen stays quiet. One request is enough.
-    if (!jobId || phoneStops.has(jobId)) return;
-    phoneStops.add(jobId);
-    dropChannelJob(jobId);
+    if (!jobId) return;
     let sessionId = channelSessionForJob(jobId);
     if (!sessionId) {
       const running = [...liveRuns()].map((run) => run.chatSessionId);
       if (running.length === 1) sessionId = running[0];
     }
     const activeId = chatState.store?.activeId ?? "";
-    if (sessionId && (isChatRunning(sessionId) || activeId === sessionId)) {
+    const decision = decidePhoneStop({
+      asked: phoneStops.has(jobId),
+      seen: channelLedger.seen(jobId),
+      running: sessionId ? isChatRunning(sessionId) : false,
+      active: sessionId !== null && sessionId === activeId,
+    });
+    if (decision.action === "ignore") return;
+    phoneStops.add(jobId);
+    dropChannelJob(jobId);
+    if (decision.action === "cancel") {
+      if (!sessionId) return;
       teamupsChannelNote(jobId, `stop in ${sessionId}`);
       try {
         if (activeId === sessionId) await cancelAsk();
@@ -669,7 +678,32 @@ function bootChatTail(): void {
       }
       return;
     }
-    finishChannel(jobId, t("chat.channelStopped"), true, sessionId ? phoneChatKey(sessionId) : "");
+    // Nothing runs for this sentence here. The site may still hold the job
+    // open because its finishing reply was lost — answer from the ledger if it
+    // has one. Claiming a stop would bury the real result of a turn that turns
+    // out to be alive after all.
+    const chat = sessionId ? phoneChatKey(sessionId) : "";
+    if (decision.action === "replay") {
+      teamupsChannelNote(jobId, "stop asked, answer from ledger");
+      void teamupsChannelReply(
+        jobId,
+        decision.reply || t("chat.channelDone"),
+        decision.ok,
+        true,
+        undefined,
+        chat,
+      ).catch(() => {});
+      return;
+    }
+    teamupsChannelNote(jobId, "stop asked, nothing running here");
+    void teamupsChannelReply(
+      jobId,
+      t("chat.channelStopMissed"),
+      false,
+      false,
+      undefined,
+      chat,
+    ).catch(() => {});
   }
   void listen<{ id?: string }>("teamups-channel-stop", (event) => {
     const id = event.payload?.id?.trim() ?? "";

@@ -611,7 +611,8 @@ export function createSendController(deps: SendDeps) {
     } finally {
       const liveGen = deps.runBusyGen?.(chatSessionId) ?? deps.getBusyGen();
       if (turnGen !== 0 && liveGen !== turnGen) {
-        if (channel && draft.channelJobId) endChannelJob(chatSessionId, draft.channelJobId);
+        // This invoke returned but the turn runs on detached. Keep the
+        // job→session mapping so a phone stop can still find and cancel it.
         return "started";
       }
       if (foreground && here()) {

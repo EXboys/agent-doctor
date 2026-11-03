@@ -451,6 +451,7 @@ export const en = {
     "chat.channelFailed": "That did not finish.",
     "chat.channelDone": "Done.",
     "chat.channelStopped": "Stopped.",
+    "chat.channelStopMissed": "Not found on this computer. If it is still running, the result will come back on its own.",
     "chat.channelWorking": "Working on: {name}",
     "chat.channelWriting": "Writing the reply.",
     "chat.channelThinking": "Still thinking.",

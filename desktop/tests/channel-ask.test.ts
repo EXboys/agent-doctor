@@ -82,4 +82,12 @@ endChannelJob("chat-a", "job-a");
 assert.equal(channelSessionForJob("job-a"), null);
 assert.equal(channelSessionForJob("job-b"), "chat-b");
 
+// A send whose invoke returned while a newer turn runs on detached must not
+// end the channel job: the phone's stop still has to find this session. The
+// mapping may only be cleared by a real turn end (chat/send.ts).
+beginChannelJob("job-live", "chat-live", "phone:x");
+assert.equal(channelSessionForJob("job-live"), "chat-live", "a detached turn keeps its job stoppable");
+endChannelJob("chat-live", "job-live");
+assert.equal(channelSessionForJob("job-live"), null, "the real turn end clears the mapping");
+
 console.log("channel ask tests passed");
