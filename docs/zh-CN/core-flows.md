@@ -1,6 +1,6 @@
 # 核心链路：改动前后的标准
 
-这是五条「坏了用户就用不了」的链路的改动标准。这里的规则全部来自真实事故（每条后面括号里是对应的修复提交）。改这些链路时先看这一页，改完跑最后一节的检查。不要为某一次事故加一次性分支——把规则落到下面的不变量里。
+这是「坏了用户就用不了」的链路的改动标准。这里的规则全部来自真实事故（每条后面括号里是对应的修复提交）。改这些链路时先看这一页，改完跑最后一节的检查。不要为某一次事故加一次性分支——把规则落到下面的不变量里。
 
 ## 一、问答回合（一轮的生命周期）
 
@@ -12,12 +12,28 @@
 2. **慢不是死。** 不能靠固定超时判定回合已死然后拆掉它；只有 runtime 明确报结束/失败/停止才收尾。（762a499）
 3. **被顶替的回合不做收尾清理。** 这次 invoke 返回时如果已经有更新的一代在跑，按「started」返回，不清映射、不清状态、不回渠道。（chat/send.ts）
 4. **被限流要说「等」，不能原样重发。** 重发等于把用户的额度再烧一次。（c951052）
-5. **续接不能拿别的 runtime 的 session id。** 每个runtime 的 thread/session 各自匹配。（39b5181）
+5. **续接不能拿别的 runtime 的 session id。** 每个 runtime 的 thread/session 各自匹配。（39b5181）
 6. **计时从各自的起点算。** thinking 时长从 thinking 开始算，不是从整轮开始算。（a1b3cf1）
+7. **转写的字节预算算上所有副本。** 页面副本、浏览器副本、localStorage 副本占同一份预算；只算一份就会写满存储。写满后必须还能渲染，不能白屏。（154884e、e275620；`chat-store-size.test.ts` 看护）
+8. **长对话保持响应。** 长转写不能整页重画；离开窗口的行不跳动；compaction 之后对话仍是一条消息流。（fb60408、7a71ebc、b4dcfaf）
 
-**看护：** `desktop/tests/turn-clock.test.ts`、`chat-failure.test.ts`、`send-round.test.ts`、`channel-ask.test.ts`（映射存活）。
+**看护：** `desktop/tests/turn-clock.test.ts`、`chat-failure.test.ts`、`send-round.test.ts`、`channel-ask.test.ts`（映射存活）、`chat-store-size.test.ts`。
 
-## 二、电脑 ↔ 手机通道
+## 二、模型服务故障切换
+
+一个已保存的模型服务挂了，这一轮换下一家，用户不被打断。
+
+**不变量：**
+
+1. **只有「服务本身坏了」才切换**：连不上、超时、限流、5xx、额度用完、密钥被拒。模型名写错**不切**——换一家还会再错一次，那是要修的名字。（3725548；`provider_failover.rs`）
+2. **切换沿已保存列表、同协议、跳过冷却中的**。切过去的那家再失败，也只往更后面走，一次消息至多切一次；冷却 3 分钟，过了自动恢复，不用人管。
+3. **状态码按整段数字认。** 模型 id 里的 `4290` 不是 `429`，不能因为一个子串把好端端的服务切走。
+4. **订阅账号的会话只能用它账号列出的模型。**（49a52d3、`model-picker-subscription.test.ts`）
+5. **告诉用户换了家。** 一句人话（「刚才那家连不上，这次改用 X」），不要静默换。
+
+**看护：** `crates/agent-doctor-core/src/setup/provider_failover.rs` 的单元测试（分类、冷却过期、状态码边界、协议匹配）。
+
+## 三、电脑 ↔ 手机通道
 
 手机（飞书）把一句话送到这台电脑，电脑把回复送回手机。
 
@@ -32,7 +48,7 @@
 
 **看护：** `desktop/tests/channel-stop.test.ts`、`channel-ask.test.ts`、`channel-ledger.test.ts`、`channel-session.test.ts`。停止的判定表在 `desktop/src/chat/channel-stop.ts`，是纯函数——改停止行为先改判定表，再让 chat-boot 接线。
 
-## 三、配置与密钥
+## 四、配置与密钥
 
 setup / 模型服务页 / 修复，都会写用户的配置文件和密钥。
 
@@ -46,20 +62,44 @@ setup / 模型服务页 / 修复，都会写用户的配置文件和密钥。
 
 **看护：** `crates/agent-doctor-core/src/setup/merge/` 的单元测试、`desktop/tests/model-picker-subscription.test.ts`、`i18n-pairs.test.ts`。
 
-## 四、下载与安装
+## 五、下载与安装
 
 装 runtime、装 CLI、装模型服务客户端。
 
 **不变量：**
 
 1. **安装不允许被墙卡死。** 大陆不可达的官方源要能跳过并说明原因，走可达的镜像；跳过的要写进结果。（1adc3dc）
-2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`），禁止裸 `Command::new`——每个裸调用都是用户桌面上的一个黑窗。（8cdcd00、a678e8b、277836e、9507226、9e8d193——修了五轮）
+2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`）。围栏测试 `raw_spawn_guard` 拦下一切没有 `// raw-spawn-ok` 标注的裸 `Command::new`；标注 = 人审过：macOS 系统工具、控制台程序自己的孩子、GUI 目标（浏览器、`open`）可以放行，**GUI 应用下起控制台子进程必须带 `CREATE_NO_WINDOW`**。（8cdcd00、a678e8b、277836e、9507226、9e8d193——修了五轮，现在有围栏）
 3. **PATH 只做尾部增量合并，不重排。** Windows PATH 超长时降级保可达，不能把应用或 Claude/Node 搞挂。（74a5694、26394a9、2a5ff8e）
 4. **每个安装步骤有进度、有失败原因。** 用户不该面对一个静默消失的安装。（8e4156e）
+5. **探测不挡路。** doctor 探测不进 UI 线程、不串行拉起一堆子进程；启动时能不起的子进程一律不起。（8fb0ea6、277836e）
 
-**看护：** CI 的 `rust-windows` job（这是 Windows-only 代码唯一的编译+lint+测试处）；涉及子进程的改动在 Windows 上必须实机看过一次。
+**看护：** `crates/agent-doctor-core/tests/raw_spawn_guard.rs`（扫 core/prompt/repair/mcp/cli/desktop 全部源码）；CI 的 `rust-windows` job（这是 Windows-only 代码唯一的编译+lint+测试处）；涉及子进程的改动在 Windows 上必须实机看过一次。
 
-## 五、官网（site/）
+## 六、跨窗口状态
+
+问答、主页、岛是三个窗口，共享同一份偏好和登录态。
+
+**不变量：**
+
+1. **每个全局偏好只有一个事实来源**：provider、语言、自动允许、登录态。任何窗口改了，必须广播到其余窗口；各窗口各存一份就是不同步。（5989a67、2810d71）
+2. **登录/授权页一个流程只开一次**，重复触发要被去重。（fdc4c94）
+3. **登录态要活过回调丢失。** 扫码回调没等到，下次启动也要恢复已登录，而不是把用户踢回登录页。（43f0fad）
+
+**看护：** 行为需要真实窗口，单测难覆盖——改这些时必须在两个窗口各验一遍（改语言、切 provider、扫码各来一次）。
+
+## 七、跨平台写法
+
+**不变量：**
+
+1. **路径不手写分隔符。** 比较、拆分、拼接走共享 helper；同一段代码会同时见到 `\` 和 `/`。（daea40b、c32474e、2223c8b）
+2. **往 Windows 控件打字走既有通道**：buffer 形式的 `encode_utf16`、退格/删除同样进通道，不要另写字符注入。（70522a4、a34bab7）
+3. **不用超出构建 target 的 JS API。** `replaceAll` 是 ES2021，构建会拦；本地 `./scripts/check.sh frontend` 现在也跑 build，别绕过它。（2223c8b、fbd759f、25425fe）
+4. **Windows-only 代码以 `rust-windows` 绿为准。** 本机是 Mac 时，Windows 路径的编译、lint、测试只在 CI 发生，推送后必须看一眼。（7ea33bc、820ab09）
+
+**看护：** CI `rust-windows`；`npm run build` 的 tsc。
+
+## 八、官网（site/）
 
 静态站，Cloudflare Pages 托管，下载走 GitHub Releases / OSS。
 
@@ -75,10 +115,10 @@ setup / 模型服务页 / 修复，都会写用户的配置文件和密钥。
 ## 改完必须跑
 
 ```bash
-make lint                                   # fmt + clippy（git 钩子也会拦）
+make lint                                   # fmt + clippy + raw_spawn_guard（git 钩子也会拦）
 ./scripts/check.sh site                     # 官网静态检查
 cd desktop && npm test                      # 桌面全部回归测试
 AGENT_DOCTOR_CHECK_DESKTOP=1 ./scripts/check.sh desktop   # 或在 macOS 上 ./scripts/check.sh all
 ```
 
-涉及 Rust 子进程、Windows 路径、安装器：等 CI 的 `rust-windows` 绿了再合。发版走 `./scripts/check.sh release-preflight`。
+改了子进程、Windows 路径、Windows 输入、安装器：等 CI 的 `rust-windows` 绿了再合。发版走 `./scripts/check.sh release-preflight`。

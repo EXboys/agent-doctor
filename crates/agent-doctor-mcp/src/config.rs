@@ -711,11 +711,20 @@ fn verify_dsh_patch_loads(config_path: &Path, plugin_id: &str) -> Result<(), Str
 }
 
 fn run_dsh_dump_config(dsh: &Path, plugin_id: &str) -> Result<(), String> {
-    let mut child = Command::new(dsh)
+    // raw-spawn-ok: console dsh under a console-less MCP host; Windows must not paint it.
+    let mut command = Command::new(dsh);
+    command
         .args(["--profile", DSH_ASK_PROFILE, "--dump-config"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
         .map_err(|err| format!("failed to start dsh: {err}"))?;
     // The pipes must drain while dsh runs or a large tree can deadlock both

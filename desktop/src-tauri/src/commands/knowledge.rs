@@ -325,12 +325,14 @@ fn document_text(path: &Path) -> Option<String> {
     }
     let mut cmd = match lower_ext(path).as_str() {
         "pdf" => {
+            // raw-spawn-ok: macOS text extraction, output captured
             let mut cmd = Command::new("osascript");
             cmd.args(["-l", "JavaScript", "-e", PDF_TEXT_SCRIPT])
                 .arg(path);
             cmd
         }
         "doc" | "docx" | "rtf" | "odt" => {
+            // raw-spawn-ok: macOS text extraction, output captured
             let mut cmd = Command::new("textutil");
             cmd.args(["-convert", "txt", "-stdout"]).arg(path);
             cmd

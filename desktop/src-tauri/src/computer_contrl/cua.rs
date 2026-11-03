@@ -75,12 +75,19 @@ fn call(tool: &str, args: &Value) -> Option<Value> {
         return None;
     }
     let path = driver_path()?;
+    // raw-spawn-ok: console driver under a GUI app; Windows must not paint it.
     let mut child = Command::new(path);
     child
         .args(["call", tool, &args.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        child.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut child = child.spawn().ok()?;
     let started = Instant::now();
     loop {

@@ -230,6 +230,7 @@ fn chrome_version_via_plutil(binary: &Path) -> Option<String> {
             if !plist.exists() {
                 return None;
             }
+            // raw-spawn-ok: macOS plist probe, output captured
             let output = Command::new("plutil")
                 .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
                 .arg(&plist)

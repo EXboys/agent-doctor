@@ -304,6 +304,39 @@ mod tests {
     }
 
     #[test]
+    fn a_cooling_outage_expires_and_is_forgotten() {
+        remember("old", Outage::Quota);
+        assert!(cooling_outage("old").is_some());
+        with_cool(|map| {
+            let cool = map.get_mut("old").expect("just remembered");
+            cool.at -= COOLDOWN + Duration::from_secs(1);
+        });
+        assert!(
+            cooling_outage("old").is_none(),
+            "past the cooldown it is usable again"
+        );
+        assert!(
+            !with_cool(|map| map.contains_key("old")),
+            "the expired entry is dropped"
+        );
+    }
+
+    #[test]
+    fn a_status_code_only_counts_as_its_own_token() {
+        // 429 inside "gpt-4290" or "5024 errors" is a model id, not an outage.
+        assert_eq!(classify_provider_outage("gpt-4290 kept failing"), None);
+        assert_eq!(classify_provider_outage("proxy reported 5024 errors"), None);
+        assert_eq!(
+            classify_provider_outage("gateway said 5022 and hung up"),
+            None
+        );
+        assert_eq!(
+            classify_provider_outage("HTTP 502 from gateway"),
+            Some(Outage::Down)
+        );
+    }
+
+    #[test]
     fn notice_names_the_provider_the_turn_will_use() {
         let next = provider("c", "丙", "openai");
         let switched = switch_to(&next, Outage::Down);
