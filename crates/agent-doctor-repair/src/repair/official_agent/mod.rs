@@ -31,9 +31,8 @@ use serde_json::{json, Value};
 use agent_doctor_core::mask::SecretVault;
 use agent_doctor_core::repair_types::{LlmConfig, RepairToolKind};
 
-use super::llm::{
-    chat_with_tool_set, max_agent_turns, read_only_tool_definitions, repair_tool_definitions,
-};
+use super::llm::stream::{chat_with_tool_set_stream, LlmStreamDelta};
+use super::llm::{max_agent_turns, read_only_tool_definitions, repair_tool_definitions};
 use super::tools::{
     allowed_paths_for_official_agent, parse_tool_call, path_is_allowed, RepairToolExecutor,
     OFFICIAL_AGENT_RUNTIME_ID,
@@ -108,6 +107,10 @@ pub enum OfficialAgentEvent {
     },
     /// The same call finished; hosts pair the two into one step card.
     ToolResult { tool: String, success: bool },
+    /// Reasoning text that a model inlined as `<think>…</think>`.
+    Reasoning { text: String },
+    /// Incremental reply text while the model writes it.
+    Delta { text: String },
     /// Plan steps for the chat plan UI.
     Plan { steps: Vec<PlanStep> },
     /// A write or allowlisted command needs the user's approval.
@@ -121,9 +124,46 @@ pub enum OfficialAgentEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfficialAgentReport {
     pub answer: String,
+    /// Reasoning models sometimes inline `<think>…</think>` in the content;
+    /// the loop strips it out of the answer and hands it back separately so
+    /// hosts can show it as a thinking step.
+    pub reasoning: Option<String>,
+    /// The reply already streamed as `Delta` events; hosts must not paint the
+    /// full answer again.
+    pub streamed: bool,
     pub model: String,
     pub tool_calls: usize,
     pub rounds: usize,
+}
+
+/// Split inline `<think>…</think>` blocks out of model content. Handles
+/// several blocks and an unclosed block that runs to the end of the reply.
+pub fn strip_think_blocks(content: &str) -> (String, Option<String>) {
+    let mut reasoning_parts: Vec<String> = Vec::new();
+    let mut clean = String::with_capacity(content.len());
+    let mut rest = content;
+    while let Some(start) = rest.find("<think>") {
+        clean.push_str(&rest[..start]);
+        let after = &rest[start + "<think>".len()..];
+        match after.find("</think>") {
+            Some(end) => {
+                reasoning_parts.push(after[..end].trim().to_string());
+                rest = &after[end + "</think>".len()..];
+            }
+            None => {
+                reasoning_parts.push(after.trim().to_string());
+                rest = "";
+            }
+        }
+    }
+    clean.push_str(rest);
+    let clean = clean.trim().to_string();
+    let reasoning = if reasoning_parts.is_empty() {
+        None
+    } else {
+        Some(reasoning_parts.join("\n\n").trim().to_string())
+    };
+    (clean, reasoning)
 }
 
 /// Approval hook for writes and allowlisted bash. Blocks until the user
@@ -254,6 +294,7 @@ pub fn run_official_agent_turn(
     let mut overflow_retries = 0usize;
     let mut confirmation_seq = 0usize;
     let mut rounds_used = 0usize;
+    let mut streamed_any = false;
 
     for round in 1..=options.max_rounds {
         ensure_not_cancelled(cancel)?;
@@ -261,33 +302,59 @@ pub fn run_official_agent_turn(
             round: round as u32,
         });
 
-        let turn = match chat_with_tool_set(config, &messages, Some(&tools)) {
-            Ok(turn) => turn,
-            Err(error) => {
-                let message = format!("{error:#}");
-                if is_context_overflow_error(&message) && overflow_retries < MAX_OVERFLOW_RETRIES {
-                    overflow_retries += 1;
-                    let budget = OVERFLOW_RECOVERY_BUDGET / (1 << (overflow_retries - 1));
-                    truncate_tool_messages(&mut messages, budget);
-                    continue;
+        let turn = {
+            let mut saw_text = false;
+            let call_result = {
+                let mut on_delta = |delta: LlmStreamDelta| match delta {
+                    LlmStreamDelta::Text(text) => {
+                        saw_text = true;
+                        on_event(OfficialAgentEvent::Delta { text });
+                    }
+                    LlmStreamDelta::Reasoning(text) => {
+                        on_event(OfficialAgentEvent::Reasoning { text });
+                    }
+                };
+                chat_with_tool_set_stream(config, &messages, Some(&tools), &mut on_delta)
+            };
+            streamed_any = streamed_any || saw_text;
+            match call_result {
+                Ok(turn) => turn,
+                Err(error) => {
+                    let message = format!("{error:#}");
+                    if is_context_overflow_error(&message)
+                        && overflow_retries < MAX_OVERFLOW_RETRIES
+                    {
+                        overflow_retries += 1;
+                        let budget = OVERFLOW_RECOVERY_BUDGET / (1 << (overflow_retries - 1));
+                        truncate_tool_messages(&mut messages, budget);
+                        continue;
+                    }
+                    return Err(error);
                 }
-                return Err(error);
             }
         };
         rounds_used = round;
 
         if turn.tool_calls.is_empty() {
+            let (answer, reasoning) = strip_think_blocks(turn.content.as_deref().unwrap_or(""));
             return Ok(OfficialAgentReport {
-                answer: turn.content.unwrap_or_default().trim().to_string(),
+                answer,
+                reasoning,
+                streamed: streamed_any,
                 model: config.model.clone(),
                 tool_calls: loop_state.tool_calls,
                 rounds: rounds_used,
             });
         }
 
+        let (clean_content, inline_reasoning) =
+            strip_think_blocks(turn.content.as_deref().unwrap_or(""));
+        if let Some(reasoning) = inline_reasoning {
+            on_event(OfficialAgentEvent::Reasoning { text: reasoning });
+        }
         messages.push(json!({
             "role": "assistant",
-            "content": turn.content,
+            "content": clean_content,
             "tool_calls": turn.tool_calls.iter().map(|call| json!({
                 "id": call.id,
                 "type": "function",
@@ -321,7 +388,7 @@ pub fn run_official_agent_turn(
             }
 
             let mut recovered_note: Option<String> = None;
-            let parsed = match parse_tool_call(&call.name, &call.arguments) {
+            let mut parsed = match parse_tool_call(&call.name, &call.arguments) {
                 Ok(parsed) => parsed,
                 // Model output budget may cut write-tool arguments mid-string;
                 // salvage what we can rather than losing the call.
@@ -373,6 +440,16 @@ pub fn run_official_agent_turn(
                     "content": json!({ "error": "deep diagnose can only read files" }).to_string()
                 }));
                 continue;
+            }
+
+            // Models often pass relative paths; resolve them against the
+            // workspace so the executor's absolute-path validation accepts them.
+            if let Some(path) = parsed.path.as_deref() {
+                if !path.trim().is_empty() && !Path::new(path).is_absolute() {
+                    if let Some(workspace) = options.workspace.as_deref() {
+                        parsed.path = Some(workspace.join(path).to_string_lossy().into_owned());
+                    }
+                }
             }
 
             on_event(OfficialAgentEvent::Tool {
@@ -466,9 +543,26 @@ pub fn run_official_agent_turn(
             "Answer now with what you have. Do not call more tools."
         }
     }));
-    let turn = chat_with_tool_set(config, &messages, None)?;
+    let turn = {
+        let mut saw_text = false;
+        let mut on_delta = |delta: LlmStreamDelta| match delta {
+            LlmStreamDelta::Text(text) => {
+                saw_text = true;
+                on_event(OfficialAgentEvent::Delta { text });
+            }
+            LlmStreamDelta::Reasoning(text) => {
+                on_event(OfficialAgentEvent::Reasoning { text });
+            }
+        };
+        let call_result = chat_with_tool_set_stream(config, &messages, None, &mut on_delta);
+        streamed_any = streamed_any || saw_text;
+        call_result?
+    };
+    let (answer, reasoning) = strip_think_blocks(turn.content.as_deref().unwrap_or(""));
     Ok(OfficialAgentReport {
-        answer: turn.content.unwrap_or_default().trim().to_string(),
+        answer,
+        reasoning,
+        streamed: streamed_any,
         model: config.model.clone(),
         tool_calls: loop_state.tool_calls,
         rounds: rounds_used,
@@ -660,6 +754,26 @@ mod tests {
             true
         )
         .is_err());
+    }
+
+    #[test]
+    fn think_blocks_are_stripped_and_kept_as_reasoning() {
+        let (clean, reasoning) = strip_think_blocks("<think>推理 A</think>回答正文");
+        assert_eq!(clean, "回答正文");
+        assert_eq!(reasoning.as_deref(), Some("推理 A"));
+
+        let (clean, reasoning) = strip_think_blocks("<think>a</think>中<think>b</think>尾");
+        assert_eq!(clean, "中尾");
+        assert_eq!(reasoning.as_deref(), Some("a\n\nb"));
+
+        // Unclosed block running to the end (truncated output budget).
+        let (clean, reasoning) = strip_think_blocks("<think>只写了一半");
+        assert_eq!(clean, "");
+        assert_eq!(reasoning.as_deref(), Some("只写了一半"));
+
+        let (clean, reasoning) = strip_think_blocks("没有标签");
+        assert_eq!(clean, "没有标签");
+        assert!(reasoning.is_none());
     }
 
     #[test]
