@@ -33,6 +33,11 @@ make check
 # or
 ./scripts/check.sh cli && ./scripts/check.sh frontend
 
+# Marketing site static checks (asset stamps, links, redirects, JS syntax)
+./scripts/check.sh site
+# or
+node scripts/check-site.mjs
+
 # Full local sweep on macOS (includes desktop Rust)
 ./scripts/check.sh all
 
@@ -89,6 +94,10 @@ AGENT_DOCTOR_CHECK_DESKTOP=1 ./scripts/check.sh desktop
 |-----|--------|-------|
 | `rust-cli` | ubuntu-latest | fmt, clippy, test, build for `agent-doctor-core` + `agent-doctor` |
 | `rust-desktop` | macos-latest | clippy for `agent-doctor-desktop` |
-| `desktop-frontend` | ubuntu-latest | `npm ci && npm run build` |
+| `rust-windows` | windows-latest | clippy + test for all crates (the only place Windows-only code is checked) |
+| `desktop-frontend` | ubuntu-latest | `npm ci && npm run build && npm test` |
+| `site` | ubuntu-latest | `node scripts/check-site.mjs` |
+
+The desktop TypeScript regression tests in `desktop/tests/` run via `npm test`, both locally (`./scripts/check.sh frontend`) and in CI — keep new behavior pinned there (see [zh-CN/core-flows.md](zh-CN/core-flows.md) for which tests guard which flow).
 
 Release builds install Linux GUI dependencies only in the desktop release job.
