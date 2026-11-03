@@ -1,12 +1,14 @@
 
 import { emit, listen } from "@tauri-apps/api/event";
 import { t } from "./i18n";
+import { agentBrandIconHtml } from "./agent-brand";
 import { isPersonalEdition } from "./edition";
 import { listPersonalProviders, nativeAccountStatus } from "./ipc";
 import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
 import {
   isAskRuntimeId,
+  metaRow,
   renderRuntimeCard,
   renderRuntimeCardActions,
   renderRuntimeTabs,
@@ -77,6 +79,8 @@ const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
 const runtimeTabsMoreEl = document.querySelector<HTMLButtonElement>("#runtime-tabs-more")!;
 const runtimeSectionEl = document.querySelector<HTMLElement>(".runtime-section")!;
 const HOME_AGENT_VISIBLE = 6;
+/** Built-in doctor agent runtime id (mirrors agent-doctor-repair). */
+const DOCTOR_RUNTIME_ID = "doctor";
 let runtimeTabsExpanded = false;
 const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
 const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
@@ -171,24 +175,29 @@ function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: 
     runtimeTabsMoreEl.hidden = true;
     return;
   }
-  const overflow = installedRuntimes.length > HOME_AGENT_VISIBLE;
+  // The built-in doctor tile always takes the first visible slot, so the
+  // agent budget is one smaller and the hidden count follows.
+  const agentVisible = HOME_AGENT_VISIBLE - 1;
+  const overflow = installedRuntimes.length > agentVisible;
   if (
     overflow &&
-    installedRuntimes.slice(HOME_AGENT_VISIBLE).some((runtime) => runtime.id === selectedId)
+    selectedId !== DOCTOR_RUNTIME_ID &&
+    installedRuntimes.slice(agentVisible).some((runtime) => runtime.id === selectedId)
   ) {
     runtimeTabsExpanded = true;
   }
   const visible =
     overflow && !runtimeTabsExpanded
-      ? installedRuntimes.slice(0, HOME_AGENT_VISIBLE)
+      ? installedRuntimes.slice(0, agentVisible)
       : installedRuntimes;
   runtimeTabsEl.innerHTML = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
+  runtimeTabsEl.prepend(doctorTabTile(selectedId === DOCTOR_RUNTIME_ID));
   if (!overflow) {
     runtimeTabsMoreEl.hidden = true;
     return;
   }
   runtimeTabsMoreEl.hidden = false;
-  const hidden = installedRuntimes.length - HOME_AGENT_VISIBLE;
+  const hidden = installedRuntimes.length - agentVisible;
   runtimeTabsMoreEl.textContent = runtimeTabsExpanded
     ? t("runtimes.showLess")
     : t("runtimes.showMore", { count: String(hidden) });
@@ -197,6 +206,55 @@ function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: 
 function hasActiveWorkspace(): boolean {
   return Boolean(appState.lastWorkspaces?.active);
 }
+
+/** Home entry for the built-in doctor agent: always installed, opens a chat. */
+function doctorTabTile(active: boolean): HTMLElement {
+  const tile = document.createElement("button");
+  tile.type = "button";
+  tile.className = `runtime-tab is-doctor${active ? " is-active" : ""}`;
+  tile.dataset.doctorTab = DOCTOR_RUNTIME_ID;
+  tile.setAttribute("role", "tab");
+  tile.setAttribute("aria-selected", active ? "true" : "false");
+  tile.title = t("chat.emptyDoctorHint");
+  tile.innerHTML = `
+    <span class="runtime-tab-dot is-ok" aria-hidden="true"></span>
+    <span class="runtime-tab-logo" aria-hidden="true">${agentBrandIconHtml("doctor")}</span>
+    <span class="runtime-tab-label">Agent Doctor</span>
+    <span class="runtime-tab-meta">${t("runtime.doctorTileMeta")}</span>`;
+  return tile;
+}
+
+/** Detail card for the built-in doctor agent, styled like a runtime card. */
+function doctorCardHtml(): string {
+  const active = appState.personalProvidersDoc?.providers.find((item) => item.active);
+  const service = active
+    ? metaRow("meta.service", active.name)
+    : metaRow("meta.service", t("runtime.doctorNoService"));
+  const actions = `
+    <button type="button" class="btn-primary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
+    <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>`;
+  return `
+    <article class="runtime" data-runtime="${DOCTOR_RUNTIME_ID}">
+      <div class="section-label runtime-card-label">
+        <h2 class="runtime-tab-title">Agent Doctor</h2>
+        <span class="runtime-badges">
+          <span class="badge ok">${t("runtime.builtinBadge")}</span>
+        </span>
+      </div>
+      <div class="meta-grid">
+        ${service}
+        <div class="meta-row">
+          <span class="meta-label">${t("meta.status")}</span>
+          <p class="meta-value">${t("runtime.doctorAlwaysReady")}</p>
+        </div>
+      </div>
+      <div class="card-actions">${actions}</div>
+      <p class="footnote runtime-install-footnote">${t("chat.emptyDoctorHint")}</p>
+    </article>
+  `;
+}
+
+
 
 async function loadHermesModel(): Promise<void> {
   try {
@@ -239,6 +297,16 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     setMainTab: (tab) => deps.setMainTab(tab),
     uninstallRuntime: (runtime, name) => install.uninstallRuntime(runtime, name),
   });
+
+  /** Selecting the doctor tile: highlight it and show its detail card. */
+  function selectDoctorRuntime(): void {
+    appState.activeRuntimeId = DOCTOR_RUNTIME_ID;
+    const report = appState.lastReport;
+    const installedRuntimes = report ? report.runtimes.filter((runtime) => runtime.installed) : [];
+    paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
+    runtimesEl.innerHTML = doctorCardHtml();
+    void diagnose.closeDiagnoseDetail({ skipDismiss: true });
+  }
 
   async function refresh() {
     setLoading(true);
@@ -350,6 +418,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
           <p>${t("runtimes.emptyInstalled")}</p>
           <p class="runtime-empty-hint">${t("runtimes.emptyInstalledHint")}</p>
           <button type="button" class="btn-primary" data-action="open-agent-catalog">${t("runtimes.addAgent")}</button>
+          <button type="button" class="btn-secondary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
         </div>
       `;
       if (!opts?.relocalize) {
@@ -362,15 +431,25 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       const fromChat = readActiveSessionRuntime();
       if (fromChat && installedRuntimes.some((runtime) => runtime.id === fromChat)) {
         appState.activeRuntimeId = fromChat;
+      } else if (fromChat === DOCTOR_RUNTIME_ID) {
+        appState.activeRuntimeId = DOCTOR_RUNTIME_ID;
       }
     }
 
-    const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
+    const selectedId =
+      appState.activeRuntimeId === DOCTOR_RUNTIME_ID
+        ? DOCTOR_RUNTIME_ID
+        : resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
     appState.activeRuntimeId = selectedId;
     paintRuntimeTabs(installedRuntimes, selectedId);
 
     const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
-    runtimesEl.innerHTML = activeRuntime ? buildRuntimeCardHtml(activeRuntime) : "";
+    runtimesEl.innerHTML =
+      selectedId === DOCTOR_RUNTIME_ID
+        ? doctorCardHtml()
+        : activeRuntime
+          ? buildRuntimeCardHtml(activeRuntime)
+          : "";
     if (opts?.relocalize) {
       diagnose.refreshDiagnoseLocale();
       return;
@@ -469,6 +548,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   });
 
   runtimeTabsEl.addEventListener("click", (event) => {
+    const doctorTab = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-doctor-tab]");
+    if (doctorTab) {
+      selectDoctorRuntime();
+      return;
+    }
     const tab = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-runtime-tab]");
     const runtimeId = tab?.dataset.runtimeTab;
     if (!runtimeId || runtimeId === appState.activeRuntimeId) {
@@ -482,6 +566,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   runtimesEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest<HTMLButtonElement>("[data-action='ask-doctor']")) {
+      void sessions.openAskWindow("doctor").catch(() => {});
+      return;
+    }
     const filterBtn = target.closest<HTMLButtonElement>("[data-repair-filter]");
     if (filterBtn && !filterBtn.disabled) {
       const card = filterBtn.closest<HTMLElement>("[data-runtime]");

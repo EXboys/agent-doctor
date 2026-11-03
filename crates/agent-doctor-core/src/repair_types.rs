@@ -457,12 +457,25 @@ impl MaskedRepairContext {
     }
 }
 
-/// OpenAI-compatible gateway endpoint plus credentials. `Debug` never shows the key.
+/// Wire protocol the gateway speaks. The official agent loop and deep diagnose
+/// send the same logical turn over either protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmProtocol {
+    #[default]
+    OpenAi,
+    Anthropic,
+}
+
+/// Gateway endpoint plus credentials. `Debug` never shows the key.
+/// `api_url` holds the full endpoint for [`LlmProtocol::OpenAi`] and the gateway
+/// base for [`LlmProtocol::Anthropic`] (the Anthropic client appends `/v1/messages`).
 #[derive(Clone)]
 pub struct LlmConfig {
     pub api_url: String,
     pub api_key: String,
     pub model: String,
+    pub protocol: LlmProtocol,
 }
 
 impl std::fmt::Debug for LlmConfig {
@@ -471,6 +484,7 @@ impl std::fmt::Debug for LlmConfig {
             .field("api_url", &self.api_url)
             .field("api_key", &"<redacted>")
             .field("model", &self.model)
+            .field("protocol", &self.protocol)
             .finish()
     }
 }
@@ -489,6 +503,18 @@ impl LlmConfig {
             api_url,
             api_key: api_key.trim().to_string(),
             model: model.trim().to_string(),
+            protocol: LlmProtocol::OpenAi,
+        }
+    }
+
+    /// Anthropic-protocol gateway base (e.g. `https://host/api/gateway/anthropic`);
+    /// the Anthropic client posts to `{base}/v1/messages`.
+    pub fn from_anthropic_gateway(gateway_url: &str, api_key: &str, model: &str) -> Self {
+        Self {
+            api_url: gateway_url.trim().trim_end_matches('/').to_string(),
+            api_key: api_key.trim().to_string(),
+            model: model.trim().to_string(),
+            protocol: LlmProtocol::Anthropic,
         }
     }
 
@@ -507,6 +533,7 @@ impl LlmConfig {
             api_url,
             api_key,
             model,
+            protocol: LlmProtocol::OpenAi,
         })
     }
 }

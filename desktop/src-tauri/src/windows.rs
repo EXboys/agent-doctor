@@ -681,9 +681,31 @@ fn apply_main_window_rest(app: &AppHandle, rest: MainWindowRest) {
     }
 }
 
+/// Default chat runtime: the first installed ask agent in recommended order,
+/// else the built-in doctor agent so an empty machine can still chat.
+pub(crate) fn default_ask_runtime() -> String {
+    const PREFERRED: [&str; 6] = [
+        "claude-code",
+        "hermes",
+        "openclaw",
+        "codex",
+        "deepseek-harness",
+        "zcode",
+    ];
+    let installed: Vec<String> = agent_doctor_prompt::installed_ask_agents()
+        .into_iter()
+        .map(|agent| agent.id)
+        .collect();
+    PREFERRED
+        .into_iter()
+        .find(|runtime| installed.iter().any(|id| id == runtime))
+        .map(str::to_string)
+        .unwrap_or_else(|| agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID.to_string())
+}
+
 /// Show the conversation only. A minimized or tray-hidden home window stays that way.
 pub(crate) fn present_ask_window(app: &AppHandle) {
-    let Ok(window) = ensure_ask_window(app, "claude-code") else {
+    let Ok(window) = ensure_ask_window(app, &default_ask_runtime()) else {
         return;
     };
     let _ = window.set_skip_taskbar(false);

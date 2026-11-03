@@ -1,7 +1,10 @@
 mod bash_allowlist;
 mod registry;
 
-pub use bash_allowlist::{bash_command_allowed_for_runtime, runtime_allowed_bash_commands};
+pub use bash_allowlist::{
+    bash_command_allowed_for_official_agent, bash_command_allowed_for_runtime,
+    runtime_allowed_bash_commands,
+};
 
 pub(crate) use registry::{
     bind_workspace_runtimes, dispatch_job, dispatch_runtime_ids, find_workspace_repair,

@@ -9,6 +9,7 @@ mod claude;
 mod codex_app_server;
 mod control;
 mod deepseek_harness;
+pub mod doctor;
 mod hermes;
 mod mcp_ensure;
 mod openclaw;
@@ -50,6 +51,7 @@ static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBacke
 static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
 static CODEX_ASK: CodexAskBackend = CodexAskBackend;
 static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
+static DOCTOR_ASK: doctor::DoctorAskBackend = doctor::DoctorAskBackend;
 
 /// Which runtimes have an [`AskBackend`] here. The registry in
 /// `agent-doctor-core` deliberately knows nothing about ask sessions.
@@ -61,6 +63,7 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
         "claude-code" => Some(&CLAUDE_ASK),
         "codex" => Some(&CODEX_ASK),
         "zcode" => Some(&ZCODE_ASK),
+        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some(&DOCTOR_ASK),
         _ => None,
     }
 }
@@ -73,15 +76,23 @@ pub fn ask_runtime_ids() -> Vec<&'static str> {
         "claude-code",
         "codex",
         "zcode",
+        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID,
     ]
 }
 
 /// Chat agents whose program is on this computer and can run ask sessions.
 pub fn installed_ask_agents() -> Vec<agent_doctor_core::InstalledAgent> {
-    agent_doctor_core::installed_agents_with_binary()
-        .into_iter()
-        .filter(|agent| ask_backend(&agent.id).is_some())
-        .collect()
+    let mut agents: Vec<agent_doctor_core::InstalledAgent> =
+        agent_doctor_core::installed_agents_with_binary()
+            .into_iter()
+            .filter(|agent| ask_backend(&agent.id).is_some())
+            .collect();
+    // The built-in doctor agent has no binary to find; it is always available.
+    agents.push(agent_doctor_core::InstalledAgent {
+        id: agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID.to_string(),
+        label: "Agent Doctor".to_string(),
+    });
+    agents
 }
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);

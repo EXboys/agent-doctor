@@ -1,12 +1,41 @@
 use std::path::{Path, PathBuf};
 
-use agent_doctor_core::runtime::{adapter_by_id, bash_command_allowed_for_runtime};
+use agent_doctor_core::runtime::{
+    adapter_by_id, all_adapters, bash_command_allowed_for_official_agent,
+    bash_command_allowed_for_runtime,
+};
+
+/// Runtime id the chat/official agent runs under. Not a registry runtime; the
+/// bash allowlist and doctor tool wiring special-case it.
+pub const OFFICIAL_AGENT_RUNTIME_ID: &str = "doctor";
 
 /// Paths the repair agent may read or edit for a runtime.
 pub fn allowed_paths_for_runtime(runtime_id: &str) -> Vec<PathBuf> {
     let mut paths = adapter_by_id(runtime_id)
         .map(|adapter| adapter.all_config_paths())
         .unwrap_or_default();
+
+    if let Some(config_dir) = dirs::config_dir() {
+        paths.push(config_dir.join("agent-doctor").join("guides"));
+        paths.push(config_dir.join("agent-doctor").join("logs"));
+    }
+
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Paths the official built-in agent may touch in chat: every registered
+/// runtime's config roots (so it can diagnose any of them) plus the project
+/// workspace. Writes outside the workspace stay gated by the permission flow.
+pub fn allowed_paths_for_official_agent(workspace: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = all_adapters()
+        .iter()
+        .flat_map(|adapter| adapter.all_config_paths())
+        .collect();
+    if let Some(workspace) = workspace {
+        paths.push(workspace.to_path_buf());
+    }
 
     if let Some(config_dir) = dirs::config_dir() {
         paths.push(config_dir.join("agent-doctor").join("guides"));
@@ -30,8 +59,13 @@ pub fn path_is_allowed(path: &Path, allowed_roots: &[PathBuf]) -> bool {
 }
 
 /// Conservative per-runtime bash allowlist — known install/update commands only.
+/// The official agent gets the union of every registered runtime's allowlist.
 pub fn bash_command_allowed(runtime_id: &str, command: &str) -> bool {
-    bash_command_allowed_for_runtime(runtime_id, command)
+    if runtime_id == OFFICIAL_AGENT_RUNTIME_ID {
+        bash_command_allowed_for_official_agent(command)
+    } else {
+        bash_command_allowed_for_runtime(runtime_id, command)
+    }
 }
 
 #[cfg(test)]

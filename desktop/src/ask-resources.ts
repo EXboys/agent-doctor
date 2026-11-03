@@ -60,7 +60,9 @@ export type AskRuntime =
   | "hermes"
   | "openclaw"
   | "deepseek-harness"
-  | "zcode";
+  | "zcode"
+  /** Built-in Agent Doctor agent loop (no external CLI). */
+  | "doctor";
 
 export type MentionKind = "skill" | "mcp" | "knowledge";
 

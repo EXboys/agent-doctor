@@ -387,6 +387,17 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   const text = raw.trim();
   if (!text) return null;
   const lower = text.toLowerCase();
+
+  // Built-in doctor agent: no model service wired yet.
+  if (lower.includes("doctor_no_provider")) {
+    return {
+      kind: "provider_key",
+      message: t("chat.fail.doctorNoProvider.message"),
+      next: t("chat.fail.doctorNoProvider.next"),
+      actions: ["provider"],
+    };
+  }
+
   const account = explainLlmAccountBlock(text);
 
   if (isExpiredSignIn(lower)) {

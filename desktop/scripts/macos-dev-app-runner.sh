@@ -127,6 +127,12 @@ rm -f "$bundle_executable"
 cp "$binary" "$bundle_executable"
 chmod +x "$bundle_executable"
 
+# Bundle the app icon so dialogs and the Dock do not show the placeholder.
+icon_src="$SRC_TAURI/icons/icon.icns"
+if [ -f "$icon_src" ]; then
+  cp -f "$icon_src" "$resources_dir/AppIcon.icns"
+fi
+
 # Merge privacy strings from src-tauri/Info.plist into a full app Info.plist.
 python3 - "$contents_dir/Info.plist" "$bundle_id" "$bundle_name" "$BINARY_NAME" "$SRC_TAURI/Info.plist" <<'PY'
 import plistlib
@@ -137,6 +143,7 @@ out, bundle_id, bundle_name, exe, privacy_path = sys.argv[1:6]
 info = {
     "CFBundleDevelopmentRegion": "en",
     "CFBundleExecutable": exe,
+    "CFBundleIconFile": "AppIcon",
     "CFBundleIdentifier": bundle_id,
     "CFBundleInfoDictionaryVersion": "6.0",
     "CFBundleName": bundle_name,

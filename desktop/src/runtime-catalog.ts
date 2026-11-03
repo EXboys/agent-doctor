@@ -1,4 +1,5 @@
 import { fetchRuntimeCatalog } from "./ipc";
+import { t } from "./i18n";
 
 
 export type RuntimeCatalogEntry = {
@@ -18,6 +19,19 @@ export async function loadRuntimeCatalog(): Promise<void> {
   } catch {
     entries = [];
   }
+  // The built-in doctor agent has no registry descriptor; it is always an
+  // ask-capable choice and can never be installed or opened as an app.
+  entries = [
+    ...entries,
+    {
+      id: "doctor",
+      label: t("chat.doctorRuntimeName"),
+      ask: true,
+      opens_app: false,
+      browser_mcp: false,
+      skill_mount: false,
+    },
+  ];
 }
 
 export function runtimeCatalog(): readonly RuntimeCatalogEntry[] {
