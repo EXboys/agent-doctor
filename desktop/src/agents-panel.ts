@@ -129,8 +129,20 @@ function updateHealthStrip(installed: number, total: number, scanning = false): 
   healthLabelEl.textContent = t("health.good");
 }
 
+/**
+ * Count of local agents shown to the user: managed runtimes plus the
+ * always-present built-in doctor tile, so the ring, the counters and the
+ * tile grid all say the same number. A machine with no managed runtime
+ * stays at zero — the doctor alone is not a healthy environment.
+ */
+function countLocalAgents(managed: number): number {
+  return managed > 0 ? managed + 1 : 0;
+}
+
 function updateAgentsSecurityOverview(report: DoctorReport): void {
-  const installed = report.runtimes.filter((runtime) => runtime.installed).length;
+  const installed = countLocalAgents(
+    report.runtimes.filter((runtime) => runtime.installed).length,
+  );
   const issueCount = [...repairPreviewByRuntime.values()].reduce(
     (count, preview) => count + preview.summary.fail + preview.summary.warn,
     0,
@@ -363,7 +375,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     opts?: { relocalize?: boolean },
   ) {
     appState.lastReport = report;
-    const installed = report.runtimes.filter((runtime) => runtime.installed).length;
+    const installed = countLocalAgents(
+      report.runtimes.filter((runtime) => runtime.installed).length,
+    );
     const total = report.runtimes.length;
 
     installedCountEl.textContent = String(installed);
