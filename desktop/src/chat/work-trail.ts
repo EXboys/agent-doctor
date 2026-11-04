@@ -78,8 +78,14 @@ function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
   if (files) trail.querySelector(".chat-work-summary")!.append(files);
   const body = trail.querySelector<HTMLElement>(".chat-work-body")!;
   for (const row of rows) {
+    // Re-seals and history repaints can hand back earlier trails: flatten them
+    // instead of nesting a trail inside a trail.
     if (row.classList.contains("chat-work-stream")) body.append(...Array.from(row.children));
-    else body.append(row);
+    else if (row.classList.contains("chat-work")) {
+      const inner = row.querySelector<HTMLElement>(".chat-work-body");
+      if (inner) body.append(...Array.from(inner.children));
+      else body.append(row);
+    } else body.append(row);
   }
   return trail;
 }
@@ -93,13 +99,30 @@ export function wrapProcessRows(rows: HTMLElement[], live = false): HTMLElement 
   return stream;
 }
 
+/**
+ * Fold one finished group into a labelled trail, in place. Turn end cannot
+ * reach every group through the trailing walk (the reply bubble stops it), so
+ * the group folds the moment it finishes instead of staying expanded until a
+ * session switch re-renders the timeline.
+ */
+export function sealWorkGroup(group: HTMLDetailsElement): void {
+  if (!group.isConnected || !group.querySelector(".chat-tool-row")) return;
+  // completedTrail moves the group into the trail's body; replacing the group
+  // afterwards would swap a node with its own ancestor (HierarchyRequestError,
+  // which silently aborted every fold). Park a marker at the group's position
+  // first, same as sealWorkTrail.
+  const marker = document.createComment("finished work");
+  group.before(marker);
+  marker.replaceWith(completedTrail([group]));
+}
+
 /** Add each process block directly to the transcript, in chronological order. */
 export function placeProcessBlock(logEl: HTMLElement, node: HTMLElement): void {
   logEl.appendChild(node);
 }
 
 function isProcessBlock(el: HTMLElement): boolean {
-  if (el.classList.contains("chat-thinking") || el.classList.contains("chat-work-stream")) {
+  if (el.classList.contains("chat-work-stream")) {
     return true;
   }
   return (
@@ -109,14 +132,29 @@ function isProcessBlock(el: HTMLElement): boolean {
   );
 }
 
+/**
+ * Fold the trailing tool groups into one labelled trail. Thinking blocks are
+ * not process rows: they stay standalone between the chips and the prose. The
+ * walk skips over them (a chatty agent like the built-in doctor interleaves a
+ * think block after every tool round), and a trail made only of thinking is
+ * not sealed at all — folding those stacked one empty-looking bar per round.
+ */
 export function sealWorkTrail(logEl: HTMLElement): void {
   const rows: HTMLElement[] = [];
   let current = logEl.lastElementChild as HTMLElement | null;
-  while (current && isProcessBlock(current)) {
-    rows.unshift(current);
+  while (current) {
+    if (isProcessBlock(current)) {
+      rows.unshift(current);
+    } else if (!current.classList.contains("chat-thinking")) {
+      break;
+    }
     current = current.previousElementSibling as HTMLElement | null;
   }
-  if (rows.length === 0) return;
+  const hasTools = rows.some(
+    (row) =>
+      row.classList.contains("chat-tool-group") || row.querySelector(".chat-tool-group") !== null,
+  );
+  if (!hasTools) return;
   const marker = document.createComment("completed work");
   rows[0].before(marker);
   marker.replaceWith(completedTrail(rows));

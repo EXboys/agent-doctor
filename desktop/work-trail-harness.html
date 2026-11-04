@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>work-trail harness</title></head>
+<body>
+  <pre id="out"></pre>
+  <div id="log"></div>
+  <script type="module">
+    const out = [];
+    const fail = (msg) => out.push(`FAIL ${msg}`);
+    const ok = (msg) => out.push(`ok   ${msg}`);
+    try {
+      const { sealWorkGroup, sealWorkTrail } = await import("/src/chat/work-trail.ts");
+      const { renderThinkingBlock } = await import("/src/chat/thinking.ts");
+
+      const log = document.getElementById("log");
+
+      // Build the exact live structure the controllers produce for one round:
+      // a sealed thinking block, then an open live tool group with rows.
+      function round(text, rowCount, withFailed) {
+        log.append(renderThinkingBlock(text, { live: false }));
+        const group = document.createElement("details");
+        group.className = "chat-tool-group is-live";
+        group.open = true;
+        group.innerHTML =
+          `<summary hidden></summary><div class="chat-tool-list"></div>`;
+        const list = group.querySelector(".chat-tool-list");
+        for (let i = 0; i < rowCount; i += 1) {
+          const row = document.createElement("div");
+          row.className = "chat-tool-row";
+          row.dataset.summary = `查阅 file-${i}.json`;
+          row.innerHTML = `<span class="chat-tool-name">查阅</span>`;
+          list.append(row);
+        }
+        if (withFailed) {
+          const row = document.createElement("div");
+          row.className = "chat-tool-row is-failed";
+          row.dataset.summary = "查阅 .claude";
+          row.innerHTML = `<span class="chat-tool-name">查阅</span>`;
+          list.append(row);
+        }
+        log.append(group);
+        return group;
+      }
+
+      // Round 1 finishes when round 2's thinking starts (beforeBlock).
+      const g1 = round("round 1 reasoning", 3, false);
+      sealWorkGroup(g1);
+
+      const g2 = round("round 2 reasoning", 2, true);
+      // Turn ends: the trailing seal runs (assistant bubble stops the walk in
+      // the real transcript, so the trailing group folds via sealWorkGroup).
+      sealWorkGroup(g2);
+
+      // Assertions.
+      const bars = log.querySelectorAll("details.chat-work");
+      bars.length === 2 ? ok(`two folded bars (${bars.length})`) : fail(`expected 2 bars, got ${bars.length}`);
+      for (const bar of bars) {
+        bar.open === false ? ok("bar is closed") : fail("bar is open");
+        const label = bar.querySelector(".chat-work-label")?.textContent ?? "";
+        label.trim().length > 0 ? ok(`bar labelled: ${label}`) : fail("bar label empty");
+        const nested = bar.querySelectorAll(".chat-work");
+        nested.length === 0 ? ok("no nested bar") : fail(`nested bars: ${nested.length}`);
+        const rows = bar.querySelectorAll(".chat-tool-row");
+        rows.length > 0 ? ok(`bar keeps ${rows.length} rows`) : fail("bar lost its rows");
+      }
+      const think = log.querySelectorAll(".chat-thinking");
+      think.length === 2 ? ok(`two thinking rows (${think.length})`) : fail(`expected 2 thinking rows, got ${think.length}`);
+      const bare = log.querySelectorAll(":scope > details.chat-tool-group");
+      bare.length === 0 ? ok("no bare live group left") : fail(`bare groups left: ${bare.length}`);
+
+      // Round sequence 2: trailing seal via sealWorkTrail (turn end path).
+      const log2 = document.getElementById("log");
+      const g3 = round("round 3 reasoning", 2, false);
+      log2.append(g3);
+      sealWorkTrail(log2);
+      const bars2 = log2.querySelectorAll("details.chat-work");
+      bars2.length === 1 ? ok(`sealWorkTrail folds trailing group (${bars2.length})`) : fail(`sealWorkTrail bars: ${bars2.length}`);
+    } catch (error) {
+      fail(`exception: ${error}`);
+      out.push(String(error?.stack ?? "").split("\n").slice(0, 6).join("\n"));
+    }
+    document.getElementById("out").textContent = out.join("\n");
+    window.__harnessDone = true;
+  </script>
+</body>
+</html>

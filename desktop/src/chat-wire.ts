@@ -430,6 +430,11 @@ export function wireChatControllers(): void {
         setStatus(String(error), "error");
       });
     },
+    draftPrompt: (text) => {
+      promptEl.value = text;
+      autoResizePrompt();
+      promptEl.focus();
+    },
     openDoctorChat: () => chatState.sessions.ensureRuntimeSession("doctor"),
     attachRunLogFailure: (row, content) => {
       const explain = explainChatFailure(content);
@@ -455,7 +460,11 @@ export function wireChatControllers(): void {
     beforeBlock: () => {
       dismissLifecycleActivity();
       settleActivity();
-      finishToolGroup(true);
+      // Detach the live group: the next round's tools must start a fresh
+      // group below this thinking block. Keeping the group alive made every
+      // round's rows pile into the first, stale, folded group far above —
+      // the transcript showed a wall of thinking with no tool rows at all.
+      finishToolGroup(false);
     },
   });
 
@@ -734,6 +743,19 @@ export function wireChatControllers(): void {
       touchSession(session);
       flushStorePersist();
       if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
+    },
+    sealPlanOnTurnEnd: () => {
+      const id = chatState.runningChatSessionId;
+      const session = chatState.store.sessions.find((item) => item.id === id);
+      if (!session?.plan?.items.length) return;
+      if (session.plan.items.every((item) => item.state === "done")) return;
+      session.plan = {
+        items: session.plan.items.map((item) => ({ ...item, state: "done" })),
+        at: session.plan.at,
+      };
+      touchSession(session);
+      flushStorePersist();
+      if (chatState.store.activeId === session.id) paintChatPlan(logEl, session.plan);
     },
     onTurnCompleted: (text, status) => chatState.hosted?.noteTurnCompleted(text, status),
     onPermissionNeeded: (payload) => chatState.hosted?.notePermission(payload),

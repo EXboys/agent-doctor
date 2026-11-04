@@ -78,6 +78,8 @@ export type StreamDeps = {
   renderSessionList: () => void;
   showReplyChanges: () => void;
   onPlan: (items: PlanStep[]) => void;
+  /** Turn ended successfully: fold any open plan steps into done. */
+  sealPlanOnTurnEnd: () => void;
   onTurnCompleted: (text: string, status: string) => void;
   onPermissionNeeded: (payload: {
     session_id: string;
@@ -119,7 +121,20 @@ export function createStreamController(deps: StreamDeps) {
         return;
       }
       const thinkingStatus = payload.type === "status" && payload.phase === "thinking";
-      if (payload.type !== "thinking" && payload.type !== "stderr_line" && !thinkingStatus) {
+      // Auto-approved bash still files a permission event, and update_plan a
+      // plan event — sealing on those split one reasoning round into two
+      // 思考过程 rows. Only real content (the reply, a stop, the turn's end)
+      // closes the block.
+      const keepsThinking =
+        payload.type === "permission_request" ||
+        payload.type === "permission_resolved" ||
+        payload.type === "plan";
+      if (
+        payload.type !== "thinking" &&
+        payload.type !== "stderr_line" &&
+        !thinkingStatus &&
+        !keepsThinking
+      ) {
         deps.thinking.seal();
       }
       switch (payload.type) {
@@ -195,6 +210,12 @@ export function createStreamController(deps: StreamDeps) {
           }
           deps.sealAssistantBubble();
           deps.expireLivePermissionCards();
+          // A finished successful turn fulfils the plan it published; without
+          // this, pending circles linger when the model never sends a closing
+          // update_plan call.
+          if (payload.status === "succeeded" && hadAssistantText) {
+            deps.sealPlanOnTurnEnd();
+          }
           let failureSaid = turnNoticeShown() || chatFailureBubbleAlreadyShown();
           if (viewing) {
             deps.hideDecisionDock();

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
+import { doctorStartCards } from "./doctor-start";
 import { paintChatPlan, planStepsFromMessages } from "../plan";
 import { renderMarkdown } from "../markdown";
 import {
@@ -93,6 +94,8 @@ export type BubblesDeps = {
   setLifecycleActivityEl: (el: HTMLElement | null) => void;
   addProject: () => void;
   openProvider: () => void;
+  /** Drop starter text into the composer for the person to edit and send. */
+  draftPrompt: (text: string) => void;
   /** Empty-state card: start a chat with the built-in doctor agent. */
   openDoctorChat?: () => void;
   /** Buttons for a failed run log whose sentence is already on the row. */
@@ -608,6 +611,9 @@ export function createBubblesController(deps: BubblesDeps) {
   }
 
   function renderEmptyChat(): HTMLElement {
+    if (deps.activeSession().runtime === "doctor") {
+      return renderDoctorStartChat();
+    }
     const wrap = document.createElement("div");
     wrap.className = "chat-start";
     const project = document.createElement("button");
@@ -634,6 +640,22 @@ export function createBubblesController(deps: BubblesDeps) {
       doctor.querySelector("span")!.textContent = t("chat.emptyDoctorHint");
       doctor.addEventListener("click", () => deps.openDoctorChat?.());
       wrap.append(doctor);
+    }
+    return wrap;
+  }
+  /** A doctor chat greets with its real abilities; a card drafts its question. */
+  function renderDoctorStartChat(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-start";
+    for (const card of doctorStartCards()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chat-start-card";
+      button.innerHTML = `<strong></strong><span></span>`;
+      button.querySelector("strong")!.textContent = card.title;
+      button.querySelector("span")!.textContent = card.hint;
+      button.addEventListener("click", () => deps.draftPrompt(card.prompt));
+      wrap.append(button);
     }
     return wrap;
   }

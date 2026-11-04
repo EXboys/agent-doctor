@@ -36,7 +36,7 @@ import {
   type ToolRecord,
 } from "./tool-records";
 import { markTurnNoticeShown, pushChatTurnError, pushChatTurnReport } from "./turn-errors";
-import { placeProcessBlock, sealWorkTrail } from "./work-trail";
+import { placeProcessBlock, sealWorkGroup, sealWorkTrail } from "./work-trail";
 
 const PAGE_LOG_CHARS = 8_000;
 
@@ -557,6 +557,10 @@ function createToolGroupElement(): HTMLDetailsElement {
   group.className = "chat-tool-group";
   group.open = true;
   group.innerHTML = `<summary hidden></summary><div class="chat-tool-list"></div>`;
+  group.addEventListener("toggle", () => {
+    // A manual open wins: stop auto-collapsing this group for the rest of the turn.
+    if (group.open && group.classList.contains("is-live")) group.dataset.openPinned = "1";
+  });
   return group;
 }
 
@@ -826,10 +830,31 @@ export function createActivityController(deps: ActivityDeps) {
     }
   });
 
+  /** A live group past this many visible rows folds into its summary bar. */
+  const LIVE_GROUP_COLLAPSE_AFTER = 6;
+
   /** Fold repeated rows and mark whether the group is still taking steps. */
   function syncToolGroup(group: HTMLDetailsElement, live: boolean): void {
     const list = group.querySelector<HTMLElement>(".chat-tool-list");
-    if (list) foldRepeatedToolRows(list);
+    if (list) {
+      foldRepeatedToolRows(list);
+      const summary = group.querySelector<HTMLElement>("summary");
+      if (live && summary) {
+        // Long tool runs (the built-in doctor alternates every round) used to
+        // paint one wall of rows until the reply arrived; fold them instead.
+        const rows = list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row:not([hidden])").length;
+        const pinned = group.dataset.openPinned === "1";
+        if (rows > LIVE_GROUP_COLLAPSE_AFTER && !pinned) {
+          summary.hidden = false;
+          summary.textContent = t("chat.workLiveCount", { count: String(rows) });
+          if (group.open) group.open = false;
+        } else if (rows <= LIVE_GROUP_COLLAPSE_AFTER && !pinned) {
+          // Too few rows to fold: keep the bare list, as CLI turns always had.
+          summary.hidden = true;
+          if (!group.open) group.open = true;
+        }
+      }
+    }
     group.classList.toggle("is-live", live);
   }
 
@@ -864,6 +889,7 @@ export function createActivityController(deps: ActivityDeps) {
     if (activity && group.contains(activity)) settleActivity();
     syncToolGroup(group, false);
     deps.setToolGroupEl(null);
+    sealWorkGroup(group);
   }
 
   function toolTextsInLog(): ToolRecord[] {

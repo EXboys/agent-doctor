@@ -122,9 +122,16 @@ fn run_doctor(
     } else {
         Some("en".to_string())
     };
-    let agent_options = OfficialAgentOptions::for_chat(prompt, locale, Some(cwd.clone()));
+    let mut agent_options = OfficialAgentOptions::for_chat(prompt, locale, Some(cwd.clone()));
+    // Same switches as 设置 → 对话: browser tools ride unless the switch is
+    // off; computer use only when the person explicitly turned it on.
+    agent_options.browser_tools = options.browser_tools_enabled != Some(false);
+    agent_options.computer_tools = options.computer_use_enabled == Some(true);
 
     let mut step_seq = 0usize;
+    // The desktop merges a result onto the row its start opened, by step id.
+    let mut open_step_id = String::new();
+    let mut open_tool = String::new();
     let mut _streamed_text = false;
     let mut gate = ControlGate {
         control,
@@ -155,23 +162,19 @@ fn run_doctor(
             }),
             OfficialAgentEvent::Tool { tool, target } => {
                 step_seq += 1;
+                // The structured step alone drives the row; a text status here
+                // would file a second, generic row (工具 N次 …) next to it.
+                let step = doctor_step(&session_id, step_seq, &tool, target.as_deref(), "running");
+                open_step_id = step.id.clone();
+                open_tool = tool.clone();
                 on_event(PromptSessionEvent::Tool {
                     session_id: session_id.clone(),
-                    step: Box::new(doctor_step(
-                        &session_id,
-                        step_seq,
-                        &tool,
-                        target.as_deref(),
-                        "running",
-                    )),
-                });
-                on_event(PromptSessionEvent::Status {
-                    session_id: session_id.clone(),
-                    phase: "tool".to_string(),
-                    message: tool.clone(),
+                    step: Box::new(step),
                 });
             }
             OfficialAgentEvent::Reasoning { text } => {
+                // One folded row per round, interleaved with the round's tool
+                // rows — the industry-standard transcript layout.
                 on_event(PromptSessionEvent::Thinking {
                     session_id: session_id.clone(),
                     text,
@@ -184,12 +187,18 @@ fn run_doctor(
                     text,
                 });
             }
-            OfficialAgentEvent::ToolResult { tool, success } => {
-                step_seq += 1;
+            OfficialAgentEvent::ToolResult { success, .. } => {
+                if open_step_id.is_empty() {
+                    return;
+                }
+                // The same step id as the start: the desktop folds the outcome
+                // onto the existing row instead of filing a second, bare one.
                 let status = if success { "done" } else { "failed" };
+                let mut step = doctor_step(&session_id, step_seq, &open_tool, None, status);
+                step.id = open_step_id.clone();
                 on_event(PromptSessionEvent::Tool {
                     session_id: session_id.clone(),
-                    step: Box::new(doctor_step(&session_id, step_seq, &tool, None, status)),
+                    step: Box::new(step),
                 });
             }
             OfficialAgentEvent::Plan { steps } => {
@@ -293,10 +302,45 @@ fn doctor_step(
     target: Option<&str>,
     status: &str,
 ) -> ToolStep {
-    let (kind, command) = if tool == "bash" {
-        ("terminal", target.unwrap_or_default().to_string())
+    // Browser and screen tools render through the desktop's name-based alias
+    // table (打开网页 / 看屏幕 …), which reads the target from `command`, not `path`.
+    // The rest map to the desktop's native kinds so the collapsed trail reads
+    // 查阅了哪些文件 / 搜索了几次 instead of a generic 其他 N 项.
+    let (kind, command, path, query) = if tool == "bash" {
+        (
+            "terminal",
+            target.unwrap_or_default().to_string(),
+            String::new(),
+            String::new(),
+        )
+    } else if tool.starts_with("browser_") || tool.starts_with("screen_") {
+        (
+            "other",
+            target.unwrap_or_default().to_string(),
+            String::new(),
+            String::new(),
+        )
     } else {
-        ("other", String::new())
+        let kind = match tool {
+            "read_file" | "list_dir" => "read",
+            "grep_files" => "search",
+            "write_file" => "write",
+            "edit_file" | "search_replace" | "patch_config" => "edit",
+            _ => "other",
+        };
+        // The desktop reads a search target from `query`, a file target from `path`.
+        let labeled = target.unwrap_or_default().to_string();
+        let query = if kind == "search" {
+            labeled.clone()
+        } else {
+            String::new()
+        };
+        let path = if kind == "search" {
+            String::new()
+        } else {
+            labeled
+        };
+        (kind, String::new(), path, query)
     };
     ToolStep {
         id: format!("{session_id}-doctor-{seq}"),
@@ -304,13 +348,9 @@ fn doctor_step(
         name: tool.to_string(),
         status: status.to_string(),
         title: String::new(),
-        path: if tool == "bash" {
-            String::new()
-        } else {
-            target.unwrap_or_default().to_string()
-        },
+        path,
         command,
-        query: String::new(),
+        query,
         line_start: None,
         line_end: None,
         additions: 0,
@@ -385,5 +425,29 @@ mod tests {
         assert!(summary.chars().count() <= 401);
         assert!(summary.ends_with('…'));
         assert_eq!(summarize_answer("short"), "short");
+    }
+
+    #[test]
+    fn doctor_steps_carry_desktop_kinds() {
+        let read = doctor_step("s", 1, "read_file", Some("/a/config.toml"), "running");
+        assert_eq!(read.kind, "read");
+        assert_eq!(read.path, "/a/config.toml");
+        assert!(read.query.is_empty());
+
+        let grep = doctor_step("s", 2, "grep_files", Some("mcp"), "running");
+        assert_eq!(grep.kind, "search");
+        assert_eq!(grep.query, "mcp");
+        assert!(grep.path.is_empty());
+
+        let edit = doctor_step("s", 3, "patch_config", Some("/a/settings.json"), "running");
+        assert_eq!(edit.kind, "edit");
+
+        let bash = doctor_step("s", 4, "bash", Some("claude --version"), "running");
+        assert_eq!(bash.kind, "terminal");
+        assert_eq!(bash.command, "claude --version");
+
+        let browser = doctor_step("s", 5, "browser_navigate", Some("https://x"), "running");
+        assert_eq!(browser.kind, "other");
+        assert_eq!(browser.command, "https://x");
     }
 }

@@ -49,7 +49,7 @@ export type ThinkingDeps = {
   updateMessage: (id: string, content: string) => void;
   /** Finish the reply streamed so far, so text after this block lands below it. */
   endReply: () => void;
-  /** Close the live rows above so tools after this block start a new group. */
+  /** Settle rows above a fresh thinking block; a live tool group stays put and keeps collecting. */
   beforeBlock: () => void;
 };
 
