@@ -597,7 +597,9 @@ fn handle_request(request: &McpRequest, browser: &SharedBrowser) -> Result<Handl
 }
 
 fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Value> {
-    let mut session = browser.lock().unwrap();
+    let mut session = browser
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let ctx = session.ensure()?;
 
     match name {
@@ -746,6 +748,13 @@ fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Val
         "browser_list_tabs" => ctx.list_tabs(),
         _ => anyhow::bail!("Unknown tool: {name}"),
     }
+}
+
+/// Run one browser tool in-process for a host that embeds the session
+/// (the desktop chat). Same dispatch and tool names as the stdio MCP
+/// server, so both surfaces stay in lockstep.
+pub fn call_browser_tool(browser: &SharedBrowser, name: &str, args: &Value) -> Result<Value> {
+    execute_tool(name, args, browser)
 }
 
 fn write_response(response: &McpResponse, framing: Framing) -> Result<()> {

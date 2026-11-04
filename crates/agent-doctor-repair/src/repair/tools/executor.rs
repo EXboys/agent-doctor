@@ -1,15 +1,33 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use super::diff::unified_diff;
 use super::discover::{grep_allowed_files, list_allowed_directory};
 use super::patch::patch_structured_file;
 use super::policy::{allowed_paths_for_runtime, bash_command_allowed, path_is_allowed};
+use crate::repair::browser_tools_allowed;
 use agent_doctor_core::mask::{is_env_file, mask_config_file, unmask_file_content, SecretVault};
 use agent_doctor_core::repair_types::{RepairToolKind, RepairToolResult};
+use agent_doctor_mcp::{call_browser_tool, call_computer_tool, SharedBrowser};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BrowserToolArgs {
+    pub url: Option<String>,
+    pub text: Option<String>,
+    /// Snapshot ref (`@eN`) or CSS selector: click/fill target, snapshot scope.
+    pub target: Option<String>,
+    pub strategy: Option<String>,
+    pub query: Option<String>,
+    pub action: Option<String>,
+    /// Screenshot output path; empty lets the browser pick a temp PNG.
+    pub path: Option<String>,
+    pub inline: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepairToolCall {
@@ -22,6 +40,19 @@ pub struct RepairToolCall {
     pub value: Option<String>,
     pub pattern: Option<String>,
     pub command: Option<String>,
+    #[serde(default)]
+    pub browser: Option<BrowserToolArgs>,
+    /// One `screen_*` computer-use call: the tool name plus its raw JSON
+    /// arguments, passed through to the computer server untouched.
+    #[serde(default)]
+    pub computer: Option<ComputerToolArgs>,
+}
+
+/// The exact `screen_*` tool invoked this turn and its arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputerToolArgs {
+    pub tool: String,
+    pub arguments: Value,
 }
 
 pub struct RepairToolExecutor {
@@ -29,6 +60,14 @@ pub struct RepairToolExecutor {
     allowed_paths: Vec<PathBuf>,
     vault: SecretVault,
     apply_writes: bool,
+    /// Browser session for the chat's browser tools. The chat shares one
+    /// process-wide session (`Arc`), so Chrome outlives single turns. `None`
+    /// keeps those calls failing cleanly (repair planner, deep diagnose).
+    browser: Option<Arc<SharedBrowser>>,
+    /// Computer-use tools need no session (every call reaches the desktop
+    /// app over its socket), but they stay off unless the chat turn enabled
+    /// them, so the repair planner can never click the real screen.
+    screen_enabled: bool,
 }
 
 impl RepairToolExecutor {
@@ -38,6 +77,8 @@ impl RepairToolExecutor {
             allowed_paths: allowed_paths_for_runtime(runtime_id),
             vault,
             apply_writes,
+            browser: None,
+            screen_enabled: false,
         }
     }
 
@@ -52,7 +93,20 @@ impl RepairToolExecutor {
             allowed_paths,
             vault,
             apply_writes,
+            browser: None,
+            screen_enabled: false,
         }
+    }
+
+    /// Attach the shared browser session (chat turns with browser tools on).
+    pub fn set_browser(&mut self, browser: Arc<SharedBrowser>) {
+        self.browser = Some(browser);
+    }
+
+    /// Allow `screen_*` computer-use calls on this executor (chat turns with
+    /// the computer-use switch on).
+    pub fn set_screen_enabled(&mut self, enabled: bool) {
+        self.screen_enabled = enabled;
     }
 
     pub fn vault(&self) -> &SecretVault {
@@ -88,6 +142,14 @@ impl RepairToolExecutor {
                 call.value.as_deref(),
             ),
             RepairToolKind::Bash => self.run_bash(call.command.as_deref()),
+            RepairToolKind::BrowserNavigate
+            | RepairToolKind::BrowserSnapshot
+            | RepairToolKind::BrowserClick
+            | RepairToolKind::BrowserFill
+            | RepairToolKind::BrowserFind
+            | RepairToolKind::BrowserScreenshot
+            | RepairToolKind::BrowserGetText => self.run_browser(call.kind, call),
+            RepairToolKind::Screen => self.run_computer(call),
         }
     }
 
@@ -407,6 +469,97 @@ impl RepairToolExecutor {
         Ok(ok(RepairToolKind::Bash, true, None, masked))
     }
 
+    /// Run a browser tool through the shared CDP session. Everything happens
+    /// inside Agent Doctor's isolated automation Chrome, so these calls never
+    /// touch the filesystem outside the screenshot PNG and need no approval
+    /// card — the chat UI surfaces each step as it runs.
+    fn run_browser(
+        &mut self,
+        kind: RepairToolKind,
+        call: &RepairToolCall,
+    ) -> Result<RepairToolResult> {
+        let applied = !matches!(
+            kind,
+            RepairToolKind::BrowserSnapshot | RepairToolKind::BrowserGetText
+        );
+        let Some(tool) = kind.browser_tool_name() else {
+            return Ok(failed(kind, false, "not a browser tool".to_string()));
+        };
+        if !browser_tools_allowed() {
+            return Ok(failed(
+                kind,
+                false,
+                "browser tools are switched off for this turn".to_string(),
+            ));
+        }
+        let Some(browser) = self.browser.as_ref() else {
+            return Ok(failed(
+                kind,
+                false,
+                "browser tools are not available in this session".to_string(),
+            ));
+        };
+        let args = browser_tool_json(tool, call.browser.as_ref());
+        match call_browser_tool(browser, tool, &args) {
+            Ok(value) => {
+                let mut snippet_vault = SecretVault::default();
+                let rendered =
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+                let masked = snippet_vault.mask_text(&rendered);
+                self.vault.absorb(snippet_vault);
+                Ok(ok(kind, applied, None, masked))
+            }
+            Err(error) => Ok(failed(kind, applied, format!("{error:#}"))),
+        }
+    }
+
+    /// Run one `screen_*` computer-use tool. The click itself happens in the
+    /// desktop app over its local socket, so these calls fail with a clear
+    /// message when the app is closed. Arguments pass through untouched —
+    /// the computer server owns their shape, same as over stdio.
+    fn run_computer(&mut self, call: &RepairToolCall) -> Result<RepairToolResult> {
+        let Some(computer) = call.computer.as_ref() else {
+            return Ok(failed(
+                RepairToolKind::Screen,
+                false,
+                "screen call is missing its tool name".to_string(),
+            ));
+        };
+        let read_only_screen = matches!(
+            computer.tool.as_str(),
+            "screen_snapshot" | "screen_apps" | "screen_windows" | "screen_state"
+        );
+        if !browser_tools_allowed() {
+            return Ok(failed(
+                RepairToolKind::Screen,
+                false,
+                "screen tools are switched off for this turn".to_string(),
+            ));
+        }
+        if !self.screen_enabled {
+            return Ok(failed(
+                RepairToolKind::Screen,
+                false,
+                "screen tools are not available in this session".to_string(),
+            ));
+        }
+        match call_computer_tool(&computer.tool, &computer.arguments) {
+            Ok(value) => {
+                let mut snippet_vault = SecretVault::default();
+                let rendered =
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+                let masked = snippet_vault.mask_text(&rendered);
+                self.vault.absorb(snippet_vault);
+                Ok(ok(RepairToolKind::Screen, !read_only_screen, None, masked))
+            }
+            Err(error) => Ok(failed(
+                RepairToolKind::Screen,
+                !read_only_screen,
+                format!("{error:#}"),
+            )),
+        }
+    }
+
     fn resolve_path(
         &self,
         path: Option<&str>,
@@ -528,6 +681,44 @@ fn failed(kind: RepairToolKind, applied: bool, error: String) -> RepairToolResul
     }
 }
 
+/// Mirror [`RepairToolCall`] browser fields into the `agent-doctor-mcp`
+/// tool-argument JSON, keeping the same tool contract as the stdio server.
+fn browser_tool_json(tool: &str, browser: Option<&BrowserToolArgs>) -> Value {
+    let Some(args) = browser else {
+        return json!({});
+    };
+    let mut json_args = json!({});
+    let set = |json_args: &mut Value, key: &str, value: &Option<String>| {
+        if let Some(text) = value.as_deref().filter(|t| !t.trim().is_empty()) {
+            json_args[key] = json!(text);
+        }
+    };
+    match tool {
+        "browser_navigate" => set(&mut json_args, "url", &args.url),
+        "browser_snapshot" => set(&mut json_args, "selector", &args.target),
+        "browser_click" | "browser_fill" => {
+            set(&mut json_args, "ref", &args.target);
+            if tool == "browser_fill" {
+                set(&mut json_args, "text", &args.text);
+            }
+        }
+        "browser_find" => {
+            set(&mut json_args, "strategy", &args.strategy);
+            set(&mut json_args, "query", &args.query);
+            set(&mut json_args, "action", &args.action);
+            set(&mut json_args, "text", &args.text);
+        }
+        "browser_screenshot" => {
+            set(&mut json_args, "path", &args.path);
+            if args.inline {
+                json_args["inline"] = json!(true);
+            }
+        }
+        _ => {}
+    }
+    json_args
+}
+
 pub fn parse_tool_call(name: &str, arguments: &str) -> Result<RepairToolCall> {
     let value: serde_json::Value =
         serde_json::from_str(arguments).context("tool arguments must be JSON object")?;
@@ -564,6 +755,47 @@ pub fn parse_tool_call(name: &str, arguments: &str) -> Result<RepairToolCall> {
         .and_then(|item| item.as_str())
         .map(str::to_string);
 
+    // `ref` wins over `selector` for click/fill, like the MCP server's own
+    // target merge; `selector` doubles as the snapshot scope.
+    let browser = if name.starts_with("browser_") {
+        let target = value
+            .get("ref")
+            .and_then(Value::as_str)
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| {
+                value
+                    .get("selector")
+                    .and_then(Value::as_str)
+                    .filter(|t| !t.trim().is_empty())
+            })
+            .map(str::to_string);
+        let text_field = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
+        Some(BrowserToolArgs {
+            url: text_field("url"),
+            text: text_field("text"),
+            target,
+            strategy: text_field("strategy"),
+            query: text_field("query"),
+            action: text_field("action"),
+            path: text_field("path"),
+            inline: value
+                .get("inline")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+    } else {
+        None
+    };
+
+    let computer = if name.starts_with("screen_") {
+        Some(ComputerToolArgs {
+            tool: name.to_string(),
+            arguments: value.clone(),
+        })
+    } else {
+        None
+    };
+
     let kind = match name {
         "read_file" => RepairToolKind::Read,
         "list_dir" => RepairToolKind::ListDir,
@@ -572,6 +804,16 @@ pub fn parse_tool_call(name: &str, arguments: &str) -> Result<RepairToolCall> {
         "search_replace" => RepairToolKind::SearchReplace,
         "patch_config" => RepairToolKind::PatchConfig,
         "bash" => RepairToolKind::Bash,
+        "browser_navigate" => RepairToolKind::BrowserNavigate,
+        "browser_snapshot" => RepairToolKind::BrowserSnapshot,
+        "browser_click" => RepairToolKind::BrowserClick,
+        "browser_fill" | "browser_type" => RepairToolKind::BrowserFill,
+        "browser_find" => RepairToolKind::BrowserFind,
+        "browser_screenshot" => RepairToolKind::BrowserScreenshot,
+        "browser_get_text" => RepairToolKind::BrowserGetText,
+        "screen_apps" | "screen_open" | "screen_snapshot" | "screen_click" | "screen_type"
+        | "screen_press" | "screen_scroll" | "screen_windows" | "screen_state" | "screen_set"
+        | "screen_menu" => RepairToolKind::Screen,
         other => bail!("unknown tool: {other}"),
     };
 
@@ -585,6 +827,8 @@ pub fn parse_tool_call(name: &str, arguments: &str) -> Result<RepairToolCall> {
         value: value_field,
         pattern,
         command,
+        browser,
+        computer,
     })
 }
 
@@ -622,6 +866,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("read");
         assert!(read.success);
@@ -645,6 +891,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("write");
         assert!(write.success);
@@ -672,6 +920,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("replace");
         assert!(!fail.success);
@@ -696,6 +946,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("preview");
         assert!(preview.success);
@@ -726,6 +978,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("write preview");
         assert!(result.success);
@@ -749,6 +1003,8 @@ mod tests {
                 value: None,
                 pattern: None,
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("list");
         assert!(result.success);
@@ -771,10 +1027,182 @@ mod tests {
                 value: None,
                 pattern: Some("provider".to_string()),
                 command: None,
+                browser: None,
+                computer: None,
             })
             .expect("grep");
         assert!(result.success);
         assert!(result.masked_output.contains("config.yaml"));
         assert!(result.masked_output.contains("provider"));
+    }
+
+    #[test]
+    fn browser_calls_parse_with_ref_winning_over_selector() {
+        let parsed = parse_tool_call(
+            "browser_navigate",
+            r#"{"url":"https://www.baidu.com/s?wd=agent%20doctor"}"#,
+        )
+        .expect("navigate");
+        assert_eq!(parsed.kind, RepairToolKind::BrowserNavigate);
+        let browser = parsed.browser.expect("browser args");
+        assert_eq!(
+            browser.url.as_deref(),
+            Some("https://www.baidu.com/s?wd=agent%20doctor")
+        );
+
+        let parsed = parse_tool_call("browser_click", r##"{"ref":"@e3","selector":"#submit"}"##)
+            .expect("click");
+        assert_eq!(parsed.kind, RepairToolKind::BrowserClick);
+        assert_eq!(
+            parsed.browser.expect("browser args").target.as_deref(),
+            Some("@e3")
+        );
+
+        let parsed = parse_tool_call(
+            "browser_fill",
+            r##"{"selector":"#kw","text":"agent doctor"}"##,
+        )
+        .expect("fill");
+        let browser = parsed.browser.expect("browser args");
+        assert_eq!(browser.target.as_deref(), Some("#kw"));
+        assert_eq!(browser.text.as_deref(), Some("agent doctor"));
+
+        let parsed = parse_tool_call(
+            "browser_find",
+            r#"{"strategy":"text","query":"登录","action":"click"}"#,
+        )
+        .expect("find");
+        assert_eq!(parsed.kind, RepairToolKind::BrowserFind);
+        let browser = parsed.browser.expect("browser args");
+        assert_eq!(browser.strategy.as_deref(), Some("text"));
+        assert_eq!(browser.query.as_deref(), Some("登录"));
+        assert_eq!(browser.action.as_deref(), Some("click"));
+
+        let parsed =
+            parse_tool_call("browser_screenshot", r#"{"path":"shot.png"}"#).expect("screenshot");
+        assert_eq!(parsed.kind, RepairToolKind::BrowserScreenshot);
+        assert_eq!(
+            parsed.browser.expect("browser args").path.as_deref(),
+            Some("shot.png")
+        );
+    }
+
+    #[test]
+    fn browser_tool_json_keeps_the_mcp_contract() {
+        let args = BrowserToolArgs {
+            url: Some("https://example.com".to_string()),
+            ..BrowserToolArgs::default()
+        };
+        let json = browser_tool_json("browser_navigate", Some(&args));
+        assert_eq!(json["url"], "https://example.com");
+
+        let args = BrowserToolArgs {
+            target: Some("@e2".to_string()),
+            text: Some("hello".to_string()),
+            ..BrowserToolArgs::default()
+        };
+        let json = browser_tool_json("browser_fill", Some(&args));
+        assert_eq!(json["ref"], "@e2");
+        assert_eq!(json["text"], "hello");
+        assert!(json.get("selector").is_none());
+
+        let json = browser_tool_json("browser_get_text", None);
+        assert_eq!(json, serde_json::json!({}));
+    }
+
+    #[test]
+    fn browser_calls_fail_cleanly_without_a_session() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut exec = executor(&dir, true);
+        let result = exec
+            .execute(&RepairToolCall {
+                kind: RepairToolKind::BrowserNavigate,
+                path: None,
+                content: None,
+                old_string: None,
+                new_string: None,
+                key_path: None,
+                value: None,
+                pattern: None,
+                command: None,
+                browser: Some(BrowserToolArgs {
+                    url: Some("https://example.com".to_string()),
+                    ..BrowserToolArgs::default()
+                }),
+                computer: None,
+            })
+            .expect("browser call");
+        assert!(!result.success);
+        assert!(result
+            .error
+            .expect("error")
+            .contains("browser tools are not available"));
+    }
+
+    #[test]
+    fn browser_calls_respect_the_turn_switch() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut exec = executor(&dir, true);
+        let _hold = crate::repair::HoldBrowserToolsOff::new();
+        let result = exec
+            .execute(&RepairToolCall {
+                kind: RepairToolKind::BrowserGetText,
+                path: None,
+                content: None,
+                old_string: None,
+                new_string: None,
+                key_path: None,
+                value: None,
+                pattern: None,
+                command: None,
+                browser: None,
+                computer: None,
+            })
+            .expect("browser call");
+        assert!(!result.success);
+        assert!(result.error.expect("error").contains("switched off"));
+    }
+
+    #[test]
+    fn screen_calls_pass_tool_name_and_raw_arguments_through() {
+        let parsed = parse_tool_call("screen_menu", r#"{"app":"访达","path":["文件","新建"]}"#)
+            .expect("menu");
+        assert_eq!(parsed.kind, RepairToolKind::Screen);
+        let computer = parsed.computer.expect("computer args");
+        assert_eq!(computer.tool, "screen_menu");
+        assert_eq!(computer.arguments["app"], "访达");
+        assert_eq!(computer.arguments["path"][1], "新建");
+
+        let parsed = parse_tool_call("screen_click", r#"{"ref":"@e2"}"#).expect("click");
+        assert_eq!(parsed.computer.expect("computer args").tool, "screen_click");
+    }
+
+    #[test]
+    fn screen_calls_fail_cleanly_when_not_enabled() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut exec = executor(&dir, true);
+        let result = exec
+            .execute(&RepairToolCall {
+                kind: RepairToolKind::Screen,
+                path: None,
+                content: None,
+                old_string: None,
+                new_string: None,
+                key_path: None,
+                value: None,
+                pattern: None,
+                command: None,
+                browser: None,
+                computer: Some(ComputerToolArgs {
+                    tool: "screen_apps".to_string(),
+                    arguments: serde_json::json!({}),
+                }),
+            })
+            .expect("screen call");
+        assert!(!result.success);
+        assert!(result
+            .error
+            .expect("error")
+            .contains("screen tools are not available"));
     }
 }

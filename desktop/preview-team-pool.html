@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>团队版 · 服务商</title>
+    <link rel="stylesheet" href="/src/styles.css?v=kind" />
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        justify-content: center;
+        background: #e8edf5;
+      }
+      .preview-frame {
+        width: 440px;
+        height: 100%;
+        min-height: 760px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="widget preview-frame">
+      <header class="widget-toolbar">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <p class="brand-name">Agent Doctor</p>
+        </div>
+      </header>
+
+      <nav class="main-tabs main-tabs-4" aria-label="Main sections">
+        <button type="button" class="main-tab">Agent</button>
+        <button type="button" class="main-tab">资源</button>
+        <button type="button" class="main-tab is-active" aria-selected="true">服务商</button>
+        <button type="button" class="main-tab">项目</button>
+      </nav>
+
+      <section class="main-panel is-active">
+        <section class="widget-section personal-section provider-panel is-active">
+          <div id="personal-list-view">
+            <div class="section-label section-label-stack">
+              <div class="section-heading">
+                <h2>模型服务</h2>
+                <p class="section-sub">给本机 Agents 配置模型服务。</p>
+              </div>
+              <button type="button" class="btn-primary btn-compact">新增</button>
+            </div>
+            <ul class="provider-list">
+              <li class="provider-item is-active">
+                <span class="provider-avatar" data-tone="1" aria-hidden="true">官</span>
+                <div class="provider-item-main">
+                  <p class="provider-item-title"><span class="provider-item-name">官方</span></p>
+                  <p class="provider-item-sub"><span class="provider-item-meta">可用</span><span class="provider-item-note">剩余 12800 Token</span></p>
+                </div>
+              </li>
+              <li class="provider-item">
+                <span class="provider-avatar" data-tone="2" aria-hidden="true">D</span>
+                <div class="provider-item-main">
+                  <p class="provider-item-title"><span class="provider-item-name">DeepSeek</span></p>
+                  <p class="provider-item-sub"><span class="provider-item-note">deepseek-flash</span></p>
+                </div>
+              </li>
+            </ul>
+            <div class="subscription-pool">
+              <div class="section-label section-label-compact">
+                <h3>订阅号</h3>
+                <button id="subscription-add" type="button" class="btn-primary btn-compact">新增</button>
+              </div>
+              <div id="subscription-pool-empty" class="subscription-pool-empty" hidden>
+                <p>还没有登录的订阅号。</p>
+                <div class="subscription-detail-actions">
+                  <button id="subscription-empty-claude" type="button" class="btn-secondary">登录 Claude Code</button>
+                  <button id="subscription-empty-codex" type="button" class="btn-secondary">登录 Codex</button>
+                </div>
+              </div>
+              <ul id="subscription-pool-list" class="subscription-pool-list">
+                <li>
+                  <button type="button" class="subscription-pool-item is-in-use" data-name="甲" data-status="使用中" data-meta="剩余 12800 · 有效期 2026-12-01" data-holder="使用人 小王的电脑" data-proxy="1.2.3.4:8080" data-cap="">
+                    <div class="subscription-pool-top">
+                      <span class="subscription-pool-name">甲</span>
+                      <span class="subscription-pool-status">使用中</span>
+                      <span class="subscription-pool-chevron" aria-hidden="true">›</span>
+                    </div>
+                    <p class="subscription-pool-meta">剩余 12800 · 有效期 2026-12-01</p>
+                    <p class="subscription-pool-holder">Claude Code · 使用人 小王的电脑 · 出口 1.2.3.4:8080</p>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" class="subscription-pool-item" data-name="乙" data-status="空闲" data-meta="剩余 400 · 有效期 2027-03-01" data-holder="没有人在用" data-proxy="" data-cap="100">
+                    <div class="subscription-pool-top">
+                      <span class="subscription-pool-name">乙</span>
+                      <span class="subscription-pool-status">空闲</span>
+                      <span class="subscription-pool-chevron" aria-hidden="true">›</span>
+                    </div>
+                    <p class="subscription-pool-meta">剩余 400 · 有效期 2027-03-01</p>
+                    <p class="subscription-pool-holder">Codex · 没有人在用 · 出口 这台电脑</p>
+                  </button>
+                </li>
+                <li>
+                  <button type="button" class="subscription-pool-item is-bad" data-name="丙" data-status="额度用完" data-meta="剩余 0 · 有效期 2026-11-20" data-holder="没有人在用" data-proxy="" data-cap="">
+                    <div class="subscription-pool-top">
+                      <span class="subscription-pool-name">丙</span>
+                      <span class="subscription-pool-status">额度用完</span>
+                      <span class="subscription-pool-chevron" aria-hidden="true">›</span>
+                    </div>
+                    <p class="subscription-pool-meta">剩余 0 · 有效期 2026-11-20</p>
+                    <p class="subscription-pool-holder">Claude Code · 没有人在用 · 出口 这台电脑</p>
+                  </button>
+                </li>
+              </ul>
+              <p class="section-footnote">示例数据。号要等电脑上报后才会出现，这里不能手填登录。</p>
+            </div>
+            <div id="subscription-detail" class="subscription-detail" hidden>
+              <div class="section-label">
+                <button id="subscription-detail-back" type="button" class="btn-ghost btn-compact">返回</button>
+                <h2 id="subscription-detail-name">甲</h2>
+                <span id="subscription-detail-status" class="subscription-pool-status">使用中</span>
+              </div>
+              <p id="subscription-detail-meta" class="subscription-pool-meta"></p>
+              <p id="subscription-detail-holder" class="subscription-pool-holder"></p>
+              <div class="subscription-detail-block">
+                <label class="field-row">
+                  <span class="field-label">出口</span>
+                  <input id="subscription-proxy" class="field-input" type="text" placeholder="代理地址，如 1.2.3.4:8080" />
+                </label>
+                <p class="section-footnote">留空再绑定，这个号走这台电脑自己的网络。</p>
+                <button id="subscription-proxy-save" type="button" class="btn-primary">绑定</button>
+              </div>
+              <div class="subscription-detail-block">
+                <label class="field-row">
+                  <span class="field-label">这一次最多用多少</span>
+                  <input id="subscription-cap" class="field-input" type="number" min="1" placeholder="这一次最多用多少" />
+                </label>
+                <p class="section-footnote">留空再设置，就取消这一次的上限。</p>
+                <button id="subscription-cap-save" type="button" class="btn-secondary">设一次上限</button>
+              </div>
+              <div class="subscription-detail-actions">
+                <button id="subscription-disable" type="button" class="btn-secondary">停用</button>
+                <button type="button" class="btn-secondary">收回</button>
+              </div>
+              <p id="subscription-detail-result" class="section-footnote" role="status"></p>
+            </div>
+            <div id="subscription-login" class="subscription-detail" hidden>
+              <div class="section-label">
+                <button id="subscription-login-back" type="button" class="btn-ghost btn-compact">返回</button>
+                <h2>新增订阅号</h2>
+              </div>
+              <p class="section-footnote">选一种，写个名字，再登录。登录只留在这个号自己的目录里。</p>
+              <div class="subscription-kind-pick" role="group">
+                <button id="subscription-login-claude" type="button" class="subscription-kind" aria-pressed="false">Claude Code</button>
+                <button id="subscription-login-codex" type="button" class="subscription-kind" aria-pressed="false">Codex</button>
+              </div>
+              <label class="field-row">
+                <span class="field-label">名字</span>
+                <input id="subscription-login-name" class="field-input" type="text" placeholder="用来认出这个号" />
+              </label>
+              <button id="subscription-login-start" type="button" class="btn-primary">开始登录</button>
+              <p id="subscription-login-result" class="section-footnote" role="status"></p>
+            </div>
+          </div>
+        </section>
+      </section>
+      <p class="section-footnote" style="margin-top:auto">本机 · 团队</p>
+    </main>
+    <script>
+      const list = document.querySelector("#personal-list-view");
+      const detail = document.querySelector("#subscription-detail");
+      const login = document.querySelector("#subscription-login");
+      const result = document.querySelector("#subscription-detail-result");
+      const loginResult = document.querySelector("#subscription-login-result");
+      let loginKind = "";
+      function paintKind() {
+        document.querySelector("#subscription-login-claude").setAttribute("aria-pressed", loginKind === "claude-code" ? "true" : "false");
+        document.querySelector("#subscription-login-codex").setAttribute("aria-pressed", loginKind === "codex" ? "true" : "false");
+      }
+      function openLogin(kind) {
+        detail.hidden = true;
+        login.hidden = false;
+        list.classList.add("is-pool-detail");
+        loginKind = kind || "";
+        loginResult.textContent = "";
+        paintKind();
+      }
+      function closeLogin() {
+        login.hidden = true;
+        loginResult.textContent = "";
+        if (detail.hidden) list.classList.remove("is-pool-detail");
+      }
+      document.querySelector("#subscription-add").addEventListener("click", () => openLogin(""));
+      document.querySelector("#subscription-empty-claude").addEventListener("click", () => openLogin("claude-code"));
+      document.querySelector("#subscription-empty-codex").addEventListener("click", () => openLogin("codex"));
+      document.querySelector("#subscription-login-back").addEventListener("click", closeLogin);
+      document.querySelector("#subscription-login-claude").addEventListener("click", () => { loginKind = "claude-code"; paintKind(); });
+      document.querySelector("#subscription-login-codex").addEventListener("click", () => { loginKind = "codex"; paintKind(); });
+      document.querySelector("#subscription-login-start").addEventListener("click", () => {
+        const name = document.querySelector("#subscription-login-name").value.trim();
+        if (!loginKind) { loginResult.textContent = "先选择 Claude Code 或 Codex。"; return; }
+        if (!name) { loginResult.textContent = "先写一个名字，用来认出这个号。"; return; }
+        loginResult.textContent = "正在打开登录…";
+      });
+      document.querySelectorAll(".subscription-pool-item").forEach((button) => {
+        button.addEventListener("click", () => {
+          login.hidden = true;
+          list.classList.add("is-pool-detail");
+          detail.hidden = false;
+          document.querySelector("#subscription-detail-name").textContent = button.dataset.name;
+          document.querySelector("#subscription-detail-status").textContent = button.dataset.status;
+          document.querySelector("#subscription-detail-meta").textContent = button.dataset.meta;
+          const kind = button.dataset.name === "乙" ? "Codex" : "Claude Code";
+          document.querySelector("#subscription-detail-holder").textContent = kind + " · " + button.dataset.holder;
+          document.querySelector("#subscription-proxy").value = button.dataset.proxy || "";
+          document.querySelector("#subscription-cap").value = button.dataset.cap || "";
+          document.querySelector("#subscription-disable").textContent = "停用";
+          result.textContent = "";
+        });
+      });
+      document.querySelector("#subscription-detail-back").addEventListener("click", () => {
+        detail.hidden = true;
+        result.textContent = "";
+        if (login.hidden) list.classList.remove("is-pool-detail");
+      });
+      document.querySelector("#subscription-proxy-save").addEventListener("click", () => {
+        const raw = document.querySelector("#subscription-proxy").value.trim();
+        result.textContent = raw
+          ? "这个号出去走 " + raw.replace(/^https?:\/\//, "") + "。"
+          : "这个号改走这台电脑自己的网络。";
+      });
+      document.querySelector("#subscription-cap-save").addEventListener("click", () => {
+        const raw = document.querySelector("#subscription-cap").value.trim();
+        result.textContent = raw ? "一次最多用 " + raw + "。" : "已取消一次上限。";
+      });
+      document.querySelector("#subscription-disable").addEventListener("click", () => {
+        const button = document.querySelector("#subscription-disable");
+        const off = button.textContent === "停用";
+        button.textContent = off ? "恢复" : "停用";
+        result.textContent = off ? "已停用，不再分出去。" : "已恢复，可以再被领走。";
+      });
+    </script>
+  </body>
+</html>

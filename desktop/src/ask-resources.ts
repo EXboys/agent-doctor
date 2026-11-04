@@ -356,6 +356,25 @@ export function promptRequestsBrowserMcp(text: string): boolean {
   ) {
     return true;
   }
+  // Chinese open-a-site intents: 打开百度，搜索… / 访问 example.com. Needs a
+  // site hint so 打开文件 / 打开项目 stay non-browser.
+  const mentionsSite =
+    /baidu|google|bing|http|www\.|\.com|\.cn|\.net/.test(lower) ||
+    text.includes("百度") ||
+    text.includes("谷歌") ||
+    text.includes("必应") ||
+    text.includes("网站") ||
+    text.includes("网页") ||
+    text.includes("网址");
+  const asksToOpen =
+    lower.includes("open ") ||
+    lower.includes("visit ") ||
+    lower.includes("go to ") ||
+    text.includes("打开") ||
+    text.includes("访问");
+  if (mentionsSite && asksToOpen) {
+    return true;
+  }
   return false;
 }
 

@@ -261,6 +261,14 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Run one screen tool in-process for a host that embeds the server (the
+/// desktop chat). Same dispatch and tool names as the stdio MCP server. The
+/// click itself still happens in the desktop app over its local socket, so
+/// this works only while the app is open.
+pub fn call_computer_tool(name: &str, args: &Value) -> Result<Value> {
+    execute(name, args)
+}
+
 fn execute(name: &str, args: &Value) -> Result<Value> {
     match name {
         "screen_apps" => screen_apps(),

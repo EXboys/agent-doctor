@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>一条路</title>
+    <style>
+      :root {
+        font-family: "PingFang SC", "Hiragino Sans GB", "Heiti SC", system-ui, sans-serif;
+        --text: #152033;
+        --muted: #5b6578;
+        --faint: #8b95a8;
+        --line: rgba(15, 23, 42, 0.1);
+        --ok: #149a5a;
+        --accent: #2f6fed;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; background: #e8ecf2; color: var(--text); }
+      body { padding: 28px 28px 56px; }
+      h1 { margin: 0 0 8px; font-size: 26px; }
+      .lead { margin: 0 0 22px; color: var(--muted); font-size: 16px; line-height: 1.55; max-width: 720px; }
+      .chain {
+        display: flex; align-items: center; gap: 10px;
+        margin: 0 0 28px; font-size: 15px; font-weight: 650;
+      }
+      .chain span {
+        padding: 8px 12px; border-radius: 999px; background: #fff;
+      }
+      .chain span.on { background: #2f6fed; color: #fff; }
+      .chain i { color: var(--faint); font-style: normal; }
+      .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+      .step { background: #fff; border-radius: 16px; padding: 14px; min-height: 420px; }
+      .step h2 { margin: 0 0 4px; font-size: 16px; }
+      .step p { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .win {
+        border-radius: 12px; overflow: hidden; background: #0c0c0c;
+        min-height: 300px; color: #d4d4d4; font-size: 12px;
+      }
+      .win.light { background: #f6f7fa; color: var(--text); }
+      .pad { padding: 12px; }
+      .card { background: #fff; border-radius: 10px; padding: 10px; margin-bottom: 8px; }
+      .dark .card { background: #161616; }
+      .card strong { display: block; font-size: 13px; margin-bottom: 4px; }
+      .btn {
+        display: inline-block; margin: 8px 6px 0 0; padding: 5px 8px;
+        border-radius: 6px; background: #eef1f6; font-size: 11px;
+      }
+      .btn-pri { background: #2f6fed; color: #fff; }
+      .split { display: grid; grid-template-columns: 118px 1fr; min-height: 300px; }
+      .rail { background: #f6f7fa; color: var(--text); padding: 8px; }
+      .ask { padding: 12px; }
+      .ok { color: var(--ok); font-weight: 650; }
+      .row-item { display: flex; justify-content: space-between; padding: 6px 4px; }
+      .row-item.on { background: #fff; border-radius: 6px; padding: 6px 8px; }
+      .foot { margin-top: 18px; color: var(--faint); font-size: 11px; }
+      .bubble { max-width: 90%; margin: 0 0 8px auto; padding: 7px 9px; border-radius: 8px; background: #2a2a2e; }
+      .reply { color: #c8c8c8; line-height: 1.45; }
+      .note {
+        margin-top: 22px; background: #fff; border-radius: 12px; padding: 14px 16px;
+        font-size: 13px; color: var(--muted); line-height: 1.5;
+      }
+      .note b { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <h1>每天就这一条路</h1>
+    <p class="lead">装 Agent 是本机的。项目是问答用的。设置是修理间，平时不用进去。</p>
+    <div class="chain">
+      <span class="on">1 先装到这台电脑</span>
+      <i>→</i>
+      <span>2 选项目，开始问</span>
+      <i>→</i>
+      <span>3 坏了再去修</span>
+    </div>
+    <div class="row">
+      <section class="step">
+        <h2>1. 先装 Agent</h2>
+        <p>不选项目。装的是这台电脑上的 Claude / Codex。</p>
+        <div class="win light">
+          <div class="pad">
+            <div class="card">
+              <strong>首次设置 · 装到这台电脑</strong>
+              还没装好。先让本机 Agent 跑起来。
+              <div><span class="btn btn-pri">去安装</span></div>
+            </div>
+            <div class="card">
+              <strong>Claude Code</strong>
+              未装
+              <div><span class="btn">去安装</span></div>
+            </div>
+            <div class="card">
+              <strong>Codex</strong>
+              未装
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="step">
+        <h2>2. 选项目，开始问</h2>
+        <p>装好以后，左边只做一件事：选在哪个项目里问。</p>
+        <div class="win">
+          <div class="split">
+            <aside class="rail">
+              <div class="ok">本机可以用</div>
+              <div style="color:#8b95a8;margin:0 0 8px">Claude Code 已连上</div>
+              <div class="row-item on">默认项目</div>
+              <div class="row-item">验证 Claude Code</div>
+              <div class="foot">知识库 · 设置</div>
+            </aside>
+            <div class="ask">
+              <div class="bubble">这个项目连不上。</div>
+              <div class="reply">我先看这个项目。密钥过期了。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="step">
+        <h2>3. 坏了再去修</h2>
+        <p>左上角「去检查」，或左下「设置」。不是每天都要打开的页。</p>
+        <div class="win light">
+          <div class="pad">
+            <div class="card">
+              <strong>去检查 · Claude Code</strong>
+              安装 → 配置 → 测试
+              <div>
+                <span class="btn btn-pri">去修</span>
+                <span class="btn">打开安装日志</span>
+                <span class="btn">重装</span>
+              </div>
+            </div>
+            <div class="card">
+              <strong>设置是修理间</strong>
+              Agent / 资源 / 服务商 / 项目 还在。密钥过期去服务商，加文件夹去项目。
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="note">
+      <b>不要走反。</b>
+      先装本机 Agent，再选项目问答。不要先建项目再找安装。
+      技能、记忆可以按项目分开，那是装好之后的事。
+    </div>
+  </body>
+</html>

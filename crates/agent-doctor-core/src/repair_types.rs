@@ -403,6 +403,36 @@ pub enum RepairToolKind {
     SearchReplace,
     PatchConfig,
     Bash,
+    /// Browser tools run inside Agent Doctor's isolated automation Chrome
+    /// (no shared logins); they never touch files or runtime configs.
+    BrowserNavigate,
+    BrowserSnapshot,
+    BrowserClick,
+    BrowserFill,
+    BrowserFind,
+    BrowserScreenshot,
+    BrowserGetText,
+    /// One `screen_*` computer-use tool; the exact tool name rides in the
+    /// caller's tool-call payload, not in this kind. Unlike the isolated
+    /// browser, these drive the person's real screen, so action tools ask
+    /// before they click.
+    Screen,
+}
+
+impl RepairToolKind {
+    /// The `agent-doctor-mcp` tool name this kind dispatches to.
+    pub fn browser_tool_name(self) -> Option<&'static str> {
+        match self {
+            Self::BrowserNavigate => Some("browser_navigate"),
+            Self::BrowserSnapshot => Some("browser_snapshot"),
+            Self::BrowserClick => Some("browser_click"),
+            Self::BrowserFill => Some("browser_fill"),
+            Self::BrowserFind => Some("browser_find"),
+            Self::BrowserScreenshot => Some("browser_screenshot"),
+            Self::BrowserGetText => Some("browser_get_text"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

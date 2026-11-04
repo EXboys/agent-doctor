@@ -134,6 +134,270 @@ pub fn repair_tool_definitions() -> Value {
     ])
 }
 
+/// Browser tools for the chat: same names and contracts as the
+/// `agent-doctor-mcp` stdio server, executed in-process against Agent
+/// Doctor's isolated automation Chrome. Never offered to the repair planner
+/// or deep diagnose.
+pub fn browser_tool_definitions() -> Value {
+    json!([
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_navigate",
+                "description": "Open a URL in Agent Doctor's browser and wait for the page to load. Returns { title, url }. Call browser_snapshot next before clicking or filling.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "The URL to open (https://…)" }
+                    },
+                    "required": ["url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_snapshot",
+                "description": "List the page's interactive elements with stable @eN refs. REQUIRED before browser_click/browser_fill — re-run after navigation or DOM changes because old refs go stale. `selector` optionally narrows the scope to one subtree.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": { "type": "string", "description": "Optional CSS scope; snapshot only inside this element" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_click",
+                "description": "Click a page element by snapshot ref (@e1, preferred) or CSS selector.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ref": { "type": "string", "description": "Snapshot ref like @e1 from browser_snapshot" },
+                        "selector": { "type": "string", "description": "CSS selector fallback when no ref" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_fill",
+                "description": "Clear and fill an input by snapshot ref (@eN, preferred) or CSS selector.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ref": { "type": "string", "description": "Snapshot ref like @e2" },
+                        "selector": { "type": "string", "description": "CSS selector fallback" },
+                        "text": { "type": "string", "description": "Text to fill in" }
+                    },
+                    "required": ["text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_find",
+                "description": "Find an element by role/label/text/placeholder/testid when refs are awkward; optionally click/fill/type it immediately via `action`.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "strategy": { "type": "string", "description": "role | label | text | placeholder | testid" },
+                        "query": { "type": "string", "description": "Text / role name / test id to match" },
+                        "action": { "type": "string", "description": "Optional: click | fill | type" },
+                        "text": { "type": "string", "description": "Text for the fill/type action" }
+                    },
+                    "required": ["strategy", "query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_screenshot",
+                "description": "Screenshot the current page as a PNG and return { path }. Tell the person where the file is; use it when they ask for a screenshot or visual proof.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Optional PNG path; defaults to a temp file" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_get_text",
+                "description": "Read the current page's visible text. Cheapest way to check search results or page content.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }
+    ])
+}
+
+/// Computer-use tools for the chat: same names and contracts as the
+/// `agent-doctor-mcp` stdio computer server, executed in-process. The click
+/// happens in the desktop app over its local socket. Never offered to the
+/// repair planner or deep diagnose.
+pub fn computer_tool_definitions() -> Value {
+    json!([
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_apps",
+                "description": "List the apps open on this computer.",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_snapshot",
+                "description": "See one app's window as text: its controls numbered @e1, @e2 … with screen points. Call it again after anything changes — old refs go stale. `app` empty uses the front app.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string", "description": "App name. Empty uses the front app." }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_click",
+                "description": "Click inside an app that is already open, by @eN ref from screen_snapshot (preferred), by label from screen_state, or by x,y points. To open or switch apps call screen_open instead — never click the Dock, Spotlight, or Launchpad.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ref": { "type": "string", "description": "@eN from screen_snapshot" },
+                        "label": { "type": "string", "description": "Control name from screen_state" },
+                        "app": { "type": "string" },
+                        "x": { "type": "number" },
+                        "y": { "type": "number" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_type",
+                "description": "Type text into the focused control. Pass ref to click that field first.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string" },
+                        "ref": { "type": "string" }
+                    },
+                    "required": ["text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_open",
+                "description": "Open an app by its exact name and bring it forward. Use this instead of clicking the Dock. 微信 is not 微信开发者工具.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string", "description": "Exact app name, such as 微信 or WeChat." }
+                    },
+                    "required": ["app"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_scroll",
+                "description": "Scroll a list up or down when the row is not on screen. x,y are points on that list.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "type": "string", "description": "up or down" },
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "amount": { "type": "integer" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_press",
+                "description": "Press a key inside the current app, such as return, escape, tab, backspace, delete, or command+a.",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "key": { "type": "string" } },
+                    "required": ["key"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_windows",
+                "description": "List an app's window titles. Empty app uses the front app.",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "app": { "type": "string" } }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_state",
+                "description": "Read the front window's buttons and text fields, with screen points.",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "app": { "type": "string" } }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_set",
+                "description": "Write into a named text field from screen_state. If that window has no text field, click the place and use screen_type.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string" },
+                        "label": { "type": "string" },
+                        "text": { "type": "string" }
+                    },
+                    "required": ["label", "text"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "screen_menu",
+                "description": "Open a menu by its names from the menu bar down, such as [\"文件\", \"新建\"]. Does not click a guessed point.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string" },
+                        "path": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }
+    ])
+}
+
 /// Tools that never change files or run commands (deep diagnose Q&A).
 pub fn read_only_tool_definitions() -> Value {
     let Value::Array(all) = repair_tool_definitions() else {
@@ -268,5 +532,106 @@ pub fn official_llm_config() -> Result<LlmConfig> {
             &entry.api_key,
             &entry.model,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_definitions_cover_the_chat_tool_set() {
+        let tools = browser_tool_definitions();
+        let names: Vec<&str> = tools
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .expect("name")
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "browser_navigate",
+                "browser_snapshot",
+                "browser_click",
+                "browser_fill",
+                "browser_find",
+                "browser_screenshot",
+                "browser_get_text"
+            ]
+        );
+    }
+
+    #[test]
+    fn computer_definitions_cover_the_screen_tool_set() {
+        let tools = computer_tool_definitions();
+        let names: Vec<&str> = tools
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .expect("name")
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "screen_apps",
+                "screen_snapshot",
+                "screen_click",
+                "screen_type",
+                "screen_open",
+                "screen_scroll",
+                "screen_press",
+                "screen_windows",
+                "screen_state",
+                "screen_set",
+                "screen_menu",
+            ]
+        );
+    }
+
+    #[test]
+    fn repair_and_read_only_definitions_stay_hands_free() {
+        let hands_free = |tools: &Value| {
+            tools.as_array().expect("array").iter().all(|tool| {
+                let name = tool
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .expect("name");
+                !name.starts_with("browser_") && !name.starts_with("screen_")
+            })
+        };
+        assert!(hands_free(&repair_tool_definitions()));
+        assert!(hands_free(&read_only_tool_definitions()));
+    }
+
+    #[test]
+    fn hand_definitions_do_not_bleed_into_each_other() {
+        let names = |tools: &Value| -> Vec<String> {
+            tools
+                .as_array()
+                .expect("array")
+                .iter()
+                .map(|tool| {
+                    tool.pointer("/function/name")
+                        .and_then(Value::as_str)
+                        .expect("name")
+                        .to_string()
+                })
+                .collect()
+        };
+        assert!(names(&browser_tool_definitions())
+            .iter()
+            .all(|name| !name.starts_with("screen_")));
+        assert!(names(&computer_tool_definitions())
+            .iter()
+            .all(|name| !name.starts_with("browser_")));
     }
 }

@@ -89,6 +89,30 @@ pub(crate) fn prompt_requests_browser_mcp(prompt: &str) -> bool {
     {
         return true;
     }
+    // Chinese open-a-site intents: 打开百度，搜索… / 访问 example.com. Needs a
+    // site hint so 打开文件 / 打开项目 stay non-browser.
+    let mentions_site = prompt.contains("百度")
+        || prompt.contains("谷歌")
+        || prompt.contains("必应")
+        || lower.contains("baidu")
+        || lower.contains("google")
+        || lower.contains("bing")
+        || lower.contains("http")
+        || lower.contains("www.")
+        || lower.contains(".com")
+        || lower.contains(".cn")
+        || lower.contains(".net")
+        || prompt.contains("网站")
+        || prompt.contains("网页")
+        || prompt.contains("网址");
+    let asks_to_open = lower.contains("open ")
+        || lower.contains("visit ")
+        || lower.contains("go to ")
+        || prompt.contains("打开")
+        || prompt.contains("访问");
+    if asks_to_open && mentions_site {
+        return true;
+    }
     false
 }
 
@@ -555,6 +579,13 @@ mod tests {
         assert!(wants_browser_mcp(&opts));
         opts.prompt = "open https://www.baidu.com".into();
         assert!(wants_browser_mcp(&opts));
+        opts.prompt = "打开百度，搜索 agent doctor".into();
+        assert!(wants_browser_mcp(&opts));
+        opts.prompt = "帮我访问 github.com 上的仓库".into();
+        assert!(wants_browser_mcp(&opts));
+        // 打开 without a site hint stays non-browser.
+        opts.prompt = "打开这个项目文件夹里的文件".into();
+        assert!(!wants_browser_mcp(&opts));
         opts.prompt = "Conversation so far:\n\nUser: 打开浏览器访问百度\n\nAssistant: opened\n\nUser: 你好\n\nAssistant:".into();
         assert!(!wants_browser_mcp(&opts));
         assert_eq!(last_user_prompt_for_intent(&opts.prompt), "你好");

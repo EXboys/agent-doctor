@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>并排主窗 · 两种收法</title>
+    <style>
+      :root {
+        font-family: "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+        --bg: #e8ecf4;
+        --text: #0f172a;
+        --muted: #64748b;
+        --line: rgba(15, 23, 42, 0.08);
+        --primary: #3b82f6;
+        --shell: #f5f7fb;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 24px 28px 40px; background: #dfe4ec; color: var(--text); }
+      h1 { margin: 0 0 6px; font-size: 22px; }
+      .lead { margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 880px; line-height: 1.5; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 24px; align-items: start; max-width: 720px; }
+      .panel { background: #fff; border-radius: 14px; padding: 14px; }
+      .panel h2 { margin: 0 0 4px; font-size: 15px; }
+      .panel p { margin: 0 0 12px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+      .desk {
+        position: relative;
+        height: 420px;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #c8d0dc 0%, #b8c2d0 100%);
+        padding: 14px;
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        overflow: hidden;
+      }
+      .desk::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image: radial-gradient(rgba(15, 23, 42, 0.06) 0.6px, transparent 0.6px);
+        background-size: 12px 12px;
+        pointer-events: none;
+        opacity: 0.5;
+      }
+      .win {
+        position: relative;
+        z-index: 1;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+      }
+      .titlebar {
+        height: 28px;
+        background: linear-gradient(180deg, #eceff4, #e2e7ef);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
+      .win-main { width: 168px; }
+      .win-ask { width: 280px; flex: 1; max-width: 280px; }
+      .h-full { height: 392px; }
+      .h-main-b { height: 320px; align-self: flex-start; margin-top: 0; }
+      .h-ask-b { height: 392px; }
+
+      /* 做法 A：外框等高，内容顶 + 底栏贴底 */
+      .a-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--shell);
+        padding: 8px;
+      }
+      .a-widget {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        background: linear-gradient(180deg, #f5f7fb 0%, var(--bg) 100%);
+        padding: 8px;
+        overflow: hidden;
+      }
+      .a-scroll-wrap {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+      .a-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding-bottom: 4px;
+      }
+      .a-fade {
+        flex-shrink: 0;
+        height: 28px;
+        margin-top: -28px;
+        background: linear-gradient(180deg, transparent, rgba(245, 247, 251, 0.95));
+        pointer-events: none;
+        position: relative;
+        z-index: 1;
+      }
+      .a-footer {
+        flex-shrink: 0;
+        margin-top: auto;
+        padding-top: 6px;
+        border-top: 1px solid var(--line);
+        font-size: 10px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.55);
+        border-radius: 0 0 10px 10px;
+        margin: 0 -8px -8px;
+        padding: 6px 8px 8px;
+      }
+
+      /* 做法 B：主窗矮一截 + 卡片浮在灰底上 */
+      .b-chrome {
+        flex: 1;
+        min-height: 0;
+        background: #e8ecf2;
+        padding: 10px 8px 12px;
+        display: flex;
+        flex-direction: column;
+      }
+      .b-card {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: #fff;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+        padding: 8px;
+        overflow: hidden;
+      }
+      .b-note {
+        flex-shrink: 0;
+        text-align: center;
+        font-size: 9px;
+        color: #94a3b8;
+        margin-top: 6px;
+      }
+
+      /* shared home bits */
+      .tabs { display: flex; gap: 4px; margin-bottom: 6px; }
+      .tabs span {
+        flex: 1; text-align: center; font-size: 10px; padding: 4px 0;
+        border-radius: 6px; color: var(--muted);
+      }
+      .tabs span.on { background: #fff; color: var(--text); font-weight: 650; box-shadow: 0 1px 2px rgba(15,23,42,0.06); }
+      .bar { font-size: 9px; color: var(--muted); margin-bottom: 6px; }
+      .card {
+        background: #fff;
+        border-radius: 8px;
+        padding: 6px 8px;
+        margin-bottom: 6px;
+        font-size: 10px;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+      }
+      .card strong { display: block; font-size: 10px; margin-bottom: 2px; }
+      .card em { font-style: normal; color: var(--muted); font-size: 9px; }
+      .ring {
+        display: grid; grid-template-columns: 40px 1fr; gap: 6px; align-items: center;
+      }
+      .ring b {
+        width: 40px; height: 40px; border-radius: 50%;
+        display: grid; place-items: center; font-size: 11px;
+        background: rgba(22, 163, 74, 0.12); color: #16a34a;
+      }
+      .rt { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+      .rt i { font-style: normal; font-size: 9px; padding: 3px 6px; background: #fff; border-radius: 6px; }
+
+      .ask-body {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 72px 1fr;
+        background: #0c0c0c;
+        color: #d4d4d4;
+        font-size: 10px;
+      }
+      .ask-rail { background: #f6f7fa; color: var(--text); padding: 6px; }
+      .ask-rail div { padding: 4px 0; }
+      .ask-rail .on { background: #fff; border-radius: 4px; padding: 4px 6px; }
+      .ask-chat { padding: 10px; }
+      .bubble { margin-left: auto; max-width: 85%; background: #2a2a2e; padding: 6px 8px; border-radius: 8px; margin-bottom: 6px; }
+      .tag {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #eef3ff;
+        color: var(--primary);
+        font-size: 11px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>并排时，主窗怎么收才不丑</h1>
+    <p class="lead">左边都是主窗 + 问答窗并排。只看主窗：做法 A 两窗外框一样高；做法 B 主窗故意矮一截，像独立小工具窗。</p>
+    <div class="grid">
+      <section class="panel">
+        <h2>做法 A · 底边齐平</h2>
+        <p>主窗和问答<strong>外框同高</strong>。Agent 内容从顶往下排，中间可滚动；底部页脚 + 渐变，空区不会像「断了一截」。</p>
+        <span class="tag">推荐：Windows 上最稳</span>
+        <div class="desk" style="margin-top: 10px">
+          <div class="win win-main h-full">
+            <div class="titlebar"><span class="dot"></span>Agent Doctor</div>
+            <div class="a-body">
+              <div class="a-widget">
+                <div class="bar">就绪 · 已装 2 · Skills 14</div>
+                <div class="tabs"><span class="on">Agent</span><span>资源</span><span>服务商</span><span>项目</span></div>
+                <div class="a-scroll-wrap">
+                  <div class="a-scroll">
+                    <div class="card ring"><b>82</b><div><strong>本机 Agent</strong><em>已装 2 · 1 个要看</em></div></div>
+                    <div class="rt"><i>Claude · 已装</i><i>Codex · 已装</i></div>
+                    <div class="card"><strong>Claude Code</strong><em>去检查 · 打开安装日志</em></div>
+                    <div class="card"><strong>Codex</strong><em>已装</em></div>
+                    <div class="card" style="opacity:0.5"><strong>Hermes</strong><em>未装 · 去安装</em></div>
+                  </div>
+                  <div class="a-fade" aria-hidden="true"></div>
+                </div>
+                <div class="a-footer">本机 Runtime · v0.1 · 检查更新</div>
+              </div>
+            </div>
+          </div>
+          <div class="win win-ask h-full">
+            <div class="titlebar"><span class="dot"></span>问答</div>
+            <div class="ask-body">
+              <aside class="ask-rail">
+                <div style="color:#16a34a;font-size:9px">本机可以用</div>
+                <div class="on">默认项目</div>
+                <div>验证项目</div>
+              </aside>
+              <div class="ask-chat">
+                <div class="bubble">这个项目连不上。</div>
+                <div>密钥过期了，去服务商页。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>做法 B · 矮面板 + 卡片</h2>
+        <p>主窗<strong>固定较矮</strong>（约设计高度），顶对齐。窗里是灰底 + 白卡片，矮一点也像刻意设计，不像布局坏了。</p>
+        <span class="tag">推荐：Mac / 大屏</span>
+        <div class="desk" style="margin-top: 10px">
+          <div class="win win-main h-main-b">
+            <div class="titlebar"><span class="dot"></span>Agent Doctor</div>
+            <div class="b-chrome">
+              <div class="b-card">
+                <div class="bar">就绪 · 已装 2 · Skills 14</div>
+                <div class="tabs"><span class="on">Agent</span><span>资源</span><span>服务商</span><span>项目</span></div>
+                <div class="a-scroll" style="flex:1;min-height:0">
+                  <div class="card ring"><b>82</b><div><strong>本机 Agent</strong><em>装到这台电脑</em></div></div>
+                  <div class="rt"><i>Claude · 已装</i><i>Codex · 已装</i></div>
+                  <div class="card"><strong>Claude Code</strong><em>去检查 · 重装</em></div>
+                </div>
+                <div class="a-footer" style="margin:0;border-radius:0 0 8px 8px">本机 Runtime · 检查更新</div>
+              </div>
+              <p class="b-note">下方是系统桌面，不是空页面</p>
+            </div>
+          </div>
+          <div class="win win-ask h-ask-b">
+            <div class="titlebar"><span class="dot"></span>问答</div>
+            <div class="ask-body">
+              <aside class="ask-rail">
+                <div style="color:#16a34a;font-size:9px">本机可以用</div>
+                <div class="on">默认项目</div>
+                <div>验证项目</div>
+              </aside>
+              <div class="ask-chat">
+                <div class="bubble">这个项目连不上。</div>
+                <div>密钥过期了，去服务商页。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>
