@@ -65,13 +65,9 @@ impl RuntimeAdapter for CursorAdapter {
         if let Some(app) = desktop_app_path() {
             return discovery_present(app);
         }
-        let cursor_home = home_join(".cursor");
-        if cursor_home.is_dir() {
-            return discovery_present(cursor_home);
-        }
-        if home_join(".local/share/cursor-agent").is_dir() {
-            return discovery_present(local_agent);
-        }
+        // Uninstall deliberately keeps settings (`~/.cursor`) and CLI data
+        // (`~/.local/share/cursor-agent`), so neither is evidence of a usable
+        // install — only binaries and the desktop app count.
         AdapterDiscovery {
             installed: false,
             version: None,
@@ -104,13 +100,14 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn cursor_home_dir_counts_as_installed() {
+    fn leftover_settings_alone_do_not_count_as_installed() {
         let temp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir(temp.path().join(".cursor")).expect("cursor home");
+        fs::create_dir(temp.path().join(".cursor")).expect("cursor settings");
+        fs::create_dir_all(temp.path().join(".local/share/cursor-agent")).expect("cli data");
         with_test_home(temp.path(), || {
             let found = CursorAdapter.discover();
-            assert!(found.installed);
-            assert_eq!(found.binary_path, Some(home_join(".cursor")));
+            assert!(!found.installed);
+            assert_eq!(found.binary_path, None);
         });
     }
 

@@ -489,6 +489,13 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   /** Swap the visible agent from the last scan. No probe, no version fetch. */
   function showInstalledRuntime(runtimeId: string): void {
+    // The doctor tile is virtual — it never appears in the installed scan, so
+    // events like ask-active-runtime route here with "doctor" (same gap as
+    // resolvePaintedRuntimeId).
+    if (runtimeId === DOCTOR_RUNTIME_ID) {
+      selectDoctorRuntime();
+      return;
+    }
     const report = appState.lastReport;
     if (!report) {
       return;

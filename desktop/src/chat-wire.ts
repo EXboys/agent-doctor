@@ -447,6 +447,7 @@ export function wireChatControllers(): void {
 
   chatState.thinking = createThinkingController({
     logEl,
+    placeBlock: (el) => chatState.activity.placeInProcessStream(el),
     isViewingRunningSession: () => isViewingRunningSession(),
     persistMessage: (content) => chatState.bubbles.persistMessage("thinking", content),
     updateMessage: (id, content) => {
@@ -677,6 +678,7 @@ export function wireChatControllers(): void {
     setDisplayedCwd: (cwd) => setDisplayedCwd(cwd),
     pushActivity: (phase, message) => pushActivity(phase, message),
     pushToolStep: (step) => pushToolStep(step),
+    sealProcessStream: () => chatState.activity.sealProcessStream(),
     flushSessionListRender: () => flushSessionListRender(),
     noteVerifyBrowserSignal: (text, source) => noteVerifyBrowserSignal(text, source),
     queueAssistantText: (text) => queueAssistantText(text),

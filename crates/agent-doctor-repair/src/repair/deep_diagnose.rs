@@ -160,7 +160,7 @@ pub fn run_deep_diagnose_chat(
             OfficialAgentEvent::Thinking { round } => {
                 on_event(DeepDiagnoseEvent::Thinking { round })
             }
-            OfficialAgentEvent::Tool { tool, target } => {
+            OfficialAgentEvent::Tool { tool, target, .. } => {
                 on_event(DeepDiagnoseEvent::Tool { tool, target })
             }
             OfficialAgentEvent::Delta { text } => {

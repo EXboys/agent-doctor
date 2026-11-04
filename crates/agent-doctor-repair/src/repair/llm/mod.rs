@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use agent_doctor_core::repair_types::{LlmConfig, LlmProtocol};
+use agent_doctor_core::usage::{usage_from_value, TokenUsage};
 use serde_json::{json, Value};
 
 pub mod anthropic;
@@ -24,6 +25,8 @@ pub struct LlmToolCall {
 pub struct LlmTurn {
     pub content: Option<String>,
     pub tool_calls: Vec<LlmToolCall>,
+    /// What this one model call billed. Empty for providers that omit usage.
+    pub usage: TokenUsage,
 }
 
 pub fn repair_tool_definitions() -> Value {
@@ -504,6 +507,10 @@ fn parse_chat_completion(payload: &Value) -> Result<LlmTurn> {
     Ok(LlmTurn {
         content,
         tool_calls,
+        usage: payload
+            .get("usage")
+            .and_then(usage_from_value)
+            .unwrap_or_default(),
     })
 }
 

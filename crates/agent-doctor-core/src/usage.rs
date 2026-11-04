@@ -96,6 +96,7 @@ pub fn usage_from_value(value: &Value) -> Option<TokenUsage> {
             "cacheReadInputTokens",
             "cacheRead",
             "cache_read_tokens",
+            "cache_read",
             "cachedReadTokens",
         ],
     )
@@ -108,6 +109,7 @@ pub fn usage_from_value(value: &Value) -> Option<TokenUsage> {
             "cacheCreationInputTokens",
             "cacheWrite",
             "cache_write_tokens",
+            "cache_write",
             "cachedWriteTokens",
         ],
     )
@@ -132,7 +134,9 @@ fn find_usage_depth(value: &Value, depth: usize) -> Option<TokenUsage> {
     }
     match value {
         Value::Object(map) => {
-            for key in ["usage", "tokenUsage", "token_usage"] {
+            // Hermes names the bucket `tokens` (with `input`/`output` inside);
+            // the other names are Anthropic, Codex and OpenClaw spellings.
+            for key in ["usage", "tokenUsage", "token_usage", "tokens"] {
                 if let Some(found) = map.get(key).and_then(usage_from_value) {
                     return Some(found);
                 }
@@ -233,8 +237,10 @@ pub fn usage_by_day_at(path: &Path, since_ts: i64, tz_offset_sec: i64) -> Result
         return Ok(Vec::new());
     }
     let conn = open(path)?;
+    // CAST keeps the bucket an integer even when a hand-imported row carries a
+    // fractional epoch — one Real `day` would otherwise fail the whole query.
     let mut stmt = conn.prepare(
-        "SELECT (ts + ?2) / 86400 AS day, runtime, provider_id, provider, model,
+        "SELECT CAST((ts + ?2) / 86400 AS INTEGER) AS day, runtime, provider_id, provider, model,
                 SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), COUNT(*)
          FROM turns WHERE ts >= ?1
          GROUP BY day, runtime, provider_id, provider, model
@@ -449,6 +455,27 @@ mod tests {
             })
         );
 
+        // Hermes stream-json ends with this exact shape (`stream_json.py`
+        // emit_result): the bucket is named `tokens`, input excludes cache.
+        let hermes = json!({
+            "type": "result", "session_id": "20261104_145235_e90665", "exit_code": 0,
+            "text": "done",
+            "tokens": {"input": 101_783, "output": 89_316, "total": 2_887_776,
+                       "cache_read": 2_696_677, "cache_write": 0},
+            "duration_ms": 4_000
+        });
+        assert_eq!(
+            find_usage(&hermes),
+            Some(TokenUsage {
+                input: 101_783,
+                output: 89_316,
+                cache_read: 2_696_677,
+                cache_write: 0
+            })
+        );
+        // A bare `tokens` count is not a usage object and must not match.
+        assert_eq!(find_usage(&json!({"tokens": 4_096})), None);
+
         let openai = json!({"usage": {
             "prompt_tokens": 100, "completion_tokens": 20,
             "prompt_tokens_details": {"cached_tokens": 60}
@@ -509,6 +536,29 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(rows.iter().all(|r| r.provider_id == "p-deepseek"));
+    }
+
+    #[test]
+    fn a_fractional_ts_row_does_not_break_the_ledger() {
+        // A hand-imported row with a Python-style fractional epoch used to make
+        // the day bucket Real and fail the whole query for every viewer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE turns (ts INTEGER NOT NULL, runtime TEXT NOT NULL,
+                provider_id TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL,
+                model TEXT NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL,
+                cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL);
+            INSERT INTO turns VALUES (20000004600.5, 'claude-code', '', 'GLM', 'glm-5.3', 4, 2, 0, 0);",
+        )
+        .unwrap();
+        drop(conn);
+
+        let rows = usage_by_day_at(&path, 0, 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].day, 20_000_004_600 / 86_400);
+        assert_eq!(rows[0].turns, 1);
     }
 
     #[test]

@@ -877,6 +877,9 @@ export function pushActivity(phase: string, message: string): void {
 export function pushToolStep(step: ToolStep): void {
   chatState.activity.pushToolStep(step);
 }
+export function sealProcessStream(): void {
+  chatState.activity.sealProcessStream();
+}
 export function settleActivity(): void {
   chatState.activity.settleActivity();
 }

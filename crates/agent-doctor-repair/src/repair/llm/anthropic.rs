@@ -273,6 +273,10 @@ fn parse_messages_response(payload: &Value) -> Result<LlmTurn> {
     Ok(LlmTurn {
         content,
         tool_calls,
+        usage: payload
+            .get("usage")
+            .and_then(agent_doctor_core::usage::usage_from_value)
+            .unwrap_or_default(),
     })
 }
 

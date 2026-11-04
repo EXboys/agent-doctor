@@ -31,6 +31,7 @@ use serde_json::{json, Value};
 
 use agent_doctor_core::mask::SecretVault;
 use agent_doctor_core::repair_types::{LlmConfig, RepairToolKind};
+use agent_doctor_core::usage::TokenUsage;
 use agent_doctor_mcp::{LazyBrowser, SharedBrowser, DEFAULT_BROWSER_MCP_PORT};
 
 use super::llm::stream::{chat_with_tool_set_stream, LlmStreamDelta};
@@ -135,11 +136,16 @@ pub enum OfficialAgentEvent {
     Thinking { round: u32 },
     /// The agent is reading, searching, editing, or running a command.
     Tool {
+        id: String,
         tool: String,
         target: Option<String>,
     },
-    /// The same call finished; hosts pair the two into one step card.
-    ToolResult { tool: String, success: bool },
+    /// The same call finished; hosts pair the two by `id` into one step card.
+    ToolResult {
+        id: String,
+        tool: String,
+        success: bool,
+    },
     /// Reasoning text that a model inlined as `<think>…</think>`.
     Reasoning { text: String },
     /// Incremental reply text while the model writes it.
@@ -167,6 +173,9 @@ pub struct OfficialAgentReport {
     pub model: String,
     pub tool_calls: usize,
     pub rounds: usize,
+    /// Every model call in the turn added up, so the chat can bill the turn.
+    #[serde(default)]
+    pub usage: TokenUsage,
 }
 
 /// Split inline `<think>…</think>` blocks out of model content. Handles
@@ -350,6 +359,8 @@ pub fn run_official_agent_turn(
     let mut confirmation_seq = 0usize;
     let mut rounds_used = 0usize;
     let mut streamed_any = false;
+    // Every model call in this turn, added up for the usage ledger.
+    let mut used = TokenUsage::default();
     let max_rounds = if hands_enabled {
         options.max_rounds.max(BROWSER_AGENT_MIN_ROUNDS)
     } else {
@@ -394,6 +405,7 @@ pub fn run_official_agent_turn(
             }
         };
         rounds_used = round;
+        used.add(&turn.usage);
 
         if turn.tool_calls.is_empty() {
             let (answer, reasoning) = strip_think_blocks(turn.content.as_deref().unwrap_or(""));
@@ -404,6 +416,7 @@ pub fn run_official_agent_turn(
                 model: config.model.clone(),
                 tool_calls: loop_state.tool_calls,
                 rounds: rounds_used,
+                usage: used,
             });
         }
 
@@ -542,7 +555,9 @@ pub fn run_official_agent_turn(
                         })
                     })
                 });
+            let call_id = format!("call-{}", loop_state.tool_calls);
             on_event(OfficialAgentEvent::Tool {
+                id: call_id.clone(),
                 tool: call.name.clone(),
                 target: tool_target_label,
             });
@@ -605,6 +620,7 @@ pub fn run_official_agent_turn(
 
             let result = executor.execute(&parsed)?;
             on_event(OfficialAgentEvent::ToolResult {
+                id: call_id,
                 tool: call.name.clone(),
                 success: result.success,
             });
@@ -666,6 +682,7 @@ pub fn run_official_agent_turn(
         call_result?
     };
     let (answer, reasoning) = strip_think_blocks(turn.content.as_deref().unwrap_or(""));
+    used.add(&turn.usage);
     Ok(OfficialAgentReport {
         answer,
         reasoning,
@@ -673,6 +690,7 @@ pub fn run_official_agent_turn(
         model: config.model.clone(),
         tool_calls: loop_state.tool_calls,
         rounds: rounds_used,
+        usage: used,
     })
 }
 

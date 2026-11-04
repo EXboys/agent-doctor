@@ -37,6 +37,8 @@ export type StreamDeps = {
   setDisplayedCwd: (cwd: string) => void;
   pushActivity: (phase: string, message: string) => void;
   pushToolStep: (step: ToolStep) => void;
+  /** Turn finished: fold this turn's process container into one collapsed trail. */
+  sealProcessStream: () => void;
   flushSessionListRender: () => void;
   noteVerifyBrowserSignal: (text: string, source: "status" | "assistant" | "tool") => void;
   queueAssistantText: (text: string) => void;
@@ -193,6 +195,7 @@ export function createStreamController(deps: StreamDeps) {
           const completedSessionId = chatId;
           const viewing = deps.getStore().activeId === completedSessionId;
           deps.flushPendingTextSync();
+          if (viewing) deps.sealProcessStream();
           const failed =
             payload.status !== "succeeded" &&
             payload.status !== "cancelled" &&

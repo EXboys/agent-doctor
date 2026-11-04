@@ -14,6 +14,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use agent_doctor_core::repair_types::{LlmConfig, LlmProtocol};
+use agent_doctor_core::usage::{usage_from_value, TokenUsage};
 
 use super::anthropic;
 use super::{chat_with_tool_set, LlmToolCall, LlmTurn};
@@ -204,6 +205,7 @@ fn sse_data(line: &str) -> Result<Option<Value>> {
 struct OpenAiStreamAcc {
     content: String,
     tools: BTreeMap<usize, LlmToolCall>,
+    usage: TokenUsage,
 }
 
 fn openai_feed_data(
@@ -214,6 +216,13 @@ fn openai_feed_data(
 ) -> Result<bool> {
     if payload.get("error").is_some() {
         bail!("LLM stream error: {payload}");
+    }
+    // The usage chunk rides on its own final event (with `include_usage`) or
+    // on the last delta chunk, and has no choices — read it before that check.
+    // Assign, don't add: providers that repeat usage per chunk repeat running
+    // totals, and the spec sends it exactly once anyway.
+    if let Some(usage) = payload.get("usage").and_then(usage_from_value) {
+        acc.usage = usage;
     }
     let Some(delta) = payload.pointer("/choices/0/delta") else {
         return Ok(false);
@@ -263,6 +272,9 @@ fn openai_chat_stream(
         "messages": messages,
         "temperature": 0.1,
         "stream": true,
+        // Ask for the closing usage chunk; providers that don't know the
+        // field ignore it, and MiniMax-style ones send usage regardless.
+        "stream_options": { "include_usage": true },
     });
     if let Some(tools) = tools {
         body["tools"] = tools.clone();
@@ -300,6 +312,7 @@ fn openai_chat_stream(
     Ok(Some(LlmTurn {
         content,
         tool_calls,
+        usage: acc.usage,
     }))
 }
 
@@ -310,6 +323,7 @@ struct AnthropicStreamAcc {
     content: String,
     tool_order: Vec<u64>,
     tools: BTreeMap<u64, LlmToolCall>,
+    usage: TokenUsage,
 }
 
 fn anthropic_feed_event(
@@ -320,6 +334,30 @@ fn anthropic_feed_event(
     out: &mut dyn FnMut(LlmStreamDelta),
 ) -> Result<bool> {
     match event {
+        "message_start" => {
+            // Input-side counts live here; output starts small and grows.
+            if let Some(usage) = payload.pointer("/message/usage").and_then(usage_from_value) {
+                acc.usage = usage;
+            }
+        }
+        "message_delta" => {
+            // The running totals for the message: output always, the input
+            // side only when the gateway repeats it.
+            if let Some(usage) = payload.get("usage").and_then(usage_from_value) {
+                if usage.output > 0 {
+                    acc.usage.output = usage.output;
+                }
+                if usage.input > 0 {
+                    acc.usage.input = usage.input;
+                }
+                if usage.cache_read > 0 {
+                    acc.usage.cache_read = usage.cache_read;
+                }
+                if usage.cache_write > 0 {
+                    acc.usage.cache_write = usage.cache_write;
+                }
+            }
+        }
         "content_block_start" => {
             if let Some(block) = payload.get("content_block") {
                 if block.get("type").and_then(Value::as_str) == Some("tool_use") {
@@ -441,6 +479,7 @@ pub(crate) fn anthropic_chat_stream(
     Ok(Some(LlmTurn {
         content,
         tool_calls,
+        usage: acc.usage,
     }))
 }
 
@@ -588,5 +627,62 @@ mod tests {
         assert!(sse_data("data: [DONE]").unwrap().is_none());
         assert!(sse_data("event: content_block_delta").unwrap().is_none());
         assert!(sse_data("data: {\"a\":1}").unwrap().is_some());
+    }
+
+    #[test]
+    fn openai_usage_chunk_lands_in_the_turn() {
+        let mut acc = OpenAiStreamAcc::default();
+        let mut filter = ThinkFilter::new();
+        let mut out = |_| {};
+        let lines = [
+            r##"data: {"choices": [{"delta": {"content": "hi"}}]}"##,
+            // The closing usage event carries no choices at all.
+            r##"data: {"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 40,
+                    "prompt_tokens_details": {"cached_tokens": 800}}}"##,
+        ];
+        for line in lines {
+            let Some(payload) = sse_data(line).unwrap() else {
+                continue;
+            };
+            let _ = openai_feed_data(&payload, &mut acc, &mut filter, &mut out).unwrap();
+        }
+        // OpenAI counts cached tokens inside prompt_tokens; the parse splits them out.
+        assert_eq!(
+            acc.usage,
+            TokenUsage {
+                input: 200,
+                output: 40,
+                cache_read: 800,
+                cache_write: 0
+            }
+        );
+    }
+
+    #[test]
+    fn anthropic_usage_grows_with_the_message() {
+        let mut acc = AnthropicStreamAcc::default();
+        let mut filter = ThinkFilter::new();
+        let mut out = |_| {};
+        let events = [
+            (
+                "message_start",
+                r#"{"message":{"usage":{"input_tokens":120,"output_tokens":1,
+                        "cache_read_input_tokens":300,"cache_creation_input_tokens":20}}}"#,
+            ),
+            ("message_delta", r#"{"usage":{"output_tokens":88}}"#),
+        ];
+        for (event, data) in events {
+            let payload: Value = serde_json::from_str(data).unwrap();
+            let _ = anthropic_feed_event(event, &payload, &mut acc, &mut filter, &mut out).unwrap();
+        }
+        assert_eq!(
+            acc.usage,
+            TokenUsage {
+                input: 120,
+                output: 88,
+                cache_read: 300,
+                cache_write: 20
+            }
+        );
     }
 }

@@ -128,7 +128,6 @@ fn run_doctor(
     agent_options.browser_tools = options.browser_tools_enabled != Some(false);
     agent_options.computer_tools = options.computer_use_enabled == Some(true);
 
-    let mut step_seq = 0usize;
     // The desktop merges a result onto the row its start opened, by step id.
     let mut open_step_id = String::new();
     let mut open_tool = String::new();
@@ -160,11 +159,10 @@ fn run_doctor(
                 phase: "thinking".to_string(),
                 message: format!("第 {round} 轮…"),
             }),
-            OfficialAgentEvent::Tool { tool, target } => {
-                step_seq += 1;
+            OfficialAgentEvent::Tool { id, tool, target } => {
                 // The structured step alone drives the row; a text status here
                 // would file a second, generic row (工具 N次 …) next to it.
-                let step = doctor_step(&session_id, step_seq, &tool, target.as_deref(), "running");
+                let step = doctor_step(&session_id, &id, &tool, target.as_deref(), "running");
                 open_step_id = step.id.clone();
                 open_tool = tool.clone();
                 on_event(PromptSessionEvent::Tool {
@@ -187,14 +185,14 @@ fn run_doctor(
                     text,
                 });
             }
-            OfficialAgentEvent::ToolResult { success, .. } => {
+            OfficialAgentEvent::ToolResult { id, success, .. } => {
                 if open_step_id.is_empty() {
                     return;
                 }
                 // The same step id as the start: the desktop folds the outcome
                 // onto the existing row instead of filing a second, bare one.
                 let status = if success { "done" } else { "failed" };
-                let mut step = doctor_step(&session_id, step_seq, &open_tool, None, status);
+                let mut step = doctor_step(&session_id, &id, &open_tool, None, status);
                 step.id = open_step_id.clone();
                 on_event(PromptSessionEvent::Tool {
                     session_id: session_id.clone(),
@@ -246,6 +244,15 @@ fn run_doctor(
                     text: answer.clone(),
                 });
             }
+            // Before Completed, like the other backends: drive_prompt folds
+            // this into the report and the usage ledger bills the turn.
+            if !report.usage.is_empty() {
+                on_event(PromptSessionEvent::Usage {
+                    session_id: session_id.clone(),
+                    usage: report.usage,
+                    model: Some(report.model.clone()),
+                });
+            }
             let summary = summarize_answer(&answer);
             on_event(PromptSessionEvent::Completed {
                 session_id: session_id.clone(),
@@ -255,7 +262,11 @@ fn run_doctor(
                 timeout: None,
             });
             Ok(PromptSessionReport {
-                usage: None,
+                usage: if report.usage.is_empty() {
+                    None
+                } else {
+                    Some(report.usage)
+                },
                 session_id,
                 runtime,
                 cwd: cwd.display().to_string(),
@@ -297,7 +308,7 @@ fn run_doctor(
 
 fn doctor_step(
     session_id: &str,
-    seq: usize,
+    call_id: &str,
     tool: &str,
     target: Option<&str>,
     status: &str,
@@ -343,7 +354,7 @@ fn doctor_step(
         (kind, String::new(), path, query)
     };
     ToolStep {
-        id: format!("{session_id}-doctor-{seq}"),
+        id: format!("{session_id}-doctor-{call_id}"),
         kind: kind.to_string(),
         name: tool.to_string(),
         status: status.to_string(),
@@ -429,24 +440,42 @@ mod tests {
 
     #[test]
     fn doctor_steps_carry_desktop_kinds() {
-        let read = doctor_step("s", 1, "read_file", Some("/a/config.toml"), "running");
+        let read = doctor_step(
+            "s",
+            "call-1",
+            "read_file",
+            Some("/a/config.toml"),
+            "running",
+        );
         assert_eq!(read.kind, "read");
         assert_eq!(read.path, "/a/config.toml");
         assert!(read.query.is_empty());
 
-        let grep = doctor_step("s", 2, "grep_files", Some("mcp"), "running");
+        let grep = doctor_step("s", "call-2", "grep_files", Some("mcp"), "running");
         assert_eq!(grep.kind, "search");
         assert_eq!(grep.query, "mcp");
         assert!(grep.path.is_empty());
 
-        let edit = doctor_step("s", 3, "patch_config", Some("/a/settings.json"), "running");
+        let edit = doctor_step(
+            "s",
+            "call-3",
+            "patch_config",
+            Some("/a/settings.json"),
+            "running",
+        );
         assert_eq!(edit.kind, "edit");
 
-        let bash = doctor_step("s", 4, "bash", Some("claude --version"), "running");
+        let bash = doctor_step("s", "call-4", "bash", Some("claude --version"), "running");
         assert_eq!(bash.kind, "terminal");
         assert_eq!(bash.command, "claude --version");
 
-        let browser = doctor_step("s", 5, "browser_navigate", Some("https://x"), "running");
+        let browser = doctor_step(
+            "s",
+            "call-5",
+            "browser_navigate",
+            Some("https://x"),
+            "running",
+        );
         assert_eq!(browser.kind, "other");
         assert_eq!(browser.command, "https://x");
     }

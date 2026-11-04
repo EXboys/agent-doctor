@@ -36,7 +36,12 @@ import {
   type ToolRecord,
 } from "./tool-records";
 import { markTurnNoticeShown, pushChatTurnError, pushChatTurnReport } from "./turn-errors";
-import { placeProcessBlock, sealWorkGroup, sealWorkTrail } from "./work-trail";
+import {
+  placeProcessBlock,
+  sealProcessContainer,
+  sealWorkGroup,
+  wrapProcessRows,
+} from "./work-trail";
 
 const PAGE_LOG_CHARS = 8_000;
 
@@ -876,7 +881,7 @@ export function createActivityController(deps: ActivityDeps) {
     }
     const group = createToolGroupElement();
     group.classList.add("is-live");
-    placeProcessBlock(deps.logEl, group);
+    placeProcessBlock(processStreamEl(), group);
     deps.setToolGroupEl(group);
     return group;
   }
@@ -907,7 +912,7 @@ export function createActivityController(deps: ActivityDeps) {
 
   /** Drop ephemeral progress rows so they don't litter the transcript. */
   function clearEphemeralActivity(dropStderr = false): void {
-    sealWorkTrail(deps.logEl);
+    sealProcessStream();
     const keptTools = toolTextsInLog();
     settleActivity();
     finishToolGroup(false);
@@ -1184,6 +1189,33 @@ export function createActivityController(deps: ActivityDeps) {
     return row;
   }
 
+  /** Every process row of this turn (status/tool/thinking) collects here and
+   *  folds once at completion. Per-chunk sealing stacked one bar per round. */
+  let processStream: HTMLElement | null = null;
+
+  function processStreamEl(): HTMLElement {
+    if (processStream?.isConnected) return processStream;
+    processStream = wrapProcessRows([], true);
+    placeProcessBlock(deps.logEl, processStream);
+    return processStream;
+  }
+
+  function placeInProcessStream(el: HTMLElement): void {
+    processStreamEl().append(el);
+  }
+
+  /** Turn done: fold the whole process container into one collapsed trail. */
+
+
+  function sealProcessStream(): void {
+    if (!processStream?.isConnected) {
+      processStream = null;
+      return;
+    }
+    sealProcessContainer(processStream);
+    processStream = null;
+  }
+
   function appendActivityRow(phase: string, kind: string, text: string): void {
     const softPhase = kind === "write";
     const activity = deps.getActivityEl();
@@ -1203,7 +1235,7 @@ export function createActivityController(deps: ActivityDeps) {
       row.querySelector<HTMLElement>(".chat-activity-elapsed")!.textContent = elapsedLabel();
       const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
       label.textContent = text;
-      deps.logEl.appendChild(row);
+      processStreamEl().appendChild(row);
       deps.setActivityEl(row);
       if (kind !== "error") deps.setLifecycleActivityEl(row);
     } else if (activity) {
@@ -1229,6 +1261,8 @@ export function createActivityController(deps: ActivityDeps) {
   return {
     dismissLifecycleActivity,
     finishToolGroup,
+    sealProcessStream,
+    placeInProcessStream,
     clearEphemeralActivity,
     appendStderrLine,
     appendTurnError,

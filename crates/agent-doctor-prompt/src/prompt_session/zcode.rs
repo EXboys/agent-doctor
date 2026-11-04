@@ -376,7 +376,18 @@ fn handle_zcode_stream_line(
             }
             tools.clear();
         }
-        "turn.completed" => tools.clear(),
+        "turn.completed" => {
+            tools.clear();
+            // The turn summary carries usage when the runtime reports it;
+            // `tokens`/`usage` both parse. Absent usage stays a no-op.
+            if let Some(usage) = agent_doctor_core::usage::find_usage(&payload) {
+                on_event(PromptSessionEvent::Usage {
+                    session_id: session_id.to_string(),
+                    usage,
+                    model: text_field(&payload, &["model", "modelId"]),
+                });
+            }
+        }
         "permission.requested" => {
             on_event(PromptSessionEvent::Status {
                 session_id: session_id.to_string(),

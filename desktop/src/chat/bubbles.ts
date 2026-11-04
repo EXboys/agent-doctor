@@ -23,7 +23,7 @@ import { followChatLog, lockChatRowHeights, noteTurnUserAt, pinChatLog, renderTo
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
-import { sealWorkTrail, wrapProcessRows } from "./work-trail";
+import { wrapProcessRows } from "./work-trail";
 import { syncQuestionRail } from "./question-rail";
 import {
   assistantMsgWrap,
@@ -242,10 +242,8 @@ export function createBubblesController(deps: BubblesDeps) {
     }
     deps.scheduleStorePersist();
     if (!deps.isViewingRunningSession()) return;
-    if (deps.getActivityEl()?.dataset.kind === "tool") deps.settleActivity();
-    deps.finishToolGroup(false);
+    if (deps.getActivityEl()) deps.settleActivity();
     deps.dismissLifecycleActivity();
-    sealWorkTrail(deps.logEl);
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
     deps.collapseResolvedPermissionsBeforeAssistant(bubble);

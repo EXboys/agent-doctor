@@ -56,7 +56,7 @@ function changedFileChips(infos: ToolActivityInfo[]): HTMLElement | null {
   return list;
 }
 
-function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
+export function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
   const trail = document.createElement("details");
   trail.className = "chat-work";
   trail.open = false;
@@ -121,17 +121,6 @@ export function placeProcessBlock(logEl: HTMLElement, node: HTMLElement): void {
   logEl.appendChild(node);
 }
 
-function isProcessBlock(el: HTMLElement): boolean {
-  if (el.classList.contains("chat-work-stream")) {
-    return true;
-  }
-  return (
-    el.classList.contains("chat-tool-group") &&
-    !el.classList.contains("chat-permission-group") &&
-    !el.classList.contains("chat-turn-tools")
-  );
-}
-
 /**
  * Fold the trailing tool groups into one labelled trail. Thinking blocks are
  * not process rows: they stay standalone between the chips and the prose. The
@@ -139,25 +128,38 @@ function isProcessBlock(el: HTMLElement): boolean {
  * think block after every tool round), and a trail made only of thinking is
  * not sealed at all — folding those stacked one empty-looking bar per round.
  */
-export function sealWorkTrail(logEl: HTMLElement): void {
-  const rows: HTMLElement[] = [];
-  let current = logEl.lastElementChild as HTMLElement | null;
-  while (current) {
-    if (isProcessBlock(current)) {
-      rows.unshift(current);
-    } else if (!current.classList.contains("chat-thinking")) {
-      break;
-    }
-    current = current.previousElementSibling as HTMLElement | null;
+/**
+ * Fold one turn's process container (live stream of status rows, tool groups
+ * and thinking blocks) into a collapsed, labelled trail — by reference, at
+ * turn completion. Walking the log cannot do this: the streaming reply bubble
+ * sits between the process rows and the end of the transcript and would stop
+ * a trailing walk after the first line of reply text.
+ */
+export function sealProcessContainer(container: HTMLElement): void {
+  console.error("S0 enter, children:", container.children.length);
+  if (!container.isConnected) return;
+  if (!container.firstElementChild) {
+    container.remove();
+    return;
   }
-  const hasTools = rows.some(
-    (row) =>
-      row.classList.contains("chat-tool-group") || row.querySelector(".chat-tool-group") !== null,
+  console.error("S1 guard ok");
+  const liveRows = container.querySelectorAll<HTMLElement>(
+    ".chat-activity.is-live, .chat-tool-row.is-live",
   );
-  if (!hasTools) return;
+  console.error("S2 liveRows:", liveRows.length);
+  for (const live of liveRows) {
+    live.classList.remove("is-live");
+    live.classList.add("is-done");
+    live.querySelector(".chat-spinner")?.remove();
+  }
+  console.error("S3 settled");
   const marker = document.createComment("completed work");
-  rows[0].before(marker);
-  marker.replaceWith(completedTrail(rows));
+  container.before(marker);
+  console.error("S4 marker");
+  const trail = completedTrail([container]);
+  console.error("S5 trail built");
+  marker.replaceWith(trail);
+  console.error("S6 replaced");
 }
 
 /** Restored timelines retain their live marker while thinking continues. */

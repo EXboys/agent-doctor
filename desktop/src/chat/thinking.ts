@@ -44,6 +44,8 @@ export function markThinkingLive(block: HTMLDetailsElement): void {
 
 export type ThinkingDeps = {
   logEl: HTMLElement;
+  /** Land thinking blocks inside this turn's process container (optional). */
+  placeBlock?: (el: HTMLDetailsElement) => void;
   isViewingRunningSession: () => boolean;
   persistMessage: (content: string) => ChatMessage;
   updateMessage: (id: string, content: string) => void;
@@ -77,7 +79,8 @@ export function createThinkingController(deps: ThinkingDeps) {
     }
     deps.beforeBlock();
     el = renderThinkingBlock(text, { id: messageId ?? undefined, live: true });
-    placeProcessBlock(deps.logEl, el);
+    if (deps.placeBlock) deps.placeBlock(el);
+    else placeProcessBlock(deps.logEl, el);
     return el;
   }
 
