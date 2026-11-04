@@ -23,6 +23,7 @@ pub use text::{head_tail, process_tool_result, READ_FILE_RESULT_MAX_CHARS, TOOL_
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -30,13 +31,33 @@ use serde_json::{json, Value};
 
 use agent_doctor_core::mask::SecretVault;
 use agent_doctor_core::repair_types::{LlmConfig, RepairToolKind};
+use agent_doctor_mcp::{LazyBrowser, SharedBrowser, DEFAULT_BROWSER_MCP_PORT};
 
 use super::llm::stream::{chat_with_tool_set_stream, LlmStreamDelta};
-use super::llm::{max_agent_turns, read_only_tool_definitions, repair_tool_definitions};
+use super::llm::{
+    browser_tool_definitions, computer_tool_definitions, max_agent_turns,
+    read_only_tool_definitions, repair_tool_definitions,
+};
 use super::tools::{
     allowed_paths_for_official_agent, parse_tool_call, path_is_allowed, RepairToolExecutor,
     OFFICIAL_AGENT_RUNTIME_ID,
 };
+
+/// One browser session for the whole app process. Chrome starts on the first
+/// browser tool call and stays open across turns — the page the person asked
+/// for must not close when the turn ends — and concurrent chat sessions share
+/// one managed instance instead of killing each other's browser. The
+/// `LazyBrowser` inside never drops, so Chrome outlives the app; the next
+/// app run reuses it over the same CDP port.
+fn chat_browser_session() -> &'static Arc<SharedBrowser> {
+    static SESSION: OnceLock<Arc<SharedBrowser>> = OnceLock::new();
+    SESSION.get_or_init(|| {
+        Arc::new(SharedBrowser::new(LazyBrowser::new(
+            DEFAULT_BROWSER_MCP_PORT,
+            false,
+        )))
+    })
+}
 
 /// Tool rounds per turn (same bound as the repair planner).
 pub const OFFICIAL_AGENT_MAX_ROUNDS: usize = max_agent_turns();
@@ -48,6 +69,9 @@ const REPEATED_FAILURE_THRESHOLD: usize = 2;
 const MAX_OVERFLOW_RETRIES: usize = 3;
 /// Tool-message char budget the overflow recovery truncates down to.
 const OVERFLOW_RECOVERY_BUDGET: usize = 3_000;
+/// Browser flows need more rounds than file repairs (navigate → snapshot →
+/// click → snapshot …), so chat turns with browser tools get this floor.
+const BROWSER_AGENT_MIN_ROUNDS: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct OfficialAgentOptions {
@@ -74,10 +98,17 @@ pub struct OfficialAgentOptions {
     /// Messages inserted between the system prompt and the user turn
     /// (deep diagnose: masked rule-check context + trimmed history).
     pub prelude_messages: Vec<Value>,
+    /// Offer the browser tools (Settings → 对话「操作网页」). Deep diagnose
+    /// ignores this via `read_only`.
+    pub browser_tools: bool,
+    /// Offer the `screen_*` computer-use tools (Settings → 对话「操作电脑」).
+    /// Off by default: these drive the person's real screen.
+    pub computer_tools: bool,
 }
 
 impl OfficialAgentOptions {
-    /// Chat profile of the built-in agent.
+    /// Chat profile of the built-in agent. Browser follows the switch default
+    /// (on unless held off); computer use must be explicitly enabled.
     pub fn for_chat(prompt: String, locale: Option<String>, workspace: Option<PathBuf>) -> Self {
         Self {
             prompt,
@@ -91,6 +122,8 @@ impl OfficialAgentOptions {
             allowed_paths_override: None,
             vault: SecretVault::default(),
             prelude_messages: Vec::new(),
+            browser_tools: true,
+            computer_tools: false,
         }
     }
 }
@@ -259,12 +292,30 @@ pub fn run_official_agent_turn(
     ensure_not_cancelled(cancel)?;
 
     let zh = options.locale.as_deref() != Some("en");
+    // Hands tools ride only on full chat turns: deep diagnose stays
+    // file-read-only, the thread-local gate can still hold them off for a
+    // turn, and computer use additionally needs its explicit switch.
+    let browser_enabled =
+        !options.read_only && options.browser_tools && crate::repair::browser_tools_allowed();
+    let computer_enabled =
+        !options.read_only && options.computer_tools && crate::repair::browser_tools_allowed();
+    let hands_enabled = browser_enabled || computer_enabled;
     let tools = if options.read_only {
         read_only_tool_definitions()
     } else {
         let mut all = repair_tool_definitions();
         if let Value::Array(items) = &mut all {
             items.push(update_plan_tool_definition());
+            if browser_enabled {
+                if let Value::Array(browser_items) = browser_tool_definitions() {
+                    items.extend(browser_items);
+                }
+            }
+            if computer_enabled {
+                if let Value::Array(screen_items) = computer_tool_definitions() {
+                    items.extend(screen_items);
+                }
+            }
         }
         all
     };
@@ -274,7 +325,7 @@ pub fn run_official_agent_turn(
         "content": options
             .system_override
             .clone()
-            .unwrap_or_else(|| system_prompt(options, zh)),
+            .unwrap_or_else(|| system_prompt(options, zh, browser_enabled, computer_enabled)),
     })];
     messages.extend(options.prelude_messages.iter().cloned());
     messages.push(json!({ "role": "user", "content": prompt }));
@@ -289,14 +340,23 @@ pub fn run_official_agent_turn(
         options.apply_writes,
         allowed_paths,
     );
+    if browser_enabled {
+        executor.set_browser(chat_browser_session().clone());
+    }
+    executor.set_screen_enabled(computer_enabled);
     let mut plan_state = PlanState::default();
     let mut loop_state = LoopState::default();
     let mut overflow_retries = 0usize;
     let mut confirmation_seq = 0usize;
     let mut rounds_used = 0usize;
     let mut streamed_any = false;
+    let max_rounds = if hands_enabled {
+        options.max_rounds.max(BROWSER_AGENT_MIN_ROUNDS)
+    } else {
+        options.max_rounds
+    };
 
-    for round in 1..=options.max_rounds {
+    for round in 1..=max_rounds {
         ensure_not_cancelled(cancel)?;
         on_event(OfficialAgentEvent::Thinking {
             round: round as u32,
@@ -372,10 +432,15 @@ pub fn run_official_agent_turn(
             if let Some(PlanningControl::UpdatePlan) = planning_control_for(&call.name) {
                 let content = match parse_plan_steps(&call.arguments) {
                     Ok(steps) => {
+                        // Merge first, emit the merged snapshot: the desktop
+                        // paints exactly what it receives, and emitting the
+                        // pre-update state left it one update behind — the
+                        // final "all done" call still showed every step open.
+                        let ack = plan_state.apply_update(steps);
                         on_event(OfficialAgentEvent::Plan {
                             steps: plan_state.steps.clone(),
                         });
-                        plan_state.apply_update(steps)
+                        ack
                     }
                     Err(error) => json!({ "error": error }).to_string(),
                 };
@@ -452,15 +517,50 @@ pub fn run_official_agent_turn(
                 }
             }
 
+            let tool_target_label = parsed
+                .path
+                .clone()
+                .or_else(|| parsed.pattern.clone())
+                .or_else(|| {
+                    parsed.browser.as_ref().and_then(|browser| {
+                        browser
+                            .url
+                            .clone()
+                            .or_else(|| browser.target.clone())
+                            .or_else(|| browser.query.clone())
+                    })
+                })
+                .or_else(|| {
+                    parsed.computer.as_ref().and_then(|computer| {
+                        ["app", "label", "text", "ref"].iter().find_map(|key| {
+                            computer
+                                .arguments
+                                .get(*key)
+                                .and_then(Value::as_str)
+                                .filter(|t| !t.trim().is_empty())
+                                .map(str::to_string)
+                        })
+                    })
+                });
             on_event(OfficialAgentEvent::Tool {
                 tool: call.name.clone(),
-                target: parsed.path.clone().or_else(|| parsed.pattern.clone()),
+                target: tool_target_label,
             });
 
-            // Permission gate for writes and allowlisted bash. Runtime config
-            // files are refused outright: repairs only happen in the repair
-            // flow where every write is backed up first.
-            if needs_permission(parsed.kind) && !options.read_only {
+            // Permission gate for writes, allowlisted bash, and screen actions.
+            // Runtime config files are refused outright: repairs only happen in
+            // the repair flow where every write is backed up first. Screen
+            // read-only looks (snapshot/apps/windows/state) skip the card;
+            // screen actions drive the real desktop, so they ask first.
+            let requires_approval = if parsed.kind == RepairToolKind::Screen {
+                parsed
+                    .computer
+                    .as_ref()
+                    .map_or(true, |computer| screen_tool_needs_approval(&computer.tool))
+            } else {
+                needs_permission(parsed.kind)
+            };
+            if requires_approval && !options.read_only {
                 if let Err(refuse) = check_write_scope(
                     parsed.kind,
                     parsed.path.as_deref(),
@@ -476,11 +576,18 @@ pub fn run_official_agent_turn(
                 }
                 confirmation_seq += 1;
                 let request_id = format!("oc-{confirmation_seq}");
-                let detail = permission_detail(
-                    parsed.kind,
-                    parsed.path.as_deref(),
-                    parsed.command.as_deref(),
-                );
+                let detail = match parsed.computer.as_ref() {
+                    Some(computer) => format!(
+                        "{} {}",
+                        computer.tool,
+                        serde_json::to_string(&computer.arguments).unwrap_or_default()
+                    ),
+                    None => permission_detail(
+                        parsed.kind,
+                        parsed.path.as_deref(),
+                        parsed.command.as_deref(),
+                    ),
+                };
                 on_event(OfficialAgentEvent::Confirmation {
                     request_id: request_id.clone(),
                     tool: call.name.clone(),
@@ -593,6 +700,15 @@ fn needs_permission(kind: RepairToolKind) -> bool {
     )
 }
 
+/// Screen read-only looks skip the approval card; everything that clicks,
+/// types, or moves the real desktop asks first.
+fn screen_tool_needs_approval(tool: &str) -> bool {
+    !matches!(
+        tool,
+        "screen_snapshot" | "screen_apps" | "screen_windows" | "screen_state"
+    )
+}
+
 /// Writes outside the project workspace are refused: runtime config edits must
 /// go through the repair flow (backup → typed actions → audit).
 fn check_write_scope(
@@ -627,11 +743,17 @@ fn permission_detail(kind: RepairToolKind, path: Option<&str>, command: Option<&
         _ => path.unwrap_or_default().to_string(),
     }
 }
-
-fn system_prompt(options: &OfficialAgentOptions, zh: bool) -> String {
+fn system_prompt(
+    options: &OfficialAgentOptions,
+    zh: bool,
+    browser_enabled: bool,
+    computer_enabled: bool,
+) -> String {
     let mut prompt = if zh {
         "你是 Agent Doctor，这台电脑上官方内置的助手。\n\
         - 你可以读取本机各 Agent（OpenClaw、Hermes、Claude Code、Codex、DeepSeek Harness）的配置文件来回答问题，密钥会显示成 {{{{SECRET:n}}}}。不要猜密钥，也不要让用户把密钥发给你。\n\
+        - 下结论必须分级，不许越级：有报错日志、401/403、启动失败或实际调用失败证据的，才是「已确认故障」；只有静态配置差异、没有运行失败证据的，写「待验证」；配置偏宽松但功能正常，是「安全加固」建议。用户亲测能用是最直接的运行证据，优先于扫描发现的配置缺口。\n\
+        - 凭据来源不止 .env：进程继承的环境变量、Shell 启动文件、凭据存储、应用自身的凭据机制、外部启动器都可能提供密钥。「配置文件里没看到某个变量」只能写「凭据来源未确认，属待验证」，禁止写成「无法调用」或「高概率失败」。\n\
         - 你可以在当前项目文件夹里新建或修改文件，但每次写入或改动前都会先征求用户同意。\n\
         - 你可以运行白名单里的官方安装/更新命令（同样先征求同意）。不在此列的命令不要尝试。\n\
         - runtime 的配置文件不要直接改：引导用户走修复流程（会先备份）。这个对话里只能改项目文件夹内的文件。\n\
@@ -641,6 +763,8 @@ fn system_prompt(options: &OfficialAgentOptions, zh: bool) -> String {
     } else {
         "You are Agent Doctor, the built-in assistant on this computer.\n\
         - You may read the config files of the agents installed here (OpenClaw, Hermes, Claude Code, Codex, DeepSeek Harness) to answer questions. Secrets appear as {{{{SECRET:n}}}}. Never guess them or ask the person to send a key.\n\
+        - Grade every conclusion, never escalate: a confirmed fault needs evidence — error logs, 401/403, a startup failure, or a failed real call. A static config difference with no runtime failure evidence is \"unverified\". A loose config that still works is a hardening tip. First-hand \"it works\" from the person outranks a gap found by static scanning.\n\
+        - Credentials do not live only in the .env: inherited process env, shell startup files, credential stores, the agent's own lookup, or external launchers can all supply keys. \"The variable is not in this file\" may only be worded as \"credential source unverified\" — never as \"cannot call\" or \"likely failing\".\n\
         - You may create or edit files inside the current project folder; every write asks the user for approval first.\n\
         - You may run allowlisted official install/update commands (also approved first). Never try commands outside that list.\n\
         - Do not edit runtime config files directly: guide the person to the repair flow (which backs up first). In this chat you only edit files inside the project folder.\n\
@@ -648,6 +772,28 @@ fn system_prompt(options: &OfficialAgentOptions, zh: bool) -> String {
         - Lead with the answer, then the details. If you are unsure, say so. Do not make things up."
         .to_string()
     };
+    if browser_enabled {
+        if zh {
+            prompt.push_str(
+                "\n- 你可以直接操作浏览器完成“打开某网站”“在网页上找按钮点一下”“截图”这类请求：browser_navigate 打开网页，browser_snapshot 获取可点击元素及其 @eN 引用（点击/填写前必须先调用），browser_click / browser_fill 点击和填写，browser_find 按文字或角色找元素，browser_screenshot 截图并告诉用户图片保存在哪，browser_get_text 读取页面文字。浏览器用独立的自动化配置，不共享日常浏览器的登录态。",
+            );
+        } else {
+            prompt.push_str(
+                "\n- You can drive the browser for requests like \"open this site\", \"find the login button and click it\", or \"take a screenshot\": browser_navigate opens a URL, browser_snapshot lists clickable elements with @eN refs (always call it before click/fill), browser_click / browser_fill act on elements, browser_find locates by text or role, browser_screenshot saves a PNG (tell the person where), browser_get_text reads page text. The browser runs an isolated automation profile; it does not share the everyday browser's logins.",
+            );
+        }
+    }
+    if computer_enabled {
+        if zh {
+            prompt.push_str(
+                "\n- 你可以操作这台电脑上已打开的应用（用户已打开「操作电脑」开关）：screen_open 按确切名字打开/切换应用（不要点 Dock、Spotlight、启动台），screen_snapshot 把窗口控件编号成 @e1、@e2…（点击前必须先调用，界面变化后要重新调用），screen_click / screen_type / screen_set / screen_press / screen_scroll 操作控件，screen_apps / screen_windows / screen_state 查看现状。每次实际点击前都会先征求用户同意。",
+            );
+        } else {
+            prompt.push_str(
+                "\n- You can operate apps already open on this computer (the person turned the computer-use switch on): screen_open opens/switches apps by exact name (never the Dock, Spotlight, or Launchpad), screen_snapshot numbers a window's controls @e1, @e2… (always call it before clicking, and again after anything changes), screen_click / screen_type / screen_set / screen_press / screen_scroll act on controls, screen_apps / screen_windows / screen_state report the current state. Every real click asks the user first.",
+            );
+        }
+    }
     if let Some(extra) = &options.system_extra {
         prompt.push_str("\n\n");
         prompt.push_str(extra);
@@ -658,6 +804,72 @@ fn system_prompt(options: &OfficialAgentOptions, zh: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_prompt_offers_browser_only_when_enabled() {
+        let options = OfficialAgentOptions::for_chat("hi".into(), None, None);
+        let with_browser = system_prompt(&options, true, true, false);
+        assert!(with_browser.contains("browser_navigate"));
+        assert!(with_browser.contains("browser_snapshot"));
+        assert!(!with_browser.contains("screen_snapshot"));
+        let without_browser = system_prompt(&options, true, false, false);
+        assert!(!without_browser.contains("browser_navigate"));
+        let english = system_prompt(&options, false, true, false);
+        assert!(english.contains("isolated automation profile"));
+    }
+
+    #[test]
+    fn system_prompt_offers_screen_only_when_enabled() {
+        let options = OfficialAgentOptions::for_chat("hi".into(), None, None);
+        let with_screen = system_prompt(&options, true, false, true);
+        assert!(with_screen.contains("screen_open"));
+        assert!(with_screen.contains("screen_snapshot"));
+        assert!(!with_screen.contains("browser_navigate"));
+        let without_screen = system_prompt(&options, true, false, false);
+        assert!(!without_screen.contains("screen_open"));
+    }
+
+    #[test]
+    fn system_prompt_grades_evidence_before_calling_something_broken() {
+        let options = OfficialAgentOptions::for_chat("hi".into(), None, None);
+        for prompt in [
+            system_prompt(&options, true, false, false),
+            system_prompt(&options, false, false, false),
+        ] {
+            // A static gap alone is never a fault; user-verified wins.
+            assert!(prompt.contains("401/403"), "evidence bar: {prompt}");
+            assert!(prompt.contains("待验证") || prompt.contains("unverified"));
+            assert!(
+                prompt.contains("亲测能用") || prompt.contains("it works"),
+                "user-verified outranks static gaps: {prompt}"
+            );
+            // Credential sources beyond the .env file, and the forbidden wording.
+            assert!(prompt.contains(".env"), "credential sources: {prompt}");
+            assert!(
+                prompt.contains("凭据来源未确认")
+                    || prompt.contains("credential source unverified"),
+                "unverified wording: {prompt}"
+            );
+            assert!(
+                prompt.contains("禁止写成「无法调用」")
+                    || prompt.contains("never as \"cannot call\""),
+                "forbidden phrasing: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn screen_action_tools_ask_but_reads_do_not() {
+        assert!(!screen_tool_needs_approval("screen_snapshot"));
+        assert!(!screen_tool_needs_approval("screen_apps"));
+        assert!(!screen_tool_needs_approval("screen_windows"));
+        assert!(!screen_tool_needs_approval("screen_state"));
+        assert!(screen_tool_needs_approval("screen_click"));
+        assert!(screen_tool_needs_approval("screen_open"));
+        assert!(screen_tool_needs_approval("screen_type"));
+        assert!(screen_tool_needs_approval("screen_press"));
+        assert!(screen_tool_needs_approval("screen_menu"));
+    }
 
     #[test]
     fn failure_loop_detection_warns_on_repeat() {

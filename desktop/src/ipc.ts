@@ -37,6 +37,7 @@ import type {
   RemoteProjectRow,
   RepairPreviewResponse,
   RestoreSummary,
+  LiveProbeReport,
   RuntimeVersionStatus,
   SubscriptionPoolRow,
   SkillMountReport,
@@ -898,6 +899,11 @@ export function deepRepair(args: { runtime: string }): Promise<DeepRepairSummary
 
 export function runBrowserSmoke(): Promise<{ ok: boolean; detail: string }> {
   return invoke("run_browser_smoke_command");
+}
+
+/** One minimal real call against the runtime's gateway — runtime evidence. */
+export function probeRuntimeLive(args: { runtime: string }): Promise<LiveProbeReport> {
+  return invoke("probe_runtime_live_command", args);
 }
 
 export function runRepairRollback(args: {

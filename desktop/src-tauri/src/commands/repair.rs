@@ -1,7 +1,8 @@
 use agent_doctor_core::{
     build_repair_preview_from_bundle, execute_install_with_progress, needs_binary_install,
-    probe_runtime, run_doctor, suggest_runtime_repairs, uninstall_runtime, InstallOptions,
-    InstallProgressEvent, InstallReport, ProbeStatus, RuntimeProbeReport,
+    probe_runtime, probe_runtime_live, run_doctor, suggest_runtime_repairs, uninstall_runtime,
+    InstallOptions, InstallProgressEvent, InstallReport, ProbeCategory, ProbeStatus,
+    RuntimeLiveProbeReport, RuntimeProbeReport,
 };
 use agent_doctor_mcp::{smoke_browser_navigate, SmokeOptions};
 use agent_doctor_repair::{
@@ -29,6 +30,9 @@ struct RepairPreviewCheck {
     id: String,
     title: String,
     status: String,
+    /// `fault` / `unverified` / `hardening` / `healthy` — the claim's evidence
+    /// class, so the UI never shows a static gap as a runtime failure.
+    category: String,
     message: String,
     details: Vec<String>,
 }
@@ -145,6 +149,10 @@ pub struct RepairPreviewResponse {
     display_name: String,
     summary: RepairPreviewSummary,
     checks: Vec<RepairPreviewCheck>,
+    /// Where the agent's API key actually lives (`.env`, process environment,
+    /// app wiring…) when the probe could tell. Answers "why is this still ok".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_source: Option<String>,
     plan_summary: String,
     suggested_repairs: Vec<SuggestedRepairItem>,
     can_apply_repair: bool,
@@ -162,6 +170,24 @@ fn probe_status_label(status: ProbeStatus) -> &'static str {
     }
 }
 
+fn probe_category_label(category: ProbeCategory) -> &'static str {
+    match category {
+        ProbeCategory::Fault => "fault",
+        ProbeCategory::Unverified => "unverified",
+        ProbeCategory::Hardening => "hardening",
+        ProbeCategory::Healthy => "healthy",
+    }
+}
+
+/// The probes use per-runtime fact wording; the desktop knows a few tokens.
+fn normalize_credential_source(value: &str) -> String {
+    match value {
+        "process environment" => "process_env".into(),
+        "Agent Doctor wiring" => "app_wiring".into(),
+        other => other.to_string(),
+    }
+}
+
 fn build_repair_preview_response(
     report: RuntimeProbeReport,
     last_execute: Option<RepairExecuteSummary>,
@@ -173,6 +199,11 @@ fn build_repair_preview_response(
     let can_apply_repair = suggested.iter().any(|item| item.auto_fixable);
     let backup_ids = list_runtime_backup_ids(&report.runtime_id).unwrap_or_default();
     let mut summary = RepairPreviewSummary::default();
+    let credential_source = report
+        .facts
+        .iter()
+        .find(|fact| fact.key == format!("{}.api_key.source", report.runtime_id))
+        .map(|fact| normalize_credential_source(fact.value.trim()));
     let checks = report
         .checks
         .into_iter()
@@ -188,6 +219,7 @@ fn build_repair_preview_response(
                 id: check.id,
                 title: check.title,
                 status: probe_status_label(check.status).to_string(),
+                category: probe_category_label(check.category).to_string(),
                 message: check.message,
                 details: check.details,
             }
@@ -199,6 +231,7 @@ fn build_repair_preview_response(
         display_name: report.display_name,
         summary,
         checks,
+        credential_source,
         plan_summary: plan.summary,
         suggested_repairs: suggested
             .into_iter()
@@ -220,6 +253,17 @@ pub async fn run_repair_preview_command(runtime: String) -> Result<RepairPreview
     tauri::async_runtime::spawn_blocking(move || {
         let report = probe_runtime(&runtime).map_err(|error| error.to_string())?;
         Ok(build_repair_preview_response(report, None))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// One minimal real call against the runtime's gateway — the runtime evidence
+/// that upgrades a "待验证" credential to confirmed-healthy / confirmed-fault.
+#[tauri::command]
+pub async fn probe_runtime_live_command(runtime: String) -> Result<RuntimeLiveProbeReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        probe_runtime_live(&runtime).map_err(|e| e.to_string())
     })
     .await
     .map_err(|error| error.to_string())?

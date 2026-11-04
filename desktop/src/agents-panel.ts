@@ -178,6 +178,16 @@ function updateAgentsSecurityOverview(report: DoctorReport): void {
   agentsReadinessRingEl.classList.toggle("is-empty", installed === 0);
 }
 
+/**
+ * The doctor tile is virtual — "doctor" is never in the installed list — so a
+ * plain resolve would drop an active doctor selection onto the first CLI.
+ */
+function resolvePaintedRuntimeId(installedRuntimes: RuntimeDoctorResult[]): string | null {
+  return appState.activeRuntimeId === DOCTOR_RUNTIME_ID
+    ? DOCTOR_RUNTIME_ID
+    : resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
+}
+
 function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: string): void {
   const solo = installedRuntimes.length < 2;
   runtimeSectionEl.classList.toggle("is-solo", solo);
@@ -450,10 +460,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       }
     }
 
-    const selectedId =
-      appState.activeRuntimeId === DOCTOR_RUNTIME_ID
-        ? DOCTOR_RUNTIME_ID
-        : resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId)!;
+    const selectedId = resolvePaintedRuntimeId(installedRuntimes)!;
     appState.activeRuntimeId = selectedId;
     paintRuntimeTabs(installedRuntimes, selectedId);
 
@@ -519,7 +526,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         return;
       }
       const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
-      const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
+      const selectedId = resolvePaintedRuntimeId(installedRuntimes);
       if (!selectedId) {
         return;
       }
@@ -557,7 +564,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const report = appState.lastReport;
     if (!report) return;
     const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
-    const selectedId = resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
+    const selectedId = resolvePaintedRuntimeId(installedRuntimes);
     if (selectedId) paintRuntimeTabs(installedRuntimes, selectedId);
   });
 
@@ -648,6 +655,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     if (action === "browser-smoke" && runtimeCard) {
       void diagnose.runBrowserSmokeFromCard(runtimeCard);
+      return;
+    }
+
+    if (action === "live-probe" && runtimeCard) {
+      void diagnose.runLiveProbeFromCard(runtimeCard);
       return;
     }
 

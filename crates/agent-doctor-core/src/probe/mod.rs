@@ -14,9 +14,12 @@ use crate::repair_types::{DiagnosticBundle, DiagnosticFact, SensitivityLevel};
 use crate::runtime::{adapter_by_id, all_adapters, descriptor_by_id, ConfigFormat};
 
 pub(crate) mod config;
+mod live;
 mod mode_drift;
 pub(crate) mod runtimes;
 mod schema;
+
+pub use live::{probe_runtime_live, LiveProbeOutcome, RuntimeLiveProbeReport};
 
 pub(crate) use config::ParsedConfig;
 use config::{config_format_for_path, parse_config};
@@ -39,6 +42,23 @@ pub enum ProbeSeverity {
     Error,
 }
 
+/// What kind of claim a check makes. A static config gap is `unverified`, never
+/// a fault — the Hermes misjudgment ("key not in .env, so calls will fail")
+/// happened because this distinction lived only in prompt wording.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeCategory {
+    /// Runtime failure evidence: error logs, 401/403, startup or call failures.
+    Fault,
+    /// A static config difference with no runtime failure evidence.
+    Unverified,
+    /// Loose or risky config that still works today; a hardening tip.
+    Hardening,
+    /// Checked and healthy, or not applicable.
+    #[default]
+    Healthy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeCheck {
     pub id: String,
@@ -48,6 +68,9 @@ pub struct ProbeCheck {
     pub message: String,
     pub details: Vec<String>,
     pub sensitivity: SensitivityLevel,
+    /// Derived from `status` unless stated otherwise; deviations must be deliberate.
+    #[serde(default)]
+    pub category: ProbeCategory,
 }
 
 impl ProbeCheck {
@@ -59,6 +82,13 @@ impl ProbeCheck {
         message: impl Into<String>,
         sensitivity: SensitivityLevel,
     ) -> Self {
+        let category = match status {
+            ProbeStatus::Warn => ProbeCategory::Unverified,
+            ProbeStatus::Fail => ProbeCategory::Fault,
+            ProbeStatus::Pass | ProbeStatus::NotApplicable | ProbeStatus::NotChecked => {
+                ProbeCategory::Healthy
+            }
+        };
         Self {
             id: id.into(),
             title: title.into(),
@@ -67,7 +97,15 @@ impl ProbeCheck {
             message: message.into(),
             details: Vec::new(),
             sensitivity,
+            category,
         }
+    }
+
+    /// Override the derived category — e.g. a permissions warning is a
+    /// hardening tip, not an unverified config difference.
+    pub fn with_category(mut self, category: ProbeCategory) -> Self {
+        self.category = category;
+        self
     }
 
     pub(crate) fn with_details(mut self, details: Vec<String>) -> Self {
@@ -94,7 +132,15 @@ impl RuntimeProbeReport {
                 .checks
                 .iter()
                 .filter(|check| matches!(check.status, ProbeStatus::Warn | ProbeStatus::Fail))
-                .map(|check| format!("{}: {}", check.title, check.message))
+                .map(|check| {
+                    let tag = match check.category {
+                        ProbeCategory::Fault => "fault",
+                        ProbeCategory::Unverified => "unverified",
+                        ProbeCategory::Hardening => "hardening",
+                        ProbeCategory::Healthy => "ok",
+                    };
+                    format!("[{tag}] {}: {}", check.title, check.message)
+                })
                 .collect(),
         }
     }
@@ -1069,5 +1115,65 @@ mod tests {
         assert_eq!(present_status, ProbeStatus::Pass);
         assert_eq!(present_severity, ProbeSeverity::Info);
         assert!(present_msg.contains("not a defect"));
+    }
+
+    #[test]
+    fn check_categories_follow_status_unless_stated() {
+        let pass = ProbeCheck::new(
+            "x.pass",
+            "X",
+            ProbeStatus::Pass,
+            ProbeSeverity::Info,
+            "ok",
+            SensitivityLevel::Public,
+        );
+        let warn = ProbeCheck::new(
+            "x.warn",
+            "X",
+            ProbeStatus::Warn,
+            ProbeSeverity::Warning,
+            "static difference",
+            SensitivityLevel::ConfigShape,
+        );
+        let fail = ProbeCheck::new(
+            "x.fail",
+            "X",
+            ProbeStatus::Fail,
+            ProbeSeverity::Error,
+            "401 from gateway",
+            SensitivityLevel::Public,
+        );
+        assert_eq!(pass.category, ProbeCategory::Healthy);
+        assert_eq!(warn.category, ProbeCategory::Unverified);
+        assert_eq!(fail.category, ProbeCategory::Fault);
+
+        // A permissions warning is a hardening tip, not an unverified gap.
+        let hardening = warn.clone().with_category(ProbeCategory::Hardening);
+        assert_eq!(hardening.category, ProbeCategory::Hardening);
+        assert_eq!(hardening.status, ProbeStatus::Warn);
+    }
+
+    #[test]
+    fn bundle_notes_carry_the_category_tag() {
+        let report = RuntimeProbeReport {
+            runtime_id: "hermes".into(),
+            display_name: "Hermes".into(),
+            binary_name: "hermes".into(),
+            checks: vec![ProbeCheck::new(
+                "hermes.api_key.configured",
+                "Hermes API key configured",
+                ProbeStatus::Warn,
+                ProbeSeverity::Warning,
+                "CUSTOM_API_KEY was not found in ~/.hermes/.env or the process environment",
+                SensitivityLevel::ConfigShape,
+            )],
+            facts: Vec::new(),
+        };
+        let notes = report.to_diagnostic_bundle().notes;
+        assert!(
+            notes[0].starts_with("[unverified] "),
+            "tag first: {notes:?}"
+        );
+        assert!(notes[0].contains("unverified"));
     }
 }

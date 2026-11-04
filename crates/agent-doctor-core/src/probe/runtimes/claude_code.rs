@@ -7,7 +7,7 @@ use crate::session_env::collect_overlay_env;
 
 use super::super::config::ParsedConfig;
 use super::super::schema::{schema_error, schema_warn};
-use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
+use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
 
 pub(crate) fn probe_schema(
     path: &Path,
@@ -174,28 +174,31 @@ fn probe_settings_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
     if let Ok(metadata) = fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
         let too_open = mode & 0o077 != 0;
-        checks.push(ProbeCheck::new(
-            format!("claude.settings.permissions:{}", path.display()),
-            "Claude settings permissions",
-            if too_open {
-                ProbeStatus::Warn
-            } else {
-                ProbeStatus::Pass
-            },
-            if too_open {
-                ProbeSeverity::Warning
-            } else {
-                ProbeSeverity::Info
-            },
-            if too_open {
-                format!(
-                    "settings.json permissions are {mode:o}; recommended 600 (contains API key)"
-                )
-            } else {
-                format!("settings.json permissions are {mode:o}")
-            },
-            SensitivityLevel::LocalPath,
-        ));
+        checks.push(
+            ProbeCheck::new(
+                format!("claude.settings.permissions:{}", path.display()),
+                "Claude settings permissions",
+                if too_open {
+                    ProbeStatus::Warn
+                } else {
+                    ProbeStatus::Pass
+                },
+                if too_open {
+                    ProbeSeverity::Warning
+                } else {
+                    ProbeSeverity::Info
+                },
+                if too_open {
+                    format!(
+                        "settings.json permissions are {mode:o}; recommended 600 (contains API key)"
+                    )
+                } else {
+                    format!("settings.json permissions are {mode:o}")
+                },
+                SensitivityLevel::LocalPath,
+            )
+            .with_category(ProbeCategory::Hardening),
+        );
     }
 }
 

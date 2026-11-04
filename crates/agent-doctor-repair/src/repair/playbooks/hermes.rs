@@ -524,6 +524,7 @@ mod tests {
                 message: "hermes was not found".to_string(),
                 details: vec![],
                 sensitivity: SensitivityLevel::Public,
+                category: agent_doctor_core::ProbeCategory::Fault,
             }],
             facts: vec![],
         };

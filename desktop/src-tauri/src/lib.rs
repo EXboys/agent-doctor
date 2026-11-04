@@ -743,6 +743,7 @@ pub fn run() {
             set_hermes_model_command,
             apply_profile_model_command,
             run_repair_preview_command,
+            probe_runtime_live_command,
             run_repair_execute_command,
             deep_diagnose_chat_command,
             cancel_deep_diagnose_command,

@@ -137,7 +137,8 @@ pub use presets::{
     UseProfileReport,
 };
 pub use probe::{
-    probe_all_runtimes, probe_runtime, ProbeCheck, ProbeSeverity, ProbeStatus, RuntimeProbeReport,
+    probe_all_runtimes, probe_runtime, probe_runtime_live, LiveProbeOutcome, ProbeCategory,
+    ProbeCheck, ProbeSeverity, ProbeStatus, RuntimeLiveProbeReport, RuntimeProbeReport,
 };
 pub use profile::{
     agent_profile_path, company_baseline_path, read_agent_profile, read_company_baseline,

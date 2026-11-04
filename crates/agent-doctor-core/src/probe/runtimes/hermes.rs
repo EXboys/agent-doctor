@@ -6,7 +6,7 @@ use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 
 use super::super::config::{parse_env_file, EnvFile, ParsedConfig};
 use super::super::schema::{schema_error, schema_warn};
-use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
+use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
 
 pub(crate) fn probe_schema(
     path: &Path,
@@ -143,26 +143,29 @@ fn probe_env_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
     if let Ok(metadata) = fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
         let too_open = mode & 0o077 != 0;
-        checks.push(ProbeCheck::new(
-            format!("hermes.env.permissions:{}", path.display()),
-            "Hermes .env permissions",
-            if too_open {
-                ProbeStatus::Warn
-            } else {
-                ProbeStatus::Pass
-            },
-            if too_open {
-                ProbeSeverity::Warning
-            } else {
-                ProbeSeverity::Info
-            },
-            if too_open {
-                format!(".env permissions are {mode:o}; recommended 600")
-            } else {
-                format!(".env permissions are {mode:o}")
-            },
-            SensitivityLevel::LocalPath,
-        ));
+        checks.push(
+            ProbeCheck::new(
+                format!("hermes.env.permissions:{}", path.display()),
+                "Hermes .env permissions",
+                if too_open {
+                    ProbeStatus::Warn
+                } else {
+                    ProbeStatus::Pass
+                },
+                if too_open {
+                    ProbeSeverity::Warning
+                } else {
+                    ProbeSeverity::Info
+                },
+                if too_open {
+                    format!(".env permissions are {mode:o}; recommended 600")
+                } else {
+                    format!(".env permissions are {mode:o}")
+                },
+                SensitivityLevel::LocalPath,
+            )
+            .with_category(ProbeCategory::Hardening),
+        );
     }
 }
 
@@ -238,106 +241,212 @@ pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<Diagnosti
     }
 }
 
-fn probe_required_key(
-    env_key: &str,
-    checks: &mut Vec<ProbeCheck>,
-    facts: &mut Vec<DiagnosticFact>,
-) {
-    let env_path = dirs::home_dir()
-        .map(|home| home.join(".hermes/.env"))
-        .unwrap_or_else(|| PathBuf::from(".hermes/.env"));
+/// What the `~/.hermes/.env` scan concluded about the required key.
+#[derive(Debug, PartialEq)]
+enum DotenvKeyVerdict {
+    NoFile,
+    Unreadable(String),
+    Absent,
+    Empty,
+    Configured,
+}
 
+/// One source among several: the app's overlay env, a launcher, or the parent
+/// shell can hand Hermes the key through the process environment. A key
+/// missing from the .env file is therefore "unverified", never "broken" —
+/// Hermes actually working is the deciding evidence.
+fn key_in_process_env(env_key: &str) -> bool {
+    let overlay = crate::session_env::collect_overlay_env();
+    overlay
+        .get(env_key)
+        .is_some_and(|value| !value.trim().is_empty())
+        || std::env::var(env_key)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// The verdict plus how many times the key appears in the .env (dupes warn on
+/// top of whatever the verdict is).
+fn scan_dotenv_key(env_path: &Path, env_key: &str) -> (DotenvKeyVerdict, Option<usize>) {
     if !env_path.exists() {
-        checks.push(ProbeCheck::new(
-            "hermes.api_key.configured",
-            "Hermes API key configured",
-            ProbeStatus::Warn,
-            ProbeSeverity::Warning,
-            format!("{env_key} is required but ~/.hermes/.env does not exist"),
-            SensitivityLevel::LocalPath,
-        ));
-        facts.push(DiagnosticFact::new(
-            "hermes.api_key.configured",
-            "false",
-            SensitivityLevel::Public,
-        ));
-        return;
+        return (DotenvKeyVerdict::NoFile, None);
     }
-
-    let raw = match fs::read_to_string(&env_path) {
+    let raw = match fs::read_to_string(env_path) {
         Ok(raw) => raw,
-        Err(error) => {
-            checks.push(ProbeCheck::new(
-                "hermes.api_key.configured",
-                "Hermes API key configured",
-                ProbeStatus::Warn,
-                ProbeSeverity::Warning,
-                format!("failed to read ~/.hermes/.env: {error}"),
-                SensitivityLevel::LocalPath,
-            ));
-            return;
-        }
+        Err(error) => return (DotenvKeyVerdict::Unreadable(error.to_string()), None),
     };
-
     let env = parse_env_file(&raw);
     let matches: Vec<_> = env
         .entries
         .iter()
         .filter(|entry| entry.key == env_key)
         .collect();
+    if matches.is_empty() {
+        return (DotenvKeyVerdict::Absent, None);
+    }
+    let duplicates = (matches.len() > 1).then_some(matches.len());
     let configured = matches
         .iter()
         .any(|entry| entry.value_present && !entry.value_empty);
-    facts.push(DiagnosticFact::new(
-        "hermes.api_key.configured",
-        configured.to_string(),
-        SensitivityLevel::Public,
-    ));
+    (
+        if configured {
+            DotenvKeyVerdict::Configured
+        } else {
+            DotenvKeyVerdict::Empty
+        },
+        duplicates,
+    )
+}
 
-    if matches.is_empty() {
-        checks.push(ProbeCheck::new(
+/// The single check that says whether Hermes can authenticate. `pass` means a
+/// source was found; the wording never upgrades a static gap to a fault.
+fn push_key_verdict(
+    env_key: &str,
+    verdict: &DotenvKeyVerdict,
+    from_process_env: bool,
+    checks: &mut Vec<ProbeCheck>,
+) {
+    use DotenvKeyVerdict::*;
+    let pass = from_process_env || *verdict == Configured;
+    let (status, severity) = if pass {
+        (ProbeStatus::Pass, ProbeSeverity::Info)
+    } else {
+        (ProbeStatus::Warn, ProbeSeverity::Warning)
+    };
+    let sensitivity = if matches!(verdict, NoFile | Unreadable(_)) {
+        SensitivityLevel::LocalPath
+    } else {
+        SensitivityLevel::ConfigShape
+    };
+    let detail = match (verdict, from_process_env) {
+        (Configured, _) => format!("{env_key} is configured in ~/.hermes/.env"),
+        (Absent, true) => {
+            format!("{env_key} is set in the process environment; it is not in ~/.hermes/.env")
+        }
+        (Empty, true) => {
+            format!("{env_key} in ~/.hermes/.env is empty, but the process environment sets it")
+        }
+        (NoFile, true) => {
+            format!("{env_key} is set in the process environment; ~/.hermes/.env does not exist")
+        }
+        (Unreadable(_), true) => {
+            format!("{env_key} is set in the process environment; ~/.hermes/.env could not be read")
+        }
+        (Absent, false) => format!(
+            "{env_key} was not found in ~/.hermes/.env or the process environment; \
+             if Hermes still works, its credential source is elsewhere (unverified)"
+        ),
+        (NoFile, false) => format!(
+            "{env_key} is required but was not found in ~/.hermes/.env or the process environment; \
+             if Hermes still works, its credential source is elsewhere (unverified)"
+        ),
+        (Empty, false) => format!("{env_key} exists in ~/.hermes/.env but is empty"),
+        (Unreadable(error), false) => format!("failed to read ~/.hermes/.env: {error}"),
+    };
+    checks.push(ProbeCheck::new(
+        "hermes.api_key.configured",
+        "Hermes API key configured",
+        status,
+        severity,
+        detail,
+        sensitivity,
+    ));
+}
+
+fn probe_required_key(
+    env_key: &str,
+    checks: &mut Vec<ProbeCheck>,
+    facts: &mut Vec<DiagnosticFact>,
+) {
+    let from_process_env = key_in_process_env(env_key);
+    let env_path = dirs::home_dir()
+        .map(|home| home.join(".hermes/.env"))
+        .unwrap_or_else(|| PathBuf::from(".hermes/.env"));
+    let (verdict, duplicates) = scan_dotenv_key(&env_path, env_key);
+
+    let configured = verdict == DotenvKeyVerdict::Configured;
+    let usable = configured || from_process_env;
+    if !matches!(verdict, DotenvKeyVerdict::Unreadable(_)) {
+        facts.push(DiagnosticFact::new(
             "hermes.api_key.configured",
-            "Hermes API key configured",
-            ProbeStatus::Warn,
-            ProbeSeverity::Warning,
-            format!("{env_key} is missing from ~/.hermes/.env"),
-            SensitivityLevel::ConfigShape,
+            usable.to_string(),
+            SensitivityLevel::Public,
         ));
-        return;
+        let source = if configured {
+            "dotenv"
+        } else if from_process_env {
+            "process_env"
+        } else {
+            ""
+        };
+        if !source.is_empty() {
+            facts.push(DiagnosticFact::new(
+                "hermes.api_key.source",
+                source,
+                SensitivityLevel::Public,
+            ));
+        }
     }
 
-    if matches.len() > 1 {
+    if let Some(count) = duplicates {
         checks.push(ProbeCheck::new(
             "hermes.api_key.duplicates",
             "Hermes API key duplicates",
             ProbeStatus::Warn,
             ProbeSeverity::Warning,
-            format!(
-                "{env_key} appears {} times in ~/.hermes/.env",
-                matches.len()
-            ),
+            format!("{env_key} appears {count} times in ~/.hermes/.env"),
             SensitivityLevel::ConfigShape,
         ));
     }
 
-    checks.push(ProbeCheck::new(
-        "hermes.api_key.configured",
-        "Hermes API key configured",
-        if configured {
-            ProbeStatus::Pass
-        } else {
-            ProbeStatus::Warn
-        },
-        if configured {
-            ProbeSeverity::Info
-        } else {
-            ProbeSeverity::Warning
-        },
-        if configured {
-            format!("{env_key} is configured in ~/.hermes/.env")
-        } else {
-            format!("{env_key} exists in ~/.hermes/.env but is empty")
-        },
-        SensitivityLevel::ConfigShape,
-    ));
+    push_key_verdict(env_key, &verdict, from_process_env, checks);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A static gap alone never grades as a fault: without the process env the
+    /// wording stays "unverified", with it the check passes outright.
+    #[test]
+    fn key_verdicts_stay_unverified_without_runtime_evidence() {
+        let cases: Vec<(DotenvKeyVerdict, ProbeStatus)> = vec![
+            (DotenvKeyVerdict::Configured, ProbeStatus::Pass),
+            (DotenvKeyVerdict::Absent, ProbeStatus::Warn),
+            (DotenvKeyVerdict::Empty, ProbeStatus::Warn),
+            (DotenvKeyVerdict::NoFile, ProbeStatus::Warn),
+            (
+                DotenvKeyVerdict::Unreadable("denied".into()),
+                ProbeStatus::Warn,
+            ),
+        ];
+        for (verdict, status) in cases {
+            let mut checks = Vec::new();
+            push_key_verdict("CUSTOM_API_KEY", &verdict, false, &mut checks);
+            assert_eq!(checks[0].status, status, "verdict {verdict:?}");
+            assert!(
+                !checks[0].message.contains("无法调用"),
+                "never claims a call failure"
+            );
+            assert!(
+                !checks[0].message.contains("unverified") || status == ProbeStatus::Warn,
+                "pass wording never says unverified"
+            );
+        }
+    }
+
+    #[test]
+    fn process_env_evidence_upgrades_every_static_gap_to_pass() {
+        for verdict in [
+            DotenvKeyVerdict::Absent,
+            DotenvKeyVerdict::Empty,
+            DotenvKeyVerdict::NoFile,
+            DotenvKeyVerdict::Unreadable("denied".into()),
+        ] {
+            let mut checks = Vec::new();
+            push_key_verdict("CUSTOM_API_KEY", &verdict, true, &mut checks);
+            assert_eq!(checks[0].status, ProbeStatus::Pass, "verdict {verdict:?}");
+            assert!(checks[0].message.contains("process environment"));
+        }
+    }
 }

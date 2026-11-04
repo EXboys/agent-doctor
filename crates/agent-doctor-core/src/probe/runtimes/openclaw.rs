@@ -7,7 +7,7 @@ use crate::session_env::{collect_overlay_env, resolve_hermes_overlay};
 
 use super::super::config::{parse_env_file, ParsedConfig};
 use super::super::schema::schema_error;
-use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
+use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
 
 const ALLOWED_TOOL_PROFILES: &[&str] = &["minimal", "coding", "messaging", "full"];
 const OPENCLAW_API_KEY_VARS: &[&str] = &["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCLAW_API_KEY"];
@@ -223,26 +223,29 @@ fn probe_env_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
     if let Ok(metadata) = fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
         let too_open = mode & 0o077 != 0;
-        checks.push(ProbeCheck::new(
-            format!("openclaw.env.permissions:{}", path.display()),
-            "OpenClaw .env permissions",
-            if too_open {
-                ProbeStatus::Warn
-            } else {
-                ProbeStatus::Pass
-            },
-            if too_open {
-                ProbeSeverity::Warning
-            } else {
-                ProbeSeverity::Info
-            },
-            if too_open {
-                format!(".env permissions are {mode:o}; recommended 600")
-            } else {
-                format!(".env permissions are {mode:o}")
-            },
-            SensitivityLevel::LocalPath,
-        ));
+        checks.push(
+            ProbeCheck::new(
+                format!("openclaw.env.permissions:{}", path.display()),
+                "OpenClaw .env permissions",
+                if too_open {
+                    ProbeStatus::Warn
+                } else {
+                    ProbeStatus::Pass
+                },
+                if too_open {
+                    ProbeSeverity::Warning
+                } else {
+                    ProbeSeverity::Info
+                },
+                if too_open {
+                    format!(".env permissions are {mode:o}; recommended 600")
+                } else {
+                    format!(".env permissions are {mode:o}")
+                },
+                SensitivityLevel::LocalPath,
+            )
+            .with_category(ProbeCategory::Hardening),
+        );
     }
 }
 

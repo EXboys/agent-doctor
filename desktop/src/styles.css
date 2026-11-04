@@ -4445,6 +4445,39 @@ html[data-os="windows"] .resources-hub-card-desc {
   color: var(--danger);
 }
 
+.repair-check-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.repair-check-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.repair-check-tag.unverified {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.repair-check-tag.hardening {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+
+.repair-check-cred {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
 .repair-chip.muted,
 .repair-check-status.muted {
   background: var(--surface-inset);

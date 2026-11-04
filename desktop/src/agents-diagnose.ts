@@ -1,5 +1,5 @@
 
-import { t } from "./i18n";
+import { t, type MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
 import {
   isAskRuntimeId,
@@ -25,7 +25,7 @@ import type {
   RuntimeDoctorResult,
   WindowSizeReport,
 } from "./types";
-import { resizeMainWindow, openDiagnoseWindow as openDiagnoseWindowCommand, openPath, runBrowserSmoke, runRepairRollback, runRepairPreview, runRepairExecute, workspaceFix, openSession } from "./ipc";
+import { resizeMainWindow, openDiagnoseWindow as openDiagnoseWindowCommand, openPath, probeRuntimeLive, runBrowserSmoke, runRepairRollback, runRepairPreview, runRepairExecute, workspaceFix, openSession } from "./ipc";
 
 export const MAIN_COMPACT_WIDTH = 420;
 /** Room for diagnose aside beside the compact agents column. */
@@ -265,6 +265,34 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       }
     } finally {
       button?.removeAttribute("disabled");
+    }
+  }
+
+  /** One minimal real call — the runtime evidence behind "待验证" items. */
+  async function runLiveProbeFromCard(root: HTMLElement): Promise<void> {
+    const runtime = root.dataset.runtime;
+    const button = root.querySelector<HTMLButtonElement>('[data-action="live-probe"]');
+    const slot = root.querySelector<HTMLElement>("[data-live-probe-slot]");
+    if (!runtime || !button || !slot) {
+      return;
+    }
+    button.setAttribute("disabled", "true");
+    slot.className = "repair-smoke-slot";
+    slot.textContent = t("repair.liveProbeRunning");
+    try {
+      const probe = await probeRuntimeLive({ runtime });
+      const label = probe.ok
+        ? t(`repair.liveProbe.${probe.outcome}` as MessageKey)
+        : t("repair.liveProbeFail");
+      slot.className = `repair-smoke-slot ${probe.ok ? "ok" : "fail"}`;
+      slot.textContent = label;
+      slot.title = probe.detail || "";
+    } catch (error) {
+      slot.className = "repair-smoke-slot fail";
+      slot.textContent = t("repair.liveProbeFail");
+      slot.title = String(error);
+    } finally {
+      button.removeAttribute("disabled");
     }
   }
 
@@ -587,6 +615,7 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
     rollbackRepairRuntimeCard,
     openRepairGuide,
     runBrowserSmokeFromCard,
+    runLiveProbeFromCard,
     bindEvents,
   };
 }

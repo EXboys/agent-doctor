@@ -148,6 +148,8 @@ pub fn run_deep_diagnose_chat(
         allowed_paths_override: Some(allowed_paths_for_runtime(&options.runtime_id)),
         vault: context.take_vault(),
         prelude_messages: prelude,
+        browser_tools: false,
+        computer_tools: false,
     };
 
     let report = run_official_agent_turn(
@@ -252,6 +254,9 @@ fn system_prompt(runtime_id: &str, zh: bool, repair_offered: bool) -> String {
         format!(
             "你是 Agent Doctor 的「深度诊断」助手，帮不懂技术的用户看懂这台电脑上 Agent（{runtime_id}）的检查结果。\n\
             - 先根据给你的规则检查结果回答。需要确认细节时，再用 list_dir / grep_files / read_file 看配置文件。你只能看，不能改文件，也不能运行命令。\n\
+            - 结论必须分级，不许越级：有报错日志、401/403、启动失败或实际调用失败证据的，才是「已确认故障」；只有静态配置差异、没有运行失败证据的，写「待验证」，不是故障；配置偏宽松但功能正常，是「安全加固」建议。用户亲测能用是最直接的运行证据，优先于扫描发现的配置缺口。待验证项要给出具体验证办法（比如让它实际跑一条消息，或点「实际测一下」按钮）。\n\
+            - 规则检查结果里的 [fault]/[unverified]/[hardening] 标签就是类别：[fault]=已确认故障；[unverified]=静态差异待验证，不是故障；[hardening]=安全加固建议，不是故障。按标签下结论，不要把 [unverified] 说成坏了。\n\
+            - 凭据来源不止 .env：进程继承的环境变量、Shell 启动文件、凭据存储、应用自身的凭据机制、外部启动器都可能提供密钥。「配置文件里没看到某个变量」只能写「凭据来源未确认，属待验证」，禁止写成「无法调用」或「高概率失败」。\n\
             - 密钥会显示成 {{{{SECRET:n}}}}。不要猜密钥，也不要让用户把密钥发给你。\n\
             - 用简体中文、短句回答三件事：问题是什么、要不要紧、下一步点哪里。优先说界面上的按钮，例如「自动修好设置」「强制重装」「服务商」。命令和文件路径只能作补充，不能只给命令。\n\
             {repair}\n\
@@ -266,6 +271,9 @@ fn system_prompt(runtime_id: &str, zh: bool, repair_offered: bool) -> String {
         format!(
             "You are Agent Doctor's Full diagnose assistant. Help a non-technical person understand the checks for the agent ({runtime_id}) on this computer.\n\
             - Answer from the rule-check results first. Use list_dir / grep_files / read_file only to confirm details. You can only read; you cannot change files or run commands.\n\
+            - Grade every conclusion, never escalate: a confirmed fault needs evidence — error logs, 401/403, a startup failure, or a failed real call. A static config difference with no runtime failure evidence is \"unverified\", not a fault. A loose config that still works is a hardening tip. First-hand \"it works\" from the person outranks a gap found by static scanning. Give each unverified item a concrete way to check it (for example, send one real message, or tap the live-probe button).\n\
+            - The rule-check notes carry a category tag: [fault] = confirmed failure; [unverified] = a static difference, still unverified, not a fault; [hardening] = a hardening tip, not a fault. Conclude by the tag; never present [unverified] as broken.\n\
+            - Credentials do not live only in the .env: inherited process env, shell startup files, credential stores, the agent's own lookup, or external launchers can all supply keys. \"The variable is not in this file\" may only be worded as \"credential source unverified\" — never as \"cannot call\" or \"likely failing\".\n\
             - Secrets appear as {{{{SECRET:n}}}}. Never guess them or ask the person to send a key.\n\
             - Reply in short plain sentences: what is wrong, whether it matters, and what to tap next. Prefer buttons in the app, such as Auto-fix setup, Force reinstall, or Provider. Commands and file paths are extra detail only.\n\
             {repair}\n\
@@ -352,6 +360,34 @@ mod tests {
         assert!(hidden.contains("不要让用户去点它"));
         assert!(!hidden.contains("点回答下面的「让 Agent Doctor 修」"));
         assert!(system_prompt("openclaw", false, false).contains("Do not tell them to tap it"));
+    }
+
+    #[test]
+    fn prompt_grades_evidence_before_calling_something_broken() {
+        for prompt in [
+            system_prompt("hermes", true, true),
+            system_prompt("hermes", false, false),
+        ] {
+            // A static gap alone is never a fault; user-verified wins.
+            assert!(prompt.contains("401/403"), "evidence bar: {prompt}");
+            assert!(prompt.contains("待验证") || prompt.contains("unverified"));
+            assert!(
+                prompt.contains("亲测能用") || prompt.contains("it works"),
+                "user-verified outranks static gaps: {prompt}"
+            );
+            // Credential sources beyond the .env file, and the forbidden wording.
+            assert!(prompt.contains(".env"), "credential sources: {prompt}");
+            assert!(
+                prompt.contains("凭据来源未确认")
+                    || prompt.contains("credential source unverified"),
+                "unverified wording: {prompt}"
+            );
+            assert!(
+                prompt.contains("禁止写成「无法调用」")
+                    || prompt.contains("never as \"cannot call\""),
+                "forbidden phrasing: {prompt}"
+            );
+        }
     }
 
     #[test]

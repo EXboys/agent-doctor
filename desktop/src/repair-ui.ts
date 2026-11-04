@@ -69,6 +69,39 @@ export function repairStatusClass(
   return "muted";
 }
 
+/** The evidence class beside the status: a static gap is not a fault. */
+function repairCategoryBadge(check: RepairPreviewResponse["checks"][number]): string {
+  if (check.category === "unverified") {
+    return `<span class="repair-check-tag unverified" title="${escapeHtml(t("repair.tagUnverifiedHint"))}">${escapeHtml(t("repair.tagUnverified"))}</span>`;
+  }
+  if (check.category === "hardening") {
+    return `<span class="repair-check-tag hardening" title="${escapeHtml(t("repair.tagHardeningHint"))}">${escapeHtml(t("repair.tagHardening"))}</span>`;
+  }
+  return "";
+}
+
+function credentialSourceLabel(source: string): string {
+  if (source === "process_env") {
+    return t("repair.credSource.processEnv");
+  }
+  if (source === "dotenv") {
+    return t("repair.credSource.dotenv");
+  }
+  if (source === "app_wiring") {
+    return t("repair.credSource.appWiring");
+  }
+  return source;
+}
+
+/** Answers "why is this still ok": where the key actually lives. */
+function credentialSourceLine(report: RepairPreviewResponse, check: RepairPreviewResponse["checks"][number]): string {
+  if (!report.credential_source || !check.id?.endsWith(".api_key.configured")) {
+    return "";
+  }
+  const source = credentialSourceLabel(report.credential_source);
+  return `<span class="repair-check-cred">${escapeHtml(t("repair.credentialSource", { source }))}</span>`;
+}
+
 const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "backup-runtime-configs": "repair.fix.backup",
   "fix-hermes-env-permissions": "repair.fix.envPermissions",
@@ -227,8 +260,12 @@ export function renderRepairPreview(
       const statusClass = repairStatusClass(check.status);
       return `
         <li class="repair-check is-${statusClass}">
-          <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
+          <span class="repair-check-lead">
+            <span class="repair-check-status ${statusClass}">${escapeHtml(repairCheckStatusLabel(check.status))}</span>
+            ${repairCategoryBadge(check)}
+          </span>
           ${renderPlainRepairCheckBody(check)}
+          ${credentialSourceLine(report, check)}
         </li>
       `;
     })
@@ -470,6 +507,14 @@ export function renderRepairPreview(
               <span class="repair-smoke-slot" data-browser-smoke-slot></span>
             </div>`
           : ""
+      }
+      ${
+        showRepairConfirm
+          ? ""
+          : `<div class="repair-smoke-row">
+              <button type="button" class="btn-ghost" data-action="live-probe">${escapeHtml(t("repair.runLiveProbe"))}</button>
+              <span class="repair-smoke-slot" data-live-probe-slot></span>
+            </div>`
       }
     </div>
   `;

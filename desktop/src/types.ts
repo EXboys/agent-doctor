@@ -17,6 +17,21 @@ export type VersionCompareStatus =
   | "below_minimum"
   | "unknown";
 
+export interface LiveProbeReport {
+  runtime_id: string;
+  ok: boolean;
+  outcome:
+    | "model_ok"
+    | "auth_failed"
+    | "not_found"
+    | "unreachable"
+    | "no_gateway"
+    | "no_key"
+    | "error";
+  detail: string;
+  resolved_url?: string;
+}
+
 export interface RuntimeVersionStatus {
   runtime_id: string;
   installed: string | null;
@@ -92,9 +107,13 @@ export interface RepairPreviewResponse {
     id?: string;
     title: string;
     status: "pass" | "warn" | "fail" | "n/a" | "not checked";
+    /** Evidence class: a static gap is `unverified`, never a fault. */
+    category?: "fault" | "unverified" | "hardening" | "healthy";
     message: string;
     details: string[];
   }>;
+  /** Where the agent's API key actually lives, when the probe could tell. */
+  credential_source?: string;
   plan_summary: string;
   suggested_repairs: Array<{
     id: string;
