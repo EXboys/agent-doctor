@@ -7,7 +7,9 @@ use crate::session_env::{collect_overlay_env, resolve_hermes_overlay};
 
 use super::super::config::{parse_env_file, ParsedConfig};
 use super::super::schema::schema_error;
-use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
+#[cfg(unix)]
+use super::super::ProbeCategory;
+use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
 
 const ALLOWED_TOOL_PROFILES: &[&str] = &["minimal", "coding", "messaging", "full"];
 const OPENCLAW_API_KEY_VARS: &[&str] = &["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCLAW_API_KEY"];

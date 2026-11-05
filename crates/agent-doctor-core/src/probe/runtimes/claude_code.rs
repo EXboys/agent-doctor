@@ -7,7 +7,9 @@ use crate::session_env::collect_overlay_env;
 
 use super::super::config::ParsedConfig;
 use super::super::schema::{schema_error, schema_warn};
-use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
+#[cfg(unix)]
+use super::super::ProbeCategory;
+use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
 
 pub(crate) fn probe_schema(
     path: &Path,

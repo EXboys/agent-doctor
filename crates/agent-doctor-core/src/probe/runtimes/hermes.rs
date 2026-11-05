@@ -6,7 +6,9 @@ use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 
 use super::super::config::{parse_env_file, EnvFile, ParsedConfig};
 use super::super::schema::{schema_error, schema_warn};
-use super::super::{ProbeCategory, ProbeCheck, ProbeSeverity, ProbeStatus};
+#[cfg(unix)]
+use super::super::ProbeCategory;
+use super::super::{ProbeCheck, ProbeSeverity, ProbeStatus};
 
 pub(crate) fn probe_schema(
     path: &Path,
