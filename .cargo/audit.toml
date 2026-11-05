@@ -11,4 +11,10 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # Same zip 4.x chain as above: ZipArchive::extract can abort on a crafted
+    # symlink entry with a huge declared size. The updater only extracts our
+    # own minisign-signed bundles, so the payload is not attacker-controlled,
+    # and the fix (zip 9.0.0) is not reachable until tauri-plugin-updater
+    # moves past zip 4.x.
+    "RUSTSEC-2026-0429",
 ]
