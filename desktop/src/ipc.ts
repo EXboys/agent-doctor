@@ -951,6 +951,12 @@ export function openSession(args: {
   return invoke("open_session_command", args);
 }
 
+/** TEMP: webview debug trace for the doctor fold investigation. */
+export function adDebug(line: string): Promise<void> {
+  void invoke("ad_debug_write_command", { line }).catch(() => {});
+  return Promise.resolve();
+}
+
 export function openAskWindow(args: { runtime?: string | null }): Promise<void> {
   return invoke("open_ask_window_command", args);
 }

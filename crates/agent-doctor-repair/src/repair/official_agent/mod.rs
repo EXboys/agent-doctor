@@ -776,6 +776,7 @@ fn system_prompt(
         - 你可以运行白名单里的官方安装/更新命令（同样先征求同意）。不在此列的命令不要尝试。\n\
         - runtime 的配置文件不要直接改：引导用户走修复流程（会先备份）。这个对话里只能改项目文件夹内的文件。\n\
         - 需要多步才能完成的任务，先用 update_plan 列出步骤，边做边更新。\n\
+        - 工具调用的每一步界面都会实时显示，回复里不要再逐步复述（“我打开了…然后我查看了…”这类流水账不要写）。中间过程安静执行；正文只在有真正结论、发现或需要确认时才说话。\n\
         - 回答先给结论，再给必要细节；用简体中文。不确定就直说，不要编造。"
         .to_string()
     } else {
@@ -787,6 +788,7 @@ fn system_prompt(
         - You may run allowlisted official install/update commands (also approved first). Never try commands outside that list.\n\
         - Do not edit runtime config files directly: guide the person to the repair flow (which backs up first). In this chat you only edit files inside the project folder.\n\
         - For multi-step requests, publish your steps with update_plan first and keep it current.\n\
+        - Every tool call is already shown live in the UI, so never narrate your steps back in the reply (no play-by-play like \"I opened… then I checked…\"). Work quietly; speak in the reply only when there is a real finding, conclusion, or something to confirm.\n\
         - Lead with the answer, then the details. If you are unsure, say so. Do not make things up."
         .to_string()
     };

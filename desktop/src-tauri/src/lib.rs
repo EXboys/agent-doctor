@@ -747,6 +747,8 @@ pub fn run() {
             run_repair_execute_command,
             deep_diagnose_chat_command,
             cancel_deep_diagnose_command,
+            ad_debug_dump_command,
+            ad_debug_write_command,
             deep_repair_command,
             run_browser_smoke_command,
             run_repair_rollback_command,

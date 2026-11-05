@@ -39,6 +39,8 @@ export type StreamDeps = {
   pushToolStep: (step: ToolStep) => void;
   /** Turn finished: fold this turn's process container into one collapsed trail. */
   sealProcessStream: () => void;
+  /** Rebuild the log from the session's messages (records render folded). */
+  repaintLog: () => void;
   flushSessionListRender: () => void;
   noteVerifyBrowserSignal: (text: string, source: "status" | "assistant" | "tool") => void;
   queueAssistantText: (text: string) => void;
@@ -195,7 +197,31 @@ export function createStreamController(deps: StreamDeps) {
           const completedSessionId = chatId;
           const viewing = deps.getStore().activeId === completedSessionId;
           deps.flushPendingTextSync();
-          if (viewing) deps.sealProcessStream();
+          // Fold the turn's process container on completion, regardless of
+          // whether this session is the one on screen: a fold skipped here
+          // never happens later (the repaint path only has records).
+          deps.sealProcessStream();
+          // Render the fold from the persisted records: deterministic, never
+          // dependent on which live rows happened to survive in the DOM.
+          if (viewing) deps.repaintLog();
+          // TEMP(ad-debug): dump the transcript structure after the fold.
+          window.setTimeout(async () => {
+            try {
+              const { adDebug } = await import("../ipc");
+              const logEl = document.querySelector(".chat-log");
+              if (!logEl) return void adDebug("postDOM: no .chat-log");
+              const shapes = [...logEl.children].map((node) => {
+                const cls = node.className?.toString().slice(0, 70) ?? node.tagName;
+                const open = node instanceof HTMLDetailsElement ? ` open=${node.open}` : "";
+                const rows = node.querySelectorAll(".chat-tool-row, .chat-activity, .chat-thinking").length;
+                const head = (node.textContent ?? "").trim().slice(0, 24);
+                return `<${node.tagName.toLowerCase()} class="${cls}"${open} rows=${rows} head="${head}">`;
+              });
+              await adDebug(`postDOM children=${logEl.children.length}:\n${shapes.join("\n")}`);
+            } catch (error) {
+              await import("../ipc").then((ipc) => ipc.adDebug(`postDOM error: ${String(error)}`)).catch(() => {});
+            }
+          }, 1500);
           const failed =
             payload.status !== "succeeded" &&
             payload.status !== "cancelled" &&

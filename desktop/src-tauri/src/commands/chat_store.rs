@@ -19,3 +19,21 @@ pub fn save_chat_store_command(store: String) -> Result<(), String> {
     };
     write.map_err(|error| error.to_string())
 }
+
+/// TEMP: dump the current chat store + the live transcript DOM so the fold
+/// can be replayed locally without the app window.
+#[tauri::command]
+pub async fn ad_debug_dump_command(log_html: String) -> Result<String, String> {
+    let log = ChatLog::open_default().map_err(|e| e.to_string())?;
+    let store = log.load().map_err(|e| e.to_string())?;
+    let data = serde_json::json!({
+        "store": store,
+        "log_html": log_html,
+    });
+    std::fs::write(
+        "/tmp/ad-session-dump.json",
+        serde_json::to_string_pretty(&data).unwrap(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok("/tmp/ad-session-dump.json".to_string())
+}

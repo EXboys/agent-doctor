@@ -780,6 +780,7 @@ export const en = {
     "chat.toolEdit": "Edit",
     "chat.toolTerminal": "Terminal",
     "chat.toolSearch": "Search",
+    "chat.toolBrowser": "Browse",
     "chat.toolOther": "Tool",
     "chat.alias.screenApps": "Open apps",
     "chat.alias.screenOpen": "Open app",

@@ -62,6 +62,7 @@ export function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
   trail.open = false;
   trail.innerHTML = `
     <summary class="chat-work-summary">
+      <span class="chat-work-icon" aria-hidden="true"></span>
       <span class="chat-work-label"></span>
       <span class="chat-work-chevron" aria-hidden="true"></span>
     </summary>
@@ -77,19 +78,36 @@ export function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
   const files = changedFileChips(infos);
   if (files) trail.querySelector(".chat-work-summary")!.append(files);
   const body = trail.querySelector<HTMLElement>(".chat-work-body")!;
-  for (const row of rows) {
-    // Re-seals and history repaints can hand back earlier trails: flatten them
-    // instead of nesting a trail inside a trail.
-    if (row.classList.contains("chat-work-stream")) body.append(...Array.from(row.children));
-    else if (row.classList.contains("chat-work")) {
-      const inner = row.querySelector<HTMLElement>(".chat-work-body");
-      if (inner) body.append(...Array.from(inner.children));
-      else body.append(row);
-    } else body.append(row);
-  }
+  for (const row of rows) appendFlatProcessRow(body, row);
   return trail;
 }
 
+/** Append one process node flat: tool groups are unwrapped to their rows so
+ *  the fold never nests a second collapsible bar inside itself — the trail
+ *  label already summarizes what the group did. */
+function appendFlatProcessRow(body: HTMLElement, node: Element): void {
+  // Re-seals and history repaints can hand back earlier trails: flatten them
+  // instead of nesting a trail inside a trail.
+  if (node.classList.contains("chat-work")) {
+    const inner = node.querySelector<HTMLElement>(".chat-work-body");
+    if (inner) {
+      for (const child of Array.from(inner.children)) appendFlatProcessRow(body, child);
+      return;
+    }
+  }
+  if (node.classList.contains("chat-work-stream")) {
+    for (const child of Array.from(node.children)) appendFlatProcessRow(body, child);
+    return;
+  }
+  if (node.classList.contains("chat-tool-group")) {
+    const list = node.querySelector<HTMLElement>(".chat-tool-list");
+    if (list) {
+      for (const row of Array.from(list.children)) body.append(row);
+      return;
+    }
+  }
+  body.append(node);
+}
 export function wrapProcessRows(rows: HTMLElement[], live = false): HTMLElement {
   if (!live) return completedTrail(rows);
   if (rows.length === 1) return rows[0];
@@ -136,32 +154,48 @@ export function placeProcessBlock(logEl: HTMLElement, node: HTMLElement): void {
  * a trailing walk after the first line of reply text.
  */
 export function sealProcessContainer(container: HTMLElement): void {
-  console.error("S0 enter, children:", container.children.length);
   if (!container.isConnected) return;
-  if (!container.firstElementChild) {
-    container.remove();
-    return;
-  }
-  console.error("S1 guard ok");
-  const liveRows = container.querySelectorAll<HTMLElement>(
+  // Settle any spinner still animating in the fold.
+  for (const live of container.querySelectorAll<HTMLElement>(
     ".chat-activity.is-live, .chat-tool-row.is-live",
-  );
-  console.error("S2 liveRows:", liveRows.length);
-  for (const live of liveRows) {
+  )) {
     live.classList.remove("is-live");
     live.classList.add("is-done");
     live.querySelector(".chat-spinner")?.remove();
   }
-  console.error("S3 settled");
+  // Drop the live pill: the trail label replaces it as the single fold.
+  container.querySelector(".chat-work-live-pill")?.remove();
+  container.classList.remove("is-folded");
+
+  // Defensive: collect stray process rows that bypassed the container and
+  // landed directly on the log (chat-tool-group, chat-thinking, chat-activity
+  // sitting as top-level siblings before this container).
+  const stray: HTMLElement[] = [];
+  const logEl = container.parentElement;
+  if (logEl) {
+    for (const child of Array.from(logEl.children)) {
+      if (child === container) continue;
+      if (child.classList.contains("chat-msg-user") || child.classList.contains("chat-msg-assistant")) continue;
+      if (child.classList.contains("chat-work")) continue; // already a fold
+      if (
+        child.classList.contains("chat-tool-group") ||
+        child.classList.contains("chat-thinking") ||
+        child.classList.contains("chat-activity")
+      ) {
+        stray.push(child as HTMLElement);
+      }
+    }
+  }
+
   const marker = document.createComment("completed work");
   container.before(marker);
-  console.error("S4 marker");
-  const trail = completedTrail([container]);
-  console.error("S5 trail built");
-  marker.replaceWith(trail);
-  console.error("S6 replaced");
+  const rows = [...stray, container];
+  marker.replaceWith(completedTrail(rows));
+  // The fold moved every row into the trail: the emptied container would
+  // linger as an invisible stray block in the transcript.
+  container.remove();
+  for (const row of stray) row.remove();
 }
-
 /** Restored timelines retain their live marker while thinking continues. */
 export function noteThinkingLive(block: HTMLElement): void {
   block.closest<HTMLElement>(".chat-work-stream")?.classList.add("is-live");

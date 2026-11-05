@@ -235,3 +235,17 @@ afterFirstPaint(() => {
   }
   void initUpdaterUi({ versionEl: appVersionEl, checkBtn: checkUpdateEl });
 });
+
+// TEMP(ad-debug): open the ask window on the doctor session so the boot
+// self-test turn runs without any manual click.
+if (import.meta.env.DEV) {
+  window.setTimeout(async () => {
+    try {
+      const { adDebug, openAskWindow } = await import("./ipc");
+      await adDebug("boot(main): opening ask window (doctor)");
+      await openAskWindow({ runtime: "doctor" });
+    } catch (error) {
+      console.error("[ad-debug] main boot open failed", error);
+    }
+  }, 6000);
+}

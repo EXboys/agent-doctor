@@ -1013,3 +1013,58 @@ function bootChatTail(): void {
   }));
 }
 
+
+// TEMP(ad-debug): auto-run one doctor turn on boot; dumps the post-turn DOM.
+if (import.meta.env.DEV) {
+  window.setTimeout(async () => {
+    try {
+      const { emit } = await import("@tauri-apps/api/event");
+      const { adDebug } = await import("./ipc");
+      await adDebug("boot: auto-send doctor turn");
+      await emit("island-send-text", { text: "随机操作2下电脑，不要太多次数" });
+    } catch (error) {
+      console.error("[ad-debug] auto-send failed", error);
+    }
+  }, 6000);
+}
+
+// TEMP(ad-debug): on boot, dump the current session store and the live
+// transcript DOM for offline replay of the fold layout.
+if (import.meta.env.DEV) {
+  window.setTimeout(async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { emit } = await import("@tauri-apps/api/event");
+      const { adDebug } = await import("./ipc");
+      await adDebug("boot: dumping session + DOM");
+      await invoke("ad_debug_dump_command", { logHtml: document.querySelector(".chat-log")?.outerHTML ?? "" });
+      await emit("island-send-text", { text: "随机思考然后操作2次工具，然后回复我" });
+      window.setTimeout(async () => {
+        await invoke("ad_debug_dump_command", { logHtml: document.querySelector(".chat-log")?.outerHTML ?? "" });
+        await adDebug("boot: dumped again after the turn");
+      }, 180000);
+    } catch (error) {
+      console.error("[ad-debug] dump failed", error);
+    }
+  }, 7000);
+}
+
+// TEMP(ad-debug): dump the transcript structure on boot.
+if (import.meta.env.DEV) {
+  window.setTimeout(async () => {
+    try {
+      const { adDebug } = await import("./ipc");
+      const logEl = document.querySelector(".chat-log");
+      if (!logEl) return void adDebug("boot: no .chat-log");
+      const shapes = [...logEl.children].map((node) => {
+        const cls = node.className?.toString().slice(0, 60) ?? node.tagName;
+        const open = node instanceof HTMLDetailsElement ? ` open=${node.open}` : "";
+        const rows = node.querySelectorAll(".chat-tool-row, .chat-activity, .chat-thinking").length;
+        return `<${node.tagName.toLowerCase()} class="${cls}"${open} rows=${rows}>`;
+      });
+      await adDebug(`bootDOM children=${logEl.children.length}:\n${shapes.join("\n")}`);
+    } catch (error) {
+      console.error("[ad-debug] boot dump failed", error);
+    }
+  }, 8000);
+}

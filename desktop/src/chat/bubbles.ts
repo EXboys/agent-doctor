@@ -20,6 +20,7 @@ import {
   toolSignature,
 } from "./format";
 import { followChatLog, lockChatRowHeights, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
+import { completedTrail } from "./work-trail";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
@@ -783,8 +784,15 @@ export function createBubblesController(deps: BubblesDeps) {
           const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
           if (lastThink instanceof HTMLDetailsElement) markThinkingLive(lastThink);
         }
-        if (rows.length === 1) target.appendChild(rows[0]);
-        else if (rows.length > 1) target.appendChild(wrapProcessRows(rows, live));
+        if (rows.length === 1) {
+          // A lone tool run still folds: history windows often split between a
+          // thinking block and its tools, and a bare open group read as a
+          // bullet list that never folded.
+          const only = rows[0]!;
+          target.appendChild(
+            !live && only.classList.contains("chat-tool-group") ? completedTrail([only]) : only,
+          );
+        } else if (rows.length > 1) target.appendChild(wrapProcessRows(rows, live));
         continue;
       }
       if (message.role === "permission") {

@@ -200,4 +200,14 @@ export function mountReplyChangeCard(
   if (!files.length) return;
   const card = renderReplyChangeCard(files, wasOpen);
   logEl.append(card);
+  // The card now summarizes this segment's writes: hide the duplicated
+  // per-file write/edit rows inside the segment's live container, so the
+  // change is shown once (ZCode style) instead of stacked twice.
+  const streams = [...logEl.querySelectorAll<HTMLElement>(".chat-work-stream")];
+  const segment = streams[streams.length - 1];
+  if (!segment) return;
+  for (const row of segment.querySelectorAll<HTMLElement>(".chat-tool-row")) {
+    const kind = row.dataset.toolKind;
+    if (kind === "write" || kind === "edit") row.hidden = true;
+  }
 }

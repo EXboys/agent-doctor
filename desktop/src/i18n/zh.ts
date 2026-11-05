@@ -782,6 +782,7 @@ export const zh = {
     "chat.toolEdit": "更改",
     "chat.toolTerminal": "终端",
     "chat.toolSearch": "搜索",
+    "chat.toolBrowser": "浏览网页",
     "chat.toolOther": "工具",
     "chat.alias.screenApps": "已打开的应用",
     "chat.alias.screenOpen": "打开应用",

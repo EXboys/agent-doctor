@@ -178,6 +178,9 @@ export function appendRunLog(logEl: HTMLElement, raw: string, summaryText = t("c
   row.dataset.kind = "log";
   row.dataset.stderr = "1";
   row.dataset.runtimeLog = "1";
+  const icon = document.createElement("span");
+  icon.className = "chat-activity-icon";
+  icon.setAttribute("aria-hidden", "true");
   const summary = document.createElement("div");
   summary.className = "chat-activity-text";
   summary.textContent = summaryText;
@@ -189,7 +192,7 @@ export function appendRunLog(logEl: HTMLElement, raw: string, summaryText = t("c
   pre.className = "chat-permission-detail";
   pre.textContent = text;
   more.append(moreSummary, pre);
-  row.append(summary, more);
+  row.append(icon, summary, more);
   logEl.appendChild(row);
   return row;
 }
@@ -325,7 +328,7 @@ export function splitToolActivity(text: string): { summary: string; detail: stri
   return { summary, detail };
 }
 
-export type ToolActivityKind = "read" | "write" | "edit" | "terminal" | "search" | "subagent" | "other";
+export type ToolActivityKind = "read" | "write" | "edit" | "terminal" | "search" | "browser" | "subagent" | "other";
 
 export type ToolActivityInfo = {
   kind: ToolActivityKind;
@@ -483,7 +486,9 @@ export function toolActivityInfo(text: string): ToolActivityInfo {
   const lower = `${summary}\n${detail}`.toLowerCase();
   const name = summary.toLowerCase().replace(/[^a-z0-9]/g, "");
   let kind: ToolActivityKind = "other";
-  if (
+  if (isSurfaceToolName(summary)) {
+    kind = "browser";
+  } else if (
     /^(websearch|webfetch|glob|grep|rg|search|searchfiles)$/.test(name) ||
     /(?:^|\s)(?:curl|wget|rg|grep)\s/.test(lower)
   ) {
@@ -542,10 +547,16 @@ export function toolKindLabel(kind: ToolActivityKind): string {
     edit: "chat.toolEdit",
     terminal: "chat.toolTerminal",
     search: "chat.toolSearch",
+    browser: "chat.toolBrowser",
     subagent: "chat.subagentKind",
     other: "chat.toolOther",
   };
   return t(keys[kind]);
+}
+
+/** Computer-use and browser tools (screen_* / browser_*, possibly behind an MCP prefix). */
+function isSurfaceToolName(raw: string): boolean {
+  return /(?:^|\s|__)_{0,2}(?:screen|browser)_/i.test(raw);
 }
 
 /** Built-in computer and browser tools, in words a beginner already has. */
@@ -972,9 +983,13 @@ export function stepActivityInfo(step: ToolStep): ToolActivityInfo {
       deletedLines: [],
     };
   }
-  const kind = STEP_KINDS.includes(step.kind as ToolActivityKind)
-    ? (step.kind as ToolActivityKind)
-    : "other";
+  // Screen/browser steps carry kind "other" from the runtime; their name is
+  // the reliable signal, so it wins over the recorded kind.
+  const kind: ToolActivityKind = isSurfaceToolName(step.name || step.title || "")
+    ? "browser"
+    : STEP_KINDS.includes(step.kind as ToolActivityKind)
+      ? (step.kind as ToolActivityKind)
+      : "other";
   const path = placeInShellDir(step.command ?? "", step.path?.trim() ?? "");
   const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
   const lineStart = step.line_start ?? 0;
@@ -1060,6 +1075,8 @@ export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
       files.set(info.kind, seen);
       counts.set(info.kind, seen.size);
     } else if (info.kind === "other" && info.label !== genericOther) {
+      named.set(info.label, (named.get(info.label) ?? 0) + 1);
+    } else if (info.kind === "browser") {
       named.set(info.label, (named.get(info.label) ?? 0) + 1);
     } else {
       counts.set(info.kind, (counts.get(info.kind) ?? 0) + 1);

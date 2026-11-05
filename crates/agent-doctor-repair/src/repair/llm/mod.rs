@@ -12,7 +12,9 @@ pub mod stream;
 
 const MAX_AGENT_TURNS: usize = 8;
 /// Reasoning models can think for a while before the first token.
-pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
+/// Reasoning models (MiniMax-M3, o-series, DeepSeek-R1) can think for
+/// several minutes before the first token; 3 minutes was not enough.
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmToolCall {

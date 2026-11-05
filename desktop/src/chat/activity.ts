@@ -1021,10 +1021,8 @@ export function createActivityController(deps: ActivityDeps) {
     const row = document.createElement("div");
     row.className = "chat-activity kind-log";
     row.dataset.kind = "log";
-    const label = document.createElement("span");
-    label.className = "chat-activity-text";
-    label.textContent = text;
-    row.appendChild(label);
+    row.innerHTML = `<span class="chat-activity-icon" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
+    row.querySelector<HTMLElement>(".chat-activity-text")!.textContent = text;
     deps.logEl.appendChild(row);
     followChatLog(deps.logEl);
   }
@@ -1039,10 +1037,8 @@ export function createActivityController(deps: ActivityDeps) {
     const row = document.createElement("div");
     row.className = "chat-activity kind-log";
     row.dataset.kind = "log";
-    const label = document.createElement("span");
-    label.className = "chat-activity-text";
-    label.textContent = sentence;
-    row.appendChild(label);
+    row.innerHTML = `<span class="chat-activity-icon" aria-hidden="true"></span><span class="chat-activity-text"></span>`;
+    row.querySelector<HTMLElement>(".chat-activity-text")!.textContent = sentence;
     deps.logEl.appendChild(row);
     if (detail) appendRunLog(deps.logEl, detail);
     followChatLog(deps.logEl);
@@ -1112,9 +1108,6 @@ export function createActivityController(deps: ActivityDeps) {
     );
     if (known) {
       applyToolRow(known, "", mergeToolStep(readRowStep(known), step));
-      const group = known.closest<HTMLDetailsElement>(".chat-tool-group");
-      if (group && group === deps.getToolGroupEl()) liveRecords(group);
-      if (group) syncToolGroup(group, group === deps.getToolGroupEl());
       if (step.status !== "running" && deps.getActivityEl() === known) settleActivity();
       deps.syncReplyChangeCard?.();
       return;
@@ -1123,18 +1116,14 @@ export function createActivityController(deps: ActivityDeps) {
       deps.syncReplyChangeCard?.();
       return;
     }
-    const group = deps.getToolGroupEl();
-    const last = group?.isConnected
-      ? group.querySelector<HTMLElement>(".chat-tool-list > .chat-tool-row:last-child")
-      : null;
-    const row = last && !last.dataset.toolId ? last : showToolRow("tool", toolStepText(step));
-    if (!row) {
-      deps.syncReplyChangeCard?.();
-      return;
-    }
+    // Flat, time-ordered: every tool row appends directly to the container.
+    const row = createToolRowElement(toolStepText(step));
+    row.dataset.kind = "tool";
+    row.dataset.toolId = step.id;
+    row.classList.add("is-live");
+    row.classList.remove("is-done");
     applyToolRow(row, "", step);
-    const owner = row.closest<HTMLDetailsElement>(".chat-tool-group");
-    if (owner) syncToolGroup(owner, true);
+    processStreamEl().appendChild(row);
     deps.syncReplyChangeCard?.();
   }
 
@@ -1190,15 +1179,25 @@ export function createActivityController(deps: ActivityDeps) {
   }
 
   /** Every process row of this turn (status/tool/thinking) collects here and
-   *  folds once at completion. Per-chunk sealing stacked one bar per round. */
+   *  folds once at completion. Rows stay FLAT and time-ordered: no nested
+   *  tool groups, so thinking and tools interleave like ZCode. */
   let processStream: HTMLElement | null = null;
 
+  /** Only fold on completion: a running turn shows every step live, never
+   *  collapsed mid-turn. */
+
   function processStreamEl(): HTMLElement {
-    if (processStream?.isConnected) return processStream;
-    processStream = wrapProcessRows([], true);
+    if (!processStream?.isConnected) {
+      processStream = wrapProcessRows([], true);
+    }
+    // The stream follows the newest text segment: re-appending moves it below
+    // the bubble that was just sealed, so the next rows continue the timeline
+    // instead of jumping above an earlier paragraph.
     placeProcessBlock(deps.logEl, processStream);
     return processStream;
   }
+
+
 
   function placeInProcessStream(el: HTMLElement): void {
     processStreamEl().append(el);
@@ -1231,7 +1230,7 @@ export function createActivityController(deps: ActivityDeps) {
       row.className = `chat-activity is-live kind-${kind}`;
       row.dataset.phase = phase;
       row.dataset.kind = kind;
-      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-text"></span><span class="chat-activity-elapsed"></span>`;
+      row.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span><span class="chat-activity-icon" aria-hidden="true"></span><span class="chat-activity-text"></span><span class="chat-activity-elapsed"></span>`;
       row.querySelector<HTMLElement>(".chat-activity-elapsed")!.textContent = elapsedLabel();
       const label = row.querySelector<HTMLElement>(".chat-activity-text")!;
       label.textContent = text;

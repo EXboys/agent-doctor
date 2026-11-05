@@ -34,6 +34,7 @@ import {
   readImageTexts,
   replayPromptAsks,
   startPromptSession,
+  adDebug,
   type PromptSessionFinished,
 } from "../ipc";
 import { markTurnStarted, noteTurnUserAt } from "./activity";
@@ -48,6 +49,7 @@ import { planPictures, type PictureInput, type PictureTurn } from "./picture-rou
 import {
   consumeDrainIntent,
   enqueueFollowUp,
+  followUpsFor,
   holdFollowUps,
   mergedFollowUp,
   takeFollowUps,
@@ -610,9 +612,11 @@ export function createSendController(deps: SendDeps) {
       }
     } finally {
       const liveGen = deps.runBusyGen?.(chatSessionId) ?? deps.getBusyGen();
-      if (turnGen !== 0 && liveGen !== turnGen) {
-        // This invoke returned but the turn runs on detached. Keep the
-        // job→session mapping so a phone stop can still find and cancel it.
+      // liveGen 0 means this chat has no live run: a `completed` event beat
+      // this invoke home and already tore the run down. Only a newer run
+      // (nonzero, different gen) truly owns the chat — then the turn runs on
+      // detached, and the job→session mapping must survive a phone stop.
+      if (turnGen !== 0 && liveGen !== turnGen && liveGen !== 0) {
         return "started";
       }
       if (foreground && here()) {
@@ -650,6 +654,10 @@ export function createSendController(deps: SendDeps) {
 
   async function sendFollowUps(chatSessionId: string): Promise<void> {
     const intent = consumeDrainIntent();
+    const queuedCount = followUpsFor(chatSessionId).length;
+    void import("../ipc")
+      .then((ipc) => void ipc.adDebug(`drain: intent=${intent} queued=${queuedCount}`))
+      .catch(() => {});
     let continued = false;
     if (intent !== "hold") {
       const merged = mergedFollowUp(takeFollowUps(chatSessionId));
@@ -662,6 +670,7 @@ export function createSendController(deps: SendDeps) {
         continued = nested === "started" || nested === "queued";
       }
     }
+    void adDebug(`drain done: continued=${continued}`);
     if (!continued) notifyChannelSessionIdle(chatSessionId);
     deps.refreshComposer();
   }

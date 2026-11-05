@@ -71,6 +71,19 @@ pub fn cancel_deep_diagnose_command(state: State<'_, DeepDiagnoseState>) -> Resu
     }
 }
 
+/// TEMP: webview debug trace channel for the doctor fold investigation.
+#[tauri::command]
+pub fn ad_debug_write_command(line: String) -> Result<(), String> {
+    eprintln!("[ad-debug] rust reached: {line}");
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/ad-debug.log")
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "{line}").map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn deep_repair_command(runtime: String) -> Result<DeepRepairSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
