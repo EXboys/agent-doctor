@@ -1033,14 +1033,13 @@ if (import.meta.env.DEV) {
 if (import.meta.env.DEV) {
   window.setTimeout(async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const { emit } = await import("@tauri-apps/api/event");
-      const { adDebug } = await import("./ipc");
+      const { adDebug, adDebugDump } = await import("./ipc");
       await adDebug("boot: dumping session + DOM");
-      await invoke("ad_debug_dump_command", { logHtml: document.querySelector(".chat-log")?.outerHTML ?? "" });
+      await adDebugDump(document.querySelector(".chat-log")?.outerHTML ?? "");
       await emit("island-send-text", { text: "随机思考然后操作2次工具，然后回复我" });
       window.setTimeout(async () => {
-        await invoke("ad_debug_dump_command", { logHtml: document.querySelector(".chat-log")?.outerHTML ?? "" });
+        await adDebugDump(document.querySelector(".chat-log")?.outerHTML ?? "");
         await adDebug("boot: dumped again after the turn");
       }, 180000);
     } catch (error) {

@@ -957,6 +957,11 @@ export function adDebug(line: string): Promise<void> {
   return Promise.resolve();
 }
 
+/** TEMP: dump the live transcript DOM for offline replay of the fold layout. */
+export async function adDebugDump(logHtml: string): Promise<void> {
+  await invoke("ad_debug_dump_command", { logHtml }).catch(() => {});
+}
+
 export function openAskWindow(args: { runtime?: string | null }): Promise<void> {
   return invoke("open_ask_window_command", args);
 }
