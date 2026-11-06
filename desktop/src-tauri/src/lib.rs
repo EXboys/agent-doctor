@@ -618,6 +618,7 @@ pub fn run() {
             seed_default_workspace_in_background();
             spawn_skill_link_repair();
             spawn_browser_mcp_autowire();
+            spawn_install_ping();
             // Pre-create Ask on the UI thread at startup. Creating it on first
             // click can hang WebView2 on Windows (blank titled window, Close
             // and Task Manager "End task" appear to do nothing).
@@ -691,6 +692,8 @@ pub fn run() {
             use_current_service_command,
             get_mode_status_command,
             get_product_edition_command,
+            install_ping_status_command,
+            set_install_ping_enabled_command,
             switch_to_personal_mode_command,
             switch_to_team_mode_command,
             wire_browser_mcp_command,
@@ -882,6 +885,21 @@ fn spawn_browser_mcp_autowire() {
                             .unwrap_or_default(),
                     );
                 }
+            });
+        });
+}
+
+/// Anonymous install ping runs on its own thread. It must never surface an
+/// error or hold startup: a machine that never reports is just an
+/// undercount, and the user opted-out flag lives in the settings DB.
+fn spawn_install_ping() {
+    let _ = std::thread::Builder::new()
+        .name("ad-install-ping".into())
+        .spawn(|| {
+            // Window, tray, and the other startup threads go first.
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            let _ = std::panic::catch_unwind(|| {
+                let _ = agent_doctor_core::install_ping::send_install_ping();
             });
         });
 }

@@ -183,6 +183,29 @@ pub fn get_product_edition_command() -> String {
     agent_doctor_core::product_edition().as_str().to_string()
 }
 
+#[derive(Debug, Serialize)]
+pub struct InstallPingStatus {
+    /// False once the user opted out of the anonymous install count.
+    pub enabled: bool,
+}
+
+#[tauri::command]
+pub fn install_ping_status_command() -> InstallPingStatus {
+    let enabled = agent_doctor_core::store::open_settings_store()
+        .ok()
+        .and_then(|store| agent_doctor_core::install_ping::install_ping_enabled(&store).ok())
+        .unwrap_or(true);
+    InstallPingStatus { enabled }
+}
+
+#[tauri::command]
+pub fn set_install_ping_enabled_command(enabled: bool) -> Result<InstallPingStatus, String> {
+    let store = agent_doctor_core::store::open_settings_store().map_err(|e| e.to_string())?;
+    agent_doctor_core::install_ping::set_install_ping_enabled(&store, enabled)
+        .map_err(|e| e.to_string())?;
+    Ok(InstallPingStatus { enabled })
+}
+
 #[tauri::command]
 pub async fn switch_to_personal_mode_command(
     app: tauri::AppHandle,

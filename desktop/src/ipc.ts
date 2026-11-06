@@ -281,6 +281,14 @@ export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
   return invoke("teamups_channel_set_enabled_command", { enabled });
 }
 
+export function installPingStatus(): Promise<{ enabled: boolean }> {
+  return invoke("install_ping_status_command");
+}
+
+export function setInstallPingEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+  return invoke("set_install_ping_enabled_command", { enabled });
+}
+
 export function teamupsChannelReply(
   id: string,
   text: string,

@@ -8,6 +8,8 @@ pub mod edition;
 pub mod evotown;
 pub mod exec;
 pub mod install;
+/// Anonymous install ping (count machines without an account).
+pub mod install_ping;
 pub mod knowledge_sync;
 pub mod lifecycle;
 /// Secret vault and masking helpers for presenting config to the LLM.

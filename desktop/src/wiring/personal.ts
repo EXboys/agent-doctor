@@ -26,6 +26,8 @@ import {
   getPersonalProviderStatus,
   listPersonalProviders,
   nativeAccountStatus,
+  installPingStatus,
+  setInstallPingEnabled,
   signOutTeamups,
   startTeamupsLogin,
   teamupsAccountStatus,
@@ -48,6 +50,7 @@ const personalListHintEl = document.querySelector<HTMLElement>("#personal-list-h
 const nativeFoldEl = document.querySelector<HTMLDetailsElement>("#native-accounts")!;
 const nativeFoldLabelEl = document.querySelector<HTMLElement>("#native-accounts-label")!;
 const nativeAccountListEl = document.querySelector<HTMLUListElement>("#native-account-list")!;
+const installPingToggleEl = document.querySelector<HTMLInputElement>("#install-ping-toggle")!;
 const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
 const personalFormTitleEl = document.querySelector<HTMLElement>("#personal-form-title")!;
 const personalIdEl = document.querySelector<HTMLInputElement>("#personal-id")!;
@@ -1101,6 +1104,22 @@ export function createPersonalController(deps: PersonalDeps) {
       }
       void onNativeAccountAction(runtimeId, action);
     });
+
+    installPingToggleEl.addEventListener("change", () => {
+      const enabled = installPingToggleEl.checked;
+      setInstallPingEnabled(enabled).catch(() => {
+        // Persist failed — flip back so the switch tells the truth.
+        installPingToggleEl.checked = !enabled;
+      });
+    });
+
+    // The switch defaults on (opt-out model); the saved flag replaces it when read.
+    installPingToggleEl.checked = true;
+    installPingStatus()
+      .then((status) => {
+        installPingToggleEl.checked = status.enabled;
+      })
+      .catch(() => {});
   }
 
   return {
