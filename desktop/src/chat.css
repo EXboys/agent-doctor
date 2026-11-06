@@ -186,8 +186,13 @@ html[data-os="windows"] .chat-side-foot {
   grid-template-columns: 320px minmax(0, 1fr);
 }
 
-.chat-shell.is-side-collapsed > .chat-side,
-.chat-shell.is-side-collapsed > .chat-splitter-between-sessions-chat {
+/* Collapse hides the rail in chat mode only. The page modes (settings,
+   knowledge, schedule, resources) pin the rail open — their grid rules keep
+   three columns even when is-side-collapsed — so hiding the side or the
+   splitter here would drop chat-main into the 5px splitter column and blank
+   the page. */
+.chat-shell.is-side-collapsed:not(.is-settings):not(.is-knowledge):not(.is-schedule):not(.is-resources-page) > .chat-side,
+.chat-shell.is-side-collapsed:not(.is-settings):not(.is-knowledge):not(.is-schedule):not(.is-resources-page) > .chat-splitter-between-sessions-chat {
   display: none;
 }
 
@@ -616,6 +621,14 @@ body.chat-is-resizing * {
 .chat-shell.is-schedule > .chat-side,
 .chat-shell.is-resources-page > .chat-side {
   display: flex;
+}
+
+/* The rail is pinned open in the page modes, so the collapse control would be
+   a dead button there. (Settings hides the whole side top bar already.) */
+.chat-shell.is-knowledge #chat-side-collapse,
+.chat-shell.is-schedule #chat-side-collapse,
+.chat-shell.is-resources-page #chat-side-collapse {
+  display: none;
 }
 
 .chat-settings {
