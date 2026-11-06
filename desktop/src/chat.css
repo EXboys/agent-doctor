@@ -9110,7 +9110,7 @@ html[data-theme="dark"] .chat-elevated:has(input:disabled):hover {
 
 html[data-theme="dark"] .chat-side,
 html[data-theme="dark"] .chat-resources-panel {
-  background: #171717;
+  background: var(--side-bg);
   border-color: rgba(255, 255, 255, 0.1);
   color: #d4d4d4;
 }
