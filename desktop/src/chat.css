@@ -1075,6 +1075,15 @@ body.chat-is-resizing * {
   flex-wrap: wrap;
 }
 
+/* The collapsed-rail expand button sits with the page title as one left
+   cluster, so space-between still spreads title-cluster | tools. */
+.chat-knowledge-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .chat-knowledge-head h2 {
   margin: 0;
   font-size: 1.35rem;
