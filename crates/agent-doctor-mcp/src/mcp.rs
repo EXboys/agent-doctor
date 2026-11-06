@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::session::SharedBrowser;
+use crate::tools::browser::{is_connection_error, BrowserContext};
 
 /// A tool definition exposed by this MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -601,7 +602,21 @@ fn execute_tool(name: &str, args: &Value, browser: &SharedBrowser) -> Result<Val
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let ctx = session.ensure()?;
+    // Not retried: a click whose reply was lost must not fire twice. The next
+    // call finds the dead socket and reconnects before it runs.
+    run_tool(ctx, name, args).map_err(|err| {
+        if is_connection_error(&err) {
+            err.context(
+                "the browser connection dropped during this call (page closed or Chrome quit); \
+                 the next browser call reconnects automatically",
+            )
+        } else {
+            err
+        }
+    })
+}
 
+fn run_tool(ctx: &mut BrowserContext, name: &str, args: &Value) -> Result<Value> {
     match name {
         "browser_navigate" => {
             let url = args

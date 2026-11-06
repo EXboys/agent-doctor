@@ -238,6 +238,43 @@ impl BrowserContext {
             }
         }
     }
+
+    /// Whether the CDP socket still works. `Target.getTargets` is answered by
+    /// the browser process, so a page busy running script still replies, and
+    /// a CDP error reply proves the socket is up just as well.
+    pub fn is_alive(&mut self) -> bool {
+        match self.send_command("Target.getTargets", json!({})) {
+            Ok(_) => true,
+            Err(err) => !is_connection_error(&err),
+        }
+    }
+}
+
+/// Whether `err` comes from the CDP socket itself being gone — the page
+/// closed, Chrome quit or crashed — rather than Chrome answering an error.
+pub(crate) fn is_connection_error(err: &anyhow::Error) -> bool {
+    use std::io::ErrorKind;
+    err.chain().any(|cause| {
+        if let Some(ws) = cause.downcast_ref::<tungstenite::Error>() {
+            return matches!(
+                ws,
+                tungstenite::Error::ConnectionClosed
+                    | tungstenite::Error::AlreadyClosed
+                    | tungstenite::Error::Io(_)
+                    | tungstenite::Error::Protocol(_)
+            );
+        }
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                ErrorKind::BrokenPipe
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::NotConnected
+                    | ErrorKind::UnexpectedEof
+            )
+        })
+    })
 }
 
 pub(crate) fn url_matches(current: &str, pattern: &str) -> bool {
@@ -336,6 +373,33 @@ mod ref_tests {
         assert_eq!(parse_ref_index("@E3"), Some(2));
         assert_eq!(parse_ref_index("#main"), None);
         assert_eq!(parse_ref_index("@e"), None);
+    }
+
+    #[test]
+    fn dead_cdp_socket_is_a_connection_error() {
+        let closed = anyhow::Error::new(tungstenite::Error::AlreadyClosed)
+            .context("Failed to send CDP command");
+        assert!(is_connection_error(&closed));
+
+        let broken_pipe = anyhow::Error::new(tungstenite::Error::Io(
+            std::io::ErrorKind::BrokenPipe.into(),
+        ))
+        .context("Failed to send CDP command");
+        assert!(is_connection_error(&broken_pipe));
+
+        let reset = anyhow::Error::new(tungstenite::Error::ConnectionClosed)
+            .context("Failed to read CDP response");
+        assert!(is_connection_error(&reset));
+    }
+
+    #[test]
+    fn cdp_error_reply_is_not_a_connection_error() {
+        let reply = anyhow::anyhow!("CDP error for Page.navigate: Cannot navigate to invalid URL");
+        assert!(!is_connection_error(&reply));
+
+        let missing = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+            .context("write screenshot /tmp/x.png");
+        assert!(!is_connection_error(&missing));
     }
 
     #[test]

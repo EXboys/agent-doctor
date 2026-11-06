@@ -1,6 +1,8 @@
 //! Lazy browser session — MCP handshake first, Chrome on first tool use.
 
+use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -50,6 +52,16 @@ impl LazyBrowser {
     }
 
     pub fn ensure(&mut self) -> Result<&mut BrowserContext> {
+        // The page under the session can close (window shut, tab closed) and
+        // Chrome can quit; probing before each use turns that into a reconnect
+        // instead of a session that stays dead until the process restarts.
+        if self.ctx.as_mut().is_some_and(|ctx| !ctx.is_alive()) {
+            eprintln!(
+                "Chrome CDP connection on port {} was lost; reconnecting…",
+                self.port
+            );
+            self.reset();
+        }
         if self.ctx.is_none() {
             let mut discovery = discover_chrome().context("Chrome not found")?;
             if let Some(dir) = &self.user_data_dir {
@@ -88,7 +100,7 @@ impl LazyBrowser {
                             self.port, mode_mismatch, profile_mismatch
                         );
                         kill_chrome_on_port(self.port)?;
-                        if profile_locked_by_other_chrome(&discovery.user_data_dir, self.port) {
+                        if profile_held_by_other_chrome(&discovery.user_data_dir, self.port) {
                             anyhow::bail!(
                                 "Chrome profile `{}` is already open without remote debugging. \
                                  Quit that Chrome completely, then retry — or start it with \
@@ -111,7 +123,7 @@ impl LazyBrowser {
                     }
                 }
                 Err(_) => {
-                    if profile_locked_by_other_chrome(&discovery.user_data_dir, self.port) {
+                    if profile_held_by_other_chrome(&discovery.user_data_dir, self.port) {
                         anyhow::bail!(
                             "Chrome profile `{}` is already open without remote debugging. \
                              Quit that Chrome completely, then retry — or start it with \
@@ -163,7 +175,7 @@ impl LazyBrowser {
                 );
             }
             eprintln!("Chrome CDP ready: {ws_endpoint}");
-            self.chrome = Some(instance);
+            self.adopt(instance);
             self.ctx = Some(ctx);
         }
 
@@ -171,6 +183,49 @@ impl LazyBrowser {
             .as_mut()
             .context("browser context missing after ensure")
     }
+
+    /// Forget the CDP connection; the next [`ensure`](Self::ensure) reconnects,
+    /// reusing Chrome while it still runs and relaunching it once it is gone.
+    /// Never stops Chrome: the pages the person opened stay up.
+    pub fn reset(&mut self) {
+        self.ctx = None;
+        let exited = self.chrome.as_mut().is_some_and(|instance| {
+            instance
+                .process
+                .as_mut()
+                .is_some_and(|child| !matches!(child.try_wait(), Ok(None)))
+        });
+        if exited {
+            self.chrome = None;
+        }
+    }
+
+    /// Record the Chrome the session now talks to. Reattaching to a Chrome
+    /// this session launched keeps its process handle, so Drop still stops it.
+    fn adopt(&mut self, mut instance: ChromeInstance) {
+        if let Some(mut child) = self.chrome.take().and_then(|previous| previous.process) {
+            if instance.process.is_none() && matches!(child.try_wait(), Ok(None)) {
+                instance.process = Some(child);
+            } else {
+                // The restart path killed it; reap it so it doesn't linger.
+                let _ = child.try_wait();
+            }
+        }
+        self.chrome = Some(instance);
+    }
+}
+
+/// A Chrome that just quit can hold its profile for a moment after its CDP
+/// port closes; only a lock that outlasts that belongs to another Chrome.
+fn profile_held_by_other_chrome(user_data_dir: &Path, port: u16) -> bool {
+    let user_data_dir = user_data_dir.to_path_buf();
+    for _ in 0..15 {
+        if !profile_locked_by_other_chrome(&user_data_dir, port) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    true
 }
 
 impl Drop for LazyBrowser {
@@ -182,3 +237,105 @@ impl Drop for LazyBrowser {
 }
 
 pub type SharedBrowser = Mutex<LazyBrowser>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::browser::chrome_http_json;
+
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .map(|addr| addr.port())
+            .expect("free port")
+    }
+
+    fn page(title: &str) -> String {
+        format!("data:text/html,<title>{title}</title>")
+    }
+
+    /// Profile path with a space in it, like macOS "Application Support".
+    fn spaced_profile(root: &tempfile::TempDir) -> std::path::PathBuf {
+        root.path().join("chrome cdp")
+    }
+
+    fn close_all_pages(port: u16) {
+        let list = chrome_http_json(port, "/json/list").expect("list targets");
+        for target in list.as_array().into_iter().flatten() {
+            if target["type"] == "page" {
+                if let Some(id) = target["id"].as_str() {
+                    // Chrome answers in plain text, so the JSON parse fails
+                    // after the close already went through.
+                    let _ = chrome_http_json(port, &format!("/json/close/{id}"));
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    #[test]
+    #[ignore = "launches a real headless Chrome"]
+    fn reconnects_after_its_page_closes() {
+        let root = tempfile::tempdir().unwrap();
+        let port = free_port();
+        let mut browser = LazyBrowser::with_user_data_dir(port, true, Some(spaced_profile(&root)));
+        browser.ensure().unwrap().navigate(&page("one")).unwrap();
+
+        close_all_pages(port);
+
+        let ctx = browser.ensure().unwrap();
+        ctx.navigate(&page("two")).unwrap();
+        assert!(ctx.get_url().unwrap().contains("two"));
+    }
+
+    #[test]
+    #[ignore = "launches a real headless Chrome"]
+    fn relaunches_after_chrome_quits() {
+        let root = tempfile::tempdir().unwrap();
+        let port = free_port();
+        let mut browser = LazyBrowser::with_user_data_dir(port, true, Some(spaced_profile(&root)));
+        browser.ensure().unwrap().navigate(&page("one")).unwrap();
+
+        let chrome = browser
+            .chrome
+            .as_mut()
+            .and_then(|instance| instance.process.as_mut())
+            .expect("session launched Chrome");
+        chrome.kill().unwrap();
+        chrome.wait().unwrap();
+
+        browser.ensure().unwrap().navigate(&page("two")).unwrap();
+        assert!(
+            browser
+                .chrome
+                .as_ref()
+                .is_some_and(|instance| instance.process.is_some()),
+            "the relaunched Chrome belongs to the session"
+        );
+    }
+
+    #[test]
+    #[ignore = "launches a real headless Chrome"]
+    fn second_session_attaches_instead_of_restarting_chrome() {
+        let root = tempfile::tempdir().unwrap();
+        let port = free_port();
+        let profile = spaced_profile(&root);
+        let mut first = LazyBrowser::with_user_data_dir(port, true, Some(profile.clone()));
+        first.ensure().unwrap().navigate(&page("one")).unwrap();
+        assert_eq!(cdp_user_data_dir(port), Some(profile.clone()));
+
+        let mut second = LazyBrowser::with_user_data_dir(port, true, Some(profile));
+        second.ensure().unwrap().navigate(&page("two")).unwrap();
+
+        let first_chrome = first
+            .chrome
+            .as_mut()
+            .and_then(|instance| instance.process.as_mut())
+            .expect("first session launched Chrome");
+        assert!(
+            first_chrome.try_wait().unwrap().is_none(),
+            "the second session must not kill the running Chrome"
+        );
+        first.ensure().unwrap().navigate(&page("three")).unwrap();
+    }
+}

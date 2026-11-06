@@ -20,7 +20,9 @@ pub use types::{BrowserDiscovery, BrowserFamily, ChromeInstance};
 
 #[cfg(test)]
 mod tests {
-    use super::cdp::automation_markers_from_command;
+    use super::cdp::{
+        automation_markers_from_command, is_chrome_main_process, parse_user_data_dir_flag,
+    };
     use super::discover::{browser_paths_for_windows_roots, default_user_data_dir};
     use super::*;
     use std::path::PathBuf;
@@ -82,6 +84,61 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn user_data_dir_flag_keeps_spaces_in_the_path() {
+        let cmd = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome \
+                   --profile-directory=Default --remote-debugging-port=9222 \
+                   --user-data-dir=/Users/me/Library/Application Support/agent-doctor/chrome-cdp \
+                   --window-size=1280,800";
+        assert_eq!(
+            parse_user_data_dir_flag(cmd),
+            Some(PathBuf::from(
+                "/Users/me/Library/Application Support/agent-doctor/chrome-cdp"
+            ))
+        );
+        assert_eq!(
+            parse_user_data_dir_flag("chrome --user-data-dir=/tmp/a b"),
+            Some(PathBuf::from("/tmp/a b"))
+        );
+        assert_eq!(
+            parse_user_data_dir_flag("chrome --user-data-dir /tmp/a b --headless=new"),
+            Some(PathBuf::from("/tmp/a b"))
+        );
+    }
+
+    #[test]
+    fn user_data_dir_flag_needs_its_own_value() {
+        assert_eq!(
+            parse_user_data_dir_flag("chrome --user-data-dir-extra=/x --user-data-dir=/y"),
+            Some(PathBuf::from("/y"))
+        );
+        assert_eq!(
+            parse_user_data_dir_flag("chrome --user-data-dir= --headless"),
+            None
+        );
+        assert_eq!(parse_user_data_dir_flag("chrome --headless"), None);
+    }
+
+    #[test]
+    fn profile_lock_only_counts_chrome_main_processes() {
+        assert!(is_chrome_main_process(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome \
+             --user-data-dir=/Users/me/Library/Application Support/agent-doctor/chrome-cdp"
+        ));
+        assert!(is_chrome_main_process(
+            "/opt/google/chrome/chrome --user-data-dir=/home/me/.config/agent-doctor/chrome-cdp"
+        ));
+        assert!(!is_chrome_main_process(
+            "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper.app/\
+             Contents/MacOS/Google Chrome Helper --type=renderer --user-data-dir=/x"
+        ));
+        // A browser MCP server names the profile in its arguments only.
+        assert!(!is_chrome_main_process(
+            "/Applications/Agent Doctor.app/Contents/MacOS/agent-doctor mcp browser --port 9222 \
+             --user-data-dir /Users/me/Library/Application Support/agent-doctor/chrome-cdp"
+        ));
     }
 
     #[test]

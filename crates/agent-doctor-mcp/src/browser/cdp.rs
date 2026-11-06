@@ -354,25 +354,37 @@ pub fn cdp_user_data_dir(port: u16) -> Option<PathBuf> {
 }
 
 pub(crate) fn parse_user_data_dir_flag(cmd: &str) -> Option<PathBuf> {
-    // Handles `--user-data-dir=/path` and `--user-data-dir /path`.
-    let bytes = cmd.as_bytes();
-    let key = b"--user-data-dir";
-    let mut i = 0;
-    while i + key.len() <= bytes.len() {
-        if &bytes[i..i + key.len()] == key {
-            let rest = &cmd[i + key.len()..];
-            let path = if let Some(stripped) = rest.strip_prefix('=') {
-                stripped.split_whitespace().next().unwrap_or("")
-            } else {
-                rest.split_whitespace().next().unwrap_or("")
-            };
+    // Handles `--user-data-dir=/path` and `--user-data-dir /path`. `ps` prints
+    // arguments unquoted, so the value runs to the next ` --` flag rather than
+    // the next space: macOS profiles live under "Application Support".
+    const KEY: &str = "--user-data-dir";
+    let mut from = 0;
+    while let Some(found) = cmd[from..].find(KEY) {
+        let after = from + found + KEY.len();
+        let rest = &cmd[after..];
+        if let Some(value) = rest.strip_prefix('=').or_else(|| rest.strip_prefix(' ')) {
+            let end = value.find(" --").unwrap_or(value.len());
+            let path = value[..end].trim();
             if !path.is_empty() {
                 return Some(PathBuf::from(path));
             }
         }
-        i += 1;
+        from = after;
     }
     None
+}
+
+/// Whether a `ps` command line is a Chrome/Chromium main process. Only the
+/// executable (before the first ` --` flag) counts: an agent-doctor server
+/// whose `--user-data-dir …/chrome-cdp` argument names the profile is not a
+/// browser holding it.
+pub(crate) fn is_chrome_main_process(cmd: &str) -> bool {
+    let program = cmd.split(" --").next().unwrap_or(cmd).to_ascii_lowercase();
+    let is_chrome = program.contains("google chrome")
+        || program.contains("chromium")
+        || program.contains("/chrome");
+    // Helper and renderer processes carry `--type=`.
+    is_chrome && !cmd.contains("--type=")
 }
 
 /// True if a non-CDP Chrome already holds `user_data_dir` (profile lock).
@@ -401,16 +413,10 @@ pub fn profile_locked_by_other_chrome(user_data_dir: &PathBuf, cdp_port: u16) ->
         if cdp_pids.contains(&pid) {
             continue;
         }
-        let lower = cmd.to_ascii_lowercase();
-        if !(lower.contains("google chrome")
-            || lower.contains("chromium")
-            || lower.contains("/chrome"))
-        {
+        if !is_chrome_main_process(cmd) {
             continue;
         }
-        if cmd.contains("--type=") {
-            continue; // helper/renderer processes
-        }
+        let lower = cmd.to_ascii_lowercase();
         if let Some(dir) = parse_user_data_dir_flag(cmd) {
             if dir == *user_data_dir {
                 return true;
