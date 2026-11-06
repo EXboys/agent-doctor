@@ -68,10 +68,10 @@ html[data-theme="dark"] {
   --md-code-fg: #d4d4d4;
   --md-code-bg: rgba(255, 255, 255, 0.1);
   --md-marker: rgba(255, 255, 255, 0.42);
-  /* ZCode hierarchy: the rail is the darkest surface, the composer the most
-     elevated one, the canvas in between. */
-  --side-bg: #121212;
-  --composer-bg: #232323;
+  /* ZCode hierarchy: the canvas is the darkest surface; the rail and the
+     composer sit one and two steps above it as visible gray panels. */
+  --side-bg: #232323;
+  --composer-bg: #262626;
   --composer-line: rgba(255, 255, 255, 0.09);
 }
 
