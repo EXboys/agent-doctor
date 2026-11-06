@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { releaseChatFollow } from "./activity";
 import { currentQuestionId, questionMarks, type QuestionMark, type QuestionSource } from "./question-marks";
 
 const HIGHLIGHT = "is-question-target";
@@ -88,7 +89,15 @@ function jumpTo(log: HTMLElement, id: string): void {
     bubble = log.querySelector<HTMLElement>(selector);
   }
   if (!bubble) return;
-  bubble.scrollIntoView({ block: "start", behavior: "smooth" });
+  // Land with the log's own top padding as breathing room: scrollIntoView
+  // block:"start" sits the bubble flush against the topbar border, clipping the
+  // highlight outline and reading as cut off. Release the tail pin first so a
+  // streaming append can't yank the view back to the bottom mid-jump.
+  const gap = 18;
+  const top =
+    log.scrollTop + bubble.getBoundingClientRect().top - log.getBoundingClientRect().top - gap;
+  releaseChatFollow(log);
+  log.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   highlighted?.classList.remove(HIGHLIGHT);
   bubble.classList.add(HIGHLIGHT);
   highlighted = bubble;

@@ -237,15 +237,25 @@ afterFirstPaint(() => {
 });
 
 // TEMP(ad-debug): open the ask window on the doctor session so the boot
-// self-test turn runs without any manual click.
-if (import.meta.env.DEV) {
+// self-test turn runs without any manual click. Opt in with ?ad-debug=1 on
+// the main window URL; the ask window itself cannot take a query string
+// (blank-window bug), so arm it via localStorage + event. Fires one second
+// before the ask window's first self-test timer, and disarms afterwards.
+if (
+  import.meta.env.DEV &&
+  new URLSearchParams(window.location.search).get("ad-debug") === "1"
+) {
   window.setTimeout(async () => {
     try {
       const { adDebug, openAskWindow } = await import("./ipc");
-      await adDebug("boot(main): opening ask window (doctor)");
+      const { emit } = await import("@tauri-apps/api/event");
+      localStorage.setItem("ad.debug.auto", "1");
+      await adDebug("boot(main): armed ask self-test, opening ask window (doctor)");
       await openAskWindow({ runtime: "doctor" });
+      await emit("ad-debug-arm");
+      window.setTimeout(() => localStorage.removeItem("ad.debug.auto"), 30000);
     } catch (error) {
       console.error("[ad-debug] main boot open failed", error);
     }
-  }, 6000);
+  }, 5000);
 }

@@ -527,26 +527,101 @@ pub fn official_llm_config() -> Result<LlmConfig> {
     let Some(entry) = agent_doctor_core::setup::load_active_personal_provider()? else {
         bail!("no active personal provider with an API key");
     };
+    // The official line rides the site's dedicated agent channel
+    // (`/api/v1/agent`: monthly free calls + pooled upstream keys). Personal
+    // providers keep their URL untouched — only the teamups-official row moves.
+    let url = official_agent_gateway_url(&entry);
     if agent_doctor_core::setup::normalize_protocol(&entry.protocol)
         == agent_doctor_core::setup::PROTOCOL_ANTHROPIC
     {
         Ok(LlmConfig::from_anthropic_gateway(
-            &entry.url,
+            &url,
             &entry.api_key,
             &entry.model,
         ))
     } else {
-        Ok(LlmConfig::from_gateway(
-            &entry.url,
-            &entry.api_key,
-            &entry.model,
-        ))
+        Ok(LlmConfig::from_gateway(&url, &entry.api_key, &entry.model))
+    }
+}
+
+/// `…/api/v1/official` → `…/api/v1/agent` (OpenAI wire) or `…/api/v1/agent/anthropic`
+/// (Anthropic wire). Anything else — custom edits included — stays as configured.
+fn official_agent_gateway_url(entry: &agent_doctor_core::setup::PersonalProviderEntry) -> String {
+    if entry.id != agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID {
+        return entry.url.clone();
+    }
+    let trimmed = entry.url.trim().trim_end_matches('/');
+    let Some(base) = trimmed.strip_suffix("/api/v1/official") else {
+        return entry.url.clone();
+    };
+    if agent_doctor_core::setup::normalize_protocol(&entry.protocol)
+        == agent_doctor_core::setup::PROTOCOL_ANTHROPIC
+    {
+        format!("{base}/api/v1/agent/anthropic")
+    } else {
+        format!("{base}/api/v1/agent")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn provider(
+        id: &str,
+        url: &str,
+        protocol: &str,
+    ) -> agent_doctor_core::setup::PersonalProviderEntry {
+        agent_doctor_core::setup::PersonalProviderEntry {
+            id: id.to_string(),
+            name: "test".to_string(),
+            url: url.to_string(),
+            api_key: "k".to_string(),
+            model: "m".to_string(),
+            protocol: protocol.to_string(),
+        }
+    }
+
+    #[test]
+    fn official_provider_rides_the_agent_channel() {
+        let openai = provider(
+            "teamups-official",
+            "https://agentdoctor.cn/api/v1/official",
+            "openai",
+        );
+        assert_eq!(
+            official_agent_gateway_url(&openai),
+            "https://agentdoctor.cn/api/v1/agent"
+        );
+        let anthropic = provider(
+            "teamups-official",
+            "https://agentdoctor.cn/api/v1/official/",
+            "anthropic",
+        );
+        assert_eq!(
+            official_agent_gateway_url(&anthropic),
+            "https://agentdoctor.cn/api/v1/agent/anthropic"
+        );
+    }
+
+    #[test]
+    fn personal_providers_and_custom_urls_stay_untouched() {
+        let deepseek = provider("deepseek", "https://api.deepseek.com/v1", "openai");
+        assert_eq!(
+            official_agent_gateway_url(&deepseek),
+            "https://api.deepseek.com/v1"
+        );
+        // 手改过的官方行（marker 不在末尾）不动，避免悄悄改用户的自定义配置
+        let edited = provider(
+            "teamups-official",
+            "https://mirror.example/official/api/v1",
+            "openai",
+        );
+        assert_eq!(
+            official_agent_gateway_url(&edited),
+            "https://mirror.example/official/api/v1"
+        );
+    }
 
     #[test]
     fn browser_definitions_cover_the_chat_tool_set() {

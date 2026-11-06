@@ -1014,9 +1014,24 @@ function bootChatTail(): void {
 }
 
 
+// TEMP(ad-debug): the boot self-test below auto-sends doctor turns, so it only
+// runs when armed. The ask window cannot take a query string (blank-window
+// bug), so arming is a localStorage flag plus an event from the main window,
+// which reads ?ad-debug=1 on its own URL.
+let adDebugArmed =
+  new URLSearchParams(window.location.search).get("ad-debug") === "1" ||
+  localStorage.getItem("ad.debug.auto") === "1";
+window.addEventListener("storage", (event) => {
+  if (event.key === "ad.debug.auto" && event.newValue === "1") adDebugArmed = true;
+});
+void listen("ad-debug-arm", () => {
+  adDebugArmed = true;
+});
+
 // TEMP(ad-debug): auto-run one doctor turn on boot; dumps the post-turn DOM.
 if (import.meta.env.DEV) {
   window.setTimeout(async () => {
+    if (!adDebugArmed) return;
     try {
       const { emit } = await import("@tauri-apps/api/event");
       const { adDebug } = await import("./ipc");
@@ -1032,6 +1047,7 @@ if (import.meta.env.DEV) {
 // transcript DOM for offline replay of the fold layout.
 if (import.meta.env.DEV) {
   window.setTimeout(async () => {
+    if (!adDebugArmed) return;
     try {
       const { emit } = await import("@tauri-apps/api/event");
       const { adDebug, adDebugDump } = await import("./ipc");
@@ -1051,6 +1067,7 @@ if (import.meta.env.DEV) {
 // TEMP(ad-debug): dump the transcript structure on boot.
 if (import.meta.env.DEV) {
   window.setTimeout(async () => {
+    if (!adDebugArmed) return;
     try {
       const { adDebug } = await import("./ipc");
       const logEl = document.querySelector(".chat-log");

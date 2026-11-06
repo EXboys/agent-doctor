@@ -270,6 +270,12 @@ export interface TeamupsAccountStatus {
     tokens_before?: number;
     period: string | null;
   } | null;
+  agent?: {
+    enabled: boolean;
+    calls_left: number;
+    monthly_calls: number;
+    reset_date: string | null;
+  } | null;
 }
 
 export interface TeamupsLoginStart {

@@ -142,6 +142,14 @@ function officialDescription(): string {
   if (hasTokenBalance) {
     parts.push(t("personal.officialTokensLeft", { remaining: formatOfficialTokens(tokens) }));
   }
+  const agent = officialAccount?.agent;
+  if (agent?.enabled) {
+    parts.push(
+      t("personal.officialAgentLeft", {
+        count: String(Math.max(0, agent.calls_left ?? 0)),
+      }),
+    );
+  }
   return parts.join(" · ");
 }
 

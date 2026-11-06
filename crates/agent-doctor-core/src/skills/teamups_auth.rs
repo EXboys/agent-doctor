@@ -45,6 +45,22 @@ pub struct TeamupsAccountStatus {
     pub packs: Vec<String>,
     #[serde(default)]
     pub official: Option<TeamupsOfficialStatus>,
+    /// Built-in agent channel (`/api/v1/agent`): monthly free calls, independent
+    /// of the official chat line's trial/member balance.
+    #[serde(default)]
+    pub agent: Option<TeamupsAgentStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamupsAgentStatus {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, alias = "callsLeft")]
+    pub calls_left: u32,
+    #[serde(default, alias = "monthlyCalls")]
+    pub monthly_calls: u32,
+    #[serde(default, alias = "resetDate")]
+    pub reset_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +281,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
             pack_count: 0,
             packs: Vec::new(),
             official: None,
+            agent: None,
         });
     };
 
@@ -286,6 +303,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
             pack_count: 0,
             packs: Vec::new(),
             official: None,
+            agent: None,
         });
     }
     if !status.is_success() {
@@ -308,6 +326,10 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         .get("official")
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok());
+    let agent = body
+        .get("agent")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok());
     let name = body
         .get("name")
         .and_then(Value::as_str)
@@ -321,6 +343,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         pack_count: packs.len() as u32,
         packs,
         official,
+        agent,
     })
 }
 

@@ -552,6 +552,11 @@ export function followChatLog(logEl: HTMLElement): void {
   pinChatLog(logEl);
 }
 
+/** Let a jump to an earlier message hold its ground while the tail keeps streaming. */
+export function releaseChatFollow(logEl: HTMLElement): void {
+  logEl.dataset.pin = "0";
+}
+
 /**
  * The holder for one segment's rows. Always open, with its summary hidden: a
  * closed details would hide the rows, and a details without a summary grows a

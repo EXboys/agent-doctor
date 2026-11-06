@@ -1893,6 +1893,7 @@ export const en = {
     "personal.officialUnusable": "Not available",
     "personal.officialTrialLeft": "{count} free tries left",
     "personal.officialTokensLeft": "{remaining} tokens left",
+    "personal.officialAgentLeft": "Built-in agent: {count} free calls left this month",
     "personal.officialNeedsMembership": "Trial finished. Start a membership to keep using it.",
     "personal.officialNeedsLogin": "Sign in to use the official model service.",
     "personal.officialLogin": "Sign in",

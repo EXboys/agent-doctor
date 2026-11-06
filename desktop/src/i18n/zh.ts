@@ -1892,6 +1892,7 @@ export const zh = {
     "personal.officialUnusable": "暂不可用",
     "personal.officialTrialLeft": "试用还剩 {count} 次",
     "personal.officialTokensLeft": "剩余 {remaining} Token",
+    "personal.officialAgentLeft": "内置 Agent 本月剩 {count} 次免费",
     "personal.officialNeedsMembership": "体验已用完，开通会员后继续使用",
     "personal.officialNeedsLogin": "登录后即可使用官方模型服务",
     "personal.officialLogin": "登录",

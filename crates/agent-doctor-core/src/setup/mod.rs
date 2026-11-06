@@ -38,7 +38,7 @@ pub use personal::{
     PersonalProviderEntry, PersonalProviderListItem, PersonalProviderOptions,
     PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
     PersonalProvidersDocument, UpsertPersonalProviderOptions, MODEL_ENV, PROTOCOL_ANTHROPIC,
-    PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
+    PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV, TEAMUPS_OFFICIAL_PROVIDER_ID,
 };
 pub use pipeline::openai_gateway_for_provider_url;
 pub use pipeline::{
