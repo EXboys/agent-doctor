@@ -25,7 +25,9 @@ export function bindSidebarCollapse(): void {
       applySidebarCollapsed(true);
       return;
     }
-    if (target.closest("#chat-side-expand")) {
+    // The expand button lives in the chat topbar and in each page header
+    // (knowledge, schedule, skills), so match by class.
+    if (target.closest(".chat-side-expand")) {
       event.preventDefault();
       applySidebarCollapsed(false);
     }
@@ -34,17 +36,17 @@ export function bindSidebarCollapse(): void {
 
 export function syncSidebarCollapseLabels(): void {
   const collapse = document.querySelector<HTMLButtonElement>("#chat-side-collapse");
-  const expand = document.querySelector<HTMLButtonElement>("#chat-side-expand");
+  const expands = document.querySelectorAll<HTMLButtonElement>(".chat-side-expand");
   const hide = t("chat.sideCollapse");
   const show = t("chat.sideExpand");
   if (collapse) {
     collapse.title = hide;
     collapse.setAttribute("aria-label", hide);
   }
-  if (expand) {
+  expands.forEach((expand) => {
     expand.title = show;
     expand.setAttribute("aria-label", show);
-  }
+  });
 }
 
 export function sidebarGroupKey(name: string | null): string {
