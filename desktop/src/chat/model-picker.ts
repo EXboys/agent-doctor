@@ -339,9 +339,18 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const onOfficial = !doctorPinnedAwayFromOfficial();
     const session = deps.activeSession();
     const pinnedModel = session?.model?.trim() ?? "";
-    const giftActive =
-      onOfficial && (pinnedModel === "" || pinnedModel === OFFICIAL_GIFT_MODEL);
-    const paidActive = onOfficial && pinnedModel !== "" && pinnedModel !== OFFICIAL_GIFT_MODEL;
+    const giftLeft = quota.free?.left ?? 0;
+    const paidLeft = quota.paid?.tokens ?? 0;
+    // Effective default mirrors doctorOfficialFallback: no pin rides the gift
+    // while it lasts, then the paid line once the gift drains.
+    const effectivePaid =
+      pinnedModel !== "" && pinnedModel !== OFFICIAL_GIFT_MODEL
+        ? onOfficial
+        : onOfficial && pinnedModel === "" && giftLeft <= 0 && paidLeft > 0;
+    const effectiveGift =
+      onOfficial &&
+      (pinnedModel === OFFICIAL_GIFT_MODEL ||
+        (pinnedModel === "" && (giftLeft > 0 || paidLeft <= 0)));
 
     const hint = document.createElement("div");
     hint.className = "chat-model-menu-hint";
@@ -369,19 +378,22 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       deps.getProviders().find((item) => item.id === OFFICIAL_PROVIDER_ID) ??
       deps.getWiredProvider();
     const hasRow = Boolean(officialRow && officialRow.id === OFFICIAL_PROVIDER_ID);
-    const giftLeft = quota.free?.left ?? 0;
-    const paidLeft = quota.paid?.tokens ?? 0;
 
     if (hasRow && giftLeft > 0) {
       group.appendChild(
-        officialOption(t("chat.officialGiftOption"), giftActive, officialRow!, OFFICIAL_GIFT_MODEL),
+        officialOption(
+          t("chat.officialGiftOption"),
+          effectiveGift,
+          officialRow!,
+          OFFICIAL_GIFT_MODEL,
+        ),
       );
     }
     if (hasRow && paidLeft > 0) {
       group.appendChild(
         officialOption(
           t("chat.modelOfficialAutoModel"),
-          paidActive,
+          effectivePaid,
           officialRow!,
           officialRow!.model || "deepseek-flash",
         ),
@@ -662,6 +674,30 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       selectSessionModel(wired, model);
     },
     updateRuntimeLabel,
+    /**
+     * Where an unpinned built-in-agent chat's next message would go: the gift
+     * while it lasts, the paid official model line once the gift drains. The
+     * send path injects this so the chip's promise (official quota shown) is
+     * what actually gets billed — no pin required, no session state mutated.
+     */
+    doctorOfficialFallback: () => {
+      if (deps.selectedRuntime() !== "doctor") return null;
+      if (deps.activeSession()?.providerId?.trim()) return null;
+      const quota = officialQuotaState(officialStatus);
+      if (!quota.signedIn) return null;
+      const giftLeft = quota.free?.left ?? 0;
+      if (giftLeft > 0) return null; // 未 pin 默认走赠送，Rust 侧已兜底
+      const paidLeft = quota.paid?.tokens ?? 0;
+      if (paidLeft <= 0) return null;
+      const officialRow =
+        deps.getProviders().find((item) => item.id === OFFICIAL_PROVIDER_ID) ??
+        deps.getWiredProvider();
+      if (!officialRow || officialRow.id !== OFFICIAL_PROVIDER_ID) return null;
+      return {
+        providerId: OFFICIAL_PROVIDER_ID,
+        model: officialRow.model || "deepseek-flash",
+      };
+    },
     /** A finished built-in-agent turn just changed the server-side quota. */
     refreshOfficialQuota: () => {
       officialFetchedAt = 0;

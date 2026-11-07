@@ -822,6 +822,7 @@ export function wireChatControllers(): void {
     setStatus: (text, tone) => setStatus(text, tone),
     selectedRuntime: () => selectedRuntime(),
     activeSession: () => activeSession(),
+    doctorOfficialFallback: () => chatState.modelPicker?.doctorOfficialFallback() ?? null,
     ensureListener: () => ensureListener(),
     clearQuickReplies: () => clearQuickReplies(),
     allowQuickRepliesAgain: () => allowQuickRepliesAgain(),

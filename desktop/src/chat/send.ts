@@ -97,6 +97,11 @@ export type SendDeps = {
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
   selectedRuntime: () => AskRuntime;
   activeSession: () => ChatSession;
+  /**
+   * Unpinned built-in-agent chat with the gift drained: route this turn to the
+   * paid official model line so the chip's「官方额度」promise is what bills.
+   */
+  doctorOfficialFallback?: () => { providerId: string; model: string } | null;
   ensureListener: () => Promise<void>;
   clearQuickReplies: () => void;
   allowQuickRepliesAgain: () => void;
@@ -491,6 +496,10 @@ export function createSendController(deps: SendDeps) {
       deps.resolveSendWorkspace(sendSession);
 
     const promptWithKnowledge = await appendKnowledgeToPrompt(promptUserText, sessionWorkspace?.trim() || null);
+    // 内置 Agent 无 pin 时按余量选线：赠送有剩走赠送，用完自动落到
+    // 官方模型行（购买额度）——模型按钮显示的就是这一轮真正扣的池。
+    const doctorFallback =
+      runtimeForTurn === "doctor" ? deps.doctorOfficialFallback?.() ?? null : null;
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
         runtime: runtimeForTurn,
@@ -514,8 +523,9 @@ export function createSendController(deps: SendDeps) {
         selectedMcps,
         imagePaths: turn?.sendPaths ?? [],
         clientRunId: chatSessionId,
-        providerId: sendSession.providerId?.trim() || null,
-        model: sendSession.model?.trim() || null,
+        providerId:
+          sendSession.providerId?.trim() || doctorFallback?.providerId || null,
+        model: sendSession.model?.trim() || doctorFallback?.model || null,
       });
 
     const stillGoing = () => (deps.isChatRunning ? deps.isChatRunning(chatSessionId) : deps.getBusy());
