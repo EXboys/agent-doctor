@@ -333,13 +333,19 @@ fn is_windows_drive_root(path: &Path) -> bool {
 #[cfg(windows)]
 fn apply_safe_child_temp(command: &mut Command) {
     for key in ["TEMP", "TMP"] {
-        if child_temp_is_usable(std::env::var_os(key).as_deref()) {
-            continue;
-        }
-        if let Some(temp) = safe_windows_temp_dir() {
+        if let Some(temp) = swapped_temp(std::env::var_os(key).as_deref()) {
             command.env(key, temp);
         }
     }
+}
+
+/// The replacement for one broken TEMP/TMP value; `None` keeps the host value.
+#[cfg(windows)]
+fn swapped_temp(raw: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if child_temp_is_usable(raw) {
+        return None;
+    }
+    safe_windows_temp_dir()
 }
 
 #[cfg(windows)]
@@ -1320,6 +1326,35 @@ mod tests {
             strip_windows_verbatim(Path::new("/tmp/work")),
             PathBuf::from("/tmp/work")
         );
+    }
+
+    /// A healthy TEMP keeps the host value; a missing, relative, nonexistent,
+    /// or drive-root value is replaced. CI's rust-windows job runs this —
+    /// that environment is exactly where the EISDIR incident lived.
+    #[cfg(windows)]
+    #[test]
+    fn broken_child_temp_values_are_swapped_healthy_ones_kept() {
+        let real = std::env::temp_dir();
+        assert!(
+            child_temp_is_usable(Some(real.as_os_str())),
+            "the CI temp dir must count as usable: {}",
+            real.display()
+        );
+        assert_eq!(
+            swapped_temp(Some(real.as_os_str())),
+            None,
+            "a healthy value must not be touched"
+        );
+        for broken in [
+            None,
+            Some(r"C:"),
+            Some("not-absolute"),
+            Some(r"C:\definitely-missing"),
+        ] {
+            let swapped = swapped_temp(broken);
+            assert!(swapped.is_some(), "{broken:?} must be swapped");
+            assert!(swapped.unwrap().is_dir());
+        }
     }
 
     #[cfg(unix)]

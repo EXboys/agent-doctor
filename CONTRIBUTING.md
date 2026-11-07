@@ -15,7 +15,7 @@ Agent Doctor is in early bootstrap. Before opening large PRs, please open an iss
 - `scripts/install-git-hooks.sh` — installs hard pre-commit / pre-push fmt+clippy gates (required once per clone)
 - `docs/` — user docs; optional enterprise integration in `enterprise.md`
 
-Before touching the core flows (chat turn, desktop↔phone channel, config and keys, install, the site), read [docs/zh-CN/core-flows.md](docs/zh-CN/core-flows.md) — its invariants come from real regressions and name the tests that guard each one.
+Before touching the core flows (chat turn, desktop↔phone channel, config and keys, install, the site), read [docs/zh-CN/core-flows.md](docs/zh-CN/core-flows.md) — its invariants come from real regressions and name the tests that guard each one. Windows subprocess creation flags, the environment we hand to external agent runtimes, and pinned runtime version bumps have their own page: [docs/zh-CN/windows-spawn-and-runtime-env.md](docs/zh-CN/windows-spawn-and-runtime-env.md).
 
 ## Code of conduct
 

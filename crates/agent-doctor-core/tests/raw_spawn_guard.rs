@@ -16,12 +16,52 @@ const MARKER: &str = "raw-spawn-ok";
 
 #[test]
 fn raw_command_spawn_is_confined_or_marked() {
+    let mut offenders = Vec::new();
+    for src in &guarded_sources() {
+        visit(src, &mut offenders);
+    }
+    assert!(
+        offenders.is_empty(),
+        "raw Command::new without '{MARKER}'. Route it through \
+         crate::exec::run_output / command_for_path, or mark the line with \
+         '// {MARKER}' when the window is intentional:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// A creation flag decides whether a child AND its whole subtree get a
+/// console, so each flag has exactly one legal home: `DETACHED_PROCESS` only
+/// for the long-lived CLI sessions in `exec/process.rs`, `CREATE_NEW_CONSOLE`
+/// only for intentional visible terminals in `session_launch/terminal.rs`,
+/// `CREATE_NO_WINDOW` everywhere else. a678e8b swapped the install runner to
+/// DETACHED_PROCESS "for consistency" and every install grew a visible
+/// powershell window; the spawn fence above only checks that a spawn is
+/// marked, so this second fence pins the flags themselves.
+#[test]
+fn creation_flags_stay_in_their_sanctioned_files() {
+    const FLAG_HOMES: &[(&str, &str)] = &[
+        ("DETACHED_PROCESS", "exec/process.rs"),
+        ("CREATE_NEW_CONSOLE", "session_launch/terminal.rs"),
+    ];
+    let mut offenders = Vec::new();
+    for src in &guarded_sources() {
+        flag_visit(src, FLAG_HOMES, &mut offenders);
+    }
+    assert!(
+        offenders.is_empty(),
+        "creation flag outside its sanctioned file — see \
+         docs/zh-CN/windows-spawn-and-runtime-env.md for the flag table:\n{}",
+        offenders.join("\n")
+    );
+}
+
+fn guarded_sources() -> Vec<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // core plus the prompt crate that was split out of it: prompt_session
     // spawns more agent children than anywhere else in the workspace. The
     // mcp crate and the CLI run console-less under the desktop app, and
     // src-tauri is the GUI app itself — all three painted stray terminals.
-    let sources = [
+    vec![
         manifest.join("src"),
         manifest
             .join("../agent-doctor-prompt/src")
@@ -43,18 +83,7 @@ fn raw_command_spawn_is_confined_or_marked() {
             .join("../../desktop/src-tauri/src")
             .canonicalize()
             .expect("desktop/src-tauri/src at the workspace root"),
-    ];
-    let mut offenders = Vec::new();
-    for src in &sources {
-        visit(src, &mut offenders);
-    }
-    assert!(
-        offenders.is_empty(),
-        "raw Command::new without '{MARKER}'. Route it through \
-         crate::exec::run_output / command_for_path, or mark the line with \
-         '// {MARKER}' when the window is intentional:\n{}",
-        offenders.join("\n")
-    );
+    ]
 }
 
 fn visit(dir: &Path, offenders: &mut Vec<String>) {
@@ -89,6 +118,42 @@ fn visit(dir: &Path, offenders: &mut Vec<String>) {
                 offenders.push(format!("{}:{}", path.display(), number + 1));
             }
             previous = line;
+        }
+    }
+}
+
+fn flag_visit(dir: &Path, flag_homes: &[(&str, &str)], offenders: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            flag_visit(&path, flag_homes, offenders);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // Test-only code does not ship.
+        let body = match text.find("#[cfg(test)]") {
+            Some(index) => &text[..index],
+            None => text.as_str(),
+        };
+        for (number, line) in body.lines().enumerate() {
+            // Doc comments may name a flag when explaining the rule; only
+            // code lines count.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for (flag, home) in flag_homes {
+                if line.contains(flag) && !path.ends_with(home) {
+                    offenders.push(format!("{}:{} uses {flag}", path.display(), number + 1));
+                }
+            }
         }
     }
 }

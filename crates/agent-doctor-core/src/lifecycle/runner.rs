@@ -41,6 +41,20 @@ pub(crate) fn run_shell_command(command_line: &str) -> Result<()> {
     run_shell_command_in(command_line, None)
 }
 
+/// The install tree runs console children (npm, powershell, git) that must all
+/// inherit one hidden console. Never `DETACHED_PROCESS` here: a detached cmd
+/// cannot pass a console down, so every child paints its own visible window —
+/// a678e8b made exactly that swap and installs grew a powershell window for
+/// three weeks. The flag fence in `raw_spawn_guard` pins each flag to its one
+/// legal file; the table lives in docs/zh-CN/windows-spawn-and-runtime-env.md.
+#[cfg(windows)]
+pub(crate) fn install_creation_flags() -> u32 {
+    CREATE_NO_WINDOW
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 /// `cwd` is the directory this command should run in. Callers pass the install
 /// directory they just discovered, never a fixed path.
 pub(crate) fn run_shell_command_in(command_line: &str, cwd: Option<&Path>) -> Result<()> {
@@ -144,15 +158,10 @@ where
     #[cfg(windows)]
     let mut command = {
         use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW, not DETACHED_PROCESS: a detached cmd has no console
-        // to hand down, so every console program it runs (powershell, npm, git)
-        // allocates its own visible terminal window. CREATE_NO_WINDOW gives the
-        // whole install tree one hidden console to inherit.
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mut command = Command::new("cmd"); // raw-spawn-ok
         command
             .args(["/C", command_line])
-            .creation_flags(CREATE_NO_WINDOW);
+            .creation_flags(install_creation_flags());
         command
     };
 
@@ -402,6 +411,16 @@ mod tests {
     use crate::lifecycle::openclaw::{
         openclaw_install_shell_command, openclaw_update_shell_command,
     };
+
+    /// a678e8b swapped the runner to DETACHED_PROCESS "for consistency" and
+    /// every install grew a visible console window. CI's rust-windows job
+    /// holds this pin; the value itself is the contract, not an accident of
+    /// the constant's name.
+    #[cfg(windows)]
+    #[test]
+    fn install_children_share_one_hidden_console() {
+        assert_eq!(super::install_creation_flags(), 0x08000000);
+    }
 
     #[test]
     fn openclaw_script_commands_get_npm_install_tuning() {

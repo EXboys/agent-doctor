@@ -69,12 +69,14 @@ setup / 模型服务页 / 修复，都会写用户的配置文件和密钥。
 **不变量：**
 
 1. **安装不允许被墙卡死。** 大陆不可达的官方源要能跳过并说明原因，走可达的镜像；跳过的要写进结果。（1adc3dc）
-2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`）。围栏测试 `raw_spawn_guard` 拦下一切没有 `// raw-spawn-ok` 标注的裸 `Command::new`；标注 = 人审过：macOS 系统工具、控制台程序自己的孩子、GUI 目标（浏览器、`open`）可以放行，**GUI 应用下起控制台子进程必须带 `CREATE_NO_WINDOW`**。（8cdcd00、a678e8b、277836e、9507226、9e8d193——修了五轮，现在有围栏）
+2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`），标志按 [windows-spawn-and-runtime-env.md](windows-spawn-and-runtime-env.md) 的表选：探测、安装、一切会再起控制台孩子的路径用 `CREATE_NO_WINDOW`；`DETACHED_PROCESS` 是「没有控制台」不是「隐藏窗口」，只许住在 `exec/process.rs` 的长驻会话里。围栏两条：`raw_spawn_guard` 拦没有 `// raw-spawn-ok` 标注的裸 `Command::new`；`creation_flags_stay_in_their_sanctioned_files` 拦标志搬家——**a678e8b 正是当年写进本条的「围栏提交」，它顺手把安装 runner 的标志从 `CREATE_NO_WINDOW` 换成 `DETACHED_PROCESS`，弹窗回归潜伏三周才被用户抓到；旧围栏只验标注、不验标志，拦不住它**。修哪条路只动哪条路。（8cdcd00、277836e、9507226、9e8d193、a678e8b→88c81ab）
 3. **PATH 只做尾部增量合并，不重排。** Windows PATH 超长时降级保可达，不能把应用或 Claude/Node 搞挂。（74a5694、26394a9、2a5ff8e）
 4. **每个安装步骤有进度、有失败原因。** 用户不该面对一个静默消失的安装。（8e4156e）
 5. **探测不挡路。** doctor 探测不进 UI 线程、不串行拉起一堆子进程；启动时能不起的子进程一律不起。（8fb0ea6、277836e）
+6. **交给外部 runtime 的环境由我们清洗，坏值说人话。** TEMP/TMP 缺失、相对、不存在或指向盘符根 → 换 `%LOCALAPPDATA%\Temp`；会话目录是盘符根 → 拦下并告诉用户选个具体文件夹；`fs::canonicalize` 的 `\\?\` verbatim 拼写剥掉再交。dsh 的沙箱每轮对 `tmpdir()` 做无保护 realpath，`TEMP=C:\` 就是每轮 `EISDIR … realpath 'C:'`（nodejs/node#6861，libuv 十年未修）——原始错误不许直达用户。（88c81ab）
+7. **升级 pin 的外部 runtime 是行为变更，不是刷版本号。** 升级前把旧版装下来 diff 包树和关键模块；升级后在 Windows 实机跑一轮真实对话再算完成。dsh 0.1.0→0.1.5（8e4156e）让聊天第一次能跑，也第一次走进了沙箱里那段无保护 realpath——「之前没有这个问题」往往等于「之前走不到这一步」。（8e4156e、88c81ab）
 
-**看护：** `crates/agent-doctor-core/tests/raw_spawn_guard.rs`（扫 core/prompt/repair/mcp/cli/desktop 全部源码）；CI 的 `rust-windows` job（这是 Windows-only 代码唯一的编译+lint+测试处）；涉及子进程的改动在 Windows 上必须实机看过一次。
+**看护：** `crates/agent-doctor-core/tests/raw_spawn_guard.rs` 的两条围栏（裸 spawn + 标志住所，扫 core/prompt/repair/mcp/cli/desktop 全部源码）；`runner.rs` 的 `install_children_share_one_hidden_console` 和 prompt 侧 TEMP/盘符根测试（Windows-only，在 CI `rust-windows` job 跑——那是 Windows-only 代码唯一的编译+lint+测试处）；涉及子进程的改动在 Windows 上必须实机看过一次。细则：[windows-spawn-and-runtime-env.md](windows-spawn-and-runtime-env.md)。
 
 ## 六、跨窗口状态
 
