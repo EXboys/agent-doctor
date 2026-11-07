@@ -27,6 +27,16 @@ What this enforces:
 
 Do **not** `git tag` + `git push --tags` without installing the hook or using `scripts/release.sh`.
 
+## Re-tagging the same version
+
+Deleting a pushed tag turns its GitHub Release into a **draft** (20+ assets still attached, invisible to the OSS sync, which then fails with `release not found`). When a build fails and you delete + re-push the tag:
+
+1. Push the fix to `main` first and wait for `ci.yml` (its `rust-windows` job is the only place Windows-only code compiles) to go green **before** re-tagging.
+2. Delete the stale tag locally and on the remote (`git push origin :refs/tags/vX.Y.Z`).
+3. After the new Release run completes, check `gh release view vX.Y.Z --json isDraft` — if it is a draft, publish it: `gh release edit vX.Y.Z --draft=false --prerelease` (beta), then re-run the failed *Sync installers to OSS* workflow (`gh run rerun <run-id> --failed`).
+
+The Release workflow's "Ensure GitHub release exists" steps now publish the release (`--draft=false`) so this heals itself for future re-tags.
+
 ## Already enforced online
 
 Tag pushes **do not** run `ci.yml`. The Release workflow therefore starts with the same gates:

@@ -176,6 +176,10 @@ jobs:
             --title "Agent Doctor ${GITHUB_REF_NAME}" \
             "${PRERELEASE[@]}" \
             --notes "$NOTES"
+          # A deleted-and-re-pushed tag leaves the release as a DRAFT, which
+          # the OSS sync cannot see ("release not found"). Publishing is
+          # idempotent and matches every fresh release's end state.
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"
 
       - name: Upload CLI archives to release
         env:
@@ -551,6 +555,9 @@ jobs:
             --title "Agent Doctor ${GITHUB_REF_NAME}" \
             "${PRERELEASE[@]}" \
             --notes "Release assets are uploading."
+          # Same draft guard as the CLI leg: a re-pushed tag leaves the release
+          # as a draft, invisible to the OSS sync ("release not found").
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"
 
       - name: Upload desktop files to Release
         env:
