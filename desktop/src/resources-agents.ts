@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { setAgentBrandIcon } from "./agent-brand";
 import { t, tRuntimeBlurb } from "./i18n";
 import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
-import { isAskRuntimeId, runtimeCatalog } from "./runtime-catalog";
+import { isAskRuntimeId, runtimeCatalog, DOCTOR_RUNTIME_ID } from "./runtime-catalog";
 import type { InstallProgressEvent, RuntimeDoctorResult } from "./types";
 import {
   resourcesState,
@@ -121,6 +121,14 @@ export function renderAgentCatalog(): void {
     const desc = document.createElement("div");
     desc.className = "res-catalog-desc";
     desc.textContent = agentCatalogBlurb(runtime.id);
+    // The built-in doctor is a virtual agent: nothing to install, and the
+    // backend has no adapter for it. It gets the open button, and any stale
+    // install error on the row goes away with it.
+    const openable = runtime.installed || runtime.id === DOCTOR_RUNTIME_ID;
+    if (runtime.id === DOCTOR_RUNTIME_ID) {
+      agentInstallHint.delete(runtime.id);
+    }
+
     const hint = document.createElement("p");
     hint.className = "res-agent-install-hint";
     const saved = agentInstallHint.get(runtime.id);
@@ -130,7 +138,7 @@ export function renderAgentCatalog(): void {
 
     const metaWrap = document.createElement("div");
     metaWrap.className = "res-catalog-meta mall-actions";
-    if (runtime.installed) {
+    if (openable) {
       const opening = agentOpenInFlight.has(runtime.id);
       const btn = document.createElement("button");
       btn.type = "button";

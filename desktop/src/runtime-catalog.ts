@@ -1,6 +1,8 @@
 import { fetchRuntimeCatalog } from "./ipc";
 import { t } from "./i18n";
+import { DOCTOR_RUNTIME_ID } from "./agent-tiles";
 
+export { DOCTOR_RUNTIME_ID };
 
 export type RuntimeCatalogEntry = {
   id: string;
@@ -24,7 +26,7 @@ export async function loadRuntimeCatalog(): Promise<void> {
   entries = [
     ...entries,
     {
-      id: "doctor",
+      id: DOCTOR_RUNTIME_ID,
       label: t("chat.doctorRuntimeName"),
       ask: true,
       opens_app: false,

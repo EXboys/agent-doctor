@@ -29,6 +29,7 @@ import { createAgentsInstall } from "./agents-install";
 import { createAgentsPresets } from "./agents-presets";
 import { createAgentsSessions } from "./agents-sessions";
 import { createAgentsWorkspaceChip } from "./agents-workspace-chip";
+import { DOCTOR_RUNTIME_ID, planAgentTiles } from "./agent-tiles";
 import type {
   DoctorReport,
   MainTabId,
@@ -79,9 +80,6 @@ const runtimesEl = document.querySelector<HTMLElement>("#runtimes")!;
 const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
 const runtimeTabsMoreEl = document.querySelector<HTMLButtonElement>("#runtime-tabs-more")!;
 const runtimeSectionEl = document.querySelector<HTMLElement>(".runtime-section")!;
-const HOME_AGENT_VISIBLE = 6;
-/** Built-in doctor agent runtime id (mirrors agent-doctor-repair). */
-const DOCTOR_RUNTIME_ID = "doctor";
 let runtimeTabsExpanded = false;
 const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
 const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
@@ -190,40 +188,27 @@ function resolvePaintedRuntimeId(installedRuntimes: RuntimeDoctorResult[]): stri
 }
 
 function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: string): void {
-  const solo = installedRuntimes.length < 2;
-  runtimeSectionEl.classList.toggle("is-solo", solo);
-  runtimeTabsEl.hidden = solo;
-  if (solo) {
-    runtimeTabsEl.innerHTML = "";
-    runtimeTabsMoreEl.hidden = true;
-    return;
-  }
-  // The built-in doctor tile always takes the first visible slot, so the
-  // agent budget is one smaller and the hidden count follows.
-  const agentVisible = HOME_AGENT_VISIBLE - 1;
-  const overflow = installedRuntimes.length > agentVisible;
-  if (
-    overflow &&
-    selectedId !== DOCTOR_RUNTIME_ID &&
-    installedRuntimes.slice(agentVisible).some((runtime) => runtime.id === selectedId)
-  ) {
+  const plan = planAgentTiles(
+    installedRuntimes.map((runtime) => runtime.id),
+    selectedId,
+    runtimeTabsExpanded,
+  );
+  if (plan.expandForSelection) {
     runtimeTabsExpanded = true;
   }
-  const visible =
-    overflow && !runtimeTabsExpanded
-      ? installedRuntimes.slice(0, agentVisible)
-      : installedRuntimes;
+  runtimeSectionEl.classList.toggle("is-solo", installedRuntimes.length < 2);
+  const visible = installedRuntimes.slice(0, plan.visibleCount);
   runtimeTabsEl.innerHTML = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
   runtimeTabsEl.prepend(doctorTabTile(selectedId === DOCTOR_RUNTIME_ID));
-  if (!overflow) {
+  runtimeTabsEl.hidden = false;
+  if (!plan.overflow) {
     runtimeTabsMoreEl.hidden = true;
     return;
   }
   runtimeTabsMoreEl.hidden = false;
-  const hidden = installedRuntimes.length - agentVisible;
   runtimeTabsMoreEl.textContent = runtimeTabsExpanded
     ? t("runtimes.showLess")
-    : t("runtimes.showMore", { count: String(hidden) });
+    : t("runtimes.showMore", { count: String(plan.hiddenCount) });
 }
 
 function hasActiveWorkspace(): boolean {
