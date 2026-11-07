@@ -1351,8 +1351,9 @@ mod tests {
             Some("not-absolute"),
             Some(r"C:\definitely-missing"),
         ] {
-            let swapped = swapped_temp(broken);
-            assert!(swapped.is_some(), "{broken:?} must be swapped");
+            let raw = broken.map(std::ffi::OsStr::new);
+            let swapped = swapped_temp(raw);
+            assert!(swapped.is_some(), "{raw:?} must be swapped");
             assert!(swapped.unwrap().is_dir());
         }
     }
