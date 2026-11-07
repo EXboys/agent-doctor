@@ -4508,6 +4508,15 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   grid-column: 2;
 }
 
+/* Failure buttons land between the sentence and the raw log. Auto-placement
+   would drop them into the 14px icon rail and stack the label one glyph per
+   line; pin them to the text column instead. */
+.chat-activity.kind-log > .chat-failure-actions {
+  grid-column: 2;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
 /* pre-wrap on a parent lets a closed <details> leak its text in the desktop webview. */
 .chat-activity.kind-log .chat-permission-more:not([open]) > :not(summary),
 .chat-bubble.meta .chat-permission-more:not([open]) > :not(summary) {

@@ -4,10 +4,12 @@
 //! `tool_result` / `result`. Ask maps those into live Status + Delta events so the UI is not
 //! stuck on “waiting for the model” during long tool loops. `session_id:` stays on stderr.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
@@ -31,6 +33,56 @@ use agent_doctor_core::session_launch::resolve_session_cwd;
 /// Shown instead of Hermes's usage dump when the installed copy is too old to chat.
 const HERMES_TOO_OLD: &str =
     "这台电脑上的 Hermes 太旧，这里还用不了。点「更新」，换成这个软件能用的版本。";
+
+/// Shown between the refused turn and the retried one.
+const HERMES_GATEWAY_RESTARTING: &str =
+    "Hermes 的常驻网关还没接上这个会话的配置（多半是网关启动得比它早）。正在重启 Hermes 网关，然后自动再试一次。";
+
+/// New Hermes one-shot turns attach to the resident host gateway before any
+/// model call. A gateway that booted before this workspace profile existed
+/// counted "only one profile", went standalone, and refuses the profile with
+/// "profile parked" until it restarts. Matched loosely on purpose: hermes
+/// moves this wording between releases.
+fn gateway_park_refusal(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    lowered.contains("gateway inaccessible")
+        || lowered.contains("profile parked")
+        || lowered.contains("only one profile exists")
+}
+
+/// Best-effort `hermes gateway restart` on the default home. The verb covers
+/// both topologies: it SIGTERMs a resident daemon (argv scan, no service
+/// needed) and restarts the installed service when there is one. HERMES_HOME
+/// is dropped afterwards so the verb targets the host gateway, not the
+/// workspace profile — the stale verdict lives in the default home's
+/// gateway_state.json, and a fresh boot re-counts the profiles that exist now.
+fn restart_hermes_gateway(overlay: &HashMap<String, String>) -> bool {
+    let bin = std::env::var("AGENT_DOCTOR_HERMES_BIN").unwrap_or_else(|_| "hermes".into());
+    let mut cmd = command_from_cli(&bin);
+    cmd.arg("gateway")
+        .arg("restart")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    apply_overlay_env(&mut cmd, overlay);
+    cmd.env_remove("HERMES_HOME");
+    let Ok(mut child) = cmd.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(_) => return false,
+        }
+    }
+}
 
 pub struct HermesAskBackend;
 
@@ -108,7 +160,7 @@ fn run_hermes(
         on_event(event);
     };
 
-    let result = super::pump::pump_oneshot(
+    let mut result = super::pump::pump_oneshot(
         &session_id,
         &mut child,
         timeout_sec,
@@ -117,6 +169,37 @@ fn run_hermes(
         &mut HermesPump::default(),
         &mut emit,
     );
+
+    // The gateway-park refusal kills the turn at the attach (~100 ms, nothing
+    // streamed). Restart the host gateway once and run this same session
+    // again — never a loop: whatever the retry returns is what gets reported.
+    if let Ok((PromptSessionStatus::Failed, _, ref stdout, ref stderr, _)) = result {
+        if !cancel.is_requested() && gateway_park_refusal(&combine_output(stdout, stderr)) {
+            emit(PromptSessionEvent::Status {
+                session_id: session_id.clone(),
+                phase: "setup".into(),
+                message: HERMES_GATEWAY_RESTARTING.into(),
+            });
+            restart_hermes_gateway(&overlay);
+            if let Ok(mut guard) = display_text.lock() {
+                guard.clear();
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            let mut retry_cmd =
+                build_hermes_command(&prompt_text, &cwd, resume_session_id, yolo, &overlay)?;
+            child = retry_cmd.spawn().context("failed to spawn hermes")?;
+            result = super::pump::pump_oneshot(
+                &session_id,
+                &mut child,
+                timeout_sec,
+                cancel.handle(),
+                "failed waiting for hermes ask",
+                &mut HermesPump::default(),
+                &mut emit,
+            );
+        }
+    }
 
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
@@ -869,6 +952,155 @@ exit 0
         assert!(!evs
             .iter()
             .any(|e| matches!(e, PromptSessionEvent::StdoutLine { .. })));
+    }
+
+    #[test]
+    fn gateway_park_refusal_matches_the_wordings_hermes_shipped() {
+        // What the customer's 0.22+ prints on stdout.
+        assert!(gateway_park_refusal(
+            "Gateway inaccessible: profile parked (only one profile exists (nothing to multiplex))"
+        ));
+        // Older split wordings, matched loosely on purpose.
+        assert!(gateway_park_refusal(
+            "Gateway state: inaccessible (only one profile exists (nothing to multiplex))"
+        ));
+        assert!(!gateway_park_refusal(
+            "LLM request failed: network connection was interrupted."
+        ));
+        assert!(!gateway_park_refusal("hermes-ok"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_park_refusal_restarts_gateway_and_retries_once() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "parking-hermes",
+            r#"#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "$1" = "gateway" ] && [ "$2" = "restart" ]; then
+  echo restarted >> "$DIR/commands.log"
+  touch "$DIR/restarted"
+  exit 0
+fi
+echo "$1 $2" >> "$DIR/commands.log"
+if [ -f "$DIR/restarted" ]; then
+  echo '{"type":"system","subtype":"init","session_id":"sid-after-restart"}'
+  echo '{"type":"result","session_id":"sid-after-restart","exit_code":0,"text":"recovered"}'
+  exit 0
+fi
+echo '{"type":"system","subtype":"init","model":"","session_id":""}'
+echo '{"type":"result","session_id":"","exit_code":1,"text":"","error":"Gateway inaccessible: profile parked (only one profile exists (nothing to multiplex))"}'
+exit 1
+"#,
+        );
+        std::env::set_var("AGENT_DOCTOR_HERMES_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = HermesAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "hermes".into(),
+                    prompt: "hello".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 30,
+                    dangerously_skip_permissions: true,
+                    full_auto: false,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
+                },
+                PromptSessionCancel::new(),
+                None,
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_HERMES_BIN");
+        assert_eq!(report.status, PromptSessionStatus::Succeeded);
+        assert_eq!(
+            report.runtime_thread_id.as_deref(),
+            Some("sid-after-restart")
+        );
+        let log = fs::read_to_string(dir.path().join("commands.log")).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.trim() == "restarted")
+                .count(),
+            1,
+            "restart exactly once, got: {log}"
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Status { message, .. } if message.contains("重启 Hermes 网关")
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromptSessionEvent::Delta { text, .. } if text.contains("recovered")
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_that_survives_the_restart_fails_without_looping() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "always-parking-hermes",
+            r#"#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "$1" = "gateway" ] && [ "$2" = "restart" ]; then
+  echo restarted >> "$DIR/commands.log"
+  exit 0
+fi
+echo "$1 $2" >> "$DIR/commands.log"
+echo '{"type":"result","session_id":"","exit_code":1,"text":"","error":"Gateway inaccessible: profile parked (only one profile exists (nothing to multiplex))"}'
+exit 1
+"#,
+        );
+        std::env::set_var("AGENT_DOCTOR_HERMES_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = HermesAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "hermes".into(),
+                    prompt: "hello".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 30,
+                    dangerously_skip_permissions: true,
+                    full_auto: false,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
+                },
+                PromptSessionCancel::new(),
+                None,
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_HERMES_BIN");
+        assert_eq!(report.status, PromptSessionStatus::Failed);
+        assert!(report.log_excerpt.contains("Gateway inaccessible"));
+        let log = fs::read_to_string(dir.path().join("commands.log")).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.trim() == "restarted")
+                .count(),
+            1,
+            "still exactly one restart, got: {log}"
+        );
     }
 
     #[test]

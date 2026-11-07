@@ -99,14 +99,22 @@ pub struct DeepRepairSummary {
 /// compatible and Anthropic protocols work here; without an official sign-in
 /// the desktop points the user at login.
 pub fn deep_diagnose_llm_config() -> Result<LlmConfig> {
-    official_llm_config().map_err(|error| {
+    // One deep-diagnose run bills the monthly gift once, like one doctor chat
+    // turn: every round of the run carries the same `x-ad-turn` id.
+    let mut config = official_llm_config().map_err(|error| {
         let message = format!("{error:#}");
         if message.contains(OFFICIAL_PROVIDER_MISSING) {
             anyhow::anyhow!("{DEEP_DIAGNOSE_NO_PROVIDER}: official account is not signed in")
         } else {
             anyhow::anyhow!(message)
         }
-    })
+    })?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    config.turn_id = Some(format!("deep-diagnose-{nanos}"));
+    Ok(config)
 }
 
 pub fn run_deep_diagnose_chat(

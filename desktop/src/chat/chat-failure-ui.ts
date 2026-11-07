@@ -86,6 +86,8 @@ function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): st
       return t("chat.fail.actionOfficialLogin");
     case "officialBuy":
       return t("chat.fail.actionOfficialBuy");
+    case "modelMenu":
+      return t("chat.fail.actionModelMenu");
   }
 }
 
@@ -201,6 +203,23 @@ async function runChatFailureAction(
     if (account) {
       account.click();
       writeActionResult(actions, t("chat.fail.openedOfficialLogin"), "muted");
+    } else {
+      try {
+        await focusMainTab({ tab: "provider" });
+        writeActionResult(actions, t("chat.fail.openedProvider"), "muted");
+      } catch {
+        writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+      }
+    }
+    return;
+  }
+  if (action === "modelMenu") {
+    // The composer's model button owns model switching; opening it puts every
+    // choice one click away, including the image-capable ones.
+    const modelBtn = document.querySelector<HTMLButtonElement>("#chat-model-btn");
+    if (modelBtn) {
+      modelBtn.click();
+      writeActionResult(actions, t("chat.fail.openedModelMenu"), "muted");
     } else {
       try {
         await focusMainTab({ tab: "provider" });

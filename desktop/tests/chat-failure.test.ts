@@ -132,6 +132,61 @@ async function main() {
   );
   assert(resets?.kind === "network", "a connection reset without a model refusal stays a network failure");
 
+  const dshNoKey = explainChatFailure(
+    'Internal error: turn failed: llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_API_KEY through the credentials service',
+  );
+  assert(dshNoKey?.kind === "provider_key", "dsh without its key is a provider setup failure");
+  assert(dshNoKey!.actions.length === 1 && dshNoKey!.actions[0] === "provider", "dsh no-key offers the provider page");
+  assert(dshNoKey!.message.includes("购买额度"), "dsh no-key says the official purchased quota can cover it");
+  assert(!dshNoKey!.message.includes("deepseek-official"), "dsh no-key copy hides the raw route id");
+
+  const parked = explainChatFailure(
+    "Gateway inaccessible: profile parked (only one profile exists (nothing to multiplex))",
+  );
+  assert(parked?.kind === "provider_key", "a parked profile is a provider-shaped failure");
+  assert(parked!.actions.length === 1 && parked!.actions[0] === "askAgain", "parked profile offers asking again");
+  assert(parked!.message.includes("网关"), "parked copy names the gateway");
+  assert(
+    !parked!.message.includes("multiplex") && !parked!.message.includes("profile parked"),
+    "parked copy hides the raw hermes wording",
+  );
+
+  const noVision = explainChatFailure(
+    'Error: cannot read "/tmp/agent-doctor-screen-1793345468251.png" as an image: model "deepseek-v4-flash" does not declare image input; switch to an image-capable model to read images',
+  );
+  assert(
+    noVision?.kind === "model_no_vision",
+    "a text-only model reading a screenshot is a no-vision failure",
+  );
+  assert(
+    noVision!.actions.includes("modelMenu"),
+    "no-vision offers the model menu switch",
+  );
+  assert(
+    noVision!.actions.includes("askAgain"),
+    "no-vision keeps ask-again for tasks that need no pictures",
+  );
+  assert(
+    !noVision!.message.includes("deepseek") && !noVision!.message.includes("/tmp"),
+    "no-vision copy hides the raw model id and screenshot path",
+  );
+
+  const sseDropped = explainChatFailure(
+    "Internal error: turn failed: SSE stream ended without [DONE]",
+  );
+  assert(
+    sseDropped?.kind === "stream_interrupted",
+    "a mid-stream [DONE] miss is a stream interruption",
+  );
+  assert(
+    sseDropped!.actions.includes("askAgain"),
+    "a stream drop offers asking again",
+  );
+  assert(
+    !sseDropped!.message.includes("SSE") && !sseDropped!.message.includes("DONE"),
+    "stream drop copy hides the wire detail",
+  );
+
   const unknown = explainChatFailure("unexpected status 500 Internal Server Error");
   assert(unknown?.kind === "unknown", "bare 500 stays unknown");
   assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");

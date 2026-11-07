@@ -280,6 +280,8 @@ export type ChatFailureKind =
   | "rate_limit"
   | "session_expired"
   | "account_model"
+  | "model_no_vision"
+  | "stream_interrupted"
   | "provider_key"
   | "provider_url"
   | "provider_model"
@@ -294,7 +296,8 @@ export type ChatFailureAction =
   | "askAgain"
   | "relogin"
   | "officialLogin"
-  | "officialBuy";
+  | "officialBuy"
+  | "modelMenu";
 
 export type ChatFailureExplain = {
   kind: ChatFailureKind;
@@ -427,6 +430,17 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
     };
   }
 
+  // Computer use / a picture file on a text-only model: the harness refuses
+  // to turn the file into an image block. Switching models is the only fix.
+  if (/does not declare image input|cannot read .* as an image/.test(lower)) {
+    return {
+      kind: "model_no_vision",
+      message: t("chat.fail.modelNoVision.message"),
+      next: t("chat.fail.modelNoVision.next"),
+      actions: ["modelMenu", "askAgain"],
+    };
+  }
+
   const account = explainLlmAccountBlock(text);
 
   if (isExpiredSignIn(lower)) {
@@ -497,6 +511,45 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       kind: "account_model",
       message: t("chat.fail.accountModel.message"),
       next: t("chat.fail.accountModel.next"),
+      actions: ["askAgain"],
+    };
+  }
+
+  // DeepSeek Harness talks to DeepSeek with a key of its own: a saved
+  // api.deepseek.com provider, the signed-in official account's purchased
+  // quota, or its own sign-in. None was wired, so the turn died before any
+  // model call ("no API key for provider route ...").
+  if (lower.includes("no api key for provider route")) {
+    return {
+      kind: "provider_key",
+      message: t("chat.fail.dshNeedsKey.message"),
+      next: t("chat.fail.dshNeedsKey.next"),
+      actions: ["provider"],
+    };
+  }
+
+  // Hermes's resident gateway refused this session's profile ("profile parked
+  // (only one profile exists)"): the gateway booted before the profile
+  // existed. The ask already restarted the gateway and retried once; this
+  // copy covers a retry that still failed.
+  if (/gateway inaccessible|profile parked|only one profile exists/.test(lower)) {
+    return {
+      kind: "provider_key",
+      message: t("chat.fail.hermesGateway.message"),
+      next: t("chat.fail.hermesGateway.next"),
+      actions: ["askAgain"],
+    };
+  }
+
+  // The harness's turn died mid-stream: the model service closed the reply
+  // before the [DONE] sentinel. Part of the turn (thinking, tool steps) may
+  // already be on screen, so the copy says the turn stopped, not that
+  // nothing ran.
+  if (/sse stream ended without/.test(lower)) {
+    return {
+      kind: "stream_interrupted",
+      message: t("chat.fail.streamDrop.message"),
+      next: t("chat.fail.streamDrop.next"),
       actions: ["askAgain"],
     };
   }

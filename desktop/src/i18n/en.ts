@@ -742,6 +742,20 @@ export const en = {
     "chat.fail.openedOfficialBuy": "Opened the official quota page.",
     "chat.fail.agentQuotaOut.message": "The built-in agent's monthly free calls are used up.",
     "chat.fail.agentQuotaOut.next": "Wait for the monthly reset, buy official quota, or switch to your own provider in the model menu.",
+    "chat.fail.modelNoVision.message": "This model cannot see images, so screenshots and picture files stay unread.",
+    "chat.fail.modelNoVision.next": "Tap Switch model and pick one that sees images (for example deepseek-v4.1-flash), then ask again.",
+    "chat.fail.actionModelMenu": "Switch model",
+    "chat.fail.openedModelMenu": "The model menu is open — pick a model that sees images.",
+    "chat.fail.dshNeedsKey.message":
+      "DeepSeek Harness has no usable model key, so this turn could not start. It only accepts DeepSeek keys: the signed-in official account's purchased quota, or your own DeepSeek provider.",
+    "chat.fail.dshNeedsKey.next":
+      "Under Providers, sign in to the official account (purchased quota required) or add a DeepSeek (api.deepseek.com) provider, then send again.",
+    "chat.fail.hermesGateway.message":
+      "Hermes's resident gateway is not serving this session's profile (it booted before the profile existed), so the ask was refused. A gateway restart and one retry already ran.",
+    "chat.fail.hermesGateway.next":
+      "Send the message again. If it still fails, run hermes gateway restart in a terminal and retry.",
+    "chat.fail.streamDrop.message": "The model service cut the reply stream short, so this turn did not finish.",
+    "chat.fail.streamDrop.next": "Send it again. If it keeps happening, switch models in the model menu or check the network and retry.",
     "chat.fail.sessionExpired.message": "The sign-in expired, so this turn got no reply.",
     "chat.fail.sessionExpired.next": "Tap Sign in again and finish it in the browser.",
     "chat.fail.actionRelogin": "Sign in again",

@@ -95,7 +95,7 @@ fn probe_api_key(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) 
             format!("{DEEPSEEK_API_KEY_ENV} is configured via {source}")
         } else {
             format!(
-                "{DEEPSEEK_API_KEY_ENV} is missing from Agent Doctor wiring, the process environment, and {}",
+                "{DEEPSEEK_API_KEY_ENV} is missing from Agent Doctor wiring (no saved api.deepseek.com provider and no signed-in official account with purchased quota), the process environment, and {} — DeepSeek Harness needs one of those to call a model",
                 env_path.display()
             )
         },

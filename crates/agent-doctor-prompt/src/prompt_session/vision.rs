@@ -62,11 +62,13 @@ pub(crate) fn model_sees_images(model: &str) -> bool {
     if id.is_empty() {
         return false;
     }
-    // DeepSeek: V4.1 Flash is natively multimodal; the old flash names route to it.
+    // DeepSeek: V4.1 Flash is natively multimodal; the rolling `deepseek-flash`
+    // alias tracks it. Versioned `deepseek-v4-flash` is the older text-only
+    // generation — the official dsh harness refuses to declare image input for
+    // it, so a picture here only ends in a failed read.
     // `deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-pro` stay text-only.
     if id.starts_with("deepseek") {
         return id.starts_with("deepseek-flash")
-            || id.starts_with("deepseek-v4-flash")
             || id.contains("v4-1-flash")
             || id.contains("v4.1-flash")
             || id.contains("vision")
@@ -326,7 +328,10 @@ mod tests {
     #[test]
     fn deepseek_flash_sees_images_but_pro_and_chat_do_not() {
         assert!(model_sees_images("deepseek-flash"));
-        assert!(model_sees_images("deepseek-v4-flash"));
+        assert!(
+            !model_sees_images("deepseek-v4-flash"),
+            "dsh does not declare image input for the old v4 flash"
+        );
         assert!(model_sees_images("deepseek-v4-flash-vision-exp"));
         assert!(model_sees_images("deepseek-v4-1-flash-261017"));
         assert!(model_sees_images("MiniMax-M3.1-Flash"));

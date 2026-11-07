@@ -744,6 +744,20 @@ export const zh = {
     "chat.fail.openedOfficialBuy": "已打开官方额度购买页。",
     "chat.fail.agentQuotaOut.message": "本月内置 Agent 免费次数已用完。",
     "chat.fail.agentQuotaOut.next": "等下月重置、购买官方额度，或在模型菜单里换你自己接的服务商。",
+    "chat.fail.modelNoVision.message": "这个模型看不了图片，屏幕截图和图片文件都读不了。",
+    "chat.fail.modelNoVision.next": "点「换模型」选一个支持看图的模型（比如 deepseek-v4.1-flash），再发一次。",
+    "chat.fail.actionModelMenu": "换模型",
+    "chat.fail.openedModelMenu": "模型菜单已打开，选一个支持看图的模型。",
+    "chat.fail.dshNeedsKey.message":
+      "DeepSeek Harness 没有可用的模型密钥，这一轮没跑起来。它只认 DeepSeek 的密钥：官方账号的购买额度，或你自己的 DeepSeek 服务商。",
+    "chat.fail.dshNeedsKey.next":
+      "到「服务商」登录官方账号（需有购买额度），或加一个 api.deepseek.com 的 DeepSeek 服务商，然后再发。",
+    "chat.fail.hermesGateway.message":
+      "Hermes 的常驻网关没有服务这个会话的配置（网关启动得比配置早），这次提问被拒了。刚才已经自动重启网关并重试过一次。",
+    "chat.fail.hermesGateway.next":
+      "再发一次试试；还不行就在终端跑 hermes gateway restart，然后再发。",
+    "chat.fail.streamDrop.message": "模型服务把回复流中断了，这一轮没走完。",
+    "chat.fail.streamDrop.next": "再发一次。总是这样就到模型菜单换个模型，或检查网络后再发。",
     "chat.fail.sessionExpired.message": "登录过期了，这一轮没问到。",
     "chat.fail.sessionExpired.next": "点「重新登录」，在浏览器里再登一次。",
     "chat.fail.actionRelogin": "重新登录",

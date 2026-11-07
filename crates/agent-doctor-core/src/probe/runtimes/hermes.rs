@@ -175,6 +175,7 @@ fn probe_env_permissions(path: &Path, checks: &mut Vec<ProbeCheck>) {
 fn probe_env_permissions(_path: &Path, _checks: &mut Vec<ProbeCheck>) {}
 
 pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
+    probe_gateway_serving(checks);
     let provider_index = facts.iter().position(|fact| fact.key == "hermes.provider");
     let configured_provider = provider_index
         .and_then(|index| facts.get(index))
@@ -241,6 +242,48 @@ pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<Diagnosti
             probe_required_key(&env_key, checks, facts);
         }
     }
+}
+
+/// A resident gateway that booted before Agent Doctor's workspace profiles
+/// existed records "only one profile exists" and refuses those profiles
+/// ("profile parked") on every Ask until it restarts. The verdict survives in
+/// the default home's gateway_state.json, so the file alone names the trap —
+/// a not-running gateway leaves no file and gets no check.
+fn probe_gateway_serving(checks: &mut Vec<ProbeCheck>) {
+    probe_gateway_serving_at(
+        &crate::adapters::util::home_join(".hermes/gateway_state.json"),
+        checks,
+    );
+}
+
+fn probe_gateway_serving_at(path: &Path, checks: &mut Vec<ProbeCheck>) {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(state) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
+    let Some(reason) = gateway_standalone_reason(&state) else {
+        return;
+    };
+    checks.push(ProbeCheck::new(
+        "hermes.gateway.serving",
+        "Hermes gateway serves Ask profiles",
+        ProbeStatus::Warn,
+        ProbeSeverity::Warning,
+        format!(
+            "the resident gateway went standalone ({reason}); Ask profiles are refused \
+             (profile parked) until it restarts — run `hermes gateway restart`"
+        ),
+        SensitivityLevel::ConfigShape,
+    ));
+}
+
+/// The recorded standalone verdict. Hermes clears the field whenever a boot
+/// ends up serving profiles, so an empty or absent field means healthy.
+fn gateway_standalone_reason(state: &serde_json::Value) -> Option<String> {
+    let reason = state.get("multiplex_standalone_reason")?.as_str()?.trim();
+    (!reason.is_empty()).then(|| reason.to_string())
 }
 
 /// What the `~/.hermes/.env` scan concluded about the required key.
@@ -450,5 +493,51 @@ mod tests {
             assert_eq!(checks[0].status, ProbeStatus::Pass, "verdict {verdict:?}");
             assert!(checks[0].message.contains("process environment"));
         }
+    }
+
+    #[test]
+    fn gateway_standalone_verdict_is_the_only_warn_trigger() {
+        let parked: serde_json::Value = serde_json::from_str(
+            r#"{"multiplex_standalone_reason": "only one profile exists (nothing to multiplex)"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            gateway_standalone_reason(&parked).as_deref(),
+            Some("only one profile exists (nothing to multiplex)")
+        );
+        // A gateway that serves profiles clears the field; absence is healthy too.
+        let serving: serde_json::Value =
+            serde_json::from_str(r#"{"multiplex_standalone_reason": null}"#).unwrap();
+        assert_eq!(gateway_standalone_reason(&serving), None);
+        let no_field: serde_json::Value = serde_json::from_str(r#"{"pid": 12}"#).unwrap();
+        assert_eq!(gateway_standalone_reason(&no_field), None);
+        let empty: serde_json::Value =
+            serde_json::from_str(r#"{"multiplex_standalone_reason": "  "}"#).unwrap();
+        assert_eq!(gateway_standalone_reason(&empty), None);
+    }
+
+    #[test]
+    fn a_recorded_standalone_verdict_becomes_a_warn_check() {
+        let mut checks = Vec::new();
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("gateway_state.json");
+        std::fs::write(
+            &state,
+            r#"{"multiplex_standalone_reason": "only one profile exists (nothing to multiplex)"}"#,
+        )
+        .unwrap();
+        probe_gateway_serving_at(&state, &mut checks);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, ProbeStatus::Warn);
+        assert!(checks[0].message.contains("hermes gateway restart"));
+
+        // No file (gateway not resident) and a healthy verdict stay silent.
+        let mut checks = Vec::new();
+        probe_gateway_serving_at(&dir.path().join("missing.json"), &mut checks);
+        assert!(checks.is_empty());
+        let mut checks = Vec::new();
+        std::fs::write(&state, r#"{"multiplex_standalone_reason": null}"#).unwrap();
+        probe_gateway_serving_at(&state, &mut checks);
+        assert!(checks.is_empty());
     }
 }

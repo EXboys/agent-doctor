@@ -318,6 +318,24 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
                     }
                 }
             }
+            // The purchased official quota (Token-metered) also feeds DeepSeek
+            // Harness: dsh appends `/chat/completions` to `DEEPSEEK_BASE_URL`
+            // and sends the key as a Bearer token, so the official row pairs
+            // with it like any OpenAI client. The per-turn-billed gift channel
+            // stays built-in-agent only. A user's own DeepSeek provider above
+            // wins; dsh's own sign-in beats both — its credentials service is
+            // authoritative over the launching environment.
+            if env.get("DEEPSEEK_API_KEY").is_none() {
+                let official = crate::setup::load_personal_provider(
+                    crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID,
+                )
+                .ok()
+                .flatten();
+                if let Some((url, key)) = deepseek_harness_official_pair(official.as_ref()) {
+                    env.insert("DEEPSEEK_API_KEY".into(), key);
+                    env.insert("DEEPSEEK_BASE_URL".into(), url);
+                }
+            }
             if let Some(active) = providers.iter().find(|p| p.active) {
                 install_personal_ask_env(
                     env,
@@ -331,6 +349,21 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
             }
         }
     }
+}
+
+/// The (endpoint, key) pair the purchased official row contributes to DeepSeek
+/// Harness. Both halves must be present: dsh rejects a key without a route,
+/// and a bare URL would point it back at its own public API default.
+fn deepseek_harness_official_pair(
+    entry: Option<&crate::setup::PersonalProviderEntry>,
+) -> Option<(String, String)> {
+    let entry = entry?;
+    let key = entry.api_key.trim();
+    let url = entry.url.trim();
+    if key.is_empty() || url.is_empty() {
+        return None;
+    }
+    Some((url.to_string(), key.to_string()))
 }
 
 pub fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
@@ -481,8 +514,11 @@ pub fn resolve_deepseek_harness_overlay(
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    // DeepSeek Harness only talks to DeepSeek. A DeepSeek key must never be
-    // paired with another provider's address, or the other way round.
+    // DeepSeek Harness only talks to DeepSeek-endpoints. A DeepSeek key must
+    // never be paired with another provider's address, or the other way round:
+    // the direct pair arrives already matched (a saved DeepSeek provider, or
+    // the official row that merge pairs with its own license), and the hermes
+    // fallback adopts a URL only when it is api.deepseek.com itself.
     if direct_key.is_some() {
         return (direct_url, direct_key);
     }
@@ -1107,6 +1143,39 @@ mod tests {
         env.insert("OPENAI_API_KEY".into(), "sk-test".into());
 
         assert!(resolve_claude_overlay(&env).is_none());
+    }
+
+    #[test]
+    fn official_row_feeds_deepseek_harness_only_when_complete() {
+        let entry = |url: &str, key: &str| crate::setup::PersonalProviderEntry {
+            id: crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID.into(),
+            name: "官方".into(),
+            url: url.into(),
+            api_key: key.into(),
+            model: "deepseek-flash".into(),
+            protocol: "openai".into(),
+        };
+        // A signed-in official row pairs its own endpoint with its own license.
+        assert_eq!(
+            deepseek_harness_official_pair(Some(&entry(
+                "https://agentdoctor.cn/api/v1/official",
+                "lic-1"
+            ))),
+            Some((
+                "https://agentdoctor.cn/api/v1/official".to_string(),
+                "lic-1".to_string()
+            ))
+        );
+        // No row, or a row without a license (not signed in / not purchased):
+        // nothing to inject, dsh falls back to its own sign-in.
+        assert_eq!(deepseek_harness_official_pair(None), None);
+        assert_eq!(
+            deepseek_harness_official_pair(Some(&entry(
+                "https://agentdoctor.cn/api/v1/official",
+                "  "
+            ))),
+            None
+        );
     }
 
     #[test]
