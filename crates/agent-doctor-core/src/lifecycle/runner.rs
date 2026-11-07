@@ -144,11 +144,15 @@ where
     #[cfg(windows)]
     let mut command = {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x00000008;
+        // CREATE_NO_WINDOW, not DETACHED_PROCESS: a detached cmd has no console
+        // to hand down, so every console program it runs (powershell, npm, git)
+        // allocates its own visible terminal window. CREATE_NO_WINDOW gives the
+        // whole install tree one hidden console to inherit.
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mut command = Command::new("cmd"); // raw-spawn-ok
         command
             .args(["/C", command_line])
-            .creation_flags(DETACHED_PROCESS);
+            .creation_flags(CREATE_NO_WINDOW);
         command
     };
 

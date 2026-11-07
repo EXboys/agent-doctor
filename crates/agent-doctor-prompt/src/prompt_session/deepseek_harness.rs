@@ -5,7 +5,7 @@
 //! stdin/stdout: `session/new` or `session/resume`, then `session/prompt`.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -66,6 +66,8 @@ fn run_deepseek_harness(
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
+    #[cfg(windows)]
+    reject_windows_drive_root(&cwd)?;
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let resume_session_id = options
         .resume_thread_id
@@ -307,7 +309,78 @@ fn build_command(cwd: &Path, overlay: &std::collections::HashMap<String, String>
         .stderr(Stdio::piped());
     apply_overlay_env(&mut command, overlay);
     apply_deepseek_harness_env(&mut command, overlay);
+    #[cfg(windows)]
+    apply_safe_child_temp(&mut command);
     command
+}
+
+/// `C:`, `C:\`, `C:/` — the drive-root spellings Node's `fs.realpath` cannot
+/// resolve (`EISDIR: illegal operation on a directory, realpath 'C:'`,
+/// nodejs/node#6861, still open in libuv). Pure string shape, so it holds the
+/// same meaning on every platform and stays testable off-Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_windows_drive_root(path: &Path) -> bool {
+    let Some(text) = path.to_str() else {
+        return false;
+    };
+    let trimmed = text.trim().trim_matches(['\\', '/']);
+    trimmed.len() == 2 && trimmed.as_bytes()[1] == b':'
+}
+
+/// dsh's Windows sandbox realpaths `os.tmpdir()` — straight from the child's
+/// TEMP/TMP env — once per turn, without catching errors. A missing or
+/// degenerate value fails every turn before the model can answer.
+#[cfg(windows)]
+fn apply_safe_child_temp(command: &mut Command) {
+    for key in ["TEMP", "TMP"] {
+        if child_temp_is_usable(std::env::var_os(key).as_deref()) {
+            continue;
+        }
+        if let Some(temp) = safe_windows_temp_dir() {
+            command.env(key, temp);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn child_temp_is_usable(raw: Option<&std::ffi::OsStr>) -> bool {
+    let Some(raw) = raw else {
+        return false;
+    };
+    let path = PathBuf::from(raw.to_string_lossy().trim());
+    path.is_absolute() && path.is_dir() && !is_windows_drive_root(&path)
+}
+
+#[cfg(windows)]
+fn safe_windows_temp_dir() -> Option<PathBuf> {
+    let candidate = match std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        Some(local) if local.is_absolute() => local.join("Temp"),
+        _ => {
+            let home = std::env::var_os("USERPROFILE")?;
+            PathBuf::from(home)
+                .join("AppData")
+                .join("Local")
+                .join("Temp")
+        }
+    };
+    if !candidate.is_dir() {
+        std::fs::create_dir_all(&candidate).ok()?;
+    }
+    candidate.is_dir().then_some(candidate)
+}
+
+/// The chat turns fail with a Node `realpath` crash before anything else when
+/// the workspace is a whole drive; dsh cannot run there, so say so instead.
+#[cfg(windows)]
+fn reject_windows_drive_root(cwd: &Path) -> anyhow::Result<()> {
+    if is_windows_drive_root(cwd) {
+        anyhow::bail!(
+            "DeepSeek 不能把整个磁盘（{}）当项目目录，它启动时会检查这个路径并直接报错。\
+             请在聊天里「添加项目」选一个具体的文件夹，把会话固定到它上面，再发一次。",
+            cwd.display()
+        );
+    }
+    Ok(())
 }
 
 struct TurnOutcome {
@@ -981,11 +1054,25 @@ fn acp_content_text(content: Option<&Value>) -> String {
         .unwrap_or_default()
 }
 
+/// dsh keeps this string in its session records, so hand it the plain Win32
+/// spelling: `fs::canonicalize` on Windows answers with a verbatim `\\?\C:\…`
+/// prefix, which dsh's Node side mishandles on drive roots and stores forever.
 fn acp_cwd(cwd: &Path) -> String {
-    std::fs::canonicalize(cwd)
-        .unwrap_or_else(|_| cwd.to_path_buf())
-        .display()
-        .to_string()
+    let canonical = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    strip_windows_verbatim(&canonical).display().to_string()
+}
+
+/// Pure text work on the verbatim spellings `fs::canonicalize` emits, kept
+/// off-`cfg` so the drive-root class stays testable on every platform.
+fn strip_windows_verbatim(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest.to_string());
+    }
+    path.to_path_buf()
 }
 
 fn tool_arguments(raw: &Value) -> String {
@@ -1193,6 +1280,45 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    /// Every spelling Node's open `realpath` bug (nodejs/node#6861) crashes on,
+    /// next to the shapes a normal project folder takes.
+    #[test]
+    fn drive_root_spellings_are_caught_and_normal_folders_pass() {
+        for root in ["C:", r"C:\", "C:/", "c:", r"D:\ ", " C: "] {
+            assert!(is_windows_drive_root(Path::new(root)), "{root}");
+        }
+        for real in [
+            "/Users/airlu/project",
+            r"C:\Users\airlu",
+            r"C:\Users\airlu\AppData\Local\Temp",
+            "d:/work",
+        ] {
+            assert!(!is_windows_drive_root(Path::new(real)), "{real}");
+        }
+        assert!(!is_windows_drive_root(Path::new("")));
+    }
+
+    #[test]
+    fn acp_cwd_gives_dsh_plain_windows_spellings() {
+        // fs::canonicalize answers verbatim on Windows; dsh must not see it.
+        assert_eq!(
+            strip_windows_verbatim(Path::new(r"\\?\C:\Users\airlu\project")),
+            PathBuf::from(r"C:\Users\airlu\project")
+        );
+        assert_eq!(
+            strip_windows_verbatim(Path::new(r"\\?\UNC\server\share\proj")),
+            PathBuf::from(r"\\server\share\proj")
+        );
+        assert_eq!(
+            strip_windows_verbatim(Path::new(r"C:\Users\airlu")),
+            PathBuf::from(r"C:\Users\airlu")
+        );
+        assert_eq!(
+            strip_windows_verbatim(Path::new("/tmp/work")),
+            PathBuf::from("/tmp/work")
         );
     }
 
