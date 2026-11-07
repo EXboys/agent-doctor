@@ -286,7 +286,15 @@ export type ChatFailureKind =
   | "network"
   | "unknown";
 
-export type ChatFailureAction = "provider" | "repair" | "native" | "privacy" | "askAgain" | "relogin";
+export type ChatFailureAction =
+  | "provider"
+  | "repair"
+  | "native"
+  | "privacy"
+  | "askAgain"
+  | "relogin"
+  | "officialLogin"
+  | "officialBuy";
 
 export type ChatFailureExplain = {
   kind: ChatFailureKind;
@@ -387,6 +395,27 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
   const text = raw.trim();
   if (!text) return null;
   const lower = text.toLowerCase();
+
+  // Built-in doctor agent: the monthly gift ran out (server 402).
+  if (lower.includes("insufficient_quota") && lower.includes("免费次数已用完")) {
+    const served = /"message"\s*:\s*"([^"]+)"/.exec(raw)?.[1] ?? "";
+    return {
+      kind: "provider_key",
+      message: served || t("chat.fail.agentQuotaOut.message"),
+      next: t("chat.fail.agentQuotaOut.next"),
+      actions: ["officialBuy"],
+    };
+  }
+
+  // Built-in doctor agent: not signed in to the official account.
+  if (lower.includes("doctor_needs_login")) {
+    return {
+      kind: "provider_key",
+      message: t("chat.fail.doctorNeedsLogin.message"),
+      next: t("chat.fail.doctorNeedsLogin.next"),
+      actions: ["officialLogin"],
+    };
+  }
 
   // Built-in doctor agent: no model service wired yet.
   if (lower.includes("doctor_no_provider")) {

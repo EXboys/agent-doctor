@@ -801,6 +801,10 @@ export function setBusy(next: boolean, chatSessionId?: string | null): void {
     chatState.runningChatSessionId = null;
     settleActivity();
     finishToolGroup(false);
+    // The built-in agent just spent one of its official quota calls.
+    if (chatState.currentRuntime === "doctor") {
+      chatState.modelPicker?.refreshOfficialQuota();
+    }
     if (chatState.assistantBubble?.isConnected) {
       chatState.assistantBubble.classList.remove("is-streaming");
       syncAssistantCopyButton(chatState.assistantBubble);

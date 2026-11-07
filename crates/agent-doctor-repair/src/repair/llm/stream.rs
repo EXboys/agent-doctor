@@ -160,6 +160,18 @@ fn stream_client() -> Result<reqwest::blocking::Client> {
         .context("failed to build LLM HTTP client")
 }
 
+/// Turn-scoped billing header: the official gateway debits the monthly gift
+/// once per `x-ad-turn`, so the follow-up rounds of one doctor turn ride free.
+fn turn_header(config: &LlmConfig) -> Vec<(&'static str, String)> {
+    config
+        .turn_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| vec![("x-ad-turn", id.to_string())])
+        .unwrap_or_default()
+}
+
 /// Returns `Ok(None)` when the request could not start streaming at all.
 fn post_stream(
     client: &reqwest::blocking::Client,
@@ -280,12 +292,9 @@ fn openai_chat_stream(
         body["tools"] = tools.clone();
         body["tool_choice"] = json!("auto");
     }
-    let reader = match post_stream(
-        &client,
-        &config.api_url,
-        vec![("Authorization", format!("Bearer {}", config.api_key))],
-        body,
-    )? {
+    let mut headers = vec![("Authorization", format!("Bearer {}", config.api_key))];
+    headers.extend(turn_header(config));
+    let reader = match post_stream(&client, &config.api_url, headers, body)? {
         Some(reader) => reader,
         None => return Ok(None),
     };
@@ -435,7 +444,7 @@ pub(crate) fn anthropic_chat_stream(
     let client = stream_client()?;
     let body = anthropic::build_stream_request_body(config, messages, tools);
     let url = anthropic::messages_url(&config.api_url);
-    let headers = vec![
+    let mut headers = vec![
         ("x-api-key", config.api_key.clone()),
         (
             "anthropic-version",
@@ -443,6 +452,7 @@ pub(crate) fn anthropic_chat_stream(
         ),
         ("Authorization", format!("Bearer {}", config.api_key)),
     ];
+    headers.extend(turn_header(config));
     let reader = match post_stream(&client, &url, headers, body)? {
         Some(reader) => reader,
         None => return Ok(None),

@@ -1,12 +1,24 @@
 
+import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
-import { nativeAccountStatus, refreshSubscriptionModels } from "../ipc";
+import { nativeAccountStatus, refreshSubscriptionModels, teamupsAccountStatus } from "../ipc";
+import {
+  builtinQuotaLabel,
+  formatOfficialTokens,
+  formatResetDate,
+  OFFICIAL_GIFT_MODEL,
+  OFFICIAL_PROVIDER_ID,
+  officialQuotaState,
+} from "../official-quota";
 import { modelsForProviderUrl, providerChipForUrl } from "../provider-models";
+import { teamupsAccountPageUrl } from "../teamups-site";
 import type {
   NativeAccountRow,
   PersonalProviderListItem,
+  TeamupsAccountStatus,
 } from "../types";
 import { runtimeDisplayName } from "./runtime";
 import type { ChatSession } from "./types";
@@ -93,6 +105,28 @@ type SubscriptionCatalog = {
 export function createModelPickerController(deps: ModelPickerDeps) {
   let nativeRows: NativeAccountRow[] = [];
   let modelListTriedAt = 0;
+  let officialStatus: TeamupsAccountStatus | null = null;
+  let officialFetchedAt = 0;
+
+  /** Throttled official-account fetch; drives the built-in agent's quota chip. */
+  async function refreshOfficialStatus(): Promise<void> {
+    if (!isPersonalEdition()) {
+      officialStatus = null;
+      return;
+    }
+    if (Date.now() - officialFetchedAt < 15_000) return;
+    officialFetchedAt = Date.now();
+    try {
+      officialStatus = await teamupsAccountStatus();
+    } catch {
+      officialStatus = null;
+    }
+  }
+
+  function repaintAfterOfficialRefresh(): void {
+    renderModelPickerLabel();
+    if (deps.getModelMenuOpen()) renderModelMenu();
+  }
 
   function subscriptionCatalog(): SubscriptionCatalog | null {
     const runtime = deps.selectedRuntime();
@@ -176,6 +210,25 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       deps.modelBtnEl.setAttribute("aria-label", model);
       return;
     }
+    // The built-in agent's chip: the official quota while the chat rides the
+    // gift (its default), the pinned provider's model once the user picks one.
+    if (deps.selectedRuntime() === "doctor" && !doctorPinnedAwayFromOfficial()) {
+      const quota = officialQuotaState(officialStatus);
+      const pinnedModel = deps.activeSession()?.model?.trim() ?? "";
+      const onGift = pinnedModel === "" || pinnedModel === OFFICIAL_GIFT_MODEL;
+      const detail = onGift
+        ? builtinQuotaLabel(quota)
+        : pinnedModel === "deepseek-flash"
+          ? t("chat.modelOfficialAutoModel")
+          : pinnedModel;
+      deps.modelLabelEl.textContent = `${t("chat.modelOfficialGroup")} · ${detail}`;
+      deps.modelBtnEl.disabled = deps.isComposerLocked();
+      deps.modelBtnEl.title = quota.signedIn
+        ? t("chat.modelOfficialHint")
+        : t("personal.officialNeedsLogin");
+      deps.modelBtnEl.setAttribute("aria-label", deps.modelLabelEl.textContent);
+      return;
+    }
     const runtimeName = runtimeDisplayName(deps.selectedRuntime());
     const chosen = chosenModel();
     if (chosen) {
@@ -230,8 +283,146 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     deps.modelMenuEl.appendChild(group);
   }
 
+  /** Badge for the official (external-CLI) line: it spends paid tokens/trial
+   * calls, not the built-in agent's monthly gift. */
+  function officialLineBadge(): HTMLElement | null {
+    const quota = officialQuotaState(officialStatus);
+    if (!quota.signedIn) return null;
+    const mark = document.createElement("span");
+    mark.className = "chat-model-quota";
+    if (quota.paid) {
+      mark.textContent = t("official.quotaPaid", {
+        tokens: formatOfficialTokens(quota.paid.tokens),
+      });
+    } else if (quota.trial) {
+      mark.textContent = t("official.quotaTrial", { count: String(quota.trial.left) });
+    } else {
+      return null;
+    }
+    return mark;
+  }
+
+  function startOfficialLogin(): void {
+    // The account bar owns the device-code flow and its pending state.
+    document.querySelector<HTMLButtonElement>("#chat-account")?.click();
+  }
+
+  function openOfficialAccountPage(): void {
+    void openUrl(teamupsAccountPageUrl()).catch(() => {});
+  }
+
+  function menuActionButton(text: string, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-model-menu-action";
+    btn.textContent = text;
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onClick();
+      closeModelMenu();
+    });
+    return btn;
+  }
+
+  /** The chat's effective official usage: no pin (or pinned official) rides
+   * the official account's gift; anything else is the user's own provider. */
+  function doctorPinnedAwayFromOfficial(): boolean {
+    const pinnedId = deps.activeSession()?.providerId?.trim();
+    return Boolean(pinnedId) && pinnedId !== OFFICIAL_PROVIDER_ID;
+  }
+
+  /** The built-in agent picks like everyone else now: the official group holds
+   * two entries — the monthly gift (agent channel, doctor only) and the logged-in
+   * official model line (purchased quota, every agent). */
+  function renderDoctorMenu(): void {
+    const quota = officialQuotaState(officialStatus);
+    const onOfficial = !doctorPinnedAwayFromOfficial();
+    const session = deps.activeSession();
+    const pinnedModel = session?.model?.trim() ?? "";
+    const giftActive =
+      onOfficial && (pinnedModel === "" || pinnedModel === OFFICIAL_GIFT_MODEL);
+    const paidActive = onOfficial && pinnedModel !== "" && pinnedModel !== OFFICIAL_GIFT_MODEL;
+
+    const hint = document.createElement("div");
+    hint.className = "chat-model-menu-hint";
+    hint.textContent = t("chat.modelOfficialHint");
+    deps.modelMenuEl.appendChild(hint);
+
+    const group = document.createElement("div");
+    group.className = "chat-model-group";
+    const label = document.createElement("div");
+    label.className = "chat-model-group-label";
+    label.textContent = t("chat.modelOfficialGroup");
+    group.appendChild(label);
+    deps.modelMenuEl.appendChild(group);
+
+    if (!quota.signedIn) {
+      const line = document.createElement("div");
+      line.className = "chat-model-menu-hint";
+      line.textContent = t("personal.officialNeedsLogin");
+      deps.modelMenuEl.appendChild(line);
+      group.appendChild(menuActionButton(t("chat.modelOfficialLoginCta"), startOfficialLogin));
+      return;
+    }
+
+    const officialRow =
+      deps.getProviders().find((item) => item.id === OFFICIAL_PROVIDER_ID) ??
+      deps.getWiredProvider();
+    const hasRow = Boolean(officialRow && officialRow.id === OFFICIAL_PROVIDER_ID);
+    const giftLeft = quota.free?.left ?? 0;
+    const paidLeft = quota.paid?.tokens ?? 0;
+
+    if (hasRow && giftLeft > 0) {
+      group.appendChild(
+        officialOption(t("chat.officialGiftOption"), giftActive, officialRow!, OFFICIAL_GIFT_MODEL),
+      );
+    }
+    if (hasRow && paidLeft > 0) {
+      group.appendChild(
+        officialOption(
+          t("chat.modelOfficialAutoModel"),
+          paidActive,
+          officialRow!,
+          officialRow!.model || "deepseek-flash",
+        ),
+      );
+    }
+    if (!hasRow || (giftLeft <= 0 && paidLeft <= 0)) {
+      const empty = document.createElement("div");
+      empty.className = "chat-model-menu-hint";
+      const reset = quota.free?.resetDate;
+      empty.textContent = reset
+        ? t("official.quotaFreeReset", { date: formatResetDate(reset) })
+        : t("official.quotaEmpty");
+      deps.modelMenuEl.appendChild(empty);
+      group.appendChild(menuActionButton(t("chat.modelOfficialBuyCta"), openOfficialAccountPage));
+    }
+  }
+
+  /** One official entry, name only — quota lives on the chip button. */
+  function officialOption(
+    text: string,
+    active: boolean,
+    officialRow: PersonalProviderListItem,
+    model: string,
+  ): HTMLButtonElement {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = `chat-model-option${active ? " is-active" : ""}`;
+    option.setAttribute("aria-selected", active ? "true" : "false");
+    option.textContent = text;
+    option.addEventListener("click", () => {
+      selectSessionModel(officialRow, model);
+    });
+    return option;
+  }
+
   function renderModelMenu(): void {
     deps.modelMenuEl.replaceChildren();
+    const isDoctor = deps.selectedRuntime() === "doctor";
+    if (isDoctor) {
+      renderDoctorMenu();
+    }
     const catalog = subscriptionCatalog();
     const keepSaved = sessionKeepsSavedService(deps.activeSession());
     if (catalog && !keepSaved) {
@@ -241,7 +432,9 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     if (catalog) renderSubscriptionMenu(catalog);
     const providers = deps.getProviders();
     const wired = deps.getWiredProvider();
-    if (providers.length === 0 && !wired) {
+    // The doctor menu already shows the official group up top, so an empty
+    // provider list is not an empty menu for it.
+    if (!isDoctor && providers.length === 0 && !wired) {
       const hint = document.createElement("div");
       hint.className = "chat-model-menu-hint";
       hint.textContent = t("chat.modelNeedProvider");
@@ -251,18 +444,29 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const chosen = chosenModel();
     const rows = providers.length > 0 ? providers : wired ? [wired] : [];
     for (const provider of rows) {
-      const models = modelsForProviderUrl(provider.url, provider.model);
+      // Already painted by renderDoctorMenu for the built-in agent.
+      if (isDoctor && provider.id === OFFICIAL_PROVIDER_ID) continue;
+      const isOfficial = provider.id === OFFICIAL_PROVIDER_ID;
+      let models = modelsForProviderUrl(provider.url, provider.model);
+      // The official gateway picks the model itself; the stored id is a marker.
+      if (isOfficial && models.length === 0) models = ["auto"];
       if (models.length === 0) continue;
       const group = document.createElement("div");
       group.className = "chat-model-group";
       const label = document.createElement("div");
       label.className = "chat-model-group-label";
-      label.textContent = provider.name.trim() || providerChipForUrl(provider.url, provider.name);
+      label.textContent = isOfficial
+        ? t("chat.modelOfficialGroup")
+        : provider.name.trim() || providerChipForUrl(provider.url, provider.name);
       if (provider.active) {
         const mark = document.createElement("span");
         mark.className = "chat-model-default";
         mark.textContent = t("chat.modelDefault");
         label.appendChild(mark);
+      }
+      if (isOfficial) {
+        const badge = officialLineBadge();
+        if (badge) label.appendChild(badge);
       }
       group.appendChild(label);
       for (const model of models) {
@@ -272,7 +476,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         btn.className = `chat-model-option${active ? " is-active" : ""}`;
         btn.role = "option";
         btn.setAttribute("aria-selected", active ? "true" : "false");
-        btn.textContent = model;
+        btn.textContent = isOfficial ? t("chat.modelOfficialAutoModel") : model;
         btn.addEventListener("click", () => {
           selectSessionModel(provider, model);
         });
@@ -290,6 +494,12 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
   function openModelMenu(): void {
     if (deps.modelBtnEl.disabled || deps.isComposerLocked()) return;
+    if (deps.selectedRuntime() === "doctor") {
+      void refreshOfficialStatus().then(() => {
+        repaintAfterOfficialRefresh();
+        if (deps.getModelMenuOpen()) positionModelMenu();
+      });
+    }
     const catalog = subscriptionCatalog();
     if (catalog && Date.now() - modelListTriedAt > 15000) {
       modelListTriedAt = Date.now();
@@ -376,6 +586,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       deps.setProviders([]);
       deps.setWiredProvider(null);
     }
+    void refreshOfficialStatus().then(repaintAfterOfficialRefresh);
     renderModelPickerLabel();
     if (deps.getModelMenuOpen()) renderModelMenu();
   }
@@ -411,14 +622,31 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     deps.pinSessionModel(provider, next);
     renderModelPickerLabel();
     deps.updateContextMeter();
-    const name = providerChipForUrl(provider.url, provider.name);
-    deps.setStatus(t("chat.modelSwitched", { model: `${name} · ${next}` }), "ok");
+    const name =
+      provider.id === OFFICIAL_PROVIDER_ID
+        ? t("chat.modelOfficialGroup")
+        : providerChipForUrl(provider.url, provider.name);
+    let modelText = next;
+    if (provider.id === OFFICIAL_PROVIDER_ID) {
+      modelText = next === OFFICIAL_GIFT_MODEL ? t("chat.officialGiftOption") : next;
+    }
+    deps.setStatus(t("chat.modelSwitched", { model: `${name} · ${modelText}` }), "ok");
     deps.modelBtnEl.disabled = deps.isComposerLocked() || !chosenModel();
   }
 
   function updateRuntimeLabel(): void {
     renderModelPickerLabel();
     deps.updateContextMeter();
+  }
+
+  // Login / sign-out elsewhere repaints the quota chip immediately.
+  if (isPersonalEdition()) {
+    void listen("teamups-account-changed", () => {
+      officialFetchedAt = 0;
+      void refreshOfficialStatus().then(repaintAfterOfficialRefresh);
+    }).catch(() => {
+      // No Tauri bridge (tests, plain web preview).
+    });
   }
 
   return {
@@ -434,8 +662,14 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       selectSessionModel(wired, model);
     },
     updateRuntimeLabel,
+    /** A finished built-in-agent turn just changed the server-side quota. */
+    refreshOfficialQuota: () => {
+      officialFetchedAt = 0;
+      void refreshOfficialStatus().then(repaintAfterOfficialRefresh);
+    },
     hasChoices: () =>
       subscriptionCatalog() !== null ||
+      deps.selectedRuntime() === "doctor" ||
       deps.getProviders().length > 0 ||
       Boolean(deps.getWiredProvider()),
   };

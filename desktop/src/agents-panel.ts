@@ -3,9 +3,10 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { t } from "./i18n";
 import { agentBrandIconHtml } from "./agent-brand";
 import { isPersonalEdition } from "./edition";
-import { listPersonalProviders, nativeAccountStatus } from "./ipc";
+import { listPersonalProviders, nativeAccountStatus, teamupsAccountStatus } from "./ipc";
 import { withErrorDetail } from "./friendly-error";
 import { formatTime } from "./format";
+import { officialQuotaLines, officialQuotaState } from "./official-quota";
 import {
   isAskRuntimeId,
   metaRow,
@@ -248,10 +249,14 @@ function doctorTabTile(active: boolean): HTMLElement {
 
 /** Detail card for the built-in doctor agent, styled like a runtime card. */
 function doctorCardHtml(): string {
-  const active = appState.personalProvidersDoc?.providers.find((item) => item.active);
-  const service = active
-    ? metaRow("meta.service", active.name)
-    : metaRow("meta.service", t("runtime.doctorNoService"));
+  // The built-in agent rides the official account only — never the active
+  // provider. The row starts at the sign-in line and `paintDoctorServiceRow`
+  // fills in the live quota once the account status arrives.
+  const service = metaRow("meta.service", t("runtime.doctorNoService"));
+  const serviceHtml = service.replace(
+    'class="meta-value"',
+    'class="meta-value" data-doctor-service',
+  );
   const actions = `
     <button type="button" class="btn-primary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
     <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>`;
@@ -264,7 +269,7 @@ function doctorCardHtml(): string {
         </span>
       </div>
       <div class="meta-grid">
-        ${service}
+        ${serviceHtml}
         <div class="meta-row">
           <span class="meta-label">${t("meta.status")}</span>
           <p class="meta-value">${t("runtime.doctorAlwaysReady")}</p>
@@ -274,6 +279,18 @@ function doctorCardHtml(): string {
       <p class="footnote runtime-install-footnote">${t("chat.emptyDoctorHint")}</p>
     </article>
   `;
+}
+
+/** Fill the doctor card's service row with the official account's live quota. */
+async function paintDoctorServiceRow(): Promise<void> {
+  const row = runtimesEl.querySelector<HTMLElement>("[data-doctor-service]");
+  if (!row) return;
+  const status = await teamupsAccountStatus().catch(() => null);
+  if (!row.isConnected) return;
+  const quota = officialQuotaState(status);
+  row.textContent = quota.signedIn
+    ? `${t("chat.modelOfficialGroup")} · ${officialQuotaLines(quota).join(" · ")}`
+    : t("personal.officialNeedsLogin");
 }
 
 
@@ -327,6 +344,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const installedRuntimes = report ? report.runtimes.filter((runtime) => runtime.installed) : [];
     paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
     runtimesEl.innerHTML = doctorCardHtml();
+    void paintDoctorServiceRow();
     void diagnose.closeDiagnoseDetail({ skipDismiss: true });
   }
 
@@ -471,6 +489,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         : activeRuntime
           ? buildRuntimeCardHtml(activeRuntime)
           : "";
+    if (selectedId === DOCTOR_RUNTIME_ID) void paintDoctorServiceRow();
     if (opts?.relocalize) {
       diagnose.refreshDiagnoseLocale();
       return;

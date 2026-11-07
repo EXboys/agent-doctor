@@ -11,7 +11,7 @@ use agent_doctor_core::session_launch::resolve_session_cwd;
 use agent_doctor_repair::official_agent::{
     run_official_agent_turn, OfficialAgentEvent, OfficialAgentOptions, PermissionGate,
 };
-use agent_doctor_repair::official_llm_config;
+use agent_doctor_repair::official_llm_config_for;
 use agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID;
 
 use super::plan::{PlanStep, PlanStepState};
@@ -27,6 +27,9 @@ const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Error-code prefix the desktop maps to provider-setup guidance.
 pub const DOCTOR_NO_PROVIDER: &str = "doctor_no_provider";
+/// The official row is missing: the built-in agent only rides the official
+/// account, so this points at login, not at wiring a provider.
+pub const DOCTOR_NEEDS_LOGIN: &str = "doctor_needs_login";
 pub const DOCTOR_CANCELLED: &str = "doctor_cancelled";
 
 pub struct DoctorAskBackend;
@@ -136,19 +139,34 @@ fn run_doctor(
         control,
         cancel: cancel.clone(),
     };
-    let config = match official_llm_config() {
-        Ok(config) => config,
-        Err(error) => {
-            return Ok(fail_run(
-                &session_id,
-                &runtime,
-                &cwd,
-                started,
-                &format!("{DOCTOR_NO_PROVIDER}: {error:#}"),
-                on_event,
-            ));
-        }
-    };
+    // The chat's pin decides: a personal provider, the gift line, or the
+    // official model line; no pin rides the gift.
+    let config =
+        match official_llm_config_for(options.provider_id.as_deref(), options.model.as_deref()) {
+            Ok(config) => config,
+            Err(error) => {
+                let text = format!("{error:#}");
+                // Missing official row = not signed in; anything else keeps the
+                // historical provider-setup guidance.
+                let code = if text.contains("official_provider_missing") {
+                    DOCTOR_NEEDS_LOGIN
+                } else {
+                    DOCTOR_NO_PROVIDER
+                };
+                return Ok(fail_run(
+                    &session_id,
+                    &runtime,
+                    &cwd,
+                    started,
+                    &format!("{code}: {text}"),
+                    on_event,
+                ));
+            }
+        };
+    // Every request of this turn carries the same turn id: the gateway bills
+    // the monthly gift once per turn, not once per LLM round.
+    let mut config = config;
+    config.turn_id = Some(session_id.clone());
     let result = run_official_agent_turn(
         &agent_options,
         &config,

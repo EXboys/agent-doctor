@@ -350,6 +350,21 @@ pub fn load_active_personal_provider() -> Result<Option<PersonalProviderEntry>> 
         .cloned())
 }
 
+/// One saved provider by id, regardless of which one is active. The official
+/// row lives here even when the user's default service is a personal key.
+pub fn load_personal_provider(id: &str) -> Result<Option<PersonalProviderEntry>> {
+    let Some(path) = personal_providers_path() else {
+        return Ok(None);
+    };
+    let store = load_store(&path)?;
+    Ok(store
+        .providers
+        .iter()
+        .find(|p| p.id == id)
+        .filter(|entry| !entry.api_key.trim().is_empty())
+        .cloned())
+}
+
 pub fn load_personal_provider_status() -> Result<PersonalProviderStatus> {
     let profile_path = agent_profile_path();
     let store_path = personal_providers_path();

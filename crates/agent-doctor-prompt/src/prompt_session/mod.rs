@@ -612,7 +612,9 @@ fn record_turn_usage(runtime: &str, options: &PromptSessionOptions, driven: &Dri
     }
     // DeepSeek Harness ignores the chat's saved model and talks only to
     // DeepSeek. A GLM model left on the chat must not be written down.
+    // The built-in agent defaults to the official row when the chat has no pin.
     let harness = runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID;
+    let official = runtime == agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID;
     let model = if harness {
         None
     } else {
@@ -620,6 +622,15 @@ fn record_turn_usage(runtime: &str, options: &PromptSessionOptions, driven: &Dri
     };
     let provider_id = if harness {
         None
+    } else if official {
+        Some(
+            options
+                .provider_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .unwrap_or(agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID),
+        )
     } else {
         options.provider_id.as_deref()
     };

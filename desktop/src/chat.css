@@ -3140,6 +3140,38 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   font-weight: 700;
 }
 
+/* Quota badge on the official model group (赠送 / 官方额度). */
+.chat-model-quota {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* Login / buy actions inside the built-in agent's status menu. */
+.chat-model-menu-action {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 4px 10px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  text-align: center;
+  cursor: pointer;
+}
+
+.chat-model-menu-action:hover {
+  filter: brightness(1.06);
+}
+
 .chat-runtime-label {
   display: inline-flex;
   align-items: center;

@@ -12,7 +12,7 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::llm::{max_agent_turns, official_llm_config};
+use super::llm::{max_agent_turns, official_llm_config, OFFICIAL_PROVIDER_MISSING};
 use super::official_agent::{
     run_official_agent_turn, AutoApproveGate, OfficialAgentEvent, OfficialAgentOptions,
 };
@@ -95,13 +95,14 @@ pub struct DeepRepairSummary {
     pub rolled_back_issues: Vec<CheckChange>,
 }
 
-/// Model for deep diagnose: the provider the user already wired in Agent Doctor.
-/// Both OpenAI-compatible and Anthropic protocols work here.
+/// Model for deep diagnose: the official built-in agent channel. Both OpenAI-
+/// compatible and Anthropic protocols work here; without an official sign-in
+/// the desktop points the user at login.
 pub fn deep_diagnose_llm_config() -> Result<LlmConfig> {
     official_llm_config().map_err(|error| {
         let message = format!("{error:#}");
-        if message.contains("no active personal provider") {
-            anyhow::anyhow!("{DEEP_DIAGNOSE_NO_PROVIDER}: no active provider with an API key")
+        if message.contains(OFFICIAL_PROVIDER_MISSING) {
+            anyhow::anyhow!("{DEEP_DIAGNOSE_NO_PROVIDER}: official account is not signed in")
         } else {
             anyhow::anyhow!(message)
         }

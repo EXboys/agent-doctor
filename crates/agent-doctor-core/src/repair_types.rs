@@ -506,6 +506,10 @@ pub struct LlmConfig {
     pub api_key: String,
     pub model: String,
     pub protocol: LlmProtocol,
+    /// One doctor turn = many LLM requests. The official gateway debits the
+    /// monthly gift once per turn via this id (`x-ad-turn` header); unset for
+    /// non-official gateways, which ignore it.
+    pub turn_id: Option<String>,
 }
 
 impl std::fmt::Debug for LlmConfig {
@@ -534,6 +538,7 @@ impl LlmConfig {
             api_key: api_key.trim().to_string(),
             model: model.trim().to_string(),
             protocol: LlmProtocol::OpenAi,
+            turn_id: None,
         }
     }
 
@@ -545,6 +550,7 @@ impl LlmConfig {
             api_key: api_key.trim().to_string(),
             model: model.trim().to_string(),
             protocol: LlmProtocol::Anthropic,
+            turn_id: None,
         }
     }
 
@@ -564,6 +570,7 @@ impl LlmConfig {
             api_key,
             model,
             protocol: LlmProtocol::OpenAi,
+            turn_id: None,
         })
     }
 }

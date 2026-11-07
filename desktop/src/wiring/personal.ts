@@ -36,6 +36,12 @@ import {
   useNativeSubscription,
   verifyPersonalProvider as verifyPersonalProviderCommand,
 } from "../ipc";
+import {
+  formatOfficialTokens,
+  OFFICIAL_PROVIDER_ID,
+  officialQuotaLines,
+  officialQuotaState,
+} from "../official-quota";
 
 const personalSectionEl = document.querySelector<HTMLElement>("#personal-section")!;
 const personalListViewEl = document.querySelector<HTMLElement>("#personal-list-view")!;
@@ -68,7 +74,6 @@ const personalSaveEl = document.querySelector<HTMLButtonElement>("#personal-save
 const personalApplyEl = document.querySelector<HTMLButtonElement>("#personal-apply")!;
 const personalHintEl = document.querySelector<HTMLElement>("#personal-hint")!;
 
-const OFFICIAL_PROVIDER_ID = "teamups-official";
 let officialAccount: TeamupsAccountStatus | null = null;
 let officialLoginWaiting = false;
 let officialBalanceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,14 +100,6 @@ function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderLi
   return [placeholder, ...doc.providers];
 }
 
-function formatOfficialTokens(tokens: number): string {
-  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
-  return new Intl.NumberFormat(getLocale() === "zh" ? "zh-CN" : "en", {
-    notation: tokens >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(Math.floor(tokens));
-}
-
 const AVATAR_TONES = 6;
 
 function avatarTone(key: string): number {
@@ -123,34 +120,9 @@ function officialUsable(): boolean {
   return official.active && (onTrial ? trials > 0 || tokens > 0 : hasTokenBalance && tokens > 0);
 }
 
+/** One line, both pools — the same wording the Ask model chip renders. */
 function officialDescription(): string {
-  const official = officialAccount?.official;
-  if (!officialAccount?.signed_in) return t("personal.officialNeedsLogin");
-  if (!official) return t("personal.officialNeedsMembership");
-
-  const trials = Math.max(0, official.trial_calls_left ?? 0);
-  const tokens = Math.max(0, official.tokens_remaining ?? 0);
-  const hasTokenBalance = official.via === "member" || (official.token_cap ?? 0) > 0 || tokens > 0;
-  const onTrial = official.via === "trial";
-  const usable = officialUsable();
-  if (!onTrial && !hasTokenBalance) return t("personal.officialNeedsMembership");
-
-  const parts = [usable ? t("personal.officialUsable") : t("personal.officialUnusable")];
-  if (onTrial && (trials > 0 || !hasTokenBalance)) {
-    parts.push(t("personal.officialTrialLeft", { count: String(trials) }));
-  }
-  if (hasTokenBalance) {
-    parts.push(t("personal.officialTokensLeft", { remaining: formatOfficialTokens(tokens) }));
-  }
-  const agent = officialAccount?.agent;
-  if (agent?.enabled) {
-    parts.push(
-      t("personal.officialAgentLeft", {
-        count: String(Math.max(0, agent.calls_left ?? 0)),
-      }),
-    );
-  }
-  return parts.join(" · ");
+  return officialQuotaLines(officialQuotaState(officialAccount)).join(" · ");
 }
 
 export type PersonalDeps = {

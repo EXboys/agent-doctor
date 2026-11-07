@@ -1,6 +1,7 @@
 import { settingsApplyKind } from "../diagnose-flow";
 import { focusMainTab, openSession, resignNativeSubscription, runRepairExecute } from "../ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { teamupsAccountPageUrl } from "../teamups-site";
 import {
   formatChatFailureLine,
   type ChatFailureAction,
@@ -81,6 +82,10 @@ function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): st
       return t("chat.fail.actionAskAgain");
     case "relogin":
       return t("chat.fail.actionRelogin");
+    case "officialLogin":
+      return t("chat.fail.actionOfficialLogin");
+    case "officialBuy":
+      return t("chat.fail.actionOfficialBuy");
   }
 }
 
@@ -178,6 +183,32 @@ async function runChatFailureAction(
   if (action === "askAgain") {
     handlers.focusPrompt?.();
     writeActionResult(actions, t("chat.fail.askAgainReady"), "muted");
+    return;
+  }
+  if (action === "officialBuy") {
+    try {
+      await openUrl(teamupsAccountPageUrl());
+      writeActionResult(actions, t("chat.fail.openedOfficialBuy"), "muted");
+    } catch {
+      writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+    }
+    return;
+  }
+  if (action === "officialLogin") {
+    // The account bar owns the device-code flow; clicking it starts the same
+    // login and repaints the built-in agent's quota chip when approved.
+    const account = document.querySelector<HTMLButtonElement>("#chat-account");
+    if (account) {
+      account.click();
+      writeActionResult(actions, t("chat.fail.openedOfficialLogin"), "muted");
+    } else {
+      try {
+        await focusMainTab({ tab: "provider" });
+        writeActionResult(actions, t("chat.fail.openedProvider"), "muted");
+      } catch {
+        writeActionResult(actions, t("chat.fail.repairFailed"), "warn");
+      }
+    }
     return;
   }
   if (action === "privacy") {

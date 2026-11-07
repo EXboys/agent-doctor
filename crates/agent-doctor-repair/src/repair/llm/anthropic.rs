@@ -37,15 +37,21 @@ pub fn chat(config: &LlmConfig, messages: &[Value], tools: Option<&Value>) -> Re
 
     let body = build_request_body(config, messages, tools);
     let url = messages_url(&config.api_url);
-    let response = client
+    let mut request = client
         .post(&url)
         .header("x-api-key", &config.api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         // Some Anthropic-compatible gateways also accept Bearer.
-        .header("Authorization", format!("Bearer {}", config.api_key))
-        .json(&body)
-        .send()
-        .context("LLM request failed")?;
+        .header("Authorization", format!("Bearer {}", config.api_key));
+    if let Some(turn_id) = config
+        .turn_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        request = request.header("x-ad-turn", turn_id);
+    }
+    let response = request.json(&body).send().context("LLM request failed")?;
 
     let status = response.status();
     let payload: Value = response

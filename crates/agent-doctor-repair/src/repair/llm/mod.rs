@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use agent_doctor_core::repair_types::{LlmConfig, LlmProtocol};
@@ -451,12 +451,16 @@ fn chat_openai(config: &LlmConfig, messages: &[Value], tools: Option<&Value>) ->
         body["tool_choice"] = json!("auto");
     }
 
-    let response = client
-        .post(&config.api_url)
-        .bearer_auth(&config.api_key)
-        .json(&body)
-        .send()
-        .context("LLM request failed")?;
+    let mut request = client.post(&config.api_url).bearer_auth(&config.api_key);
+    if let Some(turn_id) = config
+        .turn_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        request = request.header("x-ad-turn", turn_id);
+    }
+    let response = request.json(&body).send().context("LLM request failed")?;
 
     let status = response.status();
     let payload: Value = response
@@ -520,28 +524,70 @@ pub const fn max_agent_turns() -> usize {
     MAX_AGENT_TURNS
 }
 
-/// LLM config for the official built-in agent from the active personal provider.
-/// Unlike the historical deep-diagnose gate, this supports both wire protocols;
-/// callers wrap errors with their own user-facing error-code prefix.
-pub fn official_llm_config() -> Result<LlmConfig> {
-    let Some(entry) = agent_doctor_core::setup::load_active_personal_provider()? else {
-        bail!("no active personal provider with an API key");
+/// Stable marker for "the official account is not signed in". Callers match on
+/// it to point the user at login instead of generic provider setup.
+pub const OFFICIAL_PROVIDER_MISSING: &str = "official_provider_missing";
+
+/// Chat pin marker for the monthly-gift entry: rides the dedicated
+/// `/api/v1/agent` channel and spends the gift, never purchased tokens.
+pub const OFFICIAL_GIFT_MODEL: &str = "official-gift";
+
+/// LLM config for the official built-in agent. The chat's pinned provider wins
+/// when it names a saved personal service. Pinned to the official row itself,
+/// the model decides the line: the gift marker (or no model at all) rides the
+/// free `/api/v1/agent` channel, any other model rides the stored
+/// `/api/v1/official` gateway and spends purchased tokens — so a personal key
+/// is never spent silently. A missing official row with no pin means "sign in".
+pub fn official_llm_config_for(
+    provider_id: Option<&str>,
+    model: Option<&str>,
+) -> Result<LlmConfig> {
+    let pinned = provider_id.map(str::trim).filter(|id| !id.is_empty());
+    let pinned_model = model.map(str::trim).filter(|m| !m.is_empty());
+    let entry = match pinned {
+        None | Some(agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID) => {
+            agent_doctor_core::setup::load_personal_provider(
+                agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID,
+            )?
+            .ok_or_else(|| {
+                anyhow!("{OFFICIAL_PROVIDER_MISSING}: official account is not signed in")
+            })?
+        }
+        Some(id) => agent_doctor_core::setup::load_personal_provider(id)?
+            .ok_or_else(|| anyhow!("pinned provider not found: {id}"))?,
     };
-    // The official line rides the site's dedicated agent channel
-    // (`/api/v1/agent`: monthly free calls + pooled upstream keys). Personal
-    // providers keep their URL untouched — only the teamups-official row moves.
-    let url = official_agent_gateway_url(&entry);
+    let on_official_row =
+        pinned.is_none() || pinned == Some(agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID);
+    let on_gift = on_official_row
+        && pinned_model
+            .map(|m| m == OFFICIAL_GIFT_MODEL)
+            .unwrap_or(true);
+    let url = if on_gift {
+        official_agent_gateway_url(&entry)
+    } else {
+        entry.url.clone()
+    };
+    let model = if on_gift {
+        entry.model.clone()
+    } else {
+        pinned_model.unwrap_or(&entry.model).to_string()
+    };
     if agent_doctor_core::setup::normalize_protocol(&entry.protocol)
         == agent_doctor_core::setup::PROTOCOL_ANTHROPIC
     {
         Ok(LlmConfig::from_anthropic_gateway(
             &url,
             &entry.api_key,
-            &entry.model,
+            &model,
         ))
     } else {
-        Ok(LlmConfig::from_gateway(&url, &entry.api_key, &entry.model))
+        Ok(LlmConfig::from_gateway(&url, &entry.api_key, &model))
     }
+}
+
+/// Deep diagnose and other in-process callers: always the official gift line.
+pub fn official_llm_config() -> Result<LlmConfig> {
+    official_llm_config_for(None, None)
 }
 
 /// `…/api/v1/official` → `…/api/v1/agent` (OpenAI wire) or `…/api/v1/agent/anthropic`
