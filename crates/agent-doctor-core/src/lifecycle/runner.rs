@@ -97,6 +97,9 @@ pub fn waiting_input_kind(line: &str) -> Option<&'static str> {
     if trimmed.is_empty() || trimmed.starts_with('$') {
         return None;
     }
+    if is_installer_log_line(trimmed) {
+        return None;
+    }
     let lower = trimmed.to_ascii_lowercase();
     if [
         "password",
@@ -110,6 +113,7 @@ pub fn waiting_input_kind(line: &str) -> Option<&'static str> {
     ]
     .iter()
     .any(|needle| lower.contains(needle))
+        && looks_like_prompt(trimmed)
     {
         return Some("secret");
     }
@@ -126,6 +130,55 @@ pub fn waiting_input_kind(line: &str) -> Option<&'static str> {
         return Some("session");
     }
     None
+}
+
+/// Installer noise that merely *mentions* a secret-looking word: npm/yarn/pnpm
+/// progress lines, registry URLs, and package names such as
+/// `@deepseek-ai/dsh-token-meter`. Reading those as prompts stalled real
+/// installs behind an API-key box nobody could fill in.
+fn is_installer_log_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    const LOG_PREFIXES: &[&str] = &[
+        "npm http",
+        "npm verb",
+        "npm sill",
+        "npm timing",
+        "npm warn",
+        "npm notice",
+        "npm info",
+        "npm err",
+        "npm fund",
+        "npm exec",
+        "added ",
+        "changed ",
+        "removed ",
+        "downloaded ",
+        "yarn ",
+        "pnpm ",
+    ];
+    LOG_PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
+        || lower.contains("://")
+        || lower.contains(" http fetch ")
+}
+
+/// A prompt ends where the answer goes — a colon, an angle bracket, a question
+/// mark — or asks for a value in so many words. Log lines that only name a
+/// token never look like this.
+fn looks_like_prompt(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    matches!(
+        line.chars().last(),
+        Some(':') | Some('：') | Some('?') | Some('？') | Some('>')
+    ) || [
+        "please enter",
+        "please paste",
+        "enter your",
+        "paste your",
+        "input your",
+        "provide your",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 pub fn run_shell_command_capturing(command_line: &str) -> Result<ShellCapture> {
@@ -441,6 +494,41 @@ mod tests {
         );
         assert_eq!(waiting_input_kind("$ npm install"), None);
         assert_eq!(waiting_input_kind("Downloading Node.js 1/2"), None);
+    }
+
+    /// Registry progress that merely names a token package is not a prompt —
+    /// this exact line used to freeze the deepseek-harness install behind an
+    /// API-key box.
+    #[test]
+    fn installer_logs_naming_secrets_are_not_prompts() {
+        assert_eq!(
+            waiting_input_kind(
+                "npm http fetch GET 200 https://registry.npmmirror.com/@deepseek-ai%2fdsh-token-meter 1358ms (cache miss)"
+            ),
+            None
+        );
+        assert_eq!(
+            waiting_input_kind("npm http fetch GET 200 https://registry.npmmirror.com/js-tokens"),
+            None
+        );
+        assert_eq!(
+            waiting_input_kind("npm warn deprecated token-stream@1.0.0: use something else"),
+            None
+        );
+        assert_eq!(waiting_input_kind("added 214 packages in 6m"), None);
+    }
+
+    /// The prompt shape still has to be recognised once the noise is filtered.
+    #[test]
+    fn prompt_shapes_still_ask_for_a_secret() {
+        assert_eq!(waiting_input_kind("Enter your API key:"), Some("secret"));
+        assert_eq!(waiting_input_kind("Token (hidden):"), Some("secret"));
+        assert_eq!(waiting_input_kind("请粘贴密钥："), Some("secret"));
+        assert_eq!(
+            waiting_input_kind("Please paste your DeepSeek secret"),
+            Some("secret")
+        );
+        assert_eq!(waiting_input_kind("Using token cache at ~/.dsh"), None);
     }
 
     #[cfg(unix)]
