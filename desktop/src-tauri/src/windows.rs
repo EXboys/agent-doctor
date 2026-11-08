@@ -196,9 +196,13 @@ fn secondary_is_visible(app: &AppHandle, label: &str) -> bool {
 
 /// The secondary window the home is docked beside, if any.
 fn visible_secondary_label(app: &AppHandle) -> Option<&'static str> {
-    [ASK_WINDOW_LABEL, RESOURCES_WINDOW_LABEL, DIAGNOSE_WINDOW_LABEL]
-        .into_iter()
-        .find(|label| secondary_is_visible(app, label))
+    [
+        ASK_WINDOW_LABEL,
+        RESOURCES_WINDOW_LABEL,
+        DIAGNOSE_WINDOW_LABEL,
+    ]
+    .into_iter()
+    .find(|label| secondary_is_visible(app, label))
 }
 
 /// The layout the home window follows.
