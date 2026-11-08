@@ -100,6 +100,20 @@ pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<Diagnosti
     let path = settings_path();
     probe_api_key_configured(&path, checks, facts);
     probe_settings_permissions(&path, checks);
+    probe_node_engine(checks, facts);
+}
+
+/// An npm-installed `claude` on a Node older than its `engines.node` can exit
+/// without starting. Natively installed builds never touch Node, so a missing
+/// manifest means there is nothing to check — hence no fallback floor.
+fn probe_node_engine(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
+    let Some(manifest) = super::super::node_engine::package_json_for_binary(
+        "claude",
+        crate::adapters::CLAUDE_CODE_NPM_PACKAGE,
+    ) else {
+        return;
+    };
+    super::super::node_engine::probe_node_engine("claude", Some(&manifest), None, checks, facts);
 }
 
 fn probe_api_key_configured(

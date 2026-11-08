@@ -1318,6 +1318,7 @@ export const en = {
     "repair.fix.modelFromMode": "Pick a working model from your current mode",
     "repair.fix.configFromMode": "Fill in the service address and key settings from your current mode",
     "repair.fix.deepseekBrowserMcp": "Add browser tools to DeepSeek Harness",
+    "repair.fix.nodeVersion": "Install a newer Node.js",
     "repair.rollback": "Rollback from backup",
     "repair.rollingBack": "Restoring from latest backup…",
     "repair.rollbackDone": "Restored backup {id} ({count} file(s)).",

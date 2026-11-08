@@ -16,10 +16,12 @@ use crate::runtime::{adapter_by_id, all_adapters, descriptor_by_id, ConfigFormat
 pub(crate) mod config;
 mod live;
 mod mode_drift;
+pub mod node_engine;
 pub(crate) mod runtimes;
 mod schema;
 
 pub use live::{probe_runtime_live, LiveProbeOutcome, RuntimeLiveProbeReport};
+pub use node_engine::{minimum_from_range, node_version_on_path, probe_node_engine};
 
 pub(crate) use config::ParsedConfig;
 use config::{config_format_for_path, parse_config};

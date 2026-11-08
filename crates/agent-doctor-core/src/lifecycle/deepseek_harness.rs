@@ -25,8 +25,11 @@ pub fn deepseek_harness_shell_command(_action: DeepSeekHarnessLifecycleAction) -
     deepseek_harness_install_shell_command()
 }
 
-/// Version of the `dsh` found on this computer, read from its npm package.
-pub fn installed_deepseek_harness_version() -> Option<String> {
+/// Path to the installed `@deepseek-ai/dsh` manifest, if `dsh` is on this computer.
+///
+/// The manifest carries `engines.node`, which is the only trustworthy statement
+/// of how new Node has to be before the CLI will start.
+pub fn installed_deepseek_harness_manifest() -> Option<std::path::PathBuf> {
     crate::adapters::util::ensure_managed_runtime_path();
     let bin = crate::adapters::util::find_binary(crate::adapters::DEEPSEEK_HARNESS_CLI)?;
     let prefix = super::npm_target::prefix_for_binary(&bin)?;
@@ -36,9 +39,19 @@ pub fn installed_deepseek_harness_version() -> Option<String> {
         prefix.join("node_modules").join(package),
     ]
     .iter()
-    .find_map(|dir| fs::read_to_string(dir.join("package.json")).ok())
-    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-    .and_then(|manifest| manifest.get("version")?.as_str().map(str::to_string))
+    .map(|dir| dir.join("package.json"))
+    .find(|path| path.is_file())
+}
+
+/// Version of the `dsh` found on this computer, read from its npm package.
+pub fn installed_deepseek_harness_version() -> Option<String> {
+    let manifest = installed_deepseek_harness_manifest()?;
+    let raw = fs::read_to_string(manifest).ok()?;
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()?
+        .get("version")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Older than the pinned build. Those builds ship no `acp` profile, so chat cannot start.

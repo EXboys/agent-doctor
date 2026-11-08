@@ -1317,6 +1317,7 @@ export const zh = {
     "repair.fix.modelFromMode": "按当前模式填上能用的模型",
     "repair.fix.configFromMode": "按当前模式补全服务地址和密钥设置",
     "repair.fix.deepseekBrowserMcp": "给 DeepSeek Harness 加上浏览器工具",
+    "repair.fix.nodeVersion": "安装更新的 Node.js",
     "repair.rollback": "从备份回滚",
     "repair.rollingBack": "正在从最新备份恢复…",
     "repair.rollbackDone": "已恢复备份 {id}（{count} 个文件）。",

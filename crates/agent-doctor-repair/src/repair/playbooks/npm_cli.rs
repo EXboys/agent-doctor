@@ -30,9 +30,9 @@ use crate::repair::{SkippedRepairAction, SuggestedRepair};
 use agent_doctor_core::adapters::util::home_join;
 use agent_doctor_core::adapters::CodexAdapter;
 use agent_doctor_core::lifecycle::{
-    run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle, run_qoder_lifecycle,
-    run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction, NpmCliLifecycleAction,
-    QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
+    ensure_node_at_least, run_claude_code_lifecycle, run_codex_lifecycle, run_cursor_lifecycle,
+    run_qoder_lifecycle, run_workbuddy_lifecycle, run_zcode_lifecycle, CursorLifecycleAction,
+    NpmCliLifecycleAction, QoderLifecycleAction, WorkbuddyLifecycleAction, ZcodeLifecycleAction,
 };
 use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
 use agent_doctor_core::setup::{
@@ -102,20 +102,56 @@ pub(crate) const CODEX_SETUP_RULES: &[Rule] = &[install_rule!(
     "codex"
 )];
 
+/// An npm-installed CLI on an older Node can exit before its entry point runs,
+/// which looks like "installed, configured, and silent". The floor comes from
+/// the installed package's own `engines.node` (see `probe::node_engine`).
+macro_rules! node_engine_rule {
+    ($id:literal, $check:literal, $runtime:literal, $title:literal, $text:literal) => {
+        Rule {
+            id: $id,
+            title: $title,
+            description: $text,
+            check: CheckMatch::Is($check, ProbeStatus::Fail),
+            versions: Versions::ANY,
+            fix: Fix::Auto(|probe| ensure_runtime_node(probe, $runtime).map(|_| None)),
+        }
+    };
+}
+
 /// Run after the mode rewire, so the rewire cannot undo them.
-pub(crate) const CLAUDE_CODE_RULES: &[Rule] = &[Rule {
-    id: "fix-claude-code-settings-permissions",
-    title: "Tighten ~/.claude/settings.json permissions",
-    description: "Set settings.json to mode 600 (contains API key).",
-    check: CheckMatch::StartsWith("claude.settings.permissions:", ProbeStatus::Warn),
-    versions: Versions::ANY,
-    fix: Fix::AutoWhen {
-        ready: |_| cfg!(unix),
-        blocked: "Set settings.json to mode 600 (contains API key).",
-        run: |_| tighten_claude_settings_permissions().map(|_| None),
+pub(crate) const CLAUDE_CODE_RULES: &[Rule] = &[
+    node_engine_rule!(
+        "fix-claude-code-node-version",
+        "claude.node.engine",
+        "claude",
+        "Install Node.js {node_required} or newer for Claude Code",
+        "claude is installed but runs on Node.js {node_actual}, older than the {node_required} \
+         its package requires — the CLI can exit without starting. A newer Node goes into \
+         Agent Doctor's own runtime folder and onto PATH; the system-wide Node is left alone."
+    ),
+    Rule {
+        id: "fix-claude-code-settings-permissions",
+        title: "Tighten ~/.claude/settings.json permissions",
+        description: "Set settings.json to mode 600 (contains API key).",
+        check: CheckMatch::StartsWith("claude.settings.permissions:", ProbeStatus::Warn),
+        versions: Versions::ANY,
+        fix: Fix::AutoWhen {
+            ready: |_| cfg!(unix),
+            blocked: "Set settings.json to mode 600 (contains API key).",
+            run: |_| tighten_claude_settings_permissions().map(|_| None),
+        },
     },
-}];
+];
 pub(crate) const CODEX_RULES: &[Rule] = &[
+    node_engine_rule!(
+        "fix-codex-node-version",
+        "codex.node.engine",
+        "codex",
+        "Install Node.js {node_required} or newer for Codex",
+        "codex is installed but runs on Node.js {node_actual}, older than the {node_required} \
+         its package requires — the CLI can exit without starting. A newer Node goes into \
+         Agent Doctor's own runtime folder and onto PATH; the system-wide Node is left alone."
+    ),
     Rule {
         id: "fix-codex-wire-api",
         title: "Set Codex wire_api to responses",
@@ -138,6 +174,22 @@ pub(crate) const CODEX_RULES: &[Rule] = &[
         fix: Fix::Auto(|_| clear_codex_placeholder_auth().map(|_| None)),
     },
 ];
+
+/// Install a Node new enough for `runtime_id`, using the floor the probe
+/// measured from the installed package's `engines.node`. Absent the fact the
+/// rule would not have fired, so there is nothing to do.
+fn ensure_runtime_node(probe: &RuntimeProbeReport, runtime_id: &str) -> Result<Option<PathBuf>> {
+    let key = format!("{runtime_id}.node.required");
+    let Some(minimum) = probe
+        .facts
+        .iter()
+        .find(|f| f.key == key)
+        .map(|f| f.value.clone())
+    else {
+        return Ok(None);
+    };
+    ensure_node_at_least(&minimum).map(|_| None)
+}
 
 /// Rule tables for a mode-wired CLI: (before the mode rewire, after it).
 fn npm_cli_rules(runtime_id: &str) -> (&'static [Rule], &'static [Rule]) {
@@ -307,7 +359,8 @@ fn suggest_npm_cli_repairs(
     }
 
     items.extend(suggest_browser_mcp_repairs(runtime_id, display, probe));
-    let items = dedupe_repairs(items);
+    let mut items = dedupe_repairs(items);
+    super::rule::fill_node_placeholders(&mut items, probe);
     if agent_doctor_core::setup::is_native_subscription(runtime_id) {
         return items
             .into_iter()
@@ -1021,6 +1074,64 @@ mod tests {
             checks,
             facts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn suggests_node_upgrade_only_when_the_engine_check_fails() {
+        let failing = ProbeCheck::new(
+            "claude.node.engine",
+            "Node.js version",
+            ProbeStatus::Fail,
+            ProbeSeverity::Error,
+            "Node.js 22.12.0 is older than 22.19.0",
+            SensitivityLevel::Public,
+        );
+        let passing = ProbeCheck::new(
+            "claude.node.engine",
+            "Node.js version",
+            ProbeStatus::Pass,
+            ProbeSeverity::Info,
+            "Node.js 24.1.0 satisfies >=22.19.0",
+            SensitivityLevel::Public,
+        );
+        let node = |id: &str| format!("fix-{id}-node-version");
+
+        let mut probe = probe_with("claude-code", vec![failing]);
+        probe
+            .facts
+            .push(agent_doctor_core::repair_types::DiagnosticFact::new(
+                "claude.node.required",
+                "22.19.0",
+                SensitivityLevel::Public,
+            ));
+        probe
+            .facts
+            .push(agent_doctor_core::repair_types::DiagnosticFact::new(
+                "claude.node.actual",
+                "22.12.0",
+                SensitivityLevel::Public,
+            ));
+        let items = suggest_claude_code_repairs(&probe);
+        let item = items
+            .iter()
+            .find(|item| item.id == node("claude-code"))
+            .expect("node rule fires on a failed engine check");
+        assert!(item.auto_fixable);
+        assert!(
+            item.title.contains("22.19.0"),
+            "title names the required version: {}",
+            item.title
+        );
+        assert!(
+            item.description.contains("22.12.0"),
+            "description names the running version: {}",
+            item.description
+        );
+
+        let quiet = probe_with("claude-code", vec![passing]);
+        assert!(!suggest_claude_code_repairs(&quiet)
+            .iter()
+            .any(|item| item.id == node("claude-code")));
     }
 
     #[test]

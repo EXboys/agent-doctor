@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use crate::adapters::{DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_HARNESS_VERSION};
+use crate::adapters::{
+    DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_HARNESS_CLI, DEEPSEEK_HARNESS_VERSION,
+};
 use crate::repair_types::{DiagnosticFact, SensitivityLevel};
 use crate::session_env::{collect_overlay_env, resolve_deepseek_harness_overlay};
 
@@ -51,6 +53,25 @@ pub(crate) fn probe_schema(
 pub(crate) fn probe_deep(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
     probe_api_key(checks, facts);
     probe_pinned_version(checks, facts);
+    probe_node_engine(checks, facts);
+}
+
+/// A dsh on too-old Node starts, prints nothing, and exits 0 — the chat surface
+/// then reports "no reply" with every other check green. Trust `engines.node`
+/// when the installed package declares it; 0.1.5 ships without an `engines`
+/// field, so fall back to the floor its code actually needs.
+fn probe_node_engine(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {
+    if crate::adapters::util::find_binary(DEEPSEEK_HARNESS_CLI).is_none() {
+        return;
+    }
+    let manifest = crate::lifecycle::deepseek_harness::installed_deepseek_harness_manifest();
+    super::super::node_engine::probe_node_engine(
+        "deepseek-harness",
+        manifest.as_deref(),
+        Some(crate::adapters::DEEPSEEK_HARNESS_NODE_MIN),
+        checks,
+        facts,
+    );
 }
 
 fn probe_api_key(checks: &mut Vec<ProbeCheck>, facts: &mut Vec<DiagnosticFact>) {

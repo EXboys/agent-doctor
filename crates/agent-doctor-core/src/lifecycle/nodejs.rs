@@ -30,6 +30,90 @@ pub fn ensure_npm() -> Result<PathBuf> {
     ensure_npm_with_progress(|_, _| {})
 }
 
+/// Make the `node` on PATH at least `minimum` (`major.minor.patch`).
+///
+/// npm packages declare the Node they need in `engines.node`; running their CLI
+/// on anything older can exit 0 with no output, which looks like a broken chat
+/// rather than a broken install. When the machine's Node is too old this drops a
+/// newer one into the managed runtime directory and puts it first on PATH, so
+/// the next launch picks it up without touching a system-wide install.
+///
+/// Returns the version now in effect.
+pub fn ensure_node_at_least(minimum: &str) -> Result<String> {
+    ensure_node_at_least_with_progress(minimum, |_, _| {})
+}
+
+/// `on_progress(message, percent)` — percent is 0–100 for this Node bootstrap step.
+pub fn ensure_node_at_least_with_progress<F>(minimum: &str, mut on_progress: F) -> Result<String>
+where
+    F: FnMut(&str, u8),
+{
+    if let Some(current) = node_version_on_path() {
+        if !crate::version_check::version_is_older(&current, minimum) {
+            on_progress(
+                &format!("Node.js {current} already satisfies >= {minimum}"),
+                100,
+            );
+            return Ok(current);
+        }
+        on_progress(
+            &format!("Node.js {current} is older than {minimum} — installing a newer one…"),
+            2,
+        );
+    } else {
+        on_progress("Node.js not found — installing one (no admin required)…", 2);
+    }
+
+    let dest = managed_nodejs_root();
+    let already_installed = node_version_in_dir(&dest)
+        .filter(|version| !crate::version_check::version_is_older(version, minimum));
+    if already_installed.is_none() {
+        let _ = fs::remove_dir_all(&dest);
+        install_managed_nodejs(&dest, Some(minimum), &mut on_progress)?;
+    }
+    prepend_user_path(&dest);
+    prepend_user_path(&dest.join("bin"));
+
+    let version = node_version_in_dir(&dest)
+        .or_else(node_version_on_path)
+        .with_context(|| {
+            format!(
+                "Node.js was installed to {} but no version could be read back",
+                dest.display()
+            )
+        })?;
+    if crate::version_check::version_is_older(&version, minimum) {
+        bail!("installed Node.js {version} still does not satisfy >= {minimum}");
+    }
+    on_progress(&format!("Node.js {version} ready"), 100);
+    Ok(version)
+}
+
+fn node_version_in_dir(dir: &Path) -> Option<String> {
+    let binary = if cfg!(windows) {
+        dir.join("node.exe")
+    } else {
+        dir.join("bin").join("node")
+    };
+    if !binary.is_file() {
+        return None;
+    }
+    read_node_version(&binary)
+}
+
+fn node_version_on_path() -> Option<String> {
+    read_node_version(&find_binary("node")?)
+}
+
+fn read_node_version(binary: &Path) -> Option<String> {
+    let output = crate::exec::run_output(binary, &["--version"], Duration::from_secs(10)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    crate::version_check::extract_version(raw.trim())
+}
+
 /// `on_progress(message, percent)` — percent is 0–100 for this Node bootstrap step.
 pub fn ensure_npm_with_progress<F>(mut on_progress: F) -> Result<PathBuf>
 where
@@ -46,7 +130,7 @@ where
     );
     let dest = managed_nodejs_root();
     if npm_in_dir(&dest).is_none() {
-        install_managed_nodejs(&dest, &mut on_progress)?;
+        install_managed_nodejs(&dest, None, &mut on_progress)?;
     }
     prepend_user_path(&dest);
     prepend_user_path(&dest.join("bin"));
@@ -84,7 +168,7 @@ fn find_binary_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
     None
 }
 
-fn install_managed_nodejs<F>(dest: &Path, on_progress: &mut F) -> Result<()>
+fn install_managed_nodejs<F>(dest: &Path, minimum: Option<&str>, on_progress: &mut F) -> Result<()>
 where
     F: FnMut(&str, u8),
 {
@@ -96,7 +180,12 @@ where
         .context("failed to build HTTP client for Node.js download")?;
 
     on_progress("Looking up Node.js LTS…", 4);
-    let version = resolve_lts_version(&client).unwrap_or_else(|_| NODE_LTS_FALLBACK.to_string());
+    let version = match minimum {
+        Some(minimum) => {
+            resolve_version_at_least(&client, minimum).unwrap_or_else(|| format!("v{minimum}"))
+        }
+        None => resolve_lts_version(&client).unwrap_or_else(|_| NODE_LTS_FALLBACK.to_string()),
+    };
     let archive = node_archive_name(&version);
     let urls = node_archive_urls(&version, &archive);
     on_progress(&format!("Downloading Node.js {version}…"), 6);
@@ -193,19 +282,49 @@ fn node_archive_urls_routed(china: bool, version: &str, archive: &str) -> Vec<St
 }
 
 fn fetch_lts_version(client: &reqwest::blocking::Client, url: &str) -> Result<String> {
-    let entries: Vec<DistIndexEntry> = client
+    fetch_index(client, url)?
+        .into_iter()
+        .find(|entry| entry.lts.is_string())
+        .map(|entry| entry.version)
+        .context("no LTS release in node index")
+}
+
+/// Highest release in the index at or above `minimum`, preferring LTS.
+///
+/// Falls back to `None` when the index is unreachable; the caller then tries the
+/// minimum itself as an archive tag.
+fn resolve_version_at_least(client: &reqwest::blocking::Client, minimum: &str) -> Option<String> {
+    for url in node_index_urls() {
+        let Ok(entries) = fetch_index(client, &url) else {
+            continue;
+        };
+        if let Some(version) = pick_index_version(&entries, minimum) {
+            return Some(version);
+        }
+    }
+    None
+}
+
+fn pick_index_version(entries: &[DistIndexEntry], minimum: &str) -> Option<String> {
+    let usable = |entry: &&DistIndexEntry| {
+        !crate::version_check::version_is_older(entry.version.trim_start_matches('v'), minimum)
+    };
+    entries
+        .iter()
+        .find(|entry| entry.lts.is_string() && usable(entry))
+        .or_else(|| entries.iter().find(usable))
+        .map(|entry| entry.version.clone())
+}
+
+fn fetch_index(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<DistIndexEntry>> {
+    client
         .get(url)
         .send()
         .with_context(|| format!("node index {url}"))?
         .error_for_status()
         .with_context(|| format!("node index {url} HTTP"))?
         .json()
-        .with_context(|| format!("node index {url} JSON"))?;
-    entries
-        .into_iter()
-        .find(|entry| entry.lts.is_string())
-        .map(|entry| entry.version)
-        .context("no LTS release in node index")
+        .with_context(|| format!("node index {url} JSON"))
 }
 
 fn node_archive_name(version: &str) -> String {

@@ -150,6 +150,34 @@ pub(crate) fn suggest_rules(rules: &[Rule], probe: &RuntimeProbeReport) -> Vec<S
         .collect()
 }
 
+/// Fill `{node_required}` / `{node_actual}` from the probe's `*.node.*` facts.
+///
+/// Keeps the node rules runtime-agnostic: one wording, the versions come from
+/// whatever the check measured on this machine.
+pub(crate) fn fill_node_placeholders(items: &mut [SuggestedRepair], probe: &RuntimeProbeReport) {
+    let fact = |suffix: &str| {
+        probe
+            .facts
+            .iter()
+            .find(|f| f.key.ends_with(suffix))
+            .map(|f| f.value.clone())
+    };
+    let required = fact(".node.required");
+    let actual = fact(".node.actual");
+    if required.is_none() && actual.is_none() {
+        return;
+    }
+    for item in items.iter_mut() {
+        for text in [&mut item.title, &mut item.description] {
+            for (key, value) in [("{node_required}", &required), ("{node_actual}", &actual)] {
+                if let Some(value) = value {
+                    *text = text.replace(key, value);
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn apply_rules(
     rules: &[Rule],
     probe: &RuntimeProbeReport,

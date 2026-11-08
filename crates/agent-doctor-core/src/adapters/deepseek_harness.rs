@@ -11,6 +11,10 @@ pub const DEEPSEEK_HARNESS_RUNTIME_ID: &str = "deepseek-harness";
 pub const DEEPSEEK_HARNESS_CLI: &str = "dsh";
 pub const DEEPSEEK_HARNESS_VERSION: &str = "0.1.5-rc.3";
 pub const DEEPSEEK_HARNESS_NPM_PACKAGE: &str = "@deepseek-ai/dsh";
+/// Node floor used when the installed package's `engines.node` cannot be read.
+/// dsh 0.1.5 uses `import.meta.main` (22.18+), `zlib.createZstdCompress`
+/// (22.15+), and undici, which wants 22.19.
+pub const DEEPSEEK_HARNESS_NODE_MIN: &str = "22.19.0";
 pub const DEEPSEEK_BASE_URL_ENV: &str = "DEEPSEEK_BASE_URL";
 pub const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 

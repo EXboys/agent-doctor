@@ -25,6 +25,7 @@ pub(crate) fn powershell_encoded(script: &str) -> String {
     )
 }
 
+pub use nodejs::{ensure_node_at_least, ensure_node_at_least_with_progress};
 pub use uninstall::{uninstall_runtime, uninstall_shell_command};
 
 pub use cursor::{cursor_install_shell_command, run_cursor_lifecycle, CursorLifecycleAction};

@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::repair::SuggestedRepair;
-use agent_doctor_core::adapters::DEEPSEEK_HARNESS_VERSION;
+use agent_doctor_core::adapters::{DEEPSEEK_HARNESS_NODE_MIN, DEEPSEEK_HARNESS_VERSION};
 use agent_doctor_core::lifecycle::{
-    run_deepseek_harness_lifecycle, DeepSeekHarnessLifecycleAction,
+    ensure_node_at_least, run_deepseek_harness_lifecycle, DeepSeekHarnessLifecycleAction,
 };
 use agent_doctor_core::probe::{ProbeStatus, RuntimeProbeReport};
 
@@ -34,6 +34,21 @@ pub(crate) const DEEPSEEK_HARNESS_RULES: &[Rule] = &[
         }),
     },
     Rule {
+        id: "fix-deepseek-harness-node-version",
+        title: "Install Node.js {node_required} or newer",
+        description: "dsh is installed but runs on Node.js {node_actual}, older than the \
+            {node_required} it requires — its CLI exits without starting, so chat never replies. \
+            A newer Node goes into Agent Doctor's own runtime folder and onto PATH; \
+            the system-wide Node is left alone.",
+        check: CheckMatch::Is("deepseek-harness.node.engine", ProbeStatus::Fail),
+        versions: Versions::ANY,
+        fix: Fix::Auto(|probe| {
+            let minimum = fact_value(probe, "deepseek-harness.node.required")
+                .unwrap_or_else(|| DEEPSEEK_HARNESS_NODE_MIN.to_string());
+            ensure_node_at_least(&minimum).map(|_| None)
+        }),
+    },
+    Rule {
         id: "configure-deepseek-harness-credentials",
         title: "Configure DeepSeek credentials",
         description: "Add the API key in Agent Doctor wiring or the dsh web Models page; \
@@ -44,14 +59,31 @@ pub(crate) const DEEPSEEK_HARNESS_RULES: &[Rule] = &[
     },
 ];
 
+fn fact_value(probe: &RuntimeProbeReport, key: &str) -> Option<String> {
+    probe
+        .facts
+        .iter()
+        .find(|fact| fact.key == key)
+        .map(|fact| fact.value.clone())
+}
+
 pub fn suggest_deepseek_harness_repairs(probe: &RuntimeProbeReport) -> Vec<SuggestedRepair> {
+    let node_required = fact_value(probe, "deepseek-harness.node.required")
+        .unwrap_or_else(|| DEEPSEEK_HARNESS_NODE_MIN.to_string());
+    let node_actual = fact_value(probe, "deepseek-harness.node.actual")
+        .unwrap_or_else(|| "an unreadable version".to_string());
     let mut items: Vec<_> = suggest_rules(DEEPSEEK_HARNESS_RULES, probe)
         .into_iter()
         .map(|mut item| {
-            item.title = item.title.replace("{pinned}", DEEPSEEK_HARNESS_VERSION);
+            item.title = item
+                .title
+                .replace("{pinned}", DEEPSEEK_HARNESS_VERSION)
+                .replace("{node_required}", &node_required);
             item.description = item
                 .description
-                .replace("{pinned}", DEEPSEEK_HARNESS_VERSION);
+                .replace("{pinned}", DEEPSEEK_HARNESS_VERSION)
+                .replace("{node_required}", &node_required)
+                .replace("{node_actual}", &node_actual);
             item
         })
         .collect();

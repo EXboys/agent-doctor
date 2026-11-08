@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
 use crate::adapters::util::{discover_binary, home_join};
 
+/// npm package carrying the `claude` CLI when it was installed through npm
+/// rather than the native installer. Used to read `engines.node`.
+pub const CLAUDE_CODE_NPM_PACKAGE: &str = "@anthropic-ai/claude-code";
+
 pub struct ClaudeCodeAdapter;
 
 impl RuntimeAdapter for ClaudeCodeAdapter {
