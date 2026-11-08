@@ -95,6 +95,16 @@ fn window_decoration_width(window: &tauri::WebviewWindow, scale: f64) -> f64 {
     ((outer.width as f64 - inner.width as f64) / scale).max(0.0)
 }
 
+/// The home window may be sized to the page it shows.
+///
+/// Windows fills the whole work area, so a home window that stands alone
+/// would end in a blank gap under a short agent list. It fits its content
+/// instead. A window docked beside Ask keeps the shared height, so the two
+/// windows still end on the same line.
+fn home_fits_content(docked: bool) -> bool {
+    cfg!(target_os = "windows") && !docked
+}
+
 fn emit_main_dock_layout(main: &tauri::WebviewWindow, docked: bool, work_h: f64, secondary_h: f64) {
     let _ = main.emit(
         "main-dock-layout",
@@ -102,9 +112,7 @@ fn emit_main_dock_layout(main: &tauri::WebviewWindow, docked: bool, work_h: f64,
             "docked": docked,
             "workHeight": work_h,
             "secondaryHeight": secondary_h,
-            // Both platforms match Ask height here. Windows fills the extra
-            // page height in CSS instead of leaving a blank column.
-            "fitHeight": false,
+            "fitHeight": home_fits_content(docked),
         }),
     );
 }
@@ -186,6 +194,44 @@ fn secondary_is_visible(app: &AppHandle, label: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The secondary window the home is docked beside, if any.
+fn visible_secondary_label(app: &AppHandle) -> Option<&'static str> {
+    [
+        ASK_WINDOW_LABEL,
+        RESOURCES_WINDOW_LABEL,
+        DIAGNOSE_WINDOW_LABEL,
+    ]
+    .into_iter()
+    .find(|label| secondary_is_visible(app, label))
+}
+
+/// The layout the home window follows.
+///
+/// The page asks for it when it starts: the first `main-dock-layout` event
+/// is emitted while the webview is still booting, so it can be missed.
+#[tauri::command]
+pub fn main_dock_layout_command(app: AppHandle) -> Result<serde_json::Value, String> {
+    let Some(main) = app.get_webview_window("main") else {
+        return Err("main window missing".to_string());
+    };
+    let Some((_, _, _, work_h, scale)) = monitor_work_area(&main) else {
+        return Err("monitor unavailable".to_string());
+    };
+    let label = visible_secondary_label(&app);
+    let docked = label.is_some();
+    let secondary_h = label
+        .and_then(|label| app.get_webview_window(label))
+        .and_then(|window| window.inner_size().ok())
+        .map(|size| size.height as f64 / scale)
+        .unwrap_or(0.0);
+    Ok(serde_json::json!({
+        "docked": docked,
+        "workHeight": work_h,
+        "secondaryHeight": secondary_h,
+        "fitHeight": home_fits_content(docked),
+    }))
+}
+
 fn another_secondary_is_visible(app: &AppHandle, except: &str) -> bool {
     [
         ASK_WINDOW_LABEL,
@@ -194,6 +240,23 @@ fn another_secondary_is_visible(app: &AppHandle, except: &str) -> bool {
     ]
     .into_iter()
     .any(|label| label != except && secondary_is_visible(app, label))
+}
+
+/// The home window stands alone again once the window beside it is closed.
+///
+/// Windows lets the home window take the whole work area, so a home window
+/// that keeps the shared height ends in a blank gap under a short page. Put
+/// it back and let the page fit its content again.
+fn restore_standalone_home(app: &AppHandle, closed_label: &str) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    if another_secondary_is_visible(app, closed_label) {
+        return;
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        position_main_window_left(&main);
+    }
 }
 
 /// When Ask / Resources / Diagnose already share the screen, open the next one
@@ -551,6 +614,7 @@ fn attach_ask_window_close_behavior(window: &tauri::WebviewWindow) {
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             dismiss_secondary_window(&win, false);
+            restore_standalone_home(&app, ASK_WINDOW_LABEL);
         }
         WindowEvent::Destroyed => crate::island::on_ask_closed(&app),
         WindowEvent::Focused(_) => crate::island::on_ask_focus_changed(&app),
@@ -824,10 +888,12 @@ pub(crate) fn close_ask_window(app: &AppHandle, destroy: bool) -> Result<(), Str
 
 fn attach_resources_window_close_behavior(window: &tauri::WebviewWindow) {
     let win = window.clone();
+    let app = window.app_handle().clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             dismiss_secondary_window(&win, false);
+            restore_standalone_home(&app, RESOURCES_WINDOW_LABEL);
         }
     });
 }
@@ -906,10 +972,12 @@ pub(crate) fn ensure_resources_window(
 
 fn attach_diagnose_window_close_behavior(window: &tauri::WebviewWindow) {
     let win = window.clone();
+    let app = window.app_handle().clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
             dismiss_secondary_window(&win, false);
+            restore_standalone_home(&app, DIAGNOSE_WINDOW_LABEL);
         }
     });
 }
@@ -1163,7 +1231,15 @@ pub fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::{docked_inner_height, fit_main_inner_height};
+    use super::{docked_inner_height, fit_main_inner_height, home_fits_content};
+
+    #[test]
+    fn a_home_window_fits_its_content_only_when_it_stands_alone() {
+        // Alone: the window may end with its content.
+        assert_eq!(home_fits_content(false), cfg!(target_os = "windows"));
+        // Beside Ask: both windows share one height.
+        assert!(!home_fits_content(true));
+    }
 
     #[test]
     fn design_height_cap_stops_at_800_unless_the_screen_is_shorter() {

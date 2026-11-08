@@ -25,6 +25,20 @@ export function chatSideDefault(os: string | undefined): number {
   return os === "windows" ? layout.chatSideWindows : layout.chatSide;
 }
 
+/** The home window never gets shorter than this: the agent list needs the room. */
+export const homeMinHeight = 480;
+
+/**
+ * Height of a home window that stands alone (no Ask / Resources beside it).
+ *
+ * The window is as tall as the page it shows, so the page ends with its last
+ * card instead of a blank gap under it. The screen is the hard limit.
+ */
+export function fittedHomeHeight(content: number, screen: number): number {
+  const room = Math.max(0, screen - layout.homeEdgeMargin * 2);
+  return Math.round(Math.min(Math.max(content, homeMinHeight), room));
+}
+
 /**
  * One height for every home tab.
  * Start from the tallest tab, then sit halfway to the screen so the
