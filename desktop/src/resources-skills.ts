@@ -116,12 +116,15 @@ export function entryFromMallItem(item: TeamupsCatalogItem): UnifiedSkillEntry |
     if (local) return entryFromLocalSkill(local);
   }
   const category: SkillCategoryId = "other";
+  const categoryLabel = item.category_label?.trim();
   const badgeLabel =
     item.kind === "pack"
       ? t("resources.mallPackBadge")
       : isMallToolItem(item)
         ? t("resources.toolBadge")
-        : t("resources.mallSkillBadge");
+        : item.origin === "resource" && categoryLabel
+          ? categoryLabel
+          : t("resources.mallSkillBadge");
   const issue = storeIssue(item);
   return {
     key: `store:${item.kind}:${item.id}`,
@@ -741,7 +744,12 @@ export function bindCollapsibleRow(li: HTMLElement, desc: HTMLElement): void {
   more.type = "button";
   more.className = "res-catalog-more";
   more.hidden = true;
-  desc.insertAdjacentElement("afterend", more);
+  // The Expand toggle shares the description's last line and must never wrap:
+  // the text shrinks (line-clamp) so the toggle always fits at its right edge.
+  const descRow = document.createElement("div");
+  descRow.className = "res-catalog-desc-row";
+  desc.replaceWith(descRow);
+  descRow.append(desc, more);
 
   const syncMore = () => {
     const expanded = li.classList.contains("is-expanded");

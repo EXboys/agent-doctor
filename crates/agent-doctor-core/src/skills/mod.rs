@@ -7,6 +7,7 @@ pub(crate) mod local;
 mod mall;
 mod publish;
 mod resolve;
+mod resources;
 mod sync_router;
 mod teamups;
 mod teamups_auth;
@@ -21,6 +22,7 @@ pub use resolve::{
     load_local_skills_layout, resolve_cached_skill_dir, resolve_skills_source,
     save_skills_source_override, LocalSkillsLayout, ResolvedSkillsSource,
 };
+pub use resources::{fetch_free_resources, install_free_resource};
 pub use sync_router::{execute_skills_sync, SkillsSyncOptions};
 pub use teamups::{
     TeamupsCatalogItem, TeamupsClient, TeamupsMallCatalog, TeamupsPackManifest, TeamupsSkillEntry,

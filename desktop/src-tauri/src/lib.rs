@@ -669,6 +669,7 @@ pub fn run() {
             teamups_account_status_command,
             sign_out_teamups_command,
             install_teamups_mall_item_command,
+            install_teamups_resource_command,
             computer_use_access_command,
             computer_use_prompt_command,
             list_mcp_inventory_command,

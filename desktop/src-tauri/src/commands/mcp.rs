@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use agent_doctor_core::{
     browser_configured_runtimes, browser_mcp_wire_options_for_active_workspace,
-    diagnose_and_wire_browser_mcp, install_teamups_mall_item, list_browser_mcp_targets,
-    list_mcp_inventory, list_skills_inventory_with_options, list_teamups_mall_catalog,
-    load_workspaces, mount_synced_skills, poll_teamups_login, resolve_agent_doctor_binary,
-    sign_out_teamups, skill_mount_runtime_ids, start_teamups_login, teamups_account_status,
-    unmount_synced_skills, BrowserMcpDiagnoseWireReport, BrowserMcpTargetStatus,
-    McpInventoryReport, SkillMountOptions, SkillMountReport, SkillsInventoryOptions,
-    SkillsInventoryReport, SyncReport, TeamupsAccountStatus, TeamupsLoginPoll,
-    TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog,
+    diagnose_and_wire_browser_mcp, install_free_resource, install_teamups_mall_item,
+    list_browser_mcp_targets, list_mcp_inventory, list_skills_inventory_with_options,
+    list_teamups_mall_catalog, load_workspaces, mount_synced_skills, poll_teamups_login,
+    resolve_agent_doctor_binary, sign_out_teamups, skill_mount_runtime_ids, start_teamups_login,
+    teamups_account_status, unmount_synced_skills, BrowserMcpDiagnoseWireReport,
+    BrowserMcpTargetStatus, McpInventoryReport, SkillMountOptions, SkillMountReport,
+    SkillsInventoryOptions, SkillsInventoryReport, SyncReport, TeamupsAccountStatus,
+    TeamupsLoginPoll, TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsMallCatalog,
 };
 use agent_doctor_mcp::{
     browser_mcp_status_with_probe, configure_for, discover_chrome, generate_config_snippet,
@@ -425,6 +425,15 @@ pub async fn install_teamups_mall_item_command(
     .await
     .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())
+}
+
+/// Install one free storefront skill (/resources) by its catalog key.
+#[tauri::command]
+pub async fn install_teamups_resource_command(id: String) -> Result<SyncReport, String> {
+    tauri::async_runtime::spawn_blocking(move || install_free_resource(&id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// What the person still has to allow before this computer can be operated.

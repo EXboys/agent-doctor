@@ -313,7 +313,7 @@ fn sync_via_generic(
     })
 }
 
-fn load_lock_state(path: &Path) -> Result<Value> {
+pub(crate) fn load_lock_state(path: &Path) -> Result<Value> {
     if !path.exists() {
         return Ok(json!({ "skills": {} }));
     }
@@ -322,7 +322,7 @@ fn load_lock_state(path: &Path) -> Result<Value> {
     Ok(value)
 }
 
-fn save_lock_state(path: &Path, state: &Value) -> Result<()> {
+pub(crate) fn save_lock_state(path: &Path, state: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -331,7 +331,7 @@ fn save_lock_state(path: &Path, state: &Value) -> Result<()> {
 }
 
 /// If zip unpacked to `{id}/{id}/SKILL.md`, hoist files to `{id}/SKILL.md`.
-fn normalize_skill_extract_dir(target_dir: &Path) -> Result<()> {
+pub(crate) fn normalize_skill_extract_dir(target_dir: &Path) -> Result<()> {
     if target_dir.join("SKILL.md").exists() {
         return Ok(());
     }
@@ -358,7 +358,7 @@ fn normalize_skill_extract_dir(target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn extract_zip_bytes(content: &[u8], target_dir: &Path) -> Result<()> {
+pub(crate) fn extract_zip_bytes(content: &[u8], target_dir: &Path) -> Result<()> {
     fs::create_dir_all(target_dir)?;
     let reader = Cursor::new(content);
     let mut archive = zip::ZipArchive::new(reader).context("invalid skill zip archive")?;
@@ -388,7 +388,7 @@ fn hex_sha256(bytes: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn utc_now() -> String {
+pub(crate) fn utc_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -54,6 +54,22 @@ pub struct TeamupsCatalogItem {
     pub purchase_url: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
+    /// `"resource"` for free storefront skills (/resources), absent for packs.
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// Storefront category label from the /resources page (site's own name) — shown as the row badge.
+    #[serde(default)]
+    pub category_label: Option<String>,
+    /// Absolute zip URL for direct resource installs (bypasses pack manifests).
+    #[serde(default)]
+    pub download_url: Option<String>,
+    /// sha256 of the hosted zip, when the storefront provides one.
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub downloads: Option<u64>,
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +447,12 @@ pub(crate) fn merge_owned_into_catalog(
             pack_slug: Some(id),
             purchase_url: None,
             version: None,
+            origin: None,
+            category_label: None,
+            download_url: None,
+            sha256: None,
+            downloads: None,
+            author: None,
         });
     }
 }
@@ -667,6 +689,12 @@ pub(crate) fn parse_catalog_entries(
             pack_slug,
             purchase_url: Some(purchase_url),
             version,
+            origin: None,
+            category_label: None,
+            download_url: None,
+            sha256: None,
+            downloads: None,
+            author: None,
         });
     }
     out

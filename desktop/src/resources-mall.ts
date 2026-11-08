@@ -7,8 +7,8 @@ import { resourcesState, toolFiltersEl, toolsListEl, toolsEmptyEl, toolsFootnote
 import type { MallFilter } from "./resources-state";
 import { defaultToolsFootnote, renderResourcesList, rowMatchesQuery, setSkillsFootnote, skillsPanelActive, syncSkillsFootnote } from "./resources";
 import { buildMcpRows, loadMcpStatus } from "./resources-browser";
-import { appendFilterChip, appendResourceRow, appendUnifiedSkillRow, entryFromMallItem, isStoreScope, loadSkills, renderSkillsList } from "./resources-skills";
-import { listTeamupsMallCatalog, teamupsAccountStatus, startTeamupsLogin, signOutTeamups, installTeamupsMallItem } from "./ipc";
+import { appendFilterChip, appendResourceRow, appendUnifiedSkillRow, entryFromMallItem, isStoreScope, loadSkills, mountSkill, renderSkillsList } from "./resources-skills";
+import { listTeamupsMallCatalog, teamupsAccountStatus, startTeamupsLogin, signOutTeamups, installTeamupsMallItem, installTeamupsResource } from "./ipc";
 
 export function applyAccountOwnership(): void {
   if (!resourcesState.lastMallCatalog || !resourcesState.lastTeamupsAccount?.signed_in) return;
@@ -53,6 +53,11 @@ export function mallToolPool(): TeamupsCatalogItem[] {
   return (resourcesState.lastMallCatalog?.items ?? []).filter(isMallToolItem);
 }
 
+/** Free items first (storefront resources + free packs), then owned, then paid. */
+function mallSort(a: TeamupsCatalogItem, b: TeamupsCatalogItem): number {
+  return Number(b.free) - Number(a.free) || Number(b.owned) - Number(a.owned);
+}
+
 export function filteredMallToolItems(): TeamupsCatalogItem[] {
   return mallToolPool()
     .filter((item) => {
@@ -62,7 +67,7 @@ export function filteredMallToolItems(): TeamupsCatalogItem[] {
       const blob = `${item.name} ${item.description} ${item.id}`.toLowerCase();
       return blob.includes(resourcesState.resourceQuery);
     })
-    .sort((a, b) => Number(b.owned) - Number(a.owned));
+    .sort(mallSort);
 }
 
 export function filteredMallItems(): TeamupsCatalogItem[] {
@@ -77,7 +82,7 @@ export function filteredMallItems(): TeamupsCatalogItem[] {
       const blob = `${item.name} ${item.description} ${item.id} ${item.kind}`.toLowerCase();
       return blob.includes(resourcesState.resourceQuery);
     })
-    .sort((a, b) => Number(b.owned) - Number(a.owned));
+    .sort(mallSort);
 }
 
 export function renderToolsList(): void {
@@ -272,22 +277,35 @@ export async function installMallItem(
   button.textContent = t("resources.mallInstalling");
   setSkillsFootnote(t("resources.mallInstalling"));
   try {
-    const report = await installTeamupsMallItem({
-      kind: item.kind,
-      id: item.id,
-      packSlug:
-        item.kind === "skill"
-          ? (item.pack_slug?.trim() || item.id)
-          : item.pack_slug,
-    });
-    setSkillsFootnote(t("resources.mallInstallOk", {
-      installed: String(report.installed),
-    }));
-    if (resourcesState.activeSection === "skills") {
-      resourcesState.skillFilter = "issue";
-      resourcesState.highlightSkillKey = item.kind === "skill" ? item.id : null;
+    // Storefront resources (/resources) install straight from their hosted zip;
+    // TeamUps packs/skills go through the pack manifest sync.
+    const report =
+      item.origin === "resource"
+        ? await installTeamupsResource({ id: item.id })
+        : await installTeamupsMallItem({
+            kind: item.kind,
+            id: item.id,
+            packSlug:
+              item.kind === "skill"
+                ? (item.pack_slug?.trim() || item.id)
+                : item.pack_slug,
+          });
+    if (item.kind === "skill") {
+      // One-click install: land the skill on this computer, then put it on the
+      // agents right away — no second "one-click install" step to confuse.
+      resourcesState.skillsStatusMessage = null;
+      await mountSkill(item.id);
+      await Promise.all([loadMall(), loadMcpStatus()]);
+    } else {
+      setSkillsFootnote(t("resources.mallInstallOk", {
+        installed: String(report.installed),
+      }));
+      if (resourcesState.activeSection === "skills") {
+        resourcesState.skillFilter = "issue";
+        resourcesState.highlightSkillKey = null;
+      }
+      await Promise.all([loadMall(), loadSkills(), loadMcpStatus()]);
     }
-    await Promise.all([loadMall(), loadSkills(), loadMcpStatus()]);
   } catch (error) {
     setSkillsFootnote(teamupsMallInstallFailure(error));
     button.disabled = false;

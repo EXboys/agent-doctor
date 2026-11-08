@@ -244,6 +244,15 @@ export interface TeamupsCatalogItem {
   pack_slug: string | null;
   purchase_url: string | null;
   version: string | null;
+  /** "resource" = free storefront skill from the /resources page. */
+  origin?: string | null;
+  /** Storefront category label from the /resources page. */
+  category_label?: string | null;
+  /** Absolute zip URL — resource installs download it directly. */
+  download_url?: string | null;
+  sha256?: string | null;
+  downloads?: number | null;
+  author?: string | null;
 }
 
 export interface TeamupsMallCatalog {

@@ -6,8 +6,9 @@ use std::collections::HashSet;
 use std::fs;
 
 use super::resolve::{load_local_skills_layout_from_store, resolve_cached_skill_dir};
+use super::resources::fetch_free_resources;
 use super::sync_router::{execute_skills_sync_with_store, SkillsSyncOptions};
-use super::teamups::{TeamupsClient, TeamupsMallCatalog};
+use super::teamups::{TeamupsCatalogItem, TeamupsClient, TeamupsMallCatalog};
 use crate::evotown::SyncReport;
 use crate::store::{default_teamups_base_url, open_settings_store, SkillsSourceKind};
 
@@ -20,6 +21,12 @@ pub fn list_teamups_mall_catalog() -> Result<TeamupsMallCatalog> {
     let mut items = client
         .list_catalog()
         .with_context(|| format!("could not load TeamUps store from {base_url}"))?;
+
+    // Free storefront skills (/resources) ride in the same catalog. If the
+    // resources endpoint is missing or down, the packs list still loads.
+    if let Ok(rows) = fetch_free_resources(&base_url) {
+        merge_free_resource_rows(&mut items, rows);
+    }
 
     let installed = local_installed_skill_ids(&store)?;
     for item in &mut items {
@@ -93,7 +100,23 @@ pub fn install_teamups_mall_item(
     Ok(report)
 }
 
-fn teamups_mall_base_url(store: &crate::store::SettingsStore) -> Result<String> {
+/// Append free-resource rows to the catalog. A pack already offering the same
+/// skill id wins; no duplicate rows.
+fn merge_free_resource_rows(items: &mut Vec<TeamupsCatalogItem>, rows: Vec<TeamupsCatalogItem>) {
+    let known: HashSet<String> = items
+        .iter()
+        .filter(|item| item.kind == "skill")
+        .map(|item| item.id.clone())
+        .collect();
+    for row in rows {
+        if known.contains(&row.id) {
+            continue;
+        }
+        items.push(row);
+    }
+}
+
+pub(crate) fn teamups_mall_base_url(store: &crate::store::SettingsStore) -> Result<String> {
     // Prefer an explicit TeamUps base_url only when the configured source is TeamUps/Custom.
     // Evotown/SkillLite overrides must not steal the personal store.
     let configured = store.get_skills_source_settings()?;
@@ -166,7 +189,75 @@ fn pack_looks_installed(
 #[cfg(test)]
 mod tests {
     use super::super::teamups::parse_catalog_entries;
+    use super::merge_free_resource_rows;
+    use super::TeamupsCatalogItem;
     use serde_json::json;
+
+    fn resource_row(id: &str) -> TeamupsCatalogItem {
+        TeamupsCatalogItem {
+            id: id.to_string(),
+            kind: "skill".to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            free: true,
+            price_label: None,
+            owned: false,
+            installed: false,
+            skill_count: None,
+            pack_slug: None,
+            purchase_url: None,
+            version: None,
+            origin: Some("resource".into()),
+            category_label: Some("用助手".into()),
+            download_url: Some("https://agentdoctor.cn/x.zip".into()),
+            sha256: None,
+            downloads: None,
+            author: None,
+        }
+    }
+
+    #[test]
+    fn resource_rows_join_the_catalog_and_pack_skills_win_duplicates() {
+        // Pack rows come from /api/v1/packs, skill rows from /api/v1/skills.
+        let packs = parse_catalog_entries(
+            &json!({"packs": [{"slug": "starter", "name": "Starter Pack", "free": true}]}),
+            "pack",
+            "https://teamups.vip",
+        );
+        let skills = parse_catalog_entries(
+            &json!({"skills": [
+                {"id": "agent-browser", "free": true},
+                {"id": "title-polish", "free": true}
+            ]}),
+            "skill",
+            "https://teamups.vip",
+        );
+        let mut items = packs;
+        items.extend(skills);
+        assert_eq!(items.len(), 3, "one pack + two skill rows");
+        merge_free_resource_rows(
+            &mut items,
+            vec![
+                resource_row("agent-browser"), // duplicate skill id — dropped
+                resource_row("find-skills"),   // new — appended
+                resource_row("humanizer"),     // new — appended
+            ],
+        );
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "starter",
+                "agent-browser",
+                "title-polish",
+                "find-skills",
+                "humanizer"
+            ]
+        );
+        let row = items.iter().find(|item| item.id == "find-skills").unwrap();
+        assert_eq!(row.origin.as_deref(), Some("resource"));
+        assert!(row.free);
+    }
 
     #[test]
     fn parses_teamups_pack_catalog() {

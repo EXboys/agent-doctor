@@ -5,6 +5,10 @@ Agent Doctor is in early bootstrap. Before opening large PRs, please open an iss
 - Which runtime adapter (OpenClaw, Hermes, Claude Code, Codex, …)
 - Whether the change is local-only or requires a control-plane API
 
+## Conventions
+
+- Code comments, doc comments, and commit messages are written in English. User-facing strings live in the i18n dictionaries (`desktop/src/i18n/zh.ts` + `en.ts`, kept in pairs).
+
 ## Layout
 
 - `crates/agent-doctor-core/` — shared discovery, doctor, company profile logic

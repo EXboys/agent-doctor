@@ -399,6 +399,10 @@ export function installTeamupsMallItem(args: {
   return invoke("install_teamups_mall_item_command", args);
 }
 
+export function installTeamupsResource(args: { id: string }): Promise<SyncReport> {
+  return invoke("install_teamups_resource_command", args);
+}
+
 export function listMcpInventory(): Promise<McpInventoryReport> {
   return invoke("list_mcp_inventory_command");
 }

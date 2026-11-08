@@ -730,18 +730,31 @@ html[data-os="windows"] .resources-section-tab {
   overflow: hidden;
 }
 
+/* Description and its 展开/收起 toggle share one line; the toggle hugs the right edge. */
+.res-catalog-desc-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.res-catalog-desc-row .res-catalog-desc {
+  flex: 1;
+  min-width: 0;
+}
+
 .res-catalog-more {
   appearance: none;
   border: 0;
   background: transparent;
   padding: 0;
-  margin-top: 2px;
+  flex: none;
+  margin: 0 0 1px;
+  white-space: nowrap;
   color: #2f6fed;
   font: inherit;
   font-size: 0.72rem;
   font-weight: 650;
   cursor: pointer;
-  justify-self: start;
 }
 
 .res-catalog-more[hidden] {
