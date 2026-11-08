@@ -80,19 +80,21 @@ html.is-opaque-shell .widget {
   backdrop-filter: none;
 }
 
-/* Beside Ask: window height follows content up to the design cap, not Ask height. */
-html.is-main-docked,
-html.is-main-docked body {
+/* The home window is sized to the page it shows: the page fills the window
+   height, so the last card ends with the window instead of floating above a
+   blank gap. */
+html.is-main-fitted,
+html.is-main-fitted body {
   height: 100%;
   overflow: hidden;
 }
 
-html.is-main-docked .widget {
+html.is-main-fitted .widget {
   height: 100%;
   max-height: 100%;
 }
 
-html.is-main-docked .main-panels {
+html.is-main-fitted .main-panels {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -106,9 +108,9 @@ html[data-os="windows"] .widget {
   padding: 10px 12px;
 }
 
-/* Ask is as tall as the screen. Let the home page use that height: the
-   footer stays at the bottom and the last block grows, instead of a blank
-   gap under a short card. */
+/* The home window is as tall as the work area on Windows. Let the page use
+   that height: the footer stays at the bottom and the agent card grows into
+   the leftover space, instead of a blank gap under a short card. */
 html[data-os="windows"] .main-panels {
   display: flex;
   flex-direction: column;
@@ -120,15 +122,20 @@ html[data-os="windows"] .main-panel.is-active {
 }
 
 html[data-os="windows"] .agents-main {
-  flex: 1;
+  flex: 1 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+html[data-os="windows"] .agents-main > .ws-chip,
+html[data-os="windows"] .agents-main > .health-card {
+  flex: 0 0 auto;
+}
+
 html[data-os="windows"] .runtime-section,
 html[data-os="windows"] .main-panel.is-active > .widget-section:last-child {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   min-height: 0;
 }
 
@@ -137,9 +144,51 @@ html[data-os="windows"] .runtime-section {
   flex-direction: column;
 }
 
+html[data-os="windows"] .runtime-section > .runtime-tabs,
+html[data-os="windows"] .runtime-section > .runtime-tabs-more {
+  flex: 0 0 auto;
+}
+
 html[data-os="windows"] .runtime-panels {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A tall window needs the agent to look like a card, not like loose text on
+   an empty page. */
+html[data-os="windows"] .runtime-panels > .runtime:not(.is-solo) {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-os="windows"] .runtime-panels > .runtime {
+  flex: 0 0 auto;
+}
+
+/* The card on screen takes the leftover height. It never shrinks below its
+   content, so a long agent list still scrolls instead of being cut off. */
+html[data-os="windows"] .runtime-panels > article.runtime:last-of-type {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+/* Windows scrollbars are wide and eat the narrow agent panel. */
+html[data-os="windows"] .main-panels {
+  scrollbar-width: thin;
+}
+
+html[data-os="windows"] .main-panels::-webkit-scrollbar {
+  width: 8px;
+}
+
+html[data-os="windows"] .main-panels::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
 }
 
 html[data-os="windows"] .health-card-copy h2,

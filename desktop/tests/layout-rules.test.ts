@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chatSideDefault, dockedHomeHeight, layout } from "../src/layout-rules.ts";
+import { chatSideDefault, dockedHomeHeight, fittedHomeHeight, layout } from "../src/layout-rules.ts";
 
 assert.equal(layout.homeEdgeMargin, 48);
 assert.equal(layout.chatSide, 250);
@@ -21,6 +21,12 @@ assert.equal(dockedHomeHeight(900, screen, 1200), screen - layout.homeEdgeMargin
 assert.equal(chatSideDefault("windows"), layout.chatSideWindows);
 assert.equal(chatSideDefault("macos"), layout.chatSide);
 assert.equal(chatSideDefault(undefined), layout.chatSide);
+
+// A home window that stands alone ends with its content.
+assert.equal(fittedHomeHeight(520, screen), 520);
+assert.equal(fittedHomeHeight(200, screen), 480);
+assert.equal(fittedHomeHeight(2000, screen), screen - layout.homeEdgeMargin * 2);
+assert.equal(fittedHomeHeight(520, 100), 4);
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/chat.css"), "utf8");
 
@@ -45,5 +51,23 @@ assert.equal(px(root, "--chat-splitter-w"), layout.splitter);
 
 const windows = block(css, 'html[data-os="windows"]');
 assert.equal(px(windows, "--chat-side-w"), layout.chatSideWindows);
+
+// The Windows home fills the tall window: the agent card grows into the
+// leftover height, and nothing shrinks below its content.
+const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"), "utf8");
+
+const winAgents = block(styles, 'html[data-os="windows"] .agents-main');
+assert.match(winAgents, /flex:\s*1 0 auto/);
+assert.match(winAgents, /min-height:\s*0/);
+
+const winPanels = block(styles, 'html[data-os="windows"] .runtime-panels');
+assert.match(winPanels, /display:\s*flex/);
+
+const winCard = block(styles, 'html[data-os="windows"] .runtime-panels > article.runtime:last-of-type');
+assert.match(winCard, /flex:\s*1 0 auto/);
+assert.match(winCard, /min-height:\s*0/);
+
+const winScrollbar = block(styles, 'html[data-os="windows"] .main-panels::-webkit-scrollbar');
+assert.equal(px(winScrollbar, "width"), 8);
 
 console.log("layout-rules.test.ts ok");
