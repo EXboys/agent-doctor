@@ -4750,6 +4750,16 @@ html[data-os="windows"] .resources-hub-card-desc {
   box-shadow: var(--shadow-soft);
 }
 
+/* Under the doctor card the install prompt is a footnote to a real agent,
+   not a standalone empty state — no second boxed card beneath the first. */
+.runtime-empty.is-compact {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  box-shadow: none;
+}
+
 .runtime-empty > p:first-child {
   margin: 0;
   font-size: 0.92rem;

@@ -138,6 +138,15 @@ function countLocalAgents(managed: number): number {
   return managed > 0 ? managed + 1 : 0;
 }
 
+/**
+ * The solo layout is for a home with one agent *in total* — the built-in doctor
+ * included. Judging by managed CLIs alone painted the big solo card next to two
+ * tiles, so every solo decision goes through here.
+ */
+function isSoloHome(managedInstalled: number): boolean {
+  return countLocalAgents(managedInstalled) < 2;
+}
+
 function updateAgentsSecurityOverview(report: DoctorReport): void {
   const installed = countLocalAgents(
     report.runtimes.filter((runtime) => runtime.installed).length,
@@ -196,7 +205,7 @@ function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: 
   if (plan.expandForSelection) {
     runtimeTabsExpanded = true;
   }
-  runtimeSectionEl.classList.toggle("is-solo", installedRuntimes.length < 2);
+  runtimeSectionEl.classList.toggle("is-solo", isSoloHome(installedRuntimes.length));
   const visible = installedRuntimes.slice(0, plan.visibleCount);
   runtimeTabsEl.innerHTML = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
   runtimeTabsEl.prepend(doctorTabTile(selectedId === DOCTOR_RUNTIME_ID));
@@ -233,7 +242,7 @@ function doctorTabTile(active: boolean): HTMLElement {
 }
 
 /** Detail card for the built-in doctor agent, styled like a runtime card. */
-function doctorCardHtml(): string {
+function doctorCardHtml(solo = false): string {
   // The built-in agent rides the official account only — never the active
   // provider. The row starts at the sign-in line and `paintDoctorServiceRow`
   // fills in the live quota once the account status arrives.
@@ -245,14 +254,28 @@ function doctorCardHtml(): string {
   const actions = `
     <button type="button" class="btn-primary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
     <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>`;
+  // The only agent on the machine gets the large card, the same treatment a
+  // lone CLI runtime gets — the built-in agent is not a lesser one.
+  const hero = solo
+    ? `
+      <div class="runtime-solo-hero">
+        <span class="runtime-solo-logo" aria-hidden="true">${agentBrandIconHtml(DOCTOR_RUNTIME_ID)}</span>
+        <div class="runtime-solo-copy">
+          <p class="runtime-solo-kicker">${t("runtimes.soloKicker")}</p>
+          <h2 class="runtime-tab-title">Agent Doctor</h2>
+          <p class="runtime-solo-blurb">${t("runtime.doctorTileMeta")}</p>
+        </div>
+      </div>`
+    : "";
   return `
-    <article class="runtime" data-runtime="${DOCTOR_RUNTIME_ID}">
+    <article class="runtime${solo ? " is-solo" : ""}" data-runtime="${DOCTOR_RUNTIME_ID}">
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">Agent Doctor</h2>
         <span class="runtime-badges">
           <span class="badge ok">${t("runtime.builtinBadge")}</span>
         </span>
       </div>
+      ${hero}
       <div class="meta-grid">
         ${serviceHtml}
         <div class="meta-row">
@@ -372,8 +395,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       diagnose.runtimeCardActionContext(runtime),
     );
     const relatedResourcesHtml = renderRelatedResourcesHtml(preview);
-    const solo =
-      (appState.lastReport?.runtimes.filter((item) => item.installed).length ?? 0) === 1;
+    const solo = isSoloHome(
+      appState.lastReport?.runtimes.filter((item) => item.installed).length ?? 0,
+    );
     return renderRuntimeCard(
       runtime,
       appState.hermesModel,
@@ -435,19 +459,23 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
     const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
     if (installedRuntimes.length === 0) {
-      appState.activeRuntimeId = null;
-      runtimeTabsEl.innerHTML = "";
+      // The doctor ships with the app, so a home with no CLI still has one
+      // agent to show. Hiding the tiles here made the built-in agent vanish
+      // exactly when it was the only one left; the install prompt now rides
+      // under its card instead of replacing it.
+      appState.activeRuntimeId = DOCTOR_RUNTIME_ID;
+      paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
+      // One agent in total: the large card is the whole story, so the tile row
+      // would only repeat the name it already shows.
       runtimeTabsEl.hidden = true;
-      runtimeTabsMoreEl.hidden = true;
-      runtimeSectionEl.classList.remove("is-solo");
-      runtimesEl.innerHTML = `
-        <div class="runtime-empty">
+      runtimesEl.innerHTML = `${doctorCardHtml(true)}
+        <div class="runtime-empty is-compact">
           <p>${t("runtimes.emptyInstalled")}</p>
           <p class="runtime-empty-hint">${t("runtimes.emptyInstalledHint")}</p>
           <button type="button" class="btn-primary" data-action="open-agent-catalog">${t("runtimes.addAgent")}</button>
-          <button type="button" class="btn-secondary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
         </div>
       `;
+      void paintDoctorServiceRow();
       if (!opts?.relocalize) {
         void diagnose.closeDiagnoseDetail({ skipDismiss: true });
       }
