@@ -7,10 +7,12 @@ import {
   markFirstRunCompleted,
   markFirstRunDismissed,
   pickBiggestFirstRunTarget,
+  pickDrainedOfficialRuntime,
   shouldShowPersonalFirstRun,
   type FirstRunPhase,
   type FirstRunTarget,
 } from "./first-run";
+import { OFFICIAL_PROVIDER_ID } from "./official-quota";
 import { preferredRepairFilter } from "./repair-ui";
 import type {
   DoctorReport,
@@ -18,7 +20,8 @@ import type {
   RepairPreviewResponse,
   RepairStatusFilter,
 } from "./types";
-import { getPersonalProviderStatus, runRepairPreview, runDoctor, installRuntime, runRepairExecute, activatePersonalProvider, openPath } from "./ipc";
+import { planWiring, type WiringPlan } from "./wiring-plan";
+import { listPersonalProviders, runRepairPreview, runDoctor, installRuntime, runRepairExecute, activatePersonalProvider, openPath, teamupsAccountStatus } from "./ipc";
 
 export interface FirstRunUiDeps {
   panelDiagnoseEl: HTMLElement;
@@ -31,6 +34,10 @@ export interface FirstRunUiDeps {
   updateAgentsSecurityOverview: (report: DoctorReport) => void;
   setMainTab: (tab: "provider") => void;
   openAskWindowForVerify: (runtime: string) => Promise<void>;
+  /** Open the provider page's add form for the user's own key. */
+  openAddProviderForm: () => void;
+  /** Start the official sign-in or purchase; the provider page shows its progress. */
+  beginOfficialPath: (path: "login" | "buy") => Promise<void>;
 }
 
 export interface FirstRunUiApi {
@@ -65,6 +72,7 @@ const firstRunPrimaryEl = document.querySelector<HTMLButtonElement>("#first-run-
 const firstRunPrimaryLabelEl = document.querySelector<HTMLElement>("#first-run-primary-label")!;
 const firstRunSpinnerEl = document.querySelector<HTMLElement>("#first-run-spinner")!;
 const firstRunSecondaryEl = document.querySelector<HTMLButtonElement>("#first-run-secondary")!;
+const firstRunAltEl = document.querySelector<HTMLButtonElement>("#first-run-alt")!;
 const firstRunLogEl = document.querySelector<HTMLButtonElement>("#first-run-log")!;
 const firstRunFootnoteEl = document.querySelector<HTMLElement>("#first-run-footnote")!;
 
@@ -149,6 +157,7 @@ function renderFirstRunUi(): void {
     firstRunLogEl.textContent = t("runtime.openInstallLog");
     firstRunLogEl.disabled = busy;
   }
+  firstRunAltEl.hidden = true;
   // Allow skip even while scanning so users are not trapped.
   firstRunSecondaryEl.disabled = false;
 
@@ -233,10 +242,21 @@ function renderFirstRunUi(): void {
         firstRunPhase === "fixing"
           ? t("firstRun.wiringApplying")
           : t("firstRun.wiringApply", { name: target.displayName });
-      firstRunFootnoteEl.textContent = t("firstRun.footnoteWiringReady");
+      firstRunFootnoteEl.textContent = target.officialPath
+        ? t("firstRun.footnoteWiringReadyOfficial")
+        : t("firstRun.footnoteWiringReady");
+    } else if (target.officialPath) {
+      firstRunPrimaryLabelEl.textContent = t("firstRun.ownKey");
+      firstRunFootnoteEl.textContent = t("firstRun.footnoteWiringOfficial");
     } else {
       firstRunPrimaryLabelEl.textContent = t("firstRun.wiring");
       firstRunFootnoteEl.textContent = t("firstRun.footnoteWiring");
+    }
+    if (target.officialPath) {
+      firstRunAltEl.hidden = false;
+      firstRunAltEl.disabled = busy;
+      firstRunAltEl.textContent =
+        target.officialPath === "login" ? t("firstRun.officialLogin") : t("firstRun.officialBuy");
     }
   } else {
     firstRunTargetMetaEl.textContent = t("firstRun.targetMetaRepair", {
@@ -278,30 +298,88 @@ function suspendForWiring(): void {
   deps.setMainTab("provider");
 }
 
-/** If a personal provider is already saved, upgrade wiring CTA to one-click apply. */
-async function enrichWiringTarget(target: FirstRunTarget): Promise<FirstRunTarget> {
-  if (target.kind !== "wiring") {
-    return target;
-  }
-  try {
-    const status = await getPersonalProviderStatus();
-    if (!status.configured || !status.active_id) {
-      return target;
-    }
-    const providerName = status.active_name?.trim() || t("nav.wiring");
+/** Own-key path: park on the provider page with the add form open. */
+function runFirstRunOwnKey(): void {
+  suspendForWiring();
+  deps.openAddProviderForm();
+}
+
+/** Park on the provider page, where sign-in and the new balance show up. */
+async function runFirstRunOfficialPath(path: "login" | "buy"): Promise<void> {
+  suspendForWiring();
+  await deps.beginOfficialPath(path);
+}
+
+function readWiringInputs() {
+  return Promise.all([
+    listPersonalProviders().catch(() => null),
+    teamupsAccountStatus().catch(() => null),
+  ]);
+}
+
+/**
+ * Any link with quota upgrades wiring to a one-click write; with neither, the
+ * card leads with the user's own key and keeps the official account as a fallback.
+ */
+function withWiringPlan(target: FirstRunTarget, plan: WiringPlan): FirstRunTarget {
+  if (plan.kind === "apply") {
+    const providerName =
+      plan.providerId === OFFICIAL_PROVIDER_ID
+        ? t("personal.officialName")
+        : plan.providerName.trim() || t("nav.wiring");
     return {
       ...target,
-      applyProviderId: status.active_id,
+      applyProviderId: plan.providerId,
       applyProviderName: providerName,
+      officialPath: plan.officialPath ?? undefined,
       headline: t("firstRun.wiringReadyHeadline", { name: target.displayName }),
       detail: t("firstRun.wiringReadyDetail", {
         name: target.displayName,
         provider: providerName,
       }),
     };
-  } catch {
+  }
+  if (plan.kind === "getQuota") {
+    return {
+      ...target,
+      officialPath: plan.officialPath,
+      detail:
+        plan.officialPath === "login"
+          ? t("firstRun.wiringDetailOfficialLogin")
+          : t("firstRun.wiringDetailOfficialBuy"),
+    };
+  }
+  return target;
+}
+
+async function enrichWiringTarget(target: FirstRunTarget): Promise<FirstRunTarget> {
+  if (target.kind !== "wiring") {
     return target;
   }
+  const [doc, account] = await readWiringInputs();
+  return withWiringPlan(target, planWiring(doc, account));
+}
+
+/** A clean scan still needs a link with quota when the agent rides an empty official line. */
+async function drainedOfficialTarget(report: DoctorReport): Promise<FirstRunTarget | null> {
+  const [doc, account] = await readWiringInputs();
+  const runtime = pickDrainedOfficialRuntime(report, account);
+  if (!runtime) {
+    return null;
+  }
+  return withWiringPlan(
+    {
+      runtimeId: runtime.id,
+      displayName: runtime.display_name,
+      kind: "wiring",
+      headline: t("firstRun.officialEmptyHeadline", { name: runtime.display_name }),
+      detail: "",
+      fail: 0,
+      warn: 0,
+      canApply: false,
+    },
+    planWiring(doc, account),
+  );
 }
 
 function invalidatePreview(runtimeId: string): void {
@@ -355,6 +433,9 @@ async function evaluateFirstRunFromReport(
     firstRunTarget = await enrichWiringTarget(
       pickBiggestFirstRunTarget(report, deps.repairPreviewByRuntime, firstRunCopy()),
     );
+    if (firstRunTarget.kind === "none") {
+      firstRunTarget = (await drainedOfficialTarget(report)) ?? firstRunTarget;
+    }
     firstRunPhase = firstRunTarget.kind === "none" ? "success" : "issue";
   } finally {
     firstRunBusy = false;
@@ -592,6 +673,10 @@ async function runFirstRunPrimaryAction(): Promise<void> {
       await runFirstRunApplyProvider(target);
       return;
     }
+    if (target.officialPath) {
+      runFirstRunOwnKey();
+      return;
+    }
     suspendForWiring();
     return;
   }
@@ -635,6 +720,11 @@ export function initFirstRunUi(d: FirstRunUiDeps): FirstRunUiApi {
   deps = d;
   firstRunPrimaryEl.addEventListener("click", () => {
     void runFirstRunPrimaryAction();
+  });
+  firstRunAltEl.addEventListener("click", () => {
+    const path = firstRunTarget?.officialPath;
+    if (firstRunBusy || !path) return;
+    void runFirstRunOfficialPath(path);
   });
   firstRunLogEl.addEventListener("click", () => {
     const path = firstRunLogPath;

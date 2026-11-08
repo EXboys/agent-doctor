@@ -143,6 +143,8 @@ refs.firstRun = initFirstRunUi({
   updateAgentsSecurityOverview: (report) => refs.agents!.updateAgentsSecurityOverview(report),
   setMainTab: (tab) => setMainTab(tab),
   openAskWindowForVerify: (runtime) => refs.agents!.openAskWindowForVerify(runtime),
+  openAddProviderForm: () => refs.wiring!.openAddProviderForm(),
+  beginOfficialPath: (path) => refs.wiring!.beginOfficialPath(path),
 });
 
 langSwitchEl.addEventListener("click", (event) => {

@@ -1,5 +1,11 @@
 import { plainRepairCheckCopy } from "./repair-plain";
-import type { DoctorReport, RepairPreviewResponse, RuntimeDoctorResult } from "./types";
+import type {
+  DoctorReport,
+  RepairPreviewResponse,
+  RuntimeDoctorResult,
+  TeamupsAccountStatus,
+} from "./types";
+import { officialLineDrained } from "./wiring-plan";
 
 const STORAGE_KEY = "agent-doctor.personal-first-run.v1";
 
@@ -40,6 +46,11 @@ export interface FirstRunTarget {
   /** When set, wiring can one-click re-apply this saved personal provider. */
   applyProviderId?: string;
   applyProviderName?: string;
+  /**
+   * The official fallback to offer beside the main action while the official
+   * line cannot serve: "login" = signed out, "buy" = signed in but empty.
+   */
+  officialPath?: "login" | "buy";
 }
 
 interface FirstRunStorage {
@@ -89,6 +100,21 @@ function runtimeRank(id: string): number {
 
 function sortRuntimes(runtimes: RuntimeDoctorResult[]): RuntimeDoctorResult[] {
   return [...runtimes].sort((a, b) => runtimeRank(a.id) - runtimeRank(b.id));
+}
+
+/**
+ * Signing in writes the official line into every agent, so a clean scan can
+ * still leave the top agent with nothing to spend.
+ */
+export function pickDrainedOfficialRuntime(
+  report: DoctorReport,
+  account: TeamupsAccountStatus | null,
+): RuntimeDoctorResult | null {
+  return (
+    sortRuntimes(report.runtimes).find(
+      (runtime) => runtime.installed && officialLineDrained(runtime.profile.gateway_url, account),
+    ) ?? null
+  );
 }
 
 function issueScore(preview: RepairPreviewResponse): number {

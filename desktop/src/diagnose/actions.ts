@@ -2,6 +2,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   autoFixNoticeKey,
   computeDiagnoseScore,
@@ -15,25 +16,47 @@ import {
   explainLlmAccountBlock,
   missingProviderFieldsMessage,
   installFailureSentence,
+  teamupsLoginFailure,
   withErrorDetail,
   formatProviderFailure,
   withProviderFailure,
   type ProviderField,
 } from "../friendly-error";
 import { opensOwnWindowOnly } from "../agents-ui";
+import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
 import { ASK_VERIFY_DRAFT_KEY } from "../chat/types";
+import { DEFAULT_TEAMUPS_BASE_URL } from "../teamups-site";
 import type {
   InstallProgressEvent,
   ProviderProtocol,
   RepairPreviewResponse,
 } from "../types";
+import { officialFallback, officialLineDrained, planWiring } from "../wiring-plan";
 import * as dom from "./dom";
 import type { DiagnosePaintApi } from "./paint";
 import type { DiagnoseSession } from "./session";
 import { friendlyDeepError } from "./deep-chat";
 import { describeRepairSummary } from "./repair-summary";
-import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow } from "../ipc";
+import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, listPersonalProviders, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
+
+/**
+ * Whether the saved provider can serve this agent: on file, and not an
+ * official line with nothing left. Also refreshes what the config step offers.
+ */
+export async function readProviderState(session: DiagnoseSession): Promise<boolean> {
+  const [status, doc, account] = await Promise.all([
+    getPersonalProviderStatus(),
+    listPersonalProviders().catch(() => null),
+    teamupsAccountStatus().catch(() => null),
+  ]);
+  session.officialDrained = officialLineDrained(session.gatewayUrl, account);
+  session.wiringPlan = planWiring(doc, account);
+  if (!officialFallback(session.wiringPlan)) {
+    session.officialPending = null;
+  }
+  return status.configured && !session.officialDrained;
+}
 
 export type DiagnoseActionsDeps = {
   session: DiagnoseSession;
@@ -260,6 +283,77 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     paint.setResult("error", missingProviderFieldsMessage(["key"]));
   }
 
+  async function providerReady(): Promise<boolean> {
+    if (isPersonalEdition()) {
+      return readProviderState(session);
+    }
+    const status = await getPersonalProviderStatus();
+    return status.configured;
+  }
+
+  /** A saved link already has quota: write it into this agent in one click. */
+  async function applySavedProvider(): Promise<void> {
+    const plan = session.wiringPlan;
+    if (plan?.kind !== "apply") {
+      return;
+    }
+    paint.setBusy(true);
+    paint.setResult("busy", t("firstRun.wiringApplying"));
+    try {
+      const setup = await activatePersonalProvider({ id: plan.providerId });
+      const here = setup.runtimes.find((item) => item.runtime_id === session.runtimeId);
+      if (here && !here.applied) {
+        paint.setResult("error", t("firstRun.wiringApplyFailed", { name: session.displayName }));
+        return;
+      }
+      if (setup.verify?.ok === false) {
+        paint.setResult(
+          "error",
+          formatProviderFailure(setup.verify.message ?? t("diagnose.flow.verifyFailedShort"), {
+            statusCode: setup.verify.status_code,
+          }),
+        );
+        return;
+      }
+      paint.setResult(
+        "ok",
+        t("diagnose.flow.configOk", { name: setup.provider_name ?? plan.providerName }),
+      );
+      await deps.refreshState({ preferStep: "test" });
+    } catch (error) {
+      paint.setResult("error", withProviderFailure("diagnose.flow.configFailed", error));
+    } finally {
+      paint.setBusy(false);
+    }
+  }
+
+  /** The official fallback: sign in, or buy official quota, in the browser. */
+  async function startOfficialPath(): Promise<void> {
+    const path = officialFallback(session.wiringPlan);
+    if (!path) {
+      return;
+    }
+    session.officialPending = path;
+    try {
+      if (path === "login") {
+        paint.setResult("busy", t("resources.mallLoggingIn"));
+        const started = await startTeamupsLogin();
+        await openUrl(started.verification_url);
+        return;
+      }
+      const account = await teamupsAccountStatus().catch(() => null);
+      const base = account?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
+      await openUrl(`${base}/membership`);
+      paint.setResult("busy", t("diagnose.flow.officialBuyOpened"));
+    } catch (error) {
+      session.officialPending = null;
+      paint.setResult(
+        "error",
+        path === "login" ? teamupsLoginFailure(error) : withErrorDetail(t("runtime.openFailed"), error),
+      );
+    }
+  }
+
   async function runScoreTest(opts?: { reusePreview?: boolean }): Promise<void> {
     session.accountBlock = null;
     paint.setBusy(true);
@@ -279,21 +373,14 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
         paint.paintScore(session.lastScore, { animateFromZero: true });
         paint.paintChecks(session.preview, { mode: "pending" });
         paint.setScanMeter(0, session.preview.checks.length, t("diagnose.flow.confirming"));
-        const status = await getPersonalProviderStatus();
-        providerOk = status.configured;
+        providerOk = await providerReady();
       } else {
         paint.paintScore(
           { pass: 0, warn: 0, fail: 0, total: 0, percent: 0 },
           { animateFromZero: true },
         );
         paint.setScanMeter(0, session.preview?.checks.length ?? 0, t("diagnose.flow.confirming"));
-        const [nextPreview, ok] = await Promise.all([
-          deps.loadPreview(),
-          (async () => {
-            const status = await getPersonalProviderStatus();
-            return status.configured;
-          })(),
-        ]);
+        const [nextPreview, ok] = await Promise.all([deps.loadPreview(), providerReady()]);
         session.preview = nextPreview;
         session.lastScore = computeDiagnoseScore(session.preview);
         providerOk = ok;
@@ -484,6 +571,8 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
     runDeepRepair,
     runVerifyAndSave,
     goConfigNext,
+    applySavedProvider,
+    startOfficialPath,
     runScoreTest,
     openAskYourself,
     openAskForVerify,

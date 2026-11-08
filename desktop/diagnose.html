@@ -108,6 +108,9 @@
         </section>
 
         <section class="diagnose-panel" id="diagnose-panel-config" hidden>
+          <div class="diagnose-config-apply" id="diagnose-config-apply" hidden>
+            <button id="diagnose-config-apply-btn" type="button" class="btn-primary">—</button>
+          </div>
           <div id="diagnose-config-personal" class="diagnose-config-personal">
             <div class="diagnose-config-block">
               <p class="diagnose-config-label" data-i18n="diagnose.flow.fieldProvider">服务商</p>
@@ -164,6 +167,14 @@
             <button id="diagnose-config-save" type="button" class="btn-primary" data-i18n="diagnose.flow.save">保存</button>
             <button id="diagnose-config-next" type="button" class="btn-secondary" data-i18n="diagnose.flow.next">下一步</button>
             <p id="diagnose-config-result" class="diagnose-result is-slot" hidden></p>
+          </div>
+          <div class="diagnose-config-official" id="diagnose-config-official" hidden>
+            <span class="diagnose-official-mark" id="diagnose-config-official-mark" aria-hidden="true"></span>
+            <div class="diagnose-official-copy">
+              <strong data-i18n="diagnose.flow.officialTitle">官方额度</strong>
+              <span id="diagnose-config-official-text">—</span>
+            </div>
+            <button id="diagnose-config-official-btn" type="button" class="diagnose-official-cta">—</button>
           </div>
           <div id="diagnose-config-team" hidden>
             <p id="diagnose-team-status" class="diagnose-team-status">—</p>

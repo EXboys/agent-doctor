@@ -52,6 +52,19 @@ export function officialQuotaState(
   };
 }
 
+/**
+ * Whether the official line that external CLIs ride can take a request:
+ * purchased tokens, or legacy trial calls. The monthly gift does not count —
+ * it only serves the built-in agent.
+ */
+export function officialLineUsable(status: TeamupsAccountStatus | null | undefined): boolean {
+  const official = status?.official;
+  if (!status?.signed_in || !official?.active) return false;
+  const tokens = Math.max(0, official.tokens_remaining ?? 0);
+  const trials = Math.max(0, official.trial_calls_left ?? 0);
+  return tokens > 0 || (official.via === "trial" && trials > 0);
+}
+
 /** Which pool the built-in agent's next message would spend. */
 export type BuiltinQuotaState = "signed_out" | "free" | "paid" | "empty";
 

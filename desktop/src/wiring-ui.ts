@@ -26,6 +26,8 @@ export interface WiringUiApi {
   refreshPresetGroupLabels: () => void;
   applyProviderPreset: (presetId: string, opts?: { forceModel?: boolean }) => void;
   showPersonalListView: () => void;
+  openAddProviderForm: () => void;
+  beginOfficialPath: (path: "login" | "buy") => Promise<void>;
   reloadWiringLocale: () => Promise<void>;
 }
 
@@ -77,6 +79,8 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     refreshPresetGroupLabels: () => presets.refreshPresetGroupLabels(),
     applyProviderPreset: (presetId, opts) => presets.applyProviderPreset(presetId, opts),
     showPersonalListView: () => personal.showPersonalListView(),
+    openAddProviderForm: () => personal.openAddProviderForm(),
+    beginOfficialPath: (path) => personal.beginOfficialPath(path),
     reloadWiringLocale: async () => {
       presets.refreshPresetGroupLabels();
       mode.updateFooterCopy(isTeamEdition() ? "team" : "personal");

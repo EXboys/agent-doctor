@@ -1,6 +1,7 @@
 import type { DiagnoseScore, DiagnoseStepId } from "../diagnose-flow";
 import type { LlmAccountBlock } from "../friendly-error";
 import type { RepairPreviewResponse, RepairStatusFilter } from "../types";
+import type { WiringPlan } from "../wiring-plan";
 
 export const SCORE_MIN_MS = 2800;
 export const SCORE_MAX_MS = 4000;
@@ -45,6 +46,14 @@ export type DiagnoseSession = {
   /** This visit already wrote a key, so Next can leave the form. */
   keySaved: boolean;
   guideFillConfig: boolean;
+  /** What the config step offers besides the key form: a one-click write, or the official fallback. */
+  wiringPlan: WiringPlan | null;
+  /** This agent's configured base URL from the last scan. */
+  gatewayUrl: string | null;
+  /** Wired to the official line, which has nothing left to spend. */
+  officialDrained: boolean;
+  /** An official sign-in or purchase started here; re-check when it lands. */
+  officialPending: "login" | "buy" | null;
   /** Full repair panel (one-click / rollback / Chrome check). */
   deepOpen: boolean;
   repairConfirmPending: boolean;
@@ -103,6 +112,10 @@ export function createDiagnoseSession(runtimeId: string): DiagnoseSession {
     checkFilter: "all",
     keySaved: false,
     guideFillConfig: false,
+    wiringPlan: null,
+    gatewayUrl: null,
+    officialDrained: false,
+    officialPending: null,
     deepOpen: false,
     repairConfirmPending: false,
     deepFilter: "all",

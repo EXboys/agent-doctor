@@ -39,6 +39,7 @@ import {
 import {
   formatOfficialTokens,
   OFFICIAL_PROVIDER_ID,
+  officialLineUsable,
   officialQuotaLines,
   officialQuotaState,
 } from "../official-quota";
@@ -110,14 +111,8 @@ function avatarTone(key: string): number {
 
 /** Signed in and has trial calls or tokens left. Unknown until the account loads. */
 function officialUsable(): boolean {
-  const official = officialAccount?.official;
   if (!officialAccount) return true;
-  if (!officialAccount.signed_in || !official) return false;
-  const trials = Math.max(0, official.trial_calls_left ?? 0);
-  const tokens = Math.max(0, official.tokens_remaining ?? 0);
-  const hasTokenBalance = official.via === "member" || (official.token_cap ?? 0) > 0 || tokens > 0;
-  const onTrial = official.via === "trial";
-  return official.active && (onTrial ? trials > 0 || tokens > 0 : hasTokenBalance && tokens > 0);
+  return officialLineUsable(officialAccount);
 }
 
 /** One line, both pools — the same wording the Ask model chip renders. */
@@ -653,6 +648,23 @@ export function createPersonalController(deps: PersonalDeps) {
     }
   }
 
+  function openOfficialMembership(): void {
+    const base = officialAccount?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
+    startOfficialBalanceWatch();
+    void openUrl(`${base}/membership`);
+  }
+
+  /** First-run hands off here once the provider page is showing. */
+  async function beginOfficialPath(path: "login" | "buy"): Promise<void> {
+    if (path === "login") {
+      await startOfficialLogin();
+      return;
+    }
+    // The balance watch diffs against the loaded account, so load it first.
+    if (!officialAccount) await refreshOfficialAccount();
+    openOfficialMembership();
+  }
+
   function settleAfterProviderSwitch() {
     void refreshOfficialAccount().finally(() => {
       void deps.loadModeStatus();
@@ -673,6 +685,11 @@ export function createPersonalController(deps: PersonalDeps) {
     personalFormTitleEl.textContent =
       mode === "edit" ? t("personal.formEdit") : t("personal.formAdd");
     setPersonalHint("hide");
+  }
+
+  function openAddProviderForm(): void {
+    resetPersonalForm();
+    showPersonalFormView("add");
   }
 
   function setPersonalHint(
@@ -932,8 +949,7 @@ export function createPersonalController(deps: PersonalDeps) {
 
   function bindEvents() {
     personalAddEl.addEventListener("click", () => {
-      resetPersonalForm();
-      showPersonalFormView("add");
+      openAddProviderForm();
     });
 
     personalBackEl.addEventListener("click", () => {
@@ -1059,9 +1075,7 @@ export function createPersonalController(deps: PersonalDeps) {
         return;
       }
       if (action === "official-membership") {
-        const base = officialAccount?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
-        startOfficialBalanceWatch();
-        void openUrl(`${base}/membership`);
+        openOfficialMembership();
         return;
       }
       if (action === "edit-provider") {
@@ -1106,6 +1120,8 @@ export function createPersonalController(deps: PersonalDeps) {
     loadPersonalProviderStatus,
     renderPersonalProviderList,
     showPersonalListView,
+    openAddProviderForm,
+    beginOfficialPath,
     bindEvents,
   };
 }

@@ -2,7 +2,7 @@ import "./platform";
 import { listen } from "@tauri-apps/api/event";
 import { applyStaticI18n, getLocale, t } from "./i18n";
 import { bindLocaleSync } from "./locale-sync";
-import { accountBlockMessage, withErrorDetail } from "./friendly-error";
+import { accountBlockMessage, teamupsLoginFailure, withErrorDetail } from "./friendly-error";
 import { isPersonalEdition } from "./edition";
 import {
   computeDiagnoseScore,
@@ -17,7 +17,7 @@ import type {
   RepairPreviewResponse,
   RuntimeDoctorResult,
 } from "./types";
-import { createDiagnoseActions } from "./diagnose/actions";
+import { createDiagnoseActions, readProviderState } from "./diagnose/actions";
 import { createDeepChat, type DeepPresetId } from "./diagnose/deep-chat";
 import * as dom from "./diagnose/dom";
 import { createDiagnosePaint } from "./diagnose/paint";
@@ -28,7 +28,7 @@ import {
   resolveInitialRuntime,
   type CheckFilter,
 } from "./diagnose/session";
-import { runRepairPreview, runDoctor, getPersonalProviderStatus, getEvotownStatus } from "./ipc";
+import { runRepairPreview, runDoctor, getEvotownStatus } from "./ipc";
 
 declare global {
   interface Window {
@@ -97,16 +97,18 @@ async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<voi
     dom.titleEl.textContent = t("diagnose.flow.title", { name: session.displayName });
 
     if (session.installed) {
+      session.gatewayUrl = runtime?.profile.gateway_url ?? null;
       session.preview = await loadPreview();
       session.lastScore = computeDiagnoseScore(session.preview);
       session.canAutoFix = session.preview.can_apply_repair;
       const wiringNeeded = needsWiringFromPreview(session.preview);
       if (isPersonalEdition()) {
-        const status = await getPersonalProviderStatus();
-        session.configured = status.configured && !wiringNeeded;
+        session.configured = (await readProviderState(session)) && !wiringNeeded;
       } else {
         const status = await getEvotownStatus();
         session.configured = status.configured && !wiringNeeded;
+        session.wiringPlan = null;
+        session.officialDrained = false;
         dom.teamStatusEl.textContent = status.configured
           ? t("diagnose.flow.teamConfigured", {
               url: status.base_url ?? "—",
@@ -123,6 +125,9 @@ async function refreshState(opts?: { preferStep?: DiagnoseStepId }): Promise<voi
       session.configured = false;
       session.testedOk = false;
       session.canAutoFix = false;
+      session.gatewayUrl = null;
+      session.wiringPlan = null;
+      session.officialDrained = false;
     }
 
     session.activeStep =
@@ -225,6 +230,38 @@ dom.configSaveEl.addEventListener("click", () => {
 dom.configNextEl.addEventListener("click", () => {
   if (session.busy) return;
   void actions.goConfigNext();
+});
+
+dom.configApplyBtnEl.addEventListener("click", () => {
+  if (session.busy) return;
+  void actions.applySavedProvider();
+});
+
+dom.configOfficialBtnEl.addEventListener("click", () => {
+  if (session.busy) return;
+  void actions.startOfficialPath();
+});
+
+void listen<{ status?: string; message?: string }>("teamups-login-finished", (event) => {
+  if (session.officialPending !== "login") return;
+  session.officialPending = null;
+  const status = event.payload?.status || "";
+  if (status === "approved") {
+    void refreshState();
+    return;
+  }
+  paint.setResult(
+    "error",
+    status === "expired" || status === "denied"
+      ? t("resources.mallLoginExpired")
+      : teamupsLoginFailure(event.payload?.message || ""),
+  );
+});
+
+// Purchases land in the browser; re-check once the user comes back here.
+window.addEventListener("focus", () => {
+  if (session.officialPending !== "buy" || session.busy) return;
+  void refreshState();
 });
 
 dom.primaryEl.addEventListener("click", () => {

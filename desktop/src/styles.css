@@ -1690,6 +1690,12 @@ body.is-diagnose-open .diagnose-detail {
   transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
+/* The `display` rules above beat the UA `[hidden]` rule. */
+.first-run-target[hidden],
+.first-run-actions > button[hidden] {
+  display: none;
+}
+
 .first-run-actions .btn-primary {
   min-width: 7rem;
   border: 1px solid transparent;

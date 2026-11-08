@@ -8,9 +8,12 @@ import {
 import { escapeHtml } from "../format";
 import { applyStaticI18n, t } from "../i18n";
 import { opensOwnWindowOnly, supportsBrowserMcp } from "../agents-ui";
+import { OFFICIAL_PROVIDER_ID } from "../official-quota";
+import { setProviderBrandIcon } from "../provider-brand";
 import { repairCheckStatusLabel, repairStatusClass } from "../repair-ui";
 import { renderPlainRepairCheckBody } from "../repair-plain";
 import type { RepairPreviewResponse } from "../types";
+import { officialFallback, type WiringPlan } from "../wiring-plan";
 import type { DeepChatApi } from "./deep-chat";
 import * as dom from "./dom";
 import {
@@ -427,6 +430,41 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
     deepChat?.paint();
   }
 
+  /** A one-click write above the key form, and the official fallback below it. */
+  function paintConfigOptions(plan: WiringPlan | null): void {
+    const apply = plan?.kind === "apply";
+    dom.configApplyEl.hidden = !apply;
+    if (apply) {
+      dom.configApplyBtnEl.textContent = t("firstRun.wiringApply", { name: session.displayName });
+    }
+    // Keep one primary button: Save steps back while a saved link can be written.
+    dom.configSaveEl.classList.toggle("btn-primary", !apply);
+    dom.configSaveEl.classList.toggle("btn-secondary", apply);
+    const official = officialFallback(plan);
+    dom.configOfficialEl.hidden = !official;
+    // Beside the one-click write it rides up top, in reach without scrolling;
+    // otherwise it trails the key form, which stays the main path.
+    if (apply) {
+      dom.configApplyEl.append(dom.configOfficialEl);
+    } else {
+      dom.configActionsEl.after(dom.configOfficialEl);
+    }
+    if (official) {
+      if (!dom.configOfficialMarkEl.firstElementChild) {
+        setProviderBrandIcon(dom.configOfficialMarkEl, "official");
+      }
+      dom.configOfficialTextEl.textContent = apply
+        ? official === "login"
+          ? t("diagnose.flow.officialBackupLogin")
+          : t("diagnose.flow.officialBackupBuy")
+        : official === "login"
+          ? t("diagnose.flow.officialFallbackLogin")
+          : t("diagnose.flow.officialFallbackBuy");
+      dom.configOfficialBtnEl.textContent =
+        official === "login" ? t("diagnose.flow.officialLoginCta") : t("diagnose.flow.officialBuyCta");
+    }
+  }
+
   function paintAll(): void {
     ensureDetailsOpen();
     dom.heroFootEl.hidden = false;
@@ -478,9 +516,22 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       dom.secondaryEl.hidden = true;
     } else if (session.activeStep === "config") {
       paintHeroTone(session.configured ? "ok" : "busy");
+      const plan = session.configured ? null : session.wiringPlan;
       if (session.configured) {
         dom.headlineEl.textContent = t("diagnose.flow.configDoneHeadline");
         dom.detailEl.textContent = t("diagnose.flow.savedNext");
+      } else if (plan?.kind === "apply") {
+        dom.headlineEl.textContent = t("firstRun.wiringReadyHeadline", { name: session.displayName });
+        dom.detailEl.textContent = t("diagnose.flow.applyDetail", {
+          name: session.displayName,
+          provider:
+            plan.providerId === OFFICIAL_PROVIDER_ID
+              ? t("personal.officialName")
+              : plan.providerName.trim() || t("nav.wiring"),
+        });
+      } else if (session.officialDrained) {
+        dom.headlineEl.textContent = t("firstRun.officialEmptyHeadline", { name: session.displayName });
+        dom.detailEl.textContent = t("diagnose.flow.configGuideDetail");
       } else if (session.guideFillConfig) {
         dom.headlineEl.textContent = t("diagnose.flow.configGuideHeadline");
         dom.detailEl.textContent = t("diagnose.flow.configGuideDetail");
@@ -488,6 +539,7 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
         dom.headlineEl.textContent = t("diagnose.flow.configHeadline");
         dom.detailEl.textContent = t("diagnose.flow.configDetail");
       }
+      paintConfigOptions(plan);
       // The key form owns Save and Next. Diagnosis actions stay on the later step.
       session.primaryAction = "verify-save";
       session.deepOpen = false;
@@ -500,7 +552,7 @@ export function createDiagnosePaint(session: DiagnoseSession, deepChat?: DeepCha
       dom.configActionsEl.hidden = false;
       dom.configSaveEl.textContent = t("diagnose.flow.save");
       dom.configNextEl.textContent = t("diagnose.flow.next");
-      if (session.guideFillConfig && !session.configured) {
+      if (session.guideFillConfig && !session.configured && plan?.kind !== "apply") {
         window.requestAnimationFrame(() => focusConfigFill());
       }
     } else {
