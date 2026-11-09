@@ -524,6 +524,63 @@ body.chat-is-resizing * {
   background: var(--fill);
 }
 
+/* The signed-in avatar opens a small menu instead of jumping anywhere. */
+.chat-account-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-account-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--border, rgba(10, 10, 10, 0.1));
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(10, 10, 10, 0.16);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+}
+
+.chat-account-menu[hidden] {
+  display: none;
+}
+
+.chat-account-menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-account-menu-item:hover {
+  background: var(--fill);
+}
+
+.chat-account-menu-item.is-logout:hover {
+  background: rgba(196, 49, 74, 0.12);
+  color: #c4314a;
+}
+
+html[data-theme="dark"] .chat-account-menu-item.is-logout:hover {
+  background: rgba(248, 113, 133, 0.14);
+  color: #f8717f;
+}
+
 .chat-account-avatar {
   flex: none;
   width: 22px;

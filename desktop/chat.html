@@ -137,10 +137,16 @@
             <span class="chat-resources-toggle-title" data-i18n="chat.resourcesPanelTitle">Resources</span>
           </button>
           <div class="chat-account-bar">
-            <button id="chat-account" type="button" class="chat-account" title="登录">
-              <span id="chat-account-avatar" class="chat-account-avatar" aria-hidden="true">登</span>
-              <span id="chat-account-name" class="chat-account-name">登录</span>
-            </button>
+            <div class="chat-account-wrap">
+              <button id="chat-account" type="button" class="chat-account" title="登录">
+                <span id="chat-account-avatar" class="chat-account-avatar" aria-hidden="true">登</span>
+                <span id="chat-account-name" class="chat-account-name">登录</span>
+              </button>
+              <div id="chat-account-menu" class="chat-account-menu" hidden>
+                <button id="chat-account-menu-center" type="button" class="chat-account-menu-item" data-i18n="chat.account">个人中心</button>
+                <button id="chat-account-menu-logout" type="button" class="chat-account-menu-item is-logout" data-i18n="chat.accountLogout">退出登录</button>
+              </div>
+            </div>
             <button id="chat-update" type="button" class="chat-update" hidden data-i18n="chat.updateReady">更新</button>
             <button
               id="chat-settings-open"

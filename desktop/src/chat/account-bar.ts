@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { teamupsLoginFailure } from "../friendly-error";
 import { t } from "../i18n";
-import { startTeamupsLogin, teamupsAccountStatus } from "../ipc";
+import { signOutTeamups, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
 import {
   setTeamupsBaseUrl,
   teamupsAccountPageUrl,
@@ -13,6 +13,27 @@ function avatarLetter(name: string): string {
   const trimmed = name.trim();
   const first = [...trimmed][0];
   return first ? first.toUpperCase() : "个";
+}
+
+function accountMenu(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("#chat-account-menu");
+}
+
+function closeAccountMenu(): void {
+  const menu = accountMenu();
+  if (menu) menu.hidden = true;
+}
+
+function accountMenuOpen(): boolean {
+  const menu = accountMenu();
+  return !!menu && !menu.hidden;
+}
+
+/** Signed in: the avatar opens a small menu instead of jumping anywhere. */
+function toggleAccountMenu(): void {
+  const menu = accountMenu();
+  if (!menu) return;
+  menu.hidden = !menu.hidden;
 }
 
 function paintAccount(signedInName: string, signedIn = false): void {
@@ -30,6 +51,7 @@ function paintAccount(signedInName: string, signedIn = false): void {
   }
   if (avatarEl) avatarEl.textContent = avatarLetter(name || label);
   if (button) button.title = signedIn ? t("chat.accountHint") : t("personal.officialLogin");
+  if (!signedIn) closeAccountMenu();
 }
 
 export function syncAccountBarLabels(): void {
@@ -90,11 +112,11 @@ async function refreshAccountBar(): Promise<void> {
 export function bindAccountBar(): void {
   const account = document.querySelector<HTMLButtonElement>("#chat-account");
   const update = document.querySelector<HTMLButtonElement>("#chat-update");
+  const menuCenter = document.querySelector<HTMLButtonElement>("#chat-account-menu-center");
+  const menuLogout = document.querySelector<HTMLButtonElement>("#chat-account-menu-logout");
   account?.addEventListener("click", () => {
     if (accountSignedIn) {
-      void openUrl(teamupsAccountPageUrl()).catch(() => {
-        // Outside the app there is no system browser hook.
-      });
+      toggleAccountMenu();
       return;
     }
     if (accountLoginWaiting) return;
@@ -106,6 +128,28 @@ export function bindAccountBar(): void {
         accountLoginWaiting = false;
         showAccountProblem(teamupsLoginFailure(error));
       });
+  });
+  menuCenter?.addEventListener("click", () => {
+    closeAccountMenu();
+    void openUrl(teamupsAccountPageUrl()).catch(() => {
+      // Outside the app there is no system browser hook.
+    });
+  });
+  menuLogout?.addEventListener("click", () => {
+    closeAccountMenu();
+    if (!accountSignedIn) return;
+    void signOutTeamups()
+      .then(() => refreshAccountBar())
+      .catch(() => {});
+  });
+  // Clicks outside the popover close it; Escape does the same.
+  document.addEventListener("pointerdown", (event) => {
+    if (!accountMenuOpen()) return;
+    if (event.target instanceof Element && event.target.closest(".chat-account-wrap")) return;
+    closeAccountMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAccountMenu();
   });
   update?.addEventListener("click", () => {
     void checkForAppUpdates({ interactive: true });
