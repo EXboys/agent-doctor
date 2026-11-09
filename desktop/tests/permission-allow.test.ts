@@ -10,6 +10,7 @@ import {
   consumeAllowStop,
   isAllowAckTimeout,
   isAskSessionGone,
+  isSendDead,
   permissionHoldKind,
   requestAllowStop,
   resolveChoiceAllow,
@@ -87,5 +88,22 @@ assert.equal(consumeAllowStop("chat-1"), false);
 assert.equal(permissionHoldKind("等待确认：Write"), "allow");
 assert.equal(permissionHoldKind("需要你回答"), "answer");
 assert.equal(permissionHoldKind("需要你输入"), "answer");
+
+// A dead send can never be delivered, so the card stops inviting retries.
+assert.equal(
+  isSendDead("ask session has no open stdin for permission replies [ad-send=stdin-closed]"),
+  true,
+);
+assert.equal(
+  isSendDead("write permission reply: Broken pipe (os error 32) [ad-send=dead-pipe]"),
+  true,
+);
+assert.equal(isSendDead("no active ask session for permission reply"), false);
+assert.equal(isSendDead(new Error("boom")), false);
+assert.equal(
+  // The prose may change; the stable marker decides.
+  isSendDead("随便什么文案 [ad-send=stdin-closed]"),
+  true,
+);
 
 console.log("ok - permission allow");

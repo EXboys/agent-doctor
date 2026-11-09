@@ -7,9 +7,15 @@ import {
 } from "./format";
 import { assistantMsgWrap, bubblePlainText } from "./copy-ui";
 import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from "./types";
-import { resolvePermissionSession } from "../ipc";
+import { reportPromptLog, resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
-import { ackAllow, isAskSessionGone, resolveChoiceAllow, shareAllow } from "./permission-allow";
+import {
+  ackAllow,
+  isAskSessionGone,
+  isSendDead,
+  resolveChoiceAllow,
+  shareAllow,
+} from "./permission-allow";
 
 function permissionToolLabel(name: string): string {
   const key = name.trim().toLowerCase();
@@ -331,7 +337,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
           }),
         ),
       ).catch((error) => {
-        if (isAskSessionGone(error)) {
+        if (isAskSessionGone(error) || isSendDead(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
           deps.releaseAllowHold(t("chat.permissionSessionGone"));
           return;
@@ -435,7 +441,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
           ),
         );
       } catch (error) {
-        if (isAskSessionGone(error)) {
+        if (isAskSessionGone(error) || isSendDead(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
           deps.releaseAllowHold(t("chat.permissionSessionGone"));
           expireLivePermissionCards();
@@ -557,7 +563,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
         }
       } catch (error) {
         setBusyLocal(false);
-        if (isAskSessionGone(error)) {
+        if (isAskSessionGone(error) || isSendDead(error)) {
           deps.setStatus(t("chat.permissionSessionGone"), "warn");
           deps.releaseAllowHold(t("chat.permissionSessionGone"));
           expireLivePermissionCards();
@@ -619,6 +625,39 @@ export function createPermissionsController(deps: PermissionsDeps) {
     hint.className = "chat-permission-hint chat-permission-missed";
     hint.textContent = t("chat.permissionAllowMissed");
     card.appendChild(hint);
+    appendReportHint(card);
+  }
+
+  /**
+   * Manual diagnosis report. The click is the consent — nothing sends
+   * itself — and the log carries ids and error classes, never chat content.
+   */
+  function appendReportHint(card: HTMLElement): void {
+    const row = document.createElement("p");
+    row.className = "chat-permission-hint chat-permission-report";
+    const note = document.createElement("span");
+    note.textContent = t("chat.permissionReportHint");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-permission-resend";
+    button.textContent = t("chat.permissionReportButton");
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = t("chat.permissionReportSending");
+      reportPromptLog()
+        .then(() => {
+          note.textContent = "";
+          button.textContent = t("chat.permissionReported");
+        })
+        .catch(() => {
+          button.disabled = false;
+          button.textContent = t("chat.permissionReportButton");
+          note.textContent = t("chat.permissionReportFailed");
+        });
+    });
+    row.append(note, button);
+    card.appendChild(row);
   }
 
   function scrubToolFragmentsBeforePermission(detail: string): void {
@@ -801,7 +840,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
           );
         } catch (error) {
           setLocalBusy(false);
-          if (isAskSessionGone(error)) {
+          if (isAskSessionGone(error) || isSendDead(error)) {
             deps.setStatus(t("chat.permissionSessionGone"), "warn");
             deps.releaseAllowHold(t("chat.permissionSessionGone"));
             expireLivePermissionCards();

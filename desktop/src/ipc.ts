@@ -1063,6 +1063,11 @@ export function resolvePermissionSession(args: {
   return invoke("resolve_permission_session_command", args);
 }
 
+/** The user asked to send the local prompt-session log for diagnosis. */
+export function reportPromptLog(): Promise<void> {
+  return invoke("report_prompt_log_command");
+}
+
 export function submitInstallInput(line: string): Promise<void> {
   return invoke("submit_install_input_command", { line });
 }

@@ -16,6 +16,15 @@ export function isAskSessionGone(error: unknown): boolean {
   return /no active ask session/i.test(String(error));
 }
 
+/**
+ * The send failed for good: the backend stdin is closed or the pipe is gone.
+ * Nothing a retry writes can ever be delivered, so the card gets the same
+ * treatment as a finished session instead of inviting more clicks.
+ */
+export function isSendDead(error: unknown): boolean {
+  return /ad-send=(?:stdin-closed|dead-pipe)/.test(String(error));
+}
+
 /** Choice confirms wait for Allow. A question still waits for an answer. */
 export function permissionHoldKind(message: string): "allow" | "answer" {
   return /需要你/.test(message) ? "answer" : "allow";

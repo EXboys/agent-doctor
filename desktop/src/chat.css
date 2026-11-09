@@ -4828,6 +4828,18 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   color: var(--muted);
 }
 
+/* The manual diagnosis report row: one line of why, then the button. */
+.chat-permission-report {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-permission-report .chat-permission-resend {
+  margin-top: 0;
+  flex: none;
+}
+
 .chat-permission.is-batch {
   display: flex;
   flex-direction: column;

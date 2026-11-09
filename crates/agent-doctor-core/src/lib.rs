@@ -1,6 +1,9 @@
 pub mod adapter;
 pub mod adapters;
 pub mod browser_wire;
+/// One manual diagnosis report: the user clicked "上报日志" on a failed
+/// confirmation card, sending the local prompt-session log to the server.
+pub mod client_log;
 /// Shared JSON config-syntax suggestions and fixes used by every runtime playbook.
 pub mod config_syntax;
 pub mod doctor;

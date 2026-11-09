@@ -38,6 +38,7 @@ mod computer_hand_common;
 #[cfg(target_os = "macos")]
 mod drag_pasteboard;
 mod island;
+mod prompt_log;
 mod speech;
 mod state;
 mod teamups_login;
@@ -454,6 +455,7 @@ async fn start_prompt_session_command(
     let app_for_emit = app.clone();
     let emit_target = owner_label.clone();
     let client_for_events = client_key.clone();
+    let runtime_label = options.runtime.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         run_prompt_session_with_cancel(
             &options,
@@ -461,6 +463,33 @@ async fn start_prompt_session_command(
             control_for_run,
             |event: PromptSessionEvent| {
                 let event = stamp_client_run(event, &client_for_events);
+                match &event {
+                    PromptSessionEvent::PermissionRequest {
+                        session_id,
+                        request_id,
+                        tool_name,
+                        ..
+                    } => prompt_log::event(
+                        "ask_arrived",
+                        &[
+                            ("session", session_id.as_str()),
+                            ("request", request_id.as_str()),
+                            ("tool", tool_name.as_str()),
+                        ],
+                    ),
+                    PromptSessionEvent::PermissionResolved {
+                        session_id,
+                        request_id,
+                        ..
+                    } => prompt_log::event(
+                        "ask_resolved",
+                        &[
+                            ("session", session_id.as_str()),
+                            ("request", request_id.as_str()),
+                        ],
+                    ),
+                    _ => {}
+                }
                 if let PromptSessionEvent::ProviderSwitched { .. } = &event {
                     agent_doctor_prompt::retire_warm_sessions();
                     let _ = app_for_emit.emit(
@@ -501,6 +530,14 @@ async fn start_prompt_session_command(
         }),
     };
     let _ = app.emit_to(owner_label.as_str(), "prompt-session-finished", &finished);
+    prompt_log::event(
+        "run_finished",
+        &[
+            ("run", client_key.as_str()),
+            ("runtime", runtime_label.as_str()),
+            ("status", finished["status"].as_str().unwrap_or("unknown")),
+        ],
+    );
     report
 }
 
@@ -547,17 +584,30 @@ fn resolve_permission_session_command(
     allow: bool,
     text: Option<String>,
 ) -> Result<bool, String> {
-    let (control, owner) = state.control_for_backend(&session_id)?;
-    let sent_text = text.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    if let Some(text) = sent_text {
-        control
-            .respond_line(&request_id, text)
-            .map_err(|e| format!("{e:#}"))?;
-    } else {
-        control
-            .respond_permission(&request_id, allow)
-            .map_err(|e| format!("{e:#}"))?;
+    let started = std::time::Instant::now();
+    let sent = send_permission_reply(&state, &session_id, &request_id, allow, text.as_deref());
+    let elapsed_ms = started.elapsed().as_millis().to_string();
+    match &sent {
+        Ok(_) => prompt_log::event(
+            "resolve_ok",
+            &[
+                ("session", session_id.as_str()),
+                ("request", request_id.as_str()),
+                ("ms", elapsed_ms.as_str()),
+            ],
+        ),
+        Err(err) => prompt_log::event(
+            "resolve_err",
+            &[
+                ("session", session_id.as_str()),
+                ("request", request_id.as_str()),
+                ("class", agent_doctor_prompt::send_error_class(err)),
+                ("ms", elapsed_ms.as_str()),
+            ],
+        ),
     }
+    let owner = sent.map_err(|err| format!("{err:#}"))?;
+    let sent_text = text.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let allowed = sent_text.is_some() || allow;
     state.forget_ask(&session_id, &request_id);
     let _ = app.emit_to(
@@ -570,6 +620,51 @@ fn resolve_permission_session_command(
         },
     );
     Ok(true)
+}
+
+/// Deliver one allow/deny/typed reply to the backend process. Returns the
+/// owner window label so the caller can emit the resolved event. Errors carry
+/// an `[ad-send=<class>]` marker — see `send_error_class`.
+fn send_permission_reply(
+    state: &PromptSessionState,
+    session_id: &str,
+    request_id: &str,
+    allow: bool,
+    text: Option<&str>,
+) -> anyhow::Result<String> {
+    let (control, owner) = state
+        .control_for_backend(session_id)
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    let sent_text = text.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(text) = sent_text {
+        control.respond_line(request_id, text)?;
+    } else {
+        control.respond_permission(request_id, allow)?;
+    }
+    Ok(owner)
+}
+
+/// The user pressed "上报日志" on a missed-allow card. The click is the
+/// consent — nothing reports automatically — and the payload is anonymous:
+/// ids, tool names, error classes, timings; never chat content.
+#[tauri::command]
+fn report_prompt_log_command() -> Result<(), String> {
+    let log = prompt_log::read_log()
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| "no prompt log yet".to_string())?;
+    let store = agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
+    let install_id =
+        agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
+    let report = agent_doctor_core::client_log::ClientLogReport {
+        install_id,
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        client: "desktop",
+        reason: agent_doctor_core::client_log::REASON_ALLOW_MISSED.into(),
+        log,
+    };
+    agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
 }
 
 pub fn run() {
@@ -601,6 +696,9 @@ pub fn run() {
         .setup(|app| {
             app.manage(Mutex::new(tray::TrayCompactState::default()));
             app.manage(PromptSessionState::default());
+            if let Ok(dir) = app.path().app_log_dir() {
+                prompt_log::init(dir);
+            }
             agent_doctor_prompt::enable_warm_sessions();
             #[cfg(any(unix, windows))]
             computer_hand::spawn();
@@ -776,6 +874,7 @@ pub fn run() {
             list_prompt_runs_command,
             replay_prompt_asks_command,
             resolve_permission_session_command,
+            report_prompt_log_command,
             speech_capability_command,
             voice_cloud_ready_command,
             speech_dictate_command,

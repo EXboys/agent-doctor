@@ -48,6 +48,13 @@ fn ensure_install_id(store: &SettingsStore) -> Result<(String, bool)> {
     Ok((id, true))
 }
 
+/// The install id for this machine, creating it on first use. The install
+/// ping and the manual diagnosis report both key their payloads with it, so
+/// the server can correlate the two.
+pub fn install_id(store: &SettingsStore) -> Result<String> {
+    ensure_install_id(store).map(|(id, _)| id)
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct InstallPing {
     pub install_id: String,

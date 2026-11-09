@@ -987,6 +987,12 @@ export const en = {
     "chat.permissionWaitAllow": "Waiting for you to tap Allow. It continues after that.",
     "chat.permissionWaitAnswer": "Waiting for your answer. It continues after that.",
     "chat.permissionAllowMissed": "That allow did not go through. Tap Allow to try again.",
+    "chat.permissionReportHint":
+      "Send the diagnostic log for this problem — no chat content — so we can fix it faster.",
+    "chat.permissionReportButton": "Report log",
+    "chat.permissionReportSending": "Sending…",
+    "chat.permissionReported": "Sent — thank you",
+    "chat.permissionReportFailed": "Could not send. Try again later.",
     "chat.permissionAllowSending": "Allowing…",
     "chat.permissionAllowStopped": "That allow did not go through, so this turn stopped. Auto-approve is on. Send again and it continues without asking.",
     "chat.permissionContinuing": "Allowed. Continuing.",
