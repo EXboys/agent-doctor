@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::ChildStdin;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde_json::Value;
 
 /// How a pending permission request should be answered on stdin.
@@ -124,6 +124,42 @@ pub(crate) fn claude_ask_updated_input(input: &Value, text: &str) -> Value {
     })
 }
 
+/// Why a control send failed. `stdin-closed` and `dead-pipe` are final — the
+/// reply can never reach the backend process, so no retry helps. `transient`
+/// may succeed on another try. The class travels inside the error text as
+/// `[ad-send=<class>]` because the error crosses to the UI as a plain string.
+pub fn send_error_class(error: &anyhow::Error) -> &'static str {
+    let chain = format!("{error:#}");
+    if chain.contains("ad-send=stdin-closed") {
+        "stdin-closed"
+    } else if chain.contains("ad-send=dead-pipe") {
+        "dead-pipe"
+    } else if chain.contains("no active ask session") {
+        "session-gone"
+    } else {
+        "transient"
+    }
+}
+
+fn send_io_error(what: &'static str, err: std::io::Error) -> anyhow::Error {
+    anyhow::anyhow!("{what}: {err} [ad-send={}]", send_io_class(&err))
+}
+
+fn send_io_class(err: &std::io::Error) -> &'static str {
+    match err.kind() {
+        std::io::ErrorKind::BrokenPipe
+        | std::io::ErrorKind::UnexpectedEof
+        | std::io::ErrorKind::ConnectionReset
+        | std::io::ErrorKind::ConnectionAborted => "dead-pipe",
+        _ => match err.raw_os_error() {
+            // Windows reports a closed pipe as ERROR_BROKEN_PIPE (109) or
+            // ERROR_NO_DATA (232), often without a mapped ErrorKind.
+            Some(109) | Some(232) => "dead-pipe",
+            _ => "transient",
+        },
+    }
+}
+
 /// Bidirectional control channel for Ask permission prompts (Claude or Codex,
 /// or the built-in doctor agent's in-process confirmations).
 #[derive(Clone, Default)]
@@ -202,11 +238,17 @@ impl PromptSessionControl {
             .stdin
             .lock()
             .map_err(|_| anyhow::anyhow!("permission control lock poisoned"))?;
-        let stdin = guard
-            .as_mut()
-            .context("ask session has no open stdin for permission replies")?;
-        writeln!(stdin, "{line}").context("write permission reply")?;
-        stdin.flush().context("flush permission reply")?;
+        let stdin = guard.as_mut().ok_or_else(|| {
+            anyhow::anyhow!(
+                "ask session has no open stdin for permission replies [ad-send=stdin-closed]"
+            )
+        })?;
+        if let Err(err) = writeln!(stdin, "{line}") {
+            return Err(send_io_error("write permission reply", err));
+        }
+        if let Err(err) = stdin.flush() {
+            return Err(send_io_error("flush permission reply", err));
+        }
         Ok(())
     }
 
@@ -310,25 +352,54 @@ impl PromptSessionControl {
             }
         }
 
-        let payload = match self.take_pending(request_id) {
-            Some(PendingReply::CodexRpc { kind }) => Self::codex_payload(request_id, allow, &kind),
-            Some(PendingReply::ClaudeTool { input }) => {
-                Self::claude_payload(request_id, allow, input)
+        let (payload, consumed) = self.compose_permission(request_id, allow)?;
+        if let Err(err) = self.write_line(&payload.to_string()) {
+            // The ask goes back, so a retry builds the same reply with the real
+            // input instead of an empty `updatedInput`.
+            if let Some(reply) = consumed {
+                self.restore_pending(request_id, reply);
             }
-            Some(PendingReply::ClaudeAsk { .. }) => {
-                Self::claude_payload(request_id, false, Value::Null)
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Build the reply line for one pending ask, consuming its entry. Returns
+    /// the entry so a failed write can put it back (`None` for an unknown id —
+    /// the Claude fallback has nothing to restore).
+    fn compose_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+    ) -> Result<(Value, Option<PendingReply>)> {
+        let Some(reply) = self.take_pending(request_id) else {
+            // No remembered pending yet (race / stale id). Prefer Claude shape for
+            // non-numeric ids; for numeric ids wait until remember_codex_reply.
+            if request_id.chars().all(|c| c.is_ascii_digit()) {
+                bail!("no pending Codex approval for request_id={request_id}");
             }
-            Some(PendingReply::DshPermission) => Self::dsh_permission_payload(request_id, allow),
-            None => {
-                // No remembered pending yet (race / stale id). Prefer Claude shape for
-                // non-numeric ids; for numeric ids wait until remember_codex_reply.
-                if request_id.chars().all(|c| c.is_ascii_digit()) {
-                    bail!("no pending Codex approval for request_id={request_id}");
-                }
-                Self::claude_payload(request_id, allow, serde_json::json!({}))
-            }
+            return Ok((
+                Self::claude_payload(request_id, allow, serde_json::json!({})),
+                None,
+            ));
         };
-        self.write_line(&payload.to_string())
+        let payload = match &reply {
+            PendingReply::CodexRpc { kind } => Self::codex_payload(request_id, allow, kind),
+            PendingReply::ClaudeTool { input } => {
+                Self::claude_payload(request_id, allow, input.clone())
+            }
+            PendingReply::ClaudeAsk { .. } => Self::claude_payload(request_id, false, Value::Null),
+            PendingReply::DshPermission => Self::dsh_permission_payload(request_id, allow),
+        };
+        Ok((payload, Some(reply)))
+    }
+
+    /// Put one consumed pending entry back so a retry builds the same reply.
+    /// `or_insert`: a freshly re-armed ask with the same id must not be lost.
+    fn restore_pending(&self, request_id: &str, reply: PendingReply) {
+        if let Ok(mut guard) = self.pending.lock() {
+            guard.entry(request_id.to_string()).or_insert(reply);
+        }
     }
 
     /// Send one typed line to a prompt that is waiting for text.
@@ -342,36 +413,56 @@ impl PromptSessionControl {
         if text.is_empty() {
             bail!("reply text is required");
         }
-        match self.take_pending(request_id) {
-            Some(PendingReply::CodexRpc {
+        let Some(reply) = self.take_pending(request_id) else {
+            bail!("no pending text prompt for request_id={request_id}");
+        };
+        let is_text_prompt = matches!(
+            &reply,
+            PendingReply::ClaudeAsk { .. }
+                | PendingReply::CodexRpc {
+                    kind: CodexReplyKind::UserLine { .. }
+                }
+        );
+        if !is_text_prompt {
+            // Wrong kind for a typed reply — put the ask back so it can still
+            // wait for its allow instead of silently dying here.
+            self.restore_pending(request_id, reply);
+            bail!("no pending text prompt for request_id={request_id}");
+        }
+        let payload = match &reply {
+            PendingReply::CodexRpc {
                 kind:
                     CodexReplyKind::UserLine {
                         question_id,
                         elicitation,
                         questions,
                     },
-            }) => {
+            } => {
                 let id: Value = request_id
                     .parse::<i64>()
                     .map(Value::from)
                     .unwrap_or_else(|_| Value::String(request_id.to_string()));
-                let result = if elicitation {
+                let result = if *elicitation {
                     serde_json::json!({
                         "action": "accept",
                         "content": { question_id: text }
                     })
                 } else {
-                    codex_user_input_result(&questions, &question_id, text)
+                    codex_user_input_result(questions, question_id, text)
                 };
-                let payload = serde_json::json!({ "id": id, "result": result });
-                self.write_line(&payload.to_string())
+                serde_json::json!({ "id": id, "result": result })
             }
-            Some(PendingReply::ClaudeAsk { input }) => {
-                let updated = claude_ask_updated_input(&input, text);
-                self.write_line(&Self::claude_payload(request_id, true, updated).to_string())
+            PendingReply::ClaudeAsk { input } => {
+                let updated = claude_ask_updated_input(input, text);
+                Self::claude_payload(request_id, true, updated)
             }
-            _ => bail!("no pending text prompt for request_id={request_id}"),
+            _ => unreachable!("is_text_prompt filtered every other kind"),
+        };
+        if let Err(err) = self.write_line(&payload.to_string()) {
+            self.restore_pending(request_id, reply);
+            return Err(err);
         }
+        Ok(())
     }
 
     pub(crate) fn auto_ack_claude_control(&self, request_id: &str) -> Result<()> {
@@ -414,8 +505,102 @@ impl PromptSessionControl {
 
 #[cfg(test)]
 mod tests {
-    use super::claude_ask_updated_input;
+    use super::{claude_ask_updated_input, send_error_class, send_io_class, PromptSessionControl};
     use serde_json::json;
+
+    #[test]
+    fn send_error_class_reads_the_marker_from_the_chain() {
+        let dead = anyhow::anyhow!(
+            "write permission reply: Broken pipe (os error 32) [ad-send=dead-pipe]"
+        );
+        assert_eq!(send_error_class(&dead), "dead-pipe");
+        let gone = anyhow::anyhow!("no active ask session for permission reply");
+        assert_eq!(send_error_class(&gone), "session-gone");
+        assert_eq!(send_error_class(&anyhow::anyhow!("boom")), "transient");
+    }
+
+    #[test]
+    fn a_control_without_stdin_reports_it_as_closed() {
+        let control = super::PromptSessionControl::new();
+        let err = control.write_line("{}").expect_err("no stdin attached");
+        assert_eq!(send_error_class(&err), "stdin-closed");
+    }
+
+    #[test]
+    fn broken_pipe_codes_classify_dead() {
+        assert_eq!(
+            send_io_class(&std::io::Error::from_raw_os_error(109)),
+            "dead-pipe"
+        );
+        assert_eq!(
+            send_io_class(&std::io::Error::from_raw_os_error(232)),
+            "dead-pipe"
+        );
+        let kind = std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+        assert_eq!(send_io_class(&kind), "dead-pipe");
+        let other = std::io::Error::other("slow disk");
+        assert_eq!(send_io_class(&other), "transient");
+    }
+
+    #[test]
+    fn a_failed_allow_keeps_the_ask_and_retries_with_the_real_input() {
+        let control = PromptSessionControl::new();
+        let input = json!({"command": "echo hi"});
+        control.remember_claude_tool_input("req-1", input.clone());
+
+        // No stdin attached: the send fails, but the ask must survive it.
+        let err = control
+            .respond_permission("req-1", true)
+            .expect_err("no stdin");
+        assert_eq!(send_error_class(&err), "stdin-closed");
+        assert!(control.has_pending(), "failed send must put the ask back");
+
+        // The retry builds the very same payload, carrying the original input.
+        let (line, consumed) = control.compose_permission("req-1", true).unwrap();
+        assert_eq!(line["response"]["response"]["behavior"], "allow");
+        assert_eq!(line["response"]["response"]["updatedInput"], input);
+        assert!(consumed.is_some());
+        // And putting it back again keeps the round-trip stable.
+        control.restore_pending("req-1", consumed.unwrap());
+        let (again, _) = control.compose_permission("req-1", true).unwrap();
+        assert_eq!(line, again);
+    }
+
+    #[test]
+    fn a_failed_line_reply_restores_the_question() {
+        let control = PromptSessionControl::new();
+        control.remember_claude_question(
+            "req-2",
+            json!({"questions": [{"question": "用哪种登录？"}]}),
+        );
+
+        let err = control
+            .respond_line("req-2", "浏览器")
+            .expect_err("no stdin");
+        assert_eq!(send_error_class(&err), "stdin-closed");
+        assert!(
+            control.has_pending(),
+            "failed reply must put the question back"
+        );
+
+        let updated = claude_ask_updated_input(
+            &json!({"questions": [{"question": "用哪种登录？"}]}),
+            "浏览器",
+        );
+        assert_eq!(updated["answers"]["用哪种登录？"], "浏览器");
+    }
+
+    #[test]
+    fn a_line_reply_to_a_tool_ask_leaves_the_ask_intact() {
+        let control = PromptSessionControl::new();
+        control.remember_claude_tool_input("req-3", json!({"command": "ls"}));
+
+        let err = control
+            .respond_line("req-3", "hello")
+            .expect_err("tool ask is not a text prompt");
+        assert!(err.to_string().contains("no pending text prompt"));
+        assert!(control.has_pending(), "the tool ask must keep waiting");
+    }
 
     #[test]
     fn claude_ask_answer_uses_the_question_text_as_key() {

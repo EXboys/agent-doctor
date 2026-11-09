@@ -30,7 +30,7 @@ use agent_doctor_core::evotown::normalize_runtime;
 pub use agent_doctor_core::usage::TokenUsage;
 
 pub use backend::AskBackend;
-pub use control::PromptSessionControl;
+pub use control::{send_error_class, PromptSessionControl};
 pub use plan::{PlanStep, PlanStepState};
 pub use tool_step::ToolStep;
 pub use vision::{ask_image_support, AskImageSupport, SENDABLE_IMAGE_EXTS};
