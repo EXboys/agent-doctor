@@ -7,6 +7,10 @@ use toml::Value;
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeModelState, RuntimeProfile};
 use crate::adapters::util::{discover_binary, home_join};
 
+/// npm package carrying the `codex` CLI when it was installed through npm
+/// rather than the native installer. Used to read `engines.node`.
+pub const CODEX_NPM_PACKAGE: &str = "@openai/codex";
+
 pub struct CodexAdapter;
 
 impl CodexAdapter {

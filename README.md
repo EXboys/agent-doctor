@@ -74,6 +74,8 @@ See [docs/enterprise.md](docs/enterprise.md) and [docs/product-boundary.md](docs
 
 Repair writes stay typed: backup first, no free-form shell, secrets redacted before AI analysis. Missing keys get a `.env` placeholder and a local guide — you paste the secret. — [docs/repair-safety.md](docs/repair-safety.md).
 
+Each probe is paired with a rule that knows the fix, and the rules are catalogued so a "green but broken" report can be traced: [docs/install-diagnosis-rules.md](docs/install-diagnosis-rules.md).
+
 ---
 
 ## Why Agent Doctor?

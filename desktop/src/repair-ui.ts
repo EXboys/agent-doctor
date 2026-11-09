@@ -151,6 +151,9 @@ const REPAIR_FIX_LABEL_KEYS: Record<string, string> = {
   "fix-codex-api-key-scaffold": "repair.fix.apiKeyScaffold",
   "fix-config-syntax": "repair.fix.configSyntax",
   "fix-deepseek-harness-browser-mcp": "repair.fix.deepseekBrowserMcp",
+  "fix-deepseek-harness-node-version": "repair.fix.nodeVersion",
+  "fix-claude-code-node-version": "repair.fix.nodeVersion",
+  "fix-codex-node-version": "repair.fix.nodeVersion",
 };
 
 export function repairFixLabel(actionId: string): string {
