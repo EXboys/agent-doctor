@@ -29,6 +29,7 @@ import {
 
 import {
   renderSessionList,
+  scheduleSessionListRender,
   saveStore,
   ensureRuntimeSession,
   addProjectFromAsk,
@@ -272,13 +273,17 @@ function bootChatTail(): void {
     applyVerifyDraftIfAny();
   })();
 
+  // Focus precedes every click, so a synchronous rebuild here delays the
+  // switch the user asked for. The debounced render repaints the same rows
+  // right after the interaction; background updates already repaint on
+  // their own 400ms cadence while runs are live.
   window.addEventListener("focus", () => {
-    renderSessionList();
+    scheduleSessionListRender(150);
     syncSessionWorkspaceUi();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      renderSessionList();
+      scheduleSessionListRender(150);
       syncSessionWorkspaceUi();
     }
   });

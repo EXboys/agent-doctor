@@ -299,7 +299,17 @@ export function createSessionsController(deps: SessionsDeps) {
     agentPickToken += 1;
   }
 
+  // Focus precedes every click, and each scan stats every PATH directory per
+  // runtime (hundreds of stats — slow under Windows Defender). A minute-old
+  // list stays warm: a menu miss falls through to the same lookup anyway.
+  const INSTALLED_AGENTS_SCAN_TTL_MS = 60_000;
   window.addEventListener("focus", () => {
+    if (
+      installedAgentsCache &&
+      Date.now() - installedAgentsCache.at < INSTALLED_AGENTS_SCAN_TTL_MS
+    ) {
+      return;
+    }
     void refreshInstalledAgents();
   });
   void refreshInstalledAgents();
@@ -673,7 +683,9 @@ export function createSessionsController(deps: SessionsDeps) {
     if (index > 0) {
       sessions.splice(index, 1);
       sessions.unshift(session);
-      deps.saveStore();
+      // Reorder only moves memory; the debounced save lands right after the
+      // switch's own one, and `beforeunload` flushes both.
+      deps.scheduleStorePersist();
     }
     renderSessionList();
     deps.sessionListEl
@@ -827,7 +839,10 @@ export function createSessionsController(deps: SessionsDeps) {
     }
     if (!markSessionOpen(id)) renderSessionList();
     deps.renderActiveMessages();
-    deps.saveStore();
+    // A click must not pay for a whole-store serialization: the durable side
+    // already coalesces the switch into an activeId patch, and the mirror is
+    // flushed by `beforeunload` if the window closes before the timer lands.
+    deps.scheduleStorePersist();
     void syncSubagentNames(sessionWorkspaceName(session, deps.getWorkspaceDoc()) ?? "");
     if (enteringRunning) {
       deps.restoreRunningView();
@@ -1000,10 +1015,15 @@ export function createSessionsController(deps: SessionsDeps) {
       return;
     }
     const token = ++agentPickToken;
-    // The list is loaded with the window. A click uses it at once; a miss
-    // falls through to the same lookup, which only checks that the program
-    // exists and does not start it.
-    const agents = installedAgentsCache?.agents ?? (await refreshInstalledAgents());
+    // The list is warmed with the window and re-scanned on focus after the
+    // TTL. A stale cache is refreshed here instead of trusted: the menu must
+    // show agents installed since the last scan. A miss falls through to the
+    // same lookup, which only checks that the program exists.
+    const cached = installedAgentsCache;
+    const agents =
+      cached && Date.now() - cached.at < INSTALLED_AGENTS_SCAN_TTL_MS
+        ? cached.agents
+        : await refreshInstalledAgents();
     if (token !== agentPickToken) return;
     if (!agents) {
       startNewSession(projectName);

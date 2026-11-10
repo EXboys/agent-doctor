@@ -156,8 +156,13 @@ fn run_engine_register_command(
 }
 
 #[tauri::command]
-fn list_installed_ask_agents_command() -> Vec<agent_doctor_core::InstalledAgent> {
-    agent_doctor_prompt::installed_ask_agents()
+async fn list_installed_ask_agents_command() -> Vec<agent_doctor_core::InstalledAgent> {
+    // Resolves every runtime binary across PATH (hundreds of stats, plus a
+    // one-shot `npm prefix -g`). A sync command runs on the UI thread and
+    // stalls the window on every focus.
+    tauri::async_runtime::spawn_blocking(agent_doctor_prompt::installed_ask_agents)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]

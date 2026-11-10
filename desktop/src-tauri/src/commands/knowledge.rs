@@ -502,12 +502,20 @@ fn clip_chars(text: &str, max: usize) -> String {
 }
 
 #[tauri::command]
-pub fn knowledge_pages_command(project_path: Option<String>) -> Result<KnowledgePages, String> {
-    let root = knowledge_root(project_path.as_deref())?;
-    Ok(KnowledgePages {
-        pages: list_pages(&root.join("wiki")),
-        root: display(&root),
+pub async fn knowledge_pages_command(
+    project_path: Option<String>,
+) -> Result<KnowledgePages, String> {
+    // `list_pages` walks the wiki directory and reads every page; keep the
+    // scan off the UI thread like the other file-backed commands.
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = knowledge_root(project_path.as_deref())?;
+        Ok(KnowledgePages {
+            pages: list_pages(&root.join("wiki")),
+            root: display(&root),
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -896,7 +904,9 @@ mod tests {
             None,
         )
         .unwrap();
-        let pages = knowledge_pages_command(project_str.clone()).unwrap().pages;
+        let pages = tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
+            .unwrap()
+            .pages;
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].title, "Start");
         assert_eq!(pages[1].title, "Advanced");
@@ -907,7 +917,9 @@ mod tests {
             Some("guides/advanced.md".into()),
         )
         .unwrap();
-        let pages = knowledge_pages_command(project_str.clone()).unwrap().pages;
+        let pages = tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
+            .unwrap()
+            .pages;
         assert_eq!(pages[1].category.as_deref(), Some("topics"));
         let context = knowledge_context_command(project_str.clone())
             .unwrap()
@@ -917,18 +929,22 @@ mod tests {
 
         knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
         knowledge_delete_page_command(project_str.clone(), "guides/advanced.md".into()).unwrap();
-        assert!(knowledge_pages_command(project_str.clone())
-            .unwrap()
-            .pages
-            .is_empty());
+        assert!(
+            tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
+                .unwrap()
+                .pages
+                .is_empty()
+        );
         knowledge_save_page_command(project_str.clone(), "index.md".into(), "# Index\n".into())
             .unwrap();
         knowledge_clear_command(project_str.clone()).unwrap();
         assert!(!root.exists());
-        assert!(knowledge_pages_command(project_str.clone())
-            .unwrap()
-            .pages
-            .is_empty());
+        assert!(
+            tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
+                .unwrap()
+                .pages
+                .is_empty()
+        );
         assert!(
             knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).is_err()
         );

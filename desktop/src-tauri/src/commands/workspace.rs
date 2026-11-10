@@ -13,8 +13,14 @@ use tauri::Emitter;
 use crate::{rebuild_tray_menu, update_tray_tooltip};
 
 #[tauri::command]
-pub fn list_workspaces_command() -> WorkspacesDocument {
-    ensure_default_workspace().unwrap_or_else(|_| load_workspaces().unwrap_or_default())
+pub async fn list_workspaces_command() -> WorkspacesDocument {
+    // `ensure_default_workspace` touches the filesystem (and may create the
+    // default entry); a sync command would run it on the UI thread.
+    tauri::async_runtime::spawn_blocking(|| {
+        ensure_default_workspace().unwrap_or_else(|_| load_workspaces().unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]

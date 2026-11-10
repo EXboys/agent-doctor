@@ -392,7 +392,9 @@ check("switching to an idle chat shows it and clears the last reply", () => {
   api.switchSession("b");
 
   eq(getStore().activeId, "b", "open chat");
-  ok(state.saves >= 1, "choice is saved");
+  // The switch schedules the save instead of serializing the whole store on
+  // the click; `beforeunload` flushes it if the window closes first.
+  ok(calls.includes("scheduleStorePersist"), "choice is scheduled to save");
   eq(state.runtimes.at(-1), "codex", "agent follows the chat");
   eq(state.assistantMessageId, null, "old reply id cleared");
   eq(state.assistantRaw, "", "old reply text cleared");

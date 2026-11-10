@@ -66,8 +66,12 @@ pub fn skill_mount_runtime_ids_command() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
-    list_mcp_inventory().map_err(|error| error.to_string())
+pub async fn list_mcp_inventory_command() -> Result<McpInventoryReport, String> {
+    // Inventory walks runtimes and binaries on disk; keep it off the UI thread
+    // for the same reason `mcp_status_command` is.
+    tauri::async_runtime::spawn_blocking(|| list_mcp_inventory().map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

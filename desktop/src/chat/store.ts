@@ -221,7 +221,14 @@ export function loadStoreFromLocalKeys(): SessionStore | null {
     // the blob was small enough, but a store that is already at the per
     // session cap could not get any smaller — that loop never ended and the
     // page never finished booting.
-    const fitted = parseStoreRaw(fitStore(loaded, CHAT_STORE_MAX_BYTES)) ?? loaded;
+    // Heal only when the copy is actually oversized: `parseStoreRaw` always
+    // returns a fresh object, so an identity check against `loaded` was
+    // always true and every boot rewrote the whole mirror (plus the six
+    // serializations `storeCandidates` spends on the trim ladder).
+    const fitted =
+      raw.length > CHAT_STORE_MAX_BYTES
+        ? (parseStoreRaw(fitStore(loaded, CHAT_STORE_MAX_BYTES)) ?? loaded)
+        : loaded;
     if (fitted !== loaded) {
       // Heal the mirror: an oversized copy fills the storage quota and keeps
       // every later write failing.
