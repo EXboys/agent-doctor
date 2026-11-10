@@ -37,6 +37,11 @@ import {
   syncMessageCopyActions,
 } from "./copy-ui";
 import { HISTORY_BATCH, historyRenderCut, messageContinuesRun } from "./history-window";
+
+/** Mounted-transcript ceiling: layout cost grows with every mounted row, so
+ * the pump stops here and the "show earlier" button loads the rest on
+ * demand. Jumps and search flush the whole history and bypass the cap. */
+const MAX_MOUNTED_ROWS = 400;
 import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
 import {
   createFeedbackControls,
@@ -323,7 +328,9 @@ export function createBubblesController(deps: BubblesDeps) {
       return;
     }
     streamPaintAt = now;
-    setAssistantMarkdown(bubble, markdown, { deferHighlight: heavy, skipCopySync: true });
+    // Code-block wrappers, copy bars and file links are seal-time work:
+    // rebuilding them per frame re-highlighted the same code over and over.
+    setStreamingMarkdown(bubble, deps.getAssistantRaw());
   }
   function persistMessage(
     role: ChatRole,
@@ -847,11 +854,26 @@ export function createBubblesController(deps: BubblesDeps) {
     const started = performance.now();
     try {
       let more = true;
+      let capped = false;
       do {
+        // Bound the mounted transcript: layout cost grows with every row
+        // here, and a long chat must not make every streaming frame slower.
+        // The button at the top loads the rest on demand (jumps and search
+        // dispatch the same flush event and bypass the cap).
+        if (deps.logEl.childElementCount >= MAX_MOUNTED_ROWS && historyJob.cursor > 0) {
+          more = false;
+          capped = true;
+          break;
+        }
         more = mountHistoryBatch();
       } while (more && performance.now() - started < 12);
       if (more && historyJob?.token === historyToken) {
         historyFrame = window.requestAnimationFrame(pumpHistory);
+        return;
+      }
+      if (capped && historyJob?.token === historyToken) {
+        showEarlierButton();
+        syncTurnCopyButtons();
         return;
       }
     } catch (error) {
@@ -863,6 +885,19 @@ export function createBubblesController(deps: BubblesDeps) {
       historyJob = null;
       syncTurnCopyButtons();
     }
+  }
+  function showEarlierButton(): void {
+    const log = deps.logEl;
+    if (log.querySelector(".chat-history-earlier")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-history-earlier";
+    button.textContent = t("chat.showEarlier");
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      log.dispatchEvent(new CustomEvent("chat-flush-history"));
+    });
+    log.prepend(button);
   }
   function renderMessageRange(
     messages: ChatMessage[],

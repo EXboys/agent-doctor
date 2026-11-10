@@ -973,6 +973,7 @@ export const zh = {
     "chat.answerSkip": "先不答",
     "chat.inputSubmit": "提交",
     "chat.inputSending": "发送中…",
+    "chat.showEarlier": "显示更早的消息",
     "chat.inputSubmitted": "已提交",
     "chat.inputFailed": "没送出去，请再试一次。",
     "chat.permissionStep": "这一步",

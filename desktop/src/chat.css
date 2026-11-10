@@ -10552,3 +10552,22 @@ html[data-theme="dark"] .chat-feedback-card {
   display: contents;
 }
 
+/* The "show earlier" button at the top of a capped transcript. */
+.chat-history-earlier {
+  appearance: none;
+  align-self: center;
+  margin: 6px 0 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.chat-history-earlier:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}

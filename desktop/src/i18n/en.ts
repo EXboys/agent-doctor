@@ -971,6 +971,7 @@ export const en = {
     "chat.answerSkip": "Not now",
     "chat.inputSubmit": "Send",
     "chat.inputSending": "Sending…",
+    "chat.showEarlier": "Show earlier messages",
     "chat.inputSubmitted": "Sent",
     "chat.inputFailed": "That did not go through. Try again.",
     "chat.permissionStep": "This step",
