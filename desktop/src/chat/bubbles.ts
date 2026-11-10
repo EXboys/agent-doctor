@@ -224,6 +224,12 @@ export function createBubblesController(deps: BubblesDeps) {
         lockChatRowHeights([assistantMsgWrap(bubble)], true);
       }
     }
+    // Every seal is a segment boundary: the reply text that comes after a
+    // tool opens a fresh message and bubble, so tools interleave with the
+    // reply in chronological order (Paseo's timeline model).
+    deps.setAssistantRaw("");
+    deps.setAssistantMessageId(null);
+    deps.setAssistantBubble(null);
     syncTurnCopyButtons();
     syncVisiblePlan();
     deps.setAssistantBubble(null);
@@ -383,6 +389,9 @@ export function createBubblesController(deps: BubblesDeps) {
   }
   function rememberTool(text: string): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    // A tool interrupts the streaming reply: seal the text segment first so
+    // the tool message lands after it (Paseo's timeline model).
+    if (deps.getAssistantRaw().trim()) sealAssistantBubble();
     const parts = splitToolActivity(text);
     const signature = toolSignature(text);
     const messages = session.messages;
@@ -415,6 +424,9 @@ export function createBubblesController(deps: BubblesDeps) {
   }
   function rememberToolStep(step: ToolStep): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
+    // Same segment cut: the step message must follow the text written before
+    // the tool started, and later text opens a fresh segment.
+    if (deps.getAssistantRaw().trim()) sealAssistantBubble();
     if (!storeToolStep(session.messages, step, deps.getAssistantMessageId(), uid)) return;
     deps.touchSession(session);
     deps.scheduleStorePersist();
@@ -780,26 +792,6 @@ export function createBubblesController(deps: BubblesDeps) {
     return bubble;
   }
   /** Tools saved after the reply still belong above that reply. */
-  function placeToolsBeforeReply(source: ChatMessage[]): ChatMessage[] {
-    const out: ChatMessage[] = [];
-    for (let i = 0; i < source.length; ) {
-      const message = source[i];
-      if (message.role !== "assistant") {
-        out.push(message);
-        i += 1;
-        continue;
-      }
-      i += 1;
-      const tools: ChatMessage[] = [];
-      while (i < source.length && source[i].role === "tool") {
-        tools.push(source[i]);
-        i += 1;
-      }
-      out.push(...tools, message);
-    }
-    return out;
-  }
-
   function renderEmptyChat(): HTMLElement {
     if (deps.activeSession().runtime === "doctor") {
       return renderDoctorStartChat();
@@ -1136,7 +1128,9 @@ export function createBubblesController(deps: BubblesDeps) {
         syncQuestionRail(session.messages, deps.logEl);
         return;
       }
-      const messages = placeToolsBeforeReply(session.messages);
+      // Tools are stored in chronological order (segment cuts + tail appends);
+      // rendering must not hoist them above the reply segments.
+      const messages = session.messages;
       const covered = coveredRunLogPointers(messages);
       const cut = historyRenderCut(messages);
       renderMessageRange(messages, cut, messages.length, deps.logEl, covered, session.runtime);

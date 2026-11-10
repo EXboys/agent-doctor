@@ -956,6 +956,10 @@ export function createActivityController(deps: ActivityDeps) {
 
   /** If the live chip was dropped, put the saved tool list back above the reply. */
   function ensureTurnToolsVisible(lastAssistant: HTMLElement | null, seen: ToolRecord[] = []): void {
+    // Interleaved rendering already places each tool row at its chronological
+    // spot (chat-work rows under the log). The re-insert is only for the old
+    // shape where the whole reply rendered as one bubble with no rows.
+    if (deps.logEl.querySelector(":scope > .chat-tool-group, :scope > .chat-work")) return;
     const filled = (record: ToolRecord) =>
       typeof record === "string" ? Boolean(record.trim()) : Boolean(record.step || record.text.trim());
     // Only the steps no chip shows yet; the chips above earlier replies keep theirs.
@@ -1242,6 +1246,9 @@ export function createActivityController(deps: ActivityDeps) {
     if (shouldAppend) {
       deps.flushPendingTextSync();
       deps.sealAssistantBubble();
+      // The text segment sealed above closes this tool container: the next
+      // reply segment opens a fresh one after it, keeping rows chronological.
+      sealProcessStream();
       settleActivity();
       const row = document.createElement("div");
       row.className = `chat-activity is-live kind-${kind}`;
