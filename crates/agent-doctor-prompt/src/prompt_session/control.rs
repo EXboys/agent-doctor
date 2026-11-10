@@ -38,26 +38,49 @@ pub(crate) enum CodexReplyKind {
 
 /// Codex `request_user_input` answers are `{ id: { answers: [string] } }`, not a bare string.
 /// A chosen option is the label. Typed text is prefixed `user_note:`, matching the Codex client.
-pub(crate) fn codex_user_input_result(questions: &Value, fallback_id: &str, text: &str) -> Value {
+pub(crate) fn codex_user_input_result(
+    questions: &Value,
+    fallback_id: &str,
+    text: &str,
+) -> Result<Value> {
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    let answers_map = parsed
+        .as_ref()
+        .and_then(|parsed| parsed.get("answers"))
+        .and_then(Value::as_object)
+        .cloned();
     let mut out = serde_json::Map::new();
-    if let Some(map) = serde_json::from_str::<Value>(text)
-        .ok()
-        .and_then(|parsed| parsed.get("answers").and_then(|v| v.as_object()).cloned())
-    {
-        for (key, value) in map {
-            let answer = value.as_str().unwrap_or("").trim();
-            if answer.is_empty() {
-                continue;
+    match answers_map {
+        Some(map) => {
+            // Structured answers: every entry must resolve to a known question.
+            let mut known_deliverable = 0usize;
+            for (key, value) in map {
+                let answer = value.as_str().unwrap_or("").trim();
+                if answer.is_empty() {
+                    continue;
+                }
+                let Some(id) = resolve_question_id(questions, &key) else {
+                    continue; // unknown question: not deliverable
+                };
+                out.insert(id.clone(), answer_entry(questions, &id, answer));
+                known_deliverable += 1;
             }
-            let id = resolve_question_id(questions, &key).unwrap_or(key);
-            out.insert(id.clone(), answer_entry(questions, &id, answer));
+            if known_deliverable == 0 {
+                bail!(
+                    "no deliverable answer: answers must be keyed by a question's id or \
+                     full text with a non-empty value. The request is still pending; \
+                     retry with that shape."
+                );
+            }
+        }
+        None => {
+            // One free-text answer for a form without parseable answers — always
+            // deliverable (this is the phone/desktop free-text path).
+            let id = fallback_id.to_string();
+            out.insert(id.clone(), answer_entry(questions, &id, text));
         }
     }
-    if out.is_empty() {
-        let id = fallback_id.to_string();
-        out.insert(id.clone(), answer_entry(questions, &id, text));
-    }
-    serde_json::json!({ "answers": out })
+    Ok(serde_json::json!({ "answers": out }))
 }
 
 fn answer_entry(questions: &Value, id: &str, text: &str) -> Value {
@@ -102,16 +125,59 @@ fn matches_option_label(questions: &Value, id: &str, text: &str) -> bool {
         })
 }
 
+/// Paseo's deliverable-answer contract: an answers map must carry at least
+/// one entry keyed by a known question with a non-empty string value.
+/// Anything less is refused — the ask stays pending and the caller can
+/// retry with the right shape. Partial answers are fine; a free-text reply
+/// that is not an answers map never reaches this check.
+pub(crate) fn assert_answers_deliverable(
+    answers: &Value,
+    question_known: &dyn Fn(&str) -> bool,
+) -> Result<()> {
+    let Some(map) = answers.as_object() else {
+        bail!("answers must be an object keyed by question");
+    };
+    let deliverable = map
+        .iter()
+        .filter(|(key, value)| {
+            value
+                .as_str()
+                .map(str::trim)
+                .map(|text| !text.is_empty())
+                .unwrap_or(false)
+                && question_known(key)
+        })
+        .count();
+    if deliverable == 0 {
+        bail!(
+            "no deliverable answer: answers must be keyed by a question's full text \
+             (or id/header) with a non-empty string value. The request is still \
+             pending; retry with that shape."
+        );
+    }
+    Ok(())
+}
+
 /// Build the `updatedInput` Claude expects for `AskUserQuestion`.
 /// `text` is either one answer, or JSON `{"answers": { question: answer }}`.
-pub(crate) fn claude_ask_updated_input(input: &Value, text: &str) -> Value {
+pub(crate) fn claude_ask_updated_input(input: &Value, text: &str) -> Result<Value> {
     let questions = input
         .get("questions")
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()));
     if let Ok(parsed) = serde_json::from_str::<Value>(text) {
         if let Some(answers) = parsed.get("answers").filter(|v| v.is_object()) {
-            return serde_json::json!({ "questions": questions, "answers": answers });
+            // Answers are keyed by full question text or header (Paseo's
+            // contract); anything unknown or blank cannot be delivered.
+            assert_answers_deliverable(answers, &|key: &str| {
+                questions.as_array().is_some_and(|list| {
+                    list.iter().any(|q| {
+                        q.get("question").and_then(Value::as_str).map(str::trim) == Some(key)
+                            || q.get("header").and_then(Value::as_str).map(str::trim) == Some(key)
+                    })
+                })
+            })?;
+            return Ok(serde_json::json!({ "questions": questions, "answers": answers }));
         }
     }
     let question = input
@@ -119,10 +185,10 @@ pub(crate) fn claude_ask_updated_input(input: &Value, text: &str) -> Value {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or("value");
-    serde_json::json!({
+    Ok(serde_json::json!({
         "questions": questions,
         "answers": { question: text }
-    })
+    }))
 }
 
 /// Why a control send failed. `stdin-closed` and `dead-pipe` are final — the
@@ -536,12 +602,18 @@ impl PromptSessionControl {
                         "content": { question_id: text }
                     })
                 } else {
-                    codex_user_input_result(questions, question_id, text)
+                    codex_user_input_result(questions, question_id, text).map_err(|error| {
+                        self.restore_pending(request_id, reply.clone());
+                        error
+                    })?
                 };
                 serde_json::json!({ "id": id, "result": result })
             }
             PendingReply::ClaudeAsk { input } => {
-                let updated = claude_ask_updated_input(input, text);
+                let updated = claude_ask_updated_input(input, text).map_err(|error| {
+                    self.restore_pending(request_id, reply.clone());
+                    error
+                })?;
                 Self::claude_payload(request_id, true, updated, None)
             }
             _ => unreachable!("is_text_prompt filtered every other kind"),
@@ -644,6 +716,50 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_answers_map_refuses_and_keeps_the_ask_pending() {
+        let control = PromptSessionControl::new();
+        control.remember_claude_question(
+            "req-v",
+            json!({"questions": [{"question": "用哪种登录？"}, {"question": "用哪个账号？"}]}),
+        );
+        let err = control
+            .respond_line("req-v", r#"{"answers":{}}"#)
+            .expect_err("empty answers must refuse");
+        assert!(err.to_string().contains("no deliverable answer"), "{err}");
+        assert!(control.has_pending(), "the ask must stay pending for retry");
+        // 合法的部分回答通过校验：错误只剩 stdin-closed（单测无真实子进程），
+        // 且 ask 保持 pending 可重试（Paseo 允许部分回答）。
+        let retried = control.respond_line("req-v", r#"{"answers":{"用哪种登录？":"浏览器"}}"#);
+        let retried = match retried {
+            Ok(_) => panic!("unit test has no stdin; a pass would be suspicious"),
+            Err(error) => error,
+        };
+        assert_eq!(send_error_class(&retried), "stdin-closed");
+        assert!(control.has_pending());
+    }
+
+    #[test]
+    fn codex_answers_keyed_by_unknown_questions_refuse() {
+        let control = PromptSessionControl::new();
+        let questions = json!([
+            {"id": "q1", "question": "请提供密钥", "options": [{"label": "我在下方填写"}]}
+        ]);
+        control.remember_codex_reply(
+            "9",
+            super::CodexReplyKind::UserLine {
+                question_id: "q1".into(),
+                elicitation: false,
+                questions: questions.clone(),
+            },
+        );
+        let err = control
+            .respond_line("9", r#"{"answers":{"不存在的题":"答案"}}"#)
+            .expect_err("unknown-question answers must refuse");
+        assert!(err.to_string().contains("no deliverable answer"), "{err}");
+        assert!(control.has_pending());
+    }
+
+    #[test]
     fn a_control_without_stdin_reports_it_as_closed() {
         let control = super::PromptSessionControl::new();
         let err = control.write_line("{}").expect_err("no stdin attached");
@@ -710,7 +826,8 @@ mod tests {
         let updated = claude_ask_updated_input(
             &json!({"questions": [{"question": "用哪种登录？"}]}),
             "浏览器",
-        );
+        )
+        .unwrap();
         assert_eq!(updated["answers"]["用哪种登录？"], "浏览器");
     }
 
@@ -730,14 +847,15 @@ mod tests {
     fn claude_ask_answer_uses_the_question_text_as_key() {
         let input =
             json!({"questions":[{"question":"用哪种登录？","options":[{"label":"浏览器"}]}]});
-        let updated = claude_ask_updated_input(&input, "浏览器");
+        let updated = claude_ask_updated_input(&input, "浏览器").unwrap();
         assert_eq!(updated["answers"]["用哪种登录？"], "浏览器");
     }
 
     #[test]
     fn claude_ask_json_answers_pass_through() {
         let input = json!({"questions":[{"question":"甲"},{"question":"乙"}]});
-        let updated = claude_ask_updated_input(&input, r#"{"answers":{"甲":"一","乙":"二"}}"#);
+        let updated =
+            claude_ask_updated_input(&input, r#"{"answers":{"甲":"一","乙":"二"}}"#).unwrap();
         assert_eq!(updated["answers"]["甲"], "一");
         assert_eq!(updated["answers"]["乙"], "二");
     }
@@ -750,7 +868,7 @@ mod tests {
             "isOther": true,
             "options": [{"label": "我在下方填写"}, {"label": "改用环境变量"}]
         }]);
-        let result = super::codex_user_input_result(&questions, "api_key", "typed-secret");
+        let result = super::codex_user_input_result(&questions, "api_key", "typed-secret").unwrap();
         assert_eq!(
             result["answers"]["api_key"]["answers"][0],
             "user_note: typed-secret"
@@ -768,7 +886,8 @@ mod tests {
             &questions,
             "api_key",
             r#"{"answers":{"请提供密钥":"改用环境变量"}}"#,
-        );
+        )
+        .unwrap();
         assert_eq!(result["answers"]["api_key"]["answers"][0], "改用环境变量");
     }
 }
