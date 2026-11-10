@@ -84,6 +84,8 @@ export function createThinkingController(deps: ThinkingDeps) {
     return el;
   }
 
+  let pendingThink = "";
+  let thinkRaf = 0;
   function append(chunk: string): void {
     if (!chunk) return;
     if (!messageId) {
@@ -94,7 +96,23 @@ export function createThinkingController(deps: ThinkingDeps) {
       messageId = deps.persistMessage("").id;
     }
     if (text.length >= MAX_THINKING_CHARS) return;
-    text = (text + chunk).slice(0, MAX_THINKING_CHARS);
+    // Thinking events arrive faster than frames; rewrite the block once per
+    // frame instead of per event — every rewrite forced a reflow.
+    pendingThink += chunk;
+    if (thinkRaf) return;
+    thinkRaf = window.requestAnimationFrame(() => {
+      thinkRaf = 0;
+      paintThinkChunk();
+    });
+  }
+  function paintThinkChunk(): void {
+    if (thinkRaf) {
+      window.cancelAnimationFrame(thinkRaf);
+      thinkRaf = 0;
+    }
+    if (!pendingThink || !messageId) return;
+    text = (text + pendingThink).slice(0, MAX_THINKING_CHARS);
+    pendingThink = "";
     deps.updateMessage(messageId, text);
     const block = liveBlock();
     if (!block) return;
@@ -114,6 +132,8 @@ export function createThinkingController(deps: ThinkingDeps) {
       clearThinkingStarted();
       return;
     }
+    // A frame callback may still hold the last chunk — land it before folding.
+    paintThinkChunk();
     const block = findBlock();
     if (block) {
       block.classList.remove("is-live");

@@ -117,11 +117,19 @@ function bindScroll(log: HTMLElement): void {
   logBound = log;
   if (scrollBound) return;
   scrollBound = true;
+  // The rail measures a rect per question bubble; keep it to one run per
+  // frame and skip entirely while the rail is hidden.
+  let railScrollRaf = 0;
   log.addEventListener(
     "scroll",
     () => {
-      if (openId) return;
-      paintCurrent(currentInView(log));
+      const rail = railEl();
+      if (openId || !rail || rail.hidden) return;
+      if (railScrollRaf) return;
+      railScrollRaf = window.requestAnimationFrame(() => {
+        railScrollRaf = 0;
+        paintCurrent(currentInView(log));
+      });
     },
     { passive: true },
   );

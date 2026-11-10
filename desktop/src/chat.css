@@ -10544,3 +10544,11 @@ html[data-theme="dark"] .chat-feedback-card {
   background: #262626;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
 }
+
+/* Streaming markdown head/tail wrappers (Paseo's split): the completed head
+   renders once per block, only the tail repaints per frame. The wrappers
+   stay layout-transparent so the bubble's own markdown styles apply. */
+.chat-stream-part {
+  display: contents;
+}
+

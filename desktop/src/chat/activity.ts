@@ -822,24 +822,35 @@ export function createActivityController(deps: ActivityDeps) {
     releaseToolPage();
   }
 
-  deps.logEl.addEventListener("scroll", () => {
-    if (ignoreLogScroll > 0) return;
-    const log = deps.logEl;
-    const gap = log.scrollHeight - log.scrollTop - log.clientHeight;
-    log.dataset.pin = gap < 64 ? "1" : "0";
-    if (toolPageLock > 0) return;
-    const logRect = log.getBoundingClientRect();
-    for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
-      if (!group.open || toolPageLock > 0) continue;
-      const list = group.querySelector<HTMLElement>(".chat-tool-list");
-      if (!list) continue;
-      const rect = list.getBoundingClientRect();
-      if (rect.height < 1) continue;
-      if (rect.top > logRect.top - 24 && rect.top < logRect.top + 200) revealEarlier(group);
-      if (toolPageLock > 0) continue;
-      if (rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24) revealLater(group);
-    }
-  });
+  // Streaming pins the log every frame; coalesce scroll work to one run per
+  // frame and never read tool-group rects more often than that.
+  let logScrollRaf = 0;
+  deps.logEl.addEventListener(
+    "scroll",
+    () => {
+      if (ignoreLogScroll > 0) return;
+      if (logScrollRaf) return;
+      logScrollRaf = window.requestAnimationFrame(() => {
+        logScrollRaf = 0;
+        const log = deps.logEl;
+        const gap = log.scrollHeight - log.scrollTop - log.clientHeight;
+        log.dataset.pin = gap < 64 ? "1" : "0";
+        if (toolPageLock > 0) return;
+        const logRect = log.getBoundingClientRect();
+        for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
+          if (!group.open || toolPageLock > 0) continue;
+          const list = group.querySelector<HTMLElement>(".chat-tool-list");
+          if (!list) continue;
+          const rect = list.getBoundingClientRect();
+          if (rect.height < 1) continue;
+          if (rect.top > logRect.top - 24 && rect.top < logRect.top + 200) revealEarlier(group);
+          if (toolPageLock > 0) continue;
+          if (rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24) revealLater(group);
+        }
+      });
+    },
+    { passive: true },
+  );
 
   /** A live group past this many visible rows folds into its summary bar. */
   const LIVE_GROUP_COLLAPSE_AFTER = 6;

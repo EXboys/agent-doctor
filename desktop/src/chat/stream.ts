@@ -216,23 +216,27 @@ export function createStreamController(deps: StreamDeps) {
             }
           }
           // TEMP(ad-debug): dump the transcript structure after the fold.
-          window.setTimeout(async () => {
-            try {
-              const { adDebug } = await import("../ipc");
-              const logEl = document.querySelector(".chat-log");
-              if (!logEl) return void adDebug("postDOM: no .chat-log");
-              const shapes = [...logEl.children].map((node) => {
-                const cls = node.className?.toString().slice(0, 70) ?? node.tagName;
-                const open = node instanceof HTMLDetailsElement ? ` open=${node.open}` : "";
-                const rows = node.querySelectorAll(".chat-tool-row, .chat-activity, .chat-thinking").length;
-                const head = (node.textContent ?? "").trim().slice(0, 24);
-                return `<${node.tagName.toLowerCase()} class="${cls}"${open} rows=${rows} head="${head}">`;
-              });
-              await adDebug(`postDOM children=${logEl.children.length}:\n${shapes.join("\n")}`);
-            } catch (error) {
-              await import("../ipc").then((ipc) => ipc.adDebug(`postDOM error: ${String(error)}`)).catch(() => {});
-            }
-          }, 1500);
+          // Off by default — the dump reads every row's full text and costs a
+          // noticeable frame on weak machines right when a turn ends.
+          if (localStorage.getItem("ad-debug") === "1") {
+            window.setTimeout(async () => {
+              try {
+                const { adDebug } = await import("../ipc");
+                const logEl = document.querySelector(".chat-log");
+                if (!logEl) return void adDebug("postDOM: no .chat-log");
+                const shapes = [...logEl.children].map((node) => {
+                  const cls = node.className?.toString().slice(0, 70) ?? node.tagName;
+                  const open = node instanceof HTMLDetailsElement ? ` open=${node.open}` : "";
+                  const rows = node.querySelectorAll(".chat-tool-row, .chat-activity, .chat-thinking").length;
+                  const head = (node.textContent ?? "").trim().slice(0, 24);
+                  return `<${node.tagName.toLowerCase()} class="${cls}"${open} rows=${rows} head="${head}">`;
+                });
+                await adDebug(`postDOM children=${logEl.children.length}:\n${shapes.join("\n")}`);
+              } catch (error) {
+                await import("../ipc").then((ipc) => ipc.adDebug(`postDOM error: ${String(error)}`)).catch(() => {});
+              }
+            }, 1500);
+          }
           const failed =
             payload.status !== "succeeded" &&
             payload.status !== "cancelled" &&

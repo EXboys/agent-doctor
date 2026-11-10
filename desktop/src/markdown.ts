@@ -38,6 +38,39 @@ function inlineMarkdown(text: string, opts: MarkdownOptions = {}): string {
 }
 
 /**
+ * Last block boundary safe to freeze: outside a code fence, on a blank line,
+ * and not between two items of one list/quote/table (that would split the
+ * block). Paseo only re-parses streaming markdown up to such an edge — the
+ * completed prefix renders once and every tick repaints just the tail.
+ */
+export function safeMarkdownCut(raw: string): number {
+  const isContinuation = (line: string): boolean =>
+    /^\s{0,3}(?:[-*+]\s|\d+[.)]\s|>\s?|\|)/.test(line);
+  const lines = raw.split("\n");
+  let fence = false;
+  let cut = 0;
+  let offset = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const start = offset;
+    offset += line.length + 1;
+    if (/^```/.test(line)) fence = !fence;
+    if (fence || line.trim() !== "") continue;
+    let prev = i - 1;
+    while (prev >= 0 && lines[prev].trim() === "") prev -= 1;
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === "") j += 1;
+    if (j >= lines.length) {
+      cut = raw.length;
+      break;
+    }
+    if (isContinuation(lines[j]) && prev >= 0 && isContinuation(lines[prev])) continue;
+    cut = start;
+  }
+  return cut;
+}
+
+/**
  * Convert markdown source to sanitized HTML (no raw HTML passthrough).
  */
 export function renderMarkdown(source: string, opts: MarkdownOptions = {}): string {

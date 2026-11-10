@@ -3,7 +3,7 @@ import { reportFeedback } from "../ipc";
 import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
 import { doctorStartCards } from "./doctor-start";
 import { paintChatPlan, planStepsFromMessages } from "../plan";
-import { renderMarkdown } from "../markdown";
+import { renderMarkdown, safeMarkdownCut } from "../markdown";
 import {
   cleanToolLabel,
   formatPermissionDetail,
@@ -118,11 +118,21 @@ export type BubblesApi = ReturnType<typeof createBubblesController>;
 
 const STREAM_PAINT_MIN_MS = 80;
 const STREAM_HEAVY_CHARS = 2_500;
+/** Tool folding and the plan dock redraw at most this often while streaming. */
+const STREAM_AUX_MIN_MS = 400;
 
 export function createBubblesController(deps: BubblesDeps) {
   let flushRaf = 0;
   let streamPaintTimer = 0;
   let streamPaintAt = 0;
+  let streamAuxAt = 0;
+  // Streaming markdown is split into a frozen head (rendered once per
+  // completed block) and a live tail, so a delta never re-parses the whole
+  // reply — Paseo's head/tail split, minus the framework.
+  let streamHeadText = "";
+  let streamHeadBox: HTMLDivElement | null = null;
+  let streamTailBox: HTMLDivElement | null = null;
+  let streamBoxBubble: HTMLElement | null = null;
   let historyToken = 0;
   let historyFrame = 0;
   let historyJob: {
@@ -139,6 +149,7 @@ export function createBubblesController(deps: BubblesDeps) {
   window.setInterval(refreshAges, 30_000);
   deps.logEl.addEventListener("chat-flush-history", () => {
     flushPendingHistory();
+    deps.logEl.querySelector(".chat-history-earlier")?.remove();
   });
 
   function flushPendingTextSync(): void {
@@ -156,6 +167,12 @@ export function createBubblesController(deps: BubblesDeps) {
       window.clearTimeout(streamPaintTimer);
       streamPaintTimer = 0;
     }
+    // The seal re-renders the full markdown (and re-runs the code-block
+    // enhancement), so the streaming head/tail split ends here.
+    streamHeadText = "";
+    streamHeadBox = null;
+    streamTailBox = null;
+    streamBoxBubble = null;
     if (!deps.getAssistantMessageId() && !deps.getAssistantBubble()) {
       deps.setAssistantRaw("");
       return;
@@ -258,25 +275,47 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.dismissLifecycleActivity();
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
-    deps.collapseResolvedPermissionsBeforeAssistant(bubble);
+    // Tool folding and the plan dock walk every row of the turn; they lag a
+    // few hundred ms behind the text instead of running on every frame.
+    const now = performance.now();
+    if (now - streamAuxAt > STREAM_AUX_MIN_MS) {
+      streamAuxAt = now;
+      deps.collapseResolvedPermissionsBeforeAssistant(bubble);
+      syncVisiblePlan();
+    }
     paintStreamingMarkdown(bubble);
     syncReplyChangeCard();
-    syncVisiblePlan();
     followChatLog(deps.logEl);
   }
+  function setStreamingMarkdown(bubble: HTMLElement, markdown: string): void {
+    if (streamBoxBubble !== bubble) {
+      streamHeadBox = document.createElement("div");
+      streamHeadBox.className = "chat-stream-part";
+      streamTailBox = document.createElement("div");
+      streamTailBox.className = "chat-stream-part";
+      bubble.replaceChildren(streamHeadBox, streamTailBox);
+      streamHeadText = "";
+      streamBoxBubble = bubble;
+    }
+    const cut = safeMarkdownCut(markdown);
+    const head = markdown.slice(0, cut);
+    if (head !== streamHeadText) {
+      streamHeadBox!.innerHTML = head.trim() ? renderMarkdown(head) : "";
+      streamHeadText = head;
+    }
+    const tail = markdown.slice(cut);
+    streamTailBox!.innerHTML = tail.trim() ? renderMarkdown(tail) : "";
+  }
   function paintStreamingMarkdown(bubble: HTMLElement): void {
-    const markdown = deps.getAssistantRaw();
-    const heavy = markdown.length > STREAM_HEAVY_CHARS;
     const now = performance.now();
-    if (heavy && now - streamPaintAt < STREAM_PAINT_MIN_MS) {
+    if (now - streamPaintAt < STREAM_PAINT_MIN_MS) {
       if (!streamPaintTimer) {
         streamPaintTimer = window.setTimeout(() => {
           streamPaintTimer = 0;
           const live = deps.getAssistantBubble();
           if (!live?.isConnected) return;
           streamPaintAt = performance.now();
-          const raw = deps.getAssistantRaw();
-          setAssistantMarkdown(live, raw, { deferHighlight: true, skipCopySync: true });
+          setStreamingMarkdown(live, deps.getAssistantRaw());
           syncReplyChangeCard();
           followChatLog(deps.logEl);
         }, STREAM_PAINT_MIN_MS);
