@@ -89,6 +89,10 @@ function jumpTo(log: HTMLElement, id: string): void {
     bubble = log.querySelector<HTMLElement>(selector);
   }
   if (!bubble) return;
+  // A row that scrolled out of sight is skipped, and a skipped row only knows
+  // the room it was measured at. Ask for the real thing before reading where
+  // the bubble is.
+  bubble.style.setProperty("content-visibility", "visible");
   // Land with the log's own top padding as breathing room: scrollIntoView
   // block:"start" sits the bubble flush against the topbar border, clipping the
   // highlight outline and reading as cut off. Release the tail pin first so a
@@ -96,6 +100,7 @@ function jumpTo(log: HTMLElement, id: string): void {
   const gap = 18;
   const top =
     log.scrollTop + bubble.getBoundingClientRect().top - log.getBoundingClientRect().top - gap;
+  bubble.style.removeProperty("content-visibility");
   releaseChatFollow(log);
   log.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   highlighted?.classList.remove(HIGHLIGHT);
@@ -232,4 +237,32 @@ export function syncQuestionRail(messages: QuestionSource[], log: HTMLElement): 
     hideCard();
     paintCurrent(currentInView(log));
   }
+}
+
+/** How long the rail waits before it looks at the transcript again. */
+const RAIL_THROTTLE_MS = 500;
+let railTimer = 0;
+let railPending: (() => void) | null = null;
+
+/**
+ * The rail for a stream that is still running.
+ *
+ * `syncQuestionRail` reads the whole transcript to find the question under the
+ * top edge, and that read forces a layout of every row above it. Doing that on
+ * every chunk of an answer made the page crawl, so the streaming path waits for
+ * a quiet moment instead. The last update always runs, so the rail never ends
+ * up describing an older state than the chat.
+ */
+export function scheduleQuestionRail(
+  messages: () => QuestionSource[],
+  log: HTMLElement,
+): void {
+  railPending = () => syncQuestionRail(messages(), log);
+  if (railTimer) return;
+  railTimer = window.setTimeout(() => {
+    railTimer = 0;
+    const run = railPending;
+    railPending = null;
+    run?.();
+  }, RAIL_THROTTLE_MS);
 }

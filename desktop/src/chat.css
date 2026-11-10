@@ -7395,7 +7395,10 @@ html[data-os="windows"] .chat-log {
 }
 
 /* Rows keep their real height. A fixed stand-in made a short sentence between
-   tools 88px tall, so the next tool sat in the empty part of that box. */
+   tools 88px tall, so the next tool sat in the empty part of that box. Each row
+   records the height it really has (see lockChatRowHeights), so a row that
+   scrolled out of sight is skipped while it is off screen and still takes up
+   exactly the same room when it comes back. */
 .chat-log > :is(
   .chat-msg,
   .chat-work,
@@ -7408,9 +7411,15 @@ html[data-os="windows"] .chat-log {
   .chat-reply-changes,
   .chat-plan
 ) {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 56px;
   flex-shrink: 0;
+}
+
+/* The answer that is still coming in grows with every word. A stand-in would
+   hold the room of an earlier, shorter text, so it is never skipped. */
+.chat-log > .chat-bubble.is-streaming {
+  content-visibility: visible;
 }
 
 /* A new chat lifts the two start cards into the open area, clear of the composer. */

@@ -506,7 +506,8 @@ export function lockChatRowHeights(nodes: ArrayLike<Element>, refresh = false): 
   for (let i = 0; i < nodes.length; i += 1) {
     const node = nodes[i];
     if (!(node instanceof HTMLElement) || !node.isConnected || !isChatRow(node)) continue;
-    if (!refresh && (sizedRows.has(node) || node.querySelector(".is-streaming"))) continue;
+    if (!refresh && sizedRows.has(node)) continue;
+    if (!refresh && node.querySelector(".is-streaming")) continue;
     pending.push(node);
   }
   if (pending.length === 0) return;
