@@ -18,6 +18,7 @@ export function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "hermes") return "Hermes";
   if (runtime === "openclaw") return "OpenClaw";
   if (runtime === "deepseek-harness") return "DeepSeek Harness";
+  if (runtime === "acp") return "ACP";
   if (runtime === "zcode") return "ZCode";
   if (runtime === "doctor") return t("chat.doctorRuntimeName");
   return "Claude Code";
@@ -30,6 +31,7 @@ export function isAskRuntime(value: string | null | undefined): value is AskRunt
     value === "hermes" ||
     value === "openclaw" ||
     value === "deepseek-harness" ||
+    value === "acp" ||
     value === "zcode" ||
     value === "doctor"
   );

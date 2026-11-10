@@ -15,8 +15,9 @@ enum PendingReply {
     ClaudeAsk { input: Value },
     /// Codex app-server JSON-RPC result (shape depends on the request method).
     CodexRpc { kind: CodexReplyKind },
-    /// DeepSeek ACP `session/request_permission`: allow-once or reject-once.
-    DshPermission,
+    /// ACP `session/request_permission`: answer with the exact optionId the
+    /// request offered, mapped from the desktop's allow/deny answer.
+    AcpPermission { allow_id: String, deny_id: String },
 }
 
 #[derive(Debug, Clone)]
@@ -207,9 +208,18 @@ impl PromptSessionControl {
         }
     }
 
-    pub(crate) fn remember_dsh_permission(&self, request_id: &str) {
+    /// Remember which ACP option ids this request maps to for allow/deny.
+    pub(crate) fn remember_acp_permission(
+        &self,
+        request_id: &str,
+        allow_id: String,
+        deny_id: String,
+    ) {
         if let Ok(mut guard) = self.pending.lock() {
-            guard.insert(request_id.to_string(), PendingReply::DshPermission);
+            guard.insert(
+                request_id.to_string(),
+                PendingReply::AcpPermission { allow_id, deny_id },
+            );
         }
     }
 
@@ -319,16 +329,16 @@ impl PromptSessionControl {
         serde_json::json!({ "id": id, "result": result })
     }
 
-    pub(crate) fn dsh_permission_line(request_id: &str, allow: bool) -> String {
-        Self::dsh_permission_payload(request_id, allow).to_string()
+    /// ACP reply line carrying the exact `optionId` the request offered.
+    pub fn acp_permission_line(request_id: &str, option_id: &str) -> String {
+        Self::acp_permission_payload(request_id, option_id).to_string()
     }
 
-    fn dsh_permission_payload(request_id: &str, allow: bool) -> Value {
+    fn acp_permission_payload(request_id: &str, option_id: &str) -> Value {
         let id: Value = request_id
             .parse::<i64>()
             .map(Value::from)
             .unwrap_or_else(|_| Value::String(request_id.to_string()));
-        let option_id = if allow { "allow-once" } else { "reject-once" };
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -389,7 +399,10 @@ impl PromptSessionControl {
                 Self::claude_payload(request_id, allow, input.clone())
             }
             PendingReply::ClaudeAsk { .. } => Self::claude_payload(request_id, false, Value::Null),
-            PendingReply::DshPermission => Self::dsh_permission_payload(request_id, allow),
+            PendingReply::AcpPermission { allow_id, deny_id } => {
+                let option_id = if allow { allow_id } else { deny_id };
+                Self::acp_permission_payload(request_id, option_id)
+            }
         };
         Ok((payload, Some(reply)))
     }

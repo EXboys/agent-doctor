@@ -4,6 +4,8 @@
 //! [`AskBackend`] adapter (Claude: `control_request`; Codex: `app-server`;
 //! Hermes/OpenClaw: headless CLI).
 
+mod acp;
+mod acp_backend;
 mod backend;
 mod claude;
 mod codex_app_server;
@@ -48,6 +50,7 @@ type AskSession = &'static (dyn AskBackend + Sync);
 static OPENCLAW_ASK: OpenClawAskBackend = OpenClawAskBackend;
 static HERMES_ASK: HermesAskBackend = HermesAskBackend;
 static DEEPSEEK_HARNESS_ASK: DeepSeekHarnessAskBackend = DeepSeekHarnessAskBackend;
+static GENERIC_ACP_ASK: acp_backend::GenericAcpAskBackend = acp_backend::GenericAcpAskBackend;
 static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
 static CODEX_ASK: CodexAskBackend = CodexAskBackend;
 static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
@@ -60,6 +63,7 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
         "openclaw" => Some(&OPENCLAW_ASK),
         "hermes" => Some(&HERMES_ASK),
         agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID => Some(&DEEPSEEK_HARNESS_ASK),
+        "acp" => Some(&GENERIC_ACP_ASK),
         "claude-code" => Some(&CLAUDE_ASK),
         "codex" => Some(&CODEX_ASK),
         "zcode" => Some(&ZCODE_ASK),
@@ -73,6 +77,7 @@ pub fn ask_runtime_ids() -> Vec<&'static str> {
         "openclaw",
         "hermes",
         agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID,
+        "acp",
         "claude-code",
         "codex",
         "zcode",

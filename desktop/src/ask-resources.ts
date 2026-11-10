@@ -60,6 +60,7 @@ export type AskRuntime =
   | "hermes"
   | "openclaw"
   | "deepseek-harness"
+  | "acp"
   | "zcode"
   /** Built-in Agent Doctor agent loop (no external CLI). */
   | "doctor";
