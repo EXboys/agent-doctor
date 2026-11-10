@@ -13,7 +13,7 @@ export function isAllowAckTimeout(error: unknown): boolean {
 }
 
 export function isAskSessionGone(error: unknown): boolean {
-  return /no active ask session/i.test(String(error));
+  return /no active ask session|already answered/i.test(String(error));
 }
 
 /**

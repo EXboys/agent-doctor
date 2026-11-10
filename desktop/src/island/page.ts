@@ -111,7 +111,7 @@ function showError(error: unknown): void {
   if (!errorEl) return;
   const raw = String(error);
   errorEl.hidden = false;
-  errorEl.textContent = /no active ask session/i.test(raw)
+  errorEl.textContent = /no active ask session|already answered/i.test(raw)
     ? t("chat.permissionSessionGone")
     : t("island.failed");
 }

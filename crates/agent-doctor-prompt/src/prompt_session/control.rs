@@ -137,6 +137,8 @@ pub fn send_error_class(error: &anyhow::Error) -> &'static str {
         "dead-pipe"
     } else if chain.contains("no active ask session") {
         "session-gone"
+    } else if chain.contains("already answered") {
+        "already-answered"
     } else {
         "transient"
     }
@@ -170,6 +172,10 @@ pub struct PromptSessionControl {
     /// Built-in doctor agent: request_id → one-shot allow/deny sender. The
     /// loop blocks on the receiver; `respond_permission` delivers the verdict.
     doctor: Arc<Mutex<HashMap<String, std::sync::mpsc::SyncSender<bool>>>>,
+    /// Request ids whose reply already went out successfully, with the time
+    /// it went out. A second submission for one of these is a duplicate —
+    /// it gets refused instead of writing a degraded reply into the backend.
+    consumed: Arc<Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl PromptSessionControl {
@@ -234,6 +240,29 @@ impl PromptSessionControl {
             .lock()
             .map(|guard| !guard.is_empty())
             .unwrap_or(false)
+    }
+
+    /// Mark a reply as delivered. `std::time::Instant` is monotonic, so this
+    /// clock never jumps.
+    fn mark_consumed(&self, request_id: &str) {
+        const RETAIN: std::time::Duration = std::time::Duration::from_secs(600);
+        let Ok(mut guard) = self.consumed.lock() else {
+            return;
+        };
+        guard.retain(|_, at| at.elapsed() < RETAIN);
+        guard.insert(request_id.to_string(), std::time::Instant::now());
+    }
+
+    /// True when a reply for this id already went out and is recent enough
+    /// that a second submission can only be a duplicate.
+    fn already_answered(&self, request_id: &str) -> bool {
+        const RETAIN: std::time::Duration = std::time::Duration::from_secs(600);
+        let Ok(guard) = self.consumed.lock() else {
+            return false;
+        };
+        guard
+            .get(request_id)
+            .is_some_and(|at| at.elapsed() < RETAIN)
     }
 
     fn take_pending(&self, request_id: &str) -> Option<PendingReply> {
@@ -383,10 +412,14 @@ impl PromptSessionControl {
         if request_id.is_empty() {
             bail!("request_id is required");
         }
+        if self.already_answered(request_id) {
+            bail!("request already answered [ad-send=already-answered]");
+        }
 
         if let Ok(mut guard) = self.doctor.lock() {
             if let Some(sender) = guard.remove(request_id) {
                 let _ = sender.send(allow);
+                self.mark_consumed(request_id);
                 return Ok(());
             }
         }
@@ -401,6 +434,7 @@ impl PromptSessionControl {
             }
             return Err(err);
         }
+        self.mark_consumed(request_id);
         Ok(())
     }
 
@@ -464,6 +498,9 @@ impl PromptSessionControl {
         if text.is_empty() {
             bail!("reply text is required");
         }
+        if self.already_answered(request_id) {
+            bail!("request already answered [ad-send=already-answered]");
+        }
         let Some(reply) = self.take_pending(request_id) else {
             bail!("no pending text prompt for request_id={request_id}");
         };
@@ -513,6 +550,7 @@ impl PromptSessionControl {
             self.restore_pending(request_id, reply);
             return Err(err);
         }
+        self.mark_consumed(request_id);
         Ok(())
     }
 
@@ -541,6 +579,9 @@ impl PromptSessionControl {
         if let Ok(mut guard) = self.pending.lock() {
             guard.clear();
         }
+        if let Ok(mut guard) = self.consumed.lock() {
+            guard.clear();
+        }
         self.stdin.lock().ok().and_then(|mut guard| guard.take())
     }
 
@@ -549,6 +590,9 @@ impl PromptSessionControl {
             *guard = None;
         }
         if let Ok(mut guard) = self.pending.lock() {
+            guard.clear();
+        }
+        if let Ok(mut guard) = self.consumed.lock() {
             guard.clear();
         }
     }
@@ -568,6 +612,35 @@ mod tests {
         let gone = anyhow::anyhow!("no active ask session for permission reply");
         assert_eq!(send_error_class(&gone), "session-gone");
         assert_eq!(send_error_class(&anyhow::anyhow!("boom")), "transient");
+    }
+
+    #[test]
+    fn an_already_answered_request_refuses_a_second_submission() {
+        let control = PromptSessionControl::new();
+        control.remember_claude_tool_input("req-d", json!({"command": "ls"}));
+        // 第一次投递成功（无 stdin 也能走通 fallback：未知 id 走 claude 兜底……这里
+        // 直接打点模拟成功送达，因为单测无法构造真实子进程 stdin）。
+        control.mark_consumed("req-d");
+        let err = control
+            .respond_permission("req-d", true)
+            .expect_err("second submission must refuse");
+        assert!(err.to_string().contains("already answered"), "{err}");
+        assert_eq!(send_error_class(&err), "already-answered");
+    }
+
+    #[test]
+    fn an_answer_that_failed_to_send_does_not_count_as_answered() {
+        let control = PromptSessionControl::new();
+        control.remember_claude_question("req-e", json!({"questions": [{"question": "q"}]}));
+        // 没有 stdin：写入失败，ask 放回——重试必须不被 already-answered 拦住。
+        let first = control.respond_line("req-e", "浏览器");
+        assert!(first.is_err());
+        assert!(
+            !control
+                .respond_line("req-e", "浏览器")
+                .is_err_and(|err| err.to_string().contains("already answered")),
+            "a failed send must stay retryable"
+        );
     }
 
     #[test]

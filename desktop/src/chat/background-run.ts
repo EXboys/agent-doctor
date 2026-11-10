@@ -247,7 +247,7 @@ function notePermission(
         }),
       ),
     ).catch((error) => {
-      if (/no active ask session/i.test(String(error))) return;
+      if (/no active ask session|already answered/i.test(String(error))) return;
       requestAllowStop(session.id);
       void cancelPromptSession(session.id).catch(() => {});
     });

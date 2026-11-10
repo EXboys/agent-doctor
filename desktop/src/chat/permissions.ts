@@ -131,6 +131,7 @@ function renderStructuredQuestion(
 
   const errorText = (error: unknown): string => {
     const raw = String(error);
+    if (/already answered/i.test(raw)) return t("chat.channelAlreadyConfirmed");
     return /no active ask session/i.test(raw)
       ? t("chat.permissionSessionGone")
       : t("chat.inputFailed");
@@ -1096,7 +1097,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
           sendBtn.removeAttribute("aria-busy");
           sendBtn.textContent = sendLabel;
           const raw = String(error);
-          const message = /no active ask session/i.test(raw)
+          const message = /no active ask session|already answered/i.test(raw)
             ? t("chat.permissionSessionGone")
             : t("chat.inputFailed");
           showPermissionError(actions, message);
