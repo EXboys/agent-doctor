@@ -13,11 +13,20 @@ Object.defineProperty(globalThis, "navigator", {
   value: { language: "zh" },
 });
 
-const { beginChannelJob, channelSessionForJob, choiceVerdict, endChannelJob, structuredAnswers } =
+const { beginChannelJob, channelSessionForJob, choiceVerdict, endChannelJob, structuredAnswers, usefulSummary } =
   await import("../src/chat/channel-ask");
 
 assert.equal(choiceVerdict("允许"), true);
 assert.equal(choiceVerdict("2"), false);
+
+// The phone renders the ask text as one card. A bare tool name tells the
+// reader nothing; the payload's own query/url has to come along.
+assert.equal(usefulSummary(JSON.stringify({ query: "Seedance 2.5 pricing" }), "WebSearch"), "WebSearch：Seedance 2.5 pricing");
+assert.equal(usefulSummary(JSON.stringify({ url: "https://example.com/pricing" }), "WebFetch"), "WebFetch：https://example.com/pricing");
+assert.equal(usefulSummary(JSON.stringify({ path: "docs/plan.md" }), "Read"), "Read：docs/plan.md");
+assert.equal(usefulSummary(JSON.stringify({ command: "npm test", description: "跑一遍测试" }), "Bash"), "跑一遍测试");
+assert.equal(usefulSummary(JSON.stringify({ size: 3 }), "Inspect"), "Inspect");
+assert.equal(usefulSummary("rm -rf /tmp/build", "Bash").length > 0, true);
 
 const questions = [
   {

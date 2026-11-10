@@ -318,12 +318,51 @@ function parseQuestions(raw: string | undefined): TeamupsChannelQuestion[] {
   }
 }
 
-function usefulSummary(detail: string, toolName: string): string {
+export function usefulSummary(detail: string, toolName: string): string {
   const summary = formatPermissionDetail(detail).summary.trim();
   if (summary && summary !== "{}" && summary !== "[]" && !/^[[{]/.test(summary)) return clip(summary);
+  const hint = jsonDetailHint(detail);
   const name = toolName.trim();
+  if (hint) return clip(name ? `${name}：${hint}` : hint);
   if (name && name !== "{}" && !/^[[{]/.test(name)) return clip(name);
   return "这一步需要你允许后才会继续。";
+}
+
+const DETAIL_HINT_KEYS = [
+  "query",
+  "url",
+  "path",
+  "file",
+  "pattern",
+  "keyword",
+  "topic",
+  "command",
+];
+
+/**
+ * Permission payloads for search/fetch tools are bare JSON like
+ * `{"query":…}` or `{"url":…}`, which reads as nothing on the phone.
+ * Pull out the first human-worth field so the ask names what it wants.
+ */
+function jsonDetailHint(detail: string): string {
+  const unfenced = detail
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  if (!unfenced.startsWith("{") || !unfenced.endsWith("}")) return "";
+  try {
+    const value = JSON.parse(unfenced) as Record<string, unknown>;
+    for (const key of DETAIL_HINT_KEYS) {
+      const item = value[key];
+      if (typeof item === "string" && item.trim()) {
+        return item.trim().replace(/\s+/g, " ");
+      }
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 function clip(value: string): string {
