@@ -25,7 +25,7 @@ import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
 import { wrapProcessRows } from "./work-trail";
-import { syncQuestionRail } from "./question-rail";
+import { scheduleQuestionRail, syncQuestionRail } from "./question-rail";
 import {
   assistantMsgWrap,
   bubblePlainText,
@@ -396,7 +396,12 @@ export function createBubblesController(deps: BubblesDeps) {
     const message = session.messages.find((m) => m.id === id);
     if (!message) return;
     message.content = content;
-    if (session.id === deps.activeSession().id) syncQuestionRail(session.messages, deps.logEl);
+    // The rail reads the whole transcript to place its current tick, and that
+    // read forces a layout of every row above it. On a running answer it waits
+    // for a quiet moment instead of running on every chunk.
+    if (session.id === deps.activeSession().id) {
+      scheduleQuestionRail(() => session.messages, deps.logEl);
+    }
     if (opts?.persist === false) return;
     message.at = Date.now();
     deps.touchSession(session);
@@ -680,6 +685,10 @@ export function createBubblesController(deps: BubblesDeps) {
       log.scrollTop = pinned ? log.scrollHeight : top + Math.max(0, delta);
     });
     lockChatRowHeights(nodes);
+    // The rows have been measured. A hand-set "visible" would keep them from
+    // ever being skipped again, and a transcript that is never skipped is a
+    // transcript that is slow to lay out on every line that arrives.
+    for (const node of nodes) node.style.removeProperty("content-visibility");
     if (pinned) {
       withoutChatLogJump(() => {
         log.scrollTop = log.scrollHeight;
