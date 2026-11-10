@@ -61,6 +61,7 @@ struct TrayMenuLabels {
     check_project: &'static str,
     diagnose: &'static str,
     updates: &'static str,
+    feedback: &'static str,
     quit: &'static str,
     no_projects: &'static str,
     busy_switch: &'static str,
@@ -76,6 +77,7 @@ fn tray_menu_labels(zh: bool) -> TrayMenuLabels {
             check_project: "检查这个项目",
             diagnose: "诊断",
             updates: "检查更新",
+            feedback: "反馈问题",
             quit: "退出",
             no_projects: "还没有项目",
             busy_switch: "正在切换…",
@@ -89,6 +91,7 @@ fn tray_menu_labels(zh: bool) -> TrayMenuLabels {
             check_project: "Workspace check",
             diagnose: "Run doctor",
             updates: "Check for updates",
+            feedback: "Send feedback",
             quit: "Quit",
             no_projects: "(no workspaces)",
             busy_switch: "Switching…",
@@ -174,6 +177,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
     )?;
     let doctor = MenuItem::with_id(app, "doctor", labels.diagnose, true, None::<&str>)?;
     let check_update = MenuItem::with_id(app, "check_update", labels.updates, true, None::<&str>)?;
+    let feedback = MenuItem::with_id(app, "feedback", labels.feedback, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", labels.quit, true, None::<&str>)?;
 
     let mut switch_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
@@ -221,6 +225,7 @@ fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<ta
             &ws_doctor,
             &doctor,
             &check_update,
+            &feedback,
             &quit,
         ],
     )
@@ -300,6 +305,12 @@ pub(crate) fn setup_tray(app: &tauri::App) {
                 show_main_window(app);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit("check-for-updates", ());
+                }
+            }
+            "feedback" => {
+                show_main_window(app);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("ad-open-feedback", ());
                 }
             }
             "quit" => {

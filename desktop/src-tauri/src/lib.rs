@@ -668,6 +668,42 @@ fn report_prompt_log_command() -> Result<(), String> {
         client: "desktop",
         reason: agent_doctor_core::client_log::REASON_ALLOW_MISSED.into(),
         log,
+        note: None,
+        runtime: None,
+        turn_status: None,
+    };
+    agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
+}
+
+/// A rating click or a feedback-form submit. Same anonymous payload as the
+/// missed-allow report; the empty log simply travels empty instead of
+/// failing the report, because a fresh install has nothing to attach.
+#[tauri::command]
+fn report_feedback_command(
+    reason: String,
+    note: Option<String>,
+    runtime: Option<String>,
+    turn_status: Option<String>,
+) -> Result<(), String> {
+    let log = prompt_log::read_log().unwrap_or_default();
+    let store = agent_doctor_core::store::open_settings_store().map_err(|e| format!("{e:#}"))?;
+    let install_id =
+        agent_doctor_core::install_ping::install_id(&store).map_err(|e| format!("{e:#}"))?;
+    let report = agent_doctor_core::client_log::ClientLogReport {
+        install_id,
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        client: "desktop",
+        reason,
+        log,
+        note: agent_doctor_core::client_log::clean_note(&note.unwrap_or_default()),
+        runtime: runtime
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        turn_status: turn_status
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
     };
     agent_doctor_core::client_log::send_client_log(&report).map_err(|e| format!("{e:#}"))
 }
@@ -879,6 +915,7 @@ pub fn run() {
             replay_prompt_asks_command,
             resolve_permission_session_command,
             report_prompt_log_command,
+            report_feedback_command,
             speech_capability_command,
             voice_cloud_ready_command,
             speech_dictate_command,

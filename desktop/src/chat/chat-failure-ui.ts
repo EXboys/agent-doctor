@@ -1,5 +1,11 @@
 import { settingsApplyKind } from "../diagnose-flow";
-import { focusMainTab, openSession, resignNativeSubscription, runRepairExecute } from "../ipc";
+import {
+  focusMainTab,
+  openSession,
+  reportFeedback,
+  resignNativeSubscription,
+  runRepairExecute,
+} from "../ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { teamupsAccountPageUrl } from "../teamups-site";
 import {
@@ -57,6 +63,18 @@ export function mountChatFailureActions(
     });
     actions.appendChild(btn);
   }
+  // Every failure offers the report escape hatch, even when the explanation
+  // matched no playbook: the anonymous diagnosis log is the payload.
+  if (!explain.actions.includes("report")) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-failure-btn";
+    btn.textContent = actionLabel("report", explain);
+    btn.addEventListener("click", () => {
+      void runChatFailureAction("report", explain, handlers, actions);
+    });
+    actions.appendChild(btn);
+  }
 
   const details = parent.querySelector(".chat-permission-more");
   if (details) parent.insertBefore(actions, details);
@@ -88,6 +106,8 @@ function actionLabel(action: ChatFailureAction, explain: ChatFailureExplain): st
       return t("chat.fail.actionOfficialBuy");
     case "modelMenu":
       return t("chat.fail.actionModelMenu");
+    case "report":
+      return t("chat.fail.actionReport");
   }
 }
 
@@ -237,6 +257,22 @@ async function runChatFailureAction(
       writeActionResult(actions, t("chat.fail.privacyOpened"), "ok");
     } catch {
       writeActionResult(actions, t("chat.fail.privacyFailed"), "warn");
+    } finally {
+      setActionsBusy(actions, false);
+    }
+    return;
+  }
+  if (action === "report") {
+    setActionsBusy(actions, true);
+    try {
+      await reportFeedback({
+        reason: "turn-failure",
+        runtime: explain.runtime ?? handlers.selectedRuntime(),
+        turnStatus: explain.turnStatus,
+      });
+      writeActionResult(actions, t("chat.fail.reportSent"), "ok");
+    } catch {
+      writeActionResult(actions, t("chat.fail.reportFailed"), "warn");
     } finally {
       setActionsBusy(actions, false);
     }

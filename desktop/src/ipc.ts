@@ -1056,6 +1056,21 @@ export function reportPromptLog(): Promise<void> {
   return invoke("report_prompt_log_command");
 }
 
+/** A rating click or a feedback-form submit; anonymous, click = consent. */
+export function reportFeedback(args: {
+  reason: string;
+  note?: string;
+  runtime?: string;
+  turnStatus?: string;
+}): Promise<void> {
+  return invoke("report_feedback_command", {
+    reason: args.reason,
+    note: args.note ?? null,
+    runtime: args.runtime ?? null,
+    turnStatus: args.turnStatus ?? null,
+  });
+}
+
 export function submitInstallInput(line: string): Promise<void> {
   return invoke("submit_install_input_command", { line });
 }

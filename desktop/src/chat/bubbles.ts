@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { reportFeedback } from "../ipc";
 import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
 import { doctorStartCards } from "./doctor-start";
 import { paintChatPlan, planStepsFromMessages } from "../plan";
@@ -37,6 +38,14 @@ import {
 } from "./copy-ui";
 import { HISTORY_BATCH, historyRenderCut, messageContinuesRun } from "./history-window";
 import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
+import {
+  createFeedbackControls,
+  openFeedbackSupplement,
+  showFeedbackNote,
+  syncFeedbackControls,
+  takeFeedbackSupplement,
+  type FeedbackDirection,
+} from "./feedback";
 import { paintReplyAge, refreshReplyAges } from "./reply-age";
 import { mountReplyChangeCard } from "./reply-changes";
 import { stripContextCompactSummaries, uid } from "./store";
@@ -456,16 +465,61 @@ export function createBubblesController(deps: BubblesDeps) {
     const owners = assistantTurnCopyOwners(roles);
     children.forEach((child, index) => {
       if (roles[index] !== "assistant") return;
-      const bubble = child.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
+      const wrap = child as HTMLElement;
+      const bubble = wrap.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
       if (!bubble) return;
       syncMessageCopyActions(
-        child as HTMLElement,
+        wrap,
         bubble,
         bubble.classList.contains("is-streaming"),
         assistantMarkdownSource(bubble),
         owners[index] === true,
       );
+      const rated = feedbackMessage(bubble)?.feedback;
+      syncFeedbackControls(wrap, {
+        owner: owners[index] === true,
+        streaming: bubble.classList.contains("is-streaming"),
+        rated: rated === "up" || rated === "down" ? rated : undefined,
+      });
     });
+  }
+  /** The message a rating acts on, found through the bubble's data attribute. */
+  function feedbackMessage(bubble: HTMLElement): ChatMessage | undefined {
+    const id = bubble.dataset.messageId;
+    if (!id) return undefined;
+    return deps.activeSession().messages.find((message) => message.id === id);
+  }
+  /** Persist the rating, then report it anonymously with the diagnosis log. */
+  function handleFeedbackClick(wrap: HTMLElement, bubble: HTMLElement, direction: FeedbackDirection): void {
+    const session = deps.activeSession();
+    const message = feedbackMessage(bubble);
+    if (!message) return;
+    if (message.feedback === "up" || message.feedback === "down") {
+      showFeedbackNote(wrap, t("chat.feedbackAlready"), true);
+      return;
+    }
+    message.feedback = direction;
+    deps.touchSession(session);
+    if (deps.getBusy()) deps.scheduleStorePersist();
+    else deps.saveStore();
+    syncTurnCopyButtons();
+    reportFeedback({
+      reason: direction === "up" ? "reply-up" : "reply-down",
+      runtime: session.runtime,
+    })
+      .then(() => {
+        showFeedbackNote(wrap, direction === "up" ? t("chat.feedbackUpSent") : t("chat.feedbackDownSent"));
+        if (direction === "down") openFeedbackSupplement(wrap);
+      })
+      .catch(() => showFeedbackNote(wrap, t("chat.feedbackSendFailed"), true));
+  }
+  function handleFeedbackSupplement(wrap: HTMLElement): void {
+    const note = takeFeedbackSupplement(wrap);
+    const session = deps.activeSession();
+    if (!note) return;
+    reportFeedback({ reason: "reply-note", note, runtime: session.runtime })
+      .then(() => showFeedbackNote(wrap, t("chat.feedbackNoteSent")))
+      .catch(() => showFeedbackNote(wrap, t("chat.feedbackSendFailed"), true));
   }
   function syncVisiblePlan(): void {
     const onScreen = deps.activeSession();
@@ -510,6 +564,27 @@ export function createBubblesController(deps: BubblesDeps) {
     time.className = "chat-msg-time";
     time.hidden = true;
     actions.appendChild(time);
+    const feedback = createFeedbackControls();
+    feedback.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      const btn = target.closest<HTMLElement>(".chat-feedback-btn");
+      if (btn) {
+        if (btn.dataset.feedback === "up" || btn.dataset.feedback === "down") {
+          handleFeedbackClick(wrap, bubble, btn.dataset.feedback);
+        }
+        return;
+      }
+      if (target.closest(".chat-feedback-send")) handleFeedbackSupplement(wrap);
+    });
+    feedback.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      const input = event.target as HTMLElement;
+      if (input.classList.contains("chat-feedback-input")) {
+        event.preventDefault();
+        handleFeedbackSupplement(wrap);
+      }
+    });
+    actions.appendChild(feedback);
     wrap.append(bubble, actions);
     return { wrap, bubble };
   }

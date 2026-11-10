@@ -10,6 +10,15 @@ import type { ChatMessage, ChatSession, PendingPermission, PermissionMeta } from
 import { reportPromptLog, resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
 import {
+  areQuestionsAnswered,
+  buildQuestionFormAnswers,
+  parseAskFormQuestions,
+  questionShowsTextInput,
+  resolveDismissLabel,
+  resolveQuestionAnswers,
+  shouldSubmitEmptyOnDismiss,
+} from "./question-form-core";
+import {
   ackAllow,
   isAskSessionGone,
   isSendDead,
@@ -75,57 +84,29 @@ function needsTypedReply(mode: string | undefined): boolean {
   return mode === "line" || mode === "secret" || mode === "options";
 }
 
-type AskOption = { label: string; description?: string };
-type AskQuestion = {
-  question: string;
-  options: AskOption[];
-  multiSelect: boolean;
-  isOther: boolean;
-  isSecret: boolean;
-};
+/** The card's own failure note, right above the actions (Paseo's error Alert). */
+function showPermissionError(actions: Element, message: string): void {
+  actions.querySelector(".chat-permission-error")?.remove();
+  const note = document.createElement("p");
+  note.className = "chat-permission-error";
+  note.setAttribute("role", "alert");
+  note.textContent = message;
+  actions.appendChild(note);
+}
 
-function parseAskQuestions(raw: string | undefined): AskQuestion[] {
-  if (!raw?.trim()) return [];
-  try {
-    const value = JSON.parse(raw) as { questions?: unknown };
-    if (!Array.isArray(value.questions)) return [];
-    const questions: AskQuestion[] = [];
-    for (const item of value.questions) {
-      if (!item || typeof item !== "object") continue;
-      const record = item as {
-        question?: unknown;
-        options?: unknown;
-        multiSelect?: unknown;
-        isOther?: unknown;
-        isSecret?: unknown;
-      };
-      const question = typeof record.question === "string" ? record.question.trim() : "";
-      if (!question) continue;
-      const options: AskOption[] = [];
-      if (Array.isArray(record.options)) {
-        for (const option of record.options) {
-          if (!option || typeof option !== "object") continue;
-          const label = typeof (option as { label?: unknown }).label === "string"
-            ? (option as { label: string }).label.trim()
-            : "";
-          if (!label) continue;
-          const description = typeof (option as { description?: unknown }).description === "string"
-            ? (option as { description: string }).description.trim()
-            : "";
-          options.push(description ? { label, description } : { label });
-        }
-      }
-      questions.push({
-        question,
-        options,
-        multiSelect: record.multiSelect === true,
-        isOther: record.isOther === true,
-        isSecret: record.isSecret === true,
-      });
-    }
-    return questions;
-  } catch {
-    return [];
+/** Resolved typed asks echo what the user actually answered, not just a badge. */
+function showPermissionAnswer(actions: Element, badge: string, answer: string): void {
+  actions.replaceChildren();
+  const result = document.createElement("span");
+  result.className = "chat-permission-result";
+  result.textContent = badge;
+  actions.append(result);
+  const echo = answer.trim();
+  if (echo) {
+    const echoEl = document.createElement("span");
+    echoEl.className = "chat-permission-echo";
+    echoEl.textContent = echo;
+    actions.append(echoEl);
   }
 }
 
@@ -135,16 +116,54 @@ function renderStructuredQuestion(
   card: HTMLElement,
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void,
 ): void {
-  const questions = parseAskQuestions(meta.inputJson);
-  const picks = new Map<string, string[]>();
-  const otherFields = new Map<string, HTMLInputElement>();
+  const questions = parseAskFormQuestions(meta.inputJson, meta.toolName);
+  // Paseo's card state: selections and typed answers keyed by question index.
+  const selections: Record<number, Set<number>> = {};
+  const otherTexts: Record<number, string> = {};
+  const otherFields = new Map<number, HTMLInputElement>();
+  let sendBtn: HTMLButtonElement | null = null;
+  let skipBtn: HTMLButtonElement | null = null;
+  let sendLabel = t("chat.inputSubmit");
+  let skipLabel = t("chat.answerSkip");
+  let busy: "submit" | "skip" | null = null;
+
+  const errorText = (error: unknown): string => {
+    const raw = String(error);
+    return /no active ask session/i.test(raw)
+      ? t("chat.permissionSessionGone")
+      : t("chat.inputFailed");
+  };
+
+  // The pressed action swaps to a spinner (Paseo's pendingAction) and every
+  // control locks; labels come back if the send fails.
+  const setBusy = (which: "submit" | "skip" | null) => {
+    busy = which;
+    actions.querySelectorAll("button, input").forEach((el) => {
+      (el as HTMLButtonElement | HTMLInputElement).disabled = which !== null;
+    });
+    for (const [btn, label, kind] of [
+      [sendBtn, sendLabel, "submit"],
+      [skipBtn, skipLabel, "skip"],
+    ] as const) {
+      if (!btn) continue;
+      if (which === kind) {
+        btn.textContent = "";
+        const spinner = document.createElement("span");
+        spinner.className = "chat-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        btn.append(spinner, document.createTextNode(t("chat.inputSending")));
+        btn.setAttribute("aria-busy", "true");
+      } else {
+        btn.textContent = label;
+        btn.removeAttribute("aria-busy");
+      }
+    }
+  };
 
   const submitAnswers = async (answers: Record<string, string>) => {
-    if (card.dataset.resolved === "1") return;
+    if (card.dataset.resolved === "1" || busy) return;
     card.dataset.resolved = "1";
-    actions.querySelectorAll("button, input").forEach((el) => {
-      (el as HTMLButtonElement | HTMLInputElement).disabled = true;
-    });
+    setBusy("submit");
     try {
       await resolvePermissionSession({
         sessionId: meta.backendSessionId ?? "",
@@ -153,29 +172,36 @@ function renderStructuredQuestion(
         text: JSON.stringify({ answers }),
       });
       replyDrafts.delete(meta.requestId);
+      // Echo what was actually answered; the resolved event re-renders the
+      // same echo from meta.answer.
+      const echo = Object.entries(answers)
+        .map(([question, answer]) => (questions.length > 1 ? `${question}：${answer}` : answer))
+        .join("；");
+      meta.answer = echo;
+      showPermissionAnswer(actions, t("chat.inputSubmitted"), echo);
     } catch (error) {
+      // The answer stays editable and the ask stays pending, so the user can
+      // resubmit the exact same form after a failed send.
       delete card.dataset.resolved;
-      actions.querySelectorAll("button, input").forEach((el) => {
-        (el as HTMLButtonElement | HTMLInputElement).disabled = false;
-      });
-      const raw = String(error);
-      setStatus(
-        /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
-        "warn",
-      );
+      setBusy(null);
+      const message = errorText(error);
+      showPermissionError(actions, message);
+      setStatus(message, "warn");
     }
   };
 
-  const currentAnswers = (): Record<string, string> | null => {
-    const answers: Record<string, string> = {};
-    for (const question of questions) {
-      const other = otherFields.get(question.question)?.value.trim() ?? "";
-      const picked = picks.get(question.question) ?? [];
-      const value = other || picked.join(", ");
-      if (!value) return null;
-      answers[question.question] = value;
-    }
-    return answers;
+  const submit = () => {
+    if (!areQuestionsAnswered(questions, selections, otherTexts)) return;
+    const answers = resolveQuestionAnswers(
+      questions,
+      buildQuestionFormAnswers(questions, selections, otherTexts),
+    );
+    void submitAnswers(answers);
+  };
+
+  const refresh = () => {
+    if (!sendBtn || busy) return;
+    sendBtn.disabled = !areQuestionsAnswered(questions, selections, otherTexts);
   };
 
   if (questions.length === 0) {
@@ -184,27 +210,27 @@ function renderStructuredQuestion(
     field.className = "chat-permission-input";
     field.placeholder = t("chat.replyHere");
     field.value = replyDrafts.get(meta.requestId) ?? "";
-    const sendBtn = document.createElement("button");
-    sendBtn.type = "button";
-    sendBtn.className = "chat-permission-allow";
-    sendBtn.textContent = t("chat.inputSubmit");
     const send = () => {
       const text = field.value.trim();
       if (!text) return;
       void submitAnswers({ [meta.detail || "value"]: text });
     };
-    sendBtn.addEventListener("click", send);
+    const fallbackBtn = document.createElement("button");
+    fallbackBtn.type = "button";
+    fallbackBtn.className = "chat-permission-allow";
+    fallbackBtn.textContent = t("chat.inputSubmit");
+    fallbackBtn.addEventListener("click", send);
     field.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         send();
       }
     });
-    actions.append(field, sendBtn);
+    actions.append(field, fallbackBtn);
     return;
   }
 
-  for (const question of questions) {
+  questions.forEach((question, qIndex) => {
     if (questions.length > 1) {
       const label = document.createElement("p");
       label.className = "chat-permission-question";
@@ -213,71 +239,167 @@ function renderStructuredQuestion(
     }
     const optionRow = document.createElement("div");
     optionRow.className = "chat-permission-options";
-    for (const option of question.options) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chat-permission-option";
-      btn.textContent = option.label;
-      if (option.description) btn.title = option.description;
-      btn.addEventListener("click", () => {
-        const current = picks.get(question.question) ?? [];
+    const optionRows: HTMLElement[] = [];
+    question.options.forEach((option, oIndex) => {
+      const row = document.createElement("div");
+      row.className = "chat-permission-option";
+      row.tabIndex = 0;
+      row.setAttribute("role", question.multiSelect ? "checkbox" : "radio");
+      row.setAttribute("aria-checked", "false");
+      const control = document.createElement("span");
+      control.className = "chat-permission-option-check";
+      control.setAttribute("aria-hidden", "true");
+      const text = document.createElement("span");
+      text.className = "chat-permission-option-text";
+      const label = document.createElement("span");
+      label.className = "chat-permission-option-label";
+      label.textContent = option.label;
+      text.appendChild(label);
+      // Descriptions carry the trade-off notes; keep them on the card instead
+      // of hiding them behind a hover title.
+      if (option.description) {
+        const description = document.createElement("span");
+        description.className = "chat-permission-option-description";
+        description.textContent = option.description;
+        text.appendChild(description);
+      }
+      if (option.preview) {
+        // Every preview shows at once so options can be compared (Paseo);
+        // prose wraps, the block height caps with an inner scroll.
+        const preview = document.createElement("pre");
+        preview.className = "chat-permission-option-preview";
+        preview.textContent = option.preview;
+        text.appendChild(preview);
+      }
+      row.append(control, text);
+      optionRows.push(row);
+      const toggle = () => {
+        // Locked while a send is in flight and after the ask is resolved —
+        // div rows aren't covered by the button/input disable sweep.
+        if (busy || card.dataset.resolved === "1") return;
+        const current = selections[qIndex] ?? new Set<number>();
+        // Paseo: multi-select flips the box; re-clicking the picked
+        // single-select option clears it.
         const next = question.multiSelect
-          ? current.includes(option.label)
-            ? current.filter((item) => item !== option.label)
-            : [...current, option.label]
-          : [option.label];
-        picks.set(question.question, next);
-        optionRow.querySelectorAll<HTMLButtonElement>(".chat-permission-option").forEach((el) => {
-          el.classList.toggle("is-selected", next.includes(el.textContent ?? ""));
+          ? current.has(oIndex)
+            ? new Set([...current].filter((index) => index !== oIndex))
+            : new Set([...current, oIndex])
+          : current.has(oIndex)
+            ? new Set<number>()
+            : new Set([oIndex]);
+        selections[qIndex] = next;
+        optionRows.forEach((el, index) => {
+          el.classList.toggle("is-selected", next.has(index));
+          el.setAttribute("aria-checked", next.has(index) ? "true" : "false");
         });
-        const field = otherFields.get(question.question);
-        if (field && !question.multiSelect) field.value = "";
-        if (!question.multiSelect && !question.isOther && questions.length === 1) {
-          void submitAnswers({ [question.question]: option.label });
+        if (!question.multiSelect) {
+          // Paseo: picking an option clears the single-select typed answer,
+          // field included, so a stale draft can't ride along on submit.
+          delete otherTexts[qIndex];
+          const field = otherFields.get(qIndex);
+          if (field) field.value = "";
+        }
+        refresh();
+        if (!question.multiSelect && !questionShowsTextInput(question) && questions.length === 1) {
+          submit();
+        }
+      };
+      // Double-click text selection and clicks on links are not answers
+      // (Paseo's isNonAnsweringClick).
+      row.addEventListener("click", (event) => {
+        if (event.detail > 1) return;
+        if ((event.target as Element | null)?.closest("a")) return;
+        toggle();
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggle();
         }
       });
-      optionRow.appendChild(btn);
-    }
+      optionRow.appendChild(row);
+    });
     actions.appendChild(optionRow);
 
-    const other = document.createElement("input");
-    const secret =
-      question.isSecret || /密钥|口令|token|password|api key/i.test(question.question);
-    other.type = secret ? "password" : "text";
-    other.className = "chat-permission-input";
-    other.placeholder = secret ? t("chat.pasteSecret") : t("chat.answerOther");
-    other.setAttribute("aria-label", t("chat.answerOther"));
-    otherFields.set(question.question, other);
-    actions.appendChild(other);
-  }
+    // Paseo only offers the typed answer when the question allows one.
+    if (questionShowsTextInput(question)) {
+      const other = document.createElement("input");
+      const secret =
+        question.isSecret === true ||
+        /密钥|口令|token|password|api key/i.test(question.question);
+      other.type = secret ? "password" : "text";
+      other.className = "chat-permission-input";
+      const freeform = question.options.length === 0;
+      other.placeholder = secret
+        ? t("chat.pasteSecret")
+        : question.placeholder || (freeform ? t("chat.replyHere") : t("chat.answerOther"));
+      other.setAttribute("aria-label", freeform ? t("chat.replyHere") : t("chat.answerOther"));
+      other.value = otherTexts[qIndex] ?? "";
+      other.addEventListener("input", () => {
+        otherTexts[qIndex] = other.value;
+        if (!question.multiSelect) {
+          // Paseo: typing a single-select answer clears the picked option.
+          delete selections[qIndex];
+          optionRows.forEach((el) => {
+            el.classList.remove("is-selected");
+            el.setAttribute("aria-checked", "false");
+          });
+        }
+        refresh();
+      });
+      // Enter submits, like the line/secret inputs (Paseo: onSubmitEditing).
+      other.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submit();
+        }
+      });
+      otherFields.set(qIndex, other);
+      actions.appendChild(other);
+    }
+  });
 
-  const sendBtn = document.createElement("button");
+  sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "chat-permission-allow";
-  sendBtn.textContent = t("chat.inputSubmit");
-  sendBtn.addEventListener("click", () => {
-    const answers = currentAnswers();
-    if (!answers) return;
-    void submitAnswers(answers);
-  });
-  const skipBtn = document.createElement("button");
+  sendLabel = t("chat.inputSubmit");
+  sendBtn.textContent = sendLabel;
+  sendBtn.addEventListener("click", submit);
+  refresh();
+  skipBtn = document.createElement("button");
   skipBtn.type = "button";
   skipBtn.className = "chat-permission-deny";
-  skipBtn.textContent = t("chat.answerSkip");
-  skipBtn.addEventListener("click", () => {
-    if (card.dataset.resolved === "1") return;
-    void resolvePermissionSession({
-      sessionId: meta.backendSessionId ?? "",
-      requestId: meta.requestId,
-      allow: false,
-    }).catch((error: unknown) => {
-      const raw = String(error);
-      setStatus(
-        /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
-        "warn",
+  // A form where every question is an optional plain-text answer is skipped
+  // by submitting the empty answers, not by denying the ask (Paseo's
+  // shouldSubmitEmptyOnDismiss); anything else denies.
+  if (shouldSubmitEmptyOnDismiss(questions)) {
+    skipLabel = resolveDismissLabel(questions, t("chat.answerSkip"));
+    skipBtn.textContent = skipLabel;
+    skipBtn.addEventListener("click", () => {
+      void submitAnswers(
+        resolveQuestionAnswers(questions, buildQuestionFormAnswers(questions, {}, {})),
       );
     });
-  });
+  } else {
+    skipLabel = t("chat.answerSkip");
+    skipBtn.textContent = skipLabel;
+    skipBtn.addEventListener("click", () => {
+      if (card.dataset.resolved === "1" || busy) return;
+      card.dataset.resolved = "1";
+      setBusy("skip");
+      void resolvePermissionSession({
+        sessionId: meta.backendSessionId ?? "",
+        requestId: meta.requestId,
+        allow: false,
+      }).catch((error: unknown) => {
+        delete card.dataset.resolved;
+        setBusy(null);
+        const message = errorText(error);
+        showPermissionError(actions, message);
+        setStatus(message, "warn");
+      });
+    });
+  }
   actions.append(sendBtn, skipBtn);
 }
 
@@ -783,8 +905,16 @@ export function createPermissionsController(deps: PermissionsDeps) {
       const submit = async () => {
         const text = field.value.trim();
         if (!text || card.dataset.resolved === "1") return;
+        card.dataset.resolved = "1";
         field.disabled = true;
         sendBtn.disabled = true;
+        sendBtn.setAttribute("aria-busy", "true");
+        const sendLabel = sendBtn.textContent;
+        sendBtn.textContent = "";
+        const spinner = document.createElement("span");
+        spinner.className = "chat-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        sendBtn.append(spinner, document.createTextNode(t("chat.inputSending")));
         try {
           await resolvePermissionSession({
             sessionId: meta.backendSessionId ?? "",
@@ -794,14 +924,20 @@ export function createPermissionsController(deps: PermissionsDeps) {
           });
           field.value = "";
           replyDrafts.delete(meta.requestId);
+          meta.answer = text;
+          showPermissionAnswer(actions, t("chat.inputSubmitted"), text);
         } catch (error) {
+          delete card.dataset.resolved;
           field.disabled = false;
           sendBtn.disabled = false;
+          sendBtn.removeAttribute("aria-busy");
+          sendBtn.textContent = sendLabel;
           const raw = String(error);
-          deps.setStatus(
-            /no active ask session/i.test(raw) ? t("chat.permissionSessionGone") : t("chat.inputFailed"),
-            "warn",
-          );
+          const message = /no active ask session/i.test(raw)
+            ? t("chat.permissionSessionGone")
+            : t("chat.inputFailed");
+          showPermissionError(actions, message);
+          deps.setStatus(message, "warn");
         }
       };
       sendBtn.addEventListener("click", () => void submit());
@@ -1094,16 +1230,19 @@ export function createPermissionsController(deps: PermissionsDeps) {
       card.querySelector(".chat-permission-missed")?.remove();
       const actions = card.querySelector(".chat-permission-actions");
       if (actions) {
-        actions.replaceChildren();
-        const badge = document.createElement("span");
-        badge.className = "chat-permission-result";
-        const typed = message?.permission?.inputMode === "line" || message?.permission?.inputMode === "secret" || message?.permission?.inputMode === "options";
-        badge.textContent = typed
-          ? t("chat.inputSubmitted")
-          : allowed
-            ? t("chat.permissionAllowed")
-            : t("chat.permissionDenied");
-        actions.appendChild(badge);
+        const typed =
+          message?.permission?.inputMode === "line" ||
+          message?.permission?.inputMode === "secret" ||
+          message?.permission?.inputMode === "options";
+        showPermissionAnswer(
+          actions,
+          typed
+            ? t("chat.inputSubmitted")
+            : allowed
+              ? t("chat.permissionAllowed")
+              : t("chat.permissionDenied"),
+          typed ? (message?.permission?.answer ?? "") : "",
+        );
       }
     }
 

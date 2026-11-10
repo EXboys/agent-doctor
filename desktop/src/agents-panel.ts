@@ -235,14 +235,18 @@ function warmAgentCards(runtimes: RuntimeDoctorResult[]): void {
 
 /** Card swap + hero measurement both read layout, so running them inside the
  * click handler forces a synchronous reflow before the tile can repaint — on a
- * cold window that is the hitch users feel. Coalesce them into one frame. */
+ * cold window that is the hitch users feel. Coalesce them into one frame.
+ * `afterPaint` runs once the swapped card is in the DOM; the doctor card's
+ * quota fill queries `[data-doctor-service]`, which only exists after the
+ * swap. */
 let cardFrame = 0;
-function scheduleCardPaint(build: () => string): void {
+function scheduleCardPaint(build: () => string, afterPaint?: () => void): void {
   if (cardFrame) cancelAnimationFrame(cardFrame);
   cardFrame = requestAnimationFrame(() => {
     cardFrame = 0;
     paintRuntimeCard(build());
     syncHomeHero();
+    afterPaint?.();
   });
 }
 
@@ -447,8 +451,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const report = appState.lastReport;
     const installedRuntimes = report ? report.runtimes.filter((runtime) => runtime.installed) : [];
     paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
-    scheduleCardPaint(doctorCardHtml);
-    void paintDoctorServiceRow();
+    scheduleCardPaint(doctorCardHtml, () => void paintDoctorServiceRow());
     void diagnose.closeDiagnoseDetail({ skipDismiss: true });
   }
 
@@ -900,6 +903,13 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     showInstalledRuntime(runtime);
   });
   void emit(ASK_RUNTIME_QUERY_EVENT).catch(() => {});
+
+  // Signing in or out anywhere (ask window, provider tab, mall) must re-query
+  // the account on the visible doctor card — no other repaint covers it. The
+  // fill no-ops when the doctor card is not on screen.
+  void listen("teamups-account-changed", () => {
+    void paintDoctorServiceRow();
+  });
 
   document.addEventListener("click", (event) => {
     const target = event.target as Node;

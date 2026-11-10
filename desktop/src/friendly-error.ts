@@ -297,13 +297,18 @@ export type ChatFailureAction =
   | "relogin"
   | "officialLogin"
   | "officialBuy"
-  | "modelMenu";
+  | "modelMenu"
+  | "report";
 
 export type ChatFailureExplain = {
   kind: ChatFailureKind;
   message: string;
   next: string;
   actions: ChatFailureAction[];
+  /** Ask runtime of the failed turn, when the caller knows it. */
+  runtime?: string;
+  /** Terminal status of the failed turn, when the caller knows it. */
+  turnStatus?: string;
 };
 
 /** A coding-plan key on the pay-as-you-go address. GLM says "no balance"; Qwen and Kimi say the key is invalid. */

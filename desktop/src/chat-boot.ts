@@ -87,6 +87,7 @@ import { applyThemePreference, readThemePreference, watchSystemTheme } from "./c
 import { bindChatSettings, refreshConfirmCopy } from "./chat/settings-page";
 import { bindSidebarCollapse } from "./chat/session-sidebar";
 import { bindAccountBar } from "./chat/account-bar";
+import { bindFeedbackLaunchers } from "./chat/feedback";
 import {
   cancelPromptSession,
   teamupsChannelChats,
@@ -168,6 +169,7 @@ export function bootChat(): void {
   bindSidebarCollapse();
   bindLayoutResize();
   bindAccountBar();
+  bindFeedbackLaunchers();
   bindTuneMenu();
   bindKnowledge({
     projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),

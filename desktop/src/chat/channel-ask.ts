@@ -5,6 +5,13 @@ import {
 } from "../ipc";
 import { formatPermissionDetail } from "./format";
 import { publishPhoneChats } from "./phone-chats";
+import {
+  channelOptionPicks,
+  parseAskFormQuestions,
+  questionShowsTextInput,
+  type QuestionFormQuestion,
+} from "./question-form-core";
+import { selectedAnswer, splitMultiSelectAnswer } from "./question-card-answer";
 
 type AskMode = "choice" | "line" | "options";
 
@@ -16,7 +23,7 @@ type PendingAsk = {
   mode: AskMode;
   options: string[];
   question: string;
-  questions: TeamupsChannelQuestion[];
+  questions: QuestionFormQuestion[];
 };
 
 const jobsBySession = new Map<string, string>();
@@ -66,6 +73,17 @@ type ChannelAskInput = {
   inputJson?: string;
 };
 
+/** The phone site renders this exact shape; extra model fields stay local. */
+function channelQuestionPayload(questions: QuestionFormQuestion[]): TeamupsChannelQuestion[] {
+  return questions.map((question) => ({
+    question: question.question,
+    options: question.options.map((option) =>
+      option.description ? { label: option.label, description: option.description } : { label: option.label },
+    ),
+    multiSelect: question.multiSelect,
+  }));
+}
+
 export function noteChannelAsk(input: ChannelAskInput): void {
   const jobId = jobsBySession.get(input.chatSessionId);
   if (!jobId) return;
@@ -81,7 +99,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     ).catch(() => {});
     return;
   }
-  const questions = parseQuestions(input.inputJson);
+  const questions = parseAskFormQuestions(input.inputJson, input.toolName);
   const question = questions[0];
   const options = question?.options.map((option) => option.label) ?? [];
   const summary = usefulSummary(input.detail, input.toolName);
@@ -89,9 +107,9 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     ? `有 ${questions.length} 件事要选。请在手机上逐项选择；飞书暂时请到电脑上处理。`
     : question
       ? optionPrompt(question.question, options, question.multiSelect)
-    : input.inputMode === "line"
-      ? `请直接回复：\n${summary}`
-      : `要确认这一步：\n${summary}\n\n回复 1 允许\n回复 2 拒绝`;
+      : input.inputMode === "line"
+        ? `请直接回复：\n${summary}`
+        : `要确认这一步：\n${summary}\n\n回复 1 允许\n回复 2 拒绝`;
   pendingByRequest.set(input.requestId, {
     jobId,
     chatSessionId: input.chatSessionId,
@@ -107,7 +125,7 @@ export function noteChannelAsk(input: ChannelAskInput): void {
     input.requestId,
     prompt,
     true,
-    input.inputMode === "options" ? questions : undefined,
+    input.inputMode === "options" ? channelQuestionPayload(questions) : undefined,
     chat,
   ).catch(() => {});
   publishPhoneChats();
@@ -137,18 +155,75 @@ export async function takePendingChoices(sessionId: string, text: string): Promi
     (ask) => ask.chatSessionId === sessionId && ask.mode === "choice",
   );
   if (matches.length === 0) return 0;
-  for (const ask of matches) pendingByRequest.delete(ask.requestId);
-  await Promise.all(
-    matches.map((ask) =>
-      resolvePermissionSession({
+  const settled = await Promise.allSettled(
+    matches.map(async (ask) => {
+      await resolvePermissionSession({
         sessionId: ask.backendSessionId,
         requestId: ask.requestId,
         allow,
-      }),
-    ),
+      });
+      pendingByRequest.delete(ask.requestId);
+    }),
   );
+  const taken = settled.filter((result) => result.status === "fulfilled").length;
+  if (taken === 0) {
+    // Every send failed: report the failure instead of a stuck "already
+    // confirmed"; the asks stay pending so the reply can simply be repeated.
+    const failed = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    throw failed?.reason ?? new Error("permission send failed");
+  }
   publishPhoneChats();
-  return matches.length;
+  return taken;
+}
+
+/** Resolve one typed answer; only a delivered answer clears the pending ask. */
+async function sendChannelAnswer(current: PendingAsk, text: string): Promise<boolean> {
+  try {
+    await resolvePermissionSession({
+      sessionId: current.backendSessionId,
+      requestId: current.requestId,
+      allow: true,
+      text,
+    });
+    pendingByRequest.delete(current.requestId);
+    publishPhoneChats();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function rePrompt(current: PendingAsk, text: string, withQuestions: boolean): void {
+  void teamupsChannelAsk(
+    current.jobId,
+    current.requestId,
+    text,
+    true,
+    withQuestions ? channelQuestionPayload(current.questions) : undefined,
+    chatBySession.get(current.chatSessionId) ?? "",
+  ).catch(() => {});
+}
+
+/** A plain-text reply against a single structured question, if it resolves. */
+function freeTextOptionAnswer(
+  raw: string,
+  questions: QuestionFormQuestion[],
+): Record<string, string> | null {
+  if (questions.length !== 1) return null;
+  const question = questions[0];
+  const picks = channelOptionPicks(raw, question);
+  if (picks.selected.length === 0 && (picks.custom === null || !questionShowsTextInput(question))) {
+    return null;
+  }
+  const value = [
+    ...picks.selected,
+    ...(picks.custom !== null && (question.multiSelect || picks.selected.length === 0)
+      ? [picks.custom]
+      : []),
+  ].join(", ");
+  return { [question.question]: value };
 }
 
 export async function applyChannelAnswer(requestId: string, text: string): Promise<void> {
@@ -158,37 +233,17 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
   if (!raw) return;
   if (current.mode === "choice") {
     if (choiceVerdict(raw) === null) {
-      void teamupsChannelAsk(
-        current.jobId,
-        current.requestId,
-        "没看懂。回复 1 允许，回复 2 拒绝。",
-        true,
-        undefined,
-        chatBySession.get(current.chatSessionId) ?? "",
-      ).catch(() => {});
+      rePrompt(current, "没看懂。回复 1 允许，回复 2 拒绝。", false);
       return;
     }
     await takePendingChoices(current.chatSessionId, raw);
     return;
   }
   if (current.mode === "options") {
-    const answers = structuredAnswers(raw, current.questions);
-    if (answers) {
-      pendingByRequest.delete(requestId);
-      await resolvePermissionSession({
-        sessionId: current.backendSessionId,
-        requestId: current.requestId,
-        allow: true,
-        text: JSON.stringify({ answers }),
-      });
-      publishPhoneChats();
-      return;
-    }
-    const picked = pickOption(raw, current.options);
-    if (!picked) {
-      void teamupsChannelAsk(
-        current.jobId,
-        current.requestId,
+    const answers = structuredAnswers(raw, current.questions) ?? freeTextOptionAnswer(raw, current.questions);
+    if (!answers) {
+      rePrompt(
+        current,
         current.questions.length > 1
           ? `有 ${current.questions.length} 件事要选。请在手机上逐项选择；飞书暂时请到电脑上处理。`
           : optionPrompt(
@@ -197,48 +252,36 @@ export async function applyChannelAnswer(requestId: string, text: string): Promi
               current.questions[0]?.multiSelect === true,
             ),
         true,
-        current.questions,
-        chatBySession.get(current.chatSessionId) ?? "",
-      ).catch(() => {});
+      );
       return;
     }
-    pendingByRequest.delete(requestId);
-    await resolvePermissionSession({
-      sessionId: current.backendSessionId,
-      requestId: current.requestId,
-      allow: true,
-      text: JSON.stringify({ answers: { [current.question]: picked } }),
-    });
-    publishPhoneChats();
+    if (!(await sendChannelAnswer(current, JSON.stringify({ answers })))) {
+      rePrompt(current, "没送出去，请再发一次。", true);
+    }
     return;
   }
-  pendingByRequest.delete(requestId);
-  await resolvePermissionSession({
-    sessionId: current.backendSessionId,
-    requestId: current.requestId,
-    allow: true,
-    text: raw,
-  });
-  publishPhoneChats();
+  if (!(await sendChannelAnswer(current, raw))) {
+    rePrompt(current, `没送出去，请再发一次。\n\n请直接回复：\n${current.question}`, false);
+  }
 }
 
 function optionPrompt(question: string, options: string[], multiSelect = false): string {
   const lines = options.map((label, index) => `${index + 1}. ${label}`);
   const hint = multiSelect
     ? "手机上可以选择多项后统一确认。飞书暂时请到电脑上处理。"
-    : "回复序号，或直接回复选项。";
+    : "回复序号、选项原文，或直接回复你的答案。";
   return `${clip(question)}\n\n${lines.join("\n")}\n\n${hint}`;
 }
 
-function pickOption(raw: string, options: string[]): string | null {
-  const index = Number(raw);
-  if (Number.isInteger(index) && index >= 1 && index <= options.length) return options[index - 1];
-  return options.find((label) => label === raw) ?? null;
-}
-
+/**
+ * The phone site's structured reply: `{"answers": {question: "a, b"}}`,
+ * keyed by question text or header. Every question must carry an answer;
+ * option labels must match exactly; free text counts only where the question
+ * allows a typed answer (Paseo's allowOther / multiSelect semantics).
+ */
 export function structuredAnswers(
   raw: string,
-  questions: TeamupsChannelQuestion[],
+  questions: QuestionFormQuestion[],
 ): Record<string, string> | null {
   if (questions.length === 0 || !raw.startsWith("{")) return null;
   try {
@@ -247,74 +290,48 @@ export function structuredAnswers(
     const source = value.answers as Record<string, unknown>;
     const answers: Record<string, string> = {};
     for (const question of questions) {
-      const answer = source[question.question];
-      const picked = Array.isArray(answer)
-        ? answer
-            .filter((item): item is string => typeof item === "string")
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : typeof answer === "string" && answer.trim()
-          ? question.multiSelect
-            ? answer.split(",").map((item) => item.trim()).filter(Boolean)
-            : [answer.trim()]
-          : [];
-      const allowed = new Set(question.options.map((option) => option.label));
-      if (
-        picked.length === 0 ||
-        (!question.multiSelect && picked.length !== 1) ||
-        picked.some((item) => !allowed.has(item))
-      ) {
+      const answer = question.header !== question.question
+        ? source[question.question] ?? source[question.header]
+        : source[question.question];
+      const labels = question.options.map((option) => option.label);
+      const allowed = new Set(labels);
+
+      if (Array.isArray(answer)) {
+        const picked = answer
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean);
+        if (
+          picked.length === 0 ||
+          (!question.multiSelect && picked.length !== 1) ||
+          picked.some((item) => !allowed.has(item))
+        ) {
+          return null;
+        }
+        answers[question.question] = picked.join(", ");
+        continue;
+      }
+      if (typeof answer !== "string") return null;
+      const text = answer.trim();
+      if (!text) {
+        if (question.allowEmpty && question.options.length === 0) {
+          answers[question.question] = "";
+          continue;
+        }
         return null;
       }
-      answers[question.question] = picked.join(", ");
+      const { selected, custom } = question.multiSelect
+        ? splitMultiSelectAnswer(text, labels)
+        : selectedAnswer(text, labels, false);
+      if (custom !== null && !questionShowsTextInput(question)) return null;
+      answers[question.question] = [
+        ...selected,
+        ...(custom !== null && (question.multiSelect || selected.length === 0) ? [custom] : []),
+      ].join(", ");
     }
     return answers;
   } catch {
     return null;
-  }
-}
-
-function parseQuestions(raw: string | undefined): TeamupsChannelQuestion[] {
-  if (!raw?.trim()) return [];
-  try {
-    const value = JSON.parse(raw) as { questions?: unknown };
-    if (!Array.isArray(value.questions)) return [];
-    const questions: TeamupsChannelQuestion[] = [];
-    for (const item of value.questions) {
-      if (!item || typeof item !== "object") continue;
-      const record = item as {
-        question?: unknown;
-        options?: unknown;
-        multiSelect?: unknown;
-      };
-      const question = typeof record.question === "string" ? record.question.trim() : "";
-      if (!question) continue;
-      const options: { label: string; description?: string }[] = [];
-      if (Array.isArray(record.options)) {
-        for (const option of record.options) {
-          if (!option || typeof option !== "object") continue;
-          const optionRecord = option as { label?: unknown; description?: unknown };
-          const label =
-            typeof optionRecord.label === "string" ? optionRecord.label.trim() : "";
-          if (!label) continue;
-          const description =
-            typeof optionRecord.description === "string"
-              ? optionRecord.description.trim()
-              : "";
-          options.push(description ? { label, description } : { label });
-        }
-      }
-      if (options.length > 0) {
-        questions.push({
-          question,
-          options,
-          multiSelect: record.multiSelect === true,
-        });
-      }
-    }
-    return questions;
-  } catch {
-    return [];
   }
 }
 

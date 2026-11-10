@@ -173,6 +173,7 @@ export function wireChatControllers(): void {
   };
   const showChatFailureBubble = (explain: ChatFailureExplain) => {
     if (!markChatFailureBubbleShown()) return;
+    explain.runtime ??= selectedRuntime();
     mountChatFailureBubble(logEl, explain, chatFailureHandlers);
     setStatus(formatChatFailureLine(explain), "error");
   };

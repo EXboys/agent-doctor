@@ -108,6 +108,8 @@ export interface PermissionMeta {
   inputMode?: "choice" | "options" | "line" | "secret";
   /** Original tool input, used to render structured questions. */
   inputJson?: string;
+  /** What the user actually answered, echoed on the resolved card. */
+  answer?: string;
 }
 
 export interface ChatMessage {
@@ -125,6 +127,8 @@ export interface ChatMessage {
   log?: boolean;
   /** Collapsed log row uses a failure sentence instead of the generic label. */
   summary?: "commandFailed";
+  /** The user's rating on this assistant turn's reply. */
+  feedback?: "up" | "down";
 }
 
 export interface ChatSession {

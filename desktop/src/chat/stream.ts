@@ -260,8 +260,16 @@ export function createStreamController(deps: StreamDeps) {
           if (viewing) {
             deps.hideDecisionDock();
             if (!hadAssistantText && payload.status === "succeeded") {
-              if (!failureSaid && !showChatTurnFailure(deps)) {
-                deps.appendBubble("meta", t("chat.emptyReply"), { persist: false });
+              // An empty reply from a healthy run is still reportable: mount
+              // the failure-style card with just the report action.
+              if (!failureSaid && !showChatTurnFailure(deps, null, { turnStatus: payload.status })) {
+                deps.appendChatFailure({
+                  kind: "unknown",
+                  message: t("chat.emptyReply"),
+                  next: "",
+                  actions: ["report"],
+                  turnStatus: payload.status,
+                });
               }
             } else if (failed && !failureSaid) {
               const logged = !hadAssistantText ? deps.noteFailedRunLog() : null;
@@ -270,7 +278,7 @@ export function createStreamController(deps: StreamDeps) {
                 markChatFailureBubbleShown();
                 deps.setStatus(logged, "error");
               } else {
-                failureSaid = showChatTurnFailure(deps);
+                failureSaid = showChatTurnFailure(deps, null, { turnStatus: payload.status });
                 if (!failureSaid && !hadAssistantText) {
                   const sentence = deps.agentFailedLine();
                   deps.rememberMeta(sentence);
@@ -339,11 +347,14 @@ function spanLabel(sec: number): string {
 function showChatTurnFailure(
   deps: StreamDeps,
   explain?: ChatFailureExplain | null,
+  context?: { runtime?: string; turnStatus?: string },
 ): boolean {
   const resolved = explain ?? explainCurrentChatTurnFailure();
   if (!resolved || !markChatFailureBubbleShown()) {
     return false;
   }
+  resolved.runtime ??= context?.runtime;
+  resolved.turnStatus ??= context?.turnStatus;
   deps.appendChatFailure(resolved);
   deps.setStatus(formatChatFailureLine(resolved), "error");
   return true;

@@ -15,6 +15,7 @@ Object.defineProperty(globalThis, "navigator", {
 
 const { beginChannelJob, channelSessionForJob, choiceVerdict, endChannelJob, structuredAnswers, usefulSummary } =
   await import("../src/chat/channel-ask");
+const { parseAskFormQuestions } = await import("../src/chat/question-form-core");
 
 assert.equal(choiceVerdict("允许"), true);
 assert.equal(choiceVerdict("2"), false);
@@ -28,18 +29,27 @@ assert.equal(usefulSummary(JSON.stringify({ command: "npm test", description: "�
 assert.equal(usefulSummary(JSON.stringify({ size: 3 }), "Inspect"), "Inspect");
 assert.equal(usefulSummary("rm -rf /tmp/build", "Bash").length > 0, true);
 
-const questions = [
-  {
-    question: "要检查哪些部分？",
-    options: [{ label: "网络" }, { label: "配置" }, { label: "日志" }],
-    multiSelect: true,
-  },
-  {
-    question: "完成后怎么处理？",
-    options: [{ label: "只报告" }, { label: "直接修复" }],
-    multiSelect: false,
-  },
-];
+// The questions go through the shared parser, the same one the desktop card
+// uses, so both sides read one inputJson the same way. AskUserQuestion asks
+// always accept a typed answer alongside the options.
+const questions = parseAskFormQuestions(
+  JSON.stringify({
+    questions: [
+      {
+        question: "要检查哪些部分？",
+        header: "检查项",
+        options: [{ label: "网络" }, { label: "配置" }, { label: "日志" }],
+        multiSelect: true,
+      },
+      {
+        question: "完成后怎么处理？",
+        options: [{ label: "只报告" }, { label: "直接修复" }],
+        multiSelect: false,
+      },
+    ],
+  }),
+  "AskUserQuestion",
+);
 
 assert.deepEqual(
   structuredAnswers(
@@ -57,6 +67,64 @@ assert.deepEqual(
   },
 );
 
+// The site may key answers by header instead of question text.
+assert.deepEqual(
+  structuredAnswers(
+    JSON.stringify({
+      answers: {
+        检查项: "网络",
+        "完成后怎么处理？": "只报告",
+      },
+    }),
+    questions,
+  ),
+  {
+    "要检查哪些部分？": "网络",
+    "完成后怎么处理？": "只报告",
+  },
+);
+
+// A label containing ", " stays one selection when it is an exact option.
+const commaLabel = parseAskFormQuestions(
+  JSON.stringify({
+    questions: [
+      {
+        question: "怎么清理？",
+        options: [{ label: "Delete both" }, { label: "Delete both, fix code" }],
+        multiSelect: true,
+      },
+    ],
+  }),
+  "AskUserQuestion",
+);
+assert.deepEqual(
+  structuredAnswers(
+    JSON.stringify({ answers: { "怎么清理？": "Delete both, fix code" } }),
+    commaLabel,
+  ),
+  { "怎么清理？": "Delete both, fix code" },
+);
+
+// A typed answer stands in for a single-select option (allowOther is forced
+// for AskUserQuestion) and appends to a multi-select. A missing question
+// still fails the whole form.
+assert.equal(
+  structuredAnswers(
+    JSON.stringify({ answers: { "完成后怎么处理？": "先不动，等我确认" } }),
+    questions,
+  ),
+  null,
+);
+assert.deepEqual(
+  structuredAnswers(
+    JSON.stringify({
+      answers: { "要检查哪些部分？": "网络", "完成后怎么处理？": "先不动，等我确认" },
+    }),
+    questions,
+  ),
+  { "要检查哪些部分？": "网络", "完成后怎么处理？": "先不动，等我确认" },
+);
+
 assert.equal(
   structuredAnswers(
     JSON.stringify({
@@ -68,6 +136,7 @@ assert.equal(
     questions,
   ),
   null,
+  "array items must be exact labels",
 );
 
 assert.equal(
@@ -80,6 +149,7 @@ assert.equal(
     questions,
   ),
   null,
+  "every question must carry an answer",
 );
 
 beginChannelJob("job-a", "chat-a");
