@@ -948,6 +948,8 @@ pub fn run() {
             get_app_locale_command,
             set_app_locale_command,
             load_chat_store_command,
+            list_claude_import_sessions_command,
+            import_claude_session_command,
             save_chat_store_command,
             channel_link::teamups_channel_connected_command,
             channel_link::teamups_channel_pref_command,

@@ -10571,3 +10571,112 @@ html[data-theme="dark"] .chat-feedback-card {
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* Claude Code transcript importer: sidebar entry + candidate picker. */
+.chat-import-claude {
+  appearance: none;
+  align-self: stretch;
+  margin: 4px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: center;
+}
+
+.chat-import-claude:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.chat-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 10, 0.45);
+}
+
+.chat-import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 92vw);
+  max-height: 72vh;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-shell);
+}
+
+.chat-import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-import-title {
+  font-weight: 650;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.chat-import-close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.chat-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  min-height: 0;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.chat-import-row {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-import-row:hover {
+  background: var(--fill);
+}
+
+.chat-import-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-import-row-meta {
+  color: var(--muted);
+  font-size: 0.7rem;
+}

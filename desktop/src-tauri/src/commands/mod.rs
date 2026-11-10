@@ -1,4 +1,5 @@
 mod chat_store;
+mod claude_import;
 mod deep_diagnose;
 mod knowledge;
 mod knowledge_sync;
@@ -16,6 +17,7 @@ mod workspace;
 mod workspace_files;
 
 pub use chat_store::*;
+pub use claude_import::*;
 pub use deep_diagnose::*;
 pub use knowledge::*;
 pub use knowledge_sync::*;

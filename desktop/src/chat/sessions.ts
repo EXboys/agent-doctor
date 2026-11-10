@@ -38,6 +38,8 @@ import {
 
 export type SessionsDeps = {
   sessionListEl: HTMLElement;
+  /** Sidebar footer entry: the Claude Code transcript importer. */
+  renderImportEntry?: (listEl: HTMLElement) => void;
   titleEl: HTMLElement;
   promptEl: HTMLTextAreaElement;
   logEl: HTMLElement;
@@ -534,6 +536,7 @@ export function createSessionsController(deps: SessionsDeps) {
 
   function renderSessionList(): void {
     deps.sessionListEl.replaceChildren();
+    deps.renderImportEntry?.(deps.sessionListEl);
     const doc = deps.getWorkspaceDoc();
     const sessions = deps.getStore().sessions;
     const workspaceCount = doc ? Object.keys(doc.workspaces).length : 0;

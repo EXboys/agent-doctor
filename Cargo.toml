@@ -26,3 +26,6 @@ toml = "1.1"
 toml_edit = "0.25"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
+
+[profile.dev]
+debug = "line-tables-only"
