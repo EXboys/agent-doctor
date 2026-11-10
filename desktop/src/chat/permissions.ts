@@ -17,6 +17,7 @@ import {
   resolveDismissLabel,
   resolveQuestionAnswers,
   shouldSubmitEmptyOnDismiss,
+  type QuestionFormQuestion,
 } from "./question-form-core";
 import {
   ackAllow,
@@ -112,11 +113,11 @@ function showPermissionAnswer(actions: Element, badge: string, answer: string): 
 
 function renderStructuredQuestion(
   actions: HTMLElement,
+  questions: QuestionFormQuestion[],
   meta: PermissionMeta,
   card: HTMLElement,
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void,
 ): void {
-  const questions = parseAskFormQuestions(meta.inputJson, meta.toolName);
   // Paseo's card state: selections and typed answers keyed by question index.
   const selections: Record<number, Set<number>> = {};
   const otherTexts: Record<number, string> = {};
@@ -173,9 +174,20 @@ function renderStructuredQuestion(
       });
       replyDrafts.delete(meta.requestId);
       // Echo what was actually answered; the resolved event re-renders the
-      // same echo from meta.answer.
+      // same echo from meta.answer. Secret questions only ever show dots —
+      // the value would otherwise sit in the transcript in plain text.
+      const secretEcho = (question: string) => {
+        const q = questions.find((item) => item.question === question);
+        return (
+          q !== undefined &&
+          (q.isSecret === true || /密钥|口令|token|password|api key/i.test(q.question))
+        );
+      };
       const echo = Object.entries(answers)
-        .map(([question, answer]) => (questions.length > 1 ? `${question}：${answer}` : answer))
+        .map(([question, answer]) => {
+          const value = secretEcho(question) ? "••••••" : answer;
+          return questions.length > 1 ? `${question}：${value}` : value;
+        })
         .join("；");
       meta.answer = echo;
       showPermissionAnswer(actions, t("chat.inputSubmitted"), echo);
@@ -210,6 +222,9 @@ function renderStructuredQuestion(
     field.className = "chat-permission-input";
     field.placeholder = t("chat.replyHere");
     field.value = replyDrafts.get(meta.requestId) ?? "";
+    field.addEventListener("input", () => {
+      field.classList.toggle("has-value", field.value.length > 0);
+    });
     const send = () => {
       const text = field.value.trim();
       if (!text) return;
@@ -231,12 +246,12 @@ function renderStructuredQuestion(
   }
 
   questions.forEach((question, qIndex) => {
-    if (questions.length > 1) {
-      const label = document.createElement("p");
-      label.className = "chat-permission-question";
-      label.textContent = question.question;
-      actions.appendChild(label);
-    }
+    // Paseo leads with the question text, single or not — it is the card's
+    // heading, and the answers hang off it.
+    const label = document.createElement("p");
+    label.className = "chat-permission-question";
+    label.textContent = question.question;
+    actions.appendChild(label);
     const optionRow = document.createElement("div");
     optionRow.className = "chat-permission-options";
     const optionRows: HTMLElement[] = [];
@@ -337,6 +352,7 @@ function renderStructuredQuestion(
       other.value = otherTexts[qIndex] ?? "";
       other.addEventListener("input", () => {
         otherTexts[qIndex] = other.value;
+        other.classList.toggle("has-value", other.value.length > 0);
         if (!question.multiSelect) {
           // Paseo: typing a single-select answer clears the picked option.
           delete selections[qIndex];
@@ -883,9 +899,21 @@ export function createPermissionsController(deps: PermissionsDeps) {
     const actions = document.createElement("div");
     actions.className = "chat-permission-actions";
 
-    if (interactive && allowed == null && meta?.inputMode === "options") {
-      renderStructuredQuestion(actions, meta, card, deps.setStatus);
-    } else if (interactive && allowed == null && meta && (meta.inputMode === "line" || meta.inputMode === "secret")) {
+    const structured =
+      interactive && allowed == null && meta?.inputMode === "options"
+        ? parseAskFormQuestions(meta.inputJson, meta.toolName)
+        : null;
+    if (structured && structured.length > 0) {
+      // Paseo's card leads with the question itself: no tool/summary chrome,
+      // the form fills the card and the question text is the heading.
+      actions.classList.add("is-question");
+      card.classList.add("has-question-form");
+      renderStructuredQuestion(actions, structured, meta!, card, deps.setStatus);
+      card.appendChild(actions);
+    } else {
+      if (structured) {
+        renderStructuredQuestion(actions, structured, meta!, card, deps.setStatus);
+      } else if (interactive && allowed == null && meta && (meta.inputMode === "line" || meta.inputMode === "secret")) {
       const secret = meta.inputMode === "secret";
       const field = document.createElement("input");
       field.type = secret ? "password" : "text";
@@ -895,8 +923,10 @@ export function createPermissionsController(deps: PermissionsDeps) {
       field.placeholder = secret ? t("chat.pasteSecret") : t("chat.replyHere");
       field.setAttribute("aria-label", field.placeholder);
       field.value = replyDrafts.get(meta.requestId) ?? "";
+      field.classList.toggle("has-value", field.value.length > 0);
       field.addEventListener("input", () => {
         replyDrafts.set(meta.requestId, field.value);
+        field.classList.toggle("has-value", field.value.length > 0);
       });
       const sendBtn = document.createElement("button");
       sendBtn.type = "button";
@@ -924,8 +954,11 @@ export function createPermissionsController(deps: PermissionsDeps) {
           });
           field.value = "";
           replyDrafts.delete(meta.requestId);
-          meta.answer = text;
-          showPermissionAnswer(actions, t("chat.inputSubmitted"), text);
+          // A secret reply echoes as dots only — the value must not land in
+          // the transcript in plain text.
+          const echo = meta.inputMode === "secret" ? "••••••" : text;
+          meta.answer = echo;
+          showPermissionAnswer(actions, t("chat.inputSubmitted"), echo);
         } catch (error) {
           delete card.dataset.resolved;
           field.disabled = false;
@@ -1007,6 +1040,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
 
     row.append(tool, summary, actions);
     card.appendChild(row);
+    }
     if (!interactive && allowed == null) {
       const resend = deps.resendBefore(message.id);
       const hint = document.createElement("p");

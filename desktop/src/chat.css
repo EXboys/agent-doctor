@@ -4791,52 +4791,98 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   margin: 0;
   width: 100%;
   color: var(--text);
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* Question-form cards (Paseo's QuestionFormCard): the question leads, the
+   form fills the card, actions sit left. No blue pending tint — the card is
+   a calm surface like any form. */
+.chat-permission.has-question-form.is-pending {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.chat-permission-actions.is-question {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.chat-permission-actions.is-question .chat-permission-allow,
+.chat-permission-actions.is-question .chat-permission-deny {
+  border-radius: 10px;
+  padding: 7px 16px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chat-permission-actions.is-question .chat-permission-allow::before {
+  content: "✓ ";
+}
+
+.chat-permission-actions.is-question .chat-permission-deny::before {
+  content: "✕ ";
+  color: var(--muted);
+}
+
+.chat-permission-actions.is-question button[aria-busy="true"]::before {
+  content: none;
 }
 
 .chat-permission-options {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
+  margin: 2px 0;
 }
 
-/* Option rows (Paseo's QuestionOptionRow): a persistent radio/checkbox on the
-   left — toggling only swaps fill/border, the row never reflows — then the
-   label with the description and preview stacked under it. The whole row is
-   the click target. */
+/* Option rows (Paseo's QuestionOptionRow): borderless rounded rows — hover
+   and selection tint the background instead of boxing every option. The
+   radio/checkbox on the left swaps fill/border without reflowing the row;
+   unselected labels sit muted and light up when picked. */
 .chat-permission-option {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--fill);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
   color: var(--text);
-  padding: 6px 8px;
+  padding: 8px 10px;
   font: inherit;
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: 0.84rem;
+  line-height: 1.45;
   text-align: left;
   cursor: pointer;
 }
 
 .chat-permission-option:hover {
-  background: rgba(47, 111, 237, 0.06);
-  border-color: var(--line-strong);
+  background: var(--fill);
 }
 
 .chat-permission-option:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
 .chat-permission-option.is-selected {
-  background: rgba(47, 111, 237, 0.08);
-  border-color: rgba(47, 111, 237, 0.35);
+  background: var(--fill);
+}
+
+.chat-permission-option-label {
+  color: var(--muted);
+}
+
+.chat-permission-option.is-selected .chat-permission-option-label {
+  color: var(--text);
 }
 
 .chat-permission-option-check {
@@ -4844,9 +4890,9 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px; /* optical-align the 16px control to the first text line */
+  width: 18px;
+  height: 18px;
+  margin-top: 2px; /* optical-align the 18px control to the first text line */
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: transparent;
@@ -4856,7 +4902,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-permission-option[role="checkbox"] .chat-permission-option-check {
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 .chat-permission-option.is-selected .chat-permission-option-check {
@@ -4865,8 +4911,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-permission-option.is-selected[role="radio"] .chat-permission-option-check::after {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: var(--accent);
 }
@@ -4889,23 +4935,23 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-permission-option-description {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
 }
 
 /* Option previews show for every option at once so they can be compared
    (Paseo). Most previews are prose, so they wrap instead of scrolling
    sideways; the height caps with an inner scroll. */
 .chat-permission-option-preview {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   max-height: 240px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--fill);
-  padding: 6px 8px;
+  padding: 8px 10px;
   font: inherit;
-  font-size: 0.72rem;
-  line-height: 1.45;
+  font-size: 0.74rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -4948,12 +4994,22 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   width: auto;
   min-width: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--fill);
   color: var(--text);
   font: inherit;
-  font-size: 0.84rem;
-  padding: 8px 10px;
+  font-size: 0.88rem;
+  padding: 10px 12px;
+}
+
+.chat-permission-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Paseo: the typed-answer field lights its border while it holds text. */
+.chat-permission-input.has-value {
+  border-color: rgba(47, 111, 237, 0.45);
 }
 
 .chat-permission-allow,
