@@ -261,6 +261,10 @@ pub enum PromptSessionEvent {
         /// `choice` (allow/deny), `line` (one reply), or `secret` (one hidden reply).
         #[serde(default = "default_input_mode")]
         input_mode: String,
+        /// Claude Code permission suggestions (`PermissionUpdate[]` JSON) that
+        /// offer allow variants (always / this session). `None` elsewhere.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        suggestions_json: Option<String>,
     },
     /// User (or host) resolved a permission prompt.
     PermissionResolved {

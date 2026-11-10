@@ -262,17 +262,26 @@ impl PromptSessionControl {
         Ok(())
     }
 
-    fn claude_payload(request_id: &str, allow: bool, input: Value) -> Value {
+    fn claude_payload(
+        request_id: &str,
+        allow: bool,
+        input: Value,
+        updated_permissions: Option<&Value>,
+    ) -> Value {
         if allow {
+            let mut response = serde_json::json!({
+                "behavior": "allow",
+                "updatedInput": input
+            });
+            if let Some(permissions) = updated_permissions {
+                response["updatedPermissions"] = permissions.clone();
+            }
             serde_json::json!({
                 "type": "control_response",
                 "response": {
                     "subtype": "success",
                     "request_id": request_id,
-                    "response": {
-                        "behavior": "allow",
-                        "updatedInput": input
-                    }
+                    "response": response
                 }
             })
         } else {
@@ -350,6 +359,26 @@ impl PromptSessionControl {
 
     /// Allow or deny a pending permission request (Claude control or Codex RPC).
     pub fn respond_permission(&self, request_id: &str, allow: bool) -> Result<()> {
+        self.respond_permission_inner(request_id, allow, None)
+    }
+
+    /// Same, carrying the user-chosen allow variant (`PermissionUpdate[]`) so
+    /// Claude Code records the rule the card offered.
+    pub fn respond_permission_with(
+        &self,
+        request_id: &str,
+        allow: bool,
+        updated_permissions: Option<Value>,
+    ) -> Result<()> {
+        self.respond_permission_inner(request_id, allow, updated_permissions)
+    }
+
+    fn respond_permission_inner(
+        &self,
+        request_id: &str,
+        allow: bool,
+        updated_permissions: Option<Value>,
+    ) -> Result<()> {
         let request_id = request_id.trim();
         if request_id.is_empty() {
             bail!("request_id is required");
@@ -362,7 +391,8 @@ impl PromptSessionControl {
             }
         }
 
-        let (payload, consumed) = self.compose_permission(request_id, allow)?;
+        let (payload, consumed) =
+            self.compose_permission(request_id, allow, updated_permissions.as_ref())?;
         if let Err(err) = self.write_line(&payload.to_string()) {
             // The ask goes back, so a retry builds the same reply with the real
             // input instead of an empty `updatedInput`.
@@ -381,6 +411,7 @@ impl PromptSessionControl {
         &self,
         request_id: &str,
         allow: bool,
+        updated_permissions: Option<&Value>,
     ) -> Result<(Value, Option<PendingReply>)> {
         let Some(reply) = self.take_pending(request_id) else {
             // No remembered pending yet (race / stale id). Prefer Claude shape for
@@ -389,16 +420,23 @@ impl PromptSessionControl {
                 bail!("no pending Codex approval for request_id={request_id}");
             }
             return Ok((
-                Self::claude_payload(request_id, allow, serde_json::json!({})),
+                Self::claude_payload(
+                    request_id,
+                    allow,
+                    serde_json::json!({}),
+                    updated_permissions,
+                ),
                 None,
             ));
         };
         let payload = match &reply {
             PendingReply::CodexRpc { kind } => Self::codex_payload(request_id, allow, kind),
-            PendingReply::ClaudeTool { input } => {
-                Self::claude_payload(request_id, allow, input.clone())
+            PendingReply::ClaudeTool { input, .. } => {
+                Self::claude_payload(request_id, allow, input.clone(), updated_permissions)
             }
-            PendingReply::ClaudeAsk { .. } => Self::claude_payload(request_id, false, Value::Null),
+            PendingReply::ClaudeAsk { .. } => {
+                Self::claude_payload(request_id, false, Value::Null, None)
+            }
             PendingReply::AcpPermission { allow_id, deny_id } => {
                 let option_id = if allow { allow_id } else { deny_id };
                 Self::acp_permission_payload(request_id, option_id)
@@ -467,7 +505,7 @@ impl PromptSessionControl {
             }
             PendingReply::ClaudeAsk { input } => {
                 let updated = claude_ask_updated_input(input, text);
-                Self::claude_payload(request_id, true, updated)
+                Self::claude_payload(request_id, true, updated, None)
             }
             _ => unreachable!("is_text_prompt filtered every other kind"),
         };
@@ -569,13 +607,13 @@ mod tests {
         assert!(control.has_pending(), "failed send must put the ask back");
 
         // The retry builds the very same payload, carrying the original input.
-        let (line, consumed) = control.compose_permission("req-1", true).unwrap();
+        let (line, consumed) = control.compose_permission("req-1", true, None).unwrap();
         assert_eq!(line["response"]["response"]["behavior"], "allow");
         assert_eq!(line["response"]["response"]["updatedInput"], input);
         assert!(consumed.is_some());
         // And putting it back again keeps the round-trip stable.
         control.restore_pending("req-1", consumed.unwrap());
-        let (again, _) = control.compose_permission("req-1", true).unwrap();
+        let (again, _) = control.compose_permission("req-1", true, None).unwrap();
         assert_eq!(line, again);
     }
 

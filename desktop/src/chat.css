@@ -10769,3 +10769,23 @@ html[data-theme="dark"] .chat-feedback-card {
   border-color: var(--line-strong);
   color: var(--text);
 }
+
+/* Allow variants ("always allow this command") ride between allow and deny. */
+.chat-permission-variant {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-permission-variant:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

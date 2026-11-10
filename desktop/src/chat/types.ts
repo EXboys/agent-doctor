@@ -44,6 +44,8 @@ export type PromptSessionEvent =
       detail: string;
       input_json: string;
       input_mode?: string;
+      /** Claude Code allow variants (PermissionUpdate[] JSON); absent elsewhere. */
+      suggestions_json?: string | null;
     }
   | {
       type: "permission_resolved";
@@ -108,6 +110,8 @@ export interface PermissionMeta {
   inputMode?: "choice" | "options" | "line" | "secret";
   /** Original tool input, used to render structured questions. */
   inputJson?: string;
+  /** Claude Code allow variants (PermissionUpdate[] JSON), when offered. */
+  suggestionsJson?: string;
   /** What the user actually answered, echoed on the resolved card. */
   answer?: string;
 }

@@ -979,6 +979,8 @@ export const en = {
     "chat.importDone": "Imported",
     "chat.importFailed": "Import failed",
     "chat.importTruncated": "This conversation is long; only the first 2000 messages were imported.",
+    "chat.allowAlways": "Always allow",
+    "chat.allowSession": "Allow for this session",
     "chat.renderTruncated": "This reply is long; only part of it is rendered.",
     "chat.showFullReply": "Show full reply",
     "chat.questionNext": "Next",

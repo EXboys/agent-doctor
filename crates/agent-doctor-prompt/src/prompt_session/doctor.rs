@@ -239,12 +239,13 @@ fn run_doctor(
                 detail,
             } => {
                 on_event(PromptSessionEvent::PermissionRequest {
-                    session_id: session_id.clone(),
+                    session_id: session_id.to_string(),
                     request_id,
-                    tool_name: tool,
+                    tool_name: format!("doctor·{tool}"),
                     detail,
                     input_json: String::new(),
                     input_mode: "choice".to_string(),
+                    suggestions_json: None,
                 });
             }
         },

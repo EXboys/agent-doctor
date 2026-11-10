@@ -536,6 +536,7 @@ fn handle_server_request<F>(
         detail,
         input_json: String::new(),
         input_mode: "choice".into(),
+        suggestions_json: None,
     });
 }
 

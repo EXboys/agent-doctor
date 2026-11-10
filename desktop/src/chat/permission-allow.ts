@@ -50,8 +50,9 @@ export function shareAllow(
   requestId: string,
   allow: boolean,
   send: () => Promise<unknown>,
+  variant = "",
 ): Promise<unknown> {
-  const key = `${requestId}:${allow ? "allow" : "deny"}`;
+  const key = `${requestId}:${allow ? "allow" : "deny"}:${variant}`;
   const existing = allowInFlight.get(key);
   if (existing) return existing;
   const work = Promise.resolve().then(send);

@@ -266,6 +266,7 @@ function notePermission(
       allowed: null,
       inputMode,
       inputJson: payload.input_json,
+      suggestionsJson: payload.suggestions_json ?? undefined,
     },
   };
   session.messages.push(message);

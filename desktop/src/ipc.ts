@@ -1047,6 +1047,7 @@ export function resolvePermissionSession(args: {
   requestId: string;
   allow: boolean;
   text?: string | null;
+  updatedPermissionsJson?: string | null;
 }): Promise<boolean> {
   return invoke("resolve_permission_session_command", args);
 }

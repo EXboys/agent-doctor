@@ -248,6 +248,7 @@ where
             detail,
             input_json,
             input_mode,
+            suggestions_json: None,
         });
         return Ok(());
     }

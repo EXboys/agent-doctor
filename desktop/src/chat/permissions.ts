@@ -504,6 +504,47 @@ function clipTabLabel(text: string): string {
   return line.length > 16 ? `${line.slice(0, 16)}…` : line;
 }
 
+/** Claude Code allow variants from the request's `suggestions`. */
+function parseSuggestions(raw: string | undefined): {
+  payload: string;
+  label: string;
+  title?: string;
+}[] {
+  if (!raw?.trim()) return [];
+  try {
+    const list = JSON.parse(raw) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+      .map((item) => {
+        const destination =
+          typeof item.destination === "string" ? item.destination : "";
+        const rules = Array.isArray(item.rules)
+          ? item.rules
+              .map((rule) => {
+                const r = rule as { toolName?: unknown; ruleContent?: unknown };
+                const name = typeof r.toolName === "string" ? r.toolName : "";
+                const content = typeof r.ruleContent === "string" ? `(${r.ruleContent})` : "";
+                return content ? `${name} ${content}` : name;
+              })
+              .filter(Boolean)
+              .join(", ")
+          : "";
+        const sessionLike = destination === "session" || destination === "localSettings";
+        return {
+          payload: JSON.stringify(item),
+          label: sessionLike ? t("chat.allowSession") : t("chat.allowAlways"),
+          ...(rules ? { title: rules } : {}),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 export function createPermissionsController(deps: PermissionsDeps) {
   let pendingPermissionBatch: PendingPermission[] = [];
   let permissionPaintTimer = 0;
@@ -538,6 +579,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
     detail: string;
     input_mode?: string;
     input_json?: string;
+    suggestions_json?: string;
   }): void {
     if (pendingPermissionBatch.some((item) => item.requestId === payload.request_id)) {
       return;
@@ -579,7 +621,9 @@ export function createPermissionsController(deps: PermissionsDeps) {
       request_id: string;
       tool_name: string;
       detail: string;
+      input_mode?: string;
       input_json?: string;
+      suggestions_json?: string;
     },
     inputMode: "choice" | "line" | "secret" | "options",
     missed: boolean,
@@ -614,6 +658,7 @@ export function createPermissionsController(deps: PermissionsDeps) {
         allowed: null,
         inputMode,
         inputJson: payload.input_json,
+        suggestionsJson: payload.suggestions_json ?? undefined,
       },
     });
     showPendingPermission(payload, persisted);
@@ -1079,17 +1124,22 @@ export function createPermissionsController(deps: PermissionsDeps) {
         allowBtn.disabled = busyLocal;
         denyBtn.disabled = busyLocal;
       };
-      const resolve = async (allow: boolean) => {
+      const resolve = async (allow: boolean, variant = "") => {
         if (card.dataset.resolved === "1") return;
         setLocalBusy(true);
         try {
           await ackAllow(() =>
-            shareAllow(meta.requestId, allow, () =>
-              resolvePermissionSession({
-                sessionId: meta.backendSessionId ?? "",
-                requestId: meta.requestId,
-                allow,
-              }),
+            shareAllow(
+              meta.requestId,
+              allow,
+              () =>
+                resolvePermissionSession({
+                  sessionId: meta.backendSessionId ?? "",
+                  requestId: meta.requestId,
+                  allow,
+                  updatedPermissionsJson: variant || null,
+                }),
+              variant,
             ),
           );
         } catch (error) {
@@ -1110,6 +1160,17 @@ export function createPermissionsController(deps: PermissionsDeps) {
       };
       allowBtn.addEventListener("click", () => void resolve(true));
       denyBtn.addEventListener("click", () => void resolve(false));
+      // Claude Code allow variants ("always allow this command" etc.): one
+      // button per suggestion, resolving with that suggestion's payload.
+      for (const variant of parseSuggestions(meta.suggestionsJson)) {
+        const variantBtn = document.createElement("button");
+        variantBtn.type = "button";
+        variantBtn.className = "chat-permission-variant";
+        variantBtn.textContent = variant.label;
+        if (variant.title) variantBtn.title = variant.title;
+        variantBtn.addEventListener("click", () => void resolve(true, variant.payload));
+        actions.append(variantBtn);
+      }
       actions.append(allowBtn, denyBtn);
     } else {
       const badge = document.createElement("span");

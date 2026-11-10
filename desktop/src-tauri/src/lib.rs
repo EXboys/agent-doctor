@@ -590,9 +590,17 @@ fn resolve_permission_session_command(
     request_id: String,
     allow: bool,
     text: Option<String>,
+    updated_permissions_json: Option<String>,
 ) -> Result<bool, String> {
     let started = std::time::Instant::now();
-    let sent = send_permission_reply(&state, &session_id, &request_id, allow, text.as_deref());
+    let sent = send_permission_reply(
+        &state,
+        &session_id,
+        &request_id,
+        allow,
+        text.as_deref(),
+        updated_permissions_json.as_deref(),
+    );
     let elapsed_ms = started.elapsed().as_millis().to_string();
     match &sent {
         Ok(_) => prompt_log::event(
@@ -638,6 +646,7 @@ fn send_permission_reply(
     request_id: &str,
     allow: bool,
     text: Option<&str>,
+    updated_permissions_json: Option<&str>,
 ) -> anyhow::Result<String> {
     let (control, owner) = state
         .control_for_backend(session_id)
@@ -645,6 +654,15 @@ fn send_permission_reply(
     let sent_text = text.map(str::trim).filter(|s| !s.is_empty());
     if let Some(text) = sent_text {
         control.respond_line(request_id, text)?;
+    } else if let Some(raw) = updated_permissions_json
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        // "Always allow" variants carry the chosen PermissionUpdate[] so
+        // Claude Code records the rule.
+        let updated: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|error| format!("bad updatedPermissions: {error}"))?;
+        control.respond_permission_with(request_id, allow, updated)?;
     } else {
         control.respond_permission(request_id, allow)?;
     }

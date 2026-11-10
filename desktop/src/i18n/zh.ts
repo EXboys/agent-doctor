@@ -981,6 +981,8 @@ export const zh = {
     "chat.importDone": "导入完成",
     "chat.importFailed": "导入失败",
     "chat.importTruncated": "对话很长，只导入了前 2000 条消息。",
+    "chat.allowAlways": "总是允许",
+    "chat.allowSession": "本会话允许",
     "chat.renderTruncated": "这条回复很长，只渲染了前面一部分。",
     "chat.showFullReply": "显示完整回复",
     "chat.questionNext": "下一题",
