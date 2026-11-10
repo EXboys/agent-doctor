@@ -262,8 +262,10 @@
     // markdown，验证 head/tail 拆分与收尾增强。
     const bubblesMod = await import("/src/chat/bubbles.ts");
     const activityMod = await import("/src/chat/activity.ts");
+    const thinkingMod = await import("/src/chat/thinking.ts");
     const { createBubblesController } = bubblesMod;
     const { createActivityController } = activityMod;
+    const { createThinkingController } = thinkingMod;
     let streamState = { busy: false, raw: "", pending: "", bubble: null, msgId: null, hadText: false };
     const streamSession = { id: "s1", messages: [], runtime: "doctor", title: "stream" };
     const nofn = () => {};
@@ -331,6 +333,14 @@
       rememberTurnNotice: nofn,
       toolRecordsForTurn: () => [],
     });
+    const streamThinking = createThinkingController({
+      logEl: document.getElementById("stream-log"),
+      isViewingRunningSession: () => streamState.busy,
+      persistMessage: (content) => streamController.persistMessage("thinking", content),
+      updateMessage: (id, content) => streamController.updateAssistantMessage(id, content),
+      endReply: () => streamController.sealAssistantBubble(),
+      beforeBlock: nofn,
+    });
     const REPLY = [
       "我先看一下目录结构，再决定怎么改。",
       "",
@@ -373,6 +383,15 @@
       ];
       let phase = 0;
       const timer = window.setInterval(() => {
+        if (phase === 2.5) {
+          // 思考段：块出现在工具行之后、下一段文字之前（时间线内联）
+          phase = 3;
+          for (const chunk of ["先确认测试都过，", "再看配置格式。"]) {
+            streamThinking.append(chunk);
+          }
+          window.setTimeout(() => streamThinking.seal(), 600);
+          return;
+        }
         if (phase < SEGS.length) {
           const segText = SEGS[phase];
           phase += 1;
@@ -380,8 +399,11 @@
             streamController.appendAssistantChunk(segText.slice(i, i + 12));
           }
           streamController.flushPendingTextSync();
+          if (phase === 2) {
+            phase = 2.5; // Bash 之后进入思考段
+          }
           if (phase <= TOOLS.length) {
-            const tool = TOOLS[phase - 1];
+            const tool = TOOLS[Math.floor(phase) - 1];
             streamActivity.pushToolStep({
               id: tool.id,
               name: tool.name,
