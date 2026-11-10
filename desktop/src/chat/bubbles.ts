@@ -468,6 +468,10 @@ export function createBubblesController(deps: BubblesDeps) {
       const wrap = child as HTMLElement;
       const bubble = wrap.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
       if (!bubble) return;
+      // The owner exemption is what lets the action row paint at all: rows
+      // render under content-visibility: auto, whose paint containment clips
+      // the below-box action row. See the .is-turn-owner rule in chat.css.
+      wrap.classList.toggle("is-turn-owner", owners[index] === true);
       syncMessageCopyActions(
         wrap,
         bubble,

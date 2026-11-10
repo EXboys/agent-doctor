@@ -7545,6 +7545,15 @@ html[data-os="windows"] .chat-log {
   content-visibility: visible;
 }
 
+/* The turn owner's copy/time/rating row paints 30px BELOW the reply's box.
+   content-visibility: auto implies paint containment, and containment clips
+   every descendant to the row's bounds — the action row laid out but never
+   painted, so hover showed nothing. The owner stays fully painted; history
+   rows keep the skip. */
+.chat-log > .chat-msg-assistant.is-turn-owner {
+  content-visibility: visible;
+}
+
 /* A new chat lifts the two start cards into the open area, clear of the composer. */
 .chat-log:has(> .chat-start)::before,
 .chat-log:has(> .chat-start)::after {
