@@ -405,7 +405,7 @@ export function renderHermesCard(
   hermesModel: HermesSettings | null,
   actionsHtml: string,
   relatedResourcesHtml: string,
-  solo = false,
+  hero = false,
 ): string {
   const model = hermesModel ?? {
     provider: "",
@@ -441,8 +441,8 @@ export function renderHermesCard(
       : t("runtime.installed");
 
   return `
-    <article class="runtime hermes${solo ? " is-solo" : ""}" data-runtime="hermes">
-      ${solo ? renderSoloHero(runtime) : ""}
+    <article class="runtime hermes${hero ? " has-hero" : ""}" data-runtime="hermes">
+      ${renderSoloHero(runtime)}
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="badge ${badgeClass}">${badgeText}</span>
@@ -460,10 +460,10 @@ export function renderRuntimeCard(
   hermesModel: HermesSettings | null,
   actionsHtml: string,
   relatedResourcesHtml: string,
-  solo = false,
+  hero = false,
 ): string {
   if (runtime.id === "hermes" && runtime.installed) {
-    return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml, solo);
+    return renderHermesCard(runtime, hermesModel, actionsHtml, relatedResourcesHtml, hero);
   }
 
   const versionStatus = appState.runtimeVersions.get(runtime.id);
@@ -493,8 +493,8 @@ export function renderRuntimeCard(
       : "";
 
   return `
-    <article class="runtime ${runtimeClass(runtime.id)}${solo ? " is-solo" : ""}" data-runtime="${runtime.id}">
-      ${solo ? renderSoloHero(runtime) : ""}
+    <article class="runtime ${runtimeClass(runtime.id)}${hero ? " has-hero" : ""}" data-runtime="${runtime.id}">
+      ${renderSoloHero(runtime)}
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">${escapeHtml(runtime.display_name)}</h2>
         <span class="runtime-badges">

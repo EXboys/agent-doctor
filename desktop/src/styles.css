@@ -158,7 +158,7 @@ html[data-os="windows"] .runtime-panels {
 
 /* A tall window needs the agent to look like a card, not like loose text on
    an empty page. */
-html[data-os="windows"] .runtime-panels > .runtime:not(.is-solo) {
+html[data-os="windows"] .runtime-panels > .runtime:not(.has-hero) {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -3455,7 +3455,11 @@ body.is-diagnose-open .diagnose-detail {
   text-align: left;
   cursor: pointer;
   min-width: 0;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
 }
 
 html[data-os="windows"] .runtime-tab {
@@ -3464,26 +3468,47 @@ html[data-os="windows"] .runtime-tab {
   font-size: 0.8rem;
 }
 
+/* The active tile is the one card that owns the current agent, so it sits on
+   a raised white surface; the others recede into the page until hovered. */
 .runtime-tab:not(.is-active) {
-  background: #fff;
-  border-color: rgba(15, 23, 42, 0.08);
+  background: transparent;
+  border-color: rgba(15, 23, 42, 0.06);
+  color: var(--text-muted);
   box-shadow: none;
 }
 
+.runtime-tab:not(.is-active) .runtime-tab-logo {
+  opacity: 0.7;
+  filter: saturate(0.55);
+}
+
+.runtime-tab:not(.is-active) .runtime-tab-meta {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
 .runtime-tab:hover:not(.is-active) {
-  border-color: rgba(59, 130, 246, 0.35);
-  background: #f8fbff;
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.runtime-tab:hover:not(.is-active) .runtime-tab-logo {
+  opacity: 1;
+  filter: none;
 }
 
 .runtime-tab.is-active {
   border-color: var(--primary);
-  background: #eff6ff;
+  background: #fff;
   color: var(--text);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+  box-shadow:
+    0 0 0 2px rgba(59, 130, 246, 0.14),
+    0 2px 6px rgba(15, 23, 42, 0.07);
 }
 
 .runtime-tab.is-active .runtime-tab-label {
   color: var(--primary-deep);
+  font-weight: 750;
 }
 
 .runtime-tab-label {
@@ -3608,7 +3633,7 @@ html[data-os="windows"] .runtime-tab-meta {
   margin-bottom: 8px;
 }
 
-.runtime.is-solo {
+.runtime.has-hero {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -3619,7 +3644,7 @@ html[data-os="windows"] .runtime-tab-meta {
   box-shadow: var(--shadow-soft);
 }
 
-.runtime.is-solo .runtime-card-label .runtime-tab-title {
+.runtime.has-hero .runtime-card-label .runtime-tab-title {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -3627,8 +3652,14 @@ html[data-os="windows"] .runtime-tab-meta {
   clip: rect(0 0 0 0);
 }
 
-.runtime.is-solo .runtime-card-label {
+.runtime.has-hero .runtime-card-label {
   margin: 0;
+}
+
+/* The big block is painted on every card so it can be measured and shown the
+   moment there is room; only a card that carries `has-hero` draws it. */
+.runtime:not(.has-hero) .runtime-solo-hero {
+  display: none;
 }
 
 .runtime-solo-hero {
@@ -5117,7 +5148,7 @@ html[data-os="windows"] .resources-hub-card-desc {
     padding: 0;
   }
 
-  .runtime.is-solo {
+  .runtime.has-hero {
     gap: 8px;
     padding: 10px 12px;
   }
@@ -5143,7 +5174,7 @@ html[data-os="windows"] .resources-hub-card-desc {
     overflow: hidden;
   }
 
-  .runtime.is-solo .card-actions {
+  .runtime.has-hero .card-actions {
     margin-top: 0;
   }
 

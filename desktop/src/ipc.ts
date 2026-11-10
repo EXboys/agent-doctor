@@ -1009,18 +1009,6 @@ export function resizeMainWindow(args: {
   return invoke("resize_main_window_command", args);
 }
 
-export type MainDockLayout = {
-  docked: boolean;
-  workHeight: number;
-  secondaryHeight: number;
-  fitHeight: boolean;
-};
-
-/** The layout the home window follows; the page asks for it when it starts. */
-export function readMainDockLayout(): Promise<MainDockLayout> {
-  return invoke<MainDockLayout>("main_dock_layout_command");
-}
-
 export function startPromptSession(args: StartPromptSessionArgs): Promise<PromptSessionReport> {
   return invoke("start_prompt_session_command", {
     ...args,
