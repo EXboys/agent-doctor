@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>ask card fixture</title>
+  <link rel="stylesheet" href="/src/chat.css" />
+  <style>
+    body { background: #f7f8fa; margin: 0; padding: 32px 16px 64px; display: flex; flex-direction: column; gap: 18px; align-items: center; font-family: system-ui, -apple-system, "PingFang SC", sans-serif; }
+    #column { width: min(620px, 100%); display: flex; flex-direction: column; gap: 18px; }
+    .fixture-bar { display: flex; gap: 8px; align-items: center; }
+    .fixture-bar button { padding: 5px 12px; cursor: pointer; border: 1px solid rgba(15,23,42,0.14); border-radius: 8px; background: #fff; font-size: 13px; }
+    .fixture-title { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .fixture-hint { margin: 0; font-size: 12.5px; color: #64748b; }
+    .fixture-status { margin: 0; color: #b45309; font-size: 13px; }
+    #invokes { white-space: pre-wrap; font-size: 12px; color: #334155; background: #fff; border: 1px solid rgba(15,23,42,0.1); border-radius: 10px; padding: 10px 12px; max-width: 100%; box-sizing: border-box; }
+    .chat-permission { width: 100%; max-width: none; }
+  </style>
+</head>
+<body>
+  <div id="column">
+    <p class="fixture-title">问答卡片 · Paseo 风格预览</p>
+    <p class="fixture-hint">真实的 permissions.ts 渲染代码 + 伪造的 IPC。顶部按钮可以制造失败/恢复，提交记录在最下方。</p>
+    <div class="fixture-bar">
+      <button id="fail-once">下一次提交失败（临时错误）</button>
+      <button id="fail-session">会话已结束（终态错误）</button>
+      <button id="reset-fake">恢复正常</button>
+      <button id="stream-demo">▶ 模拟流式回复（head/tail 拆分）</button>
+    </div>
+    <div id="stream-log" class="chat-log" style="width:100%;"></div>
+    <div id="log" style="display:flex; flex-direction:column; gap:18px; align-items:stretch;"></div>
+    <pre id="invokes">（还没有提交）</pre>
+  </div>
+  <script>
+    // Fake Tauri internals BEFORE any app module loads: @tauri-apps/api/core
+    // invoke() delegates to window.__TAURI_INTERNALS__.invoke.
+    window.__adInvokes = [];
+    window.__adFake = { mode: "ok" };
+    let nextCbId = 0;
+    window.__TAURI_INTERNALS__ = {
+      transformCallback: (cb) => {
+        nextCbId += 1;
+        window[`_cb${nextCbId}`] = cb;
+        return nextCbId;
+      },
+      invoke: (cmd, args) => {
+        window.__adInvokes.push({ cmd, args });
+        const box = document.getElementById("invokes");
+        if (box) box.textContent = JSON.stringify(window.__adInvokes, null, 1);
+        if (cmd === "resolve_permission_session_command") {
+          if (window.__adFake.mode === "fail-transient") {
+            window.__adFake.mode = "ok";
+            return Promise.reject(
+              new Error("write permission reply: Broken pipe (os error 32) [ad-send=dead-pipe]"),
+            );
+          }
+          if (window.__adFake.mode === "fail-session-gone") {
+            return Promise.reject(new Error("no active ask session for permission reply"));
+          }
+        }
+        return Promise.resolve(null);
+      },
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+      plugins: {},
+    };
+    document.getElementById("fail-once").addEventListener("click", () => {
+      window.__adFake.mode = "fail-transient";
+    });
+    document.getElementById("fail-session").addEventListener("click", () => {
+      window.__adFake.mode = "fail-session-gone";
+    });
+    document.getElementById("reset-fake").addEventListener("click", () => {
+      window.__adFake.mode = "ok";
+    });
+  </script>
+  <script type="module">
+    try {
+    const { createPermissionsController } = await import("/src/chat/permissions.ts");
+    const log = document.getElementById("log");
+    const stored = [];
+    const controller = createPermissionsController({
+      logEl: log,
+      isViewingRunningSession: () => true,
+      runTargetSession: () => ({ id: "s1", messages: stored }),
+      touchSession: () => {},
+      saveStore: () => {},
+      flushSessionListRender: () => {},
+      setStatus: (text) => {
+        const el = document.createElement("p");
+        el.className = "fixture-status";
+        el.textContent = "[状态条] " + text;
+        log.after(el);
+      },
+      hideDecisionDock: () => {},
+      persistMessage: () => ({}),
+      flushPendingTextSync: () => {},
+      sealAssistantBubble: () => {},
+      settleActivity: () => {},
+      dismissLifecycleActivity: () => {},
+      finishToolGroup: () => {},
+      getActivityEl: () => null,
+      setActivityEl: () => {},
+      getToolGroupEl: () => null,
+      setToolGroupEl: () => {},
+      getAssistantBubble: () => null,
+      setAssistantBubble: () => {},
+      getAssistantMessageId: () => null,
+      setAssistantMessageId: () => {},
+      getAssistantRaw: () => "",
+      setAssistantRaw: () => {},
+      resendBefore: () => null,
+      holdForAllow: () => {},
+      stopAfterMissedAllow: () => {},
+      releaseAllowHold: () => {},
+    });
+
+    const message = (permission) => ({
+      id: "m-" + permission.requestId,
+      role: "permission",
+      content: "",
+      at: Date.now(),
+      permission,
+    });
+
+    const cards = [
+      {
+        label: "① 单选题：description + preview + 其他输入（AskUserQuestion 强制允许自由作答）",
+        permission: {
+          requestId: "req-single",
+          toolName: "AskUserQuestion",
+          detail: "用哪种数据库？",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "options",
+          inputJson: JSON.stringify({
+            questions: [
+              {
+                question: "用哪种数据库？",
+                header: "数据库",
+                options: [
+                  {
+                    label: "SQLite",
+                    description: "零配置，单文件，够用但并发弱",
+                    preview: "rusqlite = \"0.41\"\n\n一行 Connection::open 就能跑，\n适合本地工具和原型，写并发一高就锁库。",
+                  },
+                  {
+                    label: "Postgres",
+                    description: "并发强，要自己起服务",
+                    preview: "docker run postgres:17\n\n连接池 + 真事务，\n运维成本高一点。",
+                  },
+                  { label: "都不用，先写 JSON" },
+                ],
+                multiSelect: false,
+              },
+            ],
+          }),
+        },
+      },
+      {
+        label: "② 多选题：勾选 + 其他文本会拼在一起",
+        permission: {
+          requestId: "req-multi",
+          toolName: "AskUserQuestion",
+          detail: "要检查哪些部分？",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "options",
+          inputJson: JSON.stringify({
+            questions: [
+              {
+                question: "要检查哪些部分？",
+                header: "检查项",
+                options: [{ label: "网络" }, { label: "配置" }, { label: "日志" }],
+                multiSelect: true,
+              },
+            ],
+          }),
+        },
+      },
+      {
+        label: "③ 两题表单：题干标签 + 逐题作答 + 多题回显",
+        permission: {
+          requestId: "req-form",
+          toolName: "AskUserQuestion",
+          detail: "两个问题",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "options",
+          inputJson: JSON.stringify({
+            questions: [
+              {
+                question: "完成后怎么处理？",
+                header: "后续",
+                options: [{ label: "只报告" }, { label: "直接修复" }],
+                multiSelect: false,
+              },
+              {
+                question: "补充说明（可选）",
+                header: "备注",
+                options: [],
+                allowEmpty: true,
+                allowOther: true,
+              },
+            ],
+          }),
+        },
+      },
+      {
+        label: "④ 密钥题：密码框",
+        permission: {
+          requestId: "req-secret",
+          toolName: "AskUserQuestion",
+          detail: "请提供 API 密钥",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "options",
+          inputJson: JSON.stringify({
+            questions: [
+              {
+                question: "请提供 API 密钥",
+                options: [{ label: "我在下方填写" }, { label: "改用环境变量" }],
+                isOther: true,
+                isSecret: true,
+              },
+            ],
+          }),
+        },
+      },
+      {
+        label: "⑤ line 输入：Enter 提交 + 回显",
+        permission: {
+          requestId: "req-line",
+          toolName: "Bash",
+          detail: "请输入部署目录",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "line",
+        },
+      },
+      {
+        label: "⑥ choice 确认：允许/拒绝（未改动，回归对照）",
+        permission: {
+          requestId: "req-choice",
+          toolName: "Bash",
+          detail: "npm test",
+          backendSessionId: "backend-1",
+          allowed: null,
+          inputMode: "choice",
+        },
+      },
+    ];
+
+    for (const card of cards) {
+      const heading = document.createElement("p");
+      heading.textContent = card.label;
+      heading.style.cssText = "margin:8px 0 0;font-size:13px;font-weight:600;color:#0f172a;";
+      log.appendChild(heading);
+      log.appendChild(controller.renderPermissionCard(message(card.permission), true));
+    }
+    window.__adFixtureReady = true;
+
+    // 流式回复演示：真实的 bubbles 控制器 + 伪造 deps，逐 chunk 喂一段长
+    // markdown，验证 head/tail 拆分与收尾增强。
+    const { createBubblesController } = await import("/src/chat/bubbles.ts");
+    let streamState = { busy: false, raw: "", pending: "", bubble: null, msgId: null, hadText: false };
+    const streamSession = { id: "s1", messages: [], runtime: "doctor", title: "stream" };
+    const nofn = () => {};
+    const streamController = createBubblesController({
+      logEl: document.getElementById("stream-log"),
+      titleEl: document.createElement("div"),
+      getBusy: () => streamState.busy,
+      getStore: () => ({ activeId: "s1" }),
+      isViewingRunningSession: () => true,
+      isTurnCompleting: () => false,
+      runTargetSession: () => streamSession,
+      activeSession: () => streamSession,
+      selectedRuntime: () => "doctor",
+      sessionTitle: () => "stream",
+      touchSession: nofn,
+      saveStore: nofn,
+      flushStorePersist: nofn,
+      scheduleStorePersist: nofn,
+      scheduleSessionListRender: nofn,
+      renderSessionList: nofn,
+      updateContextMeter: nofn,
+      pushActivity: nofn,
+      settleActivity: nofn,
+      finishToolGroup: nofn,
+      dismissLifecycleActivity: nofn,
+      collapseResolvedPermissionsBeforeAssistant: nofn,
+      renderPermissionCard: () => document.createElement("div"),
+      renderPermissionGroup: () => document.createElement("details"),
+      getPendingPermissionBatch: () => [],
+      getAssistantBubble: () => streamState.bubble,
+      setAssistantBubble: (el) => { streamState.bubble = el; },
+      getAssistantMessageId: () => streamState.msgId,
+      setAssistantMessageId: (id) => { streamState.msgId = id; },
+      getAssistantRaw: () => streamState.raw,
+      setAssistantRaw: (raw) => { streamState.raw = raw; },
+      getPendingText: () => streamState.pending,
+      setPendingText: (text) => { streamState.pending = text; },
+      getTurnHadAssistantText: () => streamState.hadText,
+      setTurnHadAssistantText: (v) => { streamState.hadText = v; },
+      getActivityEl: () => null,
+      setActivityEl: nofn,
+      getToolGroupEl: () => null,
+      setToolGroupEl: nofn,
+      getLifecycleActivityEl: () => null,
+      setLifecycleActivityEl: nofn,
+      addProject: nofn,
+      openProvider: nofn,
+      draftPrompt: nofn,
+    });
+    const REPLY = [
+      "我先看一下目录结构，再决定怎么改。",
+      "",
+      "## 方案对比",
+      "",
+      "两个候选方案，各有取舍：",
+      "",
+      "- **方案 A**：改动小，但每次全量重渲染",
+      "- **方案 B**：拆分稳定段与活动段，只重画尾巴",
+      "",
+      "方案 B 的核心代码长这样：",
+      "",
+      "```ts",
+      "const cut = safeMarkdownCut(raw);",
+      "if (cut !== headText) {",
+      "  headBox.innerHTML = renderMarkdown(raw.slice(0, cut));",
+      "  headText = cut;",
+      "}",
+      "tailBox.innerHTML = renderMarkdown(raw.slice(cut));",
+      "```",
+      "",
+      "每个 tick 只解析尾部这一段，已完成的段落一次渲染后就不再动。性能随回复长度基本持平，不再线性恶化。",
+    ].join("\n");
+    document.getElementById("stream-demo").addEventListener("click", () => {
+      window.__adStreamCodeLoaded = true;
+      try {
+      const box = document.getElementById("stream-log");
+      box.replaceChildren();
+      streamState = { busy: true, raw: "", pending: "", bubble: null, msgId: null, hadText: false };
+      streamSession.messages = [];
+      let at = 0;
+      const timer = window.setInterval(() => {
+        if (at >= REPLY.length) {
+          window.clearInterval(timer);
+          streamController.flushPendingTextSync();
+          streamController.sealAssistantBubble();
+          streamState.busy = false;
+          window.__adStreamDone = true;
+          return;
+        }
+        const size = 8 + Math.floor(Math.random() * 18);
+        const chunk = REPLY.slice(at, at + size);
+        at += size;
+        // The embedded preview tab suppresses rAF, so drive the per-frame
+        // flush path directly; queueAssistantText wraps this same call in a
+        // frame inside the real app.
+        streamState.pending += chunk;
+        streamController.appendAssistantChunk(streamState.pending);
+        streamState.pending = "";
+      }, 30);
+      } catch (error) {
+        const box = document.createElement("pre");
+        box.id = "stream-error";
+        box.style.cssText = "color:#dc2626;white-space:pre-wrap;font-size:12px;";
+        box.textContent = "stream error: " + (error && (error.stack || error.message) || String(error));
+        document.body.prepend(box);
+      }
+    });
+    } catch (error) {
+      const box = document.createElement("pre");
+      box.id = "module-error";
+      box.style.cssText = "color:#dc2626;white-space:pre-wrap;font-size:12px;";
+      box.textContent = "fixture error: " + (error && (error.stack || error.message) || String(error));
+      document.body.prepend(box);
+    }
+  </script>
+</body>
+</html>
