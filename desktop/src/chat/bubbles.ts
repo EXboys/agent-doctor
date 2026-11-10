@@ -125,6 +125,11 @@ const STREAM_PAINT_MIN_MS = 80;
 const STREAM_HEAVY_CHARS = 2_500;
 /** Tool folding and the plan dock redraw at most this often while streaming. */
 const STREAM_AUX_MIN_MS = 400;
+/** A reply this long renders a bounded slice with a "show full" toggle
+ * (Paseo's web render limit); the store keeps the whole text either way. */
+const RENDER_MAX_CHARS = 32_000;
+/** User messages fold instead of growing a wall of text. */
+const USER_FOLD_CHARS = 600;
 
 export function createBubblesController(deps: BubblesDeps) {
   let flushRaf = 0;
@@ -653,6 +658,9 @@ export function createBubblesController(deps: BubblesDeps) {
     const strip = renderAttachmentStrip(opts?.attachments);
     if (strip) bubble.appendChild(strip);
 
+    const foldable = (opts?.text ?? "").length > USER_FOLD_CHARS;
+    if (foldable) bubble.classList.add("is-folded");
+
     const actions = document.createElement("div");
     actions.className = "chat-msg-actions";
     const getText = () => {
@@ -664,20 +672,71 @@ export function createBubblesController(deps: BubblesDeps) {
       return opts?.text ?? bubblePlainText(bubble);
     };
     actions.appendChild(createCopyActionButton("text", getText));
-    wrap.append(bubble, actions);
+    if (foldable) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "chat-bubble-fold";
+      toggle.textContent = t("chat.userFoldMore");
+      toggle.addEventListener("click", () => {
+        const folded = bubble.classList.toggle("is-folded");
+        toggle.textContent = folded ? t("chat.userFoldMore") : t("chat.userFoldLess");
+      });
+      wrap.append(bubble, toggle, actions);
+    } else {
+      wrap.append(bubble, actions);
+    }
     syncMessageCopyActions(wrap, bubble, false, getText());
     return { wrap, bubble };
   }
+  /// A bounded slice at a safe block boundary; the full text stays in the
+  /// store and can be rendered on demand.
+  function renderAssistantHtml(markdown: string): { html: string; truncated: boolean } {
+    if (markdown.length <= RENDER_MAX_CHARS) {
+      return { html: renderMarkdown(markdown), truncated: false };
+    }
+    const window = markdown.slice(0, RENDER_MAX_CHARS);
+    const safe = safeMarkdownCut(`${window}\n`);
+    const cutText = safe > 0 ? window.slice(0, safe) : window.slice(0, window.lastIndexOf("\n") + 1);
+    return { html: renderMarkdown(cutText), truncated: true };
+  }
+
+  function appendFullReplyToggle(
+    bubble: HTMLElement,
+    markdown: string,
+    opts?: { deferHighlight?: boolean; skipCopySync?: boolean },
+  ): void {
+    const note = document.createElement("p");
+    note.className = "chat-render-note";
+    const label = document.createElement("span");
+    label.textContent = t("chat.renderTruncated");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = t("chat.showFullReply");
+    button.addEventListener("click", () => {
+      bubble.innerHTML = renderMarkdown(markdown);
+      enhanceCodeBlocks(bubble, { defer: opts?.deferHighlight });
+      linkFileMentions(bubble);
+      note.remove();
+    });
+    note.append(label, button);
+    bubble.appendChild(note);
+  }
+
   function setAssistantMarkdown(
     bubble: HTMLElement,
     markdown: string,
     opts?: { deferHighlight?: boolean; skipCopySync?: boolean },
   ): void {
-    bubble.innerHTML = markdown.trim() ? renderMarkdown(markdown) : "";
-    if (markdown.trim()) {
-      enhanceCodeBlocks(bubble, { defer: opts?.deferHighlight });
-      linkFileMentions(bubble);
+    const source = markdown.trim();
+    if (!source) {
+      bubble.innerHTML = "";
+      return;
     }
+    const { html, truncated } = renderAssistantHtml(source);
+    bubble.innerHTML = html;
+    if (truncated) appendFullReplyToggle(bubble, source, opts);
+    enhanceCodeBlocks(bubble, { defer: opts?.deferHighlight });
+    linkFileMentions(bubble);
     if (!opts?.skipCopySync) syncAssistantCopyButton(bubble);
   }
   function appendBubble(
