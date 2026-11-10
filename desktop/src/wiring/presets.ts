@@ -33,6 +33,10 @@ const personalSaveEl = document.querySelector<HTMLButtonElement>("#personal-save
 const personalKeyEl = document.querySelector<HTMLInputElement>("#personal-key")!;
 const personalGlmPlanEl = document.querySelector<HTMLElement>("#personal-glm-plan");
 const personalMinimaxRegionEl = document.querySelector<HTMLElement>("#personal-minimax-region");
+const personalModelHintEl = document.querySelector<HTMLElement>("#personal-model-hint");
+
+/** Select entry that swaps in the free-model input. Never a real model id. */
+const CUSTOM_MODEL_OPTION = "__custom__";
 
 const PRESET_PICKER_GROUPS: Array<{ labelKey: MessageKey; ids: string[] }> = [
   {
@@ -141,6 +145,7 @@ export function createPresetsController() {
     });
     syncGlmPlan();
     syncMinimaxRegion();
+    syncModelHint();
   }
 
   function matchPresetId(name: string, url: string, protocol?: string): string {
@@ -186,19 +191,41 @@ export function createPresetsController() {
         }
         personalModelSelectEl.appendChild(option);
       }
-      if (models.length && !models.includes(current)) {
-        personalModelSelectEl.value = models[0]!;
-        personalModelEl.value = models[0]!;
+      // A saved id outside the official catalog (a custom or compatible
+      // model) keeps its seat instead of being silently rewritten to the
+      // preset default.
+      if (current && !models.includes(current)) {
+        const option = document.createElement("option");
+        option.value = current;
+        option.textContent = current;
+        option.selected = true;
+        personalModelSelectEl.appendChild(option);
       } else if (current && models.includes(current)) {
         personalModelSelectEl.value = current;
       }
+      // Escape hatch: type any model id the catalog does not list yet.
+      const custom = document.createElement("option");
+      custom.value = CUSTOM_MODEL_OPTION;
+      custom.textContent = t("personal.modelCustomOption");
+      personalModelSelectEl.appendChild(custom);
     }
   }
 
   function syncModelFromSelect() {
-    if (personalModelSelectEl && !personalModelSelectEl.hidden) {
-      personalModelEl.value = personalModelSelectEl.value;
+    if (!personalModelSelectEl || personalModelSelectEl.hidden) {
+      return;
     }
+    if (personalModelSelectEl.value === CUSTOM_MODEL_OPTION) {
+      // Swap the select for the free input; the models stay preset-routed,
+      // only the id is user-typed. Save stays available without a preset
+      // change, so a custom id can be committed on its own.
+      personalModelSelectEl.hidden = true;
+      personalModelEl.hidden = false;
+      personalSaveEl.hidden = false;
+      personalModelEl.focus();
+      return;
+    }
+    personalModelEl.value = personalModelSelectEl.value;
   }
 
   function markGlmPlan(plan: GlmKeyPlan) {
@@ -219,6 +246,15 @@ export function createPresetsController() {
     markGlmPlan(keyPlanFromUrl(personalUrlEl.value) ?? "payg");
     const hint = personalGlmPlanEl.querySelector<HTMLElement>("[data-key-plan-hint]");
     if (hint) hint.textContent = t("personal.glmPlanHint");
+  }
+
+  function syncModelHint() {
+    if (!personalModelHintEl) return;
+    const show = personalPresetEl.value === "deepseek";
+    personalModelHintEl.hidden = !show;
+    if (show) {
+      personalModelHintEl.textContent = t("personal.deepseekModelHint");
+    }
   }
 
   function setGlmPlan(plan: GlmKeyPlan) {
@@ -281,6 +317,7 @@ export function createPresetsController() {
       setPresetFormMode(true);
       syncGlmPlan();
       syncMinimaxRegion();
+      syncModelHint();
       return;
     }
     const preset = PROVIDER_PRESETS[presetId];
@@ -301,6 +338,7 @@ export function createPresetsController() {
     setPresetFormMode(false, preset.url);
     syncGlmPlan();
     syncMinimaxRegion();
+    syncModelHint();
   }
 
   function focusAfterPreset(presetId: string) {

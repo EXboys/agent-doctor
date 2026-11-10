@@ -1917,6 +1917,8 @@ export const zh = {
     "personal.url": "地址",
     "personal.apiKey": "API Key",
     "personal.model": "模型",
+    "personal.modelCustomOption": "自定义模型…",
+    "personal.deepseekModelHint": "目前 DeepSeek 助手优先只支持 DeepSeek 官方的模型；Hermes 可跑其他厂商模型，但大陆下载慢、有失败风险。",
     "personal.add": "新增",
     "personal.back": "返回",
     "personal.formAdd": "新增",

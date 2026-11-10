@@ -4,6 +4,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use crate::adapters::DEEPSEEK_OFFICIAL_BASE_URL;
 use crate::profile::{
     agent_profile_path, read_env_map, COMPANY_API_KEY_ENV, GATEWAY_URL_ENV, PROVIDER_KIND_ENV,
     PROVIDER_KIND_PERSONAL,
@@ -496,8 +497,25 @@ pub fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, S
     if let Some(key) = key {
         cmd.env("DEEPSEEK_API_KEY", key);
     }
-    if let Some(url) = url {
+    if let Some(url) = &url {
         cmd.env("DEEPSEEK_BASE_URL", url);
+    }
+    // The chat's chosen model reaches dsh through its cordis patch layer:
+    // dsh has no model environment variable and the ACP wire carries no
+    // model field, but it re-reads the patch per request. A foreign vendor
+    // id left on the chat must not land there — the patch keeps the model
+    // the user last chose, and coerce_gateway_model fitting the id to the
+    // endpoint is exactly the check.
+    let model = overlay
+        .get(MODEL_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    if let Some(model) = model {
+        let endpoint = url.as_deref().unwrap_or(DEEPSEEK_OFFICIAL_BASE_URL);
+        if crate::setup::coerce_gateway_model(endpoint, model).is_none() {
+            let adapter = crate::adapters::DeepSeekHarnessAdapter;
+            let _ = adapter.ensure_model_patch(model);
+        }
     }
 }
 
@@ -1219,5 +1237,68 @@ mod tests {
         strip_team_gateway_leftovers(&mut env);
         assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
         assert!(!env.contains_key(EVOTOWN_URL_ENV));
+    }
+
+    #[test]
+    fn harness_turn_pins_a_custom_model_and_skips_a_foreign_id() {
+        use crate::adapters::DeepSeekHarnessAdapter;
+
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let previous = std::env::var_os("DSH_HOME");
+        let set_home = |value: Option<std::ffi::OsString>| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match value {
+                Some(value) => unsafe { std::env::set_var("DSH_HOME", value) },
+                None => unsafe { std::env::remove_var("DSH_HOME") },
+            }))
+            .unwrap();
+        };
+        set_home(Some(dir.path().into()));
+        let patch = crate::adapters::DeepSeekHarnessAdapter::cordis_patch_path();
+
+        let mut overlay = HashMap::new();
+        overlay.insert(MODEL_ENV.to_string(), "my-deepseek-model".to_string());
+        overlay.insert("DEEPSEEK_API_KEY".to_string(), "ds-key".to_string());
+        let mut cmd = Command::new("dsh");
+        apply_deepseek_harness_env(&mut cmd, &overlay);
+        assert_eq!(
+            cmd.get_envs()
+                .find(|(key, _)| *key == "DEEPSEEK_API_KEY")
+                .and_then(|(_, value)| value)
+                .and_then(std::ffi::OsStr::to_str),
+            Some("ds-key")
+        );
+        assert_eq!(
+            DeepSeekHarnessAdapter::patched_model(&patch)
+                .unwrap()
+                .as_deref(),
+            Some("my-deepseek-model"),
+            "a custom id reaches dsh's patch layer"
+        );
+
+        overlay.insert(MODEL_ENV.to_string(), "glm-5.3".to_string());
+        let mut cmd = Command::new("dsh");
+        apply_deepseek_harness_env(&mut cmd, &overlay);
+        assert_eq!(
+            DeepSeekHarnessAdapter::patched_model(&patch)
+                .unwrap()
+                .as_deref(),
+            Some("my-deepseek-model"),
+            "a foreign vendor id left on the chat must not be written down"
+        );
+
+        overlay.remove(MODEL_ENV);
+        let mut cmd = Command::new("dsh");
+        apply_deepseek_harness_env(&mut cmd, &overlay);
+        assert_eq!(
+            DeepSeekHarnessAdapter::patched_model(&patch)
+                .unwrap()
+                .as_deref(),
+            Some("my-deepseek-model"),
+            "a turn without a model choice leaves the pin alone"
+        );
+
+        set_home(previous);
     }
 }

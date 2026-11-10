@@ -16,7 +16,7 @@ pub use cursor::CursorAdapter;
 pub use deepseek_harness::{
     DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, DEEPSEEK_HARNESS_CLI,
     DEEPSEEK_HARNESS_NODE_MIN, DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID,
-    DEEPSEEK_HARNESS_VERSION,
+    DEEPSEEK_HARNESS_VERSION, DEEPSEEK_OFFICIAL_BASE_URL, DEEPSEEK_OFFICIAL_PROVIDER_ROUTE,
 };
 pub use hermes::{HermesAdapter, HermesSettings};
 pub use openclaw::{configured_base_url, OpenClawAdapter};

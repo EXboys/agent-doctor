@@ -352,6 +352,26 @@ pub fn with_test_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
     })
 }
 
+/// serde_yaml parses `!!js`-style YAML.org tags into plain strings and drops
+/// the tag on rewrite — `!!js process.env.X` would silently become the literal
+/// text `process.env.X`, changing what dsh executes. A file using any tag in
+/// tag position must be edited by hand instead of rewritten by Agent Doctor.
+pub fn yaml_has_tag(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.iter().enumerate().any(|(index, &byte)| {
+        if byte != b'!' {
+            return false;
+        }
+        match index {
+            0 => true,
+            _ => matches!(
+                bytes[index - 1],
+                b' ' | b'\t' | b'\n' | b'-' | b':' | b'[' | b','
+            ),
+        }
+    })
+}
+
 /// User-local Node install used when the machine has no npm (no admin / winget).
 pub fn managed_nodejs_root() -> PathBuf {
     #[cfg(windows)]

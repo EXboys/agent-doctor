@@ -1919,6 +1919,8 @@ export const en = {
     "personal.url": "URL",
     "personal.apiKey": "API Key",
     "personal.model": "Model",
+    "personal.modelCustomOption": "Custom model…",
+    "personal.deepseekModelHint": "DeepSeek Harness currently prefers official DeepSeek models. Hermes runs other vendors' models, but downloads from mainland China are slow and often fail.",
     "personal.add": "Add",
     "personal.back": "Back",
     "personal.formAdd": "Add",

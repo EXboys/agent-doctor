@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use toml::Value as TomlValue;
 
 use crate::browser::BrowserDiscovery;
+use agent_doctor_core::adapters::util::yaml_has_tag;
 
 /// Options for configuring an MCP server entry in a runtime's config.
 #[derive(Debug, Clone)]
@@ -644,26 +645,6 @@ fn dsh_insert_patch(entry: serde_yaml::Value) -> serde_yaml::Value {
         serde_yaml::Value::Sequence(vec![entry]),
     );
     serde_yaml::Value::Mapping(map)
-}
-
-/// serde_yaml parses `!!js`-style YAML.org tags into plain strings and drops
-/// the tag on rewrite — `!!js process.env.X` would silently become the literal
-/// text `process.env.X`, changing what dsh executes. A file using any tag in
-/// tag position must be edited by hand instead.
-fn yaml_has_tag(raw: &str) -> bool {
-    let bytes = raw.as_bytes();
-    bytes.iter().enumerate().any(|(index, &byte)| {
-        if byte != b'!' {
-            return false;
-        }
-        match index {
-            0 => true,
-            _ => matches!(
-                bytes[index - 1],
-                b' ' | b'\t' | b'\n' | b'-' | b':' | b'[' | b','
-            ),
-        }
-    })
 }
 
 type DshVerifyKey = (String, Option<SystemTime>, Option<u64>, String, String);
