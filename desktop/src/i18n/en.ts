@@ -981,6 +981,7 @@ export const en = {
     "chat.importTruncated": "This conversation is long; only the first 2000 messages were imported.",
     "chat.renderTruncated": "This reply is long; only part of it is rendered.",
     "chat.showFullReply": "Show full reply",
+    "chat.questionNext": "Next",
     "chat.userFoldMore": "Show more",
     "chat.userFoldLess": "Show less",
     "chat.inputSubmitted": "Sent",

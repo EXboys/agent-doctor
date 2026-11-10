@@ -983,6 +983,7 @@ export const zh = {
     "chat.importTruncated": "对话很长，只导入了前 2000 条消息。",
     "chat.renderTruncated": "这条回复很长，只渲染了前面一部分。",
     "chat.showFullReply": "显示完整回复",
+    "chat.questionNext": "下一题",
     "chat.userFoldMore": "展开",
     "chat.userFoldLess": "收起",
     "chat.inputSubmitted": "已提交",

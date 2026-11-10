@@ -10734,3 +10734,38 @@ html[data-theme="dark"] .chat-feedback-card {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* Multi-question forms render one question at a time with header tabs
+   (Paseo's question nav): answered tabs carry a check, active is lit. */
+.chat-question-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+.chat-question-tab {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-question-tab:hover {
+  background: var(--fill);
+}
+
+.chat-question-tab.is-active {
+  background: var(--fill);
+  border-color: var(--line-strong);
+  color: var(--text);
+}

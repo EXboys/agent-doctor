@@ -11,6 +11,7 @@ import { reportPromptLog, resolvePermissionSession } from "../ipc";
 import { noteChannelAsk } from "./channel-ask";
 import {
   areQuestionsAnswered,
+  isQuestionAnswered,
   buildQuestionFormAnswers,
   parseAskFormQuestions,
   questionShowsTextInput,
@@ -142,6 +143,9 @@ function renderStructuredQuestion(
     actions.querySelectorAll("button, input").forEach((el) => {
       (el as HTMLButtonElement | HTMLInputElement).disabled = which !== null;
     });
+    tabs.forEach((tab) => {
+      tab.disabled = which !== null;
+    });
     for (const [btn, label, kind] of [
       [sendBtn, sendLabel, "submit"],
       [skipBtn, skipLabel, "skip"],
@@ -213,6 +217,17 @@ function renderStructuredQuestion(
 
   const refresh = () => {
     if (!sendBtn || busy) return;
+    if (questions.length > 1) {
+      syncTabs();
+      if (activeIndex < questions.length - 1) {
+        sendLabel = t("chat.questionNext");
+        sendBtn.textContent = sendLabel;
+        sendBtn.disabled = !questionAnswered(activeIndex);
+        return;
+      }
+      sendLabel = t("chat.inputSubmit");
+      sendBtn.textContent = sendLabel;
+    }
     sendBtn.disabled = !areQuestionsAnswered(questions, selections, otherTexts);
   };
 
@@ -245,13 +260,26 @@ function renderStructuredQuestion(
     return;
   }
 
-  questions.forEach((question, qIndex) => {
-    // Paseo leads with the question text, single or not — it is the card's
-    // heading, and the answers hang off it.
+  // Paseo renders one question at a time when a form has several: header
+  // tabs carry an answered check and the primary button walks forward. A
+  // lone question skips the tabs and keeps instant submit.
+  let activeIndex = 0;
+  const body = document.createElement("div");
+  body.className = "chat-question-body";
+  const tabs: HTMLButtonElement[] = [];
+  let tabsRow: HTMLDivElement | null = null;
+
+  const questionAnswered = (index: number) =>
+    isQuestionAnswered(questions[index], index, selections, otherTexts);
+
+  const buildQuestionControls = (qIndex: number): void => {
+    const question = questions[qIndex];
+    // Paseo leads with the question text — it is the heading, answers hang
+    // off it.
     const label = document.createElement("p");
     label.className = "chat-permission-question";
     label.textContent = question.question;
-    actions.appendChild(label);
+    body.appendChild(label);
     const optionRow = document.createElement("div");
     optionRow.className = "chat-permission-options";
     const optionRows: HTMLElement[] = [];
@@ -266,10 +294,10 @@ function renderStructuredQuestion(
       control.setAttribute("aria-hidden", "true");
       const text = document.createElement("span");
       text.className = "chat-permission-option-text";
-      const label = document.createElement("span");
-      label.className = "chat-permission-option-label";
-      label.textContent = option.label;
-      text.appendChild(label);
+      const optionLabel = document.createElement("span");
+      optionLabel.className = "chat-permission-option-label";
+      optionLabel.textContent = option.label;
+      text.appendChild(optionLabel);
       // Descriptions carry the trade-off notes; keep them on the card instead
       // of hiding them behind a hover title.
       if (option.description) {
@@ -334,7 +362,7 @@ function renderStructuredQuestion(
       });
       optionRow.appendChild(row);
     });
-    actions.appendChild(optionRow);
+    body.appendChild(optionRow);
 
     // Paseo only offers the typed answer when the question allows one.
     if (questionShowsTextInput(question)) {
@@ -371,16 +399,67 @@ function renderStructuredQuestion(
         }
       });
       otherFields.set(qIndex, other);
-      actions.appendChild(other);
+      body.appendChild(other);
     }
-  });
+  };
+
+  const syncTabs = (): void => {
+    tabs.forEach((tab, index) => {
+      const active = index === activeIndex;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+      const header = clipTabLabel(questions[index].header);
+      tab.textContent = `${questionAnswered(index) ? "✓ " : ""}${header}`;
+    });
+  };
+
+  const renderActiveQuestion = (): void => {
+    activeIndex = Math.min(activeIndex, questions.length - 1);
+    body.replaceChildren();
+    buildQuestionControls(activeIndex);
+    syncTabs();
+  };
+
+  if (questions.length > 1) {
+    tabsRow = document.createElement("div");
+    tabsRow.className = "chat-question-tabs";
+    tabsRow.setAttribute("role", "tablist");
+    questions.forEach((_, index) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "chat-question-tab";
+      tab.setAttribute("role", "tab");
+      tab.addEventListener("click", () => {
+        if (busy || index === activeIndex) return;
+        activeIndex = index;
+        renderActiveQuestion();
+        refresh();
+      });
+      tabs.push(tab);
+      tabsRow!.appendChild(tab);
+    });
+    actions.appendChild(tabsRow);
+  }
+  actions.appendChild(body);
+  renderActiveQuestion();
 
   sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "chat-permission-allow";
   sendLabel = t("chat.inputSubmit");
   sendBtn.textContent = sendLabel;
-  sendBtn.addEventListener("click", submit);
+  sendBtn.addEventListener("click", () => {
+    // On a multi-question form the primary button walks forward until the
+    // last question, where it submits (Paseo's Next/Submit split).
+    if (activeIndex < questions.length - 1) {
+      if (busy || !questionAnswered(activeIndex)) return;
+      activeIndex = Math.min(activeIndex + 1, questions.length - 1);
+      renderActiveQuestion();
+      refresh();
+      return;
+    }
+    submit();
+  });
   refresh();
   skipBtn = document.createElement("button");
   skipBtn.type = "button";
@@ -417,6 +496,12 @@ function renderStructuredQuestion(
     });
   }
   actions.append(sendBtn, skipBtn);
+}
+
+/** Tab labels: first line of the header, clipped. */
+function clipTabLabel(text: string): string {
+  const line = text.trim().split("\n")[0] ?? "";
+  return line.length > 16 ? `${line.slice(0, 16)}…` : line;
 }
 
 export function createPermissionsController(deps: PermissionsDeps) {
