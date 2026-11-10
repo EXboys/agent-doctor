@@ -41,6 +41,8 @@ export type StreamDeps = {
   sealProcessStream: () => void;
   /** Rebuild the log from the session's messages (records render folded). */
   repaintLog: () => void;
+  /** The completed repaint must not read as a still-running turn. */
+  markTurnCompleting: (sessionId: string, completing: boolean) => void;
   flushSessionListRender: () => void;
   noteVerifyBrowserSignal: (text: string, source: "status" | "assistant" | "tool") => void;
   queueAssistantText: (text: string) => void;
@@ -203,7 +205,16 @@ export function createStreamController(deps: StreamDeps) {
           deps.sealProcessStream();
           // Render the fold from the persisted records: deterministic, never
           // dependent on which live rows happened to survive in the DOM.
-          if (viewing) deps.repaintLog();
+          // busy only clears further down, so mark the turn as completing or
+          // the repaint pins the finished trail and thinking block open.
+          if (viewing) {
+            deps.markTurnCompleting(completedSessionId, true);
+            try {
+              deps.repaintLog();
+            } finally {
+              deps.markTurnCompleting(completedSessionId, false);
+            }
+          }
           // TEMP(ad-debug): dump the transcript structure after the fold.
           window.setTimeout(async () => {
             try {

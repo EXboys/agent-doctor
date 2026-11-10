@@ -862,6 +862,17 @@ fn handle_update<F>(session_id: &str, params: &Value, state: &mut AcpState, on_e
 where
     F: FnMut(PromptSessionEvent),
 {
+    // A resumed session replays its saved history as session/update traffic
+    // before session/load answers. Those calls and thoughts already live in
+    // the transcript from their own turn; until the load response lifts this
+    // gate, everything here is replay, not the new prompt's turn.
+    if state
+        .waiting
+        .values()
+        .any(|phase| *phase == Waiting::Resume)
+    {
+        return;
+    }
     let update = params.get("update").unwrap_or(params);
     let kind = update
         .get("sessionUpdate")
@@ -1438,6 +1449,65 @@ for raw in sys.stdin:
             browser_tools_enabled: None,
             computer_use_enabled: None,
         }
+    }
+
+    #[test]
+    fn a_resumed_session_replays_no_history_into_the_new_turn() {
+        let mut state = empty_state();
+        // session/load is in flight: the agent is replaying the saved
+        // conversation as session/update traffic.
+        state.waiting.insert(7, Waiting::Resume);
+        let mut events = Vec::new();
+        {
+            let mut collect = |ev: PromptSessionEvent| events.push(ev);
+            handle_update(
+                "s1",
+                &serde_json::json!({
+                    "update": {"sessionUpdate": "tool_call", "toolCallId": "old-1",
+                                "title": "Read file", "kind": "read", "status": "completed"}
+                }),
+                &mut state,
+                &mut collect,
+            );
+            handle_update(
+                "s1",
+                &serde_json::json!({
+                    "update": {"sessionUpdate": "agent_thought_chunk",
+                                "content": {"type": "text", "text": "an old thought"}}
+                }),
+                &mut state,
+                &mut collect,
+            );
+            handle_update(
+                "s1",
+                &serde_json::json!({
+                    "update": {"sessionUpdate": "agent_message_chunk",
+                                "content": {"type": "text", "text": "an old reply"}}
+                }),
+                &mut state,
+                &mut collect,
+            );
+        }
+        assert!(
+            events.is_empty(),
+            "replayed history stays out of the new turn"
+        );
+
+        // The load response lands, the gate lifts, live updates flow again.
+        state.waiting.remove(&7);
+        {
+            let mut collect = |ev: PromptSessionEvent| events.push(ev);
+            handle_update(
+                "s1",
+                &serde_json::json!({
+                    "update": {"sessionUpdate": "tool_call", "toolCallId": "new-1",
+                                "title": "Run tests", "kind": "execute", "status": "in_progress"}
+                }),
+                &mut state,
+                &mut collect,
+            );
+        }
+        assert_eq!(tool_rows(&events), 1, "only the live call surfaces");
     }
 
     #[cfg(unix)]

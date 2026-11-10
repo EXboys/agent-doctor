@@ -772,6 +772,23 @@ export function syncComposerUi(): void {
   updateContextMeter();
 }
 
+// Turns whose completed repaint is running while `busy` has not cleared yet.
+// Without this, the repaint reads a finished turn's trailing trail and thinking
+// block as still-live and pins them open.
+const completingTurns = new Set<string>();
+
+export function markTurnCompleting(sessionId: string, completing: boolean): void {
+  if (completing) {
+    completingTurns.add(sessionId);
+  } else {
+    completingTurns.delete(sessionId);
+  }
+}
+
+export function isTurnCompleting(chatSessionId: string | null | undefined): boolean {
+  return chatSessionId != null && completingTurns.has(chatSessionId);
+}
+
 export function setBusy(next: boolean, chatSessionId?: string | null): void {
   const id = chatSessionId || chatState.store.activeId;
   if (next) {

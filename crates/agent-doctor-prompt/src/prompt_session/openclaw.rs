@@ -117,7 +117,14 @@ fn run_openclaw(
     let agent = resolve_openclaw_agent(&overlay);
     let tool_trace = OpenClawSessionTrace::for_session(&agent, &openclaw_session_id);
     let mut emitted_tools = std::collections::HashSet::new();
-    let mut tool_trace_len = 0;
+    // A resumed session keeps its trace file. The cursor starts at the trace's
+    // current size: the first poll fires before OpenClaw writes this prompt's
+    // user line, so "tools after the last user line" would otherwise replay the
+    // finished turn's tools into this one — every turn, growing without bound.
+    let mut tool_trace_len = tool_trace
+        .as_ref()
+        .and_then(OpenClawSessionTrace::marker)
+        .unwrap_or(0);
 
     let display_text = Arc::new(Mutex::new(String::new()));
     let display_for_cb = Arc::clone(&display_text);
@@ -167,6 +174,7 @@ fn run_openclaw(
                 &agent,
                 &runtime_thread_id,
                 &mut emitted_tools,
+                tool_trace_len,
                 &mut emit,
             );
 
@@ -510,6 +518,7 @@ fn emit_openclaw_turn_tools<F>(
     agent: &str,
     runtime_thread_id: &str,
     emitted_tools: &mut std::collections::HashSet<String>,
+    trace_len_start: u64,
     emit: &mut F,
 ) where
     F: FnMut(PromptSessionEvent),
@@ -517,7 +526,11 @@ fn emit_openclaw_turn_tools<F>(
     let Some(trace) = OpenClawSessionTrace::for_session(agent, runtime_thread_id) else {
         return;
     };
-    let mut trace_len = 0;
+    // Baseline the backfill at the run's starting cursor: a turn that died
+    // before OpenClaw wrote its user line leaves the trace untouched, and the
+    // marker check then stays silent instead of resurfacing the finished
+    // turn's tools.
+    let mut trace_len = trace_len_start;
     emit_openclaw_tools_from_trace(session_id, &trace, emitted_tools, &mut trace_len, emit);
 }
 
@@ -1123,6 +1136,49 @@ Bind: loopback); resolved command secrets locally.";
         assert!(matches!(
             &events[1],
             PromptSessionEvent::Status { message, .. } if message.contains("browser_screenshot")
+        ));
+    }
+
+    #[test]
+    fn a_resumed_run_does_not_replay_the_finished_turns_tools() {
+        let dir = tempdir().unwrap();
+        let trace = OpenClawSessionTrace::at(dir.path(), "session");
+        fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        let path = trace.jsonl.clone();
+        let turn_one = concat!(
+            "{\"message\":{\"role\":\"user\",\"content\":\"first prompt\"}}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"id\":\"c1\",\"name\":\"exec\",\"arguments\":{\"command\":\"date\"}}]}}\n",
+            "{\"message\":{\"role\":\"toolResult\",\"toolCallId\":\"c1\",\"toolName\":\"exec\"}}\n",
+        );
+        fs::write(&path, turn_one).unwrap();
+
+        // A resumed run baselines its cursor at the trace as it stands; the
+        // first poll fires before OpenClaw writes the new prompt's user line,
+        // so "last turn" is still the finished one and must stay silent.
+        let start_len = trace.marker().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let mut trace_len = start_len;
+        let mut events = Vec::new();
+        emit_openclaw_tools_from_trace("s1", &trace, &mut seen, &mut trace_len, &mut |event| {
+            events.push(event)
+        });
+        assert!(events.is_empty(), "history before the resume stays put");
+
+        // When the next turn's lines land, only its own tools come through.
+        fs::write(
+            &path,
+            format!(
+                "{turn_one}{{\"message\":{{\"role\":\"user\",\"content\":\"second prompt\"}}}}\n{{\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"toolCall\",\"id\":\"c2\",\"name\":\"read\",\"arguments\":{{\"path\":\"next.txt\"}}}}]}}}}\n"
+            ),
+        )
+        .unwrap();
+        emit_openclaw_tools_from_trace("s1", &trace, &mut seen, &mut trace_len, &mut |event| {
+            events.push(event)
+        });
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            PromptSessionEvent::Status { message, .. } if message.contains("next.txt")
         ));
     }
 

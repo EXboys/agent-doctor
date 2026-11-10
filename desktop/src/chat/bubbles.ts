@@ -58,6 +58,8 @@ export type BubblesDeps = {
   getBusy: () => boolean;
   getStore: () => SessionStore;
   isViewingRunningSession: () => boolean;
+  /** True while the completed repaint runs: the turn is over, not live. */
+  isTurnCompleting: () => boolean;
   runTargetSession: () => ChatSession;
   activeSession: () => ChatSession;
   selectedRuntime: () => AskRuntime;
@@ -786,7 +788,11 @@ export function createBubblesController(deps: BubblesDeps) {
           }
           break;
         }
-        const live = deps.getBusy() && deps.isViewingRunningSession() && i >= messages.length;
+        const live =
+          deps.getBusy() &&
+          deps.isViewingRunningSession() &&
+          !deps.isTurnCompleting() &&
+          i >= messages.length;
         if (live) {
           const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
           if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
