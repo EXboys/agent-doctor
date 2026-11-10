@@ -59,8 +59,8 @@ use island::{
 use state::{ActivePromptRun, LivePromptRun, PromptSessionState};
 use windows::{
     close_ask_window_command, close_diagnose_window_command, close_resources_window_command,
-    focus_main_tab_command, main_dock_layout_command, open_ask_window_command,
-    open_diagnose_window_command, open_resources_window_command, resize_main_window_command,
+    focus_main_tab_command, open_ask_window_command, open_diagnose_window_command,
+    open_resources_window_command, resize_main_window_command,
 };
 
 #[tauri::command]
@@ -868,7 +868,6 @@ pub fn run() {
             close_diagnose_window_command,
             focus_main_tab_command,
             resize_main_window_command,
-            main_dock_layout_command,
             start_prompt_session_command,
             cancel_prompt_session_command,
             list_prompt_runs_command,

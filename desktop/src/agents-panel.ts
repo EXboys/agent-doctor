@@ -30,6 +30,7 @@ import { createAgentsPresets } from "./agents-presets";
 import { createAgentsSessions } from "./agents-sessions";
 import { createAgentsWorkspaceChip } from "./agents-workspace-chip";
 import { DOCTOR_RUNTIME_ID, planAgentTiles } from "./agent-tiles";
+import { resetHomeHero, syncHomeHero } from "./home-hero";
 import type {
   DoctorReport,
   MainTabId,
@@ -81,6 +82,10 @@ const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
 const runtimeTabsMoreEl = document.querySelector<HTMLButtonElement>("#runtime-tabs-more")!;
 const runtimeSectionEl = document.querySelector<HTMLElement>(".runtime-section")!;
 let runtimeTabsExpanded = false;
+/** Tiles currently in the DOM, with the active state stripped out. */
+let lastTabSkeleton = "";
+/** Markup currently in the card slot. */
+let lastCardHtml = "";
 const agentsReadinessRingEl = document.querySelector<HTMLElement>("#agents-readiness-ring")!;
 const agentsReadinessValueEl = document.querySelector<HTMLElement>("#agents-readiness-value")!;
 const agentsSecurityTitleEl = document.querySelector<HTMLElement>("#agents-security-title")!;
@@ -196,6 +201,62 @@ function resolvePaintedRuntimeId(installedRuntimes: RuntimeDoctorResult[]): stri
     : resolveActiveRuntimeId(installedRuntimes, appState.activeRuntimeId);
 }
 
+/** Tile markup with the active state normalised away, so a selection-only
+ * change compares equal to what is already on screen. */
+function tabSkeleton(html: string): string {
+  return html.replace(/ is-active/g, "").replace(/aria-selected="true"/g, 'aria-selected="false"');
+}
+
+/** The first click on an agent pays for parsing its brand mark and laying out a
+ * card that has never been on screen; every later click is cheap. Pay that once
+ * while the window is idle instead, so the first switch feels like the rest. */
+let warmed = false;
+function warmAgentCards(runtimes: RuntimeDoctorResult[]): void {
+  if (warmed || runtimes.length < 2) return;
+  warmed = true;
+  const warm = () => {
+    const host = document.createElement("div");
+    host.setAttribute("aria-hidden", "true");
+    host.style.cssText =
+      "position:fixed;top:0;left:-9999px;width:420px;visibility:hidden;pointer-events:none;";
+    host.innerHTML = runtimes
+      .map((runtime) => `<span class="runtime-solo-logo">${agentBrandIconHtml(runtime.id)}</span>`)
+      .join("");
+    // Reading a box forces the parse + paint the first switch would otherwise do.
+    void host.offsetHeight;
+    host.remove();
+  };
+  const idle = (window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void;
+  }).requestIdleCallback;
+  if (idle) idle(warm, { timeout: 3000 });
+  else window.setTimeout(warm, 1500);
+}
+
+/** Card swap + hero measurement both read layout, so running them inside the
+ * click handler forces a synchronous reflow before the tile can repaint — on a
+ * cold window that is the hitch users feel. Coalesce them into one frame. */
+let cardFrame = 0;
+function scheduleCardPaint(build: () => string): void {
+  if (cardFrame) cancelAnimationFrame(cardFrame);
+  cardFrame = requestAnimationFrame(() => {
+    cardFrame = 0;
+    paintRuntimeCard(build());
+    syncHomeHero();
+  });
+}
+
+/** Replace the card only when its markup really changed: a repaint re-decodes
+ * the brand mark and re-measures the hero, which is visible as a flicker. */
+function paintRuntimeCard(html: string): boolean {
+  if (html === lastCardHtml && runtimesEl.childElementCount > 0) {
+    return false;
+  }
+  lastCardHtml = html;
+  runtimesEl.innerHTML = html;
+  return true;
+}
+
 function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: string): void {
   const plan = planAgentTiles(
     installedRuntimes.map((runtime) => runtime.id),
@@ -207,8 +268,22 @@ function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: 
   }
   runtimeSectionEl.classList.toggle("is-solo", isSoloHome(installedRuntimes.length));
   const visible = installedRuntimes.slice(0, plan.visibleCount);
-  runtimeTabsEl.innerHTML = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
-  runtimeTabsEl.prepend(doctorTabTile(selectedId === DOCTOR_RUNTIME_ID));
+  const html = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
+  // Switching agents only flips which tile is active. Re-parsing the tiles
+  // would re-decode every brand mark and re-lay out the row on each click,
+  // which reads as a hitch, so keep the nodes and toggle the state instead.
+  if (tabSkeleton(html) === lastTabSkeleton && runtimeTabsEl.childElementCount > 0) {
+    for (const tile of runtimeTabsEl.querySelectorAll<HTMLElement>("[data-runtime-tab], [data-doctor-tab]")) {
+      const id = tile.dataset.runtimeTab ?? DOCTOR_RUNTIME_ID;
+      const active = id === selectedId;
+      tile.classList.toggle("is-active", active);
+      tile.setAttribute("aria-selected", active ? "true" : "false");
+    }
+  } else {
+    lastTabSkeleton = tabSkeleton(html);
+    runtimeTabsEl.innerHTML = html;
+    runtimeTabsEl.prepend(doctorTabTile(selectedId === DOCTOR_RUNTIME_ID));
+  }
   runtimeTabsEl.hidden = false;
   if (!plan.overflow) {
     runtimeTabsMoreEl.hidden = true;
@@ -255,9 +330,10 @@ function doctorCardHtml(solo = false): string {
     <button type="button" class="btn-primary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
     <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>`;
   // The only agent on the machine gets the large card, the same treatment a
-  // lone CLI runtime gets — the built-in agent is not a lesser one.
-  const hero = solo
-    ? `
+  // lone CLI runtime gets — the built-in agent is not a lesser one. The block
+  // is always painted and `home-hero.ts` shows it, so a multi-agent home can
+  // borrow it when the panel has room.
+  const hero = `
       <div class="runtime-solo-hero">
         <span class="runtime-solo-logo" aria-hidden="true">${agentBrandIconHtml(DOCTOR_RUNTIME_ID)}</span>
         <div class="runtime-solo-copy">
@@ -265,10 +341,9 @@ function doctorCardHtml(solo = false): string {
           <h2 class="runtime-tab-title">Agent Doctor</h2>
           <p class="runtime-solo-blurb">${t("runtime.doctorTileMeta")}</p>
         </div>
-      </div>`
-    : "";
+      </div>`;
   return `
-    <article class="runtime${solo ? " is-solo" : ""}" data-runtime="${DOCTOR_RUNTIME_ID}">
+    <article class="runtime${solo ? " has-hero" : ""}" data-runtime="${DOCTOR_RUNTIME_ID}">
       <div class="section-label runtime-card-label">
         <h2 class="runtime-tab-title">Agent Doctor</h2>
         <span class="runtime-badges">
@@ -326,8 +401,29 @@ function setLoading(loading: boolean) {
   }
 }
 
+/**
+ * Follow the room the agent panel has. Dragging the window edge, docking Ask
+ * beside it, or a finished scan all change the height the big card may take.
+ */
+function watchHomeHeroRoom(): void {
+  if (typeof ResizeObserver === "undefined") return;
+  let queued = false;
+  const observer = new ResizeObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      syncHomeHero();
+    });
+  });
+  observer.observe(runtimeSectionEl);
+}
+
 export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   deps = d;
+
+  watchHomeHeroRoom();
+  resetHomeHero();
 
   const sessions = createAgentsSessions({ setStatusBanner });
 
@@ -351,7 +447,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     const report = appState.lastReport;
     const installedRuntimes = report ? report.runtimes.filter((runtime) => runtime.installed) : [];
     paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
-    runtimesEl.innerHTML = doctorCardHtml();
+    scheduleCardPaint(doctorCardHtml);
     void paintDoctorServiceRow();
     void diagnose.closeDiagnoseDetail({ skipDismiss: true });
   }
@@ -365,8 +461,9 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     } catch (error) {
       setStatusBanner("error", withErrorDetail(t("doctor.failed"), error));
       updateHealthStrip(0, 0);
-      runtimesEl.innerHTML = `<div class="empty-state">${t("doctor.empty")}</div>`;
+      paintRuntimeCard(`<div class="empty-state">${t("doctor.empty")}</div>`);
       runtimeTabsEl.innerHTML = "";
+      lastTabSkeleton = "";
       appState.activeRuntimeId = null;
       installedCountEl.textContent = "—";
       profileStatusEl.textContent = t("status.error");
@@ -468,14 +565,15 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       // One agent in total: the large card is the whole story, so the tile row
       // would only repeat the name it already shows.
       runtimeTabsEl.hidden = true;
-      runtimesEl.innerHTML = `${doctorCardHtml(true)}
+      paintRuntimeCard(`${doctorCardHtml(true)}
         <div class="runtime-empty is-compact">
           <p>${t("runtimes.emptyInstalled")}</p>
           <p class="runtime-empty-hint">${t("runtimes.emptyInstalledHint")}</p>
           <button type="button" class="btn-primary" data-action="open-agent-catalog">${t("runtimes.addAgent")}</button>
         </div>
-      `;
+      `);
       void paintDoctorServiceRow();
+      syncHomeHero();
       if (!opts?.relocalize) {
         void diagnose.closeDiagnoseDetail({ skipDismiss: true });
       }
@@ -496,13 +594,16 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     paintRuntimeTabs(installedRuntimes, selectedId);
 
     const activeRuntime = installedRuntimes.find((runtime) => runtime.id === selectedId);
-    runtimesEl.innerHTML =
+    paintRuntimeCard(
       selectedId === DOCTOR_RUNTIME_ID
         ? doctorCardHtml()
         : activeRuntime
           ? buildRuntimeCardHtml(activeRuntime)
-          : "";
+          : "",
+    );
     if (selectedId === DOCTOR_RUNTIME_ID) void paintDoctorServiceRow();
+    syncHomeHero();
+    warmAgentCards(installedRuntimes);
     if (opts?.relocalize) {
       diagnose.refreshDiagnoseLocale();
       return;
@@ -539,7 +640,8 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     }
     appState.activeRuntimeId = runtimeId;
     paintRuntimeTabs(installedRuntimes, runtimeId);
-    runtimesEl.innerHTML = buildRuntimeCardHtml(selected);
+    // The tile state is already on screen; the card can land next frame.
+    scheduleCardPaint(() => buildRuntimeCardHtml(selected));
   }
 
   async function refreshRuntimeVersions(report: DoctorReport): Promise<void> {
@@ -577,14 +679,17 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
         const hint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
         const hintHtml = hint && !hint.hidden ? hint.innerHTML : "";
         const hintText = hint && !hint.hidden ? hint.textContent : "";
-        runtimesEl.innerHTML = buildRuntimeCardHtml(activeRuntime);
-        const nextHint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
-        if (nextHint && (hintHtml || hintText)) {
-          nextHint.hidden = false;
-          if (hintHtml) {
-            nextHint.innerHTML = hintHtml;
-          } else if (hintText) {
-            nextHint.textContent = hintText;
+        // Same markup means the version fetch found nothing new — leave the
+        // card alone instead of re-rendering it under the user's cursor.
+        if (paintRuntimeCard(buildRuntimeCardHtml(activeRuntime))) {
+          const nextHint = runtimesEl.querySelector<HTMLElement>("[data-repair-hint]");
+          if (nextHint && (hintHtml || hintText)) {
+            nextHint.hidden = false;
+            if (hintHtml) {
+              nextHint.innerHTML = hintHtml;
+            } else if (hintText) {
+              nextHint.textContent = hintText;
+            }
           }
         }
         if (preview && !diagnose.hasDismissed(selectedId)) {

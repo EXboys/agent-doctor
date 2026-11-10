@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chatSideDefault, dockedHomeHeight, fittedHomeHeight, layout } from "../src/layout-rules.ts";
+import { chatSideDefault, heroRoom, heroShouldShow, heroSpare, layout } from "../src/layout-rules.ts";
 
 assert.equal(layout.homeEdgeMargin, 48);
 assert.equal(layout.chatSide, 250);
@@ -13,20 +13,32 @@ assert.equal(layout.chatSideWindows, 272);
 
 const screen = 1040;
 
-assert.equal(dockedHomeHeight(520, screen, 980), 780);
-assert.equal(dockedHomeHeight(520, screen, 600), 600);
-assert.equal(dockedHomeHeight(1000, screen, 980), screen - layout.homeEdgeMargin * 2);
-assert.equal(dockedHomeHeight(900, screen, 1200), screen - layout.homeEdgeMargin * 2);
-
 assert.equal(chatSideDefault("windows"), layout.chatSideWindows);
 assert.equal(chatSideDefault("macos"), layout.chatSide);
 assert.equal(chatSideDefault(undefined), layout.chatSide);
 
-// A home window that stands alone ends with its content.
-assert.equal(fittedHomeHeight(520, screen), 520);
-assert.equal(fittedHomeHeight(200, screen), 480);
-assert.equal(fittedHomeHeight(2000, screen), screen - layout.homeEdgeMargin * 2);
-assert.equal(fittedHomeHeight(520, 100), 4);
+// The big card appears when there is room, and stays inside the band.
+assert.equal(heroShouldShow(heroRoom.show, false), true);
+assert.equal(heroShouldShow(heroRoom.show - 1, false), false);
+// Once painted it survives a shrinking window until the page is really tight.
+assert.equal(heroShouldShow(heroRoom.show - 1, true), true);
+assert.equal(heroShouldShow(heroRoom.hide + 1, true), true);
+assert.equal(heroShouldShow(heroRoom.hide, true), false);
+// No window height can flip the card twice: re-deciding keeps the answer.
+for (let spare = 0; spare <= 400; spare += 4) {
+  for (const shown of [true, false]) {
+    const once = heroShouldShow(spare, shown);
+    assert.equal(heroShouldShow(spare, once), once, `flip at spare=${spare}`);
+  }
+}
+assert.ok(heroRoom.hide < heroRoom.show);
+
+// The big block is taken back out before the room is judged, so a card that
+// grows into the panel cannot shrink its own spare height.
+assert.equal(heroSpare({ panel: 400, card: 300, hero: 0, gap: 0 }), 100);
+assert.equal(heroSpare({ panel: 400, card: 300, hero: 80, gap: 12 }), 192);
+// A card taller than the panel leaves no room, never a negative one to show.
+assert.equal(heroSpare({ panel: 200, card: 300, hero: 0, gap: 0 }), -100);
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/chat.css"), "utf8");
 

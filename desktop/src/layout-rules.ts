@@ -29,26 +29,55 @@ export function chatSideDefault(os: string | undefined): number {
 export const homeMinHeight = 480;
 
 /**
- * Height of a home window that stands alone (no Ask / Resources beside it).
+ * How much empty height the home may leave before the big card is worth
+ * drawing, and how little it may leave before that card has to go.
  *
- * The window is as tall as the page it shows, so the page ends with its last
- * card instead of a blank gap under it. The screen is the hard limit.
+ * Two numbers, not one: a single threshold flips the card on and off while the
+ * user drags a window edge across it. `heroShouldShow` keeps the current state
+ * inside the band between them.
  */
-export function fittedHomeHeight(content: number, screen: number): number {
-  const room = Math.max(0, screen - layout.homeEdgeMargin * 2);
-  return Math.round(Math.min(Math.max(content, homeMinHeight), room));
+export const heroRoom = {
+  /** Draw the big card once this much height is going spare. */
+  show: 168,
+  /** Drop it again only once the page is this tight. */
+  hide: 104,
+};
+
+/**
+ * Whether the home paints the big agent card beside the tiles.
+ *
+ * `spare` is the height left over after the tiles are laid out. `shown` is
+ * what the page is doing now, so a value inside the band keeps its answer and
+ * the card does not flicker.
+ */
+export function heroShouldShow(spare: number, shown: boolean): boolean {
+  if (shown) return spare > heroRoom.hide;
+  return spare >= heroRoom.show;
 }
 
 /**
- * One height for every home tab.
- * Start from the tallest tab, then sit halfway to the screen so the
- * window is not cramped and not full-height. Never taller than Ask.
+ * Height the agent panel has to spare once the tiles are laid out.
+ *
+ * Measured with the big card taken back out: a card that grows to fill the
+ * panel would otherwise measure its own empty space and hide itself, then see
+ * room again the moment it left — the card's own height must never reach this
+ * number.
+ *
+ * `card` is the natural height of the card as painted (children, not the
+ * stretched box), `hero` the block inside it that may go away.
  */
-export function dockedHomeHeight(content: number, screen: number, ask: number): number {
-  const room = Math.max(0, screen - layout.homeEdgeMargin * 2);
-  const upper = Math.min(room, ask > 0 ? ask : room);
-  if (upper <= 0) return Math.max(0, Math.round(content));
-  if (content >= upper) return Math.round(upper);
-  const mid = (content + screen) / 2;
-  return Math.round(Math.min(Math.max(mid, content), upper));
+export function heroSpare(input: {
+  /** Height the agent panel has to give. */
+  panel: number;
+  /** Natural height of the card, big block included. */
+  card: number;
+  /** Height of the big block; 0 when the card paints none. */
+  hero: number;
+  /** Row gap between the block and the rest of the card. */
+  gap: number;
+}): number {
+  const tiles = input.hero > 0 ? input.card - input.hero - input.gap : input.card;
+  return Math.round(input.panel - tiles);
 }
+
+

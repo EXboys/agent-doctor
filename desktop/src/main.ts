@@ -17,13 +17,11 @@ import { initResourcesHub } from "./resources-hub";
 import { initFirstRunUi } from "./first-run-ui";
 import { loadRuntimeCatalog } from "./runtime-catalog";
 import type { DoctorReport, MainTabId } from "./types";
-import { initMainWindowFit, scheduleMainWindowFit } from "./main-window-fit";
 
 await loadRuntimeCatalog();
 
 // Native OS title bar — fill the window edge-to-edge (no frameless traffic lights).
 document.documentElement.classList.add("is-opaque-shell");
-initMainWindowFit();
 
 const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
@@ -69,7 +67,6 @@ function setMainTab(tab: MainTabId) {
   if (tab === "diagnose") {
     refs.firstRun?.onDiagnoseTabVisible();
   }
-  scheduleMainWindowFit();
 }
 
 function updateLangButtons() {
