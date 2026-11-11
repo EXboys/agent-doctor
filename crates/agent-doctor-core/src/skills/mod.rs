@@ -34,9 +34,10 @@ pub use teamups_auth::{
     TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsOfficialStatus, TeamupsVoiceTicket,
 };
 pub use teamups_channel::{
-    parse_channel_stop, parse_teamups_channel_job, set_teamups_channel_enabled,
-    teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello,
-    teamups_channel_reply, teamups_channel_signed_in, teamups_channel_ws_url, TeamupsChannelFile,
+    parse_channel_stop, parse_teamups_channel_job, parse_teamups_channel_sync,
+    set_teamups_channel_enabled, set_teamups_channel_since, teamups_channel_auth,
+    teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello, teamups_channel_reply,
+    teamups_channel_signed_in, teamups_channel_since, teamups_channel_ws_url, TeamupsChannelFile,
     TeamupsChannelJob,
 };
 

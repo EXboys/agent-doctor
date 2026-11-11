@@ -7,10 +7,14 @@
 //! `wss://<site>/api/v1/doctor/channel`
 //! `Authorization: Bearer <license>`
 //!
-//! Client: `{"type":"hello","id":"...","name":"...","os":"...","ip":"...","resume":true}`
+//! Client: `{"type":"hello","id":"...","name":"...","os":"...","ip":"...","resume":true,"since":{}}`
+//! `since` maps phone conversation ids to the archive update this computer
+//! last merged. `{}` means "nothing here yet" and asks the site to replay
+//! every conversation it kept — that is how a reinstalled computer catches up.
+//! Server: `{"type":"sync","conversation":{"chat":"...","title":"...","updatedAt":...,"rows":[...]}}`
+//! replays one archived conversation.
 //! Client: `{"type":"heard","id":"..."}` as soon as a job frame arrives
 //! Client: `{"type":"reply","id":"...","ok":true,"text":"..."}`
-//! Server: `{"type":"job","id":"...","text":"...","chat":"..."}`
 //! `chat` is the Feishu conversation. Empty means one shared Feishu chat.
 //! `resume` means the server may send an unfinished job again after a
 //! reconnect; the same `id` comes back and the computer must not run it twice.
@@ -62,6 +66,7 @@ pub fn teamups_channel_ws_url(http_base: &str) -> String {
 
 const CHANNEL_ENABLED_KEY: &str = "teamups_channel_enabled";
 const CHANNEL_CLIENT_ID_KEY: &str = "teamups_channel_client_id";
+const CHANNEL_SINCE_KEY: &str = "teamups_channel_since";
 
 /// Whether this computer should keep the line open. Default is on.
 /// Logged-out computers still do not connect.
@@ -102,12 +107,48 @@ pub fn teamups_channel_signed_in() -> Result<bool> {
 }
 
 pub fn teamups_channel_hello() -> String {
+    let since = teamups_channel_since().unwrap_or_else(|| json!({}));
     channel_hello_frame(
         &channel_client_id(),
         &computer_name(),
         &computer_os(),
         &computer_lan_ip(),
+        &since,
     )
+}
+
+/// The per-conversation cursors the chat window pushed: `{conversationId:
+/// updatedAt}`. `None` means it never pushed one and the hello carries an
+/// empty map, which asks the site to replay everything it kept.
+pub fn teamups_channel_since() -> Option<Value> {
+    let store = open_settings_store().ok()?;
+    let raw = store.meta_get(CHANNEL_SINCE_KEY).ok()??;
+    clean_since(serde_json::from_str(&raw).ok()?)
+}
+
+pub fn set_teamups_channel_since(since: Value) -> Result<()> {
+    let store = open_settings_store()?;
+    let cleaned = clean_since(since).unwrap_or_else(|| json!({}));
+    store.meta_set(CHANNEL_SINCE_KEY, &cleaned.to_string())
+}
+
+/// Keep only entries the site can act on: a chat id and a real stamp, at
+/// most 100 chats. Anything malformed is dropped, not fatal.
+fn clean_since(value: Value) -> Option<Value> {
+    let map = value.as_object()?;
+    let mut clean = serde_json::Map::new();
+    for (id, stamp) in map.iter().take(100) {
+        let chat = clip_field(id, 80);
+        let at = match stamp.as_f64() {
+            Some(at) if at.is_finite() && at >= 0.0 => at as u64,
+            _ => continue,
+        };
+        if chat.is_empty() {
+            continue;
+        }
+        clean.insert(chat, json!(at));
+    }
+    Some(Value::Object(clean))
 }
 
 fn channel_client_id() -> String {
@@ -133,7 +174,7 @@ fn new_client_id() -> String {
     format!("ad-{now:x}")
 }
 
-fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str) -> String {
+fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str, since: &Value) -> String {
     json!({
         "type": "hello",
         "id": clip_field(id, 64),
@@ -141,6 +182,7 @@ fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str) -> String {
         "os": clip_field(os, 40),
         "ip": clip_field(ip, 64),
         "resume": true,
+        "since": since,
     })
     .to_string()
 }
@@ -246,6 +288,21 @@ pub fn parse_channel_stop(frame: &str) -> Option<String> {
     }
 }
 
+/// A conversation the site archived, replayed after hello. Returns the
+/// `conversation` object; the rows inside stay the webview's business.
+pub fn parse_teamups_channel_sync(frame: &str) -> Option<Value> {
+    let value: Value = serde_json::from_str(frame).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("sync") {
+        return None;
+    }
+    let conversation = value.get("conversation")?;
+    if conversation.is_object() {
+        Some(conversation.clone())
+    } else {
+        None
+    }
+}
+
 pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
     let value: Value = serde_json::from_str(frame).ok()?;
     if value.get("type").and_then(Value::as_str) != Some("job") {
@@ -343,8 +400,8 @@ fn clip_file_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_hello_frame, parse_channel_stop, parse_teamups_channel_job, teamups_channel_reply,
-        teamups_channel_ws_url,
+        channel_hello_frame, parse_channel_stop, parse_teamups_channel_job,
+        parse_teamups_channel_sync, teamups_channel_reply, teamups_channel_ws_url,
     };
 
     #[test]
@@ -387,7 +444,13 @@ mod tests {
 
     #[test]
     fn hello_names_this_computer() {
-        let raw = channel_hello_frame("ad-1", "MacBook Pro", "macOS", "192.168.1.8");
+        let raw = channel_hello_frame(
+            "ad-1",
+            "MacBook Pro",
+            "macOS",
+            "192.168.1.8",
+            &serde_json::json!({"chat-1": 1234}),
+        );
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["type"], "hello");
         assert_eq!(value["id"], "ad-1");
@@ -395,6 +458,30 @@ mod tests {
         assert_eq!(value["os"], "macOS");
         assert_eq!(value["ip"], "192.168.1.8");
         assert_eq!(value["resume"], true);
+        assert_eq!(value["since"]["chat-1"], 1234);
+        let empty: serde_json::Value = serde_json::from_str(&channel_hello_frame(
+            "ad-1",
+            "n",
+            "os",
+            "ip",
+            &serde_json::json!({}),
+        ))
+        .unwrap();
+        assert_eq!(empty["since"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn a_sync_frame_carries_one_conversation() {
+        let parsed = parse_teamups_channel_sync(
+            r#"{"type":"sync","conversation":{"chat":"chat-9","title":"标题","updatedAt":88,"rows":[{"key":"m:1","kind":"me","text":"你好"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed["chat"], "chat-9");
+        assert_eq!(parsed["updatedAt"], 88);
+        assert_eq!(parsed["rows"].as_array().unwrap().len(), 1);
+        assert!(parse_teamups_channel_sync(r#"{"type":"job","id":"a","text":"t"}"#).is_none());
+        assert!(parse_teamups_channel_sync(r#"{"type":"sync"}"#).is_none());
+        assert!(parse_teamups_channel_sync(r#"{"type":"sync","conversation":[]}"#).is_none());
     }
 
     #[test]

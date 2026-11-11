@@ -167,6 +167,7 @@ export interface ChatSession {
    * this chat last merged. The hello sends it so the site replays only what
    * moved; absent means the chat never synced and asks for everything.
    */
+  channelSyncedAt?: number | null;
   /** Set when the user pins this chat from the sidebar menu. Pinned rows sort first. */
   pinnedAt?: number | null;
 }

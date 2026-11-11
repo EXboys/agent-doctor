@@ -362,6 +362,15 @@ export function teamupsChannelChats(
   return invoke("teamups_channel_chats_command", { chats: { chats, projects } });
 }
 
+/**
+ * Per-conversation archive cursors (phone conversation id -> merged
+ * `updatedAt`). The next hello carries them, so the site replays only the
+ * conversations that moved; an empty map asks for everything it kept.
+ */
+export function teamupsChannelSince(since: Record<string, number>): Promise<void> {
+  return invoke("teamups_channel_since_command", { since });
+}
+
 /** One step of a Feishu message, written to this computer's channel log. */
 export function teamupsChannelNote(id: string, step: string): void {
   void invoke("teamups_channel_note_command", { id, step }).catch(() => {});

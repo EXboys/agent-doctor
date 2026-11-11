@@ -96,6 +96,7 @@ import {
   teamupsChannelPref,
   teamupsChannelReply,
   teamupsChannelSetEnabled,
+  teamupsChannelSince,
 } from "./ipc";
 import {
   applyChannelAnswer,
@@ -105,6 +106,11 @@ import {
   pendingChoiceCount,
   takePendingChoices,
 } from "./chat/channel-ask";
+import {
+  applyChannelSync,
+  bindChannelSync,
+  channelSyncSince,
+} from "./chat/channel-sync";
 import { bindPhoneChats, publishPhoneChats } from "./chat/phone-chats";
 import {
   advanceChannelCursor,
@@ -152,6 +158,11 @@ function transcriptOf(session: ReturnType<typeof activeSession>): { title: strin
   if (!lines.length) return null;
   const title = session.title.trim() || "聊天";
   return { title, text: `# ${title}\n\n${lines.join("\n\n")}\n` };
+}
+
+/** Hand the site this computer's per-conversation archive cursors. */
+function pushChannelSince(): void {
+  void teamupsChannelSince(channelSyncSince(chatState.store?.sessions ?? [])).catch(() => {});
 }
 
 export function bootChat(): void {
@@ -220,7 +231,11 @@ export function bootChat(): void {
   } catch (error) {
     console.error("Ask: early paint failed", error);
   }
-  void hydrateDurableChatStore();
+  // The cursors on disk have to reach the hello, whatever the merge brings.
+  pushChannelSince();
+  void hydrateDurableChatStore()
+    .then(() => pushChannelSince())
+    .catch(() => {});
   try {
     applyI18n();
   } catch (error) {
@@ -613,6 +628,7 @@ function bootChatTail(): void {
             label: projectDisplayLabel(name, doc).slice(0, 40),
           }))
       : [];
+    pushChannelSince();
     void teamupsChannelChats(chats.slice(0, 30), projects).catch(() => {});
   });
   void listen<boolean>("teamups-channel-status", (event) => {
@@ -720,6 +736,19 @@ function bootChatTail(): void {
     const next = takeNextChannelJob(sessionId);
     if (!next) return;
     void runChannelTurn(next);
+  });
+  bindChannelSync({
+    store: () => chatState.store,
+    createSession: () => createEmptySession(selectedRuntime()),
+    applied: (session) => {
+      saveStore();
+      renderSessionList();
+      publishPhoneChats();
+      if (chatState.store?.activeId === session.id) renderActiveMessages();
+    },
+  });
+  void listen<unknown>("teamups-channel-sync", (event) => {
+    applyChannelSync(event.payload);
   });
   void listen<{
     id?: string;

@@ -10,9 +10,10 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 
 use agent_doctor_core::{
-    parse_channel_stop, parse_teamups_channel_job, set_teamups_channel_enabled, settings_db_path,
-    teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello,
-    teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
+    parse_channel_stop, parse_teamups_channel_job, parse_teamups_channel_sync,
+    set_teamups_channel_enabled, set_teamups_channel_since, settings_db_path, teamups_channel_auth,
+    teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello, teamups_channel_reply,
+    teamups_channel_signed_in, TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -260,6 +261,18 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                         } else if let Some(id) = parse_channel_stop(&text) {
                             note(&format!("stop {id}"));
                             let _ = app.emit("teamups-channel-stop", serde_json::json!({ "id": id }));
+                        } else if let Some(conversation) = parse_teamups_channel_sync(&text) {
+                            let chat = conversation
+                                .get("chat")
+                                .and_then(|item| item.as_str())
+                                .unwrap_or("-");
+                            let rows = conversation
+                                .get("rows")
+                                .and_then(|item| item.as_array())
+                                .map(|rows| rows.len())
+                                .unwrap_or(0);
+                            note(&format!("sync {chat} rows={rows}"));
+                            let _ = app.emit("teamups-channel-sync", conversation);
                         }
                     }
                     Some(Ok(Message::Ping(data))) => {
@@ -367,6 +380,13 @@ pub fn teamups_channel_set_enabled_command(app: AppHandle, enabled: bool) -> Res
     set_teamups_channel_enabled(enabled).map_err(|err| err.to_string())?;
     poke(&app);
     Ok(())
+}
+
+/// The chat window pushes its per-conversation archive cursors; the next
+/// hello carries them, so the site replays only the conversations that moved.
+#[tauri::command]
+pub fn teamups_channel_since_command(since: serde_json::Value) -> Result<(), String> {
+    set_teamups_channel_since(since).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
