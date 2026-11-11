@@ -321,6 +321,8 @@ export function teamupsChannelReply(
       detail?: string;
       output?: string;
     }[];
+    /** 会话上下文占用（估算），手机端用来画用量条。随终稿 trace 走。 */
+    usage?: { used: number; limit: number };
   },
   chat = "",
 ): Promise<void> {
@@ -331,7 +333,8 @@ export function teamupsChannelReply(
       trace.text ||
       trace.tools.length > 0 ||
       (trace.files?.length ?? 0) > 0 ||
-      (trace.steps?.length ?? 0) > 0)
+      (trace.steps?.length ?? 0) > 0 ||
+      trace.usage)
       ? trace
       : undefined;
   return invoke("teamups_channel_reply_command", {

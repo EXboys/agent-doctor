@@ -130,6 +130,7 @@ import {
   type ChannelQueued,
 } from "./chat/channel-lane";
 import { channelSessionTitle, placeChannelSession } from "./chat/channel-route";
+import { contextLimitForModel, estimateTokens, sessionContextText } from "./chat/context";
 import { createChannelLedger } from "./chat/channel-ledger";
 import { decidePhoneStop } from "./chat/channel-stop";
 import { createEmptySession } from "./chat/store";
@@ -929,11 +930,19 @@ function bootChatTail(): void {
         ? `files ${shown.map((file) => `${file.name} +${file.addedLines.length}/-${file.deletedLines.length}`).join(", ")}`
         : "files 0",
     );
+    // 上下文占用随终稿走：手机端用量条的数据源，与桌面端用量表的同一套估算。
+    const usage = session
+      ? {
+          used: estimateTokens(sessionContextText(session)),
+          limit: contextLimitForModel(session.model),
+        }
+      : undefined;
     finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped, job.chat, {
       thinking: trace.thinking,
       tools: trace.tools,
       files: trace.files,
       steps: channelTurnSteps(session?.messages ?? [], started, job.text),
+      ...(usage ? { usage } : {}),
     });
   }
   async function runChannelJob(
