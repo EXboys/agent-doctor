@@ -7592,6 +7592,12 @@ html[data-os="windows"] .chat-log {
 ) {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 56px;
+  /* Independent layout root per row: a change inside one row (hover, fold,
+     age tick, a streaming edit) must not reflow the whole flex column of a
+     long session. Layout (not paint) containment - paint would clip the
+     turn owner's action row that hangs below the bubble. The absolute
+     .chat-msg-actions already resolves against the row wrapper. */
+  contain: layout style;
   flex-shrink: 0;
 }
 

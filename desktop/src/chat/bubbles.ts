@@ -40,8 +40,11 @@ import { HISTORY_BATCH, historyRenderCut, messageContinuesRun } from "./history-
 
 /** Mounted-transcript ceiling: layout cost grows with every mounted row, so
  * the pump stops here and the "show earlier" button loads the rest on
- * demand. Jumps and search flush the whole history and bypass the cap. */
-const MAX_MOUNTED_ROWS = 400;
+ * demand. Jumps and search flush the whole history and bypass the cap.
+ * 80 rows is Paseo's mounted-recent scale (20 stream items); at 400 the
+ * first open of a long session rendered for seconds and every invalidation
+ * afterwards reflowed all of it. */
+const MAX_MOUNTED_ROWS = 80;
 import { assistantTurnCopyOwners, joinAssistantTurnCopy } from "./turn-copy";
 import {
   createFeedbackControls,
