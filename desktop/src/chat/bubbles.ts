@@ -36,7 +36,7 @@ import {
   renderAttachmentStrip,
   syncMessageCopyActions,
 } from "./copy-ui";
-import { HISTORY_BATCH, historyRenderCut, messageContinuesRun } from "./history-window";
+import { HISTORY_BATCH, HISTORY_RUN_SLICE, historyRenderCut, snapRunBoundary } from "./history-window";
 
 /** Mounted-transcript ceiling: layout cost grows with every mounted row, so
  * the pump stops here and the "show earlier" button loads the rest on
@@ -160,10 +160,29 @@ export function createBubblesController(deps: BubblesDeps) {
     if (document.visibilityState === "visible") refreshAges();
   });
   window.setInterval(refreshAges, 30_000);
-  deps.logEl.addEventListener("chat-flush-history", () => {
-    flushPendingHistory();
-    deps.logEl.querySelector(".chat-history-earlier")?.remove();
+  deps.logEl.addEventListener("chat-load-earlier", () => {
+    loadEarlierPage();
   });
+  deps.logEl.addEventListener("chat-seek-history", (event) => {
+    const detail = (event as CustomEvent<{ id: string; onMounted?: (found: boolean) => void }>).detail;
+    if (!detail?.id) return;
+    seekEarlier(detail.id, detail.onMounted);
+  });
+  let topFillTimer = 0;
+  deps.logEl.addEventListener(
+    "scroll",
+    () => {
+      // Paseo's history-start pagination shape: filling older pages while the
+      // wheel is still moving raced the reader; wait for a pause near the top.
+      if (topFillTimer) window.clearTimeout(topFillTimer);
+      topFillTimer = window.setTimeout(() => {
+        topFillTimer = 0;
+        if (deps.logEl.scrollTop > 240) return;
+        loadEarlierPage();
+      }, 200);
+    },
+    { passive: true },
+  );
 
   function flushPendingTextSync(): void {
     if (flushRaf) {
@@ -893,27 +912,65 @@ export function createBubblesController(deps: BubblesDeps) {
     const job = historyJob;
     if (!job || job.token !== historyToken || job.cursor <= 0) return false;
     const end = job.cursor;
-    let start = Math.max(0, end - HISTORY_BATCH);
-    while (start > 0 && messageContinuesRun(job.messages, start)) start -= 1;
+    const start = snapRunBoundary(
+      job.messages,
+      Math.max(0, end - HISTORY_BATCH),
+      HISTORY_RUN_SLICE,
+    );
     const bucket = document.createElement("div");
     renderMessageRange(job.messages, start, end, bucket, job.covered, job.sessionRuntime);
     prependKeepingScroll(Array.from(bucket.children) as HTMLElement[]);
     job.cursor = start;
     return start > 0;
   }
-  function flushPendingHistory(): void {
-    if (!historyJob || historyJob.token !== historyToken) return;
-    try {
-      while (mountHistoryBatch()) {
-        // Keep going until the older rows exist, so a question jump can find its bubble.
-      }
-    } catch (error) {
-      console.error("Ask: failed to render earlier messages", error);
+  /** One chunked page of older rows (Paseo's history-start pagination):
+   * batches render across frames, the reader compensation runs per prepend -
+   * the old "flush everything" path rendered a multi-thousand-row transcript
+   * inside one synchronous loop, which froze the window for minutes. */
+  const HISTORY_PAGE_ROWS = 32;
+  let pageTargetCursor: number | null = null;
+  let seekTargetId: string | null = null;
+  let seekDone: ((found: boolean) => void) | null = null;
+
+  function loadEarlierPage(): void {
+    if (!historyJob || historyJob.token !== historyToken || historyJob.cursor <= 0) {
+      deps.logEl.querySelector(".chat-history-earlier")?.remove();
+      return;
     }
-    if (historyJob?.token === historyToken) {
-      historyJob = null;
-      syncTurnCopyButtons();
+    pageTargetCursor = Math.max(0, historyJob.cursor - HISTORY_PAGE_ROWS);
+    seekTargetId = null;
+    seekDone = null;
+    if (!historyFrame) pumpHistory();
+  }
+
+  function bubbleMounted(id: string): boolean {
+    return (
+      deps.logEl.querySelector(
+        `.chat-bubble.user[data-message-id="${CSS.escape(id)}"]`,
+      ) !== null
+    );
+  }
+
+  function seekEarlier(id: string, onMounted?: (found: boolean) => void): void {
+    if (bubbleMounted(id)) {
+      onMounted?.(true);
+      return;
     }
+    if (!historyJob || historyJob.token !== historyToken) {
+      onMounted?.(false);
+      return;
+    }
+    seekTargetId = id;
+    seekDone = onMounted ?? null;
+    pageTargetCursor = null;
+    if (!historyFrame) pumpHistory();
+  }
+
+  function finishSeek(found: boolean): void {
+    const done = seekDone;
+    seekTargetId = null;
+    seekDone = null;
+    done?.(found);
   }
   function pumpHistory(): void {
     historyFrame = 0;
@@ -925,14 +982,24 @@ export function createBubblesController(deps: BubblesDeps) {
       do {
         // Bound the mounted transcript: layout cost grows with every row
         // here, and a long chat must not make every streaming frame slower.
-        // The button at the top loads the rest on demand (jumps and search
-        // dispatch the same flush event and bypass the cap).
-        if (deps.logEl.childElementCount >= MAX_MOUNTED_ROWS && historyJob.cursor > 0) {
+        // An explicit page load (top-fill, the show-earlier button) or a
+        // seek bypasses the cap - the person asked for those older rows,
+        // and they render across frames instead of in one go.
+        const explicit = pageTargetCursor !== null || seekTargetId !== null;
+        if (!explicit && deps.logEl.childElementCount >= MAX_MOUNTED_ROWS && historyJob.cursor > 0) {
           more = false;
           capped = true;
           break;
         }
         more = mountHistoryBatch();
+        if (seekTargetId && bubbleMounted(seekTargetId)) {
+          finishSeek(true);
+          more = false;
+          break;
+        }
+        if (pageTargetCursor !== null && historyJob.cursor <= pageTargetCursor) {
+          pageTargetCursor = null;
+        }
       } while (more && performance.now() - started < 12);
       if (more && historyJob?.token === historyToken) {
         historyFrame = window.requestAnimationFrame(pumpHistory);
@@ -949,20 +1016,34 @@ export function createBubblesController(deps: BubblesDeps) {
       return;
     }
     if (historyJob?.token === historyToken) {
+      if (seekTargetId) finishSeek(false);
+      if (historyJob.cursor > 0) {
+        // The boundary sits higher up: keep the marker there for the next
+        // explicit load instead of dropping it.
+        showEarlierButton();
+        syncTurnCopyButtons();
+        return;
+      }
       historyJob = null;
       syncTurnCopyButtons();
+      deps.logEl.querySelector(".chat-history-earlier")?.remove();
     }
   }
   function showEarlierButton(): void {
     const log = deps.logEl;
-    if (log.querySelector(".chat-history-earlier")) return;
+    const existing = log.querySelector<HTMLButtonElement>(".chat-history-earlier");
+    if (existing) {
+      // Prepends slid the marker down; it belongs at the boundary.
+      log.prepend(existing);
+      existing.disabled = false;
+      return;
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chat-history-earlier";
     button.textContent = t("chat.showEarlier");
     button.addEventListener("click", () => {
-      button.disabled = true;
-      log.dispatchEvent(new CustomEvent("chat-flush-history"));
+      log.dispatchEvent(new CustomEvent("chat-load-earlier"));
     });
     log.prepend(button);
   }

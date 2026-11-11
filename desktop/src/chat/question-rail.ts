@@ -83,34 +83,42 @@ function hideCard(): void {
 
 function jumpTo(log: HTMLElement, id: string): void {
   const selector = `.chat-bubble.user[data-message-id="${CSS.escape(id)}"]`;
-  let bubble = log.querySelector<HTMLElement>(selector);
-  if (!bubble) {
-    log.dispatchEvent(new CustomEvent("chat-flush-history"));
-    bubble = log.querySelector<HTMLElement>(selector);
+  const center = (): void => {
+    const bubble = log.querySelector<HTMLElement>(selector);
+    if (!bubble) return;
+    // A row that scrolled out of sight is skipped, and a skipped row only knows
+    // the room it was measured at. Ask for the real thing before reading where
+    // the bubble is.
+    bubble.style.setProperty("content-visibility", "visible");
+    // Land with the log's own top padding as breathing room: scrollIntoView
+    // block:"start" sits the bubble flush against the topbar border, clipping the
+    // highlight outline and reading as cut off. Release the tail pin first so a
+    // streaming append can't yank the view back to the bottom mid-jump.
+    const gap = 18;
+    const top =
+      log.scrollTop + bubble.getBoundingClientRect().top - log.getBoundingClientRect().top - gap;
+    bubble.style.removeProperty("content-visibility");
+    releaseChatFollow(log);
+    log.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    highlighted?.classList.remove(HIGHLIGHT);
+    bubble.classList.add(HIGHLIGHT);
+    highlighted = bubble;
+    window.clearTimeout(highlightTimer);
+    highlightTimer = window.setTimeout(() => {
+      bubble.classList.remove(HIGHLIGHT);
+      if (highlighted === bubble) highlighted = null;
+    }, 1200);
+  };
+  if (log.querySelector(selector)) {
+    center();
+    return;
   }
-  if (!bubble) return;
-  // A row that scrolled out of sight is skipped, and a skipped row only knows
-  // the room it was measured at. Ask for the real thing before reading where
-  // the bubble is.
-  bubble.style.setProperty("content-visibility", "visible");
-  // Land with the log's own top padding as breathing room: scrollIntoView
-  // block:"start" sits the bubble flush against the topbar border, clipping the
-  // highlight outline and reading as cut off. Release the tail pin first so a
-  // streaming append can't yank the view back to the bottom mid-jump.
-  const gap = 18;
-  const top =
-    log.scrollTop + bubble.getBoundingClientRect().top - log.getBoundingClientRect().top - gap;
-  bubble.style.removeProperty("content-visibility");
-  releaseChatFollow(log);
-  log.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  highlighted?.classList.remove(HIGHLIGHT);
-  bubble.classList.add(HIGHLIGHT);
-  highlighted = bubble;
-  window.clearTimeout(highlightTimer);
-  highlightTimer = window.setTimeout(() => {
-    bubble.classList.remove(HIGHLIGHT);
-    if (highlighted === bubble) highlighted = null;
-  }, 1200);
+  // Older rows mount in settle-gated chunks now - there is no "render the
+  // whole history" flush to lean on. Ask the log to seek; the callback fires
+  // once the bubble exists (or not at all, if the transcript ends first).
+  log.dispatchEvent(new CustomEvent("chat-seek-history", {
+    detail: { id, onMounted: (found: boolean) => { if (found) center(); } },
+  }));
 }
 
 function bindScroll(log: HTMLElement): void {

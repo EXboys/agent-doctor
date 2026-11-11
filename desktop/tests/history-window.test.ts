@@ -26,7 +26,7 @@ function assert(cond: boolean, msg: string): void {
   console.log(`ok - ${msg}`);
 }
 
-const { HISTORY_FIRST_SCREEN, historyRenderCut, messageContinuesRun } = await import(
+const { HISTORY_FIRST_SCREEN, HISTORY_RUN_SLICE, historyRenderCut, messageContinuesRun, snapRunBoundary } = await import(
   "../src/chat/history-window.ts"
 );
 
@@ -65,3 +65,31 @@ assert(
 // A first screen that already holds the conversation is left alone.
 const talkFirst = [...Array.from({ length: 10 }, () => row("user")), ...Array.from({ length: 30 }, () => row("assistant"))];
 assert(historyRenderCut(talkFirst) === 16, "a first screen with talk is not stretched");
+
+// A run of thousands of rows (one long agent turn) must not drag a slice
+// boundary back to its start - a slice absorbs at most the run cap, and the
+// rest of the run fills the following slices.
+{
+  const run = Array.from({ length: 2_000 }, (_, i) => ({
+    role: "tool",
+    content: `step ${i}`,
+  }));
+  assert(
+    snapRunBoundary(run, run.length - 1, HISTORY_RUN_SLICE) === run.length - 1 - HISTORY_RUN_SLICE,
+    "a mega-run slice absorbs at most the cap",
+  );
+  // A run shorter than the cap snaps all the way to its start.
+  const short = [
+    { role: "user", content: "问一句" },
+    { role: "tool", content: "a" },
+    { role: "tool", content: "b" },
+  ];
+  assert(
+    snapRunBoundary(short, short.length - 1, HISTORY_RUN_SLICE) === 1,
+    "a short run snaps to its first row",
+  );
+  // The first-screen cut of a mega-run transcript with no conversation rows
+  // stays bounded: first screen + run slice + capped search + one more slice.
+  const cut = historyRenderCut(run);
+  assert(run.length - cut <= 600, `the mega-run cut stays bounded (cut=${cut})`);
+}
