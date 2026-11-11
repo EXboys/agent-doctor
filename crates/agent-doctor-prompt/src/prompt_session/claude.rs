@@ -230,8 +230,12 @@ fn run_claude(
         fingerprint.is_some(),
         &mut emit,
     );
+    let (pump, background) = match result {
+        Ok((pump, background)) => (Ok(pump), background),
+        Err(err) => (Err(err), BackgroundTasks::default()),
+    };
 
-    let park_as = match (&result, fingerprint) {
+    let park_as = match (&pump, fingerprint) {
         (Ok((PromptSessionStatus::Succeeded, _, stdout, _, _)), Some(fp)) => {
             extract_claude_session_id(stdout)
                 .or_else(|| resume_session_id.map(str::to_string))
@@ -239,10 +243,19 @@ fn run_claude(
         }
         _ => None,
     };
-    warm::keep_or_close("claude-code", park_as, child, pipes, &writer);
+    // Background work outlives the turn it was launched in. A parkable
+    // process simply parks (the pool keeps it); a process with nothing to
+    // park as gets a bounded background watch instead of closing on the
+    // tasks it still carries.
+    let answered = matches!(&pump, Ok((PromptSessionStatus::Succeeded, ..)));
+    if park_as.is_none() && background.pending() && answered {
+        watch_background_work(child, &writer, pipes, background);
+    } else {
+        warm::keep_or_close("claude-code", park_as, child, pipes, &writer);
+    }
 
     let duration_ms = started.elapsed().as_millis() as u64;
-    let report = match result {
+    let report = match pump {
         Ok((status, exit_code, stdout, stderr, timeout)) => {
             let recovered = if display_text
                 .lock()
@@ -603,8 +616,8 @@ fn stage_mcp_for_claude(src: &Path) -> Result<std::path::PathBuf> {
     Ok(path)
 }
 
-/// Read one turn. With `keep_alive` Claude stays up after `result` so it can be
-/// parked; otherwise stdin closes and the process is reaped.
+/// Read one turn. The first `result` envelope ends it; with `keep_alive` the
+/// process then stays up (parked or watched) so background work can land.
 #[allow(clippy::too_many_arguments)]
 fn pump_claude<F>(
     session_id: &str,
@@ -615,7 +628,7 @@ fn pump_claude<F>(
     control: Option<&PromptSessionControl>,
     keep_alive: bool,
     on_event: &mut F,
-) -> Result<super::PumpResult>
+) -> Result<(super::PumpResult, BackgroundTasks)>
 where
     F: FnMut(PromptSessionEvent),
 {
@@ -699,14 +712,15 @@ where
             clock.touch();
         }
         // A background agent keeps the turn alive after the model pauses to
-        // wait. Quiet time and the short ask limit must not cut a long task
-        // off. The turn ends when those items report back.
-        clock.set_tool_running(tools.running() || background.pending());
+        // wait — but only while the turn is still open. Quiet time and the
+        // ask limit guard the open turn; once `result` lands it is over and
+        // the background watch takes over keeping the process alive.
+        clock.set_tool_running(tools.running());
         if cancel.load(Ordering::SeqCst) {
             force_stop_child(child, pid);
             break (PromptSessionStatus::Cancelled, None);
         }
-        if claude_turn_timed_out(&clock, background.pending()) {
+        if claude_turn_timed_out(&clock) {
             timeout_note = Some(clock.timeout_note(tools.last_label()));
             force_stop_child(child, pid);
             break (PromptSessionStatus::TimedOut, None);
@@ -755,15 +769,19 @@ where
     drain(on_event, &mut tools, pipes, &mut background);
 
     let (stdout, stderr) = pipes.take_output();
-    Ok((status, exit_code, stdout, stderr, timeout_note))
+    Ok((
+        (status, exit_code, stdout, stderr, timeout_note),
+        background,
+    ))
 }
 
 /// Stop when the turn has gone quiet, or when its time limit is up.
 ///
-/// A listed background agent is marked running by the pump, so neither quiet
-/// time nor the short ask limit ends a long task that is still out.
-fn claude_turn_timed_out(clock: &SessionClock, background_pending: bool) -> bool {
-    clock.stalled() || (clock.expired() && !background_pending)
+/// Background work does not enter this decision: the turn ends at its
+/// `result` envelope either way, and a live background watch is what keeps
+/// the process around afterwards.
+fn claude_turn_timed_out(clock: &SessionClock) -> bool {
+    clock.stalled() || clock.expired()
 }
 
 /// `result` carries the whole turn's tokens; per-message usage would count twice.
@@ -1011,73 +1029,100 @@ fn claude_question_mode(input: &serde_json::Value) -> String {
     "line".to_string()
 }
 
-/// Live background agents. Claude keeps writing after the model pauses to wait
-/// for them; the first `result` is not the end of the turn while any remain.
+/// Live background work, tracked the way Paseo's runtime-safety does: the
+/// `background_tasks_changed` roster is the source of truth, and a task
+/// counts as done only once its completion notice has been seen — the roster
+/// can empty before the notice lands, so both signals are kept apart.
+///
+/// This state never holds a turn open (the `result` envelope always ends the
+/// turn); it only feeds the turn-end notice and the keep-alive decision.
 #[derive(Default)]
 struct BackgroundTasks {
     /// `None` until `background_tasks_changed`. After that, each event replaces the set.
-    level: Option<HashSet<String>>,
-    launched: u32,
-    notified: u32,
+    roster: Option<Vec<BackgroundTask>>,
+    /// Rostered task ids whose completion notice has not arrived yet.
+    awaiting: HashSet<String>,
+}
+
+#[derive(Clone)]
+struct BackgroundTask {
+    id: String,
+    description: String,
 }
 
 impl BackgroundTasks {
     fn pending(&self) -> bool {
-        if let Some(live) = &self.level {
-            return !live.is_empty();
+        !self.awaiting.is_empty()
+    }
+
+    /// What is still out, named for a person: the roster description, else the id.
+    /// `awaiting` is only ever filled from the roster, so an empty roster means
+    /// nothing is out.
+    fn pending_labels(&self) -> Vec<String> {
+        let Some(roster) = &self.roster else {
+            return Vec::new();
+        };
+        roster
+            .iter()
+            .filter(|task| self.awaiting.contains(&task.id))
+            .map(|task| {
+                if task.description.is_empty() {
+                    task.id.clone()
+                } else {
+                    task.description.clone()
+                }
+            })
+            .collect()
+    }
+
+    fn note_roster(&mut self, tasks: Vec<BackgroundTask>) {
+        for task in &tasks {
+            self.awaiting.insert(task.id.clone());
         }
-        self.launched > self.notified
+        self.roster = Some(tasks);
     }
 
-    fn saw_level(&mut self, live: HashSet<String>) {
-        self.level = Some(live);
+    /// A completion notice. An id clears that task; a notice without a
+    /// parsable id clears the whole wait — a notice means something settled,
+    /// and a stuck wait is the worse failure (the turn used to hang on it).
+    fn note_completion(&mut self, task_id: Option<&str>) {
+        match task_id {
+            Some(id) => {
+                self.awaiting.remove(id);
+            }
+            None => self.awaiting.clear(),
+        }
     }
 
+    /// Background notices also arrive folded into user messages as
+    /// `<task-notification>` text. Claude Code injects them when a task
+    /// settles; progress updates say `running` and must not clear the wait.
+    /// Any other (or missing) status ends it — matching Paseo's fallback,
+    /// where an unrecognized status still counts as settled.
     fn note_text(&mut self, text: &str) {
-        if text.is_empty() {
+        if text.is_empty() || !text.contains("<task-notification>") {
             return;
         }
-        // Once the live list arrives, only that list (and a matching finish
-        // notice) decides what is still out. A launch phrase must not add a
-        // second count on top of the list.
-        if self.level.is_none()
-            && (text.contains("Async agent launched successfully")
-                || text.contains("working in the background"))
-        {
-            self.launched += 1;
-        }
-        if text.contains("<task-notification>") && background_task_finished(text) {
-            if let Some(id) = task_notification_id(text) {
-                if let Some(live) = self.level.as_mut() {
-                    live.remove(id);
-                }
-            }
-            if self.level.is_none() {
-                self.notified = self.notified.saturating_add(1);
-            }
+        let status = task_notification_tag(text, "status").map(|s| s.to_ascii_lowercase());
+        let settled = !matches!(
+            status.as_deref(),
+            Some("running") | Some("in_progress") | Some("pending")
+        );
+        if settled {
+            self.note_completion(task_notification_tag(text, "task-id").as_deref());
         }
     }
 }
 
-fn task_notification_id(text: &str) -> Option<&str> {
-    let start = text.find("<task-id>")? + "<task-id>".len();
+/// Value of a `<tag>…</tag>` inside a task-notification blob.
+fn task_notification_tag(text: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let start = text.find(&open)? + open.len();
     let rest = text.get(start..)?;
-    let end = rest.find("</task-id>")?;
-    let id = rest[..end].trim();
-    (!id.is_empty()).then_some(id)
-}
-
-fn background_task_finished(text: &str) -> bool {
-    [
-        "<status>completed</status>",
-        "<status>failed</status>",
-        "<status>killed</status>",
-        "<status>cancelled</status>",
-        "<status>canceled</status>",
-        "<status>timed_out</status>",
-    ]
-    .iter()
-    .any(|status| text.contains(status))
+    let close = format!("</{tag}>");
+    let end = rest.find(&close)?;
+    let value = rest[..end].trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 /// One collapsed row for a helper's own words. The reply stream never sees them.
@@ -1115,6 +1160,72 @@ fn subagent_notice(
     })
 }
 
+/// A collapsed row recording that background work is still out when the turn
+/// ends. The reply displays immediately; this tells the person what has not
+/// reported back yet. Paseo renders its task notifications the same way: a
+/// synthetic tool row on the timeline.
+fn background_notice(session_id: &str, background: &BackgroundTasks) -> PromptSessionEvent {
+    let labels = background.pending_labels();
+    let mut title = String::from("仍在进行：");
+    title.push_str(&labels.join("、"));
+    PromptSessionEvent::Tool {
+        session_id: session_id.to_string(),
+        step: Box::new(ToolStep {
+            id: "background-notice".into(),
+            kind: "other".into(),
+            name: "后台任务".into(),
+            status: "done".into(),
+            title,
+            ..ToolStep::default()
+        }),
+    }
+}
+
+/// More than this and a turn-end background watch stops keeping the process
+/// alive; the tasks inside it die with the process.
+const BACKGROUND_WATCH_LIMIT: Duration = Duration::from_secs(30 * 60);
+
+/// A turn that answered while background work is still out leaves the process
+/// running, the way Paseo only releases a runtime once nothing is owed: keep
+/// draining its stream until every awaited notice lands (or the bound hits),
+/// then close stdin so it can exit. The frames a wake turn produces are not
+/// surfaced yet — they stay parked with the process.
+fn watch_background_work(
+    child: Child,
+    control: &PromptSessionControl,
+    pipes: LivePipes,
+    background: BackgroundTasks,
+) {
+    // Detach here, on the caller's thread: a failed spawn drops the closure
+    // with everything it captured, and the control is not `Send`.
+    let Some(stdin) = control.detach_stdin() else {
+        warm::retire_without_stdin(child, pipes);
+        return;
+    };
+    let _ = thread::Builder::new()
+        .name("ad-claude-background-watch".into())
+        .spawn(move || {
+            let mut child = child;
+            let mut background = background;
+            let started = Instant::now();
+            loop {
+                for (is_stdout, line) in pipes.drain() {
+                    if let (true, Ok(value)) = (is_stdout, serde_json::from_str(&line)) {
+                        note_background(&mut background, &value);
+                    }
+                }
+                if !background.pending()
+                    || !matches!(child.try_wait(), Ok(None))
+                    || started.elapsed() >= BACKGROUND_WATCH_LIMIT
+                {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            warm::retire(child, stdin, pipes);
+        });
+}
+
 fn claude_message_text(value: &serde_json::Value) -> String {
     match value.pointer("/message/content") {
         Some(serde_json::Value::String(text)) => text.trim().to_string(),
@@ -1146,22 +1257,44 @@ fn from_subagent(value: &serde_json::Value) -> bool {
 
 fn note_background(background: &mut BackgroundTasks, value: &serde_json::Value) {
     let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if event_type == "system"
-        && value.get("subtype").and_then(|v| v.as_str()) == Some("background_tasks_changed")
-    {
-        let mut live = HashSet::new();
-        if let Some(tasks) = value.get("tasks").and_then(|v| v.as_array()) {
-            for task in tasks {
-                if let Some(id) = task
-                    .get("task_id")
-                    .and_then(|v| v.as_str())
-                    .filter(|id| !id.is_empty())
-                {
-                    live.insert(id.to_string());
+    if event_type == "system" {
+        let subtype = value.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
+        if subtype == "background_tasks_changed" {
+            let mut tasks = Vec::new();
+            if let Some(list) = value.get("tasks").and_then(|v| v.as_array()) {
+                for task in list {
+                    let Some(id) = task
+                        .get("task_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                    else {
+                        continue;
+                    };
+                    tasks.push(BackgroundTask {
+                        id: id.to_string(),
+                        description: task
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                    });
                 }
             }
+            background.note_roster(tasks);
+            return;
         }
-        background.saw_level(live);
+        // The structured completion record. Only terminal states arrive here.
+        if subtype == "task_notification" {
+            let id = value
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|id| !id.is_empty());
+            background.note_completion(id);
+            return;
+        }
         return;
     }
     if event_type != "user" {
@@ -1445,24 +1578,14 @@ fn parse_claude_stream_line(
         }
         // Final envelope — surface errors immediately; successful `result` text is
         // applied after pump when live deltas were missing (avoids duplicating
-        // assistant text that already streamed).
+        // assistant text that already streamed). The result always ends the turn
+        // (Paseo's rule): background work is tracked out-of-band and reported in
+        // a turn-end notice, never by holding the reply hostage.
         "result" => {
             let is_error = value
                 .get("is_error")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            // The model can stop to wait for background agents. That envelope is
-            // not the answer; keep reading until those agents have reported back.
-            if !is_error && background.pending() {
-                return vec![PromptSessionEvent::Status {
-                    session_id: session_id.to_string(),
-                    phase: "thinking".into(),
-                    message: "还在等这几项做完".into(),
-                }];
-            }
-            if let Some(flag) = turn_done {
-                flag.store(true, Ordering::SeqCst);
-            }
             if is_error {
                 let msg = value
                     .get("result")
@@ -1471,11 +1594,19 @@ fn parse_claude_stream_line(
                     .unwrap_or("Claude reported an error");
                 vec![turn_error(session_id, msg)]
             } else {
-                vec![PromptSessionEvent::Status {
+                if let Some(flag) = turn_done {
+                    flag.store(true, Ordering::SeqCst);
+                }
+                let mut out = Vec::new();
+                if background.pending() {
+                    out.push(background_notice(session_id, background));
+                }
+                out.push(PromptSessionEvent::Status {
                     session_id: session_id.to_string(),
                     phase: "done".into(),
                     message: "回复已完成".into(),
-                }]
+                });
+                out
             }
         }
         _ => Vec::new(),
@@ -1746,101 +1877,90 @@ mod tests {
     }
 
     #[test]
-    fn result_waits_while_background_agents_are_still_out() {
+    fn the_result_ends_the_turn_even_with_background_work_out() {
         let flag = AtomicBool::new(false);
         let mut background = BackgroundTasks::default();
-        let launch = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"Async agent launched successfully. The agent is working in the background."}]}}"#;
+        let roster = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","description":"结构"}]}"#;
         let _ = parse_claude_stream_line(
             "s1",
-            launch,
+            roster,
             None,
             Some(&flag),
             &mut PlanBoard::default(),
             &mut background,
         );
-        let waiting = parse_claude_stream_line(
+        let ended = parse_claude_stream_line(
             "s1",
-            r#"{"type":"result","is_error":false,"result":"等它们完成"}"#,
+            r#"{"type":"result","is_error":false,"result":"先回你一句，后台还在跑"}"#,
             None,
             Some(&flag),
             &mut PlanBoard::default(),
             &mut background,
         );
-        assert!(!flag.load(Ordering::SeqCst));
-        assert!(waiting.iter().any(|event| matches!(
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "the first result must end the turn"
+        );
+        assert!(
+            ended
+                .iter()
+                .any(|event| matches!(event, PromptSessionEvent::Tool { .. })),
+            "the turn-end notice names the work still out"
+        );
+        assert!(ended.iter().any(|event| matches!(
             event,
-            PromptSessionEvent::Status { message, .. } if message == "还在等这几项做完"
+            PromptSessionEvent::Status { phase, .. } if phase == "done"
         )));
-
-        let note = r#"{"type":"user","message":{"content":"<task-notification><task-id>a</task-id><status>completed</status></task-notification>"}}"#;
-        let _ = parse_claude_stream_line(
-            "s1",
-            note,
-            None,
-            Some(&flag),
-            &mut PlanBoard::default(),
-            &mut background,
-        );
-        let _ = parse_claude_stream_line(
-            "s1",
-            r#"{"type":"result","is_error":false,"result":"优化清单"}"#,
-            None,
-            Some(&flag),
-            &mut PlanBoard::default(),
-            &mut background,
-        );
-        assert!(flag.load(Ordering::SeqCst));
     }
 
     #[test]
-    fn background_task_list_replaces_itself() {
-        let flag = AtomicBool::new(false);
+    fn a_roster_that_empties_before_the_notice_keeps_the_wait() {
         let mut background = BackgroundTasks::default();
+        let roster = |tasks: &str| {
+            format!(r#"{{"type":"system","subtype":"background_tasks_changed","tasks":{tasks}}}"#)
+        };
         let _ = parse_claude_stream_line(
             "s1",
-            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"agent","description":"结构"}]}"#,
+            &roster(r#"[{"task_id":"a","description":"结构"}]"#),
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
+        assert!(background.pending());
+        // The roster empties first; the completion notice is still in flight.
         let _ = parse_claude_stream_line(
             "s1",
-            r#"{"type":"result","is_error":false,"result":"先等等"}"#,
+            &roster("[]"),
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
-        assert!(!flag.load(Ordering::SeqCst));
-        let _ = parse_claude_stream_line(
-            "s1",
-            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#,
-            None,
-            Some(&flag),
-            &mut PlanBoard::default(),
-            &mut background,
+        assert!(
+            background.pending(),
+            "an empty roster must not end the wait early"
         );
         let _ = parse_claude_stream_line(
             "s1",
-            r#"{"type":"result","is_error":false,"result":"清单"}"#,
+            r#"{"type":"system","subtype":"task_notification","task_id":"a","status":"completed"}"#,
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
-        assert!(flag.load(Ordering::SeqCst));
+        assert!(!background.pending());
     }
 
     #[test]
-    fn a_finish_notice_clears_the_listed_task_without_another_list() {
-        let flag = AtomicBool::new(false);
+    fn the_roster_and_its_notices_decide_what_is_still_out() {
         let mut background = BackgroundTasks::default();
+        let roster = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","description":"结构"},{"task_id":"b","description":"文案"}]}"#;
         let _ = parse_claude_stream_line(
             "s1",
-            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","description":"结构"},{"task_id":"b","description":"文案"}]}"#,
+            roster,
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
@@ -1853,62 +1973,133 @@ mod tests {
             "s1",
             &note("a"),
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
         assert!(background.pending());
-        let waiting = parse_claude_stream_line(
-            "s1",
-            r#"{"type":"result","is_error":false,"result":"还差一项"}"#,
-            None,
-            Some(&flag),
-            &mut PlanBoard::default(),
-            &mut background,
-        );
-        assert!(!flag.load(Ordering::SeqCst));
-        assert!(waiting.iter().any(|event| matches!(
-            event,
-            PromptSessionEvent::Status { message, .. } if message == "还在等这几项做完"
-        )));
+        assert_eq!(background.pending_labels(), vec!["文案".to_string()]);
         let _ = parse_claude_stream_line(
             "s1",
             &note("b"),
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
         assert!(!background.pending());
+    }
+
+    #[test]
+    fn a_progress_notice_does_not_end_the_wait() {
+        let mut background = BackgroundTasks::default();
         let _ = parse_claude_stream_line(
             "s1",
-            r#"{"type":"result","is_error":false,"result":"两份都好了"}"#,
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","description":"结构"}]}"#,
             None,
-            Some(&flag),
+            None,
             &mut PlanBoard::default(),
             &mut background,
         );
-        assert!(flag.load(Ordering::SeqCst));
+        let running = r#"{"type":"user","message":{"content":"<task-notification><task-id>a</task-id><status>running</status><summary>还在跑</summary></task-notification>"}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            running,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(background.pending());
+        let done = r#"{"type":"user","message":{"content":"<task-notification><task-id>a</task-id><status>completed</status></task-notification>"}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            done,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(!background.pending());
     }
 
     #[test]
-    fn a_quiet_background_task_is_not_cut_off() {
-        let mut clock = SessionClock::new(86_400);
-        clock.set_tool_running(true);
-        clock.pretend_quiet(std::time::Duration::from_secs(10 * 60));
-        assert!(!claude_turn_timed_out(&clock, true));
+    fn an_unrecognized_or_idless_notice_still_settles_the_task() {
+        let mut background = BackgroundTasks::default();
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","description":"结构"}]}"#,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        // An unseen status string must not wedge the wait (it used to).
+        let odd = r#"{"type":"user","message":{"content":"<task-notification><task-id>a</task-id><status>wrapped_up</status></task-notification>"}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            odd,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(!background.pending());
+
+        let _ = parse_claude_stream_line(
+            "s1",
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b","description":"文案"}]}"#,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        // A notice with no parsable id clears the whole wait: a stuck wait is
+        // the worse failure.
+        let idless = r#"{"type":"user","message":{"content":"<task-notification><status>completed</status></task-notification>"}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            idless,
+            None,
+            None,
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(!background.pending());
     }
 
     #[test]
-    fn background_work_is_not_cut_by_the_ask_limit() {
+    fn a_launch_phrase_alone_no_longer_holds_anything() {
+        let mut background = BackgroundTasks::default();
+        let launch = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"Async agent launched successfully. The agent is working in the background."}]}}"#;
+        let _ = parse_claude_stream_line(
+            "s1",
+            launch,
+            None,
+            Some(&AtomicBool::new(false)),
+            &mut PlanBoard::default(),
+            &mut background,
+        );
+        assert!(
+            !background.pending(),
+            "prose is not evidence; only the roster and notices count"
+        );
+    }
+
+    #[test]
+    fn the_open_turn_keeps_its_quiet_and_ask_limits() {
+        // Quiet with an open step stays alive until the ask limit.
         let mut clock = SessionClock::new(600);
-        clock.pretend_elapsed(std::time::Duration::from_secs(600));
-        clock.touch();
         clock.set_tool_running(true);
-        assert!(clock.expired());
-        assert!(!claude_turn_timed_out(&clock, true));
-        clock.set_tool_running(false);
-        assert!(claude_turn_timed_out(&clock, false));
+        clock.pretend_quiet(Duration::from_secs(10 * 60));
+        assert!(!claude_turn_timed_out(&clock));
+        // The ask limit ends an open turn whatever is running.
+        clock.pretend_elapsed(Duration::from_secs(600));
+        assert!(claude_turn_timed_out(&clock));
+        // Quiet with no open step is stalled.
+        let mut clock = SessionClock::new(86_400);
+        clock.pretend_quiet(Duration::from_secs(10 * 60));
+        assert!(claude_turn_timed_out(&clock));
     }
 
     #[test]
