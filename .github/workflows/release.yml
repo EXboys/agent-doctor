@@ -193,6 +193,9 @@ jobs:
     name: Desktop (${{ matrix.edition }} / ${{ matrix.platform }})
     needs: [lint, lint-desktop]
     runs-on: ${{ matrix.os }}
+    # Normal desktop builds finish in 12-18 min; a hung runner (apt, tool
+    # download) must turn into a fast, visible failure, not a silent stall.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -229,9 +232,15 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-22.04'
+        timeout-minutes: 10
+        env:
+          # A runner-image update (2026-11-11, v0.1.98-beta.9) started a
+          # package asking a conffile question; without this the step sat
+          # on stdin for hours with no visible log.
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \

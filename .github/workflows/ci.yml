@@ -95,6 +95,9 @@ jobs:
       - name: Install Microsoft Edge
         if: matrix.browser == 'edge'
         id: setup-edge
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           # browser-actions/setup-edge often fails on Linux: Edge Updates API
           # may omit a Stable+x64+Linux download URL. Install from Microsoft's apt repo.
@@ -118,6 +121,7 @@ jobs:
 
       - name: Install xvfb (Edge headless stability)
         if: matrix.browser == 'edge'
+        timeout-minutes: 5
         run: sudo apt-get install -y xvfb
 
       - name: CDP navigate smoke
