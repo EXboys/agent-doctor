@@ -3,7 +3,7 @@ import { reportFeedback } from "../ipc";
 import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
 import { doctorStartCards } from "./doctor-start";
 import { paintChatPlan, planStepsFromMessages } from "../plan";
-import { renderMarkdown, safeMarkdownCut } from "../markdown";
+import { markdownCutInfo, renderMarkdown, safeMarkdownCut } from "../markdown";
 import {
   cleanToolLabel,
   formatPermissionDetail,
@@ -313,14 +313,27 @@ export function createBubblesController(deps: BubblesDeps) {
       streamHeadText = "";
       streamBoxBubble = bubble;
     }
-    const cut = safeMarkdownCut(markdown);
+    const { cut, fenced } = markdownCutInfo(markdown);
     const head = markdown.slice(0, cut);
     if (head !== streamHeadText) {
       streamHeadBox!.innerHTML = head.trim() ? renderMarkdown(head) : "";
       streamHeadText = head;
     }
     const tail = markdown.slice(cut);
-    streamTailBox!.innerHTML = tail.trim() ? renderMarkdown(tail) : "";
+    const tailBox = streamTailBox!;
+    if (fenced) {
+      // A streaming fence has no safe cut inside it, so this tail re-parses
+      // whole on every paint - the long-reply jank. It is code: render it as
+      // plain text per tick, and markdown takes over exactly once when the
+      // fence closes and the cut moves past it.
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.textContent = tail;
+      pre.append(code);
+      tailBox.replaceChildren(pre);
+      return;
+    }
+    tailBox.innerHTML = tail.trim() ? renderMarkdown(tail) : "";
   }
   function paintStreamingMarkdown(bubble: HTMLElement): void {
     const now = performance.now();

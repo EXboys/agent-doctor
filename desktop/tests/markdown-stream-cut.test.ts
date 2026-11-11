@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { safeMarkdownCut } from "../src/markdown";
+import { markdownCutInfo, safeMarkdownCut } from "../src/markdown";
 
 // No safe boundary yet: a single unfinished paragraph stays entirely in the tail.
 assert.equal(safeMarkdownCut("just one line"), 0);
@@ -34,3 +34,19 @@ assert.equal(
   safeMarkdownCut("intro\n\n- item one\n\nafter list"),
   "intro\n\n- item one\n".length,
 );
+
+// An unclosed fence reports fenced=true: the streaming tail renders as
+// plain code text instead of re-parsing the whole fence every tick.
+{
+  const open = "intro\n\n```bash\nnpm install\nnpm run build\nmore lines coming";
+  const info = markdownCutInfo(open);
+  assert.equal(info.cut, "intro\n".length);
+  assert.equal(info.fenced, true);
+}
+{
+  // The closer moves the cut past the whole fence and clears the flag.
+  const closed = "intro\n\n```bash\nnpm install\n```\n\nafter the fence";
+  const info = markdownCutInfo(closed);
+  assert.equal(info.cut, "intro\n\n```bash\nnpm install\n```\n".length);
+  assert.equal(info.fenced, false);
+}

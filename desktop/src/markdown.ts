@@ -42,8 +42,12 @@ function inlineMarkdown(text: string, opts: MarkdownOptions = {}): string {
  * and not between two items of one list/quote/table (that would split the
  * block). Paseo only re-parses streaming markdown up to such an edge — the
  * completed prefix renders once and every tick repaints just the tail.
+ *
+ * `fenced` reports an unclosed fence at the cut. A streaming fence has no
+ * safe boundary inside it, so the tail keeps re-parsing the whole fence on
+ * every tick; the caller renders that tail as plain code text instead.
  */
-export function safeMarkdownCut(raw: string): number {
+export function markdownCutInfo(raw: string): { cut: number; fenced: boolean } {
   const isContinuation = (line: string): boolean =>
     /^\s{0,3}(?:[-*+]\s|\d+[.)]\s|>\s?|\|)/.test(line);
   const lines = raw.split("\n");
@@ -67,7 +71,11 @@ export function safeMarkdownCut(raw: string): number {
     if (isContinuation(lines[j]) && prev >= 0 && isContinuation(lines[prev])) continue;
     cut = start;
   }
-  return cut;
+  return { cut, fenced: fence };
+}
+
+export function safeMarkdownCut(raw: string): number {
+  return markdownCutInfo(raw).cut;
 }
 
 /**

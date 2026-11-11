@@ -700,26 +700,33 @@ export function createActivityController(deps: ActivityDeps) {
     for (const row of rows.slice(0, extra)) dropRow(row);
   }
 
-  /** Drop rows that sit outside the chat, so a long scroll never paints every step. */
+  /** Drop rows that sit outside the chat, so a long scroll never paints every step.
+   * One layout read for the whole batch: interleaving reads with removals used
+   * to reflow per row. */
   function dropOffscreenRows(list: HTMLElement, edge: "top" | "bottom"): void {
     const log = deps.logEl;
     const logRect = log.getBoundingClientRect();
-    while (list.querySelectorAll(":scope > .chat-tool-row").length > MAX_TOOL_DOM_ROWS) {
-      const row =
-        edge === "top"
-          ? list.querySelector<HTMLElement>(":scope > .chat-tool-row")
-          : list.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
-      if (!row) return;
-      const rect = row.getBoundingClientRect();
-      const outside = edge === "top" ? rect.bottom < logRect.top + 4 : rect.top > logRect.bottom - 4;
-      if (!outside) return;
-      const height = row.offsetHeight;
-      dropRow(row);
-      if (edge === "top" && height) {
-        withoutLogJump(() => {
-          log.scrollTop = Math.max(0, log.scrollTop - height);
-        });
-      }
+    const rows = [...list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row")];
+    const extra = rows.length - MAX_TOOL_DOM_ROWS;
+    if (extra <= 0) return;
+    const victims = edge === "top" ? rows.slice(0, extra) : rows.slice(-extra).reverse();
+    const rects = victims.map((row) => row.getBoundingClientRect());
+    let shift = 0;
+    let count = 0;
+    for (let i = 0; i < victims.length; i += 1) {
+      const rect = rects[i]!;
+      const outside =
+        edge === "top" ? rect.bottom < logRect.top + 4 : rect.top > logRect.bottom - 4;
+      if (!outside) break;
+      shift += rect.height;
+      count += 1;
+    }
+    if (count === 0) return;
+    for (let i = 0; i < count; i += 1) dropRow(victims[i]!);
+    if (edge === "top" && shift) {
+      withoutLogJump(() => {
+        log.scrollTop = Math.max(0, log.scrollTop - shift);
+      });
     }
   }
 
@@ -823,8 +830,17 @@ export function createActivityController(deps: ActivityDeps) {
   }
 
   // Streaming pins the log every frame; coalesce scroll work to one run per
-  // frame and never read tool-group rects more often than that.
+  // frame. Page reveals wait for the scroll to settle: mounting pages
+  // mid-scroll (and compensating scrollTop so the reader holds still) made a
+  // long transcript impossible to scroll — the wheel raced the pages, and
+  // every race round re-rendered markdown and reflowed the log. While the
+  // wheel is moving the mounted pages are enough; the edges fill in when it
+  // settles.
+  const SCROLL_SETTLE_MS = 150;
+  const GROUP_REVEAL_COOLDOWN_MS = 250;
+  const groupRevealAt = new WeakMap<HTMLDetailsElement, number>();
   let logScrollRaf = 0;
+  let logScrollIdleTimer = 0;
   deps.logEl.addEventListener(
     "scroll",
     () => {
@@ -836,21 +852,43 @@ export function createActivityController(deps: ActivityDeps) {
         const gap = log.scrollHeight - log.scrollTop - log.clientHeight;
         log.dataset.pin = gap < 64 ? "1" : "0";
         if (toolPageLock > 0) return;
-        const logRect = log.getBoundingClientRect();
-        for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
-          if (!group.open || toolPageLock > 0) continue;
-          const list = group.querySelector<HTMLElement>(".chat-tool-list");
-          if (!list) continue;
-          const rect = list.getBoundingClientRect();
-          if (rect.height < 1) continue;
-          if (rect.top > logRect.top - 24 && rect.top < logRect.top + 200) revealEarlier(group);
-          if (toolPageLock > 0) continue;
-          if (rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24) revealLater(group);
-        }
+        if (logScrollIdleTimer) window.clearTimeout(logScrollIdleTimer);
+        logScrollIdleTimer = window.setTimeout(() => {
+          logScrollIdleTimer = 0;
+          revealAtEdges();
+        }, SCROLL_SETTLE_MS);
       });
     },
     { passive: true },
   );
+
+  /** Fill pages for every group whose list edge sits in a trigger band. One
+   * page per pass; a per-group cooldown keeps a band the reader keeps
+   * hovering from paging again and again. */
+  function revealAtEdges(): void {
+    if (toolPageLock > 0) return;
+    const log = deps.logEl;
+    const logRect = log.getBoundingClientRect();
+    for (const group of log.querySelectorAll<HTMLDetailsElement>(".chat-tool-group")) {
+      if (!group.open || toolPageLock > 0) break;
+      const list = group.querySelector<HTMLElement>(".chat-tool-list");
+      if (!list) continue;
+      const rect = list.getBoundingClientRect();
+      if (rect.height < 1) continue;
+      const nearTop = rect.top > logRect.top - 24 && rect.top < logRect.top + 200;
+      const nearBottom = rect.bottom > logRect.bottom - 200 && rect.bottom < logRect.bottom + 24;
+      if (!nearTop && !nearBottom) {
+        groupRevealAt.delete(group);
+        continue;
+      }
+      const now = performance.now();
+      const last = groupRevealAt.get(group) ?? 0;
+      if (now - last < GROUP_REVEAL_COOLDOWN_MS) continue;
+      groupRevealAt.set(group, now);
+      if (nearTop) revealEarlier(group);
+      if (toolPageLock === 0 && nearBottom) revealLater(group);
+    }
+  }
 
   /** A live group past this many visible rows folds into its summary bar. */
   const LIVE_GROUP_COLLAPSE_AFTER = 6;

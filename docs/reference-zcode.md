@@ -12,6 +12,8 @@
 | 思考折叠/流式管线 | `docs/chat/reasoning-streaming-auto-collapse.md` | `desktop/src/chat/thinking.ts` |
 | 工具分组摘要 | `docs/chat/execute-tool-call-grouping.md` | `desktop/src/chat/work-trail.ts`（“执行 N 条命令”） |
 | 渲染性能预算 | `docs/chat/message-render-performance.md` | 32k 渲染上限、400 行挂载上限 |
+| 滚动停止后补页（settle scheduler） | ZCode `ConversationTimeline.tsx`（虚拟器不做滚动期挂载）；Paseo `agent-stream/history-start-settle-scheduler.ts` | `desktop/src/chat/activity.ts`（revealAtEdges：滚动 settle 150ms 后翻页 + 每组 250ms 冷却） |
+| 围栏尾巴纯文本流式渲染 | ZCode「冻结历史 + 尾轮」分区（流式帧只算尾轮且尾部有界）；Paseo 头尾分离 | `desktop/src/chat/bubbles.ts`（`markdownCutInfo` fenced → 尾巴 `pre>code` 纯文本，闭合后 markdown 一次成型） |
 
 ## 待继续参考的主题
 
