@@ -1,5 +1,5 @@
 import { focusMainTab } from "./ipc";
-import { claudeImportEntry } from "./chat/claude-import";
+import { transcriptImportEntry } from "./chat/transcript-import";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { mountReplyChangeCard } from "./chat/reply-changes";
 import { omitBareToolStarts } from "./chat/tool-records";
@@ -543,7 +543,7 @@ export function wireChatControllers(): void {
     sessionListEl,
     renderImportEntry: (listEl) =>
       listEl.append(
-        claudeImportEntry({
+        transcriptImportEntry({
           onImported: (session) => {
             chatState.store.sessions.unshift(session);
             chatState.store.activeId = session.id;

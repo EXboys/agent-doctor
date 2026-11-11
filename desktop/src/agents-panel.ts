@@ -332,7 +332,14 @@ function doctorCardHtml(solo = false): string {
   );
   const actions = `
     <button type="button" class="btn-primary" data-action="ask-doctor">${t("chat.emptyDoctorAction")}</button>
-    <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>`;
+    <button type="button" class="btn-secondary" data-action="go-provider">${t("runtime.doctorWire")}</button>
+    ${
+      // 「去看其他 Agent」lives on the actions row, and only before the first
+      // third-party agent is installed — once one is managed here it goes.
+      solo
+        ? `<button type="button" class="btn-secondary" data-action="open-agent-catalog">${t("runtimes.soloSeeOthers")}</button>`
+        : ""
+    }`;
   // The only agent on the machine gets the large card, the same treatment a
   // lone CLI runtime gets — the built-in agent is not a lesser one. The block
   // is always painted and `home-hero.ts` shows it, so a multi-agent home can

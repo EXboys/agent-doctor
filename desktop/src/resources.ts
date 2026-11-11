@@ -309,6 +309,9 @@ export function paintVisibleSection(): void {
   }
   if (resourcesState.activeSection === "tools") {
     renderToolsList();
+    // The login banner is a local read: re-check it on every paint so a
+    // fresh login elsewhere shows up here without waiting for a reload.
+    if (personalEdition && isStoreScope()) void refreshMallAccount();
     return;
   }
   if (resourcesState.activeSection === "browser") {
@@ -319,6 +322,7 @@ export function paintVisibleSection(): void {
     return;
   }
   renderResourcesList();
+  if (personalEdition && isStoreScope()) void refreshMallAccount();
 }
 
 export async function refreshVisible(): Promise<void> {

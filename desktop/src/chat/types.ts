@@ -162,6 +162,11 @@ export interface ChatSession {
   autoApprove?: boolean;
   /** Feishu conversation this chat belongs to. One conversation, one chat. */
   channelKey?: string | null;
+  /**
+   * Server archive cursor for a phone conversation: the archive `updatedAt`
+   * this chat last merged. The hello sends it so the site replays only what
+   * moved; absent means the chat never synced and asks for everything.
+   */
   /** Set when the user pins this chat from the sidebar menu. Pinned rows sort first. */
   pinnedAt?: number | null;
 }
@@ -177,6 +182,27 @@ export type PendingPermission = {
   toolName: string;
   detail: string;
   messageId: string;
+};
+
+/** Where an importable conversation can come from. One id per agent runtime. */
+export type TranscriptImportSourceId = "claude-code" | "codex";
+
+/** One importable transcript found in an agent CLI's local store. */
+export type TranscriptImportCandidate = {
+  path: string;
+  session_id: string;
+  title: string;
+  preview: string;
+  updated_at: number;
+  size_bytes: number;
+};
+
+/** What importing one of those transcripts yields. */
+export type TranscriptImportPayload = {
+  session_id: string;
+  title: string;
+  truncated: boolean;
+  messages: ChatMessage[];
 };
 
 export const STORAGE_KEY = "agent-doctor.chat.sessions.v2";

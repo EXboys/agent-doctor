@@ -1,5 +1,4 @@
 mod chat_store;
-mod claude_import;
 mod deep_diagnose;
 mod knowledge;
 mod knowledge_sync;
@@ -11,13 +10,13 @@ mod repair;
 mod skills;
 mod speech;
 mod subagents;
+mod transcript_import;
 mod versions;
 mod wiring;
 mod workspace;
 mod workspace_files;
 
 pub use chat_store::*;
-pub use claude_import::*;
 pub use deep_diagnose::*;
 pub use knowledge::*;
 pub use knowledge_sync::*;
@@ -31,6 +30,7 @@ pub use repair::*;
 pub use skills::*;
 pub use speech::*;
 pub use subagents::*;
+pub use transcript_import::*;
 pub use versions::*;
 pub use wiring::*;
 pub use workspace::*;

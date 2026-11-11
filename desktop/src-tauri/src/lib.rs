@@ -661,8 +661,8 @@ fn send_permission_reply(
         // "Always allow" variants carry the chosen PermissionUpdate[] so
         // Claude Code records the rule.
         let updated: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|error| format!("bad updatedPermissions: {error}"))?;
-        control.respond_permission_with(request_id, allow, updated)?;
+            .map_err(|error| anyhow::anyhow!("bad updatedPermissions: {error}"))?;
+        control.respond_permission_with(request_id, allow, Some(updated))?;
     } else {
         control.respond_permission(request_id, allow)?;
     }
@@ -966,8 +966,8 @@ pub fn run() {
             get_app_locale_command,
             set_app_locale_command,
             load_chat_store_command,
-            list_claude_import_sessions_command,
-            import_claude_session_command,
+            list_import_sessions_command,
+            import_session_command,
             save_chat_store_command,
             channel_link::teamups_channel_connected_command,
             channel_link::teamups_channel_pref_command,

@@ -10572,8 +10572,8 @@ html[data-theme="dark"] .chat-feedback-card {
   border-color: var(--accent);
 }
 
-/* Claude Code transcript importer: sidebar entry + candidate picker. */
-.chat-import-claude {
+/* Transcript importer: sidebar entry, source tabs, candidate picker. */
+.chat-import-entry {
   appearance: none;
   align-self: stretch;
   margin: 4px 8px;
@@ -10588,9 +10588,37 @@ html[data-theme="dark"] .chat-feedback-card {
   text-align: center;
 }
 
-.chat-import-claude:hover {
+.chat-import-entry:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+
+.chat-import-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 8px;
+}
+
+.chat-import-tab {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.chat-import-tab:hover {
+  color: var(--text);
+}
+
+.chat-import-tab.is-active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .chat-import-overlay {

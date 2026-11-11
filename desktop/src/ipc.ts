@@ -8,6 +8,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { readBrowserToolsEnabled, readComputerUseEnabled } from "./chat/hands-pref";
 import type { PromptSessionReport } from "./chat/types";
 import type {
+  TranscriptImportCandidate,
+  TranscriptImportPayload,
+} from "./chat/types";
+import type {
   BrowserMcpDiagnoseWireReport,
   DoctorReport,
   EngineRegisterStatus,
@@ -358,6 +362,13 @@ export function teamupsChannelChats(
   return invoke("teamups_channel_chats_command", { chats: { chats, projects } });
 }
 
+/**
+ * Per-conversation archive cursors (phone conversation id -> merged
+ * `updatedAt`). The next hello carries them, so the site replays only the
+ * conversations that moved; an empty map asks for everything it kept.
+ */
+}
+
 /** One step of a Feishu message, written to this computer's channel log. */
 export function teamupsChannelNote(id: string, step: string): void {
   void invoke("teamups_channel_note_command", { id, step }).catch(() => {});
@@ -553,6 +564,19 @@ export function rewireCurrentMode(args: {
 
 export function listInstalledAskAgents(): Promise<Array<{ id: string; label: string }>> {
   return invoke("list_installed_ask_agents_command");
+}
+
+export function listTranscripts(
+  source: string,
+): Promise<Array<TranscriptImportCandidate>> {
+  return invoke("list_import_sessions_command", { source });
+}
+
+export function importTranscript(
+  source: string,
+  path: string,
+): Promise<TranscriptImportPayload> {
+  return invoke("import_session_command", { source, path });
 }
 
 export function runDoctor(): Promise<DoctorReport> {

@@ -276,6 +276,8 @@ const ACTION_ICON = {
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 8h4M7 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   uninstall:
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  skills:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l2.2 5.2L19 10l-4.8 1.8L12 17l-2.2-5.2L5 10l4.8-1.8L12 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M18.5 15.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" fill="currentColor" stroke="none"/></svg>',
 } as const;
 
 function actionButton(
@@ -297,6 +299,9 @@ export function renderStandardRuntimeActions(_runtimeId: string): string {
     }),
     actionButton("secondary", "ask-session", ACTION_ICON.ask, t("runtime.ask"), {
       title: t("runtime.askHint"),
+    }),
+    actionButton("secondary", "open-resources-skills", ACTION_ICON.skills, t("runtime.addSkills"), {
+      title: t("runtime.addSkillsHint"),
     }),
     actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
       title: t("runtime.uninstallHint"),
@@ -388,13 +393,6 @@ function renderSoloHero(runtime: RuntimeDoctorResult): string {
         <p class="runtime-solo-kicker">${escapeHtml(t("runtimes.soloKicker"))}</p>
         <h2 class="runtime-tab-title">${escapeHtml(runtimeListName(runtime))}</h2>
         ${blurb ? `<p class="runtime-solo-blurb">${escapeHtml(blurb)}</p>` : ""}
-      </div>
-    </div>
-    <div class="runtime-solo-next">
-      <p>${escapeHtml(t("runtimes.soloNext"))}</p>
-      <div class="runtime-solo-next-actions">
-        <button type="button" class="btn-secondary" data-action="open-resources-skills">${escapeHtml(t("runtimes.soloAddSkills"))}</button>
-        <button type="button" class="btn-ghost" data-action="open-agent-catalog">${escapeHtml(t("runtimes.soloSeeOthers"))}</button>
       </div>
     </div>
   `;

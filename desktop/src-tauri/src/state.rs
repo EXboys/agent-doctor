@@ -206,6 +206,7 @@ mod tests {
             detail: "ls".into(),
             input_json: "{}".into(),
             input_mode: "choice".into(),
+            suggestions_json: None,
         }
     }
 

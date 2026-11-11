@@ -190,22 +190,22 @@ export async function refreshMallAccount(): Promise<void> {
 }
 
 export async function loadMall(): Promise<void> {
+  // The account is a local read; paint the login banner as soon as it lands
+  // instead of holding it behind the catalog's network fetch — a signed-in
+  // banner must not wait on, or flash signed-out behind, a slow catalog.
+  void refreshMallAccount();
   try {
-    const [catalog, account] = await Promise.all([
-      listTeamupsMallCatalog(),
-      teamupsAccountStatus().catch(() => null),
-    ]);
-    resourcesState.lastMallCatalog = catalog;
-    resourcesState.lastTeamupsAccount = account;
-    applyAccountOwnership();
-    if (skillsPanelActive()) {
-      renderResourcesList();
-    }
+    resourcesState.lastMallCatalog = await listTeamupsMallCatalog();
   } catch (error) {
     resourcesState.lastMallCatalog = null;
     setSkillsFootnote(withErrorDetail(t("resources.mallLoadFailed"), error));
     renderMallAccount();
     renderSkillsList();
+    return;
+  }
+  applyAccountOwnership();
+  if (skillsPanelActive()) {
+    renderResourcesList();
   }
 }
 
