@@ -34,7 +34,11 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
     </summary>
     <div class="chat-thinking-body"></div>
   `;
-  block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = text;
+  // A live block renders only the tail (see liveTail); the folded block
+  // after the seal always carries the full text for later reading.
+  block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = opts?.live
+    ? liveTail(text)
+    : text;
   // While thinking the row stays open so the peek keeps streaming; once done
   // the block folds into its header row and that row opens it again.
   block.querySelector("summary")?.addEventListener("click", (event) => {
