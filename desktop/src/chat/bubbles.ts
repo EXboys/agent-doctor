@@ -926,8 +926,9 @@ export function createBubblesController(deps: BubblesDeps) {
   /** One chunked page of older rows (Paseo's history-start pagination):
    * batches render across frames, the reader compensation runs per prepend -
    * the old "flush everything" path rendered a multi-thousand-row transcript
-   * inside one synchronous loop, which froze the window for minutes. */
-  const HISTORY_PAGE_ROWS = 32;
+   * inside one synchronous loop, which froze the window for minutes.
+   * 50 rows is Telegram Android's paging size (happy's telegram-chat.md). */
+  const HISTORY_PAGE_ROWS = 50;
   let pageTargetCursor: number | null = null;
   let seekTargetId: string | null = null;
   let seekDone: ((found: boolean) => void) | null = null;
