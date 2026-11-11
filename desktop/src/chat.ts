@@ -581,12 +581,22 @@ export function flushStorePersist(): void {
   saveStore();
 }
 
-/** Avoid syncing the full transcript to disk on every streaming token or tool step. */
-export function scheduleStorePersist(delayMs = 500): void {
+/** Avoid syncing the full transcript to disk on every streaming token or tool step.
+ *
+ * The write is a synchronous stringify of the whole store plus large
+ * localStorage writes, so it runs at most every 1.5s while streaming (turn
+ * end flushes immediately), and even then the write itself waits for an
+ * idle slice — a mid-stream frame must never carry it. The cost of waiting
+ * is a harder kill losing up to ~1.5s of tail in the local mirror. */
+export function scheduleStorePersist(delayMs = 1500): void {
   if (chatState.storePersistTimer) window.clearTimeout(chatState.storePersistTimer);
   chatState.storePersistTimer = window.setTimeout(() => {
     chatState.storePersistTimer = 0;
-    saveStore();
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => saveStore(), { timeout: 1200 });
+    } else {
+      saveStore();
+    }
   }, delayMs);
 }
 

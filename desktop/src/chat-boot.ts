@@ -149,6 +149,7 @@ import { orderedProjectNames } from "./chat/project-order";
 import { syncKnowledgeFolder } from "./chat/knowledge-sync";
 import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled } from "./chat/image-text";
+import { startPerformanceProbe } from "./chat/perf-probe";
 import { wireChatControllers } from "./chat-wire";
 
 function transcriptOf(session: ReturnType<typeof activeSession>): { title: string; text: string } | null {
@@ -176,6 +177,17 @@ export function bootChat(): void {
   };
   applyThemePreference(readThemePreference(), false);
   watchSystemTheme();
+  // Count >50ms main-thread gaps instead of trusting feel; a bad minute is
+  // echoed into the runtime debug log, and window.__AD_PERF.report() reads
+  // the full ring in the console.
+  startPerformanceProbe({
+    getRows: () => logEl.childElementCount,
+    onReport: (line) => {
+      void import("./ipc")
+        .then((ipc) => ipc.adDebug(`perf: ${line}`))
+        .catch(() => {});
+    },
+  });
   bindChatSettings(() => applyI18n());
   bindSidebarCollapse();
   bindLayoutResize();
