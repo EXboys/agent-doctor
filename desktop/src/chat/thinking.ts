@@ -4,6 +4,22 @@ import { noteThinkingLive, placeProcessBlock } from "./work-trail";
 import type { ChatMessage } from "./types";
 
 const MAX_THINKING_CHARS = 12_000;
+/**
+ * While live, only the tail of the thinking text is in the DOM: the peek is
+ * pinned to the bottom, so the earlier text is scrolled out of view anyway.
+ * Renders O(tail) per frame instead of O(full text); the full text stays in
+ * the session message and comes back in the folded block after the seal.
+ */
+const THINKING_TAIL_CHARS = 600;
+
+/** The trailing slice of the thinking text, cut above a surrogate pair. */
+function liveTail(text: string): string {
+  if (text.length <= THINKING_TAIL_CHARS) return text;
+  let start = text.length - THINKING_TAIL_CHARS;
+  const code = text.charCodeAt(start);
+  if (code >= 0xdc00 && code <= 0xdfff) start -= 1; // land on the high surrogate
+  return text.slice(start);
+}
 
 export function renderThinkingBlock(text: string, opts?: { id?: string; live?: boolean }): HTMLDetailsElement {
   const block = document.createElement("details");
@@ -120,7 +136,7 @@ export function createThinkingController(deps: ThinkingDeps) {
     // The peek keeps showing the newest lines unless the reader scrolled up inside it.
     const follow = block.dataset.follow === "1" || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
     delete block.dataset.follow;
-    body.textContent = text;
+    body.textContent = liveTail(text);
     if (follow) body.scrollTop = body.scrollHeight;
     followChatLog(deps.logEl);
   }
@@ -138,6 +154,9 @@ export function createThinkingController(deps: ThinkingDeps) {
     if (block) {
       block.classList.remove("is-live");
       block.open = false;
+      // The live body only carried the tail; restore the full text so the
+      // folded block still reads complete when expanded later.
+      block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = text;
       block.querySelector<HTMLElement>(".chat-thinking-label")!.textContent = elapsed
         ? t("chat.thinkingDone", { elapsed })
         : t("chat.thinkingSaved");
