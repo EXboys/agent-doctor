@@ -1,6 +1,8 @@
 # Agent Doctor
 
-**Talk to the agents on this computer, and repair them when they break.**
+**Everyone's building new agents. We keep yours working.**
+
+Install · Repair · Run — OpenClaw, Hermes, Claude Code, Codex, DeepSeek Harness, one place.
 
 Agent Doctor discovers OpenClaw, Hermes, DeepSeek Harness, Claude Code, Codex, and related runtimes. The desktop chat works inside a project. When something is misconfigured, redacted probes find it, and repairs run from backups, typed actions, and an audit report.
 
@@ -122,6 +124,10 @@ Each runtime has its own install path, gateway settings, skills manifest, policy
 ---
 
 ## 中文
+
+**别人都在造 agent，我们让你的 agent 靠得住。**
+
+装得上 · 修得好 · 用得久 —— OpenClaw、Hermes、Claude Code、Codex、DeepSeek Harness，一站管好。
 
 **Agent Doctor** 在本机跟 Agent 对话，也能 **诊断、修复、隔离** 这些 Runtime（OpenClaw、Hermes、DeepSeek Harness、Claude Code、Codex 等）。
 

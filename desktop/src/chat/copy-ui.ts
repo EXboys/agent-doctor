@@ -1,3 +1,4 @@
+import { perfMark } from "./perf-probe";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import { highlightCode, isPlainFenceLanguage, verticalWheelStaysInCodeBlock } from "./code-highlight";
@@ -189,12 +190,19 @@ function bindCodeBlockWheel(pre: HTMLElement): void {
 
 let pendingCodeObserver: IntersectionObserver | null = null;
 
+/** Tokenizing is O(text) with a big constant; past this size the block
+ * renders plain (Telegram cuts over-long parts at 900dp for the same
+ * reason) and the next scroll no longer freezes on one block. */
+const HIGHLIGHT_MAX_CHARS = 20_000;
+
 function highlightWrappedCode(wrap: HTMLElement): void {
   if (wrap.dataset.highlighted === "1") return;
   const code = wrap.querySelector("pre code");
   const language = wrap.dataset.language ?? "";
-  if (code && language && !isPlainFenceLanguage(language)) {
-    code.innerHTML = highlightCode(code.textContent ?? "", language);
+  const text = code?.textContent ?? "";
+  if (code && language && !isPlainFenceLanguage(language) && text.length <= HIGHLIGHT_MAX_CHARS) {
+    perfMark("code-highlight");
+    code.innerHTML = highlightCode(text, language);
   }
   wrap.dataset.highlighted = "1";
   delete wrap.dataset.highlightPending;

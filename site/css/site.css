@@ -381,6 +381,14 @@ h1 em {
   font-size: 17.5px;
 }
 
+.triple {
+  margin: 16px 0 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;

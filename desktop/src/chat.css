@@ -7560,11 +7560,18 @@ body.chat-skill-dragging .chat-res-grip {
   padding: 18px 16px 12px;
   -webkit-mask-image: none;
   mask-image: none;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  /* Block layout, not flex: WebKit skips layout/render for
+     content-visibility:auto rows only in the normal flow. As flex children
+     every row was fully laid out on any invalidation, which is what made a
+     long session's scroll freeze on the Mac. The old gap: 10px lives on as
+     the sibling margin below (same between-rows-only spacing). */
+  display: block;
   border: none;
   box-shadow: none;
+}
+
+.chat-log > * + * {
+  margin-top: 10px;
 }
 
 /* Windows scrollbars take width from the text. Reserve that strip so a growing
@@ -7620,16 +7627,14 @@ html[data-os="windows"] .chat-log {
 .chat-log:has(> .chat-start)::before,
 .chat-log:has(> .chat-start)::after {
   content: "";
-  flex: 1 1 0;
+  display: block;
   min-height: 0;
 }
 
+/* The old flex-grow pair (0.42 / 1.15) sat the cards ~27% down the empty
+   chat; block layout needs explicit spacers instead. */
 .chat-log:has(> .chat-start)::before {
-  flex-grow: 0.42;
-}
-
-.chat-log:has(> .chat-start)::after {
-  flex-grow: 1.15;
+  height: 32vh;
 }
 
 .chat-bubble {
@@ -10561,8 +10566,9 @@ html[data-theme="dark"] .chat-feedback-card {
 /* The "show earlier" button at the top of a capped transcript. */
 .chat-history-earlier {
   appearance: none;
-  align-self: center;
-  margin: 6px 0 2px;
+  display: block;
+  width: fit-content;
+  margin: 6px auto 2px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--panel);

@@ -1060,6 +1060,7 @@ export function createBubblesController(deps: BubblesDeps) {
     covered: { hidden: Set<number>; failedLogs: Set<number> },
     runtime: ChatSession["runtime"],
   ): void {
+    perfMark("history-render");
     for (let i = start; i < end; ) {
       const message = messages[i];
       if (message.role === "tool" || message.role === "thinking") {
