@@ -182,14 +182,31 @@ export function bootChat(): void {
   // Count >50ms main-thread gaps instead of trusting feel; a bad minute is
   // echoed into the runtime debug log, and window.__AD_PERF.report() reads
   // the full ring in the console.
-  startPerformanceProbe({
-    getRows: () => logEl.childElementCount,
-    onReport: (line) => {
-      void import("./ipc")
-        .then((ipc) => ipc.adDebug(`perf: ${line}`))
-        .catch(() => {});
-    },
-  });
+  void import("@tauri-apps/api/app")
+    .then((app) => app.getVersion())
+    .then((version) => {
+      startPerformanceProbe({
+        version,
+        getRows: () => logEl.childElementCount,
+        onReport: (line) => {
+          void import("./ipc")
+            .then((ipc) => ipc.adDebug(`perf: ${line}`))
+            .catch(() => {});
+        },
+      });
+    })
+    .catch(() => {
+      // 版本拿不到也照常启动探针，只是行里不带版本号。
+      startPerformanceProbe({
+        version: "?",
+        getRows: () => logEl.childElementCount,
+        onReport: (line) => {
+          void import("./ipc")
+            .then((ipc) => ipc.adDebug(`perf: ${line}`))
+            .catch(() => {});
+        },
+      });
+    });
   bindChatSettings(() => applyI18n());
   bindSidebarCollapse();
   bindLayoutResize();

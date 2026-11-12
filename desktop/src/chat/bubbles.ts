@@ -21,7 +21,7 @@ import {
   splitToolActivity,
   toolSignature,
 } from "./format";
-import { followChatLog, lockChatRowHeights, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
+import { followChatLog, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
 import { completedTrail } from "./work-trail";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
@@ -244,7 +244,6 @@ export function createBubblesController(deps: BubblesDeps) {
           ? deps.runTargetSession().messages.find((message) => message.id === id)
           : undefined;
         syncAssistantTime(bubble, stamped?.at, false);
-        lockChatRowHeights([assistantMsgWrap(bubble)], true);
       }
     }
     // Every seal is a segment boundary: the reply text that comes after a
@@ -901,7 +900,7 @@ export function createBubblesController(deps: BubblesDeps) {
       const delta = log.scrollHeight - before;
       log.scrollTop = pinned ? log.scrollHeight : top + Math.max(0, delta);
     });
-    lockChatRowHeights(nodes);
+    // Row heights ride on WebKit's contain-intrinsic "auto" memory; no measuring.
     // The rows have been measured. A hand-set "visible" would keep them from
     // ever being skipped again, and a transcript that is never skipped is a
     // transcript that is slow to lay out on every line that arrives.

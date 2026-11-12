@@ -80,6 +80,9 @@ export function summarizeLongTasks(
 
 export function startPerformanceProbe(input: {
   getRows: () => number;
+  /** App version, prepended to every report line so accumulated logs
+   * self-identify which build wrote them. */
+  version: string;
   onReport?: (line: string) => void;
 }): void {
   const samples: LongTaskSample[] = [];
@@ -113,7 +116,8 @@ export function startPerformanceProbe(input: {
       const line = summarizeLongTasks(samples, Date.now());
       if (line) {
         lastReportAt = Date.now();
-        input.onReport?.(line);
+        const stamp = new Date().toISOString().slice(11, 19);
+        input.onReport?.(`[${input.version}] ${stamp} ${line}`);
       }
     }
     schedule();

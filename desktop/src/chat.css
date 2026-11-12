@@ -7603,11 +7603,16 @@ html[data-os="windows"] .chat-log {
   border-color: var(--accent);
 }
 
-/* Rows keep their real height. A fixed stand-in made a short sentence between
-   tools 88px tall, so the next tool sat in the empty part of that box. Each row
-   records the height it really has (see lockChatRowHeights), so a row that
-   scrolled out of sight is skipped while it is off screen and still takes up
-   exactly the same room when it comes back. */
+/* Each row is an independent layout root: a change inside one row (hover,
+   fold, age tick, a streaming edit) must not reflow the whole column of a
+   long session. Layout (not paint) containment - paint would clip the turn
+   owner's action row that hangs below the bubble; the absolute
+   .chat-msg-actions already resolves against the row wrapper.
+   content-visibility was REMOVED (2026-11-12, M1/macOS 27 field data): on
+   WKWebView it did not reliably skip flex-column rows, and its per-layout
+   relevance pass made every invalidation cost seconds on long sessions -
+   single 55-60s frames traced to row measuring. The 80-row mount window
+   bounds the DOM instead; pinned rows render normally. */
 .chat-log > :is(
   .chat-msg,
   .chat-work,
@@ -7620,30 +7625,7 @@ html[data-os="windows"] .chat-log {
   .chat-reply-changes,
   .chat-plan
 ) {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto 56px;
-  /* Independent layout root per row: a change inside one row (hover, fold,
-     age tick, a streaming edit) must not reflow the whole flex column of a
-     long session. Layout (not paint) containment - paint would clip the
-     turn owner's action row that hangs below the bubble. The absolute
-     .chat-msg-actions already resolves against the row wrapper. */
   contain: layout style;
-  flex-shrink: 0;
-}
-
-/* The answer that is still coming in grows with every word. A stand-in would
-   hold the room of an earlier, shorter text, so it is never skipped. */
-.chat-log > .chat-bubble.is-streaming {
-  content-visibility: visible;
-}
-
-/* The turn owner's copy/time/rating row paints 30px BELOW the reply's box.
-   content-visibility: auto implies paint containment, and containment clips
-   every descendant to the row's bounds — the action row laid out but never
-   painted, so hover showed nothing. The owner stays fully painted; history
-   rows keep the skip. */
-.chat-log > .chat-msg-assistant.is-turn-owner {
-  content-visibility: visible;
 }
 
 /* A new chat lifts the two start cards into the open area, clear of the composer. */
