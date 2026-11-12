@@ -54,7 +54,7 @@ export function turnSegmentRecords(all: ToolRecord[], shownKeys: Iterable<string
   return all.slice(start);
 }
 
-const SAVED_OUTPUT_CHARS = 1_500;
+const SAVED_OUTPUT_CHARS = 32_000;
 const SAVED_LINES = 80;
 const SAVED_LINE_CHARS = 400;
 
@@ -129,7 +129,7 @@ export function appendRunLogMessage(messages: ChatMessage[], text: string, newId
   messages.push({ id: newId(), role: "meta", content: detail, at: Date.now(), log: true });
 }
 
-const SAVED_LOG_CHARS = 20_000;
+const SAVED_LOG_CHARS = 64_000;
 
 /**
  * Put a step on this turn's tool messages. A result merges into the message with the

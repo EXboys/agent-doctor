@@ -64,7 +64,7 @@ export function isLogMessage(message: { role: string; content: string; log?: boo
   return isRuntimeLog(message.content) && !COMMAND_TAIL.test(stripLogAnsi(message.content).trim());
 }
 
-const RUN_LOG_CHARS = 20_000;
+const RUN_LOG_CHARS = 64_000;
 
 /** This turn's collapsed log row: after the last user message, if there is one yet. */
 function currentRunLog(logEl: HTMLElement): HTMLElement | null {
@@ -192,6 +192,23 @@ export function appendRunLog(logEl: HTMLElement, raw: string, summaryText = t("c
   pre.className = "chat-permission-detail";
   pre.textContent = text;
   more.append(moreSummary, pre);
+  // The tail kept here can be hundreds of lines; a copy button is how the
+  // person actually collects it (the mirror keeps 64k of this row).
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "chat-log-copy";
+  copy.textContent = t("chat.logCopyOutput");
+  copy.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void navigator.clipboard.writeText(pre.textContent ?? "").then(() => {
+      copy.textContent = t("chat.copied");
+      window.setTimeout(() => {
+        copy.textContent = t("chat.logCopyOutput");
+      }, 1200);
+    }).catch(() => {});
+  });
+  moreSummary.append(copy);
   row.append(icon, summary, more);
   logEl.appendChild(row);
   return row;

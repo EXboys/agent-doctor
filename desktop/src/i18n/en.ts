@@ -482,6 +482,8 @@ export const en = {
     "chat.copyCode": "Copy",
     "chat.codePlain": "Plain text",
     "chat.copied": "Copied",
+    "chat.toolCopyOutput": "Copy output",
+    "chat.logCopyOutput": "Copy log",
     "chat.copyFailed": "Could not copy",
     "chat.replyJustNow": "just now",
     "chat.replyMinutesAgo": "{n}m ago",

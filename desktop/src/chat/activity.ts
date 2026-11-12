@@ -418,12 +418,41 @@ export function applyToolRow(row: HTMLElement, text: string, step?: ToolStep): v
 export function createToolRowElement(text: string, step?: ToolStep): HTMLDetailsElement {
   const row = document.createElement("details");
   row.className = "chat-activity is-done kind-tool chat-tool-row";
-  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-subagent" hidden><span class="chat-subagent-mark" aria-hidden="true"></span><span class="chat-subagent-kind"></span><span class="chat-subagent-name" hidden></span><span class="chat-subagent-task" hidden></span></span><span class="chat-tool-repeat" hidden></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
+  row.innerHTML = `<summary class="chat-tool-row-summary"><span class="chat-tool-step" aria-hidden="true"></span><span class="chat-tool-name chat-activity-text"></span><span class="chat-subagent" hidden><span class="chat-subagent-mark" aria-hidden="true"></span><span class="chat-subagent-kind"></span><span class="chat-subagent-name" hidden></span><span class="chat-subagent-task" hidden></span></span><span class="chat-tool-repeat" hidden></span><button type="button" class="chat-tool-preview" hidden></button><span class="chat-tool-folder" hidden></span><span class="chat-tool-changes" hidden></span><span class="chat-tool-status" hidden></span><button type="button" class="chat-tool-copy" hidden title=""></button><span class="chat-tool-chevron" hidden aria-hidden="true"></span></summary><pre class="chat-tool-cmd" hidden></pre><div class="chat-tool-diff" hidden></div>`;
   row.querySelector("summary")?.addEventListener("click", (event) => {
     if (!row.dataset.expandable) event.preventDefault();
   });
+  bindToolRowCopy(row, text);
   applyToolRow(row, text, step);
   return row;
+}
+
+/** Full stored output for one row, for the copy button. The page body shows
+ * a clipped slice; this keeps what the person would collect. */
+const fullToolOutputs = new WeakMap<HTMLElement, string>();
+
+function bindToolRowCopy(row: HTMLDetailsElement, text: string): void {
+  if (text.trim().length < 400) return;
+  fullToolOutputs.set(row, text);
+  const button = row.querySelector<HTMLButtonElement>(".chat-tool-copy");
+  if (!button) return;
+  button.hidden = false;
+  button.title = t("chat.toolCopyOutput");
+  button.textContent = t("chat.toolCopyOutput");
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const full = fullToolOutputs.get(row) ?? "";
+    void navigator.clipboard
+      .writeText(full)
+      .then(() => {
+        button.textContent = t("chat.copied");
+        window.setTimeout(() => {
+          button.textContent = t("chat.toolCopyOutput");
+        }, 1200);
+      })
+      .catch(() => {});
+  });
 }
 
 export { toolRecordKey, type ToolRecord } from "./tool-records";

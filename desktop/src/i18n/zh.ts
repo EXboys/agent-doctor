@@ -482,6 +482,8 @@ export const zh = {
     "chat.copyCode": "复制",
     "chat.codePlain": "纯文本",
     "chat.copied": "已复制",
+    "chat.toolCopyOutput": "复制输出",
+    "chat.logCopyOutput": "复制日志",
     "chat.copyFailed": "复制失败",
     "chat.replyJustNow": "刚刚",
     "chat.replyMinutesAgo": "{n}分钟前",

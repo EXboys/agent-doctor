@@ -207,7 +207,12 @@ check("the first step takes over the status line saved for it", messages.length 
 storeToolStep(messages, { id: "s", status: "done", output: "x".repeat(4000) }, null, newId);
 const saved = messages[1]?.step;
 check("its result merges into the same message", messages.length === 2 && saved?.status === "done" && saved?.command === "git status", saved);
-check("saved output is trimmed", (saved?.output?.length ?? 0) < 2000, saved?.output?.length);
+// A 500-line log (~20-50k chars) must survive storage intact for the copy
+// button; only truly huge outputs are bounded, at 32k.
+check("saved output keeps 500-line logs intact", (saved?.output?.length ?? 0) === 4000, saved?.output?.length);
+storeToolStep(messages, { id: "s", status: "done", output: "x".repeat(40_000) }, null, newId);
+const savedBig = messages[1]?.step;
+check("huge output is bounded at 32k", (savedBig?.output?.length ?? 0) > 32_000 && (savedBig?.output?.length ?? 0) < 32_100, savedBig?.output?.length);
 
 messages.push({ id: "a1", role: "assistant", content: "", at: 3 });
 storeToolStep(messages, { id: "e", kind: "edit", status: "running", path: "a.ts", additions: 1 }, "a1", newId);

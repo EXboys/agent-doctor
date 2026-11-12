@@ -7580,6 +7580,29 @@ html[data-os="windows"] .chat-log {
   scrollbar-gutter: stable;
 }
 
+/* Collect buttons on tool rows and runtime logs: copy the full stored
+   output (32k/64k tails) without expanding anything. */
+.chat-log .chat-tool-copy,
+.chat-log .chat-log-copy {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 1px 8px;
+  margin-left: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-log .chat-tool-copy:hover,
+.chat-log .chat-log-copy:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 /* Rows keep their real height. A fixed stand-in made a short sentence between
    tools 88px tall, so the next tool sat in the empty part of that box. Each row
    records the height it really has (see lockChatRowHeights), so a row that
