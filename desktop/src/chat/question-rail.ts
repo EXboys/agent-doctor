@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { perfMark } from "./perf-probe";
 import { releaseChatFollow } from "./activity";
 import { currentQuestionId, questionMarks, type QuestionMark, type QuestionSource } from "./question-marks";
 
@@ -198,6 +199,7 @@ function refreshOpenCard(marks: QuestionMark[]): void {
 
 /** Fixed ticks for this chat's questions. Hidden until there are two. */
 export function syncQuestionRail(messages: QuestionSource[], log: HTMLElement): void {
+  perfMark("question-rail");
   const rail = railEl();
   const ticks = ticksEl();
   if (!rail || !ticks) return;

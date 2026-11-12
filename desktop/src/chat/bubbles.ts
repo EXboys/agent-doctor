@@ -4,6 +4,7 @@ import { clearEmptyChatStart, sessionHasChatContent } from "./empty-start";
 import { doctorStartCards } from "./doctor-start";
 import { paintChatPlan, planStepsFromMessages } from "../plan";
 import { markdownCutInfo, renderMarkdown, safeMarkdownCut } from "../markdown";
+import { perfMark } from "./perf-probe";
 import {
   cleanToolLabel,
   formatPermissionDetail,
@@ -554,6 +555,7 @@ export function createBubblesController(deps: BubblesDeps) {
     return joinAssistantTurnCopy(parts);
   }
   function syncTurnCopyButtons(): void {
+    perfMark("turn-copy");
     const children = Array.from(deps.logEl.children);
     const roles = children.map((child) => {
       if (child.classList.contains("chat-msg-user")) return "user";
@@ -934,6 +936,7 @@ export function createBubblesController(deps: BubblesDeps) {
   let seekDone: ((found: boolean) => void) | null = null;
 
   function loadEarlierPage(): void {
+    perfMark("load-earlier-page");
     if (!historyJob || historyJob.token !== historyToken || historyJob.cursor <= 0) {
       deps.logEl.querySelector(".chat-history-earlier")?.remove();
       return;
@@ -974,6 +977,7 @@ export function createBubblesController(deps: BubblesDeps) {
     done?.(found);
   }
   function pumpHistory(): void {
+    perfMark("history-pump");
     historyFrame = 0;
     if (!historyJob || historyJob.token !== historyToken) return;
     const started = performance.now();

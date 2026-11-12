@@ -111,6 +111,7 @@ import {
   applyChatTheme as applyChatThemeBase,
   currentChatTheme,
 } from "./chat/theme";
+import { perfMark } from "./chat/perf-probe";
 import { emit } from "@tauri-apps/api/event";
 import {
   ASK_ACTIVE_RUNTIME_EVENT,
@@ -155,6 +156,7 @@ let chatWriteMemory: ChatWriteMemory | null = null;
 let durableBodyStamp = "";
 
 export function saveStore(): void {
+  perfMark("store-save");
   try {
     chatState.store = persistStore(chatState.store);
   } catch (error) {
@@ -233,6 +235,7 @@ let durableHydrateAttempts = 0;
 
 /** Pull the on-disk log, keep anything the browser copy still has, then write the union back. */
 export async function hydrateDurableChatStore(): Promise<void> {
+  perfMark("durable-hydrate");
   let disk: SessionStore | null = null;
   try {
     const raw = await loadChatStore();

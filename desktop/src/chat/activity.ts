@@ -1,3 +1,4 @@
+import { perfMark } from "./perf-probe";
 import { explainChatFailure } from "../friendly-error";
 import type { ChatFailureExplain } from "../friendly-error";
 import { getLocale, t } from "../i18n";
@@ -502,6 +503,7 @@ function isChatRow(node: HTMLElement): boolean {
  * Rows already recorded are left alone unless `refresh` is set.
  */
 export function lockChatRowHeights(nodes: ArrayLike<Element>, refresh = false): void {
+  perfMark("row-measure");
   const pending: HTMLElement[] = [];
   for (let i = 0; i < nodes.length; i += 1) {
     const node = nodes[i];
@@ -772,6 +774,7 @@ export function createActivityController(deps: ActivityDeps) {
   }
 
   function revealEarlier(group: HTMLDetailsElement): void {
+    perfMark("tool-page");
     if (toolPageLock > 0) return;
     const records = recordsFor(group);
     const list = group.querySelector<HTMLElement>(".chat-tool-list");

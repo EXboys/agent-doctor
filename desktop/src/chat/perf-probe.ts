@@ -22,7 +22,19 @@ export type LongTaskSample = {
   streaming: boolean;
   /** Mounted rows in the log at that moment. */
   rows: number;
+  /** What the app last said it was doing (perfMark), for attribution. */
+  label: string;
 };
+
+/** What the app last said it was doing. Chat code calls perfMark around its
+ * heavier walks; a long frame attributes itself to the most recent mark. */
+let lastLabel = "idle";
+let lastLabelAt = -Infinity;
+
+export function perfMark(label: string): void {
+  lastLabel = label;
+  lastLabelAt = performance.now();
+}
 
 declare global {
   interface Window {
@@ -50,6 +62,19 @@ export function summarizeLongTasks(
   ];
   if (streaming > 0) parts.push(`${streaming} while streaming`);
   parts.push(`rows=${worst.rows}`);
+  // Attribution: group the window's long frames by what the app was doing.
+  const byLabel = new Map<string, { count: number; total: number }>();
+  for (const sample of inWindow) {
+    const entry = byLabel.get(sample.label) ?? { count: 0, total: 0 };
+    entry.count += 1;
+    entry.total += sample.gapMs;
+    byLabel.set(sample.label, entry);
+  }
+  const ranked = [...byLabel.entries()]
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([label, entry]) => `${label} x${entry.count}/${Math.round(entry.total)}ms`)
+    .join(", ");
+  if (ranked) parts.push(`by ${ranked}`);
   return parts.join("; ");
 }
 
@@ -70,11 +95,13 @@ export function startPerformanceProbe(input: {
     const gap = now - last;
     last = now;
     if (gap >= LONG_TASK_GAP_MS) {
+      const label = performance.now() - lastLabelAt < 5000 ? lastLabel : "idle";
       samples.push({
         at: Date.now(),
         gapMs: Math.round(gap),
         streaming: isStreaming(),
         rows: input.getRows(),
+        label,
       });
       if (samples.length > RING_MAX) samples.splice(0, samples.length - RING_MAX);
     }

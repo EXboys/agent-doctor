@@ -1,3 +1,4 @@
+import { perfMark } from "./perf-probe";
 import { placeChannelSession } from "./channel-route";
 import { isChatRunning } from "./live-runs";
 import { MAX_SESSIONS, type ChatMessage, type ChatSession, type SessionStore } from "./types";
@@ -135,6 +136,7 @@ export function bindChannelSync(deps: ChannelSyncDeps): void {
 
 /** One replayed conversation from the site. Rows join the chat they name. */
 export function applyChannelSync(payload: unknown): void {
+  perfMark("channel-sync");
   const deps = syncDeps;
   if (!deps) return;
   const conversation = readSyncedConversation(payload);
