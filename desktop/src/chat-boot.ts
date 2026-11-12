@@ -150,7 +150,7 @@ import { orderedProjectNames } from "./chat/project-order";
 import { syncKnowledgeFolder } from "./chat/knowledge-sync";
 import { sessionWorkspaceName } from "./chat/session-workspace";
 import { readImageTextEnabled } from "./chat/image-text";
-import { startPerformanceProbe } from "./chat/perf-probe";
+import { perfMark, startPerformanceProbe } from "./chat/perf-probe";
 import { wireChatControllers } from "./chat-wire";
 
 function transcriptOf(session: ReturnType<typeof activeSession>): { title: string; text: string } | null {
@@ -164,6 +164,7 @@ function transcriptOf(session: ReturnType<typeof activeSession>): { title: strin
 
 /** Hand the site this computer's per-conversation archive cursors. */
 function pushChannelSince(): void {
+  perfMark("channel-since");
   void teamupsChannelSince(channelSyncSince(chatState.store?.sessions ?? [])).catch(() => {});
 }
 

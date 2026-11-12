@@ -95,7 +95,11 @@ export function startPerformanceProbe(input: {
     const gap = now - last;
     last = now;
     if (gap >= LONG_TASK_GAP_MS) {
-      const label = performance.now() - lastLabelAt < 5000 ? lastLabel : "idle";
+      // A mark set at the START of a long block is already old when the
+      // frame resumes; judge staleness against the gap itself, or every
+      // long block inside a marked section reads as "idle".
+      const label =
+        performance.now() - lastLabelAt < 5000 + gap ? lastLabel : "idle";
       samples.push({
         at: Date.now(),
         gapMs: Math.round(gap),

@@ -626,6 +626,7 @@ export function createBubblesController(deps: BubblesDeps) {
       .catch(() => showFeedbackNote(wrap, t("chat.feedbackSendFailed"), true));
   }
   function syncVisiblePlan(): void {
+    perfMark("plan-sync");
     const onScreen = deps.activeSession();
     const source = deps.getBusy() && deps.isViewingRunningSession() ? deps.runTargetSession() : onScreen;
     if (source.id !== onScreen.id) return;
@@ -636,6 +637,7 @@ export function createBubblesController(deps: BubblesDeps) {
     paintChatPlan(deps.logEl, items.length ? { items, at: source.plan?.at ?? Date.now() } : null);
   }
   function syncReplyChangeCard(): void {
+    perfMark("reply-card");
     const onScreen = deps.activeSession();
     const source = deps.getBusy() && deps.isViewingRunningSession() ? deps.runTargetSession() : onScreen;
     if (source.id !== onScreen.id) return;
@@ -1224,6 +1226,7 @@ export function createBubblesController(deps: BubblesDeps) {
         deps.setAssistantRaw("");
         deps.setTurnHadAssistantText(false);
       }
+      perfMark("session-mount");
       const session = deps.activeSession();
       if (!session.messages.length) {
         deps.logEl.appendChild(renderEmptyChat());

@@ -1,3 +1,4 @@
+import { perfMark } from "./perf-probe";
 import { t } from "../i18n";
 import {
   COMPACT_KEEP_TURNS,
@@ -94,6 +95,7 @@ export function createContextMeterController(deps: ContextMeterDeps) {
   }
 
   function updateContextMeter(): void {
+    perfMark("context-meter");
     if (!deps.contextMeterEl || !deps.contextRingFillEl || !deps.contextLabelEl) return;
     const session = deps.activeSession();
     const turns = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
