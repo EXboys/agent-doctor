@@ -239,12 +239,46 @@ export function sessionContextText(session: ChatSession, draft = ""): string {
   return chunks.join("\n");
 }
 
+/**
+ * Token estimate without materializing the whole transcript: count per
+ * message and sum. sessionContextText's join allocated a megabyte-scale
+ * string on every meter update - a swap-thrash trigger on tight machines.
+ * The ratio (CJK/1.5, other/4) matches estimateTokens.
+ */
+function countTokensIn(text: string): number {
+  let cjk = 0;
+  let other = 0;
+  for (const ch of text) {
+    if ((ch.codePointAt(0) ?? 0) > 0xff) cjk += 1;
+    else other += 1;
+  }
+  return Math.ceil(cjk / 1.5 + other / 4);
+}
+
+export function estimateSessionTokens(session: ChatSession, draft = ""): number {
+  let tokens = 0;
+  for (const message of session.messages) {
+    if (message.role !== "user" && message.role !== "assistant" && message.role !== "meta") {
+      continue;
+    }
+    if (message.log) continue;
+    const content = message.content;
+    if (content.trim()) tokens += countTokensIn(content);
+    if (message.attachments?.length) {
+      tokens += countTokensIn(message.attachments.map((a) => a.name).join("\n"));
+    }
+  }
+  const trimmedDraft = draft.trim();
+  if (trimmedDraft) tokens += countTokensIn(trimmedDraft);
+  return Math.max(1, tokens);
+}
+
 export function contextUsagePercent(
   session: ChatSession,
   draft = "",
   model: string | null | undefined,
 ): number {
-  const used = estimateTokens(sessionContextText(session, draft));
+  const used = estimateSessionTokens(session, draft);
   if (used <= 0) return 0;
   const limit = contextLimitForModel(model);
   const pct = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));

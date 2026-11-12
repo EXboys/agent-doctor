@@ -157,13 +157,19 @@ let durableBodyStamp = "";
 
 export function saveStore(): void {
   perfMark("store-save");
+  if (isChatStoreDurableReady()) {
+    // The database is the real copy: drain straight to it. The localStorage
+    // mirror (a full stringify plus backup parse/write - seconds on a full
+    // store, and a swap-thrash trigger on tight machines) is only for hosts
+    // without the database.
+    void persistDurableChatStore(chatState.store);
+    return;
+  }
   try {
     chatState.store = persistStore(chatState.store);
   } catch (error) {
     console.warn("Ask: local chat mirror failed", error);
   }
-  if (!isChatStoreDurableReady()) return;
-  void persistDurableChatStore(chatState.store);
 }
 
 function persistDurableChatStore(store: SessionStore): Promise<void> {

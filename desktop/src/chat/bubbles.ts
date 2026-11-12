@@ -1252,8 +1252,15 @@ export function createBubblesController(deps: BubblesDeps) {
       syncTurnCopyButtons();
       syncVisiblePlan();
       pinChatLog(deps.logEl);
-      syncQuestionRail(session.messages, deps.logEl);
-      deps.updateContextMeter();
+      // The transcript is on screen at this point. The rail, the context
+      // meter and the channel cursor walk the whole session - under memory
+      // pressure those walks cost seconds, so they run after the first
+      // paint instead of inside it.
+      window.setTimeout(() => {
+        if (historyToken === 0) return;
+        syncQuestionRail(session.messages, deps.logEl);
+        deps.updateContextMeter();
+      }, 350);
       if (cut > 0) {
         historyJob = {
           token: historyToken,
