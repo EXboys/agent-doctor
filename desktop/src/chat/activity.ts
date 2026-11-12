@@ -542,15 +542,18 @@ export function lockChatRowHeights(nodes: ArrayLike<Element>, refresh = false): 
     pending.push(node);
   }
   if (pending.length === 0) return;
-  for (const node of pending) node.style.setProperty("content-visibility", "visible");
+  // Estimates, not measurements. The old path forced every row rendered
+  // (content-visibility: visible) and read rects one style-write apart -
+  // read/write interleaving made one call cost 58 seconds on a long session
+  // (probe: row-measure x1/58506ms). WebKit's contain-intrinsic "auto"
+  // remembers a row's real size after its first on-screen render, so a cheap
+  // content-based estimate only has to hold the scroll layout until then.
   for (const node of pending) {
-    const height = node.getBoundingClientRect().height;
-    if (height > 0) {
-      node.style.setProperty("contain-intrinsic-block-size", `auto ${height}px`);
-      sizedRows.add(node);
-    }
+    const chars = node.textContent?.length ?? 0;
+    const estimate = Math.min(2400, Math.max(56, 72 + Math.round(chars * 0.28)));
+    node.style.setProperty("contain-intrinsic-block-size", `auto ${estimate}px`);
+    sizedRows.add(node);
   }
-  for (const node of pending) node.style.removeProperty("content-visibility");
 }
 
 /** Measure rows the first time they join the transcript, including ones appended while scrolled up. */
