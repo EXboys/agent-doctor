@@ -1,6 +1,7 @@
 import { perfMark } from "./perf-probe";
 import { placeChannelSession } from "./channel-route";
 import { MAX_SESSIONS, type ChatMessage, type ChatSession, type SessionStore } from "./types";
+import { isChatRunning } from "./live-runs";
 
 /**
  * The site archives every phone conversation and replays the ones that moved
@@ -146,12 +147,15 @@ export function applyChannelSync(payload: unknown): void {
     : `${CHANNEL_PREFIX}${conversation.chat}`;
   const placed = placeChannelSession(store.sessions, key, deps.createSession);
   const session = placed.session;
-  // A live turn used to skip the merge and keep its cursor at the old stamp -
-  // so the site replayed the whole growing conversation on every hello, and
-  // the replay grew with the run: O(n²) traffic that froze the window under
-  // memory pressure. Merge and ack what the replay carries even mid-run; the
-  // merge joins rows by identity, so nothing doubles, and the site only
-  // replays rows newer than the acked cursor.
+  // A live turn owns its transcript: the chat is already rendering its own
+  // rows, so archive copies must not pour in mid-run. But the cursor MUST
+  // ack what the replay carried - with the cursor parked, the site replayed
+  // the whole growing conversation on every hello (O(n²) traffic that froze
+  // the window under memory pressure).
+  if (isChatRunning(session.id)) {
+    session.channelSyncedAt = Math.max(session.channelSyncedAt ?? 0, conversation.updatedAt);
+    return;
+  }
   const merged = mergeSyncedConversation(session, conversation);
   if (placed.created) {
     if (!merged) return;

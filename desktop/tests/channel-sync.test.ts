@@ -155,8 +155,14 @@ applyChannelSync({
   rows: [{ key: "m:2", kind: "me", text: "还在吗" }],
 });
 endLiveRun(liveSession.id);
-assert(liveApplied === 0, "a running chat takes nothing in");
-assert(!liveSession.channelSyncedAt, "a skipped replay does not move the cursor");
+// A running chat acks the replay stamp without taking the archived rows in
+// (its own live rows own the transcript) - the ack is what stops the site
+// from replaying the whole conversation on every hello.
+assert(liveApplied === 0, "a running chat takes no archived rows in");
+assert(
+  liveSession.channelSyncedAt === 1_000_000,
+  "the acked stamp stops the site from replaying the same rows",
+);
 
 const since = channelSyncSince(store.sessions);
 assert(since["conv-1"] === 1_000_000, "the cursor map names the phone conversation");
