@@ -286,6 +286,7 @@ pub(crate) fn handle_notification<F>(
             }
         }
         "turn/started" => {
+            state.last_turn_error = None;
             on_event(PromptSessionEvent::Status {
                 session_id: state.session_id.clone(),
                 phase: "requesting".into(),
@@ -300,9 +301,13 @@ pub(crate) fn handle_notification<F>(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if status == "failed" {
-                let msg =
-                    codex_error_message(&params).unwrap_or_else(|| "Codex turn failed".into());
-                on_event(turn_error(&state.session_id, &msg));
+                match codex_error_message(&params) {
+                    Some(msg) => emit_turn_error_once(state, &msg, on_event),
+                    None if state.last_turn_error.is_none() => {
+                        emit_turn_error_once(state, "Codex turn failed", on_event);
+                    }
+                    None => {}
+                }
             } else {
                 let fallback = if state.saw_agent_delta {
                     None
@@ -325,12 +330,19 @@ pub(crate) fn handle_notification<F>(
         }
         "turn/failed" => {
             state.turn_done = true;
-            let msg = params
+            match params
                 .pointer("/error/message")
                 .or_else(|| params.pointer("/turn/error/message"))
                 .and_then(|v| v.as_str())
-                .unwrap_or("Codex turn failed");
-            on_event(turn_error(&state.session_id, msg));
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(msg) => emit_turn_error_once(state, msg, on_event),
+                None if state.last_turn_error.is_none() => {
+                    emit_turn_error_once(state, "Codex turn failed", on_event);
+                }
+                None => {}
+            }
         }
         // Current app-server uses camelCase. Older builds used snake_case.
         "item/agentMessage/delta" | "item/agent_message/delta" => {
@@ -490,7 +502,7 @@ pub(crate) fn handle_notification<F>(
                 }
                 "error" => {
                     if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
-                        on_event(turn_error(&state.session_id, msg));
+                        emit_turn_error_once(state, msg, on_event);
                     }
                 }
                 _ => {}
@@ -498,11 +510,26 @@ pub(crate) fn handle_notification<F>(
         }
         "error" => {
             if let Some(msg) = codex_error_message(&params) {
-                on_event(turn_error(&state.session_id, &msg));
+                emit_turn_error_once(state, &msg, on_event);
             }
         }
         _ => {}
     }
+}
+
+fn emit_turn_error_once<F>(state: &mut PumpState, raw: &str, on_event: &mut F)
+where
+    F: FnMut(PromptSessionEvent),
+{
+    let key = raw.trim();
+    if key.is_empty() {
+        return;
+    }
+    if state.last_turn_error.as_deref() == Some(key) {
+        return;
+    }
+    state.last_turn_error = Some(key.to_string());
+    on_event(turn_error(&state.session_id, key));
 }
 
 pub(crate) fn mcp_startup_is_missing_program(error: &str) -> bool {

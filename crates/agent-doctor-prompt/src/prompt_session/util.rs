@@ -454,6 +454,8 @@ pub(crate) fn command_from_cli(bin: &str) -> Command {
     let mut cmd = command_for_path(&resolved);
     // Chat output is read by this app, not a terminal: no color codes.
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
+    #[cfg(windows)]
+    super::deepseek_harness::apply_safe_child_temp(&mut cmd);
     cmd
 }
 

@@ -445,6 +445,25 @@ where
                 );
             }
             driven = second;
+        } else if is_transient_rate_limit(&blob) {
+            // Single-provider setups (e.g. 官方 alone) have no second provider to
+            // fail over to. Pause briefly so a burst 429 window can clear, then
+            // try once more before surfacing a failure.
+            retire_warm_sessions();
+            on_event(PromptSessionEvent::Status {
+                session_id: driven.report.session_id.clone(),
+                phase: "requesting".into(),
+                message: "模型线路正忙，正在自动重试…".into(),
+            });
+            if wait_unless_cancelled(&cancel_again, std::time::Duration::from_secs(4)) {
+                driven = drive_prompt(
+                    backend,
+                    &options_slot,
+                    cancel_again,
+                    control_again,
+                    &mut on_event,
+                )?;
+            }
         }
     }
     for event in driven.held.drain(..) {
@@ -610,6 +629,32 @@ fn failover_notice(message: &str) -> PromptSessionEvent {
         message: message.to_string(),
         plain: true,
     }
+}
+
+fn is_transient_rate_limit(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let has_429 = lower
+        .split(|ch: char| !ch.is_ascii_digit())
+        .any(|part| part == "429");
+    has_429
+        || lower.contains("too many requests")
+        || lower.contains("rate limit")
+        || lower.contains("rate_limit")
+        || text.contains("请求过于频繁")
+        || text.contains("线路繁忙")
+        || text.contains("都在忙")
+}
+
+fn wait_unless_cancelled(cancel: &PromptSessionCancel, total: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < total {
+        if cancel.is_requested() {
+            return false;
+        }
+        let step = (total - started.elapsed()).min(std::time::Duration::from_millis(100));
+        std::thread::sleep(step);
+    }
+    !cancel.is_requested()
 }
 
 fn record_turn_usage(runtime: &str, options: &PromptSessionOptions, driven: &DrivenPrompt) {
@@ -800,5 +845,14 @@ time.sleep(30)
             line.starts_with(&notes),
             "the note stays a prefix of the line"
         );
+    }
+
+    #[test]
+    fn transient_rate_limit_matches_429_and_ignores_model_ids() {
+        assert!(is_transient_rate_limit(
+            "exceeded retry limit, last status: 429 Too Many Requests"
+        ));
+        assert!(is_transient_rate_limit("官方线路繁忙，请稍后再试"));
+        assert!(!is_transient_rate_limit("gpt-4290 invalid model"));
     }
 }

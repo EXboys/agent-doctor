@@ -30,17 +30,15 @@ fn raw_command_spawn_is_confined_or_marked() {
 }
 
 /// A creation flag decides whether a child AND its whole subtree get a
-/// console, so each flag has exactly one legal home: `DETACHED_PROCESS` only
-/// for the long-lived CLI sessions in `exec/process.rs`, `CREATE_NEW_CONSOLE`
-/// only for intentional visible terminals in `session_launch/terminal.rs`,
-/// `CREATE_NO_WINDOW` everywhere else. a678e8b swapped the install runner to
-/// DETACHED_PROCESS "for consistency" and every install grew a visible
-/// powershell window; the spawn fence above only checks that a spawn is
-/// marked, so this second fence pins the flags themselves.
+/// console: `CREATE_NEW_CONSOLE` only for intentional visible terminals in
+/// `session_launch/terminal.rs`, `CREATE_NO_WINDOW` everywhere else, and
+/// `DETACHED_PROCESS` nowhere (a detached parent has no console, so any
+/// console child it spawns — `codex.js -> codex.exe`, `cmd -> powershell` —
+/// opens a visible black terminal window).
 #[test]
 fn creation_flags_stay_in_their_sanctioned_files() {
     const FLAG_HOMES: &[(&str, &str)] = &[
-        ("DETACHED_PROCESS", "exec/process.rs"),
+        ("DETACHED_PROCESS", "__never__"),
         ("CREATE_NEW_CONSOLE", "session_launch/terminal.rs"),
     ];
     let mut offenders = Vec::new();

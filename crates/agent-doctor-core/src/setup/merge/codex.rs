@@ -24,9 +24,21 @@ pub fn apply_codex(
 /// every turn — keep those keys only in the isolated home in that case.
 pub fn apply_codex_slot(
     gateway_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+    provider_slot: Option<&str>,
+) -> AnyhowResult<RuntimeSetupResult> {
+    apply_codex_slot_for_home(gateway_url, api_key, model, provider_slot, None)
+}
+
+/// Same as [`apply_codex_slot`], targeting an explicit isolated `CODEX_HOME`
+/// when one is already bound for the session.
+pub fn apply_codex_slot_for_home(
+    gateway_url: &str,
     _api_key: &str,
     model: Option<&str>,
     provider_slot: Option<&str>,
+    codex_home: Option<&std::path::Path>,
 ) -> AnyhowResult<RuntimeSetupResult> {
     let model_id = model
         .map(str::trim)
@@ -40,16 +52,22 @@ pub fn apply_codex_slot(
 
     let global_path = home_join(".codex/config.toml");
     let global_codex_home = home_join(".codex");
-    let isolated_config = crate::workspace::load_workspaces().ok().and_then(|doc| {
-        let active = doc.active.as_deref()?;
-        let entry = doc.workspaces.get(active)?;
-        if !entry.codex_home.exists() {
-            return None;
-        }
-        if crate::workspace::path::paths_equal(&entry.codex_home, &global_codex_home) {
-            return None;
-        }
-        Some(entry.codex_home.join("config.toml"))
+    let explicit_isolated = codex_home
+        .filter(|home| !home.as_os_str().is_empty())
+        .filter(|home| !crate::workspace::path::paths_equal(home, &global_codex_home))
+        .map(|home| home.join("config.toml"));
+    let isolated_config = explicit_isolated.or_else(|| {
+        crate::workspace::load_workspaces().ok().and_then(|doc| {
+            let active = doc.active.as_deref()?;
+            let entry = doc.workspaces.get(active)?;
+            if !entry.codex_home.exists() {
+                return None;
+            }
+            if crate::workspace::path::paths_equal(&entry.codex_home, &global_codex_home) {
+                return None;
+            }
+            Some(entry.codex_home.join("config.toml"))
+        })
     });
 
     let path = isolated_config
@@ -65,7 +83,7 @@ pub fn apply_codex_slot(
         let _ = strip_codex_project_denied_provider_keys(&global_path);
     }
 
-    clear_codex_placeholder_auth()?;
+    clear_codex_placeholder_auth_in(codex_home)?;
 
     let env_key = codex_slot_env_key(&slot);
     Ok(RuntimeSetupResult {
@@ -426,6 +444,8 @@ pub(crate) fn write_codex_provider_config(
     // OpenAI Codex CLI (≥0.84) only accepts Responses wire API.
     entry_table["wire_api"] = toml_edit::value("responses");
     entry_table["supports_websockets"] = toml_edit::value(false);
+    entry_table["request_max_retries"] = toml_edit::value(6);
+    entry_table["stream_max_retries"] = toml_edit::value(6);
 
     fs::write(path, doc.to_string())
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -480,14 +500,57 @@ pub(crate) fn infer_codex_hermes_slot(gateway_url: &str) -> &'static str {
     }
 }
 
+fn known_codex_auth_paths(extra_home: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut homes = vec![home_join(".codex")];
+    if let Some(home) = extra_home.filter(|p| !p.as_os_str().is_empty()) {
+        homes.push(home.to_path_buf());
+    }
+    if let Some(env_home) = std::env::var_os("CODEX_HOME") {
+        let env_home = std::path::PathBuf::from(env_home);
+        if !env_home.as_os_str().is_empty() {
+            homes.push(env_home);
+        }
+    }
+    if let Ok(doc) = crate::workspace::load_workspaces() {
+        for entry in doc.workspaces.values() {
+            if !entry.codex_home.as_os_str().is_empty() {
+                homes.push(entry.codex_home.clone());
+            }
+        }
+    }
+    let mut paths = Vec::new();
+    for home in homes {
+        let auth = home.join("auth.json");
+        let key = auth.canonicalize().unwrap_or_else(|_| auth.clone());
+        if paths
+            .iter()
+            .any(|seen: &std::path::PathBuf| seen.canonicalize().as_ref().unwrap_or(seen) == &key)
+        {
+            continue;
+        }
+        paths.push(auth);
+    }
+    paths
+}
+
 /// Remove Agent Doctor placeholder / empty apikey auth.json so Codex uses env_key auth.
 pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
-    let path = home_join(".codex/auth.json");
+    clear_codex_placeholder_auth_in(None)
+}
+
+pub fn clear_codex_placeholder_auth_in(extra_home: Option<&std::path::Path>) -> AnyhowResult<()> {
+    for path in known_codex_auth_paths(extra_home) {
+        clear_placeholder_auth_file(&path)?;
+    }
+    Ok(())
+}
+
+fn clear_placeholder_auth_file(path: &std::path::Path) -> AnyhowResult<()> {
     if !path.exists() {
         return Ok(());
     }
     let raw =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(());
     };
@@ -501,7 +564,7 @@ pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
         && value.get("api_key").is_none()
         && value.get("tokens").is_none();
     if is_placeholder || is_empty_apikey {
-        fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
     Ok(())
 }
@@ -510,13 +573,24 @@ pub fn clear_codex_placeholder_auth() -> AnyhowResult<()> {
 ///
 /// Stored ChatGPT tokens make Codex talk to api.openai.com even when
 /// OPENAI_BASE_URL / openai_base_url point at the company gateway.
+/// Cleans both `~/.codex/auth.json` and isolated workspace `CODEX_HOME/auth.json`.
 pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
-    let path = home_join(".codex/auth.json");
+    clear_codex_chatgpt_auth_in(None)
+}
+
+pub fn clear_codex_chatgpt_auth_in(extra_home: Option<&std::path::Path>) -> AnyhowResult<()> {
+    for path in known_codex_auth_paths(extra_home) {
+        clear_chatgpt_auth_file(&path)?;
+    }
+    Ok(())
+}
+
+fn clear_chatgpt_auth_file(path: &std::path::Path) -> AnyhowResult<()> {
     if !path.exists() {
         return Ok(());
     }
     let raw =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Ok(());
     };
@@ -531,8 +605,8 @@ pub fn clear_codex_chatgpt_auth_for_gateway() -> AnyhowResult<()> {
     if !has_chatgpt_tokens {
         return Ok(());
     }
-    let _ = crate::setup::backup_file(&path);
-    fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+    let _ = crate::setup::backup_file(path);
+    fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     Ok(())
 }
 
@@ -940,5 +1014,32 @@ url = "https://example.com/mcp"
         assert!(isolated.contains("keep"));
         let profile_text = fs::read_to_string(&profile).unwrap();
         assert!(!profile_text.contains("gone"));
+    }
+
+    #[test]
+    fn isolated_codex_home_clears_chatgpt_auth_and_writes_gateway_config() {
+        let dir = tempdir().unwrap();
+        let codex_home = dir.path().join("isolated-codex");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(
+            codex_home.join("auth.json"),
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"stale"}}"#,
+        )
+        .unwrap();
+
+        clear_chatgpt_auth_file(&codex_home.join("auth.json")).unwrap();
+        assert!(!codex_home.join("auth.json").exists());
+
+        write_codex_provider_config(
+            &codex_home.join("config.toml"),
+            "https://agentdoctor.cn/api/v1/official",
+            "deepseek-flash",
+            CODEX_PERSONAL_SLOT,
+        )
+        .unwrap();
+        let rendered = fs::read_to_string(codex_home.join("config.toml")).unwrap();
+        assert!(rendered.contains("openai_base_url = \"https://agentdoctor.cn/api/v1/official\""));
+        assert!(rendered.contains("request_max_retries = 6"));
+        assert!(rendered.contains("stream_max_retries = 6"));
     }
 }

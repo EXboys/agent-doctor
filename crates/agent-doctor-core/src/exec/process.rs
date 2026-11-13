@@ -2,11 +2,14 @@
 //!
 //! Windows GUI apps (Tauri) can hang forever on `Command::output()` when the
 //! child is a `.cmd` shim (`npm`, `claude`, …) or a GUI exe that never exits.
-//! Always use a timeout and closed stdin. Captured probes use
-//! `CREATE_NO_WINDOW`; long-lived CLI sessions use [`DETACHED_PROCESS`].
+//! Always use a timeout and closed stdin. Both captured probes and long-lived
+//! CLI sessions use `CREATE_NO_WINDOW` so the child and every console program
+//! it spawns (`codex.js -> codex.exe`, shell tools, MCP servers) inherit one
+//! hidden console instead of opening visible `conhost` windows.
 //!
-//! The two flags must not be combined: Windows ignores `CREATE_NO_WINDOW`
-//! when `DETACHED_PROCESS` is also present.
+//! `CREATE_NO_WINDOW` must never be combined with `DETACHED_PROCESS`: Windows
+//! ignores `CREATE_NO_WINDOW` when `DETACHED_PROCESS` is also present, and a
+//! detached parent has no console for its children to inherit.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -25,10 +28,13 @@ pub const VERSION_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 /// like the program was never installed.
 pub const VERSION_PROBE_DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
-#[cfg(windows)]
-const DETACHED_PROCESS: u32 = 0x00000008;
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn cli_creation_flags() -> u32 {
+    CREATE_NO_WINDOW
+}
 #[derive(Debug)]
 pub enum RunError {
     Io(std::io::Error),
@@ -587,10 +593,12 @@ fn quoted_tokens(text: &str) -> Vec<&str> {
 }
 
 /// Build a spawnable CLI command. Windows starts npm `.cmd` shims as `node`
-/// directly and detaches the console, so a GUI app does not flash a terminal.
+/// directly and attaches a hidden console (`CREATE_NO_WINDOW`), so neither the
+/// CLI nor the children it spawns (`codex.js -> codex.exe`, shell tools, MCP
+/// servers) open a visible terminal window.
 pub fn command_for_path(program: &Path) -> Command {
     let mut cmd = build_command(program, &[]);
-    apply_detached(&mut cmd);
+    apply_probe_no_window(&mut cmd);
     cmd
 }
 
@@ -598,15 +606,7 @@ fn apply_probe_no_window(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        _cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-}
-
-fn apply_detached(_cmd: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        _cmd.creation_flags(DETACHED_PROCESS);
+        _cmd.creation_flags(cli_creation_flags());
     }
 }
 
@@ -958,6 +958,14 @@ mod tests {
         std::fs::write(&cmd, "@echo off\r\n\"%~dp0Cursor.exe\" %*\r\n").unwrap();
         assert!(launch_opens_gui_window(&cmd));
         assert!(launch_opens_gui_window(&exe));
+    }
+
+    #[test]
+    fn cli_children_share_one_hidden_console() {
+        // CREATE_NO_WINDOW (0x08000000), never DETACHED_PROCESS (0x00000008):
+        // Codex's node launcher spawns codex.exe without windowsHide, which
+        // opens a visible conhost window whenever its parent has no console.
+        assert_eq!(super::cli_creation_flags(), 0x08000000);
     }
 
     fn gui_pe_bytes() -> Vec<u8> {

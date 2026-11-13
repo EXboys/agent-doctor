@@ -13,8 +13,9 @@ pub use account_models::{
     AccountModelList,
 };
 pub use merge::{
-    apply_claude_code, apply_claude_code_with_model, apply_codex_slot, apply_hermes_slot,
-    apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth,
+    apply_claude_code, apply_claude_code_with_model, apply_codex_slot, apply_codex_slot_for_home,
+    apply_hermes_slot, apply_openclaw_slot, clear_codex_chatgpt_auth_for_gateway,
+    clear_codex_chatgpt_auth_in, clear_codex_placeholder_auth, clear_codex_placeholder_auth_in,
     strip_codex_project_denied_provider_keys, CODEX_PERSONAL_SLOT, CODEX_TEAM_SLOT,
     COMPANY_DEFAULT_MODEL, HERMES_PERSONAL_SLOT, HERMES_TEAM_SLOT, OPENCLAW_PERSONAL_SLOT,
     OPENCLAW_PROVIDER_ID, OPENCLAW_TEAM_SLOT,

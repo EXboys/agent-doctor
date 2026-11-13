@@ -10,10 +10,10 @@ use crate::profile::{
     PROVIDER_KIND_PERSONAL,
 };
 use crate::setup::{
-    anthropic_gateway_for_provider_url, anthropic_gateway_url_from_evotown_base, apply_codex_slot,
-    clear_codex_chatgpt_auth_for_gateway, clear_codex_placeholder_auth, evotown_agent_env_path,
-    normalize_protocol, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV, PROTOCOL_ANTHROPIC,
-    PROVIDER_PROTOCOL_ENV,
+    anthropic_gateway_for_provider_url, anthropic_gateway_url_from_evotown_base,
+    apply_codex_slot_for_home, clear_codex_chatgpt_auth_in, clear_codex_placeholder_auth_in,
+    evotown_agent_env_path, normalize_protocol, EVOTOWN_API_KEY_ENV, EVOTOWN_URL_ENV, MODEL_ENV,
+    PROTOCOL_ANTHROPIC, PROVIDER_PROTOCOL_ENV,
 };
 use crate::workspace::active_env_path;
 
@@ -583,22 +583,30 @@ pub fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> 
             }
         }
     }
-    let _ = clear_codex_placeholder_auth();
-    if let Some((url, key, model, slot)) = resolve_codex_overlay(overlay) {
-        let _ = clear_codex_chatgpt_auth_for_gateway();
-        let _ = apply_codex_slot(&url, &key, model.as_deref(), Some(&slot));
-    }
-    let global = crate::adapters::util::home_join(".codex");
-    let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(&global.join("config.toml"));
-    if let Some(home) = overlay.get("CODEX_HOME").map(PathBuf::from) {
+    let home = overlay
+        .get("CODEX_HOME")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    if let Some(ref home) = home {
         let workspace = overlay.get("AGENT_DOCTOR_WORKSPACE").map(|s| s.as_str());
         let explicit_root = overlay.get("AGENT_DOCTOR_PROJECT_ROOT").map(Path::new);
         let project = crate::session_launch::resolve_session_cwd(explicit_root, workspace);
-        let _ = crate::workspace::backends::bind_codex_for_project(&home, Some(&project));
+        let _ = crate::workspace::backends::bind_codex_for_project(home, Some(&project));
+    }
+    let _ = clear_codex_placeholder_auth_in(home.as_deref());
+    if let Some((url, key, model, slot)) = resolve_codex_overlay(overlay) {
+        let _ = clear_codex_chatgpt_auth_in(home.as_deref());
+        let _ =
+            apply_codex_slot_for_home(&url, &key, model.as_deref(), Some(&slot), home.as_deref());
+    }
+    let global = crate::adapters::util::home_join(".codex");
+    let _ = crate::setup::merge::drop_unreachable_codex_mcp_servers(&global.join("config.toml"));
+    if let Some(ref home) = home {
         // Existing installs may still have provider keys in ~/.codex from older
         // wiring. Strip them when Ask uses an isolated CODEX_HOME so newer Codex
         // does not warn on every app-server turn.
-        if !crate::workspace::path::paths_equal(&home, &global) {
+        if !crate::workspace::path::paths_equal(home, &global) {
             let _ =
                 crate::setup::strip_codex_project_denied_provider_keys(&global.join("config.toml"));
             let _ =
@@ -983,6 +991,9 @@ pub fn codex_provider_config_args(
         &format!("{prefix}.supports_websockets"),
         "false".to_string(),
     );
+    set(&format!("{prefix}.request_max_retries"), "6".to_string());
+    set(&format!("{prefix}.stream_max_retries"), "6".to_string());
+    set("openai_base_url", toml_string(url));
     set("model_provider", toml_string(slot));
     if let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
         set("model", toml_string(model_id));

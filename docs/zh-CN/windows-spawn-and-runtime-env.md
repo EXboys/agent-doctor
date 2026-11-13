@@ -6,21 +6,21 @@
 
 | 标志 | 语义 | 唯一合法住所 | 用途 |
 | --- | --- | --- | --- |
-| `CREATE_NO_WINDOW` (0x08000000) | 给子进程一个**不显示窗口的控制台，整棵子孙树继承它** | 其他一切地方 | 探测、安装、GUI 应用下起的一切控制台子进程 |
-| `DETACHED_PROCESS` (0x00000008) | 子进程**没有控制台**；它再起的控制台程序各自新开**可见**窗口 | `exec/process.rs`（长驻 CLI 会话） | 会话进程就是终点、不指望它再起别的东西 |
+| `CREATE_NO_WINDOW` (0x08000000) | 给子进程一个**不显示窗口的控制台，整棵子孙树继承它** | 除 `terminal.rs` 外一切地方 | 探测、安装、长驻 Agent CLI 会话（Codex / Claude / dsh…） |
+| `DETACHED_PROCESS` (0x00000008) | 子进程**没有控制台**；它再起的控制台程序各自新开**可见**窗口 | **禁止使用** | 曾误用于 `exec/process.rs`，导致 `codex.js → codex.exe` 弹黑窗 |
 | `CREATE_NEW_CONSOLE` | 给子进程一个**新的可见**控制台 | `session_launch/terminal.rs` | 有意给用户开终端 |
 
-一句话记住区别：**`DETACHED_PROCESS` 不是「隐藏窗口」，是「没有控制台」——隐藏要靠 `CREATE_NO_WINDOW`。** 判断方法：这个子进程自己会不会再起别的控制台程序？会（cmd → npm → node、cmd → powershell → git）→ `CREATE_NO_WINDOW`；它自己就是终点 → 两个都能用，选 `CREATE_NO_WINDOW` 不会错；想给用户看 → `CREATE_NEW_CONSOLE`。
+一句话记住区别：**`DETACHED_PROCESS` 不是「隐藏窗口」，是「没有控制台」——隐藏要靠 `CREATE_NO_WINDOW`。** Agent CLI 本身就会再起控制台子进程（`@openai/codex` 的 `node.exe → codex.exe`、以及对话中跑的 `powershell` / `cmd` / `git` / MCP），用 `DETACHED_PROCESS` 必然弹黑窗。
 
 **事故史：**
 
 - 0.1.87–0.1.90：裸 `Command::new` 闪窗四连 → `8cdcd00` 建立第一条围栏（裸 spawn 必须走 `exec` 或带 `// raw-spawn-ok` 标注）。
-- `a678e8b`（2026-10-19）：为修「启动探测闪窗」，把安装 runner 的 `CREATE_NO_WINDOW` 一并换成了 `DETACHED_PROCESS`。探测修好了，但从这半天起，**每装一个 runtime 都弹一个 powershell 黑窗**（Claude Code 的 npm→node.exe、DeepSeek/Hermes 的 powershell、Hermes 装机下载的 git/uv 全中），潜伏三周后被用户发现 → `88c81ab` 恢复。**当时的围栏拦不住它：`raw_spawn_guard` 只验「spawn 有没有标注」，不验「标志选得对不对」——runner.rs 恰好是有标注的。** 这就是第二条围栏（标志住所）存在的原因。
+- `a678e8b`（2026-10-19）：为修「启动探测闪窗」，把安装 runner 和 `command_for_path` 的 `CREATE_NO_WINDOW` 换成了 `DETACHED_PROCESS`。安装器每装一个 runtime 都弹 powershell 黑窗 → `88c81ab` 先修回安装器；而 `command_for_path` 留着 `DETACHED_PROCESS` 导致 Windows 上启动 Codex 时 `node.exe` 再起 `@openai/codex-win32-x64/.../codex.exe` 直接弹出黑窗并常驻 → `command_for_path` 也统一改为 `CREATE_NO_WINDOW`，围栏彻底禁用 `DETACHED_PROCESS`。
 
 **不变量：**
 
 1. 每个spawn 的标志按「它的孩子还要起什么」选，不按「和别处保持一致」选。
-2. 标志只许住在唯一合法文件里：`DETACHED_PROCESS` 只在 `exec/process.rs`，`CREATE_NEW_CONSOLE` 只在 `session_launch/terminal.rs`。围栏 `creation_flags_stay_in_their_sanctioned_files`（`raw_spawn_guard.rs`）拦搬家；`runner.rs` 的 `install_children_share_one_hidden_console` 在 CI `rust-windows` 里钉死安装标志的值。
+2. 标志只许住在唯一合法文件里：`CREATE_NEW_CONSOLE` 只在 `session_launch/terminal.rs`，`DETACHED_PROCESS` 全仓禁用，其余一律 `CREATE_NO_WINDOW`。围栏 `creation_flags_stay_in_their_sanctioned_files`（`raw_spawn_guard.rs`）拦违规标志；`runner.rs` 与 `exec/process.rs` 的测试钉死 `0x08000000`。
 3. **修哪条路只动哪条路。** 一次修复顺手「统一」另一处的标志，就是 `a678e8b` 的做法。动任何 spawn 点前，先说出这个进程的孩子树：它起谁、那些孩子又起谁。
 
 ## 二、交给外部 runtime 的环境：由我们清洗，坏值说人话

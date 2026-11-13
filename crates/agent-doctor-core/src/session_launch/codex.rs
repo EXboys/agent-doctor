@@ -102,6 +102,9 @@ pub(crate) fn codex_launch_argv(
         &format!("{prefix}.supports_websockets"),
         "false".to_string(),
     );
+    set(&format!("{prefix}.request_max_retries"), "6".to_string());
+    set(&format!("{prefix}.stream_max_retries"), "6".to_string());
+    set("openai_base_url", toml_string(url));
     set("model_provider", toml_string(slot));
     // Only pin the model when the active profile names one; otherwise leave the
     // user's own `model` in config.toml alone.

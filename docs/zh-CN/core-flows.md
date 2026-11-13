@@ -69,7 +69,7 @@ setup / 模型服务页 / 修复，都会写用户的配置文件和密钥。
 **不变量：**
 
 1. **安装不允许被墙卡死。** 大陆不可达的官方源要能跳过并说明原因，走可达的镜像；跳过的要写进结果。（1adc3dc）
-2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`），标志按 [windows-spawn-and-runtime-env.md](windows-spawn-and-runtime-env.md) 的表选：探测、安装、一切会再起控制台孩子的路径用 `CREATE_NO_WINDOW`；`DETACHED_PROCESS` 是「没有控制台」不是「隐藏窗口」，只许住在 `exec/process.rs` 的长驻会话里。围栏两条：`raw_spawn_guard` 拦没有 `// raw-spawn-ok` 标注的裸 `Command::new`；`creation_flags_stay_in_their_sanctioned_files` 拦标志搬家——**a678e8b 正是当年写进本条的「围栏提交」，它顺手把安装 runner 的标志从 `CREATE_NO_WINDOW` 换成 `DETACHED_PROCESS`，弹窗回归潜伏三周才被用户抓到；旧围栏只验标注、不验标志，拦不住它**。修哪条路只动哪条路。（8cdcd00、277836e、9507226、9e8d193、a678e8b→88c81ab）
+2. **Windows 上一律经共享 runner 起子进程**（`lifecycle/runner.rs`、`exec/process.rs`），标志按 [windows-spawn-and-runtime-env.md](windows-spawn-and-runtime-env.md) 的表选：探测、安装、长驻 Agent CLI 会话（`node.exe → codex.exe` 等一切会再起控制台孩子的路径）一律用 `CREATE_NO_WINDOW`；`DETACHED_PROCESS` 是「没有控制台」不是「隐藏窗口」，全仓禁用；只有有意给用户开终端的 `session_launch/terminal.rs` 用 `CREATE_NEW_CONSOLE`。围栏两条：`raw_spawn_guard` 拦没有 `// raw-spawn-ok` 标注的裸 `Command::new`；`creation_flags_stay_in_their_sanctioned_files` 拦标志搬家——**a678e8b 正是当年写进本条的「围栏提交」，它顺手把安装 runner 和 `command_for_path` 的标志从 `CREATE_NO_WINDOW` 换成 `DETACHED_PROCESS`，先后导致安装器弹 PowerShell 黑窗、Codex 启动弹 `codex.exe` 黑窗**。修哪条路只动哪条路。（8cdcd00、277836e、9507226、9e8d193、a678e8b→88c81ab）
 3. **PATH 只做尾部增量合并，不重排。** Windows PATH 超长时降级保可达，不能把应用或 Claude/Node 搞挂。（74a5694、26394a9、2a5ff8e）
 4. **每个安装步骤有进度、有失败原因。** 用户不该面对一个静默消失的安装。（8e4156e）
 5. **探测不挡路。** doctor 探测不进 UI 线程、不串行拉起一堆子进程；启动时能不起的子进程一律不起。（8fb0ea6、277836e）

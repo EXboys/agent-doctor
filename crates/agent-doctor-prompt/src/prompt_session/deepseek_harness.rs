@@ -331,7 +331,7 @@ fn is_windows_drive_root(path: &Path) -> bool {
 /// TEMP/TMP env — once per turn, without catching errors. A missing or
 /// degenerate value fails every turn before the model can answer.
 #[cfg(windows)]
-fn apply_safe_child_temp(command: &mut Command) {
+pub(crate) fn apply_safe_child_temp(command: &mut Command) {
     for key in ["TEMP", "TMP"] {
         if let Some(temp) = swapped_temp(std::env::var_os(key).as_deref()) {
             command.env(key, temp);

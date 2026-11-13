@@ -7727,9 +7727,10 @@ html[data-os="windows"] .chat-log {
 .chat-msg-user {
   align-self: flex-end;
   align-items: flex-end;
-  width: auto;
+  width: fit-content;
   max-width: min(42rem, 100%);
   min-width: 0;
+  margin-left: auto;
 }
 
 .chat-msg-user.is-compact {
@@ -8230,6 +8231,11 @@ html[data-os="windows"] .chat-log {
   padding: 0;
 }
 
+.chat-log > .chat-bubble.meta {
+  width: fit-content;
+  margin-inline: auto;
+}
+
 .chat-failure-wrap {
   align-self: center;
   display: flex;
@@ -8237,7 +8243,7 @@ html[data-os="windows"] .chat-log {
   align-items: center;
   gap: 8px;
   max-width: min(420px, 92%);
-  margin: 4px 0 8px;
+  margin: 4px auto 8px;
 }
 
 .chat-bubble.meta.is-failure {

@@ -106,10 +106,13 @@ fn sandbox_writable_roots(cwd: &str, extra_roots: &[String]) -> Vec<String> {
         if trimmed.is_empty() {
             return;
         }
-        if roots.iter().any(|existing| existing == trimmed) {
+        let plain = super::acp::strip_windows_verbatim(std::path::Path::new(trimmed))
+            .display()
+            .to_string();
+        if roots.iter().any(|existing| existing == &plain) {
             return;
         }
-        roots.push(trimmed.to_string());
+        roots.push(plain);
     };
     push(cwd);
     for root in extra_roots {
@@ -224,7 +227,10 @@ fn run_codex_app_server(
         bail!("prompt must not be empty");
     }
 
-    let cwd = resolve_session_cwd(options.cwd.as_deref(), options.workspace_name.as_deref());
+    let cwd = super::acp::strip_windows_verbatim(&resolve_session_cwd(
+        options.cwd.as_deref(),
+        options.workspace_name.as_deref(),
+    ));
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
     }
@@ -358,6 +364,7 @@ fn run_codex_app_server(
         account_model: account_model.clone(),
         resumed: false,
         model_update_rpc: None,
+        last_turn_error: None,
     };
 
     let fingerprint =
@@ -653,6 +660,8 @@ pub(crate) struct PumpState {
     resumed: bool,
     /// `thread/settings/update` sent before the turn. An error starts a new thread.
     model_update_rpc: Option<u64>,
+    /// Last error already emitted in this turn so `"error"` + `"turn/completed"` do not double-print.
+    last_turn_error: Option<String>,
 }
 
 fn codex_config_files(
@@ -878,6 +887,7 @@ mod tests {
             account_model: None,
             resumed: false,
             model_update_rpc: None,
+            last_turn_error: None,
         };
         let control = PromptSessionControl::new();
         handle_rpc_response(
@@ -919,6 +929,7 @@ mod tests {
             account_model: Some("gpt-5.6-sol".into()),
             resumed: true,
             model_update_rpc: Some(9),
+            last_turn_error: None,
         };
         let control = PromptSessionControl::new();
         handle_rpc_response(
@@ -956,6 +967,7 @@ mod tests {
             account_model: None,
             resumed: false,
             model_update_rpc: None,
+            last_turn_error: None,
         };
         let mut events = Vec::new();
         handle_notification(
@@ -1013,6 +1025,30 @@ mod tests {
             PromptSessionEvent::TurnError { message, .. } if message.contains("这一轮失败了")
         )));
         assert!(state.turn_done);
+
+        // Identical error on `error` + `turn/completed` must only emit once.
+        let mut dedup_events = Vec::new();
+        handle_notification("turn/started", None, &mut state, &mut |event| {
+            dedup_events.push(event);
+        });
+        let rate_err = "exceeded retry limit, last status: 429 Too Many Requests";
+        handle_notification(
+            "error",
+            Some(&json!({"error": {"message": rate_err}})),
+            &mut state,
+            &mut |event| dedup_events.push(event),
+        );
+        handle_notification(
+            "turn/completed",
+            Some(&json!({"turn": {"status": "failed", "error": {"message": rate_err}}})),
+            &mut state,
+            &mut |event| dedup_events.push(event),
+        );
+        let turn_errors = dedup_events
+            .iter()
+            .filter(|event| matches!(event, PromptSessionEvent::TurnError { .. }))
+            .count();
+        assert_eq!(turn_errors, 1);
     }
 
     #[test]
