@@ -1,6 +1,5 @@
 import { perfMark } from "./perf-probe";
 import { placeChannelSession } from "./channel-route";
-import { isChatRunning } from "./live-runs";
 import { MAX_SESSIONS, type ChatMessage, type ChatSession, type SessionStore } from "./types";
 
 /**
@@ -147,14 +146,18 @@ export function applyChannelSync(payload: unknown): void {
     : `${CHANNEL_PREFIX}${conversation.chat}`;
   const placed = placeChannelSession(store.sessions, key, deps.createSession);
   const session = placed.session;
-  // A live turn owns its messages. The cursor stays put, so the next hello
-  // replays this conversation once the run is over.
-  if (isChatRunning(session.id)) return;
+  // A live turn used to skip the merge and keep its cursor at the old stamp -
+  // so the site replayed the whole growing conversation on every hello, and
+  // the replay grew with the run: O(n²) traffic that froze the window under
+  // memory pressure. Merge and ack what the replay carries even mid-run; the
+  // merge joins rows by identity, so nothing doubles, and the site only
+  // replays rows newer than the acked cursor.
   const merged = mergeSyncedConversation(session, conversation);
   if (placed.created) {
     if (!merged) return;
     store.sessions = placed.sessions.slice(0, MAX_SESSIONS);
   }
+  session.channelSyncedAt = Math.max(session.channelSyncedAt ?? 0, conversation.updatedAt);
   if (!merged) return;
   deps.applied(session);
 }
