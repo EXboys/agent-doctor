@@ -127,6 +127,7 @@ import {
   parseStoreRaw,
   partialCopySessionIds,
   persistStore,
+  rememberOpenChatId,
   stripContextCompactSummaries,
   sessionTitle as sessionTitleBase,
 } from "./chat/store";
@@ -184,24 +185,24 @@ function persistDurableChatStore(store: SessionStore): Promise<void> {
 }
 
 async function drainDurableWrites(): Promise<void> {
-  perfMark("durable-drain");
   while (durablePending) {
     const snapshot = durablePending;
     durablePending = null;
+    perfMark("durable-drain");
     const stamp = chatBodyStamp(snapshot);
     if (chatWriteMemory && stamp === durableBodyStamp) {
       if (chatWriteMemory.activeId === snapshot.activeId) continue;
       const order = snapshot.sessions.map((session) => session.id);
+      const orderPatch = JSON.stringify({
+        v: 2,
+        activeId: snapshot.activeId,
+        order,
+        deletedIds: [],
+        sessions: [],
+      });
+      perfMark("idle");
       try {
-        await saveChatStore(
-          JSON.stringify({
-            v: 2,
-            activeId: snapshot.activeId,
-            order,
-            deletedIds: [],
-            sessions: [],
-          }),
-        );
+        await saveChatStore(orderPatch);
         chatWriteMemory = { ...chatWriteMemory, activeId: snapshot.activeId, order };
         durableSaveWarned = false;
       } catch (error) {
@@ -221,8 +222,10 @@ async function drainDurableWrites(): Promise<void> {
       durableBodyStamp = stamp;
       continue;
     }
+    const payload = JSON.stringify(diff.patch);
+    perfMark("idle");
     try {
-      await saveChatStore(JSON.stringify(diff.patch));
+      await saveChatStore(payload);
       chatWriteMemory = diff.next;
       durableBodyStamp = stamp;
       durableSaveWarned = false;
@@ -273,11 +276,9 @@ export async function hydrateDurableChatStore(): Promise<void> {
   markChatStoreDurableReady();
   if (merged) chatState.store = merged;
   stripContextCompactSummaries(chatState.store);
-  try {
-    chatState.store = persistStore(chatState.store);
-  } catch (error) {
-    console.warn("Ask: local chat mirror failed", error);
-  }
+  // The database is the copy that matters. Rewriting the localStorage mirror
+  // here stringifies every session on the main thread (field: 11s on a 16GB M1).
+  rememberOpenChatId(chatState.store.activeId);
   try {
     renderSessionList();
     renderActiveMessages();
@@ -573,8 +574,8 @@ export function setCurrentRuntime(runtime: AskRuntime, opts?: { syncSession?: bo
   }
   if (changed) {
     publishActiveRuntime();
+    void loadAskResources();
   }
-  void loadAskResources();
 }
 
 export function publishActiveRuntime(): void {

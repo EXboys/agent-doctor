@@ -319,31 +319,45 @@ function capDiskText(text: string): string {
   return `${text.slice(0, TOOL_TEXT_CAP)}\n…`;
 }
 
-/** What gets written down. User and assistant text stay whole; tool output is bounded. */
+/** What gets written down. User and assistant text stay whole; tool output is bounded.
+ * Messages under the cap keep their object identity so the save diff can reuse
+ * fingerprints instead of hashing every historical row again. */
 export function chatStoreForDisk(store: SessionStore): SessionStore {
-  return {
-    ...store,
-    sessions: store.sessions.map((session) => ({
-      ...session,
-      messages: session.messages.map((message) => {
-        const isLog = message.role === "meta" && message.log === true;
-        let next = message;
-        if (message.role === "tool" || isLog) {
-          next = { ...next, content: capDiskText(next.content) };
-        }
-        if (next.step?.output && next.step.output.length > TOOL_TEXT_CAP) {
-          next = { ...next, step: { ...next.step, output: capDiskText(next.step.output) } };
-        }
-        if (next.permission?.detail && next.permission.detail.length > TOOL_TEXT_CAP) {
-          next = {
-            ...next,
-            permission: { ...next.permission, detail: capDiskText(next.permission.detail) },
-          };
-        }
-        return next;
-      }),
-    })),
-  };
+  let sessionsChanged = false;
+  const sessions = store.sessions.map((session) => {
+    let changed = false;
+    const messages = session.messages.map((message) => {
+      const isLog = message.role === "meta" && message.log === true;
+      let next = message;
+      let touched = false;
+      if ((message.role === "tool" || isLog) && message.content.length > TOOL_TEXT_CAP) {
+        next = { ...next, content: capDiskText(next.content) };
+        touched = true;
+      }
+      if (next.step?.output && next.step.output.length > TOOL_TEXT_CAP) {
+        next = { ...next, step: { ...next.step, output: capDiskText(next.step.output) } };
+        touched = true;
+      }
+      if (next.permission?.detail && next.permission.detail.length > TOOL_TEXT_CAP) {
+        next = {
+          ...next,
+          permission: { ...next.permission, detail: capDiskText(next.permission.detail) },
+        };
+        touched = true;
+      }
+      if (touched) changed = true;
+      return touched ? next : message;
+    });
+    if (!changed) return session;
+    sessionsChanged = true;
+    return { ...session, messages };
+  });
+  return sessionsChanged ? { ...store, sessions } : store;
+}
+
+/** Remember which chat is open without rewriting the transcript mirror. */
+export function rememberOpenChatId(id: string): void {
+  rememberOpenChat(id);
 }
 
 let lastBodyStamp = "";
@@ -698,7 +712,8 @@ export function sessionTitle(session: ChatSession, untitled: string): string {
   if (session.title.trim()) return session.title.trim();
   const firstUser = session.messages.find((m) => m.role === "user");
   if (firstUser?.content.trim()) {
-    const line = firstUser.content.trim().split(/\n/)[0] ?? "";
+    const head = firstUser.content.slice(0, 300);
+    const line = head.trim().split(/\n/)[0] ?? "";
     return line.length > 28 ? `${line.slice(0, 28)}…` : line;
   }
   return untitled;

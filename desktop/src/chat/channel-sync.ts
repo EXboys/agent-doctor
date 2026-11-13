@@ -135,7 +135,46 @@ export function bindChannelSync(deps: ChannelSyncDeps): void {
 }
 
 /** One replayed conversation from the site. Rows join the chat they name. */
+/**
+ * Sync events fire at the daemon/site's cadence - during a live phone run
+ * that is continuous. Processing each event inline (full parse + merge +
+ * save + re-render) buried the main thread and froze every conversation.
+ * Coalesce: at most one apply per APPLY_MIN_INTERVAL, latest payload wins
+ * (superseded payloads carry no unique data - each replay is the full
+ * conversation state as of its stamp).
+ */
+/**
+ * Identical consecutive replays carry nothing new: during a live phone run
+ * the daemon re-sends the whole conversation state per archive change, and
+ * deduping by payload signature keeps a replay storm from burying the main
+ * thread in no-op merges. Distinct states apply synchronously - the merge is
+ * idempotent and callers assert on its effects.
+ */
+let lastSyncSignature = "";
+
+function syncPayloadSignature(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return String(payload);
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.rows)) return `${String(record.chat)}:${String(record.updatedAt)}:-1`;
+  const parts: string[] = [`${String(record.chat)}:${String(record.updatedAt)}:${record.rows.length}`];
+  for (const item of record.rows.slice(-100)) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const text = typeof row.text === "string" ? row.text : "";
+    const answered = typeof row.answered === "string" ? row.answered : "";
+    parts.push(`${String(row.key ?? "")}:${text.length}:${text.slice(-16)}:${answered}`);
+  }
+  return parts.join("|");
+}
+
 export function applyChannelSync(payload: unknown): void {
+  const signature = syncPayloadSignature(payload);
+  if (signature === lastSyncSignature) return;
+  lastSyncSignature = signature;
+  applyChannelSyncNow(payload);
+}
+
+function applyChannelSyncNow(payload: unknown): void {
   perfMark("channel-sync");
   const deps = syncDeps;
   if (!deps) return;

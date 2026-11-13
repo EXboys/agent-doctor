@@ -1,7 +1,7 @@
 import { getLocale } from "../i18n";
 import { splitToolActivity } from "./format";
 import type { PictureTurn } from "./picture-route";
-import type { ChatAttachment, ChatSession } from "./types";
+import type { ChatAttachment, ChatMessage, ChatSession } from "./types";
 import { MAX_CONTEXT_MESSAGES } from "./types";
 
 const STOPPED_STEP_CHARS = 160;
@@ -248,11 +248,32 @@ export function sessionContextText(session: ChatSession, draft = ""): string {
 function countTokensIn(text: string): number {
   let cjk = 0;
   let other = 0;
-  for (const ch of text) {
-    if ((ch.codePointAt(0) ?? 0) > 0xff) cjk += 1;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      const point =
+        next >= 0xdc00 && next <= 0xdfff ? ((code - 0xd800) << 10) + (next - 0xdc00) + 0x10000 : code;
+      if (point > 0xff) cjk += 1;
+      else other += 1;
+      if (next >= 0xdc00 && next <= 0xdfff) i += 1;
+      continue;
+    }
+    if (code > 0xff) cjk += 1;
     else other += 1;
   }
   return Math.ceil(cjk / 1.5 + other / 4);
+}
+
+const messageTokens = new WeakMap<ChatMessage, { content: string; tokens: number }>();
+
+function tokensForMessage(message: ChatMessage): number {
+  const content = message.content;
+  const hit = messageTokens.get(message);
+  if (hit && hit.content === content) return hit.tokens;
+  const tokens = content.trim() ? countTokensIn(content) : 0;
+  messageTokens.set(message, { content, tokens });
+  return tokens;
 }
 
 export function estimateSessionTokens(session: ChatSession, draft = ""): number {
@@ -262,8 +283,7 @@ export function estimateSessionTokens(session: ChatSession, draft = ""): number 
       continue;
     }
     if (message.log) continue;
-    const content = message.content;
-    if (content.trim()) tokens += countTokensIn(content);
+    tokens += tokensForMessage(message);
     if (message.attachments?.length) {
       tokens += countTokensIn(message.attachments.map((a) => a.name).join("\n"));
     }

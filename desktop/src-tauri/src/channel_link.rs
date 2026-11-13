@@ -368,16 +368,27 @@ fn safe_upload_name(raw: &str, index: usize) -> String {
 }
 
 #[tauri::command]
-pub fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
-    Ok(ChannelPref {
-        enabled: teamups_channel_enabled().map_err(|err| err.to_string())?,
-        signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
+pub async fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Ok(ChannelPref {
+            enabled: teamups_channel_enabled().map_err(|err| err.to_string())?,
+            signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
+        })
     })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-pub fn teamups_channel_set_enabled_command(app: AppHandle, enabled: bool) -> Result<(), String> {
-    set_teamups_channel_enabled(enabled).map_err(|err| err.to_string())?;
+pub async fn teamups_channel_set_enabled_command(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        set_teamups_channel_enabled(enabled).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     poke(&app);
     Ok(())
 }
@@ -385,8 +396,12 @@ pub fn teamups_channel_set_enabled_command(app: AppHandle, enabled: bool) -> Res
 /// The chat window pushes its per-conversation archive cursors; the next
 /// hello carries them, so the site replays only the conversations that moved.
 #[tauri::command]
-pub fn teamups_channel_since_command(since: serde_json::Value) -> Result<(), String> {
-    set_teamups_channel_since(since).map_err(|err| err.to_string())
+pub async fn teamups_channel_since_command(since: serde_json::Value) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        set_teamups_channel_since(since).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]

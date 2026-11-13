@@ -70,6 +70,24 @@ import type {
 } from "./types";
 import type { AskRuntime } from "../ask-resources";
 
+const sessionMessageIndex = new WeakMap<
+  ChatSession,
+  { count: number; tail: ChatMessage | undefined; byId: Map<string, ChatMessage> }
+>();
+
+function messageById(session: ChatSession, id: string): ChatMessage | undefined {
+  const messages = session.messages;
+  const tail = messages[messages.length - 1];
+  let cached = sessionMessageIndex.get(session);
+  if (!cached || cached.count !== messages.length || cached.tail !== tail) {
+    const byId = new Map<string, ChatMessage>();
+    for (const message of messages) byId.set(message.id, message);
+    cached = { count: messages.length, tail, byId };
+    sessionMessageIndex.set(session, cached);
+  }
+  return cached.byId.get(id);
+}
+
 export type BubblesDeps = {
   logEl: HTMLElement;
   titleEl: HTMLElement;
@@ -247,9 +265,7 @@ export function createBubblesController(deps: BubblesDeps) {
         const bubble = deps.getAssistantBubble()!;
         syncAssistantCopyButton(bubble);
         const id = deps.getAssistantMessageId();
-        const stamped = id
-          ? deps.runTargetSession().messages.find((message) => message.id === id)
-          : undefined;
+        const stamped = id ? messageById(deps.runTargetSession(), id) : undefined;
         syncAssistantTime(bubble, stamped?.at, false);
       }
     }
@@ -509,7 +525,7 @@ export function createBubblesController(deps: BubblesDeps) {
   }
   function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
-    const message = session.messages.find((m) => m.id === id);
+    const message = messageById(session, id);
     if (!message) return;
     message.content = content;
     // The rail reads the whole transcript to place its current tick, and that
@@ -532,8 +548,8 @@ export function createBubblesController(deps: BubblesDeps) {
     const id = bubble.dataset.messageId;
     if (id) {
       const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
-      const message = session.messages.find((m) => m.id === id);
-      if (message?.content?.trim()) return message.content;
+      const message = messageById(session, id);
+      if (message) return message.content;
     }
     if (bubble === deps.getAssistantBubble() && deps.getAssistantRaw().trim()) return deps.getAssistantRaw();
     return bubblePlainText(bubble);
@@ -597,7 +613,7 @@ export function createBubblesController(deps: BubblesDeps) {
   function feedbackMessage(bubble: HTMLElement): ChatMessage | undefined {
     const id = bubble.dataset.messageId;
     if (!id) return undefined;
-    return deps.activeSession().messages.find((message) => message.id === id);
+    return messageById(deps.activeSession(), id);
   }
   /** Persist the rating, then report it anonymously with the diagnosis log. */
   function handleFeedbackClick(wrap: HTMLElement, bubble: HTMLElement, direction: FeedbackDirection): void {
@@ -732,7 +748,7 @@ export function createBubblesController(deps: BubblesDeps) {
     const getText = () => {
       const id = bubble.dataset.messageId;
       if (id) {
-        const message = deps.activeSession().messages.find((m) => m.id === id);
+        const message = messageById(deps.activeSession(), id);
         if (message) return message.content;
       }
       return opts?.text ?? bubblePlainText(bubble);

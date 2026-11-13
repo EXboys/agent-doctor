@@ -139,7 +139,7 @@ import {
   projectDisplayLabel,
   sessionWorkspacePath,
 } from "./chat/session-workspace";
-import { MAX_SESSIONS } from "./chat/types";
+import { MAX_SESSIONS, ChatSession } from "./chat/types";
 import type { SendAskResult } from "./chat/send";
 import { bindLayoutResize } from "./chat/layout-resize";
 import { bindTuneMenu } from "./chat/tune-menu";
@@ -688,6 +688,23 @@ function bootChatTail(): void {
       }
     })(),
   );
+
+  let channelAppliedTimer: ReturnType<typeof setTimeout> | null = null;
+  const channelAppliedIds = new Set<string>();
+  function coalesceChannelApplied(session: ChatSession): void {
+    channelAppliedIds.add(session.id);
+    if (channelAppliedTimer) return;
+    channelAppliedTimer = setTimeout(() => {
+      channelAppliedTimer = null;
+      const activeChanged = Boolean(chatState.store?.activeId && channelAppliedIds.has(chatState.store.activeId));
+      channelAppliedIds.clear();
+      saveStore();
+      renderSessionList();
+      publishPhoneChats();
+      if (activeChanged) renderActiveMessages();
+    }, 400);
+  }
+
   function phoneChatKey(sessionId: string): string {
     return chatState.store?.sessions.find((item) => item.id === sessionId)?.channelKey?.trim() || "";
   }
@@ -772,12 +789,11 @@ function bootChatTail(): void {
   bindChannelSync({
     store: () => chatState.store,
     createSession: () => createEmptySession(selectedRuntime()),
-    applied: (session) => {
-      saveStore();
-      renderSessionList();
-      publishPhoneChats();
-      if (chatState.store?.activeId === session.id) renderActiveMessages();
-    },
+    // A live phone run fires replays continuously; without coalescing, each
+    // one paid a full save + session-list render + chat re-render per event
+    // and buried the main thread (the freeze on the 16G M1). One pass per
+    // 400ms keeps the UI current at a fraction of the cost.
+    applied: coalesceChannelApplied,
   });
   void listen<unknown>("teamups-channel-sync", (event) => {
     applyChannelSync(event.payload);

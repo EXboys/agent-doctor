@@ -98,8 +98,14 @@ export function createContextMeterController(deps: ContextMeterDeps) {
     perfMark("context-meter");
     if (!deps.contextMeterEl || !deps.contextRingFillEl || !deps.contextLabelEl) return;
     const session = deps.activeSession();
-    const turns = session.messages.filter((m) => m.role === "user" || m.role === "assistant");
-    const hasContent = turns.length > 0 || Boolean(deps.promptEl.value.trim());
+    let turnCount = 0;
+    for (const m of session.messages) {
+      if (m.role === "user" || m.role === "assistant") {
+        turnCount += 1;
+        if (turnCount > COMPACT_KEEP_TURNS) break;
+      }
+    }
+    const hasContent = turnCount > 0 || Boolean(deps.promptEl.value.trim());
     // Always show the meter so a new empty chat can still open the tip panel.
     if (deps.contextMeterEl.hidden) deps.contextMeterEl.hidden = false;
     const pct = hasContent ? deps.contextUsagePercent(session, deps.promptEl.value) : 0;
@@ -140,7 +146,7 @@ export function createContextMeterController(deps: ContextMeterDeps) {
     }
     const foldedBody = document.querySelector("#chat-tune-context-body");
     if (foldedBody && foldedBody.textContent !== popoverBody) foldedBody.textContent = popoverBody;
-    const canCompact = turns.length > COMPACT_KEEP_TURNS && !deps.isComposerLocked();
+    const canCompact = turnCount > COMPACT_KEEP_TURNS && !deps.isComposerLocked();
     if (deps.contextCompactEl) {
       deps.contextCompactEl.disabled = !canCompact;
       deps.contextCompactEl.hidden = !hasContent;

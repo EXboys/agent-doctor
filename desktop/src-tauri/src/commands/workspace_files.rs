@@ -151,12 +151,98 @@ fn is_sheet_name(name: &str) -> bool {
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        "node_modules" | ".git" | "target" | "dist" | "build" | ".next" | "__pycache__"
-    )
+        "node_modules"
+            | ".git"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | ".turbo"
+            | ".svelte-kit"
+            | ".parcel-cache"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | "vendor"
+            | "Pods"
+            | "DerivedData"
+            | "Library"
+            | "Applications"
+            | "CloudStorage"
+            | "System"
+            | "Volumes"
+            | "Pictures"
+            | "Movies"
+            | "Music"
+            | ".Trash"
+            | ".cache"
+            | ".npm"
+            | ".pnpm-store"
+            | ".yarn"
+            | ".bun"
+            | ".cargo"
+            | ".rustup"
+            | ".local"
+            | ".cursor"
+            | ".vscode"
+            | ".claude"
+            | ".codex"
+            | ".agent-doctor"
+            | ".gradle"
+            | ".m2"
+            | ".orbstack"
+            | ".docker"
+    ) || name.ends_with(".photoslibrary")
+        || name.ends_with(".app")
+}
+
+/// True when `root` is the user's home folder or an OS top-level directory rather than a project.
+/// Walking 20k entries under `$HOME` touches `Library/CloudStorage` and iCloud placeholders, which
+/// can stall `stat`/`read_dir` for 20–60s on macOS.
+fn is_broad_non_project_root(root_canon: &Path) -> bool {
+    if root_canon.parent().is_none() {
+        return true;
+    }
+    if matches!(
+        root_canon.to_str(),
+        Some(
+            "/Users"
+                | "/home"
+                | "/System"
+                | "/Volumes"
+                | "/private"
+                | "/var"
+                | "/tmp"
+                | "/private/tmp"
+        )
+    ) {
+        return true;
+    }
+    if let Some(home) = dirs::home_dir() {
+        if home == root_canon {
+            return true;
+        }
+        if let Ok(home_canon) = home.canonicalize() {
+            if home_canon == root_canon {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[tauri::command]
-pub fn list_workspace_dir_command(
+pub async fn list_workspace_dir_command(
+    root: String,
+    relative: Option<String>,
+) -> Result<Vec<WorkspaceDirEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_workspace_dir_blocking(root, relative))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn list_workspace_dir_blocking(
     root: String,
     relative: Option<String>,
 ) -> Result<Vec<WorkspaceDirEntry>, String> {
@@ -216,12 +302,23 @@ pub struct WorkspaceMatch {
 }
 
 const MAX_FIND_DEPTH: usize = 6;
-const MAX_FIND_VISITS: usize = 20_000;
+const MAX_FIND_VISITS: usize = 4_000;
+const MAX_FIND_BUDGET_MS: u128 = 150;
 
 /// A reply names a file the way a person would: a bare name, a short path, or
 /// a full path. Find the one it means inside the project.
 #[tauri::command]
-pub fn find_workspace_path_command(
+pub async fn find_workspace_path_command(
+    root: String,
+    query: String,
+) -> Result<Option<WorkspaceMatch>, String> {
+    // Runs for inline code mentions across rendered bubbles; never touch disk on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || find_workspace_path_blocking(root, query))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn find_workspace_path_blocking(
     root: String,
     query: String,
 ) -> Result<Option<WorkspaceMatch>, String> {
@@ -269,22 +366,52 @@ pub fn find_workspace_path_command(
         return Ok(None);
     }
 
+    // When `root` is the user's home directory (`default` workspace) or an OS root, never walk
+    // the whole folder tree (which hits `Library/CloudStorage` and iCloud placeholders). Only
+    // probe direct one-hop user folders for bare file names such as `简历.pdf`.
+    if is_broad_non_project_root(&root_canon) {
+        if !wanted.contains('/') {
+            for folder in ["Desktop", "Downloads", "Documents"] {
+                let candidate = root_canon.join(folder).join(&wanted);
+                if let Ok(found) = candidate.canonicalize() {
+                    if found.starts_with(&root_canon) && found != root_canon {
+                        return Ok(Some(WorkspaceMatch {
+                            relative_path: relative_from_root(&root_canon, &found),
+                            is_dir: found.is_dir(),
+                            external: false,
+                        }));
+                    }
+                }
+            }
+        }
+        return Ok(None);
+    }
+
     let suffix = format!("/{}", wanted.trim_start_matches("./"));
     let mut best: Option<WorkspaceMatch> = None;
     let mut queue = std::collections::VecDeque::from([(root_canon.clone(), 0usize)]);
     let mut visits = 0usize;
+    let started = std::time::Instant::now();
     while let Some((dir, depth)) = queue.pop_front() {
+        if started.elapsed().as_millis() > MAX_FIND_BUDGET_MS {
+            return Ok(best);
+        }
         let Ok(read_dir) = fs::read_dir(&dir) else {
             continue;
         };
         for item in read_dir.flatten() {
             visits += 1;
-            if visits > MAX_FIND_VISITS {
+            if visits > MAX_FIND_VISITS
+                || (visits & 63 == 0 && started.elapsed().as_millis() > MAX_FIND_BUDGET_MS)
+            {
                 return Ok(best);
             }
             let path = item.path();
             let name = item.file_name().to_string_lossy().to_string();
-            let is_dir = path.is_dir();
+            let Ok(file_type) = item.file_type() else {
+                continue;
+            };
+            let is_dir = file_type.is_dir();
             if is_dir && should_skip_dir(&name) {
                 continue;
             }
@@ -315,7 +442,16 @@ pub fn find_workspace_path_command(
 }
 
 #[tauri::command]
-pub fn read_workspace_file_command(
+pub async fn read_workspace_file_command(
+    root: String,
+    relative: String,
+) -> Result<WorkspaceFilePayload, String> {
+    tauri::async_runtime::spawn_blocking(move || read_workspace_file_blocking(root, relative))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn read_workspace_file_blocking(
     root: String,
     relative: String,
 ) -> Result<WorkspaceFilePayload, String> {
@@ -419,7 +555,19 @@ fn read_sheets(path: &Path) -> Result<Vec<WorkspaceSheet>, String> {
 }
 
 #[tauri::command]
-pub fn write_workspace_file_command(
+pub async fn write_workspace_file_command(
+    root: String,
+    relative: String,
+    content: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        write_workspace_file_blocking(root, relative, content)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn write_workspace_file_blocking(
     root: String,
     relative: String,
     content: String,
@@ -451,7 +599,7 @@ mod tests {
         fs::write(dir.join(".daily-digest/digest.mjs"), "x").unwrap();
         fs::write(dir.join(".daily-digest/logs/2026-10-10.md"), "x").unwrap();
         let root = dir.to_string_lossy().to_string();
-        let find = |q: &str| find_workspace_path_command(root.clone(), q.into()).unwrap();
+        let find = |q: &str| find_workspace_path_blocking(root.clone(), q.into()).unwrap();
 
         assert_eq!(
             find("digest.mjs"),
@@ -466,7 +614,7 @@ mod tests {
         let hit = find(&outside.to_string_lossy()).unwrap();
         assert!(hit.external && !hit.is_dir);
         let (folder, name) = hit.relative_path.rsplit_once('/').unwrap();
-        let opened = read_workspace_file_command(folder.into(), name.into()).unwrap();
+        let opened = read_workspace_file_blocking(folder.into(), name.into()).unwrap();
         assert_eq!(opened.content, "x");
         let _ = fs::remove_file(&outside);
         assert_eq!(
@@ -477,6 +625,16 @@ mod tests {
         assert_eq!(find("missing.md"), None);
         assert_eq!(find("../etc/passwd"), None);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn broad_roots_do_not_recursively_scan() {
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(home_canon) = home.canonicalize() {
+                assert!(is_broad_non_project_root(&home_canon));
+            }
+        }
+        assert!(is_broad_non_project_root(Path::new("/")));
     }
 
     #[test]
@@ -491,29 +649,29 @@ mod tests {
         fs::write(nested.join("main.rs"), "fn main() {}").unwrap();
         let root = dir.to_string_lossy().to_string();
 
-        let entries = list_workspace_dir_command(root.clone(), Some(String::new())).unwrap();
+        let entries = list_workspace_dir_blocking(root.clone(), Some(String::new())).unwrap();
         assert!(entries.iter().any(|e| e.name == "src" && e.is_dir));
 
-        let file = read_workspace_file_command(root.clone(), "src/main.rs".into()).unwrap();
+        let file = read_workspace_file_blocking(root.clone(), "src/main.rs".into()).unwrap();
         assert_eq!(file.language, "rust");
         assert!(file.content.contains("fn main"));
 
-        write_workspace_file_command(root.clone(), "src/main.rs".into(), "fn main() { }\n".into())
+        write_workspace_file_blocking(root.clone(), "src/main.rs".into(), "fn main() { }\n".into())
             .unwrap();
-        let updated = read_workspace_file_command(root.clone(), "src/main.rs".into()).unwrap();
+        let updated = read_workspace_file_blocking(root.clone(), "src/main.rs".into()).unwrap();
         assert!(updated.content.contains("{ }"));
 
         fs::write(dir.join("shot.png"), vec![0x89, b'P', b'N', b'G', 0, 0, 1]).unwrap();
-        let image = read_workspace_file_command(root.clone(), "shot.png".into()).unwrap();
+        let image = read_workspace_file_blocking(root.clone(), "shot.png".into()).unwrap();
         assert!(image.is_image && !image.editable);
         assert!(image.absolute_path.ends_with("shot.png"));
 
         fs::write(dir.join("blob.bin"), vec![0u8, 1, 2]).unwrap();
-        let blob = read_workspace_file_command(root.clone(), "blob.bin".into()).unwrap();
+        let blob = read_workspace_file_blocking(root.clone(), "blob.bin".into()).unwrap();
         assert!(!blob.is_image && !blob.editable && blob.sheets.is_none());
 
         write_test_xlsx(&dir.join("data.xlsx"));
-        let book = read_workspace_file_command(root, "data.xlsx".into()).unwrap();
+        let book = read_workspace_file_blocking(root, "data.xlsx".into()).unwrap();
         let sheets = book.sheets.expect("xlsx should be read as sheets");
         assert_eq!(sheets[0].name, "Sheet1");
         assert_eq!(

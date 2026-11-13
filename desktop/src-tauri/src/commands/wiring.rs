@@ -37,8 +37,21 @@ fn wire_browser_mcp_for_desktop() -> Result<BrowserMcpWireReport, String> {
 }
 
 #[tauri::command]
-pub fn get_personal_provider_status_command() -> PersonalProviderStatus {
-    load_personal_provider_status().unwrap_or(PersonalProviderStatus {
+pub async fn get_personal_provider_status_command() -> PersonalProviderStatus {
+    tauri::async_runtime::spawn_blocking(|| {
+        load_personal_provider_status().unwrap_or(PersonalProviderStatus {
+            configured: false,
+            gateway_url: None,
+            model: None,
+            api_key_hint: None,
+            profile_env_path: None,
+            active_id: None,
+            active_name: None,
+            protocol: None,
+        })
+    })
+    .await
+    .unwrap_or(PersonalProviderStatus {
         configured: false,
         gateway_url: None,
         model: None,
@@ -51,8 +64,16 @@ pub fn get_personal_provider_status_command() -> PersonalProviderStatus {
 }
 
 #[tauri::command]
-pub fn list_personal_providers_command() -> PersonalProvidersDocument {
-    list_personal_providers().unwrap_or(PersonalProvidersDocument {
+pub async fn list_personal_providers_command() -> PersonalProvidersDocument {
+    tauri::async_runtime::spawn_blocking(|| {
+        list_personal_providers().unwrap_or(PersonalProvidersDocument {
+            active_id: None,
+            providers: Vec::new(),
+            store_path: String::new(),
+        })
+    })
+    .await
+    .unwrap_or(PersonalProvidersDocument {
         active_id: None,
         providers: Vec::new(),
         store_path: String::new(),
@@ -162,9 +183,8 @@ pub async fn apply_personal_provider_command(
     Ok(report)
 }
 
-#[tauri::command]
-pub fn get_mode_status_command() -> ModeStatus {
-    load_mode_status().unwrap_or(ModeStatus {
+fn unset_mode_status() -> ModeStatus {
+    ModeStatus {
         mode: "unset".to_string(),
         edition: agent_doctor_core::product_edition().as_str().to_string(),
         personal_ready: false,
@@ -175,7 +195,16 @@ pub fn get_mode_status_command() -> ModeStatus {
         personal_active_id: None,
         personal_active_name: None,
         team_base_url: None,
+    }
+}
+
+#[tauri::command]
+pub async fn get_mode_status_command() -> ModeStatus {
+    tauri::async_runtime::spawn_blocking(|| {
+        load_mode_status().unwrap_or_else(|_| unset_mode_status())
     })
+    .await
+    .unwrap_or_else(|_| unset_mode_status())
 }
 
 #[tauri::command]

@@ -55,17 +55,24 @@ export function questionMarks(messages: QuestionSource[]): QuestionMark[] {
   return marks;
 }
 
+function firstLine(text: string): string {
+  const head = text.length > 400 ? text.slice(0, 400) : text;
+  let start = 0;
+  while (start < head.length && /\s/.test(head[start] ?? "")) start += 1;
+  let end = start;
+  while (end < head.length && head[end] !== "\n" && head[end] !== "\r") end += 1;
+  return head.slice(start, end).trim();
+}
+
 function questionTitle(message: QuestionSource): string {
-  const line = message.content
-    .split("\n")
-    .map((part) => part.trim())
-    .find(Boolean);
+  const line = firstLine(message.content);
   if (line) return line;
   return message.attachments?.find((item) => item.name?.trim())?.name?.trim() ?? "";
 }
 
 function excerpt(text: string): string {
-  const plain = text
+  const head = text.length > 4_000 ? text.slice(0, 4_000) : text;
+  const plain = head
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
     .replace(/\[[^\]]*]\([^)]*\)/g, " ")

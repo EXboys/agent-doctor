@@ -519,7 +519,20 @@ pub async fn knowledge_pages_command(
 }
 
 #[tauri::command]
-pub fn knowledge_save_order_command(
+pub async fn knowledge_save_order_command(
+    project_path: Option<String>,
+    category: String,
+    page_paths: Vec<String>,
+    moved_path: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        knowledge_save_order_blocking(project_path, category, page_paths, moved_path)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn knowledge_save_order_blocking(
     project_path: Option<String>,
     category: String,
     page_paths: Vec<String>,
@@ -565,7 +578,16 @@ pub fn knowledge_save_order_command(
 }
 
 #[tauri::command]
-pub fn knowledge_read_page_command(
+pub async fn knowledge_read_page_command(
+    project_path: Option<String>,
+    path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || knowledge_read_page_blocking(project_path, path))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn knowledge_read_page_blocking(
     project_path: Option<String>,
     path: String,
 ) -> Result<String, String> {
@@ -653,7 +675,19 @@ fn import_paths(project_path: Option<&str>, paths: Vec<String>) -> Result<Knowle
 }
 
 #[tauri::command]
-pub fn knowledge_add_source_command(
+pub async fn knowledge_add_source_command(
+    project_path: Option<String>,
+    name: String,
+    content: String,
+) -> Result<KnowledgeImport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        knowledge_add_source_blocking(project_path, name, content)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn knowledge_add_source_blocking(
     project_path: Option<String>,
     name: String,
     content: String,
@@ -672,7 +706,19 @@ pub fn knowledge_add_source_command(
 }
 
 #[tauri::command]
-pub fn knowledge_save_page_command(
+pub async fn knowledge_save_page_command(
+    project_path: Option<String>,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        knowledge_save_page_blocking(project_path, path, content)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn knowledge_save_page_blocking(
     project_path: Option<String>,
     path: String,
     content: String,
@@ -686,7 +732,16 @@ pub fn knowledge_save_page_command(
 }
 
 #[tauri::command]
-pub fn knowledge_delete_page_command(
+pub async fn knowledge_delete_page_command(
+    project_path: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || knowledge_delete_page_blocking(project_path, path))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn knowledge_delete_page_blocking(
     project_path: Option<String>,
     path: String,
 ) -> Result<(), String> {
@@ -720,7 +775,13 @@ fn remove_empty_dirs(wiki: &Path, mut dir: &Path) {
 
 /// Removes this scope’s knowledge folder, pages and sources together.
 #[tauri::command]
-pub fn knowledge_clear_command(project_path: Option<String>) -> Result<(), String> {
+pub async fn knowledge_clear_command(project_path: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || knowledge_clear_blocking(project_path))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn knowledge_clear_blocking(project_path: Option<String>) -> Result<(), String> {
     let root = knowledge_root(project_path.as_deref())?;
     if !root.exists() {
         return Ok(());
@@ -791,7 +852,15 @@ fn collect_raw_files(
 
 /// Catalog a chat turn can look up. Page bodies stay on disk until the assistant opens one.
 #[tauri::command]
-pub fn knowledge_context_command(
+pub async fn knowledge_context_command(
+    project_path: Option<String>,
+) -> Result<Option<KnowledgeContext>, String> {
+    tauri::async_runtime::spawn_blocking(move || knowledge_context_blocking(project_path))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn knowledge_context_blocking(
     project_path: Option<String>,
 ) -> Result<Option<KnowledgeContext>, String> {
     let Ok(root) = knowledge_root(project_path.as_deref()) else {
@@ -879,25 +948,25 @@ mod tests {
         assert!(root.join("AGENTS.md").is_file());
         assert!(root.join(&report.sources[1]).join("inner/b.txt").is_file());
 
-        let pending = knowledge_context_command(project_str.clone())
+        let pending = knowledge_context_blocking(project_str.clone())
             .unwrap()
             .unwrap();
         assert!(pending.full.is_none());
         assert!(pending.index.contains("a.md"));
         assert!(pending.raw_dir.unwrap().ends_with("raw"));
-        knowledge_save_page_command(
+        knowledge_save_page_blocking(
             project_str.clone(),
             "guides/start.md".into(),
             "# Start\nhi".into(),
         )
         .unwrap();
-        knowledge_save_page_command(
+        knowledge_save_page_blocking(
             project_str.clone(),
             "guides/advanced.md".into(),
             "# Advanced\nmore".into(),
         )
         .unwrap();
-        knowledge_save_order_command(
+        knowledge_save_order_blocking(
             project_str.clone(),
             "guides".into(),
             vec!["guides/start.md".into(), "guides/advanced.md".into()],
@@ -910,7 +979,7 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].title, "Start");
         assert_eq!(pages[1].title, "Advanced");
-        knowledge_save_order_command(
+        knowledge_save_order_blocking(
             project_str.clone(),
             "topics".into(),
             vec!["guides/advanced.md".into()],
@@ -921,23 +990,23 @@ mod tests {
             .unwrap()
             .pages;
         assert_eq!(pages[1].category.as_deref(), Some("topics"));
-        let context = knowledge_context_command(project_str.clone())
+        let context = knowledge_context_blocking(project_str.clone())
             .unwrap()
             .unwrap();
         assert!(context.index.contains("guides/start.md"));
         assert!(context.full.is_none());
 
-        knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).unwrap();
-        knowledge_delete_page_command(project_str.clone(), "guides/advanced.md".into()).unwrap();
+        knowledge_delete_page_blocking(project_str.clone(), "guides/start.md".into()).unwrap();
+        knowledge_delete_page_blocking(project_str.clone(), "guides/advanced.md".into()).unwrap();
         assert!(
             tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
                 .unwrap()
                 .pages
                 .is_empty()
         );
-        knowledge_save_page_command(project_str.clone(), "index.md".into(), "# Index\n".into())
+        knowledge_save_page_blocking(project_str.clone(), "index.md".into(), "# Index\n".into())
             .unwrap();
-        knowledge_clear_command(project_str.clone()).unwrap();
+        knowledge_clear_blocking(project_str.clone()).unwrap();
         assert!(!root.exists());
         assert!(
             tauri::async_runtime::block_on(knowledge_pages_command(project_str.clone()))
@@ -946,9 +1015,9 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            knowledge_delete_page_command(project_str.clone(), "guides/start.md".into()).is_err()
+            knowledge_delete_page_blocking(project_str.clone(), "guides/start.md".into()).is_err()
         );
-        assert!(knowledge_read_page_command(project_str, "../AGENTS.md".into()).is_err());
+        assert!(knowledge_read_page_blocking(project_str, "../AGENTS.md".into()).is_err());
         let _ = fs::remove_dir_all(project);
     }
 
