@@ -35,10 +35,13 @@ export function renderThinkingBlock(text: string, opts?: { id?: string; live?: b
     <div class="chat-thinking-body"></div>
   `;
   // A live block renders only the tail (see liveTail); the folded block
-  // after the seal always carries the full text for later reading.
+  // after the seal carries the text - capped at 80k chars (a deep-thinking
+  // run can exceed that; the store keeps the full text, and laying out
+  // megabytes inside the details is the same freeze as giant pastes).
+  const shown = text.length > 80_000 ? `${text.slice(0, 80_000)}\n…［已截断］` : text;
   block.querySelector<HTMLElement>(".chat-thinking-body")!.textContent = opts?.live
     ? liveTail(text)
-    : text;
+    : shown;
   // While thinking the row stays open so the peek keeps streaming; once done
   // the block folds into its header row and that row opens it again.
   block.querySelector("summary")?.addEventListener("click", (event) => {

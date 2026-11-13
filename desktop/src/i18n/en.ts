@@ -991,6 +991,7 @@ export const en = {
     "chat.showFullReply": "Show full reply",
     "chat.questionNext": "Next",
     "chat.userFoldMore": "Show more",
+    "chat.userCutNote": "(Message too long - showing first and last fragments. Full text is {chars} chars; use the copy button below.)",
     "chat.userFoldLess": "Show less",
     "chat.inputSubmitted": "Sent",
     "chat.inputFailed": "That did not go through. Try again.",

@@ -993,6 +993,7 @@ export const zh = {
     "chat.showFullReply": "显示完整回复",
     "chat.questionNext": "下一题",
     "chat.userFoldMore": "展开",
+    "chat.userCutNote": "（消息过长，仅显示首尾片段。全文 {chars} 字符，点下方复制按钮获取全文）",
     "chat.userFoldLess": "收起",
     "chat.inputSubmitted": "已提交",
     "chat.inputFailed": "没送出去，请再试一次。",

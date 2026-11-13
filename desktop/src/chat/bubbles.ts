@@ -134,6 +134,13 @@ const STREAM_AUX_MIN_MS = 400;
 const RENDER_MAX_CHARS = 32_000;
 /** User messages fold instead of growing a wall of text. */
 const USER_FOLD_CHARS = 600;
+/** Hard display cut for a user message (Telegram cuts over-long parts at
+ * 900dp for the same reason): a megabyte paste laid out in full froze first
+ * opens for minutes on WebKit. The full text stays in the store and rides
+ * the copy button. */
+const USER_RENDER_CHARS = 4000;
+const USER_RENDER_HEAD = 3600;
+const USER_RENDER_TAIL = 400;
 
 export function createBubblesController(deps: BubblesDeps) {
   let flushRaf = 0;
@@ -704,11 +711,20 @@ export function createBubblesController(deps: BubblesDeps) {
     const bubble = document.createElement("div");
     bubble.className = "chat-bubble user";
     if (opts?.id) bubble.dataset.messageId = opts.id;
-    bubble.textContent = opts?.text ?? "";
+    const full = opts?.text ?? "";
+    // Hard display cut over the render cap: WebKit lays out the whole text
+    // node even under the CSS fold, and a megabyte paste froze first opens
+    // for minutes. Head+tail keep both ends of a pasted log readable.
+    let shown = full;
+    const sliced = full.length > USER_RENDER_CHARS;
+    if (sliced) {
+      shown = `${full.slice(0, USER_RENDER_HEAD)}\n…\n${full.slice(-USER_RENDER_TAIL)}\n${t("chat.userCutNote", { chars: String(full.length) })}`;
+    }
+    bubble.textContent = shown;
     const strip = renderAttachmentStrip(opts?.attachments);
     if (strip) bubble.appendChild(strip);
 
-    const foldable = (opts?.text ?? "").length > USER_FOLD_CHARS;
+    const foldable = !sliced && full.length > USER_FOLD_CHARS;
     if (foldable) bubble.classList.add("is-folded");
 
     const actions = document.createElement("div");
