@@ -29,9 +29,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2
+      # rustsec/audit-check@v2 posts its findings as a check run, but that
+      # API call 404'd intermittently (2026-11-13) and failed the job even
+      # with zero vulnerabilities. Run cargo-audit directly instead: results
+      # land in the step summary, and the job fails only on real
+      # vulnerabilities - warnings (unmaintained/unsound/yanked in
+      # transitive deps) stay visible without failing.
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      - name: cargo audit
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          cargo audit 2>&1 | tee "$GITHUB_STEP_SUMMARY"
 
   npm-audit:
     name: npm audit (desktop)
