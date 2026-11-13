@@ -176,6 +176,7 @@ export function bootChat(): void {
   const win = window as Window & {
     __AD_ASK_APPLY_RUNTIME__?: (runtime: string) => void;
     __AD_ASK_BOOTED__?: boolean;
+    __AD_DUMP?: () => Promise<string>;
   };
   applyThemePreference(readThemePreference(), false);
   watchSystemTheme();
@@ -1118,26 +1119,15 @@ if (import.meta.env.DEV) {
   }, 6000);
 }
 
-// TEMP(ad-debug): on boot, dump the current session store and the live
-// transcript DOM for offline replay of the fold layout.
-if (import.meta.env.DEV) {
-  window.setTimeout(async () => {
-    if (!adDebugArmed) return;
-    try {
-      const { emit } = await import("@tauri-apps/api/event");
-      const { adDebug, adDebugDump } = await import("./ipc");
-      await adDebug("boot: dumping session + DOM");
-      await adDebugDump(document.querySelector(".chat-log")?.outerHTML ?? "");
-      await emit("island-send-text", { text: "随机思考然后操作2次工具，然后回复我" });
-      window.setTimeout(async () => {
-        await adDebugDump(document.querySelector(".chat-log")?.outerHTML ?? "");
-        await adDebug("boot: dumped again after the turn");
-      }, 180000);
-    } catch (error) {
-      console.error("[ad-debug] dump failed", error);
-    }
-  }, 7000);
-}
+// Field diagnostics for installed betas: with the devtools feature enabled,
+// the inspector opens on release builds too. __AD_DUMP writes the current
+// session store plus transcript DOM to /tmp/ad-session-dump.json; the perf
+// probe exposes __AD_PERF.report() for the long-frame ring.
+(window as Window & { __AD_DUMP?: () => Promise<string> }).__AD_DUMP = async (): Promise<string> => {
+  const { adDebugDump } = await import("./ipc");
+  await adDebugDump(document.querySelector(".chat-log")?.outerHTML ?? "");
+  return "/tmp/ad-session-dump.json";
+};
 
 // TEMP(ad-debug): dump the transcript structure on boot.
 if (import.meta.env.DEV) {

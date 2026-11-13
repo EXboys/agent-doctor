@@ -184,6 +184,7 @@ function persistDurableChatStore(store: SessionStore): Promise<void> {
 }
 
 async function drainDurableWrites(): Promise<void> {
+  perfMark("durable-drain");
   while (durablePending) {
     const snapshot = durablePending;
     durablePending = null;
