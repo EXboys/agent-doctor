@@ -64,6 +64,24 @@ async function main() {
   assert(releaseStalePins(sessions, "deepseek") === false, "a second pass finds nothing to release");
   assert(releaseStalePins([{ providerId: "minimax", model: "MiniMax-M3" }], null) === false, "no active provider releases nothing");
 
+  const { pinSessionAfterFailover } = await import("../src/chat/model-picker");
+  const failingChat = {
+    providerId: null as string | null,
+    model: "",
+    providerTag: "claude|api.anthropic.com" as string | null,
+    runtimeThreadId: "thread-old" as string | null,
+  };
+  pinSessionAfterFailover(
+    failingChat,
+    [{ id: "deepseek", url: "https://api.deepseek.com/v1" }],
+    "deepseek",
+    "deepseek-chat",
+  );
+  assert(failingChat.providerId === "deepseek", "failover pins only this chat");
+  assert(failingChat.model === "deepseek-chat", "failover pins the backup model");
+  assert(failingChat.runtimeThreadId === null, "old provider's native thread is dropped");
+  assert(failingChat.providerTag === "deepseek|api.deepseek.com", "tag tracks the backup host");
+
   console.log("model-picker-subscription.test.ts ok");
 }
 

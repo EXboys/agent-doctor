@@ -88,12 +88,16 @@ pub fn run(
                     eprintln!("[{mark}] {}", step.text);
                 }
             }
+            PromptSessionEvent::ProviderSwitched { notice, .. } => {
+                if !notice.trim().is_empty() {
+                    eprintln!("… {notice}");
+                }
+            }
             PromptSessionEvent::PermissionResolved { .. }
             | PromptSessionEvent::Thinking { .. }
             | PromptSessionEvent::Tool { .. }
             | PromptSessionEvent::Usage { .. }
-            | PromptSessionEvent::Completed { .. }
-            | PromptSessionEvent::ProviderSwitched { .. } => {}
+            | PromptSessionEvent::Completed { .. } => {}
         }
         let _ = io::stdout().flush();
         let _ = io::stderr().flush();

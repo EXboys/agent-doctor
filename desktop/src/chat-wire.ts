@@ -2,6 +2,7 @@ import { focusMainTab } from "./ipc";
 import { transcriptImportEntry } from "./chat/transcript-import";
 import { applyBackgroundEvent } from "./chat/background-run";
 import { mountReplyChangeCard } from "./chat/reply-changes";
+import { uid } from "./chat/store";
 import { omitBareToolStarts } from "./chat/tool-records";
 import { busyGenFor, isChatRunning, runningCount } from "./chat/live-runs";
 import { chatState } from "./chat-state";
@@ -139,7 +140,11 @@ import { createActivityController } from "./chat/activity";
 import { createThinkingController } from "./chat/thinking";
 import { createRunningIndicator } from "./chat/running";
 import { t } from "./i18n";
-import { createModelPickerController } from "./chat/model-picker";
+import {
+  createModelPickerController,
+  pinSessionAfterFailover,
+  providerHostTag,
+} from "./chat/model-picker";
 import { createDecisionController } from "./chat/decision";
 import { createAttachmentsController } from "./chat/attachments";
 import { createContextMeterController } from "./chat/context-meter";
@@ -155,16 +160,6 @@ import {
   type ChatFailureExplain,
 } from "./friendly-error";
 import { markChatFailureBubbleShown } from "./chat/turn-errors";
-
-function providerHostTag(provider: { id: string; url: string }): string {
-  let host = provider.url;
-  try {
-    host = new URL(provider.url).host;
-  } catch {
-    // keep the raw address
-  }
-  return `${provider.id}|${host}`;
-}
 
 export function wireChatControllers(): void {
   const chatFailureHandlers = {
@@ -690,6 +685,14 @@ export function wireChatControllers(): void {
             flushStorePersist();
             if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
           },
+          onProviderSwitched: (id, providerId, model) => {
+            const session = sessionById(id);
+            if (!session) return;
+            pinSessionAfterFailover(session, chatState.personalProviders, providerId, model);
+            touchSession(session);
+            flushStorePersist();
+            if (chatState.store.activeId === id) chatState.modelPicker?.renderModelPickerLabel();
+          },
         },
         chatId,
         payload,
@@ -767,6 +770,24 @@ export function wireChatControllers(): void {
       touchSession(session);
       flushStorePersist();
       if (chatState.store.activeId === id) paintChatPlan(logEl, session.plan);
+    },
+    onProviderSwitched: (chatId, providerId, model, notice) => {
+      const session = sessionById(chatId);
+      const text = notice.trim();
+      if (session) {
+        pinSessionAfterFailover(session, chatState.personalProviders, providerId, model);
+        if (text) {
+          session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
+        }
+        touchSession(session);
+        flushStorePersist();
+      }
+      if (chatState.store.activeId === chatId) {
+        chatState.modelPicker?.renderModelPickerLabel();
+        if (text) {
+          appendBubble("meta", text, { persist: false });
+        }
+      }
     },
     sealPlanOnTurnEnd: () => {
       const id = chatState.runningChatSessionId;
@@ -868,8 +889,8 @@ export function wireChatControllers(): void {
     readImageTextEnabled: () => readImageTextEnabled(),
     refreshComposer: () => syncComposerUi(),
     releaseUnansweredSteps: () => chatState.permissions.denyPendingChoices(),
-    providerTag: () => {
-      const session = chatState.store?.sessions ? activeSession() : null;
+    providerTag: (target) => {
+      const session = target ?? (chatState.store?.sessions ? activeSession() : null);
       const pinned = session?.providerId
         ? chatState.personalProviders.find((item) => item.id === session.providerId)
         : undefined;

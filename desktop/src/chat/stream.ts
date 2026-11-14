@@ -84,6 +84,7 @@ export type StreamDeps = {
   renderSessionList: () => void;
   showReplyChanges: () => void;
   onPlan: (items: PlanStep[]) => void;
+  onProviderSwitched?: (chatId: string, providerId: string, model: string, notice: string) => void;
   /** Turn ended successfully: fold any open plan steps into done. */
   sealPlanOnTurnEnd: () => void;
   onTurnCompleted: (text: string, status: string) => void;
@@ -134,7 +135,8 @@ export function createStreamController(deps: StreamDeps) {
       const keepsThinking =
         payload.type === "permission_request" ||
         payload.type === "permission_resolved" ||
-        payload.type === "plan";
+        payload.type === "plan" ||
+        payload.type === "provider_switched";
       if (
         payload.type !== "thinking" &&
         payload.type !== "stderr_line" &&
@@ -194,6 +196,14 @@ export function createStreamController(deps: StreamDeps) {
           break;
         case "plan":
           deps.onPlan(payload.items);
+          break;
+        case "provider_switched":
+          deps.onProviderSwitched?.(
+            chatId,
+            payload.provider_id,
+            payload.model,
+            payload.notice ?? "",
+          );
           break;
         case "completed": {
           const completedSessionId = chatId;

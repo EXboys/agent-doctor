@@ -108,16 +108,22 @@ fn apply_ask_provider_choice(
     if provider_id.is_none() && model.is_none() {
         return;
     }
-    let Ok(store) = crate::store::SettingsStore::open_default() else {
-        return;
-    };
-    let Ok(providers) = store.list_personal_providers() else {
-        return;
-    };
-    let chosen = provider_id
-        .and_then(|id| providers.iter().find(|item| item.id == id))
-        .or_else(|| providers.iter().find(|item| item.active));
-    let Some(chosen) = chosen else {
+    let chosen_from_store = crate::store::SettingsStore::open_default()
+        .ok()
+        .and_then(|store| {
+            let providers = store.list_personal_providers().ok()?;
+            let chosen = provider_id
+                .and_then(|id| providers.iter().find(|item| item.id == id))
+                .or_else(|| providers.iter().find(|item| item.active))?
+                .clone();
+            Some((store, chosen))
+        });
+    let Some((store, chosen)) = chosen_from_store else {
+        if provider_id.is_none() {
+            if let Some(model) = model {
+                env.insert(MODEL_ENV.to_string(), model.to_string());
+            }
+        }
         return;
     };
     let model = model.unwrap_or(chosen.model.as_str());
@@ -165,16 +171,7 @@ fn install_personal_ask_env(
         }
     }
     env.insert(GATEWAY_URL_ENV.to_string(), url.to_string());
-    env.insert("OPENAI_BASE_URL".into(), url.to_string());
-    let protocol = normalize_protocol(protocol);
-    env.insert(PROVIDER_PROTOCOL_ENV.to_string(), protocol.clone());
-    if protocol == PROTOCOL_ANTHROPIC {
-        env.insert("ANTHROPIC_BASE_URL".into(), url.to_string());
-    } else {
-        // OpenAI-compatible personal providers must not keep a leftover
-        // Anthropic/Evotown base URL — Claude Ask would call skilllite.
-        env.remove("ANTHROPIC_BASE_URL");
-    }
+    apply_personal_gateway_urls(env, url, protocol);
     if !model.trim().is_empty() {
         let resolved =
             crate::setup::coerce_gateway_model(url, model).unwrap_or_else(|| model.to_string());
@@ -182,6 +179,35 @@ fn install_personal_ask_env(
             let _ = crate::setup::persist_personal_provider_model(id, &resolved);
         }
         env.insert(MODEL_ENV.to_string(), resolved);
+    }
+}
+
+fn apply_personal_gateway_urls(env: &mut HashMap<String, String>, url: &str, protocol: &str) {
+    let (openai_url, dual) = crate::setup::openai_gateway_for_provider_url(url);
+    let protocol = normalize_protocol(protocol);
+    if dual {
+        env.insert(GATEWAY_URL_ENV.to_string(), openai_url.clone());
+        env.insert("OPENAI_BASE_URL".into(), openai_url);
+        env.insert(
+            PROVIDER_PROTOCOL_ENV.to_string(),
+            crate::setup::PROTOCOL_OPENAI.to_string(),
+        );
+        if let Some(anthropic_url) = anthropic_gateway_for_provider_url(url) {
+            env.insert("ANTHROPIC_BASE_URL".into(), anthropic_url);
+        } else {
+            env.remove("ANTHROPIC_BASE_URL");
+        }
+    } else {
+        env.insert(GATEWAY_URL_ENV.to_string(), url.to_string());
+        env.insert("OPENAI_BASE_URL".into(), url.to_string());
+        env.insert(PROVIDER_PROTOCOL_ENV.to_string(), protocol.clone());
+        if protocol == PROTOCOL_ANTHROPIC {
+            env.insert("ANTHROPIC_BASE_URL".into(), url.to_string());
+        } else {
+            // OpenAI-compatible personal providers must not keep a leftover
+            // Anthropic/Evotown base URL — Claude Ask would call skilllite.
+            env.remove("ANTHROPIC_BASE_URL");
+        }
     }
 }
 
@@ -1311,5 +1337,27 @@ mod tests {
         );
 
         set_home(previous);
+    }
+
+    #[test]
+    fn dual_protocol_provider_saved_under_either_protocol_serves_claude_and_codex() {
+        for (saved_url, saved_proto) in [
+            ("https://api.deepseek.com/v1", "openai"),
+            ("https://api.deepseek.com/anthropic", "anthropic"),
+        ] {
+            let mut env = HashMap::new();
+            env.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+            env.insert("OPENAI_API_KEY".into(), "sk-ds".into());
+            env.insert("ANTHROPIC_API_KEY".into(), "sk-ds".into());
+            apply_personal_gateway_urls(&mut env, saved_url, saved_proto);
+
+            let (claude_url, claude_key) = resolve_claude_overlay(&env).expect("claude overlay");
+            assert_eq!(claude_url, "https://api.deepseek.com/anthropic");
+            assert_eq!(claude_key, "sk-ds");
+
+            let (codex_url, codex_key, _, _) = resolve_codex_overlay(&env).expect("codex overlay");
+            assert_eq!(codex_url, "https://api.deepseek.com/v1");
+            assert_eq!(codex_key, "sk-ds");
+        }
     }
 }

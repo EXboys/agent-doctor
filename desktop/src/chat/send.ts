@@ -145,7 +145,7 @@ export type SendDeps = {
    */
   releaseUnansweredSteps?: () => Promise<boolean>;
   /** Which provider answers now; empty when the app does not choose one. */
-  providerTag?: () => string;
+  providerTag?: (target?: ChatSession | null) => string;
 };
 
 export type SendApi = ReturnType<typeof createSendController>;
@@ -205,11 +205,21 @@ export function createSendController(deps: SendDeps) {
   async function readPictures(
     items: ChatAttachment[],
     runtime: string,
+    sessionCtx?: {
+      providerId?: string | null;
+      model?: string | null;
+      workspaceName?: string | null;
+    },
   ): Promise<{ length: number; inputs: PictureInput[]; support: { seesImages: boolean; formats: string[] } }> {
     let support = { seesImages: false, formats: [] as string[] };
     if (items.length === 0) return { length: 0, inputs: [], support };
     try {
-      const found = await askImageSupport({ runtime });
+      const found = await askImageSupport({
+        runtime,
+        providerId: sessionCtx?.providerId ?? null,
+        model: sessionCtx?.model ?? null,
+        workspaceName: sessionCtx?.workspaceName ?? null,
+      });
       if (found) support = { seesImages: Boolean(found.sees_images), formats: found.formats ?? [] };
     } catch {
       /* treat as text-only */
@@ -364,7 +374,7 @@ export function createSendController(deps: SendDeps) {
     const sendSessionEarly = deps.sessionById(chatSessionId) ?? deps.activeSession();
     const elevated = sendSessionEarly.autoApprove === true;
     const runtimeForTurn = foreground ? deps.selectedRuntime() : sendSessionEarly.runtime;
-    const providerTag = deps.providerTag?.() ?? "";
+    const providerTag = deps.providerTag?.(sendSessionEarly) ?? "";
     if (
       providerTag &&
       sendSessionEarly.runtimeThreadId?.trim() &&
@@ -482,24 +492,32 @@ export function createSendController(deps: SendDeps) {
       deps.pushActivity("info", t("chat.verifyMcpWatching"));
     }
 
+    const sendSession = deps.sessionById(chatSessionId) ?? deps.activeSession();
+    const { cwd: sessionCwd, workspaceName: sessionWorkspace } =
+      deps.resolveSendWorkspace(sendSession);
+    // 内置 Agent 无 pin 时按余量选线：赠送有剩走赠送，用完自动落到
+    // 官方模型行（购买额度）——模型按钮显示的就是这一轮真正扣的池。
+    const doctorFallback =
+      runtimeForTurn === "doctor" ? deps.doctorOfficialFallback?.() ?? null : null;
+    const effectiveProviderId =
+      sendSession.providerId?.trim() || doctorFallback?.providerId || null;
+    const effectiveModel = sendSession.model?.trim() || doctorFallback?.model || null;
+
     const pictureInputs = await readPictures(
       attachments.filter((item) => item.kind === "image"),
       runtimeForTurn,
+      {
+        providerId: effectiveProviderId,
+        model: effectiveModel,
+        workspaceName: sessionWorkspace?.trim() || null,
+      },
     );
     let pictures = pictureInputs.length
       ? planPictures(pictureInputs.inputs, pictureInputs.support)
       : undefined;
     if (pictures && foreground) notePictures(pictures, runtimeForTurn);
 
-    const sendSession = deps.sessionById(chatSessionId) ?? deps.activeSession();
-    const { cwd: sessionCwd, workspaceName: sessionWorkspace } =
-      deps.resolveSendWorkspace(sendSession);
-
     const promptWithKnowledge = await appendKnowledgeToPrompt(promptUserText, sessionWorkspace?.trim() || null);
-    // 内置 Agent 无 pin 时按余量选线：赠送有剩走赠送，用完自动落到
-    // 官方模型行（购买额度）——模型按钮显示的就是这一轮真正扣的池。
-    const doctorFallback =
-      runtimeForTurn === "doctor" ? deps.doctorOfficialFallback?.() ?? null : null;
     const startRound = (turn: PictureTurn | undefined) =>
       startPromptSession({
         runtime: runtimeForTurn,
@@ -523,9 +541,8 @@ export function createSendController(deps: SendDeps) {
         selectedMcps,
         imagePaths: turn?.sendPaths ?? [],
         clientRunId: chatSessionId,
-        providerId:
-          sendSession.providerId?.trim() || doctorFallback?.providerId || null,
-        model: sendSession.model?.trim() || doctorFallback?.model || null,
+        providerId: effectiveProviderId,
+        model: effectiveModel,
       });
 
     const stillGoing = () => (deps.isChatRunning ? deps.isChatRunning(chatSessionId) : deps.getBusy());
@@ -554,7 +571,8 @@ export function createSendController(deps: SendDeps) {
       deps.saveStore();
       if (report.runtime_thread_id?.trim()) {
         session.runtimeThreadId = report.runtime_thread_id.trim();
-        session.providerTag = providerTag || null;
+        const latestTag = deps.providerTag?.(session) ?? providerTag;
+        session.providerTag = latestTag || null;
         deps.touchSession(session);
         deps.saveStore();
       } else if (resumeThreadId && report.status === "failed") {

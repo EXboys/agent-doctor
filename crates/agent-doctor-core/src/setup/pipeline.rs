@@ -651,6 +651,23 @@ pub fn anthropic_gateway_for_provider_url(url: &str) -> Option<String> {
     None
 }
 
+/// Whether a saved personal provider can serve a turn that speaks `needed` (`openai` or `anthropic`).
+///
+/// Dual-endpoint vendors (DeepSeek, GLM, Qwen, Kimi, MiniMax, Volcengine, SiliconFlow,
+/// OpenRouter, TeamUps official) expose both protocols on the same API key, so a row
+/// saved under either protocol can back up both Claude Code and OpenAI-compatible agents.
+pub fn provider_supports_protocol(protocol: &str, url: &str, needed: &str) -> bool {
+    let needed = normalize_protocol(needed);
+    if normalize_protocol(protocol) == needed {
+        return true;
+    }
+    if needed == PROTOCOL_ANTHROPIC {
+        anthropic_gateway_for_provider_url(url).is_some()
+    } else {
+        openai_gateway_for_provider_url(url).1
+    }
+}
+
 fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
     if let Some(official) = teamups_official_endpoints(url) {
         return Some(official);
@@ -1050,5 +1067,49 @@ mod tests {
             claude_code_target_url(&bundle),
             Some("https://api.anthropic.com")
         );
+    }
+
+    #[test]
+    fn dual_endpoint_vendors_satisfy_both_protocols_while_single_stack_stays_strict() {
+        assert!(provider_supports_protocol(
+            "openai",
+            "https://api.deepseek.com/v1",
+            "anthropic"
+        ));
+        assert!(provider_supports_protocol(
+            "anthropic",
+            "https://api.deepseek.com/anthropic",
+            "openai"
+        ));
+        assert!(provider_supports_protocol(
+            "openai",
+            "https://openrouter.ai/api/v1",
+            "anthropic"
+        ));
+        assert!(provider_supports_protocol(
+            "openai",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "anthropic"
+        ));
+        assert!(provider_supports_protocol(
+            "openai",
+            "https://api.openai.com/v1",
+            "openai"
+        ));
+        assert!(!provider_supports_protocol(
+            "openai",
+            "https://api.openai.com/v1",
+            "anthropic"
+        ));
+        assert!(provider_supports_protocol(
+            "anthropic",
+            "https://api.anthropic.com",
+            "anthropic"
+        ));
+        assert!(!provider_supports_protocol(
+            "anthropic",
+            "https://api.anthropic.com",
+            "openai"
+        ));
     }
 }

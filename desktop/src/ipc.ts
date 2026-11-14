@@ -1171,7 +1171,12 @@ export type AskImageSupport = {
   formats: string[];
 };
 
-export function askImageSupport(args: { runtime: string }): Promise<AskImageSupport> {
+export function askImageSupport(args: {
+  runtime: string;
+  providerId?: string | null;
+  model?: string | null;
+  workspaceName?: string | null;
+}): Promise<AskImageSupport> {
   return invoke("ask_image_support_command", args);
 }
 

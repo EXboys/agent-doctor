@@ -7,9 +7,7 @@ use base64::Engine as _;
 use serde::Serialize;
 
 use agent_doctor_core::profile::{PROVIDER_KIND_ENV, PROVIDER_KIND_PERSONAL};
-use agent_doctor_core::session_env::{
-    collect_overlay_env, resolve_claude_overlay, resolve_codex_overlay,
-};
+use agent_doctor_core::session_env::{resolve_claude_overlay, resolve_codex_overlay};
 use agent_doctor_core::setup::MODEL_ENV;
 
 /// Formats every vision runtime we send to accepts (DeepSeek, OpenAI, Anthropic).
@@ -36,8 +34,26 @@ pub struct AskImageSupport {
 
 /// Whether Ask on `runtime` can hand pictures to the model this turn.
 pub fn ask_image_support(runtime: &str) -> AskImageSupport {
+    ask_image_support_for_session(runtime, None, None, None)
+}
+
+/// Session-aware variant: uses the chat's pinned `provider_id`, `model`, and
+/// `workspace_name` rather than only the globally active provider.
+pub fn ask_image_support_for_session(
+    runtime: &str,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    workspace_name: Option<&str>,
+) -> AskImageSupport {
     let runtime = agent_doctor_core::evotown::normalize_runtime(runtime);
-    let overlay = collect_overlay_env();
+    let overlay = agent_doctor_core::session_env::collect_overlay_env_for_options(
+        &agent_doctor_core::session_env::OverlayAskOptions {
+            runtime: &runtime,
+            model,
+            provider_id,
+            workspace_name,
+        },
+    );
     AskImageSupport {
         sees_images: runtime_sees_images(&runtime, &overlay),
         model: overlay_model(&overlay),
@@ -442,5 +458,33 @@ mod tests {
         assert_eq!(prepared.paths.len(), 1);
         assert_eq!(prepared.keep.len(), 1);
         assert_ne!(prepared.paths[0], path);
+    }
+
+    #[test]
+    fn session_pinned_model_overrides_text_only_default_for_image_support() {
+        // When a chat explicitly pins a multimodal model (`deepseek-flash`),
+        // `ask_image_support_for_session` reports `sees_images = true` even if
+        // another model (`deepseek-v4-pro`) would be text-only, and vice versa.
+        let vision = ask_image_support_for_session("codex", None, Some("deepseek-flash"), None);
+        assert_eq!(vision.model.as_deref(), Some("deepseek-flash"));
+        assert!(vision.sees_images);
+
+        let text_only = ask_image_support_for_session("codex", None, Some("deepseek-chat"), None);
+        // Only when a personal/team gateway is active does `deepseek-chat` gate vision off;
+        // on native login (`!gateway`) Codex's own account models see images, so check
+        // `runtime_sees_images` directly on a gateway overlay with the session's model.
+        let mut gateway_overlay = HashMap::new();
+        gateway_overlay.insert(PROVIDER_KIND_ENV.into(), PROVIDER_KIND_PERSONAL.into());
+        gateway_overlay.insert(
+            "OPENAI_BASE_URL".into(),
+            "https://api.deepseek.com/v1".into(),
+        );
+        gateway_overlay.insert("OPENAI_API_KEY".into(), "sk-test".into());
+        gateway_overlay.insert(MODEL_ENV.into(), "deepseek-chat".into());
+        assert!(!runtime_sees_images("codex", &gateway_overlay));
+
+        gateway_overlay.insert(MODEL_ENV.into(), "deepseek-flash".into());
+        assert!(runtime_sees_images("codex", &gateway_overlay));
+        let _ = text_only;
     }
 }

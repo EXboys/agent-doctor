@@ -35,7 +35,9 @@ pub use backend::AskBackend;
 pub use control::{send_error_class, PromptSessionControl};
 pub use plan::{PlanStep, PlanStepState};
 pub use tool_step::ToolStep;
-pub use vision::{ask_image_support, AskImageSupport, SENDABLE_IMAGE_EXTS};
+pub use vision::{
+    ask_image_support, ask_image_support_for_session, AskImageSupport, SENDABLE_IMAGE_EXTS,
+};
 pub use warm::{enable_warm_sessions, retire_warm_sessions, shutdown_warm_sessions};
 
 pub(crate) use claude::ClaudeAskBackend;
@@ -299,11 +301,13 @@ pub enum PromptSessionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<TimeoutNote>,
     },
-    /// This turn moved to another saved provider. The checked provider moves with it.
+    /// This chat moved to another saved provider; the global default stays as chosen.
     ProviderSwitched {
         session_id: String,
         provider_id: String,
         model: String,
+        #[serde(default)]
+        notice: String,
     },
 }
 
@@ -391,21 +395,30 @@ where
     agent_doctor_core::setup::merge::drop_unreachable_ask_tools(&cwd);
     agent_doctor_core::setup::merge::retarget_windows_mcp_hosts(&cwd);
     let mut options_slot = options.clone();
-    let mut switched = false;
+    let required_protocol = required_protocol_for_runtime(&runtime);
+    let mut pending_switch: Option<agent_doctor_core::setup::FailoverSwitch> = None;
     if !cfg!(test) && failover_allowed(&runtime, &options_slot) {
+        let origin = effective_provider_id(&runtime, &options_slot);
         if let Some(choice) =
-            agent_doctor_core::setup::failover_while_cooling(options_slot.provider_id.as_deref())
+            agent_doctor_core::setup::failover_while_cooling(origin, required_protocol)
         {
-            commit_failover(&mut options_slot, &choice, &mut on_event);
-            switched = true;
+            prepare_failover(&mut options_slot, &choice);
+            pending_switch = Some(choice);
         }
     }
 
+    let switched = pending_switch.is_some();
     let cancel_again = cancel.clone();
     let control_again = control.clone();
-    let mut driven = drive_prompt(backend, &options_slot, cancel, control, &mut on_event)?;
+    let mut driven = drive_prompt(
+        backend,
+        &options_slot,
+        cancel,
+        control,
+        pending_switch.as_ref(),
+        &mut on_event,
+    )?;
     if !cfg!(test)
-        && !switched
         && failover_allowed(&runtime, &options_slot)
         && driven.report.status != PromptSessionStatus::Cancelled
         && !driven.saw_work
@@ -421,28 +434,33 @@ where
             driven.notes,
             if hung { "\ntimeout" } else { "" }
         );
-        if let Some(choice) = agent_doctor_core::setup::failover_after_outage(
-            options_slot.provider_id.as_deref(),
-            &blob,
-        ) {
+        let origin = effective_provider_id(&runtime, &options_slot);
+        if switched {
+            agent_doctor_core::setup::remember_provider_outage(origin, &blob);
+        } else if let Some(choice) =
+            agent_doctor_core::setup::failover_after_outage(origin, required_protocol, &blob)
+        {
             record_turn_usage(&runtime, &options_slot, &driven);
-            commit_failover(&mut options_slot, &choice, &mut on_event);
+            prepare_failover(&mut options_slot, &choice);
             let second = drive_prompt(
                 backend,
                 &options_slot,
                 cancel_again,
                 control_again,
+                Some(&choice),
                 &mut on_event,
             )?;
             if second.report.status != PromptSessionStatus::Cancelled && !second.saw_work {
+                let second_hung = matches!(second.report.status, PromptSessionStatus::TimedOut);
                 let second_blob = format!(
-                    "{}\n{}\n{}",
-                    second.report.summary, second.report.log_excerpt, second.notes
+                    "{}\n{}\n{}{}",
+                    second.report.summary,
+                    second.report.log_excerpt,
+                    second.notes,
+                    if second_hung { "\ntimeout" } else { "" }
                 );
-                agent_doctor_core::setup::remember_provider_outage(
-                    options_slot.provider_id.as_deref(),
-                    &second_blob,
-                );
+                let fallback_origin = effective_provider_id(&runtime, &options_slot);
+                agent_doctor_core::setup::remember_provider_outage(fallback_origin, &second_blob);
             }
             driven = second;
         } else if is_transient_rate_limit(&blob) {
@@ -461,6 +479,7 @@ where
                     &options_slot,
                     cancel_again,
                     control_again,
+                    None,
                     &mut on_event,
                 )?;
             }
@@ -492,6 +511,7 @@ fn drive_prompt<F>(
     options: &PromptSessionOptions,
     cancel: PromptSessionCancel,
     control: Option<PromptSessionControl>,
+    mut pending_switch: Option<&agent_doctor_core::setup::FailoverSwitch>,
     on_event: &mut F,
 ) -> Result<DrivenPrompt>
 where
@@ -504,6 +524,19 @@ where
     let mut held = Vec::new();
     let mut completed = None;
     let mut report = backend.run(options, cancel, control, &mut |event| {
+        if let PromptSessionEvent::Started { session_id, .. } = &event {
+            let sid = session_id.clone();
+            on_event(event);
+            if let Some(choice) = pending_switch.take() {
+                on_event(PromptSessionEvent::ProviderSwitched {
+                    session_id: sid,
+                    provider_id: choice.id.clone(),
+                    model: choice.model.clone(),
+                    notice: choice.notice.clone(),
+                });
+            }
+            return;
+        }
         if let PromptSessionEvent::Usage { usage, model, .. } = &event {
             used.add(usage);
             if model.is_some() {
@@ -579,7 +612,7 @@ fn push_failure_note(notes: &mut String, line: &str) {
 }
 
 fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
-    if runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID {
+    if runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID || runtime == "zcode" {
         return false;
     }
     // A ChatGPT or Claude login is not one of the saved providers.
@@ -594,6 +627,36 @@ fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
     true
 }
 
+/// Wire protocol this runtime speaks. `doctor` speaks both OpenAI and Anthropic natively.
+fn required_protocol_for_runtime(runtime: &str) -> Option<&'static str> {
+    match runtime {
+        "claude-code" => Some(agent_doctor_core::setup::PROTOCOL_ANTHROPIC),
+        "codex" | "hermes" | "openclaw" | "acp" => Some(agent_doctor_core::setup::PROTOCOL_OPENAI),
+        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some("*"),
+        _ => None,
+    }
+}
+
+/// Which provider row this turn actually rides before any failover.
+///
+/// An unpinned `doctor` chat always calls `teamups-official` (never `doc.active_id`),
+/// so an outage on the official line must cool `teamups-official` and fail over from
+/// there instead of blaming whichever personal provider is globally active for CLI tools.
+fn effective_provider_id<'a>(runtime: &str, options: &'a PromptSessionOptions) -> Option<&'a str> {
+    let explicit = options
+        .provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    if explicit.is_some() {
+        return explicit;
+    }
+    if runtime == agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID {
+        return Some(agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID);
+    }
+    None
+}
+
 fn apply_failover(
     options: &mut PromptSessionOptions,
     choice: &agent_doctor_core::setup::FailoverSwitch,
@@ -603,32 +666,14 @@ fn apply_failover(
     options.resume_thread_id = None;
 }
 
-fn commit_failover<F>(
+/// Scope the failover to this chat's options without rewriting the global default
+/// provider or other chats' configurations.
+fn prepare_failover(
     options: &mut PromptSessionOptions,
     choice: &agent_doctor_core::setup::FailoverSwitch,
-    on_event: &mut F,
-) where
-    F: FnMut(PromptSessionEvent),
-{
-    // The same switch a click on the provider card performs, so the checked
-    // row and the next message follow this provider.
-    let _ = agent_doctor_core::activate_personal_provider(&choice.id);
+) {
     retire_warm_sessions();
     apply_failover(options, choice);
-    on_event(failover_notice(&choice.notice));
-    on_event(PromptSessionEvent::ProviderSwitched {
-        session_id: String::new(),
-        provider_id: choice.id.clone(),
-        model: choice.model.clone(),
-    });
-}
-
-fn failover_notice(message: &str) -> PromptSessionEvent {
-    PromptSessionEvent::TurnError {
-        session_id: String::new(),
-        message: message.to_string(),
-        plain: true,
-    }
 }
 
 fn is_transient_rate_limit(text: &str) -> bool {
@@ -854,5 +899,134 @@ time.sleep(30)
         ));
         assert!(is_transient_rate_limit("官方线路繁忙，请稍后再试"));
         assert!(!is_transient_rate_limit("gpt-4290 invalid model"));
+    }
+
+    #[test]
+    fn session_failover_attaches_backend_session_id_and_maps_runtime_protocols() {
+        struct StubBackend;
+        impl AskBackend for StubBackend {
+            fn run(
+                &self,
+                options: &PromptSessionOptions,
+                _cancel: PromptSessionCancel,
+                _control: Option<PromptSessionControl>,
+                on_event: &mut dyn FnMut(PromptSessionEvent),
+            ) -> Result<PromptSessionReport> {
+                assert_eq!(options.provider_id.as_deref(), Some("fallback-b"));
+                assert_eq!(options.model.as_deref(), Some("deepseek-chat"));
+                assert!(options.resume_thread_id.is_none());
+                on_event(PromptSessionEvent::Started {
+                    session_id: "ask-77".into(),
+                    runtime: "claude-code".into(),
+                    cwd: "/tmp".into(),
+                    command: "claude".into(),
+                    client_run_id: String::new(),
+                });
+                on_event(PromptSessionEvent::Delta {
+                    session_id: "ask-77".into(),
+                    text: "ok".into(),
+                });
+                Ok(PromptSessionReport {
+                    session_id: "ask-77".into(),
+                    runtime: "claude-code".into(),
+                    cwd: "/tmp".into(),
+                    status: PromptSessionStatus::Succeeded,
+                    exit_code: Some(0),
+                    summary: "ok".into(),
+                    log_excerpt: String::new(),
+                    duration_ms: 5,
+                    runtime_thread_id: Some("thread-b".into()),
+                    usage: None,
+                })
+            }
+        }
+
+        static STUB: StubBackend = StubBackend;
+        let mut options = PromptSessionOptions {
+            runtime: "claude-code".into(),
+            prompt: "hi".into(),
+            cwd: None,
+            timeout_sec: 30,
+            dangerously_skip_permissions: false,
+            full_auto: false,
+            resume_thread_id: Some("old-thread-a".into()),
+            selected_mcps: Vec::new(),
+            image_paths: Vec::new(),
+            workspace_name: None,
+            provider_id: Some("primary-a".into()),
+            model: Some("claude-sonnet".into()),
+            browser_tools_enabled: None,
+            computer_use_enabled: None,
+        };
+        let choice = agent_doctor_core::setup::FailoverSwitch {
+            id: "fallback-b".into(),
+            model: "deepseek-chat".into(),
+            notice: "刚才那家连不上，这次改用 DeepSeek。".into(),
+        };
+        prepare_failover(&mut options, &choice);
+
+        let mut events = Vec::new();
+        let driven = drive_prompt(
+            &STUB,
+            &options,
+            PromptSessionCancel::new(),
+            None,
+            Some(&choice),
+            &mut |event| events.push(event),
+        )
+        .expect("stub turn");
+        assert!(driven.saw_work);
+        assert!(matches!(
+            &events[0],
+            PromptSessionEvent::Started { session_id, .. } if session_id == "ask-77"
+        ));
+        assert!(matches!(
+            &events[1],
+            PromptSessionEvent::ProviderSwitched {
+                session_id,
+                provider_id,
+                model,
+                notice,
+            } if session_id == "ask-77"
+                && provider_id == "fallback-b"
+                && model == "deepseek-chat"
+                && notice.contains("DeepSeek")
+        ));
+
+        assert_eq!(
+            required_protocol_for_runtime("claude-code"),
+            Some("anthropic")
+        );
+        assert_eq!(required_protocol_for_runtime("codex"), Some("openai"));
+        assert_eq!(required_protocol_for_runtime("hermes"), Some("openai"));
+        assert_eq!(required_protocol_for_runtime("openclaw"), Some("openai"));
+        assert_eq!(required_protocol_for_runtime("doctor"), Some("*"));
+
+        // Unpinned `doctor` originates from `teamups-official`, not `None` (which
+        // would fall back to `doc.active_id` and blame a personal CLI provider).
+        let unpinned_doctor = PromptSessionOptions {
+            runtime: "doctor".into(),
+            provider_id: None,
+            ..options.clone()
+        };
+        assert_eq!(
+            effective_provider_id("doctor", &unpinned_doctor),
+            Some(agent_doctor_core::setup::TEAMUPS_OFFICIAL_PROVIDER_ID)
+        );
+        let pinned_doctor = PromptSessionOptions {
+            runtime: "doctor".into(),
+            provider_id: Some("my-deepseek".into()),
+            ..options.clone()
+        };
+        assert_eq!(
+            effective_provider_id("doctor", &pinned_doctor),
+            Some("my-deepseek")
+        );
+        let unpinned_codex = PromptSessionOptions {
+            runtime: "codex".into(),
+            provider_id: None,
+            ..options
+        };
+        assert_eq!(effective_provider_id("codex", &unpinned_codex), None);
     }
 }

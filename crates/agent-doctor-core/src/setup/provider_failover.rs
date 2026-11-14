@@ -1,15 +1,23 @@
-//! One saved provider is down. The next one with the same protocol takes this turn.
+//! One saved provider is down. The next compatible one takes this chat.
 //!
-//! A wrong key or a wrong model stays on that provider. A provider that just failed
-//! is skipped for a few minutes so the next message does not hit it first.
+//! A wrong model name stays on that provider so the typo is visible. Transient
+//! outages (rate limits, 5xx, timeouts) rest briefly; empty quota or a rejected
+//! key rests longer until the person saves the provider again. When every
+//! compatible backup is resting, the one closest to waking up is probed once.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::{list_personal_providers, normalize_protocol, PersonalProviderListItem};
+use super::{
+    list_personal_providers, normalize_protocol, provider_supports_protocol,
+    PersonalProviderListItem,
+};
 
-const COOLDOWN: Duration = Duration::from_secs(3 * 60);
+/// Transient network / 429 / 5xx faults clear quickly.
+const DOWN_COOLDOWN: Duration = Duration::from_secs(60);
+/// Empty balance or a rejected key stays out of the way until topped up or re-saved.
+const ACCOUNT_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Outage {
@@ -21,6 +29,13 @@ enum Outage {
     Auth,
 }
 
+fn cooldown_for(outage: Outage) -> Duration {
+    match outage {
+        Outage::Down => DOWN_COOLDOWN,
+        Outage::Quota | Outage::Auth => ACCOUNT_COOLDOWN,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FailoverSwitch {
     pub id: String,
@@ -28,6 +43,7 @@ pub struct FailoverSwitch {
     pub notice: String,
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Cool {
     at: Instant,
     outage: Outage,
@@ -41,48 +57,63 @@ fn with_cool<T>(body: impl FnOnce(&mut HashMap<String, Cool>) -> T) -> T {
     body(map)
 }
 
-fn remember(id: &str, outage: Outage) {
+fn remember_in(map: &mut HashMap<String, Cool>, id: &str, outage: Outage) {
+    map.insert(
+        id.to_string(),
+        Cool {
+            at: Instant::now(),
+            outage,
+        },
+    );
+}
+
+fn remaining_in(map: &mut HashMap<String, Cool>, id: &str) -> Option<(Outage, Duration)> {
+    let (outage, total, elapsed) = {
+        let cool = map.get(id)?;
+        (cool.outage, cooldown_for(cool.outage), cool.at.elapsed())
+    };
+    if elapsed >= total {
+        map.remove(id);
+        None
+    } else {
+        Some((outage, total - elapsed))
+    }
+}
+
+/// Saving, activating, or deleting a provider resets its cooldown so a fresh key
+/// or topped-up balance works on the very next send.
+pub fn clear_provider_cooldown(provider_id: &str) {
+    let id = provider_id.trim();
+    if id.is_empty() {
+        return;
+    }
     with_cool(|map| {
-        map.insert(
-            id.to_string(),
-            Cool {
-                at: Instant::now(),
-                outage,
-            },
-        );
+        map.remove(id);
     });
 }
 
-fn cooling_outage(id: &str) -> Option<Outage> {
-    with_cool(|map| {
-        let (outage, fresh) = {
-            let cool = map.get(id)?;
-            (cool.outage, cool.at.elapsed() < COOLDOWN)
-        };
-        if !fresh {
-            map.remove(id);
-        }
-        fresh.then_some(outage)
-    })
-}
-
 /// The provider this turn would call is still in its cooldown. Use another one.
-pub fn failover_while_cooling(provider_id: Option<&str>) -> Option<FailoverSwitch> {
+pub fn failover_while_cooling(
+    provider_id: Option<&str>,
+    required_protocol: Option<&str>,
+) -> Option<FailoverSwitch> {
     let doc = list_personal_providers().ok()?;
     let current = current_provider(&doc.providers, provider_id.or(doc.active_id.as_deref()))?;
-    let outage = cooling_outage(&current.id)?;
-    let next = pick_fallback(&doc.providers, &current.id, true)?;
-    Some(switch_to(next, outage))
+    with_cool(|map| choose_while_cooling(map, &doc.providers, &current.id, required_protocol))
 }
 
 /// `failure` is an outage. Cool this provider and name the one to try once.
-pub fn failover_after_outage(provider_id: Option<&str>, failure: &str) -> Option<FailoverSwitch> {
+pub fn failover_after_outage(
+    provider_id: Option<&str>,
+    required_protocol: Option<&str>,
+    failure: &str,
+) -> Option<FailoverSwitch> {
     let outage = classify_provider_outage(failure)?;
     let doc = list_personal_providers().ok()?;
     let current = current_provider(&doc.providers, provider_id.or(doc.active_id.as_deref()))?;
-    let next = pick_fallback(&doc.providers, &current.id, true)?;
-    remember(&current.id, outage);
-    Some(switch_to(next, outage))
+    with_cool(|map| {
+        choose_after_outage(map, &doc.providers, &current.id, required_protocol, outage)
+    })
 }
 
 /// The fallback itself failed the same way. Skip it on the next message too.
@@ -97,7 +128,7 @@ pub fn remember_provider_outage(provider_id: Option<&str>, failure: &str) {
     else {
         return;
     };
-    remember(&current.id, outage);
+    with_cool(|map| remember_in(map, &current.id, outage));
 }
 
 fn current_provider<'a>(
@@ -108,29 +139,104 @@ fn current_provider<'a>(
     providers.iter().find(|item| item.id == id)
 }
 
-fn pick_fallback<'a>(
+fn candidate_fits(
+    item: &PersonalProviderListItem,
+    current: &PersonalProviderListItem,
+    required_protocol: Option<&str>,
+) -> bool {
+    match required_protocol {
+        Some("*") => true,
+        Some(proto) => provider_supports_protocol(&item.protocol, &item.url, proto),
+        None => provider_supports_protocol(
+            &item.protocol,
+            &item.url,
+            &normalize_protocol(&current.protocol),
+        ),
+    }
+}
+
+fn choose_while_cooling(
+    map: &mut HashMap<String, Cool>,
+    providers: &[PersonalProviderListItem],
+    current_id: &str,
+    required_protocol: Option<&str>,
+) -> Option<FailoverSwitch> {
+    let (outage, current_remaining) = remaining_in(map, current_id)?;
+    if let Some(awake) = pick_awake_fallback(map, providers, current_id, required_protocol) {
+        return Some(switch_to(awake, outage));
+    }
+    // Every compatible provider is cooling (`probeOne`): switch only when another
+    // candidate wakes up sooner than the one already chosen.
+    let (soonest, rem) = pick_soonest_cooling(map, providers, current_id, required_protocol)?;
+    (rem < current_remaining).then(|| switch_to(soonest, outage))
+}
+
+fn choose_after_outage(
+    map: &mut HashMap<String, Cool>,
+    providers: &[PersonalProviderListItem],
+    current_id: &str,
+    required_protocol: Option<&str>,
+    outage: Outage,
+) -> Option<FailoverSwitch> {
+    let next =
+        pick_awake_fallback(map, providers, current_id, required_protocol).or_else(|| {
+            pick_soonest_cooling(map, providers, current_id, required_protocol)
+                .map(|(item, _)| item)
+        })?;
+    remember_in(map, current_id, outage);
+    Some(switch_to(next, outage))
+}
+
+fn pick_awake_fallback<'a>(
+    map: &mut HashMap<String, Cool>,
     providers: &'a [PersonalProviderListItem],
     current_id: &str,
-    skip_cooling: bool,
+    required_protocol: Option<&str>,
 ) -> Option<&'a PersonalProviderListItem> {
     let start = providers.iter().position(|item| item.id == current_id)?;
     let current = &providers[start];
-    let protocol = normalize_protocol(&current.protocol);
     let count = providers.len();
     for step in 1..count {
         let item = &providers[(start + step) % count];
         if item.id == current_id {
             continue;
         }
-        if normalize_protocol(&item.protocol) != protocol {
+        if !candidate_fits(item, current, required_protocol) {
             continue;
         }
-        if skip_cooling && cooling_outage(&item.id).is_some() {
+        if remaining_in(map, &item.id).is_some() {
             continue;
         }
         return Some(item);
     }
     None
+}
+
+/// Among cooling alternates that fit this runtime's protocol, pick the one closest
+/// to waking up (`probeOne`). Ties preserve list order after `current_id`.
+fn pick_soonest_cooling<'a>(
+    map: &mut HashMap<String, Cool>,
+    providers: &'a [PersonalProviderListItem],
+    current_id: &str,
+    required_protocol: Option<&str>,
+) -> Option<(&'a PersonalProviderListItem, Duration)> {
+    let start = providers.iter().position(|item| item.id == current_id)?;
+    let current = &providers[start];
+    let count = providers.len();
+    let mut best: Option<(&'a PersonalProviderListItem, Duration)> = None;
+    for step in 1..count {
+        let item = &providers[(start + step) % count];
+        if item.id == current_id || !candidate_fits(item, current, required_protocol) {
+            continue;
+        }
+        let Some((_, rem)) = remaining_in(map, &item.id) else {
+            return Some((item, Duration::ZERO));
+        };
+        if best.map_or(true, |(_, best_rem)| rem < best_rem) {
+            best = Some((item, rem));
+        }
+    }
+    best
 }
 
 fn switch_to(next: &PersonalProviderListItem, outage: Outage) -> FailoverSwitch {
@@ -246,10 +352,14 @@ mod tests {
     use super::*;
 
     fn provider(id: &str, name: &str, protocol: &str) -> PersonalProviderListItem {
+        provider_at(id, name, "https://example.com/v1", protocol)
+    }
+
+    fn provider_at(id: &str, name: &str, url: &str, protocol: &str) -> PersonalProviderListItem {
         PersonalProviderListItem {
             id: id.into(),
             name: name.into(),
-            url: "https://example.com/v1".into(),
+            url: url.into(),
             model: format!("{id}-model"),
             protocol: protocol.into(),
             api_key_hint: String::new(),
@@ -289,36 +399,146 @@ mod tests {
     }
 
     #[test]
-    fn fallback_stays_on_the_same_protocol_and_skips_a_cooled_one() {
+    fn fallback_stays_on_compatible_protocol_and_skips_a_cooled_one() {
         let providers = vec![
             provider("a", "甲", "openai"),
             provider("b", "乙", "anthropic"),
             provider("c", "丙", "openai"),
         ];
-        let next = pick_fallback(&providers, "a", false).unwrap();
+        let mut map = HashMap::new();
+        let next = pick_awake_fallback(&mut map, &providers, "a", Some("openai")).unwrap();
         assert_eq!(next.id, "c");
 
-        remember("c", Outage::Down);
-        assert!(pick_fallback(&providers, "a", true).is_none());
-        with_cool(|map| map.clear());
+        remember_in(&mut map, "c", Outage::Down);
+        assert!(pick_awake_fallback(&mut map, &providers, "a", Some("openai")).is_none());
     }
 
     #[test]
-    fn a_cooling_outage_expires_and_is_forgotten() {
-        remember("old", Outage::Quota);
-        assert!(cooling_outage("old").is_some());
-        with_cool(|map| {
-            let cool = map.get_mut("old").expect("just remembered");
-            cool.at -= COOLDOWN + Duration::from_secs(1);
-        });
-        assert!(
-            cooling_outage("old").is_none(),
-            "past the cooldown it is usable again"
-        );
-        assert!(
-            !with_cool(|map| map.contains_key("old")),
-            "the expired entry is dropped"
-        );
+    fn dual_endpoint_provider_backs_up_both_claude_and_openai_agents() {
+        let providers = vec![
+            provider_at(
+                "claude-raw",
+                "Claude",
+                "https://api.anthropic.com",
+                "anthropic",
+            ),
+            provider_at(
+                "openai-raw",
+                "OpenAI",
+                "https://api.openai.com/v1",
+                "openai",
+            ),
+            provider_at(
+                "deepseek",
+                "DeepSeek",
+                "https://api.deepseek.com/v1",
+                "openai",
+            ),
+        ];
+        let mut map = HashMap::new();
+        // Claude Code (`anthropic`) skips pure OpenAI, but accepts DeepSeek even though
+        // DeepSeek was saved under `openai` — DeepSeek exposes `/anthropic` on the same key.
+        let for_claude = choose_after_outage(
+            &mut map,
+            &providers,
+            "claude-raw",
+            Some("anthropic"),
+            Outage::Down,
+        )
+        .expect("dual-endpoint backup for Claude Code");
+        assert_eq!(for_claude.id, "deepseek");
+
+        // Conversely, if DeepSeek (saved under `anthropic`) fails on Codex (`openai`),
+        // pure OpenAI is chosen while pure Anthropic is skipped.
+        let reverse = vec![
+            provider_at(
+                "deepseek-anth",
+                "DeepSeek",
+                "https://api.deepseek.com/anthropic",
+                "anthropic",
+            ),
+            provider_at(
+                "claude-raw",
+                "Claude",
+                "https://api.anthropic.com",
+                "anthropic",
+            ),
+            provider_at(
+                "openai-raw",
+                "OpenAI",
+                "https://api.openai.com/v1",
+                "openai",
+            ),
+        ];
+        let mut map2 = HashMap::new();
+        let for_codex = choose_after_outage(
+            &mut map2,
+            &reverse,
+            "deepseek-anth",
+            Some("openai"),
+            Outage::Down,
+        )
+        .expect("openai backup for Codex");
+        assert_eq!(for_codex.id, "openai-raw");
+    }
+
+    #[test]
+    fn cooldown_is_tiered_by_outage_kind_and_cleared_on_save() {
+        let mut map = HashMap::new();
+        remember_in(&mut map, "transient", Outage::Down);
+        remember_in(&mut map, "exhausted", Outage::Quota);
+        remember_in(&mut map, "bad-key", Outage::Auth);
+
+        // After 61s, transient Down has expired while Quota and Auth still rest.
+        map.get_mut("transient").unwrap().at -= Duration::from_secs(61);
+        map.get_mut("exhausted").unwrap().at -= Duration::from_secs(61);
+        map.get_mut("bad-key").unwrap().at -= Duration::from_secs(61);
+
+        assert!(remaining_in(&mut map, "transient").is_none());
+        assert!(!map.contains_key("transient"));
+        assert!(remaining_in(&mut map, "exhausted").is_some());
+        assert!(remaining_in(&mut map, "bad-key").is_some());
+
+        // Past 30m, Quota expires too.
+        map.get_mut("exhausted").unwrap().at -= ACCOUNT_COOLDOWN;
+        assert!(remaining_in(&mut map, "exhausted").is_none());
+
+        // Explicit clear (re-saving/activating a provider) drops cooldown immediately.
+        remember_in(&mut map, "re-saved-test", Outage::Auth);
+        with_cool(|global| remember_in(global, "re-saved-global", Outage::Quota));
+        clear_provider_cooldown("re-saved-global");
+        assert!(with_cool(
+            |global| remaining_in(global, "re-saved-global").is_none()
+        ));
+    }
+
+    #[test]
+    fn probe_one_picks_the_soonest_waking_backup_when_all_are_cooling() {
+        let providers = vec![
+            provider("a", "甲", "openai"),
+            provider("b", "乙", "openai"),
+            provider("c", "丙", "openai"),
+        ];
+        let mut map = HashMap::new();
+        // `b` is resting for 30m (Quota, ~29m left); `c` is resting for 60s (Down, ~15s left).
+        remember_in(&mut map, "b", Outage::Quota);
+        map.get_mut("b").unwrap().at -= Duration::from_secs(60);
+        remember_in(&mut map, "c", Outage::Down);
+        map.get_mut("c").unwrap().at -= Duration::from_secs(45);
+
+        // `a` just failed right now: even though both `b` and `c` are cooling,
+        // `probeOne` tries `c` (15s left) instead of giving up.
+        let switched = choose_after_outage(&mut map, &providers, "a", Some("openai"), Outage::Down)
+            .expect("probe soonest cooling backup");
+        assert_eq!(switched.id, "c");
+
+        // Pre-turn check while `b` (29m left) is selected: switches to `c` (15s left).
+        let pre = choose_while_cooling(&mut map, &providers, "b", Some("openai"))
+            .expect("switch from long quota cooldown to nearly-awake backup");
+        assert_eq!(pre.id, "c");
+
+        // Pre-turn check while `c` itself is already the soonest to wake: stay on `c`.
+        assert!(choose_while_cooling(&mut map, &providers, "c", Some("openai")).is_none());
     }
 
     #[test]

@@ -32,6 +32,7 @@ export type BackgroundRunCtx = {
   endRun: (id: string) => void;
   noteUnseen: (id: string) => void;
   onPlan: (chatId: string, items: PromptSessionEvent & { type: "plan" }) => void;
+  onProviderSwitched?: (chatId: string, providerId: string, model: string) => void;
 };
 
 export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payload: PromptSessionEvent): void {
@@ -119,6 +120,16 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
     case "plan":
       ctx.onPlan(chatId, payload);
       return;
+    case "provider_switched": {
+      ctx.onProviderSwitched?.(chatId, payload.provider_id, payload.model);
+      const text = stripLogAnsi(payload.notice ?? "").trim();
+      if (text) {
+        session.messages.push({ id: uid(), role: "meta", content: text, at: Date.now() });
+        ctx.touchSession(session);
+        ctx.scheduleStorePersist();
+      }
+      return;
+    }
     case "completed": {
       const noReply = !run.turnHadAssistantText && !run.assistantRaw.trim();
       if (noReply && payload.summary?.trim()) {

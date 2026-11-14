@@ -5,9 +5,9 @@
 pub mod prompt_session;
 
 pub use prompt_session::{
-    ask_image_support, ask_runtime_ids, enable_warm_sessions, installed_ask_agents,
-    retire_warm_sessions, run_prompt_session, run_prompt_session_with_cancel, send_error_class,
-    shutdown_warm_sessions, AskImageSupport, PlanStep, PlanStepState, PromptSessionCancel,
-    PromptSessionControl, PromptSessionEvent, PromptSessionOptions, PromptSessionReport,
-    PromptSessionStatus,
+    ask_image_support, ask_image_support_for_session, ask_runtime_ids, enable_warm_sessions,
+    installed_ask_agents, retire_warm_sessions, run_prompt_session, run_prompt_session_with_cancel,
+    send_error_class, shutdown_warm_sessions, AskImageSupport, PlanStep, PlanStepState,
+    PromptSessionCancel, PromptSessionControl, PromptSessionEvent, PromptSessionOptions,
+    PromptSessionReport, PromptSessionStatus,
 };

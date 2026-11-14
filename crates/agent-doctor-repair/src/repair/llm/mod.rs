@@ -575,13 +575,23 @@ pub fn official_llm_config_for(
     if agent_doctor_core::setup::normalize_protocol(&entry.protocol)
         == agent_doctor_core::setup::PROTOCOL_ANTHROPIC
     {
+        let anthropic_url = if on_gift {
+            url
+        } else {
+            agent_doctor_core::setup::anthropic_gateway_for_provider_url(&url).unwrap_or(url)
+        };
         Ok(LlmConfig::from_anthropic_gateway(
-            &url,
+            &anthropic_url,
             &entry.api_key,
             &model,
         ))
     } else {
-        Ok(LlmConfig::from_gateway(&url, &entry.api_key, &model))
+        let openai_url = if on_gift {
+            url
+        } else {
+            agent_doctor_core::setup::openai_gateway_for_provider_url(&url).0
+        };
+        Ok(LlmConfig::from_gateway(&openai_url, &entry.api_key, &model))
     }
 }
 

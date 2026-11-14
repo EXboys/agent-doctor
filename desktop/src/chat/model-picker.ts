@@ -97,6 +97,38 @@ export function releaseStalePins(
   return touched;
 }
 
+export function providerHostTag(provider: { id: string; url: string }): string {
+  let host = provider.url;
+  try {
+    host = new URL(provider.url).host;
+  } catch {
+    // keep the raw address
+  }
+  return `${provider.id}|${host}`;
+}
+
+/**
+ * Stick this chat to the fallback provider that answered it, keeping its prompt
+ * cache warm on later turns while leaving the global default and other chats alone.
+ */
+export function pinSessionAfterFailover(
+  session: {
+    providerId?: string | null;
+    model?: string | null;
+    providerTag?: string | null;
+    runtimeThreadId?: string | null;
+  },
+  providers: ReadonlyArray<{ id: string; url: string }>,
+  providerId: string,
+  model: string,
+): void {
+  const matched = providers.find((item) => item.id === providerId);
+  session.providerId = providerId;
+  session.model = model;
+  session.runtimeThreadId = null;
+  session.providerTag = matched ? providerHostTag(matched) : null;
+}
+
 type SubscriptionCatalog = {
   models: string[];
   label: string;

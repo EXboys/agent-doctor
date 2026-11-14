@@ -498,11 +498,9 @@ async fn start_prompt_session_command(
                     _ => {}
                 }
                 if let PromptSessionEvent::ProviderSwitched { .. } = &event {
+                    // Failover is scoped to this chat session; do not broadcast
+                    // `personal-provider-changed`, which releases pins on other chats.
                     agent_doctor_prompt::retire_warm_sessions();
-                    let _ = app_for_emit.emit(
-                        "personal-provider-changed",
-                        serde_json::json!({ "failover": true }),
-                    );
                 }
                 if let Some(sessions) = app_for_emit.try_state::<PromptSessionState>() {
                     if let Some(backend_id) = event_session_id(&event) {

@@ -220,6 +220,7 @@ pub fn upsert_personal_provider(
     };
 
     save_store(&path, &store)?;
+    crate::setup::clear_provider_cooldown(&id);
 
     if options.activate {
         activate_personal_provider(&id)?;
@@ -253,16 +254,18 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
     let mut store = load_store(&path)?;
     migrate_from_profile_if_empty(&mut store, &path)?;
     let make_active = store.active_id.is_none();
-    if let Some(entry) = store
+    let credentials_changed = if let Some(entry) = store
         .providers
         .iter_mut()
         .find(|p| p.id == TEAMUPS_OFFICIAL_PROVIDER_ID)
     {
+        let changed = entry.url != url || entry.api_key != license;
         entry.name = TEAMUPS_OFFICIAL_PROVIDER_NAME.to_string();
         entry.url = url;
         entry.api_key = license.to_string();
         entry.model = TEAMUPS_OFFICIAL_MODEL.to_string();
         entry.protocol = PROTOCOL_OPENAI.to_string();
+        changed
     } else {
         store.providers.insert(
             0,
@@ -275,11 +278,15 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
                 protocol: PROTOCOL_OPENAI.to_string(),
             },
         );
-    }
+        true
+    };
     if make_active {
         store.active_id = Some(TEAMUPS_OFFICIAL_PROVIDER_ID.to_string());
     }
     save_store(&path, &store)?;
+    if credentials_changed {
+        crate::setup::clear_provider_cooldown(TEAMUPS_OFFICIAL_PROVIDER_ID);
+    }
     if make_active {
         let _ = activate_personal_provider(TEAMUPS_OFFICIAL_PROVIDER_ID);
     }
@@ -298,10 +305,12 @@ pub fn delete_personal_provider(id: &str) -> Result<PersonalProvidersDocument> {
         store.active_id = None;
     }
     save_store(&path, &store)?;
+    crate::setup::clear_provider_cooldown(id);
     Ok(document_from_store(&store, &path))
 }
 
 pub fn activate_personal_provider(id: &str) -> Result<PersonalProviderSetupReport> {
+    crate::setup::clear_provider_cooldown(id);
     let switch = crate::setup::pipeline::apply_mode_switch(
         crate::setup::pipeline::ModeSwitchTarget::Personal {
             provider_id: Some(id.to_string()),

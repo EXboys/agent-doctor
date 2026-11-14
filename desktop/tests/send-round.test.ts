@@ -124,6 +124,8 @@ type FakeSession = {
   runtime: string;
   messages: Array<{ role: string; content: string }>;
   runtimeThreadId: string | null;
+  providerId?: string | null;
+  model?: string | null;
   providerTag?: string | null;
   interrupted?: { status: string; at: number } | null;
   autoApprove?: boolean;
@@ -151,6 +153,7 @@ function newController(opts: {
   elevated?: boolean;
   providerTag?: string;
   runningCount?: number;
+  attachments?: Array<{ id: string; path: string; name: string; kind: "image" | "file" }>;
 }) {
   const sessions = opts.sessions;
   if (opts.elevated) {
@@ -179,7 +182,7 @@ function newController(opts: {
     getBusyGen: () => state.busyGen,
     runningCount: () => opts.runningCount ?? 0,
     getRunningChatSessionId: () => (state.busy ? store.activeId : null),
-    getPendingAttachments: () => [],
+    getPendingAttachments: () => opts.attachments ?? [],
     setPendingAttachments: () => {},
     resolveSendWorkspace: () => ({ cwd: "/tmp/ws", workspaceName: "default" }),
     getVerifyMcpTurn: () => false,
@@ -592,6 +595,36 @@ await check("Stop when the engine cannot be reached frees the chat with a plain 
   ok(Boolean(last?.text.startsWith(t("chat.cancelFailed"))), `status should start with the plain line, got ${last?.text}`);
   eq(state.expired, 1, "waiting approvals are expired");
   consumeDrainIntent();
+});
+
+await check("image support check receives the chat's pinned providerId, model, and workspaceName", async () => {
+  reset();
+  const { api, promptEl } = newController({
+    sessions: [
+      makeSession("s-vision", {
+        providerId: "deepseek-pinned",
+        model: "deepseek-flash",
+      }),
+    ],
+    runtime: "codex",
+    attachments: [{ id: "img-1", path: "/tmp/shot.png", name: "shot.png", kind: "image" }],
+  });
+  promptEl.value = "read this screenshot";
+
+  await api.sendAsk();
+
+  const imgChecks = invokes.filter((call) => call.cmd === "ask_image_support_command");
+  eq(imgChecks.length, 1, "one image support check");
+  eq(
+    imgChecks[0].args,
+    {
+      runtime: "codex",
+      providerId: "deepseek-pinned",
+      model: "deepseek-flash",
+      workspaceName: "default",
+    },
+    "session-scoped routing passed to ask_image_support_command",
+  );
 });
 
 console.log("");

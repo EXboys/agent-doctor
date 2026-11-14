@@ -69,6 +69,13 @@ export type PromptSessionEvent =
         elapsed_sec: number;
         last_tool: string;
       } | null;
+    }
+  | {
+      type: "provider_switched";
+      session_id: string;
+      provider_id: string;
+      model: string;
+      notice?: string;
     };
 
 /** One tool call as fixed fields. A later event with the same id adds the result. */

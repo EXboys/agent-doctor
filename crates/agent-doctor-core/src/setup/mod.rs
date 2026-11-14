@@ -45,11 +45,13 @@ pub use personal::{
 pub use pipeline::openai_gateway_for_provider_url;
 pub use pipeline::{
     anthropic_gateway_for_provider_url, apply_mode_switch, coerce_gateway_model, effector_label,
-    probe_endpoint_bundle, project_bundle, runtime_strategies, strategy_for, BundleProbeReport,
-    EffectorKind, EndpointBundle, ModeSwitchTarget, RuntimeStrategy, WriteSemantics,
+    probe_endpoint_bundle, project_bundle, provider_supports_protocol, runtime_strategies,
+    strategy_for, BundleProbeReport, EffectorKind, EndpointBundle, ModeSwitchTarget,
+    RuntimeStrategy, WriteSemantics,
 };
 pub use provider_failover::{
-    failover_after_outage, failover_while_cooling, remember_provider_outage, FailoverSwitch,
+    clear_provider_cooldown, failover_after_outage, failover_while_cooling,
+    remember_provider_outage, FailoverSwitch,
 };
 
 use std::fs;
