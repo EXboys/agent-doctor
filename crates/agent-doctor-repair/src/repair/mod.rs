@@ -1,3 +1,4 @@
+mod backup_manifest;
 pub mod browser_tools_gate;
 mod deep_diagnose;
 pub(crate) mod dispatch;

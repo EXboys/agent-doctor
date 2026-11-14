@@ -317,13 +317,12 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
       });
       const report = await runRepairPreview({ runtime });
       mountRepairPreview(report, { resetFilter: true, open: true });
-      deps.setStatusBanner(
-        "ok",
-        t("repair.rollbackDone", {
-          id: restore.backup_id,
-          count: String(restore.restored_files.length),
-        }),
-      );
+      const notices = (restore.notices ?? []).filter((notice) => notice.trim());
+      const done = t("repair.rollbackDone", {
+        id: restore.backup_id,
+        count: String(restore.restored_files.length),
+      });
+      deps.setStatusBanner("ok", notices.length ? `${done} ${notices.join(" ")}` : done);
       if (runtime === "hermes") {
         await deps.loadHermesModel();
       }

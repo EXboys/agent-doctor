@@ -15,19 +15,25 @@ pub struct CodexAdapter;
 
 impl CodexAdapter {
     pub fn config_path() -> PathBuf {
-        // Prefer active workspace isolated CODEX_HOME — provider keys live there
-        // once Ask/wiring avoids writing them into ~/.codex (project-local deny).
+        // Prefer the active workspace isolated CODEX_HOME when that directory
+        // exists, even if config.toml has not been created yet. Setup/wiring
+        // already writes there as soon as the isolated home exists; requiring
+        // the file first made backup/repair fall back to ~/.codex.
+        let global = home_join(".codex/config.toml");
+        let global_home = home_join(".codex");
         if let Ok(doc) = crate::workspace::load_workspaces() {
             if let Some(active) = doc.active.as_deref() {
                 if let Some(entry) = doc.workspaces.get(active) {
-                    let ws = entry.codex_home.join("config.toml");
-                    if ws.exists() {
-                        return ws;
+                    if !entry.codex_home.as_os_str().is_empty()
+                        && entry.codex_home.exists()
+                        && !crate::workspace::path::paths_equal(&entry.codex_home, &global_home)
+                    {
+                        return entry.codex_home.join("config.toml");
                     }
                 }
             }
         }
-        home_join(".codex/config.toml")
+        global
     }
 
     fn auth_path() -> PathBuf {
@@ -202,5 +208,38 @@ env_key = "COMPANY_API_KEY"
         assert!(optional
             .iter()
             .any(|path| { path.file_name().and_then(|name| name.to_str()) == Some("auth.json") }));
+    }
+
+    #[test]
+    fn config_path_uses_isolated_home_dir_even_without_config_file() {
+        use crate::adapters::util::with_test_home;
+        use crate::workspace::{save_workspaces, WorkspaceEntry, WorkspacesDocument};
+        use std::collections::BTreeMap;
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        with_test_home(temp.path(), || {
+            let isolated = temp.path().join("ws-a/codex-home");
+            fs::create_dir_all(&isolated).expect("mkdir isolated");
+            let mut workspaces = BTreeMap::new();
+            workspaces.insert(
+                "alpha".to_string(),
+                WorkspaceEntry {
+                    path: temp.path().join("projects/alpha"),
+                    hermes_profile: "default".to_string(),
+                    codex_home: isolated.clone(),
+                    openclaw_agent_id: "main".to_string(),
+                    openclaw_workspace: temp.path().join("ws-a/openclaw"),
+                    title: String::new(),
+                },
+            );
+            save_workspaces(&WorkspacesDocument {
+                active: Some("alpha".to_string()),
+                workspaces,
+            })
+            .expect("save workspaces");
+            assert_eq!(CodexAdapter::config_path(), isolated.join("config.toml"));
+            assert!(!isolated.join("config.toml").exists());
+        });
     }
 }

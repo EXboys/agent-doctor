@@ -97,6 +97,8 @@ pub struct RestoreSummary {
     backup_id: String,
     backup_root: String,
     restored_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notices: Vec<String>,
 }
 
 impl From<&RestoreReport> for RestoreSummary {
@@ -105,6 +107,7 @@ impl From<&RestoreReport> for RestoreSummary {
             backup_id: report.backup_id.clone(),
             backup_root: report.backup_root.clone(),
             restored_files: report.restored_files.clone(),
+            notices: report.notices.clone(),
         }
     }
 }

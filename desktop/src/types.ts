@@ -139,6 +139,7 @@ export type RestoreSummary = {
   backup_id: string;
   backup_root: string;
   restored_files: string[];
+  notices?: string[];
 };
 
 export type InstallRuntimeResponse = {

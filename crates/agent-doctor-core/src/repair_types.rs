@@ -235,7 +235,7 @@ pub struct ExplainInstallFailure {
 
 /// Root directory every runtime backup snapshot lives under.
 pub fn backups_root() -> Result<PathBuf> {
-    let root = dirs::config_dir()
+    let root = crate::adapters::util::config_dir()
         .map(|dir| dir.join("agent-doctor").join("backups"))
         .context("could not resolve config directory")?;
     std::fs::create_dir_all(&root)?;

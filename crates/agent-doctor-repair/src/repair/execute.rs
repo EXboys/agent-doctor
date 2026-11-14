@@ -5,6 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::backup_manifest::{
+    file_name_of, identity_for_path, unique_existing_file_names, write_manifest, BackupManifest,
+    ManifestFile, MANIFEST_VERSION,
+};
 use super::{
     build_repair_preview_from_bundle, AuditReport, BackupSnapshot, RedactionPolicy, Redactor,
     RepairAction, RepairActionKind, RepairPlan, SensitivityLevel, SnapshotFile,
@@ -181,34 +185,86 @@ pub fn create_runtime_backup_snapshot(runtime_id: &str) -> Result<BackupSnapshot
     let adapter =
         adapter_by_id(runtime_id).with_context(|| format!("unknown runtime '{runtime_id}'"))?;
     let config_paths = adapter.all_config_paths();
-    let snapshot_id = format!("{runtime_id}-{}", unix_seconds());
-    let snapshot_root = backups_root()?.join(&snapshot_id);
-    fs::create_dir_all(&snapshot_root)?;
+    unique_existing_file_names(&config_paths)?;
 
-    let files = snapshot_config_files(&config_paths, &snapshot_root)?;
+    let backups = backups_root()?;
+    fs::create_dir_all(&backups)?;
+    let snapshot_id = allocate_snapshot_id(runtime_id, &backups)?;
+    let snapshot_root = backups.join(&snapshot_id);
+    fs::create_dir(&snapshot_root).with_context(|| {
+        format!(
+            "failed to create backup directory {}",
+            snapshot_root.display()
+        )
+    })?;
 
+    let result = write_snapshot(runtime_id, &snapshot_id, &config_paths, &snapshot_root);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&snapshot_root);
+    }
+    result
+}
+
+fn write_snapshot(
+    runtime_id: &str,
+    snapshot_id: &str,
+    config_paths: &[PathBuf],
+    snapshot_root: &Path,
+) -> Result<BackupSnapshot> {
+    let files = snapshot_config_files(runtime_id, config_paths, snapshot_root)?;
+    let manifest = BackupManifest {
+        version: MANIFEST_VERSION,
+        runtime_id: runtime_id.to_string(),
+        id: snapshot_id.to_string(),
+        files: files
+            .iter()
+            .map(|file| ManifestFile {
+                file_name: file_name_of(Path::new(&file.original_path)),
+                original_path: file.original_path.clone(),
+                snapshot_name: file_name_of(Path::new(&file.snapshot_path)),
+                identity: identity_for_path(Path::new(&file.original_path)),
+            })
+            .collect(),
+    };
+    write_manifest(snapshot_root, &manifest)?;
     Ok(BackupSnapshot {
-        id: snapshot_id,
+        id: snapshot_id.to_string(),
         runtime_id: runtime_id.to_string(),
         root: snapshot_root.display().to_string(),
         files,
     })
 }
 
+fn allocate_snapshot_id(runtime_id: &str, backups: &Path) -> Result<String> {
+    let base = format!("{runtime_id}-{}", unix_seconds());
+    if !backups.join(&base).exists() {
+        return Ok(base);
+    }
+    for suffix in 2..100 {
+        let candidate = format!("{base}-{suffix}");
+        if !backups.join(&candidate).exists() {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!(
+        "could not allocate a unique backup id under {}",
+        backups.display()
+    )
+}
+
 pub fn snapshot_config_files(
+    _runtime_id: &str,
     config_paths: &[PathBuf],
     snapshot_root: &Path,
 ) -> Result<Vec<SnapshotFile>> {
+    unique_existing_file_names(config_paths)?;
     let mut files = Vec::new();
     for path in config_paths {
         if !path.exists() {
             continue;
         }
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "config".to_string());
-        let dest = snapshot_root.join(file_name);
+        let file_name = file_name_of(path);
+        let dest = snapshot_root.join(&file_name);
         fs::copy(path, &dest)
             .with_context(|| format!("failed to copy {} to {}", path.display(), dest.display()))?;
         files.push(SnapshotFile {
@@ -271,27 +327,30 @@ mod tests {
         let snapshot_root = temp.path().join("snapshot");
         fs::create_dir_all(&snapshot_root).expect("mkdir");
 
-        let files =
-            snapshot_config_files(std::slice::from_ref(&source), &snapshot_root).expect("snapshot");
+        let files = snapshot_config_files("hermes", std::slice::from_ref(&source), &snapshot_root)
+            .expect("snapshot");
         assert_eq!(files.len(), 1);
         assert!(Path::new(&files[0].snapshot_path).exists());
     }
 
     #[test]
     fn execute_repair_records_backup_without_apply_writes() {
-        let report =
-            execute_repair("hermes", &RepairExecuteOptions::default()).expect("execute repair");
-        assert!(report.backup.runtime_id == "hermes");
-        assert!(report.backup.root.contains("hermes"));
-        assert!(report
-            .executed_action_ids
-            .iter()
-            .any(|id| id == "backup-runtime-configs"));
-        assert!(!report
-            .skipped_actions
-            .iter()
-            .any(|item| item.id == "apply-confirmed-fixes"));
-        assert!(report.audit.verification_summary.contains("before:"));
-        assert!(report.audit.verification_summary.contains("after:"));
+        let temp = tempfile::tempdir().expect("tempdir");
+        agent_doctor_core::adapters::util::with_test_home(temp.path(), || {
+            let report =
+                execute_repair("hermes", &RepairExecuteOptions::default()).expect("execute repair");
+            assert!(report.backup.runtime_id == "hermes");
+            assert!(report.backup.root.contains("hermes"));
+            assert!(report
+                .executed_action_ids
+                .iter()
+                .any(|id| id == "backup-runtime-configs"));
+            assert!(!report
+                .skipped_actions
+                .iter()
+                .any(|item| item.id == "apply-confirmed-fixes"));
+            assert!(report.audit.verification_summary.contains("before:"));
+            assert!(report.audit.verification_summary.contains("after:"));
+        });
     }
 }

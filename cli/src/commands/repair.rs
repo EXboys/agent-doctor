@@ -328,6 +328,12 @@ fn run_rollback(runtime: &str, backup: Option<&str>, json: bool) -> Result<()> {
     for path in &report.restored_files {
         println!("  - {path}");
     }
+    if !report.notices.is_empty() {
+        println!("\nNotes:");
+        for notice in &report.notices {
+            println!("  - {notice}");
+        }
+    }
     Ok(())
 }
 
