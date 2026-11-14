@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Agent Doctor",
-  "version": "0.1.99",
+  "version": "0.1.100-beta.1",
   "identifier": "com.agentdoctor.app",
   "build": {
     "beforeDevCommand": "npm run dev",
