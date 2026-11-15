@@ -51,7 +51,7 @@ pub use pipeline::{
 };
 pub use provider_failover::{
     clear_provider_cooldown, failover_after_outage, failover_while_cooling,
-    remember_provider_outage, FailoverSwitch,
+    failure_needs_a_form_fix, remember_provider_outage, FailoverSwitch,
 };
 
 use std::fs;

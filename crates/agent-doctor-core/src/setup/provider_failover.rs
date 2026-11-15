@@ -102,6 +102,13 @@ pub fn failover_while_cooling(
     with_cool(|map| choose_while_cooling(map, &doc.providers, &current.id, required_protocol))
 }
 
+/// A wrong model name, a retired model, or a key on the wrong product line.
+/// The person fixes that in the form. Switching providers repeats it, and a
+/// rate-limit retry only waits on the same mistake.
+pub fn failure_needs_a_form_fix(failure: &str) -> bool {
+    is_model_mistake(failure) || is_plan_line_mismatch(failure)
+}
+
 /// `failure` is an outage. Cool this provider and name the one to try once.
 pub fn failover_after_outage(
     provider_id: Option<&str>,
@@ -261,7 +268,12 @@ fn classify_provider_outage(text: &str) -> Option<Outage> {
     let lower = trimmed.to_lowercase();
     // A wrong model name stays. A rejected key does not: the next provider
     // answers with its own key.
-    if is_model_mistake(&lower) {
+    if is_model_mistake(trimmed) {
+        return None;
+    }
+    // A coding-plan key on the pay-as-you-go address often says "no balance".
+    // That is the wrong door, not an empty account.
+    if is_plan_line_mismatch(trimmed) {
         return None;
     }
     if is_quota(trimmed, &lower) {
@@ -276,12 +288,79 @@ fn classify_provider_outage(text: &str) -> Option<Outage> {
     None
 }
 
-fn is_model_mistake(lower: &str) -> bool {
-    lower.contains("model_not_found")
-        || lower.contains("model is not supported")
-        || lower.contains("invalid model")
-        || lower.contains("no such model")
-        || lower.contains("unknown model")
+fn is_model_mistake(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    const PHRASES: &[&str] = &[
+        "model_not_found",
+        "model_deprecated",
+        "invalid_model",
+        "unknown_model",
+        "invalid model",
+        "unknown model",
+        "no such model",
+        "model not found",
+        "model is not supported",
+        "model is deprecated",
+        "model has been deprecated",
+        "model was deprecated",
+        "deprecated model",
+        "model does not exist",
+        "model doesn't exist",
+    ];
+    if PHRASES.iter().any(|phrase| lower.contains(phrase)) {
+        return true;
+    }
+    // "The model `gpt-x` does not exist" keeps the id between the two words.
+    // Match the whole word so "bigmodel" is not a model, and slice on characters
+    // so a Chinese message cannot split a byte.
+    let bytes = lower.as_bytes();
+    let mut index = 0;
+    for ch in lower.chars() {
+        let next = index + ch.len_utf8();
+        if lower[index..].starts_with("model") {
+            let after = index + "model".len();
+            let before_ok = index == 0 || !bytes[index - 1].is_ascii_alphanumeric();
+            let after_ok = after >= bytes.len() || !bytes[after].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                let end = lower[after..]
+                    .char_indices()
+                    .nth(80)
+                    .map(|(offset, _)| after + offset)
+                    .unwrap_or(lower.len());
+                let window = &lower[index..end];
+                if window.contains("does not exist")
+                    || window.contains("doesn't exist")
+                    || window.contains("not found")
+                    || window.contains("is deprecated")
+                    || window.contains("has been deprecated")
+                    || window.contains("was deprecated")
+                    || window.contains("is not supported")
+                {
+                    return true;
+                }
+            }
+        }
+        index = next;
+    }
+    raw.contains("模型不存在")
+        || raw.contains("模型已下线")
+        || raw.contains("模型已下架")
+        || raw.contains("无此模型")
+        || raw.contains("没有这个模型")
+}
+
+/// Pay-as-you-go address plus a body that means "this key belongs to the other line".
+/// A bare "余额不足" with no pay-as-you-go address stays a real empty balance.
+/// A plain 401 on Qwen or Kimi stays a rejected key.
+fn is_plan_line_mismatch(raw: &str) -> bool {
+    if raw.contains("编程套餐") || raw.to_ascii_lowercase().contains("coding plan") {
+        return true;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let glm_payg = (lower.contains("open.bigmodel.cn") || lower.contains("api.z.ai"))
+        && lower.contains("/api/paas/v4")
+        && !lower.contains("/api/coding/");
+    glm_payg && super::zhipu::zhipu_plan_mismatch(raw)
 }
 
 fn is_auth(lower: &str) -> bool {
@@ -396,6 +475,52 @@ mod tests {
         assert_eq!(classify_provider_outage("model_not_found"), None);
         assert_eq!(classify_provider_outage(""), None);
         assert_eq!(classify_provider_outage("claude-3-5-sonnet"), None);
+        assert_eq!(
+            classify_provider_outage("The model `gpt-x` does not exist"),
+            None
+        );
+        assert_eq!(classify_provider_outage("model is deprecated"), None);
+        assert_eq!(classify_provider_outage("模型已下线"), None);
+        assert_eq!(
+            classify_provider_outage("HTTP 503\nnpm warn deprecated left-pad"),
+            Some(Outage::Down)
+        );
+    }
+
+    #[test]
+    fn coding_plan_key_on_the_payg_address_stays_put() {
+        let payg = concat!(
+            "LLM HTTP 429 Too Many Requests url: https://open.bigmodel.cn/api/paas/v4/chat/completions ",
+            r#"{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}"#
+        );
+        assert_eq!(classify_provider_outage(payg), None);
+        assert!(failure_needs_a_form_fix(payg));
+        assert_eq!(
+            classify_provider_outage(
+                r#"{"error":{"code":"1315","message":"该 API Key 仅限企业编程套餐场景使用"}}"#
+            ),
+            None
+        );
+        // No pay-as-you-go address: this is a real empty balance.
+        assert_eq!(
+            classify_provider_outage(
+                r#"{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}"#
+            ),
+            Some(Outage::Quota)
+        );
+        // The coding-plan address itself running out is still an empty balance.
+        let coding = concat!(
+            "url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions ",
+            r#"{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}"#
+        );
+        assert_eq!(classify_provider_outage(coding), Some(Outage::Quota));
+        // Qwen/Kimi 401 without a plan sentence is still a rejected key.
+        assert_eq!(
+            classify_provider_outage(
+                "HTTP 401 invalid api-key url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+            ),
+            Some(Outage::Auth)
+        );
     }
 
     #[test]

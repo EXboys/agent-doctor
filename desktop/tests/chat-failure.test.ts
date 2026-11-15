@@ -73,6 +73,14 @@ async function main() {
   assert(!balance!.message.includes("429"), "balance copy hides the raw status");
   assert(balance!.message.includes("不是本软件"), "balance copy says the app is fine");
 
+  const retired = explainChatFailure("The model `gpt-x` does not exist");
+  assert(retired?.kind === "provider_model", "a retired or missing model name stays a model problem");
+  assert(retired!.message.includes("没有这个模型"), "a bad model name says so in one sentence");
+  assert(retired!.next.includes("换一个模型"), "a bad model name tells the user to pick another");
+
+  const deprecated = explainChatFailure("HTTP 429 model is deprecated");
+  assert(deprecated?.kind === "provider_model", "a deprecated model is not a rate limit");
+
   const limited = explainChatFailure("LLM HTTP 429 Too Many Requests");
   assert(limited?.kind === "rate_limit", "bare 429 should be rate limit");
   assert(limited!.actions.includes("askAgain"), "rate limit offers ask again");

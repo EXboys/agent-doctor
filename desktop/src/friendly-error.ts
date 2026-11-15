@@ -177,6 +177,14 @@ export function explainProviderFailure(
     };
   }
 
+  if (isModelNameProblem(raw, lower)) {
+    return {
+      kind: "model",
+      message: t("provider.fail.model"),
+      next: t("provider.fail.modelNext"),
+    };
+  }
+
   if (account === "rate_limit" || status === 429) {
     return {
       kind: "rate_limit",
@@ -196,18 +204,6 @@ export function explainProviderFailure(
       kind: "key",
       message: t("provider.fail.key"),
       next: t("provider.fail.keyNext"),
-    };
-  }
-
-  if (
-    /model.?not.?found|invalid.?model|unknown.?model|does not exist.*model|no such model|model_not_found/.test(
-      lower,
-    )
-  ) {
-    return {
-      kind: "model",
-      message: t("provider.fail.model"),
-      next: t("provider.fail.modelNext"),
     };
   }
 
@@ -362,6 +358,27 @@ function isExpiredSignIn(lower: string): boolean {
   );
 }
 
+/**
+ * The model id is wrong or retired. A signed-in account refusing one of its
+ * own models is a different case and stays out of this shape.
+ */
+function isModelNameProblem(raw: string, lower: string): boolean {
+  if (/chatgpt account|claude account/.test(lower) && /model is not supported/.test(lower)) {
+    return false;
+  }
+  if (/模型不存在|模型已下线|模型已下架|无此模型|没有这个模型/.test(raw)) return true;
+  if (
+    /model[_\s-]?not[_\s-]?found|model[_\s-]?deprecated|invalid[_\s-]?model|unknown[_\s-]?model|no such model|model is not supported|deprecated model/.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  return /model[^.\n]{0,80}(does not exist|doesn't exist|not found|is deprecated|has been deprecated|was deprecated|is not supported)/.test(
+    lower,
+  );
+}
+
 /** The signed-in account refused the model. The id itself is not the rule. */
 function isAccountModelRejected(lower: string): boolean {
   if (!/model is not supported/.test(lower)) return false;
@@ -463,6 +480,15 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       message: t("chat.fail.glmPlan.message"),
       next: t("chat.fail.glmPlan.next"),
       actions: ["provider"],
+    };
+  }
+
+  if (isModelNameProblem(text, lower)) {
+    return {
+      kind: "provider_model",
+      message: t("provider.fail.model"),
+      next: t("provider.fail.modelNext"),
+      actions: ["provider", "native"],
     };
   }
 

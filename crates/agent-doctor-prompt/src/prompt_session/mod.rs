@@ -463,7 +463,9 @@ where
                 agent_doctor_core::setup::remember_provider_outage(fallback_origin, &second_blob);
             }
             driven = second;
-        } else if is_transient_rate_limit(&blob) {
+        } else if !agent_doctor_core::setup::failure_needs_a_form_fix(&blob)
+            && is_transient_rate_limit(&blob)
+        {
             // Single-provider setups (e.g. 官方 alone) have no second provider to
             // fail over to. Pause briefly so a burst 429 window can clear, then
             // try once more before surfacing a failure.
