@@ -940,20 +940,22 @@ mod tests {
                 .unwrap_or_else(|| panic!("no install command for {runtime}"));
             let update = lifecycle_shell_command(runtime, true)
                 .unwrap_or_else(|| panic!("no update command for {runtime}"));
-            assert!(!install.contains("npm install"), "{install}");
             assert!(
-                update.contains("update ||"),
-                "{runtime} update should try the installed CLI first: {update}"
+                install.starts_with("npm install -g "),
+                "{runtime} installs from its npm package: {install}"
+            );
+            assert!(
+                update.contains("@latest"),
+                "{runtime} updates the same npm package: {update}"
             );
         }
         let workbuddy = lifecycle_shell_command("workbuddy", false).unwrap();
         assert!(
-            workbuddy.contains("codebuddy.cn/cli/install")
-                || workbuddy.contains("copilot.tencent.com/cli/install"),
+            workbuddy.contains("@tencent-ai/codebuddy-code"),
             "{workbuddy}"
         );
         let qoder = lifecycle_shell_command("qoder", false).unwrap();
-        assert!(qoder.contains("qoder.com/install"), "{qoder}");
+        assert!(qoder.contains("@qoder-ai/qodercli"), "{qoder}");
         assert_eq!(install_action_id("workbuddy"), "fix-workbuddy-install");
         assert_eq!(install_action_id("qoder"), "fix-qoder-install");
     }

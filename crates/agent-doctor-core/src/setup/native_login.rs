@@ -34,6 +34,9 @@ use crate::store::open_settings_store;
 const MODE_SUBSCRIPTION: &str = "subscription";
 const CODEX_ID: &str = "codex";
 const CLAUDE_ID: &str = "claude-code";
+const QODER_ID: &str = "qoder";
+const CURSOR_ID: &str = "cursor";
+const WORKBUDDY_ID: &str = "workbuddy";
 const CODEX_LOGIN_URL: &str = "https://auth.openai.com";
 const CLAUDE_LOGIN_URL: &str = "https://claude.ai";
 const LOGIN_WAIT: Duration = Duration::from_secs(180);
@@ -66,7 +69,10 @@ pub struct NativeAccountSwitch {
 }
 
 pub fn is_native_subscription(runtime_id: &str) -> bool {
-    matches!(runtime_id, CODEX_ID | CLAUDE_ID) && read_mode(runtime_id) == MODE_SUBSCRIPTION
+    matches!(
+        runtime_id,
+        CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID
+    ) && read_mode(runtime_id) == MODE_SUBSCRIPTION
 }
 
 pub fn native_account_status(probe: bool) -> NativeAccountStatus {
@@ -79,18 +85,27 @@ pub fn native_account_status(probe: bool) -> NativeAccountStatus {
     } else {
         (false, false)
     };
-    NativeAccountStatus {
-        rows: vec![
-            row(CODEX_ID, codex_up, &provider_name),
-            row(CLAUDE_ID, claude_up, &provider_name),
-        ],
+    let mut rows = vec![
+        row(CODEX_ID, codex_up, &provider_name),
+        row(CLAUDE_ID, claude_up, &provider_name),
+    ];
+    // These rows appear when that official command line is on this computer.
+    // The login site probe is for Codex and Claude only.
+    for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID] {
+        if cli_binary(runtime_id).is_some() {
+            rows.push(row(runtime_id, true, &provider_name));
+        }
     }
+    NativeAccountStatus { rows }
 }
 
 pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> {
     ensure_edition_allows_mode(MODE_PERSONAL)?;
     let runtime_id = known_runtime(runtime_id)?;
     let provider_name = active_provider_name();
+    if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
+        return use_cli_subscription(runtime_id, provider_name);
+    }
     if runtime_id == CODEX_ID {
         restore_codex_auth();
     }
@@ -167,6 +182,7 @@ pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
             };
             apply_claude_code_with_model(&url, &provider.api_key, Some(provider.model.as_str()))?;
         }
+        QODER_ID | CURSOR_ID | WORKBUDDY_ID => {}
         _ => bail!("unknown runtime"),
     }
     write_mode(runtime_id, "service")?;
@@ -189,9 +205,13 @@ fn switch(
 
 fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountRow {
     let using = is_native_subscription(runtime_id);
-    let installed = discover_binary(binary_name(runtime_id))
-        .binary_path
-        .is_some();
+    let installed = if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
+        cli_binary(runtime_id).is_some()
+    } else {
+        discover_binary(binary_name(runtime_id))
+            .binary_path
+            .is_some()
+    };
     NativeAccountRow {
         runtime_id: runtime_id.to_string(),
         using_subscription: using,
@@ -218,7 +238,107 @@ fn known_runtime(runtime_id: &str) -> Result<&'static str> {
     match runtime_id {
         CODEX_ID => Ok(CODEX_ID),
         CLAUDE_ID => Ok(CLAUDE_ID),
-        other => bail!("subscription login is only for Codex and Claude Code, not {other}"),
+        QODER_ID => Ok(QODER_ID),
+        CURSOR_ID => Ok(CURSOR_ID),
+        WORKBUDDY_ID => Ok(WORKBUDDY_ID),
+        other => bail!("subscription login is only for an official command line, not {other}"),
+    }
+}
+
+fn cli_binary(runtime_id: &str) -> Option<PathBuf> {
+    match runtime_id {
+        QODER_ID => crate::adapters::qoder_cli_path(),
+        CURSOR_ID => crate::adapters::cursor_cli_path(),
+        WORKBUDDY_ID => discover_binary("codebuddy").binary_path,
+        _ => None,
+    }
+}
+
+fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<NativeAccountSwitch> {
+    let Some(binary) = cli_binary(runtime_id) else {
+        return Ok(switch(runtime_id, false, "missing_tool", provider_name));
+    };
+    // WorkBuddy signs in inside its own command line. There is no login
+    // subcommand, and the desktop app's saved account stays where it is.
+    if runtime_id == WORKBUDDY_ID {
+        let owned = binary.to_string_lossy().into_owned();
+        crate::session_launch::terminal::open_in_terminal(
+            WORKBUDDY_ID,
+            &[&owned],
+            &crate::adapters::util::home_dir(),
+            None,
+        )?;
+        return Ok(switch(runtime_id, false, "login_incomplete", provider_name));
+    }
+    if cli_logged_in(runtime_id) {
+        write_mode(runtime_id, MODE_SUBSCRIPTION)?;
+        return Ok(switch(runtime_id, true, "using", provider_name));
+    }
+    let _ = spawn_cli_login(&binary);
+    if cli_logged_in(runtime_id) {
+        write_mode(runtime_id, MODE_SUBSCRIPTION)?;
+        return Ok(switch(runtime_id, true, "using", provider_name));
+    }
+    Ok(switch(runtime_id, false, "login_incomplete", provider_name))
+}
+
+fn cli_logged_in(runtime_id: &str) -> bool {
+    match runtime_id {
+        QODER_ID => read_json(&home_join(".qoder/auth.json")).is_some_and(|value| tokenish(&value)),
+        CURSOR_ID => read_json(&home_join(".cursor/cli-config.json"))
+            .is_some_and(|value| cursor_cli_config_is_signed_in(&value)),
+        _ => false,
+    }
+}
+
+fn tokenish(value: &Value) -> bool {
+    nonempty_str(value.get("access_token"))
+        || nonempty_str(value.get("accessToken"))
+        || nonempty_str(value.get("token"))
+        || nonempty_str(value.get("refresh_token"))
+        || value.get("tokens").is_some()
+}
+
+fn nonempty_str(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+}
+
+pub(crate) fn cursor_cli_config_is_signed_in(value: &Value) -> bool {
+    nonempty_str(value.get("accessToken"))
+        || nonempty_str(value.get("authToken"))
+        || value.get("auth").is_some_and(|auth| {
+            nonempty_str(auth.get("accessToken")) || nonempty_str(auth.get("token"))
+        })
+}
+
+fn spawn_cli_login(binary: &Path) -> Result<()> {
+    let mut child = crate::exec::command_for_path(binary)
+        .arg("login")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let opened = Arc::new(AtomicBool::new(false));
+    if let Some(pipe) = child.stdout.take() {
+        watch_login_output(pipe, Arc::clone(&opened));
+    }
+    if let Some(pipe) = child.stderr.take() {
+        watch_login_output(pipe, opened);
+    }
+    let started = Instant::now();
+    loop {
+        if started.elapsed() > LOGIN_WAIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("login timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => thread::sleep(Duration::from_millis(400)),
+            Err(_) => return Ok(()),
+        }
     }
 }
 
@@ -277,6 +397,9 @@ fn claude_target_url(url: &str, protocol: &str) -> Option<String> {
 }
 
 fn logged_in(runtime_id: &str) -> bool {
+    if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
+        return cli_logged_in(runtime_id);
+    }
     if runtime_id == CODEX_ID {
         read_json(&home_join(".codex/auth.json"))
             .map(|value| codex_auth_is_chatgpt(&value))
@@ -402,7 +525,9 @@ fn forget_saved_login(runtime_id: &str) {
         }
         return;
     }
-    let _ = fs::remove_file(home_join(".claude/.credentials.json"));
+    if runtime_id == CLAUDE_ID {
+        let _ = fs::remove_file(home_join(".claude/.credentials.json"));
+    }
 }
 
 /// Replace a project Codex home's account file with the one just written to `~/.codex`.
@@ -639,6 +764,14 @@ mod tests {
             &json!({"claudeAiOauth": {"accessToken": "x"}})
         ));
         assert!(!claude_credentials_are_oauth(&json!({"note": "empty"})));
+    }
+
+    #[test]
+    fn cursor_cli_config_counts_only_its_own_token() {
+        assert!(cursor_cli_config_is_signed_in(
+            &json!({"accessToken": "cli-token"})
+        ));
+        assert!(!cursor_cli_config_is_signed_in(&json!({"version": 1})));
     }
 
     #[test]

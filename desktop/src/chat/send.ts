@@ -534,7 +534,10 @@ export function createSendController(deps: SendDeps) {
           (runtimeForTurn === "claude-code" ||
             runtimeForTurn === "hermes" ||
             runtimeForTurn === "deepseek-harness" ||
-            runtimeForTurn === "zcode") &&
+            runtimeForTurn === "zcode" ||
+            runtimeForTurn === "qoder" ||
+            runtimeForTurn === "cursor" ||
+            runtimeForTurn === "workbuddy") &&
           elevated,
         fullAuto: (runtimeForTurn === "codex" || runtimeForTurn === "openclaw") && elevated,
         resumeThreadId,

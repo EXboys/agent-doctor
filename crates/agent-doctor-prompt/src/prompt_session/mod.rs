@@ -10,6 +10,7 @@ mod backend;
 mod claude;
 mod codex_app_server;
 mod control;
+mod cursor;
 mod deepseek_harness;
 pub mod doctor;
 mod hermes;
@@ -17,10 +18,12 @@ mod mcp_ensure;
 mod openclaw;
 mod plan;
 mod pump;
+mod qoder;
 mod tool_step;
 mod util;
 mod vision;
 mod warm;
+mod workbuddy;
 mod zcode;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,9 +45,12 @@ pub use warm::{enable_warm_sessions, retire_warm_sessions, shutdown_warm_session
 
 pub(crate) use claude::ClaudeAskBackend;
 pub(crate) use codex_app_server::CodexAskBackend;
+pub(crate) use cursor::CursorAskBackend;
 pub(crate) use deepseek_harness::DeepSeekHarnessAskBackend;
 pub(crate) use hermes::HermesAskBackend;
 pub(crate) use openclaw::OpenClawAskBackend;
+pub(crate) use qoder::QoderAskBackend;
+pub(crate) use workbuddy::WorkbuddyAskBackend;
 pub(crate) use zcode::ZcodeAskBackend;
 
 type AskSession = &'static (dyn AskBackend + Sync);
@@ -56,6 +62,9 @@ static GENERIC_ACP_ASK: acp_backend::GenericAcpAskBackend = acp_backend::Generic
 static CLAUDE_ASK: ClaudeAskBackend = ClaudeAskBackend;
 static CODEX_ASK: CodexAskBackend = CodexAskBackend;
 static ZCODE_ASK: ZcodeAskBackend = ZcodeAskBackend;
+static QODER_ASK: QoderAskBackend = QoderAskBackend;
+static CURSOR_ASK: CursorAskBackend = CursorAskBackend;
+static WORKBUDDY_ASK: WorkbuddyAskBackend = WorkbuddyAskBackend;
 static DOCTOR_ASK: doctor::DoctorAskBackend = doctor::DoctorAskBackend;
 
 /// Which runtimes have an [`AskBackend`] here. The registry in
@@ -69,6 +78,9 @@ pub(crate) fn ask_backend(runtime_id: &str) -> Option<AskSession> {
         "claude-code" => Some(&CLAUDE_ASK),
         "codex" => Some(&CODEX_ASK),
         "zcode" => Some(&ZCODE_ASK),
+        "qoder" => Some(&QODER_ASK),
+        "cursor" => Some(&CURSOR_ASK),
+        "workbuddy" => Some(&WORKBUDDY_ASK),
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some(&DOCTOR_ASK),
         _ => None,
     }
@@ -83,6 +95,9 @@ pub fn ask_runtime_ids() -> Vec<&'static str> {
         "claude-code",
         "codex",
         "zcode",
+        "qoder",
+        "cursor",
+        "workbuddy",
         agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID,
     ]
 }
@@ -93,6 +108,7 @@ pub fn installed_ask_agents() -> Vec<agent_doctor_core::InstalledAgent> {
         agent_doctor_core::installed_agents_with_binary()
             .into_iter()
             .filter(|agent| ask_backend(&agent.id).is_some())
+            .filter(|agent| ask_cli_installed(&agent.id))
             .collect();
     // The built-in doctor agent has no binary to find; it is always available.
     agents.push(agent_doctor_core::InstalledAgent {
@@ -100,6 +116,18 @@ pub fn installed_ask_agents() -> Vec<agent_doctor_core::InstalledAgent> {
         label: "Agent Doctor".to_string(),
     });
     agents
+}
+
+/// Desktop bundles count as "installed" for the status cards, not for unified chat.
+fn ask_cli_installed(runtime_id: &str) -> bool {
+    match runtime_id {
+        "qoder" => agent_doctor_core::adapters::qoder_cli_path().is_some(),
+        "cursor" => agent_doctor_core::adapters::cursor_cli_path().is_some(),
+        "workbuddy" => agent_doctor_core::adapters::workbuddy_cli_path().is_some(),
+        "zcode" => agent_doctor_core::adapters::locate_zcode_headless()
+            .is_some_and(|launch| launch.script.is_none()),
+        _ => true,
+    }
 }
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -614,7 +642,10 @@ fn push_failure_note(notes: &mut String, line: &str) {
 }
 
 fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
-    if runtime == agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID || runtime == "zcode" {
+    if matches!(
+        runtime,
+        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID | "zcode" | "qoder" | "cursor" | "workbuddy"
+    ) {
         return false;
     }
     // A ChatGPT or Claude login is not one of the saved providers.
@@ -806,7 +837,9 @@ mod tests {
         assert!(message.contains("ask supports"));
         assert!(message.contains("openclaw"));
         assert!(message.contains("got 'not-a-runtime'"));
-        assert!(!ask_runtime_ids().contains(&"qoder"));
+        assert!(ask_runtime_ids().contains(&"qoder"));
+        assert!(ask_runtime_ids().contains(&"cursor"));
+        assert!(ask_runtime_ids().contains(&"workbuddy"));
     }
 
     #[test]

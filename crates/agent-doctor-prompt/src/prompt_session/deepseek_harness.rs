@@ -409,6 +409,7 @@ mod tests {
         AcpState {
             next_id: 1,
             waiting: HashMap::new(),
+            authenticated: true,
             acp_session: None,
             prompt_done: false,
             failed: None,

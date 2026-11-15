@@ -1,28 +1,10 @@
-//! Qoder native installer (https://qoder.com/install).
+//! Qoder CLI via its official npm package (`@qoder-ai/qodercli`).
 
 use anyhow::Result;
 
-use super::shell_script::ShellScriptLifecycle;
+use super::npm_cli::{run_npm_cli_lifecycle, NpmCliLifecycleAction};
 
-pub const QODER_INSTALL_SCRIPT_URL: &str = "https://qoder.com/install";
-
-pub const QODER_INSTALL_PS1_URL: &str = "https://qoder.com/install.ps1";
-
-const SHELL: ShellScriptLifecycle = ShellScriptLifecycle {
-    display_name: "Qoder",
-    update_cli: "qoder",
-    update_bash_args: " --force",
-    unix_script_url,
-    windows_irm_arg,
-};
-
-fn unix_script_url() -> &'static str {
-    QODER_INSTALL_SCRIPT_URL
-}
-
-fn windows_irm_arg() -> &'static str {
-    QODER_INSTALL_PS1_URL
-}
+pub const QODER_NPM_PACKAGE: &str = "@qoder-ai/qodercli";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QoderLifecycleAction {
@@ -31,18 +13,25 @@ pub enum QoderLifecycleAction {
 }
 
 pub fn qoder_install_shell_command() -> String {
-    SHELL.install_command()
+    super::npm_cli::npm_global_install_command(QODER_NPM_PACKAGE)
 }
 
 pub fn qoder_update_shell_command() -> String {
-    SHELL.update_command()
+    super::npm_cli::npm_global_install_command(&format!("{QODER_NPM_PACKAGE}@latest"))
 }
 
 pub fn run_qoder_lifecycle(action: QoderLifecycleAction) -> Result<()> {
-    match action {
-        QoderLifecycleAction::Install => SHELL.run_install(),
-        QoderLifecycleAction::Update => SHELL.run_update(),
-    }
+    let npm_action = match action {
+        QoderLifecycleAction::Install => NpmCliLifecycleAction::Install,
+        QoderLifecycleAction::Update => NpmCliLifecycleAction::Update,
+    };
+    run_npm_cli_lifecycle(
+        "qodercli",
+        QODER_NPM_PACKAGE,
+        &format!("{QODER_NPM_PACKAGE}@latest"),
+        npm_action,
+        "Qoder",
+    )
 }
 
 #[cfg(test)]
@@ -50,9 +39,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_uses_official_native_script() {
-        let cmd = qoder_install_shell_command();
-        assert!(cmd.contains("qoder.com/install"));
-        assert!(!cmd.contains("npm install"));
+    fn install_uses_the_official_npm_package() {
+        assert_eq!(
+            qoder_install_shell_command(),
+            "npm install -g @qoder-ai/qodercli"
+        );
+        assert!(qoder_update_shell_command().ends_with("@latest"));
     }
 }

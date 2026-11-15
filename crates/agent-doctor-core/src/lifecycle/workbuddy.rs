@@ -1,41 +1,12 @@
-//! WorkBuddy / CodeBuddy native installer.
+//! WorkBuddy CLI via its official npm package (`@tencent-ai/codebuddy-code`).
+//!
+//! The command it installs is `codebuddy`. The desktop app stays where it is.
 
 use anyhow::Result;
 
-use super::shell_script::ShellScriptLifecycle;
+use super::npm_cli::{run_npm_cli_lifecycle, NpmCliLifecycleAction};
 
-pub const WORKBUDDY_INSTALL_SCRIPT_URL: &str = "https://www.codebuddy.cn/cli/install.sh";
-pub const WORKBUDDY_INSTALL_SCRIPT_URL_INTL: &str = "https://copilot.tencent.com/cli/install.sh";
-
-pub const WORKBUDDY_INSTALL_PS1_URL: &str = "https://www.codebuddy.cn/cli/install.ps1";
-
-const SHELL: ShellScriptLifecycle = ShellScriptLifecycle {
-    display_name: "WorkBuddy",
-    update_cli: "codebuddy",
-    update_bash_args: " --force",
-    unix_script_url,
-    windows_irm_arg,
-};
-
-/// The mirror decides which region's install script runs.
-fn unix_script_url() -> &'static str {
-    #[cfg(not(target_os = "windows"))]
-    {
-        if super::download_route::use_china_mirrors() {
-            WORKBUDDY_INSTALL_SCRIPT_URL
-        } else {
-            WORKBUDDY_INSTALL_SCRIPT_URL_INTL
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        WORKBUDDY_INSTALL_SCRIPT_URL
-    }
-}
-
-fn windows_irm_arg() -> &'static str {
-    WORKBUDDY_INSTALL_PS1_URL
-}
+pub const WORKBUDDY_NPM_PACKAGE: &str = "@tencent-ai/codebuddy-code";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbuddyLifecycleAction {
@@ -44,18 +15,25 @@ pub enum WorkbuddyLifecycleAction {
 }
 
 pub fn workbuddy_install_shell_command() -> String {
-    SHELL.install_command()
+    super::npm_cli::npm_global_install_command(WORKBUDDY_NPM_PACKAGE)
 }
 
 pub fn workbuddy_update_shell_command() -> String {
-    SHELL.update_command()
+    super::npm_cli::npm_global_install_command(&format!("{WORKBUDDY_NPM_PACKAGE}@latest"))
 }
 
 pub fn run_workbuddy_lifecycle(action: WorkbuddyLifecycleAction) -> Result<()> {
-    match action {
-        WorkbuddyLifecycleAction::Install => SHELL.run_install(),
-        WorkbuddyLifecycleAction::Update => SHELL.run_update(),
-    }
+    let npm_action = match action {
+        WorkbuddyLifecycleAction::Install => NpmCliLifecycleAction::Install,
+        WorkbuddyLifecycleAction::Update => NpmCliLifecycleAction::Update,
+    };
+    run_npm_cli_lifecycle(
+        "codebuddy",
+        WORKBUDDY_NPM_PACKAGE,
+        &format!("{WORKBUDDY_NPM_PACKAGE}@latest"),
+        npm_action,
+        "WorkBuddy",
+    )
 }
 
 #[cfg(test)]
@@ -63,12 +41,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_uses_official_native_script() {
-        let cmd = workbuddy_install_shell_command();
-        assert!(
-            cmd.contains("codebuddy.cn/cli/install")
-                || cmd.contains("copilot.tencent.com/cli/install")
+    fn install_uses_the_official_npm_package() {
+        assert_eq!(
+            workbuddy_install_shell_command(),
+            "npm install -g @tencent-ai/codebuddy-code"
         );
-        assert!(!cmd.contains("npm install"));
+        assert!(workbuddy_update_shell_command().ends_with("@latest"));
     }
 }

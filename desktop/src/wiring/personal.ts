@@ -341,11 +341,27 @@ export function createPersonalController(deps: PersonalDeps) {
   let nativeBusyId: string | null = null;
 
   function accountLabel(runtimeId: string): string {
-    return runtimeId === "codex" ? t("native.chatgpt") : t("native.claude");
+    if (runtimeId === "codex") return t("native.chatgpt");
+    if (runtimeId === "qoder") return t("native.qoder");
+    if (runtimeId === "cursor") return t("native.cursor");
+    if (runtimeId === "workbuddy") return t("native.workbuddy");
+    return t("native.claude");
   }
 
   function toolLabel(runtimeId: string): string {
-    return runtimeId === "codex" ? "Codex" : "Claude Code";
+    if (runtimeId === "codex") return "Codex";
+    if (runtimeId === "qoder") return "Qoder";
+    if (runtimeId === "cursor") return "Cursor";
+    if (runtimeId === "workbuddy") return "WorkBuddy";
+    return "Claude Code";
+  }
+
+  function chipLabel(runtimeId: string): string {
+    if (runtimeId === "codex") return t("native.chipChatgpt");
+    if (runtimeId === "qoder") return t("native.chipQoder");
+    if (runtimeId === "cursor") return t("native.chipCursor");
+    if (runtimeId === "workbuddy") return t("native.chipWorkbuddy");
+    return t("native.chipClaude");
   }
 
   function applyOkText(name: string): string {
@@ -369,12 +385,17 @@ export function createPersonalController(deps: PersonalDeps) {
       case "unreachable":
         return t("native.unreachable");
       case "missing_tool":
-        return result.runtime_id === "codex" ? t("native.missingCodex") : t("native.missingClaude");
+        if (result.runtime_id === "codex") return t("native.missingCodex");
+        if (result.runtime_id === "qoder") return t("native.missingQoder");
+        if (result.runtime_id === "cursor") return t("native.missingCursor");
+        if (result.runtime_id === "workbuddy") return t("native.missingWorkbuddy");
+        return t("native.missingClaude");
       case "no_provider":
         return t("native.noProvider");
       case "unsupported":
         return t("native.unsupported", { tool });
       default:
+        if (result.runtime_id === "workbuddy") return t("native.openedCli");
         return t("native.incomplete");
     }
   }
@@ -415,7 +436,7 @@ export function createPersonalController(deps: PersonalDeps) {
       sub.className = "provider-item-sub";
       const chip = document.createElement("span");
       chip.className = "provider-item-meta";
-      chip.textContent = row.runtime_id === "codex" ? t("native.chipChatgpt") : t("native.chipClaude");
+      chip.textContent = chipLabel(row.runtime_id);
       const note = document.createElement("span");
       note.className = "provider-item-note";
       const noteText = busy

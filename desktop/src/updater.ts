@@ -218,8 +218,15 @@ export async function initUpdaterUi(opts: {
   await listen("check-for-updates", () => {
     void checkForAppUpdates({ interactive: true });
   });
-  // Boot check after UI settles; silent unless an update is available.
+  // Quiet check after the window is up. A newer version only reveals the
+  // footer button; it does not open a dialog.
   window.setTimeout(() => {
-    void checkForAppUpdates({ silent: true, interactive: true });
+    void probeAppUpdate().then((found) => {
+      const button = opts.checkBtn;
+      if (!found || !button) return;
+      button.hidden = false;
+      button.textContent = t("update.ready");
+      button.title = t("update.readyHint");
+    });
   }, 8_000);
 }

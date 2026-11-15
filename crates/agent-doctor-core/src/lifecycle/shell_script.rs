@@ -1,6 +1,6 @@
 //! The shared native shell-script installer.
 //!
-//! Cursor, Qoder and WorkBuddy all install through the same curl-to-temp-file
+//! Cursor has no npm package, so it installs through this curl-to-temp-file
 //! bash one-liner on Unix and `irm | iex` PowerShell one-liner on Windows,
 //! with an update path that tries the CLI's own `update` command first. The
 //! templates live here once; each runtime only names its URLs and display

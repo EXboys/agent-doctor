@@ -20,6 +20,9 @@ export function runtimeDisplayName(runtime: AskRuntime): string {
   if (runtime === "deepseek-harness") return "DeepSeek Harness";
   if (runtime === "acp") return "ACP";
   if (runtime === "zcode") return "ZCode";
+  if (runtime === "qoder") return "Qoder";
+  if (runtime === "cursor") return "Cursor";
+  if (runtime === "workbuddy") return "WorkBuddy";
   if (runtime === "doctor") return t("chat.doctorRuntimeName");
   return "Claude Code";
 }
@@ -33,6 +36,9 @@ export function isAskRuntime(value: string | null | undefined): value is AskRunt
     value === "deepseek-harness" ||
     value === "acp" ||
     value === "zcode" ||
+    value === "qoder" ||
+    value === "cursor" ||
+    value === "workbuddy" ||
     value === "doctor"
   );
 }

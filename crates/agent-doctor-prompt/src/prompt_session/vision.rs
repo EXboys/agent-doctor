@@ -22,7 +22,15 @@ const JPEG_QUALITY: u8 = 85;
 /// Already this small and within the edge: leave the file alone.
 const SKIP_SHRINK_BYTES: usize = 400 * 1024;
 
-const VISION_RUNTIMES: &[&str] = &["codex", "claude-code", "deepseek-harness", "acp"];
+const VISION_RUNTIMES: &[&str] = &[
+    "codex",
+    "claude-code",
+    "deepseek-harness",
+    "acp",
+    "qoder",
+    "cursor",
+    "workbuddy",
+];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AskImageSupport {

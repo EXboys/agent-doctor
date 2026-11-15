@@ -5,6 +5,11 @@ use crate::adapters::util::{discover_binary, home_join, profile_from_config_path
 
 pub struct WorkbuddyAdapter;
 
+/// The official WorkBuddy command line (`codebuddy`). The desktop app is not this binary.
+pub fn workbuddy_cli_path() -> Option<PathBuf> {
+    discover_binary("codebuddy").binary_path
+}
+
 impl RuntimeAdapter for WorkbuddyAdapter {
     fn id(&self) -> &'static str {
         "workbuddy"

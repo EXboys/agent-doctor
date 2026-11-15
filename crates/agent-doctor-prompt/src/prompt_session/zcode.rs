@@ -30,8 +30,8 @@ use agent_doctor_core::adapters::locate_zcode_headless;
 use agent_doctor_core::session_env::format_command_display;
 use agent_doctor_core::session_launch::resolve_session_cwd;
 
-const ZCODE_MISSING: &str = "没找到 ZCode。先点「安装」。";
-const ZCODE_NOT_READY: &str = "ZCode 还不能在这里问答。先打开 ZCode 窗口登录一次，再回来问。";
+const ZCODE_MISSING: &str = "桌面里的 ZCode 留在那边。这里要用它的命令行，这台电脑还没装。";
+const ZCODE_NOT_READY: &str = "ZCode 的命令行这次没能开始。";
 
 pub struct ZcodeAskBackend;
 
@@ -243,7 +243,9 @@ fn build_zcode_command(
             script: std::env::var_os("AGENT_DOCTOR_ZCODE_SCRIPT").map(std::path::PathBuf::from),
         }
     } else {
-        locate_zcode_headless().ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
+        locate_zcode_headless()
+            .filter(|launch| launch.script.is_none())
+            .ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
     };
     let mut cmd = agent_doctor_core::exec::command_for_path(&launch.program);
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");

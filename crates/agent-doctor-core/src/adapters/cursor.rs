@@ -31,6 +31,27 @@ fn desktop_app_path() -> Option<PathBuf> {
     crate::adapters::util::desktop_app_path(&DESKTOP_APP)
 }
 
+/// The official Cursor command line. The desktop app is not this binary.
+pub fn cursor_cli_path() -> Option<PathBuf> {
+    let local_agent = home_join(".local/bin/agent");
+    if local_agent.is_file() && looks_like_cursor_agent(&local_agent) {
+        return Some(local_agent);
+    }
+    let named = discover_binary("cursor-agent");
+    if named.binary_path.is_some() {
+        return named.binary_path;
+    }
+    let agent = discover_binary("agent");
+    if agent
+        .binary_path
+        .as_deref()
+        .is_some_and(looks_like_cursor_agent)
+    {
+        return agent.binary_path;
+    }
+    None
+}
+
 /// Install locations the uninstall step may remove. Settings under `~/.cursor` are not included.
 pub(crate) fn cursor_desktop_installs() -> Vec<PathBuf> {
     crate::adapters::util::desktop_app_candidates(&DESKTOP_APP)

@@ -36,6 +36,14 @@ pub(crate) fn locate_qoder() -> Option<QoderInstall> {
     choose_qoder_install(cli_on_path(), versioned_cli_path(), desktop_app_path())
 }
 
+/// Official Qoder command line. The desktop app does not count.
+pub fn qoder_cli_path() -> Option<PathBuf> {
+    match locate_qoder() {
+        Some(QoderInstall::Cli(path)) => Some(path),
+        _ => None,
+    }
+}
+
 fn desktop_app_path() -> Option<PathBuf> {
     crate::adapters::util::desktop_app_path(&DESKTOP_APP)
 }

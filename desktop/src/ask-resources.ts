@@ -62,6 +62,9 @@ export type AskRuntime =
   | "deepseek-harness"
   | "acp"
   | "zcode"
+  | "qoder"
+  | "cursor"
+  | "workbuddy"
   /** Built-in Agent Doctor agent loop (no external CLI). */
   | "doctor";
 

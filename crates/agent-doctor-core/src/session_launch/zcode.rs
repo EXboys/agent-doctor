@@ -1,70 +1,49 @@
 use std::path::Path;
-use std::process::Command;
-#[cfg(target_os = "windows")]
-use std::process::Stdio;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::adapters::{locate_zcode, ZcodeInstall};
+use crate::adapters::{locate_zcode_headless, ZcodeHeadless};
 
 use super::terminal::open_in_terminal;
-use super::{OpenSessionMethod, OpenSessionReport};
+use super::OpenSessionReport;
+
+pub(crate) const ZCODE_CLI_MISSING: &str =
+    "桌面里的 ZCode 留在那边。这里要用它的命令行，这台电脑还没装。";
 
 pub(crate) fn open_zcode(cwd: &Path) -> Result<OpenSessionReport> {
-    match locate_zcode() {
-        Some(ZcodeInstall::App(path)) => open_zcode_app(&path, cwd),
-        Some(ZcodeInstall::Cli(path)) => {
-            let owned = path.to_string_lossy().into_owned();
+    open_zcode_launch(locate_zcode_headless(), cwd)
+}
+
+pub(crate) fn open_zcode_launch(
+    found: Option<ZcodeHeadless>,
+    cwd: &Path,
+) -> Result<OpenSessionReport> {
+    match found {
+        Some(launch) if launch.script.is_none() => {
+            let owned = launch.program.to_string_lossy().into_owned();
             open_in_terminal("zcode", &[&owned], cwd, None)
         }
-        None => open_in_terminal("zcode", &["zcode"], cwd, None),
+        _ => anyhow::bail!(ZCODE_CLI_MISSING),
     }
 }
 
-fn open_zcode_app(app: &Path, cwd: &Path) -> Result<OpenSessionReport> {
-    launch_zcode_app(app)?;
-    Ok(OpenSessionReport {
-        runtime: "zcode".into(),
-        method: OpenSessionMethod::App,
-        cwd: cwd.display().to_string(),
-        target: "ZCode".into(),
-        detail: "Opened ZCode.".into(),
-    })
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
 
-fn launch_zcode_app(app: &Path) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        let status = Command::new("open") // raw-spawn-ok
-            .arg(app)
-            .status()
-            .context("failed to open ZCode")?;
-        if !status.success() {
-            anyhow::bail!("ZCode is on this computer but did not open");
-        }
-        Ok(())
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new(app) // raw-spawn-ok
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .context("failed to start ZCode")?;
-        Ok(())
-    }
-    #[cfg(target_os = "linux")]
-    {
-        Command::new(app).spawn().context("failed to start ZCode")?; // raw-spawn-ok
-        Ok(())
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        let _ = app;
-        anyhow::bail!("opening ZCode is not supported on this platform")
+    #[test]
+    fn desktop_bundle_is_not_opened() {
+        let err = open_zcode_launch(
+            Some(ZcodeHeadless {
+                program: PathBuf::from("/Applications/ZCode.app/Contents/MacOS/ZCode"),
+                script: Some(PathBuf::from(
+                    "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+                )),
+            }),
+            Path::new("."),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("命令行"));
     }
 }

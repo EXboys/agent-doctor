@@ -46,6 +46,8 @@ pub struct TeamupsChannelJob {
     pub project: String,
     /// Pictures and files the phone attached. Empty for a text-only sentence.
     pub files: Vec<TeamupsChannelFile>,
+    /// Which command line should answer. Empty keeps the chat's current one.
+    pub runtime: String,
 }
 
 pub fn teamups_channel_ws_url(http_base: &str) -> String {
@@ -328,12 +330,18 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim();
+    let runtime = value
+        .get("runtime")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     Some(TeamupsChannelJob {
         id: id.to_string(),
         text: text.to_string(),
         chat: chat.chars().take(128).collect(),
         project: project.chars().take(80).collect(),
         files,
+        runtime: runtime.chars().take(40).collect(),
     })
 }
 
@@ -423,10 +431,13 @@ mod tests {
         assert_eq!(job.id, "a");
         assert_eq!(job.text, "打开项目");
         assert_eq!(job.chat, "");
-        let named =
-            parse_teamups_channel_job(r#"{"type":"job","id":"b","text":"下一句","chat":"oc_123"}"#)
-                .unwrap();
+        assert_eq!(job.runtime, "");
+        let named = parse_teamups_channel_job(
+            r#"{"type":"job","id":"b","text":"下一句","chat":"oc_123","runtime":"qoder"}"#,
+        )
+        .unwrap();
         assert_eq!(named.chat, "oc_123");
+        assert_eq!(named.runtime, "qoder");
         assert!(named.files.is_empty());
         let with_file = parse_teamups_channel_job(
             r#"{"type":"job","id":"c","text":"看看","files":[{"name":"a.png","mime":"image/png","kind":"image","data":"aGVsbG8="}]}"#,

@@ -39,6 +39,10 @@ pub(crate) struct AcpProfile {
     pub images_note: String,
     /// Fallback tool title when the request and the call carry none.
     pub default_tool: String,
+    /// Optional `authenticate` method id sent right after `initialize` (e.g. `"cursor_login"`).
+    pub auth_method: Option<&'static str>,
+    /// Wire method for continuing a saved session (`"session/resume"` or `"session/load"`).
+    pub resume_method: &'static str,
 }
 
 impl AcpProfile {
@@ -50,6 +54,8 @@ impl AcpProfile {
             refusal: "DeepSeek 拒绝继续这一轮。".into(),
             images_note: "这个 DeepSeek 助手收不了图片，这次只带上了图里的字。".into(),
             default_tool: "这一步操作".into(),
+            auth_method: None,
+            resume_method: "session/resume",
         }
     }
 
@@ -61,6 +67,8 @@ impl AcpProfile {
             refusal: "ACP 助手拒绝继续这一轮。".into(),
             images_note: "这个 ACP 助手收不了图片，这次只带上了图里的字。".into(),
             default_tool: "这一步操作".into(),
+            auth_method: None,
+            resume_method: "session/resume",
         }
     }
 }
@@ -77,6 +85,7 @@ pub(crate) struct TurnOutcome {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Waiting {
     Initialize,
+    Authenticate,
     Resume,
     NewSession,
     Prompt,
@@ -85,6 +94,7 @@ pub(crate) enum Waiting {
 pub(crate) struct AcpState {
     pub next_id: i64,
     pub waiting: HashMap<i64, Waiting>,
+    pub authenticated: bool,
     pub acp_session: Option<String>,
     pub prompt_done: bool,
     pub failed: Option<String>,
@@ -122,9 +132,11 @@ where
     F: FnMut(PromptSessionEvent),
 {
     let pid = child.id();
+    let authenticated = already_open.is_some() || profile.auth_method.is_none();
     let mut state = AcpState {
         next_id: 1,
         waiting: HashMap::new(),
+        authenticated,
         acp_session: already_open.clone(),
         prompt_done: false,
         failed: None,
@@ -258,10 +270,23 @@ fn advance_handshake(
     if state
         .waiting
         .values()
-        .any(|kind| *kind == Waiting::Initialize)
+        .any(|kind| matches!(kind, Waiting::Initialize | Waiting::Authenticate))
         || state.failed.is_some()
     {
         return Ok(());
+    }
+    if !state.authenticated {
+        if let Some(method_id) = state.profile.auth_method {
+            queue_rpc(
+                control,
+                state,
+                Waiting::Authenticate,
+                "authenticate",
+                json!({ "methodId": method_id }),
+            )?;
+            return Ok(());
+        }
+        state.authenticated = true;
     }
     if state.acp_session.is_none()
         && !state
@@ -271,11 +296,12 @@ fn advance_handshake(
     {
         if let Some(sid) = resume_id.filter(|_| !state.resume_rejected) {
             state.resume_target = Some(sid.to_string());
+            let method = state.profile.resume_method;
             queue_rpc(
                 control,
                 state,
                 Waiting::Resume,
-                "session/resume",
+                method,
                 json!({
                     "sessionId": sid,
                     "cwd": acp_cwd(cwd),
@@ -302,7 +328,7 @@ fn advance_handshake(
         && !state.waiting.values().any(|kind| {
             matches!(
                 kind,
-                Waiting::Resume | Waiting::NewSession | Waiting::Initialize
+                Waiting::Resume | Waiting::NewSession | Waiting::Initialize | Waiting::Authenticate
             )
         })
     {
@@ -432,6 +458,9 @@ fn handle_acp_message<F>(
                     message: state.profile.images_note.clone(),
                 });
             }
+        }
+        Waiting::Authenticate => {
+            state.authenticated = true;
         }
         Waiting::Resume | Waiting::NewSession => {
             let sid = result

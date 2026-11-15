@@ -93,6 +93,7 @@ struct JobPayload {
     text: String,
     chat: String,
     project: String,
+    runtime: String,
     files: Vec<JobFilePayload>,
 }
 
@@ -253,6 +254,7 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                     text: job.text,
                                     chat: job.chat,
                                     project: job.project,
+                                    runtime: job.runtime,
                                     files,
                                 },
                             );

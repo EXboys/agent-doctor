@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use crate::adapter::RuntimeAdapter;
 use crate::adapters::{
-    ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter, HermesAdapter,
-    OpenClawAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
+    cursor_cli_path, ClaudeCodeAdapter, CodexAdapter, CursorAdapter, DeepSeekHarnessAdapter,
+    HermesAdapter, OpenClawAdapter, QoderAdapter, WorkbuddyAdapter, ZcodeAdapter,
 };
 use crate::config_syntax::{apply_config_syntax_repair, suggest_config_syntax_repairs};
 use crate::evotown::{
@@ -29,8 +29,7 @@ use crate::probe::ParsedConfig;
 use crate::probe::{ProbeCheck, ProbeStatus, RuntimeProbeReport};
 use crate::repair_types::{PlaybookApplyResult, SuggestedRepair};
 use crate::session_launch::{
-    open_claude_code, open_codex, open_cursor_app, open_in_terminal, open_qoder, open_zcode,
-    OpenSessionReport,
+    open_claude_code, open_codex, open_in_terminal, open_qoder, open_zcode, OpenSessionReport,
 };
 use crate::setup::{EffectorKind, WriteSemantics};
 use crate::workspace::backends::{
@@ -407,10 +406,14 @@ fn open_workbuddy_session(
 
 fn open_cursor_session(
     cwd: &Path,
-    _prompt: Option<&str>,
+    prompt: Option<&str>,
     _prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
-    open_cursor_app(cwd)
+    let Some(path) = cursor_cli_path() else {
+        anyhow::bail!("桌面里的 Cursor 留在那边。这里要用它的命令行，这台电脑还没装。");
+    };
+    let owned = path.to_string_lossy().into_owned();
+    open_in_terminal("cursor", &[&owned], cwd, prompt)
 }
 
 fn open_zcode_session(
@@ -657,7 +660,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         workspace_repairs: &[],
         label: "Cursor",
         open_session: Some(open_cursor_session),
-        open_session_kind: Some(OpenSessionKind::App),
+        open_session_kind: Some(OpenSessionKind::Terminal),
         dispatch: None,
         skill_mount: true,
         browser_mcp: false,
@@ -678,7 +681,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         workspace_repairs: &[],
         label: "ZCode",
         open_session: Some(open_zcode_session),
-        open_session_kind: Some(OpenSessionKind::App),
+        open_session_kind: Some(OpenSessionKind::Terminal),
         dispatch: None,
         skill_mount: false,
         browser_mcp: false,
@@ -1134,7 +1137,7 @@ mod tests {
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
         assert_eq!(
             descriptor_by_id("zcode").unwrap().open_session_kind,
-            Some(OpenSessionKind::App)
+            Some(OpenSessionKind::Terminal)
         );
         let mut repair_ids: Vec<_> = RUNTIME_REGISTRY
             .iter()
@@ -1180,7 +1183,7 @@ mod tests {
             .all(|entry| entry.open_session.is_some()));
         assert_eq!(
             descriptor_by_id("cursor").unwrap().open_session_kind,
-            Some(OpenSessionKind::App)
+            Some(OpenSessionKind::Terminal)
         );
         assert_eq!(descriptor_by_id("claude-code").unwrap().label, "Claude");
         let catalog = runtime_catalog();

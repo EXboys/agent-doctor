@@ -13,6 +13,8 @@ export type ChannelQueued = {
   chat: string;
   files?: ChannelUpload[];
   project?: string;
+  /** Command line the phone named. Empty keeps the chat's current one. */
+  runtime?: string;
 };
 
 const queues = new Map<string, ChannelQueued[]>();

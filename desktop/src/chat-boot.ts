@@ -803,6 +803,7 @@ function bootChatTail(): void {
     text?: string;
     chat?: string;
     project?: string;
+    runtime?: string;
     files?: { name?: string; path?: string; kind?: string }[];
   }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
@@ -815,7 +816,8 @@ function bootChatTail(): void {
     const text = event.payload?.text?.trim() || (files.length ? "看看这个。" : "");
     const chat = event.payload?.chat?.trim() ?? "";
     const project = event.payload?.project?.trim() ?? "";
-    void runChannelJob(id, text, chat, files, project);
+    const runtime = event.payload?.runtime?.trim() ?? "";
+    void runChannelJob(id, text, chat, files, project, runtime);
   });
   function pinChannelWorkspace(sessionId: string, project: string): void {
     const name = project.trim();
@@ -830,15 +832,22 @@ function bootChatTail(): void {
     renderSessionList();
     publishPhoneChats();
   }
-  function sessionForChannel(chat: string, text: string, project = ""): string {
+  function sessionForChannel(chat: string, text: string, project = "", runtime = ""): string {
     const store = chatState.store;
     const doc = chatState.workspaceDoc;
     const pinned = project && doc?.workspaces[project] ? project : defaultWorkspaceName(doc);
+    const named = isAskRuntime(runtime) ? runtime : "";
     const placed = placeChannelSession(store.sessions, chat, () => {
-      const session = createEmptySession(selectedRuntime(), pinned);
+      const session = createEmptySession(named || selectedRuntime(), pinned);
       session.title = channelSessionTitle(text);
       return session;
     });
+    if (!placed.created && named && placed.session.runtime !== named && !isChatRunning(placed.session.id)) {
+      placed.session.runtime = named;
+      placed.session.runtimeThreadId = null;
+      placed.session.updatedAt = Date.now();
+      saveStore();
+    }
     if (placed.created) {
       store.sessions = placed.sessions.slice(0, MAX_SESSIONS);
       saveStore();
@@ -986,6 +995,7 @@ function bootChatTail(): void {
     chat: string,
     files: { name: string; path: string; kind: "image" | "file" }[] = [],
     project = "",
+    runtime = "",
   ): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
     if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
@@ -1008,13 +1018,17 @@ function bootChatTail(): void {
       finishChannel(id, t("chat.channelCut"), false, chat);
       return;
     }
+    if (runtime && !isAskRuntime(runtime)) {
+      finishChannel(id, t("chat.channelCliOnly"), false, chat);
+      return;
+    }
     channelLedger.take(id);
     if (phoneStops.has(id)) {
       finishChannel(id, t("chat.channelStopped"), true, chat);
       return;
     }
     try {
-      const sessionId = sessionForChannel(chat, text, project);
+      const sessionId = sessionForChannel(chat, text, project, runtime);
       pinChannelWorkspace(sessionId, project);
       const job: ChannelQueued = {
         id,
@@ -1024,6 +1038,7 @@ function bootChatTail(): void {
         chat,
         files,
         ...(project ? { project } : {}),
+        ...(runtime ? { runtime } : {}),
       };
       const busy = isChatRunning(sessionId) || channelQueueLength(sessionId) > 0;
       const action = channelConfirmAction({

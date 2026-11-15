@@ -572,8 +572,16 @@
           <span id="footer-copy" data-i18n="app.footer">本机 Runtime · 诊断修复</span>
           <span class="footer-sep" aria-hidden="true">·</span>
           <span id="app-version" class="app-version">v—</span>
-          <button id="check-update" type="button" class="btn-link footer-update" data-i18n="update.check">
-            检查更新
+          <button
+            id="check-update"
+            type="button"
+            class="btn-link footer-update"
+            hidden
+            data-i18n="update.ready"
+            data-i18n-title="update.readyHint"
+            title="有新版本，点这里更新"
+          >
+            更新
           </button>
         </div>
       </footer>
