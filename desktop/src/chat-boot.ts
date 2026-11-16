@@ -1,5 +1,6 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
 import { isChatRunning, liveRuns, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
+import { OFFICIAL_PROVIDER_ID } from "./official-quota";
 import { chatState } from "./chat-state";
 import { syncQuestionRail } from "./chat/question-rail";
 
@@ -808,6 +809,8 @@ function bootChatTail(): void {
         id: provider.id,
         model: provider.model,
         models: modelsForProviderUrl(provider.url, provider.model),
+        // 官方内置（配额制）打上标记，手机端好区分「内置 / 自配 key」。
+        builtin: provider.id === OFFICIAL_PROVIDER_ID,
       }));
       const current = pickOf(activeSession());
       const agent = current.agent || selectedRuntime();

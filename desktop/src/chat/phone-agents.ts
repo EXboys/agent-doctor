@@ -7,7 +7,14 @@
 
 export type PhoneAgentRow = { id: string; name: string };
 
-export type PhoneModelRow = { id: string; agent: string; label: string; provider: string };
+export type PhoneModelRow = {
+  id: string;
+  agent: string;
+  label: string;
+  provider: string;
+  /** The official (quota-based) provider: the phone tags it 内置 vs 自配 key. */
+  builtin?: boolean;
+};
 
 export type PhonePick = { agent: string; model: string; provider: string };
 
@@ -31,7 +38,12 @@ export function agentRows(installed: Array<{ id: string; label: string }>): Phon
  * different key. Deduped by provider+id, capped so the sheet stays readable.
  */
 export function modelRows(
-  providers: Array<{ id?: string | null; model?: string | null; models?: readonly string[] }>,
+  providers: Array<{
+    id?: string | null;
+    model?: string | null;
+    models?: readonly string[];
+    builtin?: boolean | null;
+  }>,
   label: (id: string) => string,
   agent = "",
   cap = 40,
@@ -47,7 +59,13 @@ export function modelRows(
       const key = `${providerId}\n${id}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      rows.push({ id, agent, label: label(id) || id, provider: providerId });
+      rows.push({
+        id,
+        agent,
+        label: label(id) || id,
+        provider: providerId,
+        ...(provider.builtin ? { builtin: true } : {}),
+      });
       if (rows.length >= cap) return rows;
     }
   }
