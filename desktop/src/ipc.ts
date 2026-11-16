@@ -293,6 +293,22 @@ export function setInstallPingEnabled(enabled: boolean): Promise<{ enabled: bool
   return invoke("set_install_ping_enabled_command", { enabled });
 }
 
+export type ChannelReplyImage = {
+  name: string;
+  mime: string;
+  data: string;
+};
+
+export function teamupsChannelImage(
+  path: string,
+  cwd?: string | null,
+): Promise<ChannelReplyImage> {
+  return invoke("teamups_channel_image_command", {
+    path,
+    cwd: cwd?.trim() || null,
+  });
+}
+
 export function teamupsChannelReply(
   id: string,
   text: string,
@@ -325,6 +341,7 @@ export function teamupsChannelReply(
     usage?: { used: number; limit: number };
   },
   chat = "",
+  images?: ChannelReplyImage[],
 ): Promise<void> {
   const payload =
     trace &&
@@ -344,6 +361,7 @@ export function teamupsChannelReply(
     done,
     trace: payload,
     chat: chat.trim(),
+    images: images?.length ? images : undefined,
   });
 }
 

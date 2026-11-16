@@ -284,6 +284,212 @@ pub fn teamups_channel_reply(id: &str, text: &str, ok: bool, done: bool, chat: &
     value.to_string()
 }
 
+/// How many pictures one answer may carry, and how big each may be once
+/// base64-encoded. The phone renders them inline, so the line stays the limit.
+pub const REPLY_IMAGE_MAX: usize = 3;
+pub const REPLY_IMAGE_DATA_MAX: usize = 900_000;
+/// Small icons/diagrams below this size and within [`REPLY_IMAGE_MAX_EDGE`] stay untouched.
+const REPLY_IMAGE_SKIP_COMPRESS_BYTES: usize = 80_000;
+/// Target raw byte budget (~175 KB raw / ~240 KB base64) so screenshots stay light on mobile data.
+const REPLY_IMAGE_SOFT_RAW_BYTES: usize = 180_000;
+const REPLY_IMAGE_MAX_EDGE: u32 = 1280;
+
+fn reply_image_mime(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else {
+        ""
+    }
+}
+
+/// A picture the answer wants on the phone: `{ name, mime, data }`, where
+/// `data` is raw base64. Anything oversized or not a picture is dropped, so a
+/// runaway answer cannot stuff megabytes into one reply.
+pub fn clean_reply_images(value: Option<&Value>) -> Vec<Value> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut kept = Vec::new();
+    for item in items.iter().take(REPLY_IMAGE_MAX) {
+        let Some(map) = item.as_object() else {
+            continue;
+        };
+        let name = map.get("name").and_then(Value::as_str).unwrap_or("").trim();
+        let mime = map.get("mime").and_then(Value::as_str).unwrap_or("").trim();
+        let data = map.get("data").and_then(Value::as_str).unwrap_or("").trim();
+        let data: String = data.chars().filter(|ch| !ch.is_whitespace()).collect();
+        let mime_ok = matches!(
+            mime,
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        );
+        let data_ok = !data.is_empty()
+            && data.len() <= REPLY_IMAGE_DATA_MAX
+            && data
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=');
+        if !mime_ok || !data_ok {
+            continue;
+        }
+        let name = if name.is_empty() { "图片" } else { name };
+        kept.push(json!({
+            "name": name.chars().take(80).collect::<String>(),
+            "mime": mime,
+            "data": data,
+        }));
+    }
+    kept
+}
+
+/// Read a picture from disk into the frame shape above.
+pub fn read_reply_image(path: &str) -> Result<Value, String> {
+    read_reply_image_in(path, None)
+}
+
+fn resolve_reply_image_path(raw: &str, cwd: Option<&str>) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.to_ascii_lowercase().starts_with("file://") {
+        if let Ok(parsed) = url::Url::parse(trimmed) {
+            if let Ok(file_path) = parsed.to_file_path() {
+                return Some(file_path);
+            }
+        }
+    }
+    let path = if trimmed == "~" {
+        dirs::home_dir()?
+    } else if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+    {
+        dirs::home_dir()?.join(rest)
+    } else {
+        std::path::PathBuf::from(trimmed)
+    };
+    if path.is_relative() {
+        if let Some(base) = cwd.map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(std::path::Path::new(base).join(path));
+        }
+    }
+    Some(path)
+}
+
+fn flatten_to_rgb_on_white(img: &image::DynamicImage) -> image::RgbImage {
+    if !img.color().has_alpha() {
+        return img.to_rgb8();
+    }
+    let rgba = img.to_rgba8();
+    let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
+    for (x, y, p) in rgba.enumerate_pixels() {
+        let a = u16::from(p[3]);
+        let inv = 255 - a;
+        rgb.put_pixel(
+            x,
+            y,
+            image::Rgb([
+                ((u16::from(p[0]) * a + 255 * inv + 127) / 255) as u8,
+                ((u16::from(p[1]) * a + 255 * inv + 127) / 255) as u8,
+                ((u16::from(p[2]) * a + 255 * inv + 127) / 255) as u8,
+            ]),
+        );
+    }
+    rgb
+}
+
+fn compress_reply_image_bytes(
+    bytes: &[u8],
+    soft_bytes: usize,
+    hard_bytes: usize,
+) -> Option<(Vec<u8>, &'static str)> {
+    let img = image::load_from_memory(bytes).ok()?;
+    if bytes.len() <= REPLY_IMAGE_SKIP_COMPRESS_BYTES
+        && img.width() <= REPLY_IMAGE_MAX_EDGE
+        && img.height() <= REPLY_IMAGE_MAX_EDGE
+    {
+        return None;
+    }
+    let mut best_under_hard: Option<Vec<u8>> = None;
+    for (max_edge, quality) in [
+        (REPLY_IMAGE_MAX_EDGE, 74u8),
+        (1120, 68),
+        (960, 62),
+        (800, 56),
+    ] {
+        let resized = if img.width() > max_edge || img.height() > max_edge {
+            img.resize(max_edge, max_edge, image::imageops::FilterType::CatmullRom)
+        } else {
+            img.clone()
+        };
+        let rgb = flatten_to_rgb_on_white(&resized);
+        let mut out = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+        if encoder
+            .encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .is_err()
+        {
+            continue;
+        }
+        if out.len() <= soft_bytes {
+            return Some((out, "image/jpeg"));
+        }
+        if out.len() <= hard_bytes
+            && best_under_hard
+                .as_ref()
+                .map_or(true, |prev| out.len() < prev.len())
+        {
+            best_under_hard = Some(out);
+        }
+    }
+    best_under_hard.map(|out| (out, "image/jpeg"))
+}
+
+/// Read a picture from disk (resolving `file://`, `~/`, and relative paths under `cwd`)
+/// and compress screenshots so they stay light over the channel and under [`REPLY_IMAGE_DATA_MAX`].
+pub fn read_reply_image_in(path: &str, cwd: Option<&str>) -> Result<Value, String> {
+    let resolved =
+        resolve_reply_image_path(path, cwd).ok_or_else(|| "没有给图片路径。".to_string())?;
+    let resolved_str = resolved.to_string_lossy();
+    let mut mime = reply_image_mime(&resolved_str);
+    if mime.is_empty() {
+        return Err("只支持 png / jpg / gif / webp。".to_string());
+    }
+    let mut bytes = std::fs::read(&resolved).map_err(|err| format!("读不到这张图：{err}"))?;
+    let max_raw = REPLY_IMAGE_DATA_MAX / 4 * 3;
+    if mime != "image/gif" {
+        if let Some((shrunk, next_mime)) =
+            compress_reply_image_bytes(&bytes, REPLY_IMAGE_SOFT_RAW_BYTES, max_raw)
+        {
+            // Keep original only when it already fits `max_raw` and re-encoding barely saves bytes.
+            if bytes.len() > max_raw || shrunk.len() + 8_192 < bytes.len() {
+                bytes = shrunk;
+                mime = next_mime;
+            }
+        }
+    }
+    if bytes.len() > max_raw {
+        return Err("图片太大了，压到 600KB 以内再发。".to_string());
+    }
+    let data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    let name = resolved
+        .file_name()
+        .and_then(|item| item.to_str())
+        .unwrap_or("图片");
+    Ok(json!({ "name": name, "mime": mime, "data": data }))
+}
+
 pub fn parse_channel_stop(frame: &str) -> Option<String> {
     let value: Value = serde_json::from_str(frame).ok()?;
     if value.get("type").and_then(Value::as_str) != Some("stop") {
@@ -562,5 +768,127 @@ mod tests {
         let bare: serde_json::Value =
             serde_json::from_str(&teamups_channel_reply("a", "做完了", true, true, "  ")).unwrap();
         assert!(bare.get("chat").is_none());
+    }
+
+    #[test]
+    fn reply_pictures_are_capped_and_type_checked() {
+        use super::{clean_reply_images, REPLY_IMAGE_DATA_MAX};
+        let small = serde_json::json!([{ "name": "chart.png", "mime": "image/png", "data": "iVBORw0KGgo=" }]);
+        let kept = clean_reply_images(Some(&small));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0]["mime"], "image/png");
+
+        // A page rendered as PDF, or a data URL wrapper, is not a picture body.
+        let bad = serde_json::json!([
+            { "name": "a.pdf", "mime": "application/pdf", "data": "iVBORw0KGgo=" },
+            { "name": "b.png", "mime": "image/png", "data": "data:image/png;base64,iVBORw0KGgo=" },
+            { "name": "c.png", "mime": "image/png", "data": "" },
+        ]);
+        assert!(clean_reply_images(Some(&bad)).is_empty());
+
+        // One oversized picture does not sink the good one beside it.
+        let huge = "A".repeat(REPLY_IMAGE_DATA_MAX + 4);
+        let mixed = serde_json::json!([
+            { "name": "big.png", "mime": "image/png", "data": huge },
+            { "name": "ok.png", "mime": "image/png", "data": "iVBORw0KGgo=" },
+        ]);
+        let kept = clean_reply_images(Some(&mixed));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0]["name"], "ok.png");
+
+        // Only three ride along, and a nameless one still gets a label.
+        let many = serde_json::json!([
+            { "mime": "image/png", "data": "iVBORw0KGgo=" },
+            { "mime": "image/png", "data": "iVBORw0KGgo=" },
+            { "mime": "image/png", "data": "iVBORw0KGgo=" },
+            { "mime": "image/png", "data": "iVBORw0KGgo=" },
+        ]);
+        let kept = clean_reply_images(Some(&many));
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0]["name"], "图片");
+
+        assert!(clean_reply_images(None).is_empty());
+        assert!(clean_reply_images(Some(&serde_json::json!("x"))).is_empty());
+    }
+
+    #[test]
+    fn read_reply_image_resolves_relative_paths_and_shrinks_oversized_screenshots() {
+        use super::{clean_reply_images, read_reply_image_in, REPLY_IMAGE_DATA_MAX};
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("out");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Small PNG stays PNG and resolves relative to `cwd`.
+        let small_path = sub.join("预览图.png");
+        let small_img = image::RgbImage::from_pixel(16, 16, image::Rgb([32, 120, 220]));
+        small_img.save(&small_path).unwrap();
+        let small =
+            read_reply_image_in("out/预览图.png", Some(&dir.path().to_string_lossy())).unwrap();
+        assert_eq!(small["name"], "预览图.png");
+        assert_eq!(small["mime"], "image/png");
+        assert_eq!(
+            clean_reply_images(Some(&serde_json::json!([small]))).len(),
+            1
+        );
+
+        // `file://` URL with percent-encoded CJK name resolves cleanly.
+        let file_url = url::Url::from_file_path(&small_path).unwrap();
+        let from_url = read_reply_image_in(file_url.as_str(), None).unwrap();
+        assert_eq!(from_url["name"], "预览图.png");
+
+        // Medium screenshot (~200 KB PNG, < 675 KB) is ALSO compressed proactively to save bandwidth,
+        // and transparent pixels flatten cleanly onto white instead of black.
+        let med_path = sub.join("ui-shot.png");
+        let mut med_img = image::RgbaImage::new(600, 400);
+        for (x, y, pixel) in med_img.enumerate_pixels_mut() {
+            let r = ((x * 255) / 600) as u8;
+            let g = ((y * 255) / 400) as u8;
+            let b = (((x + y) % 211) as u8).wrapping_add(((x / 32) ^ (y / 32)) as u8);
+            let a = if x < 24 && y < 24 { 0 } else { 255 };
+            *pixel = image::Rgba([r, g, b, a]);
+        }
+        med_img.save(&med_path).unwrap();
+        let med_raw_len = std::fs::metadata(&med_path).unwrap().len() as usize;
+        assert!(
+            med_raw_len > 80_000 && med_raw_len < REPLY_IMAGE_DATA_MAX / 4 * 3,
+            "med_raw_len={med_raw_len}"
+        );
+        let med = read_reply_image_in(&med_path.to_string_lossy(), None).unwrap();
+        assert_eq!(med["mime"], "image/jpeg");
+        let med_decoded = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            med["data"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            med_decoded.len() <= 180_000 && med_decoded.len() * 2 < med_raw_len,
+            "med_decoded={} vs med_raw_len={med_raw_len}",
+            med_decoded.len()
+        );
+        let check_white = image::load_from_memory(&med_decoded).unwrap().to_rgb8();
+        assert!(check_white.get_pixel(2, 2)[0] > 240);
+
+        // Oversized noisy PNG (> 675 KB raw) is shrunk to JPEG under `REPLY_IMAGE_DATA_MAX`.
+        let big_path = sub.join("retina.png");
+        let mut big_img = image::RgbImage::new(1400, 1000);
+        for (x, y, pixel) in big_img.enumerate_pixels_mut() {
+            let v1 = ((x.wrapping_mul(73) ^ y.wrapping_mul(179)) & 0xff) as u8;
+            let v2 = ((x.wrapping_mul(199).wrapping_add(y.wrapping_mul(37))) & 0xff) as u8;
+            let v3 = ((x ^ y).wrapping_mul(97) & 0xff) as u8;
+            *pixel = image::Rgb([v1, v2, v3]);
+        }
+        big_img.save(&big_path).unwrap();
+        assert!(
+            std::fs::metadata(&big_path).unwrap().len() as usize > REPLY_IMAGE_DATA_MAX / 4 * 3
+        );
+
+        let shrunk = read_reply_image_in(&big_path.to_string_lossy(), None).unwrap();
+        assert_eq!(shrunk["name"], "retina.png");
+        assert_eq!(shrunk["mime"], "image/jpeg");
+        assert!(shrunk["data"].as_str().unwrap().len() <= REPLY_IMAGE_DATA_MAX);
+        assert_eq!(
+            clean_reply_images(Some(&serde_json::json!([shrunk]))).len(),
+            1
+        );
     }
 }

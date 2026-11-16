@@ -10,10 +10,11 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 
 use agent_doctor_core::{
-    parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
-    parse_teamups_channel_sync, set_teamups_channel_enabled, set_teamups_channel_since,
-    settings_db_path, teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard,
-    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
+    clean_reply_images, parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
+    parse_teamups_channel_sync, read_reply_image_in, set_teamups_channel_enabled,
+    set_teamups_channel_since, settings_db_path, teamups_channel_auth, teamups_channel_enabled,
+    teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
+    TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -419,6 +420,7 @@ pub fn teamups_channel_connected_command() -> bool {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn teamups_channel_reply_command(
     app: AppHandle,
     id: String,
@@ -427,6 +429,7 @@ pub fn teamups_channel_reply_command(
     done: Option<bool>,
     trace: Option<serde_json::Value>,
     chat: Option<String>,
+    images: Option<serde_json::Value>,
 ) -> Result<(), String> {
     let done = done.unwrap_or(true);
     note(&format!(
@@ -451,6 +454,16 @@ pub fn teamups_channel_reply_command(
             frame_value["trace"] = trace;
         }
     }
+    // Pictures the answer wants on the phone. Oversized ones are dropped here,
+    // before they ever reach the line.
+    let images = clean_reply_images(images.as_ref());
+    if !images.is_empty() {
+        note(&format!(
+            "job {id} reply carries {} picture(s)",
+            images.len()
+        ));
+        frame_value["images"] = serde_json::json!(images);
+    }
     let frame = frame_value.to_string();
     let outbound = app
         .try_state::<Outbound>()
@@ -461,6 +474,17 @@ pub fn teamups_channel_reply_command(
         "飞书这条线还没连上。".to_string()
     })?;
     tx.send(frame).map_err(|_| "回复没送回官网。".to_string())
+}
+
+/// Read a picture off this computer so an answer can carry it to the phone.
+#[tauri::command]
+pub async fn teamups_channel_image_command(
+    path: String,
+    cwd: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || read_reply_image_in(&path, cwd.as_deref()))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 /// The phone's conversation list. Each item is one chat on this computer.

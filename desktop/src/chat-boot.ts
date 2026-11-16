@@ -70,6 +70,7 @@ import {
   sendAsk,
   flushPendingTextSync,
   offerBackupRestoreIfNeeded,
+  resolveSendWorkspace,
   askResources,
   mentionMenu,
 } from "./chat";
@@ -90,10 +91,12 @@ import { bindAccountBar } from "./chat/account-bar";
 import { bindFeedbackLaunchers } from "./chat/feedback";
 import {
   cancelPromptSession,
+  type ChannelReplyImage,
   listInstalledAskAgents,
   listPersonalProviders,
   teamupsChannelChats,
   teamupsChannelConnected,
+  teamupsChannelImage,
   teamupsChannelInventory,
   teamupsChannelNote,
   teamupsChannelPref,
@@ -101,6 +104,7 @@ import {
   teamupsChannelSetEnabled,
   teamupsChannelSince,
 } from "./ipc";
+import { collectChannelReplyImages } from "./chat/channel-images";
 import {
   agentRows,
   applyPick,
@@ -724,9 +728,10 @@ function bootChatTail(): void {
     ok: boolean,
     chat = "",
     trace?: Parameters<typeof teamupsChannelReply>[4],
+    images?: ChannelReplyImage[],
   ): void {
     channelLedger.finish(id, text, ok);
-    void teamupsChannelReply(id, text, ok, true, trace, chat).catch(() => {});
+    void teamupsChannelReply(id, text, ok, true, trace, chat, images).catch(() => {});
     publishPhoneChats();
   }
   const phoneStops = new Set<string>();
@@ -1024,13 +1029,34 @@ function bootChatTail(): void {
           limit: contextLimitForModel(session.model),
         }
       : undefined;
-    finishChannel(job.id, final, halted ? true : Boolean(answer) || !stopped, job.chat, {
-      thinking: trace.thinking,
-      tools: trace.tools,
-      files: trace.files,
-      steps: channelTurnSteps(session?.messages ?? [], started, job.text),
-      ...(usage ? { usage } : {}),
-    });
+    const steps = channelTurnSteps(session?.messages ?? [], started, job.text);
+    const sessionCwd = session ? resolveSendWorkspace(session).cwd : "";
+    const images = halted
+      ? []
+      : await collectChannelReplyImages({
+          text: final,
+          steps,
+          files: trace.files,
+          cwd: sessionCwd,
+          readImage: teamupsChannelImage,
+        });
+    if (images.length > 0) {
+      teamupsChannelNote(job.id, `images ${images.map((img) => img.name).join(", ")}`);
+    }
+    finishChannel(
+      job.id,
+      final,
+      halted ? true : Boolean(answer) || !stopped,
+      job.chat,
+      {
+        thinking: trace.thinking,
+        tools: trace.tools,
+        files: trace.files,
+        steps,
+        ...(usage ? { usage } : {}),
+      },
+      images,
+    );
   }
   async function runChannelJob(
     id: string,
