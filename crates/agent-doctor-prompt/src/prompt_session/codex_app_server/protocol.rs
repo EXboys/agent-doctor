@@ -351,6 +351,16 @@ pub(crate) fn handle_notification<F>(
                 // assistant bubble on phase changes, which otherwise stores
                 // one localStorage message per token.
                 state.saw_agent_delta = true;
+                state.open_message_has_text = true;
+                if let Some(item_id) = params
+                    .get("itemId")
+                    .or_else(|| params.get("item_id"))
+                    .or_else(|| params.pointer("/item/id"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    state.streamed_message_ids.insert(item_id.to_string());
+                }
                 on_event(PromptSessionEvent::Delta {
                     session_id: state.session_id.clone(),
                     text,
@@ -358,6 +368,7 @@ pub(crate) fn handle_notification<F>(
             }
         }
         "item/reasoning/summaryTextDelta" | "item/reasoning/summaryPartAdded" => {
+            state.open_message_has_text = false;
             let delta = if method == "item/reasoning/summaryPartAdded" {
                 "\n\n".to_string()
             } else {
@@ -421,13 +432,40 @@ pub(crate) fn handle_notification<F>(
             }
             let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
             match item_type {
+                t if is_agent_message_type(t) && method == "item/started" => {
+                    if state.open_message_has_text {
+                        state.open_message_has_text = false;
+                        on_event(PromptSessionEvent::Delta {
+                            session_id: state.session_id.clone(),
+                            text: "\n\n".to_string(),
+                        });
+                    }
+                }
                 // Prefer streamed deltas; only fall back to the completed payload
-                // when no delta arrived (some turns emit text only on completed).
+                // when this item never streamed (stage commentary may stream while
+                // a later item arrives whole, or vice versa).
                 // Official app-server uses camelCase `agentMessage`; older builds used snake_case.
                 t if is_agent_message_type(t) && method == "item/completed" => {
-                    if !state.saw_agent_delta {
+                    let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let already_streamed = if item_id.is_empty() {
+                        state.saw_agent_delta
+                    } else {
+                        state.streamed_message_ids.contains(item_id)
+                            || (state.streamed_message_ids.is_empty() && state.saw_agent_delta)
+                    };
+                    if !already_streamed {
                         if let Some(text) = agent_item_text(&item) {
+                            if state.open_message_has_text {
+                                on_event(PromptSessionEvent::Delta {
+                                    session_id: state.session_id.clone(),
+                                    text: "\n\n".to_string(),
+                                });
+                            }
                             state.saw_agent_delta = true;
+                            state.open_message_has_text = true;
+                            if !item_id.is_empty() {
+                                state.streamed_message_ids.insert(item_id.to_string());
+                            }
                             on_event(PromptSessionEvent::Delta {
                                 session_id: state.session_id.clone(),
                                 text,
@@ -437,6 +475,7 @@ pub(crate) fn handle_notification<F>(
                 }
                 t if is_agent_message_type(t) => {}
                 t if is_tool_activity(t) => {
+                    state.open_message_has_text = false;
                     let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     if method == "item/started" {
                         state.tools.start(item_id);
@@ -474,6 +513,7 @@ pub(crate) fn handle_notification<F>(
                 }
                 "reasoning" => {
                     if method == "item/started" {
+                        state.open_message_has_text = false;
                         state.thinking.reset();
                         on_event(PromptSessionEvent::Status {
                             session_id: state.session_id.clone(),

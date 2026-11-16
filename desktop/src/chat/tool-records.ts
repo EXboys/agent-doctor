@@ -14,14 +14,32 @@ function toolFace(text: string): string {
  */
 export function omitBareToolStarts(records: ToolRecord[]): ToolRecord[] {
   const out: ToolRecord[] = [];
+  const claimedSteps = new Set<number>();
   for (let i = 0; i < records.length; i += 1) {
     const record = records[i];
-    const next = records[i + 1];
-    if (record && typeof record === "string" && next && typeof next !== "string" && next.step) {
+    if (record && typeof record === "string") {
       const name = toolFace(record);
-      const stepName = toolFace(next.step.name || next.text);
       const { detail } = splitToolActivity(record);
-      if (!detail && name && name === stepName) continue;
+      if (!detail && name) {
+        // Match either the immediately following step or, in a parallel tool
+        // batch ([bare A, bare B, step A, step B]), the next unclaimed step
+        // with the same tool face.
+        let matched = -1;
+        for (let j = i + 1; j < records.length; j += 1) {
+          if (claimedSteps.has(j)) continue;
+          const candidate = records[j];
+          if (!candidate || typeof candidate === "string" || !candidate.step) continue;
+          const stepName = toolFace(candidate.step.name || candidate.text);
+          if (stepName === name) {
+            matched = j;
+            break;
+          }
+        }
+        if (matched >= 0) {
+          claimedSteps.add(matched);
+          continue;
+        }
+      }
     }
     if (record) out.push(record);
   }
@@ -152,6 +170,21 @@ export function storeToolStep(
     const message = messages[i];
     if (message?.role === "tool" && message.step?.id === step.id) {
       message.step = slim(mergeToolStep(message.step, step));
+      message.content = toolStepText(message.step);
+      // If a `Status(tool)` announcement landed right before this merge update
+      // (e.g. `content_block_start` already created the step, then `assistant`
+      // sent `Status` + `Tool`), drop that redundant bare status message.
+      const tailAt = messages.length - 1;
+      const tail = messages[tailAt];
+      const checkAt = tail?.role === "assistant" && tail.id === streamingAssistantId ? tailAt - 1 : tailAt;
+      const check = messages[checkAt];
+      if (checkAt > i && check?.role === "tool" && !check.step) {
+        const bareFace = toolFace(check.content);
+        const stepFace = toolFace(message.step.name || step.name || "");
+        if (!bareFace || !stepFace || bareFace === stepFace) {
+          messages.splice(checkAt, 1);
+        }
+      }
       return true;
     }
   }
@@ -159,11 +192,30 @@ export function storeToolStep(
   const stored = slim(step);
   const tailAt = messages.length - 1;
   const tail = messages[tailAt];
-  const anchorAt = tail?.role === "assistant" ? tailAt - 1 : tailAt;
-  const anchor = messages[anchorAt];
-  if (anchorAt > userAt && anchor?.role === "tool" && !anchor.step) {
-    anchor.step = stored;
-    anchor.content = toolStepText(stored);
+  const anchorEnd = tail?.role === "assistant" ? tailAt - 1 : tailAt;
+  // Walk the current contiguous tool run so parallel `[Status(A), Status(B), Tool(A), Tool(B)]`
+  // pairs each step with its matching status message instead of stranding the first one.
+  let runStart = anchorEnd;
+  while (runStart >= userAt + 1 && messages[runStart]?.role === "tool") {
+    runStart -= 1;
+  }
+  const stepFace = toolFace(stored.name || "");
+  let adoptAt = -1;
+  for (let i = runStart + 1; i <= anchorEnd; i += 1) {
+    const candidate = messages[i];
+    if (candidate?.role !== "tool" || candidate.step) continue;
+    if (stepFace && toolFace(candidate.content) === stepFace) {
+      adoptAt = i;
+      break;
+    }
+  }
+  if (adoptAt < 0 && anchorEnd > userAt && messages[anchorEnd]?.role === "tool" && !messages[anchorEnd]?.step) {
+    adoptAt = anchorEnd;
+  }
+  if (adoptAt >= 0) {
+    const adopted = messages[adoptAt]!;
+    adopted.step = stored;
+    adopted.content = toolStepText(stored);
     return true;
   }
   const message: ChatMessage = {

@@ -3,7 +3,7 @@ import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
 import { clearTurnClock } from "./chat/activity";
-import { HAND_MISSING_PHASE } from "./chat/format";
+import { HAND_MISSING_PHASE, plainRunningActivityText, plainRunningToolText } from "./chat/format";
 import { permissionHoldKind, requestAllowStop } from "./chat/permission-allow";
 import { releaseStalePins } from "./chat/model-picker";
 import { syncSidebarCollapseLabels } from "./chat/session-sidebar";
@@ -911,12 +911,21 @@ export function pushActivity(phase: string, message: string): void {
     holdRunningForAllow(permissionHoldKind(message));
   } else if (phase !== HAND_MISSING_PHASE) {
     chatState.running?.setPaused(false);
-    chatState.latestActivityText = message.trim();
-    chatState.running?.setText(message);
+    const friendly = plainRunningActivityText(phase, message);
+    chatState.latestActivityText = friendly;
+    chatState.running?.setText(friendly);
   }
   chatState.activity.pushActivity(phase, message);
 }
 export function pushToolStep(step: ToolStep): void {
+  if (step.kind && step.status === "running") {
+    chatState.running?.setPaused(false);
+    const friendly = plainRunningToolText(step);
+    if (friendly) {
+      chatState.latestActivityText = friendly;
+      chatState.running?.setText(friendly);
+    }
+  }
   chatState.activity.pushToolStep(step);
 }
 export function sealProcessStream(): void {
@@ -970,7 +979,11 @@ export function persistMessage(
   return chatState.bubbles.persistMessage(role, content, opts);
 }
 
-export function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
+export function updateAssistantMessage(
+  id: string,
+  content: string,
+  opts?: { persist?: boolean; durationMs?: number },
+): void {
   chatState.bubbles.updateAssistantMessage(id, content, opts);
 }
 

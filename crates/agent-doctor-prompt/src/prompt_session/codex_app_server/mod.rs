@@ -359,6 +359,8 @@ fn run_codex_app_server(
         images: images.clone(),
         approval_policy: approval_policy.clone(),
         saw_agent_delta: false,
+        streamed_message_ids: std::collections::HashSet::new(),
+        open_message_has_text: false,
         tools: ToolWatch::default(),
         thinking: ThinkingLine::default(),
         account_model: account_model.clone(),
@@ -652,6 +654,10 @@ pub(crate) struct PumpState {
     images: Vec<String>,
     approval_policy: Value,
     saw_agent_delta: bool,
+    /// `agentMessage` item ids that already streamed deltas, so a later non-streamed item in the same turn is not dropped.
+    streamed_message_ids: std::collections::HashSet<String>,
+    /// An `agentMessage` wrote text with no tool/reasoning after it yet; a back-to-back message item gets a paragraph break.
+    open_message_has_text: bool,
     tools: ToolWatch,
     thinking: ThinkingLine,
     /// Account model for this turn. Empty when Codex should keep its own default.
@@ -882,6 +888,8 @@ mod tests {
             images: Vec::new(),
             approval_policy: json!("on-request"),
             saw_agent_delta: false,
+            streamed_message_ids: std::collections::HashSet::new(),
+            open_message_has_text: false,
             tools: ToolWatch::default(),
             thinking: ThinkingLine::default(),
             account_model: None,
@@ -924,6 +932,8 @@ mod tests {
             images: Vec::new(),
             approval_policy: json!("on-request"),
             saw_agent_delta: false,
+            streamed_message_ids: std::collections::HashSet::new(),
+            open_message_has_text: false,
             tools: ToolWatch::default(),
             thinking: ThinkingLine::default(),
             account_model: Some("gpt-5.6-sol".into()),
@@ -962,6 +972,8 @@ mod tests {
             images: Vec::new(),
             approval_policy: json!("on-request"),
             saw_agent_delta: false,
+            streamed_message_ids: std::collections::HashSet::new(),
+            open_message_has_text: false,
             tools: ToolWatch::default(),
             thinking: ThinkingLine::default(),
             account_model: None,
@@ -982,6 +994,21 @@ mod tests {
             &mut state,
             &mut |event| events.push(event),
         );
+        handle_notification(
+            "item/agentMessage/delta",
+            Some(&json!({"itemId": "m_stage", "delta": "先看配置。"})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        handle_notification(
+            "item/completed",
+            Some(&json!({"item": {"id": "m_final", "type": "agentMessage", "text": "查清楚了。"}})),
+            &mut state,
+            &mut |event| events.push(event),
+        );
+        assert!(events.iter().any(
+            |ev| matches!(ev, PromptSessionEvent::Delta { text, .. } if text == "查清楚了。")
+        ));
         handle_notification(
             "item/started",
             Some(&json!({"item": {"type": "webSearch", "query": "登录按钮"}})),

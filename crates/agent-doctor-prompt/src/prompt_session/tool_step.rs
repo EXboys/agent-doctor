@@ -208,7 +208,7 @@ pub(crate) fn tool_step(id: &str, name: &str, input: &Value) -> ToolStep {
             step.query = text(obj, &["pattern", "query", "url", "glob_pattern", "q"]);
         }
         "bash" | "shell" | "terminal" | "execcommand" | "command" | "commandexecution"
-        | "runcommand" | "runterminalcmd" | "exec" => {
+        | "runcommand" | "runterminalcmd" | "exec" | "powershell" | "pwsh" | "cmd" | "cmdexe" => {
             step.command = command_text(obj.get("command").or_else(|| obj.get("cmd")));
             step.path.clear();
             classify_command(&mut step);
@@ -638,11 +638,43 @@ fn heredoc_lines(command: &str) -> Vec<String> {
         .collect()
 }
 
+fn strip_wrapping_quotes(raw: &str) -> &str {
+    let s = raw.trim();
+    s.strip_prefix('\'')
+        .and_then(|r| r.strip_suffix('\''))
+        .or_else(|| s.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
+        .unwrap_or(s)
+        .trim()
+}
+
+/// Unwrap `/bin/zsh -lc '...'` or `powershell -NoProfile -Command "..."` so the real command is classified.
+fn unwrap_shell_command(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(pos) = trimmed.find(" -lc ") {
+        let rest = strip_wrapping_quotes(&trimmed[pos + 5..]);
+        if !rest.is_empty() {
+            return rest;
+        }
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("powershell") || lower.starts_with("pwsh") {
+        for flag in [" -command ", " -c "] {
+            if let Some(pos) = lower.find(flag) {
+                let rest = strip_wrapping_quotes(&trimmed[pos + flag.len()..]);
+                if !rest.is_empty() {
+                    return rest;
+                }
+            }
+        }
+    }
+    trimmed
+}
+
 /// Terminal commands that write, append to, read, or search name what they touch.
 fn classify_command(step: &mut ToolStep) {
     step.kind = "terminal".into();
-    let command = step.command.clone();
-    let first = command.lines().next().unwrap_or("");
+    let unwrapped = unwrap_shell_command(&step.command).to_string();
+    let first = unwrapped.lines().next().unwrap_or("");
     let words = shell_words(first);
     let mut segments: Vec<&[String]> = Vec::new();
     let mut start = 0;
@@ -661,17 +693,18 @@ fn classify_command(step: &mut ToolStep) {
         if seg.is_empty() {
             continue;
         }
-        if seg[0] == "cd" {
+        if seg[0].eq_ignore_ascii_case("cd") || seg[0].eq_ignore_ascii_case("set-location") {
             note_cd(&mut cwd, seg);
             continue;
         }
         actions.push((cwd.clone(), seg));
     }
 
-    let written = heredoc_lines(&command);
+    let written = heredoc_lines(&unwrapped);
     for (dir, seg) in &actions {
-        let echoed: Vec<String> = match seg[0].as_str() {
-            "echo" | "printf" => seg[1..]
+        let cmd_lower = seg[0].to_ascii_lowercase();
+        let echoed: Vec<String> = match cmd_lower.as_str() {
+            "echo" | "printf" | "write-output" => seg[1..]
                 .iter()
                 .take_while(|w| !w.starts_with('>'))
                 .filter(|w| !w.starts_with('-'))
@@ -701,19 +734,34 @@ fn classify_command(step: &mut ToolStep) {
             }
         }
         if found.is_none() {
-            let cmd = seg[0].as_str();
             let args: Vec<&String> = seg[1..]
                 .iter()
                 .filter(|w| !w.starts_with('<') && !w.starts_with('>') && !w.contains('>'))
                 .collect();
             let last_file = || args.iter().rev().find_map(|w| file_word(w));
-            found = match cmd {
-                "tee" => {
-                    let append = seg[1..].iter().any(|w| w == "-a" || w == "--append");
-                    args.iter()
-                        .find_map(|w| file_word(w))
-                        .map(|p| (if append { "edit" } else { "write" }, p))
+            let ps_path_arg = || {
+                seg[1..]
+                    .windows(2)
+                    .find_map(|pair| {
+                        let flag = pair[0].to_ascii_lowercase();
+                        matches!(flag.as_str(), "-path" | "-literalpath" | "-filepath")
+                            .then(|| file_word(&pair[1]))
+                            .flatten()
+                    })
+                    .or_else(|| args.iter().find_map(|w| file_word(w)))
+            };
+            found = match cmd_lower.as_str() {
+                "tee" | "tee-object" => {
+                    let append = seg[1..].iter().any(|w| {
+                        matches!(
+                            w.to_ascii_lowercase().as_str(),
+                            "-a" | "--append" | "-append"
+                        )
+                    });
+                    ps_path_arg().map(|p| (if append { "edit" } else { "write" }, p))
                 }
+                "set-content" | "out-file" => ps_path_arg().map(|p| ("write", p)),
+                "add-content" => ps_path_arg().map(|p| ("edit", p)),
                 "touch" => last_file().map(|p| ("write", p)),
                 "sed" | "perl"
                     if seg[1..]
@@ -734,14 +782,33 @@ fn classify_command(step: &mut ToolStep) {
         }
     }
     for (dir, seg) in &actions {
-        let cmd = seg[0].as_str();
+        let cmd_lower = seg[0].to_ascii_lowercase();
         let has_redirect = seg.iter().any(|w| w.contains('>') || w.starts_with('<'));
         if matches!(
-            cmd,
-            "cat" | "bat" | "head" | "tail" | "less" | "more" | "nl" | "wc" | "stat"
+            cmd_lower.as_str(),
+            "cat"
+                | "bat"
+                | "head"
+                | "tail"
+                | "less"
+                | "more"
+                | "nl"
+                | "wc"
+                | "stat"
+                | "get-content"
+                | "gc"
         ) && !has_redirect
         {
-            if let Some(path) = seg[1..].iter().rev().find_map(|w| file_word(w)) {
+            let path = seg[1..]
+                .windows(2)
+                .find_map(|pair| {
+                    let flag = pair[0].to_ascii_lowercase();
+                    matches!(flag.as_str(), "-path" | "-literalpath")
+                        .then(|| file_word(&pair[1]))
+                        .flatten()
+                })
+                .or_else(|| seg[1..].iter().rev().find_map(|w| file_word(w)));
+            if let Some(path) = path {
                 step.kind = "read".into();
                 step.path = place_in_dir(dir, &path);
                 return;
@@ -750,8 +817,18 @@ fn classify_command(step: &mut ToolStep) {
     }
     if let Some((_, seg)) = actions.first() {
         if matches!(
-            seg[0].as_str(),
-            "curl" | "wget" | "rg" | "grep" | "egrep" | "find" | "fd" | "ag"
+            seg[0].to_ascii_lowercase().as_str(),
+            "curl"
+                | "wget"
+                | "rg"
+                | "grep"
+                | "egrep"
+                | "find"
+                | "fd"
+                | "ag"
+                | "select-string"
+                | "sls"
+                | "findstr"
         ) {
             step.kind = "search".into();
         }
@@ -854,6 +931,31 @@ mod tests {
         assert_eq!(bash("npm run build 2>&1 > /dev/null").kind, "terminal");
         assert_eq!(bash("ls -la /tmp 2>&1").kind, "terminal");
         assert_eq!(bash("curl -s https://example.com").kind, "search");
+
+        let ps = tool_step(
+            "ps1",
+            "PowerShell",
+            &json!({"command": "Get-ScheduledTask -TaskName mihomo*", "description": "Inspect mihomo scheduled task"}),
+        );
+        assert_eq!(
+            (ps.kind.as_str(), ps.title.as_str()),
+            ("terminal", "Inspect mihomo scheduled task")
+        );
+        let ps_read = tool_step(
+            "ps2",
+            "PowerShell",
+            &json!({"command": "powershell.exe -NoProfile -Command \"Get-Content -Path watchdog.ps1\""}),
+        );
+        assert_eq!(
+            (ps_read.kind.as_str(), ps_read.path.as_str()),
+            ("read", "watchdog.ps1")
+        );
+        let ps_search = tool_step(
+            "ps3",
+            "pwsh",
+            &json!({"command": "Select-String -Path *.log -Pattern 'error'"}),
+        );
+        assert_eq!(ps_search.kind, "search");
     }
 
     #[test]

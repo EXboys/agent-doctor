@@ -521,8 +521,10 @@ export function toolActivityInfo(text: string): ToolActivityInfo {
   ) {
     kind = "edit";
   } else if (
-    /^(bash|shell|terminal|command|commandexecution|exec|runcommand)$/.test(name) ||
-    /(?:^|\s)(?:bash|zsh|sh|npm|pnpm|yarn|cargo|git|python|node)\s/.test(lower)
+    /^(bash|shell|terminal|command|commandexecution|exec|execcommand|runcommand|runterminalcmd|powershell|pwsh|cmd|cmdexe)$/.test(
+      name,
+    ) ||
+    /(?:^|\s)(?:bash|zsh|sh|powershell|pwsh|npm|pnpm|yarn|cargo|git|python|node)\s/.test(lower)
   ) {
     kind = "terminal";
   }
@@ -620,6 +622,17 @@ const KIND_WORDS = new Set([
   "edit",
   "bash",
   "shell",
+  "terminal",
+  "command",
+  "commandexecution",
+  "exec",
+  "execcommand",
+  "runcommand",
+  "runterminalcmd",
+  "powershell",
+  "pwsh",
+  "cmd",
+  "cmdexe",
   "grep",
   "glob",
   "search",
@@ -1110,14 +1123,72 @@ export function summarizeToolActivities(infos: ToolActivityInfo[]): string {
   add("search", "chat.workSearches");
   add("terminal", "chat.workCommands");
   add("subagent", "chat.workSubagents");
-  for (const [name, count] of named) {
-    parts.push(count > 1 ? t("chat.workAliasCount", { name, count: String(count) }) : name);
+  if (named.size > 2) {
+    let totalNamed = 0;
+    for (const count of named.values()) totalNamed += count;
+    parts.push(t("chat.workScreenSteps", { count: String(totalNamed) }));
+  } else {
+    for (const [name, count] of named) {
+      parts.push(count > 1 ? t("chat.workAliasCount", { name, count: String(count) }) : name);
+    }
   }
   add("other", "chat.workOtherActions");
   const additions = infos.reduce((sum, info) => sum + info.additions, 0);
   const deletions = infos.reduce((sum, info) => sum + info.deletions, 0);
   if (additions || deletions) parts.push(`+${additions} −${deletions}`);
   return parts.join(" · ");
+}
+
+function unwrapShellWrapper(command: string): string {
+  const trimmed = command.trim();
+  const unquote = (s: string) => {
+    const v = s.trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      return v.slice(1, -1).trim();
+    }
+    return v;
+  };
+  const posix = trimmed.match(/^(?:\/usr\/bin\/env\s+)?(?:\/bin\/)?(?:zsh|bash|sh)\s+-l?c\s+([\s\S]+)$/i);
+  if (posix?.[1]) return unquote(posix[1]);
+  const ps = trimmed.match(/^(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\b[\s\S]*?\s-(?:command|c)\s+([\s\S]+)$/i);
+  if (ps?.[1]) return unquote(ps[1]);
+  return trimmed;
+}
+
+const READONLY_SHELL_WRITE_RE =
+  /\b(?:sed\s+-i|perl\s+-pi|tee|mv|cp|rm|mkdir|rmdir|touch|truncate|chmod|chown|del|erase|taskkill|(?:set|add|clear|remove|new|move|copy|rename|start|stop|restart|invoke|register|unregister|enable|disable|install|uninstall|out)-[a-z]+)\b|(?:^|\s)git\s+(?:add|commit|push|pull|rm|mv|checkout|switch|restore|reset|clean|revert|cherry-pick|merge|rebase|stash)\b|(?:^|\s)schtasks(?:\.exe)?\s+\/(?:create|change|delete|run|end)\b|(?:^|\s)reg(?:\.exe)?\s+(?:add|delete|import)\b|(?:^|\s)(?:npm|pnpm|yarn|cargo|pip|brew)\s+(?:install|add|remove|uninstall|run|build|publish)\b/i;
+
+const READONLY_SHELL_READ_RE =
+  /^(?:rg|grep|egrep|fgrep|find|fd|ag|ls|dir|cat|bat|head|tail|less|more|wc|nl|stat|file|pwd|which|where|whereis|type|readlink|realpath|tree|ps|pgrep|lsof|netstat|ss|ifconfig|ipconfig|uname|whoami|id|env|printenv|sed\s+-n|get-[a-z]+|gci|gc|sls|select-string|select-object|where-object|foreach-object|format-table|format-list|measure-object|sort-object|test-path|resolve-path|tasklist|systeminfo)\b|^git\s+(?:status|log|show|diff|branch|rev-parse|ls-files|remote)\b|^schtasks(?:\.exe)?\s+\/query\b|^reg(?:\.exe)?\s+query\b|^wevtutil(?:\.exe)?\s+qe\b/i;
+
+/** True when a shell command only inspects files/processes/logs without mutating state (ZCode Explore contract). */
+export function isReadOnlyTerminalCommand(rawCommand: string): boolean {
+  const unwrapped = unwrapShellWrapper(rawCommand);
+  if (!unwrapped) return false;
+  // Strip harmless stderr/null redirects before checking for file-writing redirects.
+  const withoutNullRedirect = unwrapped
+    .replace(/\b\d*>&\d+\b/g, " ")
+    .replace(/\b\d*>>?\s*(?:\/dev\/null|\$null|nul)\b/gi, " ");
+  if (/(?:^|[^\d<])>>?\s*\S|&>\s*\S/.test(withoutNullRedirect)) return false;
+  if (READONLY_SHELL_WRITE_RE.test(withoutNullRedirect)) return false;
+  const segments = withoutNullRedirect
+    .split(/&&|\|\||;|\|/g)
+    .map((s) => s.trim().replace(/^\$?\w+\s*=\s*/, "").trim())
+    .filter(Boolean);
+  if (segments.length === 0) return false;
+  return segments.some((seg) => READONLY_SHELL_READ_RE.test(seg));
+}
+
+/** Human-readable status text for the running bar, avoiding raw `调用工具 PowerShell…`. */
+export function plainRunningToolText(step: ToolStep): string {
+  const info = stepActivityInfo(step);
+  return info.target ? `${info.label} · ${info.target}` : info.label;
+}
+
+export function plainRunningActivityText(phase: string, message: string): string {
+  if (activityKind(phase) !== "tool") return message.trim();
+  const info = toolActivityInfo(message);
+  return info.target ? `${info.label} · ${info.target}` : info.label;
 }
 
 export function cleanToolLabel(text: string): string {

@@ -22,7 +22,6 @@ import {
   toolSignature,
 } from "./format";
 import { followChatLog, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, withoutChatLogJump } from "./activity";
-import { completedTrail } from "./work-trail";
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
@@ -333,6 +332,7 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.scheduleStorePersist();
     if (!deps.isViewingRunningSession()) return;
     if (deps.getActivityEl()) deps.settleActivity();
+    deps.finishToolGroup(false);
     deps.dismissLifecycleActivity();
     const bubble = ensureAssistantBubble();
     if (!bubble.isConnected) return;
@@ -523,11 +523,18 @@ export function createBubblesController(deps: BubblesDeps) {
     deps.touchSession(session);
     deps.scheduleStorePersist();
   }
-  function updateAssistantMessage(id: string, content: string, opts?: { persist?: boolean }): void {
+  function updateAssistantMessage(
+    id: string,
+    content: string,
+    opts?: { persist?: boolean; durationMs?: number },
+  ): void {
     const session = deps.getBusy() ? deps.runTargetSession() : deps.activeSession();
     const message = messageById(session, id);
     if (!message) return;
     message.content = content;
+    if (opts?.durationMs !== undefined) {
+      message.durationMs = opts.durationMs;
+    }
     // The rail reads the whole transcript to place its current tick, and that
     // read forces a layout of every row above it. On a running answer it waits
     // for a quiet moment instead of running on every chunk.
@@ -1121,7 +1128,12 @@ export function createBubblesController(deps: BubblesDeps) {
           }
           if (current.role === "thinking") {
             if (current.content.trim()) {
-              rows.push(renderThinkingBlock(current.content, { id: current.id }));
+              rows.push(
+                renderThinkingBlock(current.content, {
+                  id: current.id,
+                  durationMs: current.durationMs,
+                }),
+              );
             }
             i += 1;
             continue;
@@ -1134,20 +1146,14 @@ export function createBubblesController(deps: BubblesDeps) {
           !deps.isTurnCompleting() &&
           i >= messages.length;
         if (live) {
-          const lastTools = [...rows].reverse().find((row) => row.classList.contains("chat-tool-group"));
-          if (lastTools instanceof HTMLDetailsElement) lastTools.open = true;
-          const lastThink = [...rows].reverse().find((row) => row.classList.contains("chat-thinking"));
-          if (lastThink instanceof HTMLDetailsElement) markThinkingLive(lastThink);
+          const lastRow = rows[rows.length - 1];
+          if (lastRow instanceof HTMLDetailsElement && lastRow.classList.contains("chat-thinking")) {
+            markThinkingLive(lastRow);
+          }
         }
-        if (rows.length === 1) {
-          // A lone tool run still folds: history windows often split between a
-          // thinking block and its tools, and a bare open group read as a
-          // bullet list that never folded.
-          const only = rows[0]!;
-          target.appendChild(
-            !live && only.classList.contains("chat-tool-group") ? completedTrail([only]) : only,
-          );
-        } else if (rows.length > 1) target.appendChild(wrapProcessRows(rows, live));
+        if (rows.length >= 1) {
+          target.appendChild(wrapProcessRows(rows, live));
+        }
         continue;
       }
       if (message.role === "permission") {

@@ -135,9 +135,10 @@ export function buildPromptWithHistory(
 ): string {
   const useChinese = getLocale() === "zh" || /[\u3400-\u9fff]/.test(userText);
   const responseStyle =
-    "Response style: answer the user directly and concisely. Lead with the result. " +
-    "Use short sections or bullets only when they improve clarity. Do not narrate hidden reasoning, " +
-    "routine progress, tool-selection decisions, retries, or permission flow. Do not repeat the request." +
+    "Response style: answer the user directly and concisely. For direct questions, lead with the result. " +
+    "For multi-step investigations or edits, write a brief 1–2 sentence stage summary at the start of each phase " +
+    "or when sharing a key intermediate finding before running the next batch of tools, so the user can follow the phases. " +
+    "Do not narrate individual tool calls one by one, hidden reasoning, retries, or permission prompts. Do not repeat the request." +
     (useChinese
       ? " Reply in Simplified Chinese. If this runtime exposes visible thinking or reasoning text, that visible text must also be in Simplified Chinese; do not output English thinking."
       : "");

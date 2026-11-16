@@ -782,6 +782,10 @@ export const en = {
     "chat.fail.macosDenied.message": "This Mac blocked the project settings, so this turn stopped.",
     "chat.fail.macosDenied.next":
       "Open System Settings → Privacy & Security → Files and Folders, turn on Agent Doctor, then ask again.",
+    "chat.fail.localStorage.message":
+      "This computer is out of disk space, or another window is holding the session record, so this turn stopped before saving.",
+    "chat.fail.localStorage.next":
+      "Free up some disk space or close other windows using the same tool, then tap Ask again.",
     "chat.fail.balance.message": "The model account has no balance, so this turn did not go through. This app is fine.",
     "chat.fail.balance.next": "Recharge on the provider’s site, or tap Open Provider and switch to a key that still has credit.",
     "chat.fail.rateLimit.message": "Too many questions just now, so the model is not taking this one. This app is fine.",
@@ -815,6 +819,10 @@ export const en = {
     "chat.workLiveCount": "Working · {count} steps",
     "chat.workDone": "What it did",
     "chat.workDoneElapsed": "Worked for {elapsed}",
+    "chat.stageExploreLive": "Reading",
+    "chat.stageTerminalLive": "Running commands",
+    "chat.stageChangesLive": "Updating files",
+    "chat.stageBrowserLive": "Working on screen",
     "chat.toolRead": "Read",
     "chat.toolWrite": "Write",
     "chat.toolEdit": "Edit",
@@ -938,6 +946,9 @@ export const en = {
     "chat.workSubagents": "{count} subagents",
     "chat.subagentKind": "Subagent",
     "chat.workOtherActions": "{count} other actions",
+    "chat.workInspections": "checked {count} items",
+    "chat.workFailedCount": "{count} didn't work",
+    "chat.workScreenSteps": "{count} screen/page steps",
     "chat.workAliasCount": "{name} × {count}",
     "chat.toolTimes": "{count} times",
     "chat.noReply": "It reported an error and did not reply. Try sending again.",

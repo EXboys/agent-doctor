@@ -1543,18 +1543,33 @@ fn parse_claude_stream_line(
                         .pointer("/event/content_block/name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool");
+                    let tool_use_id = value
+                        .pointer("/event/content_block/id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     // The full checklist arrives on the assistant message. Starting
                     // the block here would record a plan tool twice.
                     if !tool_carries_plan(name) {
-                        let detail = value
+                        let input = value
                             .pointer("/event/content_block/input")
-                            .map(|input| tool_activity_detail(name, input))
-                            .unwrap_or_default();
-                        out.push(PromptSessionEvent::Status {
-                            session_id: session_id.to_string(),
-                            phase: "tool".into(),
-                            message: format_tool_status(name, &detail),
-                        });
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        if !tool_use_id.is_empty() {
+                            // Emit a keyed step so the later `assistant` block with full
+                            // input merges into this exact call instead of stranding a
+                            // bare un-keyed status row across parallel tool calls.
+                            out.push(PromptSessionEvent::Tool {
+                                session_id: session_id.to_string(),
+                                step: Box::new(tool_step(tool_use_id, name, &input)),
+                            });
+                        } else {
+                            let detail = tool_activity_detail(name, &input);
+                            out.push(PromptSessionEvent::Status {
+                                session_id: session_id.to_string(),
+                                phase: "tool".into(),
+                                message: format_tool_status(name, &detail),
+                            });
+                        }
                     }
                 }
             }
@@ -2218,6 +2233,26 @@ mod tests {
             PromptSessionEvent::Tool { step, .. }
                 if step.id == "t9" && step.status == "failed" && step.exit_code == Some(1)
         )));
+    }
+
+    #[test]
+    fn parallel_content_block_starts_emit_keyed_steps_without_orphan_status_rows() {
+        let mut board = PlanBoard::default();
+        let mut bg = BackgroundTasks::default();
+        let start_read = r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}}}"#;
+        let start_ps = r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_2","name":"PowerShell","input":{}}}}"#;
+        let ev1 = parse_claude_stream_line("s1", start_read, None, None, &mut board, &mut bg);
+        let ev2 = parse_claude_stream_line("s1", start_ps, None, None, &mut board, &mut bg);
+        assert!(!ev1
+            .iter()
+            .chain(ev2.iter())
+            .any(|e| matches!(e, PromptSessionEvent::Status { phase, .. } if phase == "tool")));
+        assert!(ev1.iter().any(
+            |e| matches!(e, PromptSessionEvent::Tool { step, .. } if step.id == "toolu_1" && step.kind == "read")
+        ));
+        assert!(ev2.iter().any(
+            |e| matches!(e, PromptSessionEvent::Tool { step, .. } if step.id == "toolu_2" && step.kind == "terminal")
+        ));
     }
 
     #[test]

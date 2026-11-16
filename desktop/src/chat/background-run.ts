@@ -65,16 +65,21 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       }
       return;
     case "delta":
+      run.thinkingMessageId = null;
+      run.thinkingText = "";
       upsertAssistant(session, run, payload.text);
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
       return;
     case "stdout_line":
+      run.thinkingMessageId = null;
+      run.thinkingText = "";
       upsertAssistant(session, run, `${payload.line}\n`);
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
       return;
     case "thinking":
+      sealBackgroundAssistant(session, run);
       upsertThinking(session, run, payload.text);
       ctx.touchSession(session);
       ctx.scheduleStorePersist();
@@ -112,6 +117,9 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
       ctx.scheduleSessionListRender();
       return;
     case "tool":
+      run.thinkingMessageId = null;
+      run.thinkingText = "";
+      sealBackgroundAssistant(session, run);
       if (storeToolStep(session.messages, payload.step, run.assistantMessageId, uid)) {
         ctx.touchSession(session);
         ctx.scheduleStorePersist();
@@ -178,7 +186,22 @@ export function applyBackgroundEvent(ctx: BackgroundRunCtx, chatId: string, payl
   }
 }
 
+function sealBackgroundAssistant(session: ChatSession, run: LiveRun): void {
+  if (!run.assistantMessageId) {
+    run.assistantRaw = "";
+    return;
+  }
+  if (!run.assistantRaw.trim()) {
+    session.messages = session.messages.filter((m) => m.id !== run.assistantMessageId);
+  }
+  run.assistantMessageId = null;
+  run.assistantRaw = "";
+}
+
 function rememberTool(session: ChatSession, run: LiveRun, text: string): void {
+  run.thinkingMessageId = null;
+  run.thinkingText = "";
+  sealBackgroundAssistant(session, run);
   const parts = splitToolActivity(text);
   const signature = toolSignature(text);
   const messages = session.messages;

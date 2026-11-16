@@ -38,9 +38,12 @@ import {
 } from "./tool-records";
 import { markTurnNoticeShown, pushChatTurnError, pushChatTurnReport } from "./turn-errors";
 import {
+  appendToolRowToStageStream,
   placeProcessBlock,
+  refreshStageRowInStream,
   sealProcessContainer,
   sealWorkGroup,
+  settleTrailingStageInStream,
   wrapProcessRows,
 } from "./work-trail";
 
@@ -606,7 +609,7 @@ export function createActivityController(deps: ActivityDeps) {
     deps.setLifecycleActivityEl(null);
   }
 
-  /** Every tool chip since the latest user message, including those folded into a work trail. */
+  /** Every tool chip since the latest user message, including stage-grouped ones. */
   function turnToolGroups(): HTMLDetailsElement[] {
     const groups: HTMLDetailsElement[] = [];
     for (
@@ -614,8 +617,11 @@ export function createActivityController(deps: ActivityDeps) {
       node && !node.classList.contains("chat-msg-user");
       node = node.previousElementSibling as HTMLElement | null
     ) {
-      if (node.classList.contains("chat-tool-group")) groups.push(node as HTMLDetailsElement);
-      else groups.push(...node.querySelectorAll<HTMLDetailsElement>(".chat-tool-group"));
+      if (node.classList.contains("chat-tool-group") || node.classList.contains("chat-stage-group")) {
+        groups.push(node as HTMLDetailsElement);
+      } else {
+        groups.push(...node.querySelectorAll<HTMLDetailsElement>(".chat-tool-group, .chat-stage-group"));
+      }
     }
     return groups;
   }
@@ -641,28 +647,9 @@ export function createActivityController(deps: ActivityDeps) {
     return heldToolRecords.get(group) ?? [];
   }
 
-  /** The on-screen list still ends at the newest step, or the one just before it. */
-  function windowShowsTail(records: ToolRecord[], list: HTMLElement): boolean {
-    const last = list.querySelector<HTMLElement>(":scope > .chat-tool-row:last-child");
-    if (!last || records.length === 0) return true;
-    const index = recordIndexOf(last, records);
-    if (index >= 0) return index >= records.length - 2;
-    return false;
-  }
-
   function dropRow(row: HTMLElement): void {
     if (deps.getActivityEl() === row) deps.setActivityEl(null);
     row.remove();
-  }
-
-  /** While following the task, keep only the latest page of rows. */
-  function trimLiveToolRows(group: HTMLDetailsElement): void {
-    const list = group.querySelector<HTMLElement>(".chat-tool-list");
-    if (!list) return;
-    const rows = [...list.querySelectorAll<HTMLElement>(":scope > .chat-tool-row")];
-    const extra = rows.length - MAX_SHOWN_TOOL_ROWS;
-    if (extra <= 0) return;
-    for (const row of rows.slice(0, extra)) dropRow(row);
   }
 
   /** Drop rows that sit outside the chat, so a long scroll never paints every step.
@@ -884,30 +871,10 @@ export function createActivityController(deps: ActivityDeps) {
     group.classList.toggle("is-live", live);
   }
 
-  function ensureToolGroup(): HTMLDetailsElement {
-    const existing = deps.getToolGroupEl();
-    if (existing?.isConnected) return existing;
-    // Reuse a trailing unfinished tool chip instead of stacking duplicate rows.
-    const last = deps.logEl.lastElementChild as HTMLElement | null;
-    if (
-      last instanceof HTMLDetailsElement &&
-      last.classList.contains("chat-tool-group") &&
-      !last.classList.contains("chat-permission-group") &&
-      !last.classList.contains("chat-turn-tools")
-    ) {
-      deps.setToolGroupEl(last);
-      last.open = true;
-      syncToolGroup(last, true);
-      return last;
-    }
-    const group = createToolGroupElement();
-    group.classList.add("is-live");
-    placeProcessBlock(processStreamEl(), group);
-    deps.setToolGroupEl(group);
-    return group;
-  }
-
   function finishToolGroup(_collapse = true): void {
+    if (processStream?.isConnected) {
+      settleTrailingStageInStream(processStream);
+    }
     const group = deps.getToolGroupEl();
     if (!group) return;
     liveRecords(group);
@@ -961,9 +928,15 @@ export function createActivityController(deps: ActivityDeps) {
   /** If the live chip was dropped, put the saved tool list back above the reply. */
   function ensureTurnToolsVisible(lastAssistant: HTMLElement | null, seen: ToolRecord[] = []): void {
     // Interleaved rendering already places each tool row at its chronological
-    // spot (chat-work rows under the log). The re-insert is only for the old
-    // shape where the whole reply rendered as one bubble with no rows.
-    if (deps.logEl.querySelector(":scope > .chat-tool-group, :scope > .chat-work")) return;
+    // spot (stage groups / tool rows under the log). The re-insert is only for
+    // the old shape where the whole reply rendered as one bubble with no rows.
+    if (
+      deps.logEl.querySelector(
+        ":scope > .chat-tool-group, :scope > .chat-stage-group, :scope > .chat-work, :scope > .chat-tool-row, :scope > .chat-work-stream",
+      )
+    ) {
+      return;
+    }
     const filled = (record: ToolRecord) =>
       typeof record === "string" ? Boolean(record.trim()) : Boolean(record.step || record.text.trim());
     // Only the steps no chip shows yet; the chips above earlier replies keep theirs.
@@ -981,6 +954,7 @@ export function createActivityController(deps: ActivityDeps) {
     const previous = block.previousElementSibling;
     if (
       previous?.classList.contains("chat-work") ||
+      previous?.classList.contains("chat-stage-group") ||
       previous?.classList.contains("chat-work-stream")
     ) {
       return;
@@ -1123,17 +1097,38 @@ export function createActivityController(deps: ActivityDeps) {
     appendActivityRow(phase, kind, text);
   }
 
-  /** Structured step: fill the row with the same id, or start a new one. */
-  /** The status line for a tool arrives first; its step then takes over that row. */
+  function toolFaceKey(raw: string): string {
+    return splitToolActivity(raw).summary.replace(/[….]+$/g, "").toLowerCase();
+  }
+
+  /** Structured step: fill the row with the same id, adopt a bare start row, or append into the stage stream. */
   function pushToolStep(step: ToolStep): void {
     deps.rememberToolStep(step);
     if (!deps.isViewingRunningSession()) return;
+    dismissLifecycleActivity();
+    deps.flushPendingTextSync();
+    deps.sealAssistantBubble();
+
     const known = [...deps.logEl.querySelectorAll<HTMLElement>(".chat-tool-row")].find(
       (row) => row.dataset.toolId === step.id,
     );
     if (known) {
       applyToolRow(known, "", mergeToolStep(readRowStep(known), step));
+      // If a duplicate `Status(tool)` bare row landed right after `known` was already created, drop it.
+      if (processStream?.isConnected) {
+        const stepFace = toolFaceKey(step.name || "");
+        for (const bare of processStream.querySelectorAll<HTMLElement>(".chat-tool-row")) {
+          if (bare === known || bare.dataset.toolId) continue;
+          const bareFace = toolFaceKey(bare.dataset.summary || "");
+          if (!bareFace || !stepFace || bareFace === stepFace) {
+            dropRow(bare);
+            break;
+          }
+        }
+      }
+      refreshStageRowInStream(known, true);
       if (step.status !== "running" && deps.getActivityEl() === known) settleActivity();
+      followChatLog(deps.logEl);
       deps.syncReplyChangeCard?.();
       return;
     }
@@ -1141,14 +1136,35 @@ export function createActivityController(deps: ActivityDeps) {
       deps.syncReplyChangeCard?.();
       return;
     }
-    // Flat, time-ordered: every tool row appends directly to the container.
+
+    const stream = processStreamEl();
+    const stepFace = toolFaceKey(step.name || "");
+    const adoptable = [...stream.querySelectorAll<HTMLElement>(".chat-tool-row")].find((candidate) => {
+      if (candidate.dataset.toolId) return false;
+      const candFace = toolFaceKey(candidate.dataset.summary || "");
+      return Boolean(stepFace && candFace === stepFace);
+    });
+    if (adoptable) {
+      adoptable.dataset.kind = "tool";
+      adoptable.dataset.toolId = step.id;
+      applyToolRow(adoptable, toolStepText(step), step);
+      refreshStageRowInStream(adoptable, true);
+      if (step.status !== "running" && deps.getActivityEl() === adoptable) settleActivity();
+      followChatLog(deps.logEl);
+      deps.syncReplyChangeCard?.();
+      return;
+    }
+
+    settleActivity();
     const row = createToolRowElement(toolStepText(step));
     row.dataset.kind = "tool";
     row.dataset.toolId = step.id;
     row.classList.add("is-live");
     row.classList.remove("is-done");
     applyToolRow(row, "", step);
-    processStreamEl().appendChild(row);
+    appendToolRowToStageStream(stream, row);
+    deps.setActivityEl(row);
+    followChatLog(deps.logEl);
     deps.syncReplyChangeCard?.();
   }
 
@@ -1158,12 +1174,23 @@ export function createActivityController(deps: ActivityDeps) {
     deps.flushPendingTextSync();
     deps.sealAssistantBubble();
 
-    const group = ensureToolGroup();
-    const list = group.querySelector<HTMLElement>(".chat-tool-list")!;
-    liveRecords(group);
+    const stream = processStreamEl();
     const parts = splitToolActivity(text);
     const signature = toolSignature(text);
-    const last = list.querySelector<HTMLElement>(".chat-activity.kind-tool:last-child");
+    const face = toolFaceKey(text);
+    const tailRows = [...stream.querySelectorAll<HTMLElement>(".chat-tool-row")];
+    // If a structured `ToolStep` for this live call is already on screen (e.g.
+    // Claude `content_block_start` emitted a keyed step before `assistant` sent
+    // `Status(tool)`), do not append a second un-keyed status row.
+    const alreadyKeyedLive = [...tailRows].reverse().find((candidate) => {
+      if (!candidate.dataset.toolId || !candidate.classList.contains("is-live")) return false;
+      const candStep = readRowStep(candidate);
+      return Boolean(face && toolFaceKey(candStep?.name || "") === face);
+    });
+    if (alreadyKeyedLive && !parts.detail) {
+      return alreadyKeyedLive;
+    }
+    const last = tailRows[tailRows.length - 1];
     const canFillDetail =
       last &&
       !last.dataset.toolId &&
@@ -1171,19 +1198,15 @@ export function createActivityController(deps: ActivityDeps) {
       !last.dataset.detail &&
       Boolean(parts.detail);
     if (last && !last.dataset.toolId && (last.dataset.signature === signature || canFillDetail)) {
-      if (canFillDetail) applyToolRow(last, text);
+      if (canFillDetail) {
+        applyToolRow(last, text);
+        refreshStageRowInStream(last, true);
+      }
       last.classList.add("is-live");
       last.classList.remove("is-done");
       deps.setActivityEl(last);
-      syncToolGroup(group, true);
       if (!last.dataset.toolKey) last.dataset.toolKey = `t:${signature}`;
       return last;
-    }
-
-    const records = liveRecords(group);
-    if (deps.logEl.dataset.pin === "0" && !windowShowsTail(records, list)) {
-      syncToolGroup(group, true);
-      return null;
     }
 
     settleActivity();
@@ -1192,45 +1215,52 @@ export function createActivityController(deps: ActivityDeps) {
     row.classList.remove("is-done");
     row.dataset.phase = phase;
     row.dataset.toolKey = `t:${signature}`;
-    stampRecord(row, Math.max(0, records.length - 1));
-    list.appendChild(row);
-    if (deps.logEl.dataset.pin !== "0") trimLiveToolRows(group);
-    else dropOffscreenRows(list, "top");
+    appendToolRowToStageStream(stream, row);
     deps.setActivityEl(row);
-    syncToolGroup(group, true);
     followChatLog(deps.logEl);
     deps.syncReplyChangeCard?.();
     return row;
   }
 
-  /** Every process row of this turn (status/tool/thinking) collects here and
-   *  folds once at completion. Rows stay FLAT and time-ordered: no nested
-   *  tool groups, so thinking and tools interleave like ZCode. */
+  /** Process rows of the current segment (between assistant prose bubbles).
+   *  Sealing a container replaces it in place with clean stage-grouped rows
+   *  so earlier paragraphs stay anchored above later stages (Paseo / ZCode). */
   let processStream: HTMLElement | null = null;
-
-  /** Only fold on completion: a running turn shows every step live, never
-   *  collapsed mid-turn. */
 
   function processStreamEl(): HTMLElement {
     if (!processStream?.isConnected) {
       processStream = wrapProcessRows([], true);
+      placeProcessBlock(deps.logEl, processStream);
+      return processStream;
     }
-    // The stream follows the newest text segment: re-appending moves it below
-    // the bubble that was just sealed, so the next rows continue the timeline
-    // instead of jumping above an earlier paragraph.
-    placeProcessBlock(deps.logEl, processStream);
+    // If an assistant prose bubble or user bubble landed AFTER `processStream`,
+    // close the earlier segment in place and open a fresh stream after the prose!
+    // (Previously re-appending the same `processStream` yanked all earlier tool
+    // rows down below the newly written stage summary.)
+    let after = processStream.nextElementSibling;
+    let crossedProse = false;
+    while (after) {
+      if (after.classList.contains("chat-msg-assistant") || after.classList.contains("chat-msg-user")) {
+        crossedProse = true;
+        break;
+      }
+      after = after.nextElementSibling;
+    }
+    if (crossedProse) {
+      sealProcessContainer(processStream);
+      processStream = wrapProcessRows([], true);
+      placeProcessBlock(deps.logEl, processStream);
+    }
     return processStream;
   }
 
-
-
   function placeInProcessStream(el: HTMLElement): void {
-    processStreamEl().append(el);
+    const stream = processStreamEl();
+    settleTrailingStageInStream(stream);
+    stream.append(el);
   }
 
-  /** Turn done: fold the whole process container into one collapsed trail. */
-
-
+  /** Settle the active process segment in place into stage-grouped rows. */
   function sealProcessStream(): void {
     if (!processStream?.isConnected) {
       processStream = null;

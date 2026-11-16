@@ -134,6 +134,8 @@ export interface ChatMessage {
   step?: ToolStep;
   /** Earlier steps of this turn that were dropped so the page stays small. */
   skippedTools?: number;
+  /** Elapsed ms for `role: "thinking"` so `思考了 Xs` survives repaints. */
+  durationMs?: number;
   /** `role: "meta"` holding raw process output. Shown collapsed, never as a reply. */
   log?: boolean;
   /** Collapsed log row uses a failure sentence instead of the generic label. */

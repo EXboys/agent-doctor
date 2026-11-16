@@ -784,6 +784,10 @@ export const zh = {
     "chat.fail.macosDenied.message": "本机没允许打开这个项目的设置，所以这一轮停住了。",
     "chat.fail.macosDenied.next":
       "打开「系统设置 → 隐私与安全性 → 文件和文件夹」，打开 Agent Doctor，再回到问答重试。",
+    "chat.fail.localStorage.message":
+      "电脑磁盘空间不够，或会话记录正被另一个窗口占用，这一轮存不下记录就先停了。",
+    "chat.fail.localStorage.next":
+      "腾出一点电脑磁盘空间，或关掉别的同款窗口，再点「再问一次」。",
     "chat.fail.balance.message": "模型账号余额不够，这一轮没问到。这不是本软件的问题。",
     "chat.fail.balance.next": "到服务商网站充值，或点「去服务商」换一个还有额度的密钥。",
     "chat.fail.rateLimit.message": "这会儿问得太勤，模型那边暂时不接了。这不是本软件的问题。",
@@ -817,6 +821,10 @@ export const zh = {
     "chat.workLiveCount": "正在处理 · 已进行 {count} 步",
     "chat.workDone": "处理过程",
     "chat.workDoneElapsed": "处理过程 · {elapsed}",
+    "chat.stageExploreLive": "正在读取信息",
+    "chat.stageTerminalLive": "正在执行命令",
+    "chat.stageChangesLive": "正在修改文件",
+    "chat.stageBrowserLive": "正在操作画面",
     "chat.toolRead": "查阅",
     "chat.toolWrite": "写入",
     "chat.toolEdit": "更改",
@@ -940,6 +948,9 @@ export const zh = {
     "chat.workSubagents": "子智能体 {count} 次",
     "chat.subagentKind": "子智能体",
     "chat.workOtherActions": "其他 {count} 项",
+    "chat.workInspections": "检查 {count} 项",
+    "chat.workFailedCount": "{count} 条没成功",
+    "chat.workScreenSteps": "画面与网页操作 {count} 步",
     "chat.workAliasCount": "{name} {count} 次",
     "chat.toolTimes": "{count} 次",
     "chat.noReply": "报错了，这次没有回话。再发一次试试。",

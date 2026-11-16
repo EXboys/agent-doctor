@@ -3600,6 +3600,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: min(680px, 95%);
+  min-width: 0;
   vertical-align: top;
   min-height: 24px;
   padding: 3px 6px;
@@ -3618,17 +3620,31 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   display: none;
 }
 
-.chat-thinking.is-live .chat-thinking-summary {
-  cursor: default;
+.chat-thinking-summary:hover {
+  background: rgba(10, 10, 10, 0.05);
 }
 
-.chat-thinking:not(.is-live) .chat-thinking-summary:hover {
-  background: rgba(10, 10, 10, 0.05);
+.chat-thinking-label {
+  flex: 0 0 auto;
+}
+
+.chat-thinking-snippet {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.chat-thinking-snippet[hidden] {
+  display: none;
 }
 
 /* Process rows stack as one list: the log's message gap does not apply
    between two consecutive process rows, whatever their kind. */
-.chat-log > :is(.chat-thinking, .chat-tool-group, .chat-activity, .chat-work) + :is(.chat-thinking, .chat-tool-group, .chat-activity, .chat-work) {
+.chat-log > :is(.chat-thinking, .chat-tool-group, .chat-stage-group, .chat-activity, .chat-work) + :is(.chat-thinking, .chat-tool-group, .chat-stage-group, .chat-activity, .chat-work) {
   margin-top: -9px;
 }
 
@@ -3675,7 +3691,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 /* The reopen arrow stays out of the way until the pointer is on this row. */
 .chat-thinking-chevron {
-  display: none;
+  display: block;
+  flex: 0 0 auto;
   width: 6px;
   height: 6px;
   margin: 0 0 1px 2px;
@@ -3686,12 +3703,8 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
-.chat-thinking:not(.is-live) .chat-thinking-chevron {
-  display: block;
-}
-
-.chat-thinking:not(.is-live) > .chat-thinking-summary:is(:hover, :focus-within) .chat-thinking-chevron,
-.chat-thinking:not(.is-live)[open]:is(:hover, :focus-within) .chat-thinking-chevron {
+.chat-thinking > .chat-thinking-summary:is(:hover, :focus-within) .chat-thinking-chevron,
+.chat-thinking[open]:is(:hover, :focus-within) .chat-thinking-chevron {
   opacity: 0.85;
 }
 
@@ -4040,9 +4053,143 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 }
 
 .chat-work-body .chat-thinking,
-.chat-work-body .chat-tool-group {
+.chat-work-body .chat-tool-group,
+.chat-stage-body .chat-tool-row {
   max-width: 100%;
   margin: 0;
+}
+
+/* Stage-grouped tool rows (ZCode Explore / Terminal / Changes / Browser) */
+.chat-stage-group {
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  margin: 1px 0;
+  color: var(--faint);
+}
+
+.chat-stage-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, 95%);
+  min-width: 0;
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  flex-wrap: wrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-stage-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-stage-summary:hover {
+  background: var(--fill);
+  color: var(--muted);
+}
+
+.chat-stage-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+.chat-stage-icon::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  opacity: 0.8;
+  -webkit-mask: var(--stage-icon, none) center / 12px 12px no-repeat;
+  mask: var(--stage-icon, none) center / 12px 12px no-repeat;
+}
+
+.chat-stage-group.is-explore .chat-stage-icon {
+  --stage-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+}
+
+.chat-stage-group.is-terminal .chat-stage-icon {
+  --stage-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 17 10 11 4 5'/%3E%3Cline x1='12' x2='20' y1='19' y2='19'/%3E%3C/svg%3E");
+}
+
+.chat-stage-group.is-changes .chat-stage-icon {
+  --stage-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E");
+}
+
+.chat-stage-group.is-browser .chat-stage-icon {
+  --stage-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M2 12h20'/%3E%3Cpath d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/%3E%3C/svg%3E");
+}
+
+.chat-stage-label {
+  flex: 0 0 auto;
+}
+
+.chat-stage-group.is-live .chat-stage-label {
+  font-weight: 500;
+  background: linear-gradient(90deg, var(--muted) 30%, rgba(148, 163, 184, 0.45) 50%, var(--muted) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-thinking-shimmer 1.6s linear infinite;
+}
+
+.chat-stage-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+}
+
+.chat-stage-detail[hidden] {
+  display: none;
+}
+
+.chat-stage-chevron {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin: 0 0 1px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.chat-stage-group > .chat-stage-summary:is(:hover, :focus-within) .chat-stage-chevron,
+.chat-stage-group[open]:is(:hover, :focus-within) .chat-stage-chevron {
+  opacity: 0.85;
+}
+
+.chat-stage-group[open] .chat-stage-chevron {
+  margin-bottom: -1px;
+  transform: rotate(225deg);
+}
+
+.chat-stage-body {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 2px 22px;
+  padding: 0 0 2px 0;
+  border-left: 1px solid rgba(10, 10, 10, 0.1);
 }
 
 .chat-tool-list {
@@ -7616,6 +7763,7 @@ html[data-os="windows"] .chat-log {
 .chat-log > :is(
   .chat-msg,
   .chat-work,
+  .chat-stage-group,
   .chat-work-stream,
   .chat-thinking,
   .chat-tool-group,
@@ -9618,6 +9766,8 @@ html[data-theme="dark"] .chat-session:hover {
 /* Dark: collapsed process rows stay faint. Hover and a live row lift one step. */
 html[data-theme="dark"] .chat-tool-group,
 html[data-theme="dark"] .chat-tool-group-summary,
+html[data-theme="dark"] .chat-stage-group,
+html[data-theme="dark"] .chat-stage-summary,
 html[data-theme="dark"] .chat-work,
 html[data-theme="dark"] .chat-work-summary {
   color: var(--faint);
@@ -9628,6 +9778,7 @@ html[data-theme="dark"] .chat-tool-group-summary {
 }
 
 html[data-theme="dark"] .chat-tool-group-summary:hover,
+html[data-theme="dark"] .chat-stage-summary:hover,
 html[data-theme="dark"] .chat-work-summary:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
@@ -9644,7 +9795,8 @@ html[data-theme="dark"] .chat-thinking-body {
   color: rgba(255, 255, 255, 0.62);
 }
 
-html[data-theme="dark"] .chat-work.is-live .chat-work-label {
+html[data-theme="dark"] .chat-work.is-live .chat-work-label,
+html[data-theme="dark"] .chat-stage-group.is-live .chat-stage-label {
   background-image: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0.55) 30%,
@@ -9653,11 +9805,12 @@ html[data-theme="dark"] .chat-work.is-live .chat-work-label {
   );
 }
 
-html[data-theme="dark"] .chat-work-body {
+html[data-theme="dark"] .chat-work-body,
+html[data-theme="dark"] .chat-stage-body {
   border-left-color: rgba(255, 255, 255, 0.14);
 }
 
-html[data-theme="dark"] .chat-thinking:not(.is-live) .chat-thinking-summary:hover {
+html[data-theme="dark"] .chat-thinking-summary:hover {
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.62);
 }

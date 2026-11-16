@@ -452,8 +452,8 @@ export function wireChatControllers(): void {
     },
     isViewingRunningSession: () => isViewingRunningSession(),
     persistMessage: (content) => chatState.bubbles.persistMessage("thinking", content),
-    updateMessage: (id, content) => {
-      updateAssistantMessage(id, content, { persist: false });
+    updateMessage: (id, content, durationMs) => {
+      updateAssistantMessage(id, content, { persist: false, durationMs });
       scheduleStorePersist();
     },
     endReply: () => {
