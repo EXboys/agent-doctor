@@ -10,10 +10,10 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 
 use agent_doctor_core::{
-    parse_channel_stop, parse_teamups_channel_job, parse_teamups_channel_sync,
-    set_teamups_channel_enabled, set_teamups_channel_since, settings_db_path, teamups_channel_auth,
-    teamups_channel_enabled, teamups_channel_heard, teamups_channel_hello, teamups_channel_reply,
-    teamups_channel_signed_in, TeamupsChannelFile,
+    parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
+    parse_teamups_channel_sync, set_teamups_channel_enabled, set_teamups_channel_since,
+    settings_db_path, teamups_channel_auth, teamups_channel_enabled, teamups_channel_heard,
+    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -94,6 +94,8 @@ struct JobPayload {
     chat: String,
     project: String,
     runtime: String,
+    model: String,
+    provider: String,
     files: Vec<JobFilePayload>,
 }
 
@@ -255,9 +257,14 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                     chat: job.chat,
                                     project: job.project,
                                     runtime: job.runtime,
+                                    model: job.model,
+                                    provider: job.provider,
                                     files,
                                 },
                             );
+                        } else if parse_channel_choices(&text) {
+                            // The site wants to fill the phone's picker.
+                            let _ = app.emit("teamups-channel-choices", ());
                         } else if let Some(answer) = parse_channel_answer(&text) {
                             let _ = app.emit("teamups-channel-answer", answer);
                         } else if let Some(id) = parse_channel_stop(&text) {
@@ -529,6 +536,37 @@ pub fn teamups_channel_ask_command(
         .as_ref()
         .ok_or_else(|| "飞书这条线还没连上。".to_string())?;
     tx.send(frame).map_err(|_| "确认没送到飞书。".to_string())
+}
+
+/// What this computer can run, so the phone's picker shows real options.
+/// `agents` and `models` are already shaped by the chat window; this only
+/// wraps them in the frame the site understands and puts it on the line.
+#[tauri::command]
+pub fn teamups_channel_inventory_command(
+    app: AppHandle,
+    agents: serde_json::Value,
+    models: serde_json::Value,
+    current: serde_json::Value,
+) -> Result<(), String> {
+    let frame = json!({
+        "type": "inventory",
+        "agents": agents,
+        "models": models,
+        "current": current,
+    })
+    .to_string();
+    let outbound = app
+        .try_state::<Outbound>()
+        .ok_or_else(|| "这条线还没连上。".to_string())?;
+    let guard = outbound.0.lock().expect("channel");
+    let tx = guard
+        .as_ref()
+        .ok_or_else(|| "这条线还没连上。".to_string())?;
+    if tx.send(frame).is_err() {
+        return Err("清单没送出去。".to_string());
+    }
+    note("sent agent list to the site");
+    Ok(())
 }
 
 fn parse_channel_answer(frame: &str) -> Option<AnswerPayload> {

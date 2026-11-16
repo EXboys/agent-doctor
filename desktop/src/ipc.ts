@@ -366,6 +366,18 @@ export function teamupsChannelChats(
 }
 
 /**
+ * What this computer can run, for the phone's agent / model picker. Sent when
+ * the site asks (on connect and whenever the phone opens the sheet).
+ */
+export function teamupsChannelInventory(args: {
+  agents: Array<{ id: string; name: string }>;
+  models: Array<{ id: string; agent: string; label: string; provider: string }>;
+  current: { agent: string; model: string; provider: string };
+}): Promise<void> {
+  return invoke("teamups_channel_inventory_command", args);
+}
+
+/**
  * Per-conversation archive cursors (phone conversation id -> merged
  * `updatedAt`). The next hello carries them, so the site replays only the
  * conversations that moved; an empty map asks for everything it kept.

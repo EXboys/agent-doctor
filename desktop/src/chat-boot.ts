@@ -90,14 +90,24 @@ import { bindAccountBar } from "./chat/account-bar";
 import { bindFeedbackLaunchers } from "./chat/feedback";
 import {
   cancelPromptSession,
+  listInstalledAskAgents,
+  listPersonalProviders,
   teamupsChannelChats,
   teamupsChannelConnected,
+  teamupsChannelInventory,
   teamupsChannelNote,
   teamupsChannelPref,
   teamupsChannelReply,
   teamupsChannelSetEnabled,
   teamupsChannelSince,
 } from "./ipc";
+import {
+  agentRows,
+  applyPick,
+  modelRows,
+  pickOf,
+} from "./chat/phone-agents";
+import { modelOptionLabel, modelsForProviderUrl } from "./provider-models";
 import {
   applyChannelAnswer,
   channelSessionForJob,
@@ -781,6 +791,35 @@ function bootChatTail(): void {
     const id = event.payload?.id?.trim() ?? "";
     if (id) void stopAsked(id);
   });
+  // The phone opened its agent / model sheet: name what this computer can run.
+  let inventoryBusy = false;
+  async function publishPhoneInventory(): Promise<void> {
+    if (inventoryBusy) return;
+    inventoryBusy = true;
+    try {
+      const installed = await listInstalledAskAgents().catch(() => []);
+      const doc = await listPersonalProviders().catch(() => null);
+      const providers = (doc?.providers ?? []).map((provider) => ({
+        id: provider.id,
+        model: provider.model,
+        models: modelsForProviderUrl(provider.url, provider.model),
+      }));
+      const current = pickOf(activeSession());
+      const agent = current.agent || selectedRuntime();
+      await teamupsChannelInventory({
+        agents: agentRows(installed),
+        models: modelRows(providers, (id) => modelOptionLabel(id), agent),
+        current,
+      });
+    } catch (error) {
+      console.warn("channel: agent list not sent", error);
+    } finally {
+      inventoryBusy = false;
+    }
+  }
+  void listen("teamups-channel-choices", () => {
+    void publishPhoneInventory();
+  });
   setChannelSessionIdle((sessionId) => {
     const next = takeNextChannelJob(sessionId);
     if (!next) return;
@@ -804,6 +843,8 @@ function bootChatTail(): void {
     chat?: string;
     project?: string;
     runtime?: string;
+    model?: string;
+    provider?: string;
     files?: { name?: string; path?: string; kind?: string }[];
   }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
@@ -817,7 +858,9 @@ function bootChatTail(): void {
     const chat = event.payload?.chat?.trim() ?? "";
     const project = event.payload?.project?.trim() ?? "";
     const runtime = event.payload?.runtime?.trim() ?? "";
-    void runChannelJob(id, text, chat, files, project, runtime);
+    const model = event.payload?.model?.trim() ?? "";
+    const provider = event.payload?.provider?.trim() ?? "";
+    void runChannelJob(id, text, chat, files, project, runtime, model, provider);
   });
   function pinChannelWorkspace(sessionId: string, project: string): void {
     const name = project.trim();
@@ -996,6 +1039,8 @@ function bootChatTail(): void {
     files: { name: string; path: string; kind: "image" | "file" }[] = [],
     project = "",
     runtime = "",
+    model = "",
+    provider = "",
   ): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
     if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
@@ -1030,6 +1075,22 @@ function bootChatTail(): void {
     try {
       const sessionId = sessionForChannel(chat, text, project, runtime);
       pinChannelWorkspace(sessionId, project);
+      // The phone may also have named a model. Apply it before the turn so the
+      // answer comes from what the owner picked, not the last desktop choice.
+      if (model) {
+        const pickedSession = chatState.store?.sessions.find((item) => item.id === sessionId);
+        if (
+          pickedSession &&
+          applyPick(pickedSession, { agent: pickedSession.runtime, model, provider }, {
+            running: isChatRunning(sessionId),
+          })
+        ) {
+          saveStore();
+          renderSessionList();
+          publishActiveRuntime();
+          updateContextMeter();
+        }
+      }
       const job: ChannelQueued = {
         id,
         sessionId,

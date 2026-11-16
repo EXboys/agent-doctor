@@ -48,6 +48,13 @@ pub struct TeamupsChannelJob {
     pub files: Vec<TeamupsChannelFile>,
     /// Which command line should answer. Empty keeps the chat's current one.
     pub runtime: String,
+    /// Which model the phone picked for that command line. Empty keeps the
+    /// chat's current model. Only meaningful together with `runtime` or a chat
+    /// the owner already pinned.
+    pub model: String,
+    /// Which saved service serves that model. Empty means the wired one. A
+    /// model id alone is ambiguous when the computer holds several providers.
+    pub provider: String,
 }
 
 pub fn teamups_channel_ws_url(http_base: &str) -> String {
@@ -335,6 +342,16 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim();
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let provider = value
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     Some(TeamupsChannelJob {
         id: id.to_string(),
         text: text.to_string(),
@@ -342,7 +359,17 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         project: project.chars().take(80).collect(),
         files,
         runtime: runtime.chars().take(40).collect(),
+        model: model.chars().take(120).collect(),
+        provider: provider.chars().take(64).collect(),
     })
+}
+
+/// The site asks what this computer can run (`{"type":"choices"}`).
+pub fn parse_channel_choices(frame: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(frame) else {
+        return false;
+    };
+    value.get("type").and_then(Value::as_str) == Some("choices")
 }
 
 fn parse_job_files(value: Option<&Value>) -> Vec<TeamupsChannelFile> {
@@ -408,7 +435,7 @@ fn clip_file_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_hello_frame, parse_channel_stop, parse_teamups_channel_job,
+        channel_hello_frame, parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
         parse_teamups_channel_sync, teamups_channel_reply, teamups_channel_ws_url,
     };
 
@@ -422,6 +449,34 @@ mod tests {
             teamups_channel_ws_url("http://127.0.0.1:3000/"),
             "ws://127.0.0.1:3000/api/v1/doctor/channel"
         );
+    }
+
+    #[test]
+    fn the_site_can_ask_what_this_computer_runs() {
+        assert!(parse_channel_choices(r#"{"type":"choices"}"#));
+        assert!(!parse_channel_choices(
+            r#"{"type":"job","id":"a","text":"t"}"#
+        ));
+        assert!(!parse_channel_choices("not json"));
+    }
+
+    #[test]
+    fn a_job_can_name_an_agent_and_a_model() {
+        let job = parse_teamups_channel_job(
+            r#"{"type":"job","id":"m","text":"跑复盘","chat":"phone:conv-1","runtime":"hermes","model":"deepseek-v4-flash","provider":"prov-2"}"#,
+        )
+        .unwrap();
+        assert_eq!(job.runtime, "hermes");
+        assert_eq!(job.model, "deepseek-v4-flash");
+        assert_eq!(job.provider, "prov-2");
+        let plain = parse_teamups_channel_job(r#"{"type":"job","id":"n","text":"默认"}"#).unwrap();
+        assert_eq!(plain.model, "");
+        let long = parse_teamups_channel_job(&format!(
+            r#"{{"type":"job","id":"o","text":"x","model":"{}"}}"#,
+            "m".repeat(400)
+        ))
+        .unwrap();
+        assert_eq!(long.model.chars().count(), 120);
     }
 
     #[test]
