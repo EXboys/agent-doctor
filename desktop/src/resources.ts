@@ -4,9 +4,9 @@ import { getLocale, t } from "./i18n";
 import { bindLocaleSync } from "./locale-sync";
 import type { MessageKey } from "./i18n";
 import type { ResourceRow } from "./types";
-import { resourcesState, subtitleEl, sectionTabsEl, mainHeadEl, skillsPanelEl, skillScopeEl, skillScopeHintEl, panelLeadEl, skillsStickyEl, toolFiltersEl, searchEl, footnoteEl, toolsFootnoteEl, mallAccountEl, mallLoginEl, mallLogoutEl, mcpShowUiEl, mcpUserDataDirEl, mcpProfileDirectoryEl, mcpProfileSystemEl, mcpProfileIsolatedEl, mcpRefreshEl, mcpDiagnoseWireEl, personalEdition } from "./resources-state";
+import { resourcesState, subtitleEl, sectionTabsEl, mainHeadEl, skillsPanelEl, skillScopeEl, skillScopeHintEl, panelLeadEl, skillsStickyEl, agentsTabsEl, toolFiltersEl, searchEl, footnoteEl, toolsFootnoteEl, mallAccountEl, mallLoginEl, mallLogoutEl, mcpShowUiEl, mcpUserDataDirEl, mcpProfileDirectoryEl, mcpProfileSystemEl, mcpProfileIsolatedEl, mcpRefreshEl, mcpDiagnoseWireEl, personalEdition } from "./resources-state";
 import type { ResourcesSection, SkillScope, ToolFilter } from "./resources-state";
-import { catalogAgents, countAgentMatches, loadDoctor, renderAgentCatalog } from "./resources-agents";
+import { countAgentMatches, loadDoctor, renderAgentCatalog, stableCatalogNeedsInstall } from "./resources-agents";
 import { filteredMallItems, filteredMallToolItems, loadMall, mallToolPool, noteMallLoginFinished, refreshMallAccount, renderMallAccount, renderToolsList, signOutMallAccount, startMallLogin } from "./resources-mall";
 import { browserStatusIsFresh, buildMcpRows, diagnoseAndWireBrowserMcp, loadMcpStatus, persistProfileDirectory, persistShowBrowserUi, persistUserDataDir, refreshMcpSnippet, renderMcpBrowserStatus, selectedProfileDirectory, selectedUserDataDir, syncProfileModeButtons } from "./resources-browser";
 import { buildLocalSkillEntries, entryMatchesQuery, isStoreScope, loadSkills, onSkillsPanelScroll, renderSkillsList } from "./resources-skills";
@@ -67,16 +67,28 @@ export function syncSkillScopeChrome(): void {
       scope === "store" ? t("resources.skillScopeStoreHint") : t("resources.skillScopeLocalHint");
   }
   skillsStickyEl.hidden = resourcesState.activeSection !== "skills";
+  agentsTabsEl.hidden =
+    resourcesState.activeSection !== "agents" || agentsTabsEl.childElementCount === 0;
   syncPanelLead();
 }
 
 export function syncPanelLead(): void {
   if (resourcesState.activeSection === "agents") {
     panelLeadEl.hidden = false;
-    const missing = catalogAgents().some((runtime) => !runtime.installed);
-    panelLeadEl.textContent = missing
-      ? t("resources.agentCatalogHint")
-      : t("resources.agentCatalogHintAllOn");
+    const tab = resourcesState.agentCatalogTab;
+    if (tab === "builtin") {
+      panelLeadEl.textContent = t("resources.agentGroupBuiltinHint");
+    } else if (tab === "npm") {
+      panelLeadEl.textContent = t("resources.agentGroupNpmHint");
+    } else if (tab === "domestic") {
+      panelLeadEl.textContent = t("resources.agentGroupDomesticHint");
+    } else if (tab === "experimental") {
+      panelLeadEl.textContent = t("resources.agentExperimentalHint");
+    } else {
+      panelLeadEl.textContent = stableCatalogNeedsInstall()
+        ? t("resources.agentCatalogHint")
+        : t("resources.agentCatalogHintAllOn");
+    }
     return;
   }
   if (resourcesState.activeSection === "browser") {

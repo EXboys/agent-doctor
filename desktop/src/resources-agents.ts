@@ -2,11 +2,21 @@
 import { listen } from "@tauri-apps/api/event";
 import { setAgentBrandIcon } from "./agent-brand";
 import { t, tRuntimeBlurb } from "./i18n";
-import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
+import {
+  AGENT_CATALOG_GROUP_ORDER,
+  agentCatalogRank,
+  groupAgentCatalog,
+  installsDesktopAndCli,
+  isExperimentalRuntime,
+  type AgentCatalogGroupId,
+  type AgentCatalogTabId,
+} from "./agent-catalog-groups";
+import { experimentalInstallFailure, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
 import { isAskRuntimeId, runtimeCatalog, DOCTOR_RUNTIME_ID } from "./runtime-catalog";
 import type { InstallProgressEvent, RuntimeDoctorResult } from "./types";
 import {
   resourcesState,
+  agentsTabsEl,
   agentsListEl,
   agentsEmptyEl,
   agentInstallInFlight,
@@ -80,95 +90,260 @@ export function catalogAgents(): RuntimeDoctorResult[] {
   return [...fromDoctor, ...extras]
     .map(withCatalogInstallState)
     .filter((runtime) => agentMatchesQuery(runtime))
-    .sort((a, b) => Number(a.installed) - Number(b.installed));
+    .sort((a, b) => {
+      const rankDiff = agentCatalogRank(a.id) - agentCatalogRank(b.id);
+      if (rankDiff !== 0) return rankDiff;
+      return Number(a.installed) - Number(b.installed);
+    });
 }
 
 export function countAgentMatches(): number {
   return catalogAgents().length;
 }
 
+/**
+ * The top line says "点安装" when a normal agent is still missing.
+ * Experimental agents have their own note, unless they are all the search shows.
+ */
+export function stableCatalogNeedsInstall(): boolean {
+  const rows = catalogAgents().filter((runtime) => runtime.id !== DOCTOR_RUNTIME_ID);
+  const stable = rows.filter((runtime) => !isExperimentalRuntime(runtime.id));
+  if (stable.some((runtime) => !runtime.installed)) return true;
+  return stable.length === 0 && rows.some((runtime) => !runtime.installed);
+}
+
+function renderAgentRow(runtime: RuntimeDoctorResult): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "res-catalog-item is-agent-row";
+  li.dataset.runtime = runtime.id;
+
+  const icon = document.createElement("span");
+  icon.className = "res-catalog-icon is-agent";
+  setAgentBrandIcon(icon, runtime.id);
+
+  const body = document.createElement("div");
+  body.className = "res-catalog-body";
+  const titleRow = document.createElement("div");
+  titleRow.className = "res-catalog-title-row";
+  const strong = document.createElement("strong");
+  strong.textContent = agentChipLabel(runtime.id);
+  titleRow.appendChild(strong);
+  if (installsDesktopAndCli(runtime.id)) {
+    const scopeBadge = document.createElement("span");
+    scopeBadge.className = "res-catalog-badge is-dual";
+    scopeBadge.textContent = t("resources.agentInstallDual");
+    titleRow.appendChild(scopeBadge);
+  }
+  if (isExperimentalRuntime(runtime.id)) {
+    const badge = document.createElement("span");
+    badge.className = "res-catalog-badge is-experimental";
+    badge.textContent =
+      runtime.id === "hermes"
+        ? t("resources.agentExperimentalBadgeNetwork")
+        : t("resources.agentExperimentalBadge");
+    titleRow.appendChild(badge);
+  }
+  const desc = document.createElement("div");
+  desc.className = "res-catalog-desc";
+  desc.textContent = agentCatalogBlurb(runtime.id);
+  // The built-in doctor is a virtual agent: nothing to install, and the
+  // backend has no adapter for it. It gets the open button, and any stale
+  // install error on the row goes away with it.
+  const openable = runtime.installed || runtime.id === DOCTOR_RUNTIME_ID;
+  if (runtime.id === DOCTOR_RUNTIME_ID) {
+    agentInstallHint.delete(runtime.id);
+  }
+
+  const hint = document.createElement("p");
+  hint.className = "res-agent-install-hint";
+  const saved = agentInstallHint.get(runtime.id);
+  hint.hidden = !saved;
+  hint.textContent = saved ?? "";
+  body.append(titleRow, desc, hint);
+
+  const metaWrap = document.createElement("div");
+  metaWrap.className = "res-catalog-meta mall-actions";
+  if (openable) {
+    const opening = agentOpenInFlight.has(runtime.id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary btn-compact";
+    btn.textContent = opening
+      ? t("runtime.opening")
+      : agentJustOpened.has(runtime.id)
+        ? t("resources.agentOpened")
+        : t("runtime.open");
+    btn.disabled = opening;
+    btn.addEventListener("click", () => {
+      void openCatalogAgent(runtime.id);
+    });
+    metaWrap.appendChild(btn);
+  } else {
+    const busy = agentInstallInFlight.has(runtime.id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-primary btn-compact";
+    btn.textContent = busy ? t("runtime.installing") : t("runtime.install");
+    btn.disabled = busy;
+    btn.addEventListener("click", () => {
+      void installCatalogAgent(runtime.id);
+    });
+    metaWrap.appendChild(btn);
+  }
+
+  li.append(icon, body, metaWrap);
+  return li;
+}
+
+function groupCopy(group: AgentCatalogGroupId): { title: string; hint: string } {
+  switch (group) {
+    case "builtin":
+      return {
+        title: t("resources.agentGroupBuiltinTitle"),
+        hint: t("resources.agentGroupBuiltinHint"),
+      };
+    case "npm":
+      return {
+        title: t("resources.agentGroupNpmTitle"),
+        hint: t("resources.agentGroupNpmHint"),
+      };
+    case "domestic":
+      return {
+        title: t("resources.agentGroupDomesticTitle"),
+        hint: t("resources.agentGroupDomesticHint"),
+      };
+    case "experimental":
+      return {
+        title: t("resources.agentExperimentalTitle"),
+        hint: t("resources.agentExperimentalHint"),
+      };
+  }
+}
+
+function groupTabLabel(group: AgentCatalogGroupId): string {
+  switch (group) {
+    case "builtin":
+      return t("resources.agentGroupBuiltinTitle");
+    case "npm":
+      return t("resources.agentGroupNpmTitle");
+    case "domestic":
+      return t("resources.agentGroupDomesticTab");
+    case "experimental":
+      return t("resources.agentExperimentalTitle");
+  }
+}
+
+function renderAgentTabs(
+  allCount: number,
+  grouped: Record<AgentCatalogGroupId, RuntimeDoctorResult[]>,
+): void {
+  agentsTabsEl.replaceChildren();
+  const visibleSection = resourcesState.activeSection === "agents";
+  if (allCount === 0) {
+    agentsTabsEl.hidden = true;
+    return;
+  }
+  agentsTabsEl.hidden = !visibleSection;
+  const tabs: Array<{ id: AgentCatalogTabId; label: string; count: number }> = [
+    { id: "all", label: t("resources.agentTabAll"), count: allCount },
+    ...AGENT_CATALOG_GROUP_ORDER.map((id) => ({
+      id,
+      label: groupTabLabel(id),
+      count: grouped[id].length,
+    })).filter((tab) => tab.count > 0),
+  ];
+
+  if (!tabs.some((tab) => tab.id === resourcesState.agentCatalogTab)) {
+    resourcesState.agentCatalogTab = "all";
+  }
+
+  for (const tab of tabs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const active = resourcesState.agentCatalogTab === tab.id;
+    btn.className = `filter-chip${active ? " is-active" : ""}`;
+    btn.dataset.agentTab = tab.id;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = tab.label;
+    const countSpan = document.createElement("span");
+    countSpan.className = "chip-count";
+    countSpan.textContent = String(tab.count);
+    btn.append(labelSpan, countSpan);
+    btn.addEventListener("click", () => {
+      if (resourcesState.agentCatalogTab === tab.id) return;
+      resourcesState.agentCatalogTab = tab.id;
+      renderAgentCatalog();
+      document.querySelector<HTMLElement>("#panel-agents")?.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    agentsTabsEl.appendChild(btn);
+  }
+}
+
+function appendAgentSection(group: AgentCatalogGroupId, rows: RuntimeDoctorResult[]): void {
+  if (rows.length === 0) return;
+  const { title, hint } = groupCopy(group);
+  const heading = document.createElement("div");
+  heading.className = "res-catalog-group res-catalog-group-row";
+  heading.dataset.agentGroup = group;
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "res-catalog-group-title";
+  titleEl.textContent = `${title} · ${rows.length}`;
+  heading.appendChild(titleEl);
+
+  if (hint) {
+    const subEl = document.createElement("span");
+    subEl.className = "res-catalog-group-sub";
+    subEl.textContent = hint;
+    heading.appendChild(subEl);
+  }
+  agentsListEl.appendChild(heading);
+
+  const ul = document.createElement("ul");
+  ul.className = "res-catalog-list";
+  for (const runtime of rows) ul.appendChild(renderAgentRow(runtime));
+  agentsListEl.appendChild(ul);
+}
+
 export function renderAgentCatalog(): void {
   const rows = catalogAgents();
-  const missing = rows.some((runtime) => !runtime.installed);
+  const grouped = groupAgentCatalog(rows);
+  renderAgentTabs(rows.length, grouped);
   const hintEl = document.querySelector<HTMLElement>("#resources-agents-hint");
   if (hintEl) {
-    hintEl.textContent = missing ? t("resources.agentCatalogHint") : t("resources.agentCatalogHintAllOn");
+    hintEl.textContent = stableCatalogNeedsInstall()
+      ? t("resources.agentCatalogHint")
+      : t("resources.agentCatalogHintAllOn");
   }
   if (resourcesState.activeSection === "agents") syncPanelLead();
   agentsListEl.replaceChildren();
-  if (rows.length === 0) {
+  const visibleGroups =
+    resourcesState.agentCatalogTab === "all"
+      ? AGENT_CATALOG_GROUP_ORDER
+      : [resourcesState.agentCatalogTab];
+  const visibleCount = visibleGroups.reduce((sum, id) => sum + grouped[id].length, 0);
+  if (visibleCount === 0) {
     agentsEmptyEl.hidden = false;
     agentsEmptyEl.textContent = resourcesState.resourceQuery ? t("chat.resourcesNoMatch") : t("resources.emptyAgents");
     return;
   }
   agentsEmptyEl.hidden = true;
-  for (const runtime of rows) {
-    const li = document.createElement("li");
-    li.className = "res-catalog-item";
-    li.dataset.runtime = runtime.id;
-
-    const icon = document.createElement("span");
-    icon.className = "res-catalog-icon is-agent";
-    setAgentBrandIcon(icon, runtime.id);
-
-    const body = document.createElement("div");
-    body.className = "res-catalog-body";
-    const titleRow = document.createElement("div");
-    titleRow.className = "res-catalog-title-row";
-    const strong = document.createElement("strong");
-    strong.textContent = agentChipLabel(runtime.id);
-    titleRow.appendChild(strong);
-    const desc = document.createElement("div");
-    desc.className = "res-catalog-desc";
-    desc.textContent = agentCatalogBlurb(runtime.id);
-    // The built-in doctor is a virtual agent: nothing to install, and the
-    // backend has no adapter for it. It gets the open button, and any stale
-    // install error on the row goes away with it.
-    const openable = runtime.installed || runtime.id === DOCTOR_RUNTIME_ID;
-    if (runtime.id === DOCTOR_RUNTIME_ID) {
-      agentInstallHint.delete(runtime.id);
+  if (resourcesState.agentCatalogTab === "all") {
+    for (const group of visibleGroups) {
+      appendAgentSection(group, grouped[group]);
     }
-
-    const hint = document.createElement("p");
-    hint.className = "res-agent-install-hint";
-    const saved = agentInstallHint.get(runtime.id);
-    hint.hidden = !saved;
-    hint.textContent = saved ?? "";
-    body.append(titleRow, desc, hint);
-
-    const metaWrap = document.createElement("div");
-    metaWrap.className = "res-catalog-meta mall-actions";
-    if (openable) {
-      const opening = agentOpenInFlight.has(runtime.id);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn-secondary btn-compact";
-      btn.textContent = opening
-        ? t("runtime.opening")
-        : agentJustOpened.has(runtime.id)
-          ? t("resources.agentOpened")
-          : t("runtime.open");
-      btn.disabled = opening;
-      btn.addEventListener("click", () => {
-        void openCatalogAgent(runtime.id);
-      });
-      metaWrap.appendChild(btn);
-    } else {
-      const busy = agentInstallInFlight.has(runtime.id);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn-primary btn-compact";
-      btn.textContent = busy ? t("runtime.installing") : t("runtime.install");
-      btn.disabled = busy;
-      btn.addEventListener("click", () => {
-        void installCatalogAgent(runtime.id);
-      });
-      metaWrap.appendChild(btn);
-    }
-
-    li.append(icon, body, metaWrap);
-    agentsListEl.appendChild(li);
+    return;
   }
+  const ul = document.createElement("ul");
+  ul.className = "res-catalog-list";
+  for (const group of visibleGroups) {
+    for (const runtime of grouped[group]) {
+      ul.appendChild(renderAgentRow(runtime));
+    }
+  }
+  agentsListEl.appendChild(ul);
 }
 
 export function setAgentInstallHint(runtime: string, message: string, tone: "ok" | "warn" | "error" | "busy"): void {
@@ -226,11 +401,14 @@ export async function installCatalogAgent(runtime: string): Promise<void> {
         report.skipped.map((item) => item.reason).find(Boolean) ||
         report.manual_fallback[0] ||
         "";
-      setAgentInstallHint(runtime, installFailureSentence(detail), "error");
+      setAgentInstallHint(runtime, installFailureSentenceFor(runtime, detail), "error");
     }
     await loadDoctor();
   } catch (error) {
-    setAgentInstallHint(runtime, withErrorDetail(t("runtime.installFailed"), error), "error");
+    const message = isExperimentalRuntime(runtime)
+      ? experimentalInstallFailure(runtime)
+      : withErrorDetail(t("runtime.installFailed"), error);
+    setAgentInstallHint(runtime, message, "error");
   } finally {
     agentInstallInFlight.delete(runtime);
     unlisten();

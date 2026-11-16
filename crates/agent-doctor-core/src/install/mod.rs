@@ -162,22 +162,29 @@ where
                         break;
                     }
                     let reason = if updating && !needs_binary_install(&after_attempt) {
-                        "更新跑完了，但这份还是太旧，这里用不了。"
+                        "更新跑完了，但这份还是太旧，这里用不了。".to_string()
+                    } else if let Some(missing) = dual_install_partial_reason(runtime_id) {
+                        missing.to_string()
                     } else {
-                        "install script finished but binary still not found on PATH"
+                        "install script finished but binary still not found on PATH".to_string()
                     };
                     skipped_actions.push(SkippedRepairAction {
                         id: install_action_id(runtime_id).to_string(),
-                        reason: reason.to_string(),
+                        reason,
                     });
                 }
                 Err(error) => {
                     if let Some(path) = error.log_path {
                         install_log_path = Some(path.display().to_string());
                     }
+                    crate::adapters::util::refresh_managed_runtime_path();
+                    let reason = match dual_install_partial_reason(runtime_id) {
+                        Some(partial) => format!("{partial}\n{}", error.reason),
+                        None => error.reason,
+                    };
                     skipped_actions.push(SkippedRepairAction {
                         id: install_action_id(runtime_id).to_string(),
-                        reason: error.reason,
+                        reason,
                     });
                 }
             }
@@ -616,6 +623,16 @@ fn install_attempt_ok(probe: &RuntimeProbeReport, updating: bool) -> bool {
     !needs_binary_install(probe) && !(updating && client_still_too_old(probe))
 }
 
+/// Non-empty when one half of a dual-install bundle (`workbuddy` / `qoder`) landed and the other did not.
+fn dual_install_partial_reason(runtime_id: &str) -> Option<&'static str> {
+    let reason = match runtime_id {
+        "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
+        "qoder" => crate::adapters::qoder_missing_install_part(),
+        _ => None,
+    }?;
+    (reason.contains("已装好") || reason.contains("已在本机")).then_some(reason)
+}
+
 fn has_remaining_work(probe: &RuntimeProbeReport) -> bool {
     suggest_runtime_repairs(&probe.runtime_id, probe)
         .iter()
@@ -940,22 +957,27 @@ mod tests {
                 .unwrap_or_else(|| panic!("no install command for {runtime}"));
             let update = lifecycle_shell_command(runtime, true)
                 .unwrap_or_else(|| panic!("no update command for {runtime}"));
-            assert!(
-                install.starts_with("npm install -g "),
-                "{runtime} installs from its npm package: {install}"
-            );
-            assert!(
-                update.contains("@latest"),
-                "{runtime} updates the same npm package: {update}"
+            assert!(!install.is_empty(), "{runtime} install command");
+            assert!(!update.is_empty(), "{runtime} update command");
+            assert_ne!(
+                install, update,
+                "{runtime} update command differs from install"
             );
         }
-        let workbuddy = lifecycle_shell_command("workbuddy", false).unwrap();
-        assert!(
-            workbuddy.contains("@tencent-ai/codebuddy-code"),
-            "{workbuddy}"
-        );
-        let qoder = lifecycle_shell_command("qoder", false).unwrap();
-        assert!(qoder.contains("@qoder-ai/qodercli"), "{qoder}");
+        #[cfg(not(target_os = "windows"))]
+        {
+            let workbuddy = lifecycle_shell_command("workbuddy", false).unwrap();
+            assert!(
+                workbuddy.contains("@tencent-ai/codebuddy-code")
+                    && workbuddy.contains("WorkBuddy.app"),
+                "{workbuddy}"
+            );
+            let qoder = lifecycle_shell_command("qoder", false).unwrap();
+            assert!(
+                qoder.contains("@qoder-ai/qodercli") && qoder.contains("Qoder-IDE-darwin"),
+                "{qoder}"
+            );
+        }
         assert_eq!(install_action_id("workbuddy"), "fix-workbuddy-install");
         assert_eq!(install_action_id("qoder"), "fix-qoder-install");
     }

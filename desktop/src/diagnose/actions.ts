@@ -12,10 +12,12 @@ import {
   settingsApplyKind,
   type DiagnoseStepId,
 } from "../diagnose-flow";
+import { isExperimentalRuntime } from "../agent-catalog-groups";
 import {
   explainLlmAccountBlock,
   missingProviderFieldsMessage,
-  installFailureSentence,
+  experimentalInstallFailure,
+  installFailureSentenceFor,
   teamupsLoginFailure,
   withErrorDetail,
   formatProviderFailure,
@@ -107,10 +109,15 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
           report.skipped.map((item) => item.reason).find(Boolean) ||
           report.manual_fallback[0] ||
           "";
-        paint.setResult("error", installFailureSentence(detail));
+        paint.setResult("error", installFailureSentenceFor(session.runtimeId, detail));
       }
     } catch (error) {
-      paint.setResult("error", withErrorDetail(t("diagnose.flow.installFailedDetail"), error));
+      paint.setResult(
+        "error",
+        isExperimentalRuntime(session.runtimeId)
+          ? experimentalInstallFailure(session.runtimeId)
+          : withErrorDetail(t("diagnose.flow.installFailedDetail"), error),
+      );
     } finally {
       unlisten();
       paint.setBusy(false);

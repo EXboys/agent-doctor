@@ -1,3 +1,4 @@
+import { isExperimentalRuntime } from "./agent-catalog-groups";
 import { agentBrandIconHtml } from "./agent-brand";
 import { t, tRuntimeBlurb, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
@@ -485,10 +486,9 @@ export function renderRuntimeCard(
         .filter(Boolean)
         .join("")
     : metaRow("meta.status", t("runtime.notDetected"));
-  const previewBadge =
-    runtime.id === "deepseek-harness"
-      ? `<span class="badge preview">${escapeHtml(t("runtime.developerPreview"))}</span>`
-      : "";
+  const previewBadge = isExperimentalRuntime(runtime.id)
+    ? `<span class="badge warn">${escapeHtml(t("runtime.developerPreview"))}</span>`
+    : "";
 
   return `
     <article class="runtime ${runtimeClass(runtime.id)}${hero ? " has-hero" : ""}" data-runtime="${runtime.id}">
@@ -576,10 +576,9 @@ export function renderRuntimeTabs(
             : t("runtime.installed");
       const versionMeta = versionStatus?.installed || runtime.version;
       const tabMeta = [stateLabel, versionMeta].filter(Boolean).join(" · ");
-      const displayMeta =
-        runtime.id === "deepseek-harness"
-          ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")
-          : tabMeta;
+      const displayMeta = isExperimentalRuntime(runtime.id)
+        ? [t("runtime.experimentalShort"), tabMeta].filter(Boolean).join(" · ")
+        : tabMeta;
       return `
         <button
           type="button"

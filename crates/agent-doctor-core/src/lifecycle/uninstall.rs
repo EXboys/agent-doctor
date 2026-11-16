@@ -26,13 +26,13 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
         "qoder" => {
             return Ok(
-                "rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.local/bin/qodercli\" \"$HOME/.qoder/bin/qoder\"; rm -rf \"$HOME/.qoder/bin/qodercli\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
+                "rm -rf \"$HOME/Applications/Qoder CN.app\" \"$HOME/Applications/Qoder IDE.app\" \"$HOME/Applications/Qoder.app\" \"$HOME/.qoder/bin/qodercli\" \"$HOME/.qoder/bin/qoderclicn\"; rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.local/bin/qodercli\" \"$HOME/.local/bin/qoderclicn\" \"$HOME/.qoder/bin/qoder\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
                     .to_string(),
             );
         }
         "workbuddy" => {
             return Ok(
-                "rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
+                "rm -rf \"$HOME/Applications/WorkBuddy.app\"; rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
                     .to_string(),
             );
         }
@@ -440,14 +440,88 @@ fn uninstall_zcode() -> Result<()> {
     bail!("没找到能卸的 ZCode。应用程序文件夹里的窗口不会被卸掉。");
 }
 
+fn remove_user_desktop_bundles(candidates: Vec<std::path::PathBuf>) -> bool {
+    let home = home_join("");
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let mut removed = false;
+    for path in candidates {
+        let user_owned = path.starts_with(&home)
+            || local_app_data
+                .as_ref()
+                .is_some_and(|local| path.starts_with(local));
+        if !user_owned || !path.exists() {
+            continue;
+        }
+        let target = if path.is_file() {
+            path.parent().unwrap_or(&path)
+        } else {
+            path.as_path()
+        };
+        let res = if target.is_dir() && !target.is_symlink() {
+            std::fs::remove_dir_all(target)
+        } else {
+            std::fs::remove_file(target)
+        };
+        if res.is_ok() {
+            removed = true;
+        }
+    }
+    removed
+}
+
 pub fn uninstall_runtime(runtime_id: &str) -> Result<()> {
     match runtime_id {
-        "qoder" => uninstall_native_cli(&["qoder", "qodercli"], "@qoder-ai/qodercli", "qodercli"),
-        "workbuddy" => uninstall_native_cli(
-            &["codebuddy", "workbuddy"],
-            "@tencent-ai/codebuddy-code",
-            "codebuddy",
-        ),
+        "qoder" => {
+            let mut removed =
+                remove_user_desktop_bundles(crate::adapters::qoder_desktop_installs());
+            for rel in [".qoder/bin/qodercli", ".qoder/bin/qoderclicn"] {
+                let dir = home_join(rel);
+                if dir.is_dir() && std::fs::remove_dir_all(&dir).is_ok() {
+                    removed = true;
+                }
+            }
+            if uninstall_native_cli(
+                &["qoder", "qodercli", "qoderclicn"],
+                "@qoder-ai/qodercli",
+                "qodercli",
+            )
+            .is_ok()
+            {
+                removed = true;
+            }
+            if removed {
+                Ok(())
+            } else {
+                bail!("没找到能卸的 Qoder。")
+            }
+        }
+        "workbuddy" => {
+            let mut removed =
+                remove_user_desktop_bundles(crate::adapters::workbuddy_desktop_installs());
+            for rel in [
+                ".codebuddy/bin/codebuddy",
+                "AppData/Local/codebuddy/bin/codebuddy.exe",
+            ] {
+                let file = home_join(rel);
+                if (file.is_file() || file.is_symlink()) && std::fs::remove_file(&file).is_ok() {
+                    removed = true;
+                }
+            }
+            if uninstall_native_cli(
+                &["codebuddy", "workbuddy"],
+                "@tencent-ai/codebuddy-code",
+                "codebuddy",
+            )
+            .is_ok()
+            {
+                removed = true;
+            }
+            if removed {
+                Ok(())
+            } else {
+                bail!("没找到能卸的 WorkBuddy。")
+            }
+        }
         "cursor" => uninstall_cursor(),
         "zcode" => uninstall_zcode(),
         "hermes" if cfg!(windows) => uninstall_hermes_windows(),

@@ -340,8 +340,8 @@ fn prepare_npm_install_env(command_line: &str, command: &mut Command) {
     // Default npm loglevel hides hundreds of DeepSeek dependency fetches.
     command.env("npm_config_loglevel", "info");
     command.env("npm_config_progress", "true");
-    command.env("npm_config_fetch_retries", "2");
-    command.env("npm_config_fetch_timeout", "120000");
+    command.env("npm_config_fetch_retries", "3");
+    command.env("npm_config_fetch_timeout", "300000");
 }
 
 fn finish_lifecycle_error(capture: &ShellCapture) -> anyhow::Error {

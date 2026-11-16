@@ -194,6 +194,7 @@ fn probe_adapter(adapter: &dyn RuntimeAdapter) -> Result<RuntimeProbeReport> {
 
     probe_binary(&ctx, &mut checks, &mut facts);
     adopt_adapter_discovery(adapter, &mut checks, &mut facts);
+    enforce_dual_install_bundle(adapter.id(), &mut checks, &mut facts);
     probe_configs(adapter, &ctx, &mut checks, &mut facts);
     probe_env_conflicts(&ctx, &mut checks, &mut facts);
     descriptor.run_deep_probe(&mut checks, &mut facts);
@@ -318,6 +319,33 @@ fn adopt_adapter_discovery(
     }
     if let Some(fact) = facts.iter_mut().find(|item| item.key == "binary.installed") {
         fact.value = "true".into();
+    }
+}
+
+/// Domestic dual-install runtimes (`workbuddy`, `qoder`) require both their CLI
+/// and their desktop client on macOS and Windows. Having only one of the two
+/// leaves `binary.exists` failed so Install completes the missing half.
+fn enforce_dual_install_bundle(
+    runtime_id: &str,
+    checks: &mut [ProbeCheck],
+    facts: &mut [DiagnosticFact],
+) {
+    let missing = match runtime_id {
+        "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
+        "qoder" => crate::adapters::qoder_missing_install_part(),
+        _ => None,
+    };
+    let Some(reason) = missing else {
+        return;
+    };
+    if let Some(check) = checks.iter_mut().find(|item| item.id == "binary.exists") {
+        check.status = ProbeStatus::Fail;
+        check.severity = ProbeSeverity::Error;
+        check.message = reason.to_string();
+        check.sensitivity = SensitivityLevel::Public;
+    }
+    if let Some(fact) = facts.iter_mut().find(|item| item.key == "binary.installed") {
+        fact.value = "false".into();
     }
 }
 

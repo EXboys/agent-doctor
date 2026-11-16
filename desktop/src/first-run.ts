@@ -1,3 +1,4 @@
+import { isExperimentalRuntime } from "./agent-catalog-groups";
 import { plainRepairCheckCopy } from "./repair-plain";
 import type {
   DoctorReport,
@@ -234,7 +235,9 @@ export function pickBiggestFirstRunTarget(
 
   if (installed.length === 0) {
     const candidate =
-      ordered.find((r) => !r.installed) ?? ordered[0];
+      ordered.find((r) => !r.installed && !isExperimentalRuntime(r.id)) ??
+      ordered.find((r) => !r.installed) ??
+      ordered[0];
     if (candidate) {
       const text = copy.missingInstall(candidate.display_name);
       return {

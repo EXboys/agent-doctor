@@ -824,7 +824,11 @@ pub fn installed_agents_with_binary() -> Vec<InstalledAgent> {
     crate::adapters::util::ensure_managed_runtime_path();
     RUNTIME_REGISTRY
         .iter()
-        .filter(|entry| crate::adapters::util::find_binary(entry.probe.binary_name).is_some())
+        .filter(|entry| match entry.id {
+            "qoder" => crate::adapters::qoder_cli_path().is_some(),
+            "workbuddy" => crate::adapters::workbuddy_cli_path().is_some(),
+            _ => crate::adapters::util::find_binary(entry.probe.binary_name).is_some(),
+        })
         .map(|entry| InstalledAgent {
             id: entry.id.to_string(),
             label: (entry.create_adapter)().display_name().to_string(),

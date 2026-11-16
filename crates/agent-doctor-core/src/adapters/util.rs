@@ -896,6 +896,8 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".cargo/bin"));
         dirs.push(home.join("bin"));
         dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".codebuddy/bin"));
+        dirs.push(home.join(".qoder/bin"));
         dirs.push(home.join(".claude/local"));
         dirs.push(home.join(".hermes/bin"));
         dirs.push(home.join("AppData/Local/hermes"));
@@ -903,6 +905,7 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
         {
             dirs.push(home.join(r"AppData\Roaming\npm"));
             dirs.push(home.join(r"AppData\Local\Programs\nodejs"));
+            dirs.push(home.join(r"AppData\Local\codebuddy\bin"));
             dirs.push(home.join(r"AppData\Local\hermes"));
             dirs.push(home.join(r"scoop\shims"));
             dirs.push(home.join(r".local\bin"));

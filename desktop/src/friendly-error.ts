@@ -1,3 +1,4 @@
+import { installsDesktopAndCli, isExperimentalRuntime } from "./agent-catalog-groups";
 import { t, type MessageKey } from "./i18n";
 
 export function errorDetail(error: unknown): string {
@@ -19,6 +20,7 @@ export function withErrorDetail(message: string, error: unknown): string {
 /** One sentence after a runtime install. Update keeps the existing wording. */
 export function installDoneSentence(runtime: string, update: boolean): string {
   if (update) return t("runtime.updateOk");
+  if (installsDesktopAndCli(runtime)) return t("runtime.installOkDual");
   if (runtime === "hermes") return t("runtime.installOkHermes");
   if (runtime === "claude-code") return t("runtime.installOkClaude");
   if (runtime === "codex") return t("runtime.installOkCodex");
@@ -28,6 +30,12 @@ export function installDoneSentence(runtime: string, update: boolean): string {
 /** Install failures stay one sentence. The log button still holds the raw output. */
 export function installFailureSentence(detail: string): string {
   const lower = detail.toLowerCase();
+  if (detail.includes("桌面软件还没装")) {
+    return t("runtime.installFailMissingApp");
+  }
+  if (detail.includes("桌面软件已在本机") && detail.includes("命令行还没装")) {
+    return t("runtime.installFailMissingCli");
+  }
   if (
     /claude\.ai|chatgpt\.com|enotfound|econnrefused|etimedout|timed?\s*out|timeout|could not resolve|connection refused|curl: \([0-9]+\)|network|dns|连不上|网络/.test(
       lower,
@@ -36,6 +44,20 @@ export function installFailureSentence(detail: string): string {
     return t("runtime.installFailNetwork");
   }
   return t("runtime.installFailed");
+}
+
+/** Experimental agents fail often. Mainland products are not a network problem. */
+export function experimentalInstallFailure(runtime: string): string {
+  if (runtime === "hermes") return t("runtime.installFailedHermes");
+  return t("runtime.installFailedExperimental");
+}
+
+/** Experimental agents fail often. Say that, and do not dump the installer log. */
+export function installFailureSentenceFor(runtime: string, detail: string): string {
+  const specific = installFailureSentence(detail);
+  if (specific !== t("runtime.installFailed")) return specific;
+  if (isExperimentalRuntime(runtime)) return experimentalInstallFailure(runtime);
+  return specific;
 }
 
 /** TeamUps browser-login failures: one plain sentence, no HTML or English dumps. */

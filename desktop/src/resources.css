@@ -182,6 +182,85 @@ html[data-os="windows"] .resources-section-tab {
   margin-top: 2px;
 }
 
+.res-catalog-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 2px 2px;
+}
+
+.res-catalog-group-row:first-child {
+  margin-top: 2px;
+}
+
+.res-catalog-group-title {
+  color: var(--muted, #667085);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.res-catalog-group-row[data-agent-group="experimental"] .res-catalog-group-title {
+  color: #b45309;
+}
+
+.res-catalog-group-sub {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(102, 112, 133, 0.85);
+}
+
+.resources-agents-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0 0;
+  background: #fff;
+}
+
+.resources-agents-tabs[hidden] {
+  display: none !important;
+}
+
+.resources-agents-tabs .filter-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  line-height: 1;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.resources-agents-tabs .chip-count {
+  font-weight: 650;
+  opacity: 0.58;
+}
+
+.resources-agents-tabs .filter-chip.is-active .chip-count {
+  opacity: 0.8;
+}
+
+.res-catalog-badge.is-dual {
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
+.res-catalog-badge.is-experimental {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
+.res-catalog-item.is-agent-row {
+  align-items: center;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

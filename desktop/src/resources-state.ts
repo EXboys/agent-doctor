@@ -10,6 +10,7 @@ import type {
   TeamupsMallCatalog,
   ResourceRow,
 } from "./types";
+import type { AgentCatalogTabId } from "./agent-catalog-groups";
 import type { SkillCategoryId } from "./skill-categories";
 
 export type ResourcesSection = "agents" | "skills" | "tools" | "browser";
@@ -68,7 +69,8 @@ export const mallAccountEl = document.querySelector<HTMLElement>("#resources-mal
 export const mallAccountStatusEl = document.querySelector<HTMLElement>("#resources-mall-account-status")!;
 export const mallLoginEl = document.querySelector<HTMLButtonElement>("#resources-mall-login")!;
 export const mallLogoutEl = document.querySelector<HTMLButtonElement>("#resources-mall-logout")!;
-export const agentsListEl = document.querySelector<HTMLUListElement>("#resources-agents-list")!;
+export const agentsTabsEl = document.querySelector<HTMLElement>("#resources-agents-tabs")!;
+export const agentsListEl = document.querySelector<HTMLElement>("#resources-agents-list")!;
 export const agentsEmptyEl = document.querySelector<HTMLElement>("#resources-agents-empty")!;
 export const mcpBrowserBadgeEl = document.querySelector<HTMLElement>("#mcp-browser-badge")!;
 export const mcpChromeEl = document.querySelector<HTMLElement>("#mcp-chrome")!;
@@ -103,6 +105,7 @@ export const resourcesState = {
   mallFilter: "all" as MallFilter,
   resourceQuery: "",
   activeSection: "skills" as ResourcesSection,
+  agentCatalogTab: "all" as AgentCatalogTabId,
   mcpConfigureInFlight: false,
   mallActionInFlight: false,
   mallLoginInFlight: false,

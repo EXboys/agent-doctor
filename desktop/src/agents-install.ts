@@ -2,7 +2,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
-import { installDoneSentence, installFailureSentence, withErrorDetail } from "./friendly-error";
+import { isExperimentalRuntime } from "./agent-catalog-groups";
+import { experimentalInstallFailure, installDoneSentence, installFailureSentenceFor, withErrorDetail } from "./friendly-error";
 import { escapeHtml } from "./format";
 import type { DoctorReport, InstallProgressEvent } from "./types";
 import { installRuntime, uninstallRuntime as uninstallRuntimeCommand } from "./ipc";
@@ -247,7 +248,7 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
           report.skipped.map((item) => item.reason).find(Boolean) ||
           report.manual_fallback[0] ||
           "";
-        nextHintText = update ? t("runtime.updateFailed") : installFailureSentence(detail);
+        nextHintText = update ? t("runtime.updateFailed") : installFailureSentenceFor(runtime, detail);
       }
       // refresh() re-renders cards and would wipe the in-card hint — keep sticky.
       let stickyHtml = nextHintHtml;
@@ -266,7 +267,9 @@ export function createAgentsInstall(deps: AgentsInstallDeps) {
       await deps.refresh();
       setStickyInstallHint(runtime, stickyHtml, stickyText);
     } catch (error) {
-      const message = withErrorDetail(t("runtime.installFailed"), error);
+      const message = isExperimentalRuntime(runtime)
+        ? experimentalInstallFailure(runtime)
+        : withErrorDetail(t("runtime.installFailed"), error);
       setStickyInstallHint(runtime, null, message);
       try {
         await deps.refresh();
