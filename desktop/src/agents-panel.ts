@@ -29,6 +29,7 @@ import { createAgentsInstall } from "./agents-install";
 import { createAgentsPresets } from "./agents-presets";
 import { createAgentsSessions } from "./agents-sessions";
 import { createAgentsWorkspaceChip } from "./agents-workspace-chip";
+import { agentCatalogRank } from "./agent-catalog-groups";
 import { DOCTOR_RUNTIME_ID, planAgentTiles } from "./agent-tiles";
 import { resetHomeHero, syncHomeHero } from "./home-hero";
 import type {
@@ -82,6 +83,7 @@ const runtimeTabsEl = document.querySelector<HTMLElement>("#runtime-tabs")!;
 const runtimeTabsMoreEl = document.querySelector<HTMLButtonElement>("#runtime-tabs-more")!;
 const runtimeSectionEl = document.querySelector<HTMLElement>(".runtime-section")!;
 let runtimeTabsExpanded = false;
+let runtimeTabsUserCollapsed = false;
 /** Tiles currently in the DOM, with the active state stripped out. */
 let lastTabSkeleton = "";
 /** Markup currently in the card slot. */
@@ -261,17 +263,27 @@ function paintRuntimeCard(html: string): boolean {
   return true;
 }
 
+function orderedInstalledRuntimes(report: DoctorReport): RuntimeDoctorResult[] {
+  return report.runtimes
+    .filter((runtime) => runtime.installed)
+    .sort((a, b) => agentCatalogRank(a.id) - agentCatalogRank(b.id));
+}
+
 function paintRuntimeTabs(installedRuntimes: RuntimeDoctorResult[], selectedId: string): void {
   const plan = planAgentTiles(
     installedRuntimes.map((runtime) => runtime.id),
     selectedId,
     runtimeTabsExpanded,
+    runtimeTabsUserCollapsed,
   );
   if (plan.expandForSelection) {
     runtimeTabsExpanded = true;
   }
   runtimeSectionEl.classList.toggle("is-solo", isSoloHome(installedRuntimes.length));
-  const visible = installedRuntimes.slice(0, plan.visibleCount);
+  const byId = new Map(installedRuntimes.map((runtime) => [runtime.id, runtime]));
+  const visible = plan.visibleIds
+    .map((id) => byId.get(id))
+    .filter((runtime): runtime is RuntimeDoctorResult => Boolean(runtime));
   const html = renderRuntimeTabs(visible, selectedId, repairPreviewByRuntime);
   // Switching agents only flips which tile is active. Re-parsing the tiles
   // would re-decode every brand mark and re-lay out the row on each click,
@@ -456,7 +468,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   function selectDoctorRuntime(): void {
     appState.activeRuntimeId = DOCTOR_RUNTIME_ID;
     const report = appState.lastReport;
-    const installedRuntimes = report ? report.runtimes.filter((runtime) => runtime.installed) : [];
+    const installedRuntimes = report ? orderedInstalledRuntimes(report) : [];
     paintRuntimeTabs(installedRuntimes, DOCTOR_RUNTIME_ID);
     scheduleCardPaint(doctorCardHtml, () => void paintDoctorServiceRow());
     void diagnose.closeDiagnoseDetail({ skipDismiss: true });
@@ -564,7 +576,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       }
     }
 
-    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const installedRuntimes = orderedInstalledRuntimes(report);
     if (installedRuntimes.length === 0) {
       // The doctor ships with the app, so a home with no CLI still has one
       // agent to show. Hiding the tiles here made the built-in agent vanish
@@ -643,7 +655,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     if (!report) {
       return;
     }
-    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const installedRuntimes = orderedInstalledRuntimes(report);
     const selected = installedRuntimes.find((runtime) => runtime.id === runtimeId);
     if (!selected) {
       return;
@@ -676,7 +688,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       if (appState.lastReport !== report) {
         return;
       }
-      const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+      const installedRuntimes = orderedInstalledRuntimes(report);
       const selectedId = resolvePaintedRuntimeId(installedRuntimes);
       if (!selectedId) {
         return;
@@ -715,9 +727,10 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
 
   runtimeTabsMoreEl.addEventListener("click", () => {
     runtimeTabsExpanded = !runtimeTabsExpanded;
+    runtimeTabsUserCollapsed = !runtimeTabsExpanded;
     const report = appState.lastReport;
     if (!report) return;
-    const installedRuntimes = report.runtimes.filter((runtime) => runtime.installed);
+    const installedRuntimes = orderedInstalledRuntimes(report);
     const selectedId = resolvePaintedRuntimeId(installedRuntimes);
     if (selectedId) paintRuntimeTabs(installedRuntimes, selectedId);
   });

@@ -49,6 +49,7 @@ fn cursor_profile() -> AcpProfile {
         images_note: "这个 Cursor 收不了图片，这次只带上了图里的字。".into(),
         default_tool: "这一步操作".into(),
         auth_method: Some("cursor_login"),
+        auth_on_demand: None,
         resume_method: "session/load",
     }
 }

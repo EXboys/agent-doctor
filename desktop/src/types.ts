@@ -2,6 +2,7 @@ export interface RuntimeDoctorResult {
   id: string;
   display_name: string;
   installed: boolean;
+  incomplete_install?: boolean;
   version: string | null;
   binary_path: string | null;
   config_paths: string[];

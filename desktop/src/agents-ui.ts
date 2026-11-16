@@ -82,7 +82,16 @@ function subscriptionServiceRow(runtimeId: string): string {
     (item) => item.runtime_id === runtimeId && item.using_subscription,
   );
   if (!row) return "";
-  const account = runtimeId === "codex" ? t("native.chatgpt") : t("native.claude");
+  const account =
+    runtimeId === "codex"
+      ? t("native.chatgpt")
+      : runtimeId === "qoder"
+        ? t("native.qoder")
+        : runtimeId === "cursor"
+          ? t("native.cursor")
+          : runtimeId === "workbuddy"
+            ? t("native.workbuddy")
+            : t("native.claude");
   return metaRow("meta.service", account);
 }
 
@@ -533,7 +542,7 @@ export function runtimeTabDotClass(
   if (!runtime.installed) {
     return "off";
   }
-  if (runtimeHasProblems(preview)) {
+  if (runtime.incomplete_install || runtimeHasProblems(preview)) {
     return "warn";
   }
   return "ok";
@@ -571,7 +580,7 @@ export function renderRuntimeTabs(
         ? t("runtime.notInstalled")
         : versionStatus?.status === "below_minimum"
           ? t("runtime.needsUpdate")
-          : runtimeHasProblems(preview)
+          : runtime.incomplete_install || runtimeHasProblems(preview)
             ? t("runtime.configAttention")
             : t("runtime.installed");
       const versionMeta = versionStatus?.installed || runtime.version;

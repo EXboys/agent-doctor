@@ -122,6 +122,16 @@ async function main() {
   );
   assert(refresh?.kind === "session_expired", "a failed token refresh is the same expired sign-in");
 
+  const cliUnauthed = explainChatFailure("Authentication required");
+  assert(
+    cliUnauthed?.kind === "session_expired",
+    "ACP CLI Authentication required should ask to sign in, not say bad API key",
+  );
+  assert(
+    cliUnauthed!.actions.includes("native") && !cliUnauthed!.message.includes("密钥"),
+    "ACP CLI unauthed offers Open Native and never mentions a pasted key",
+  );
+
   const accountModel = explainChatFailure(
     [
       "2026-10-18T03:40:45.466165Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: Connection reset by peer (os error 54), url: wss://chatgpt.com/backend-api/codex/responses",

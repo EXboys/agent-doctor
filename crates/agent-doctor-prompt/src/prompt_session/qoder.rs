@@ -19,7 +19,7 @@ use super::{
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use agent_doctor_core::adapters::qoder_cli_path;
-use agent_doctor_core::session_env::{apply_overlay_env, format_command_display};
+use agent_doctor_core::session_env::{apply_overlay_env, apply_qoder_env, format_command_display};
 use agent_doctor_core::session_launch::resolve_session_cwd;
 
 const RUNTIME_ID: &str = "qoder";
@@ -39,7 +39,13 @@ impl AskBackend for QoderAskBackend {
     }
 }
 
-fn qoder_profile() -> AcpProfile {
+fn qoder_profile(binary: &str) -> AcpProfile {
+    let lower = binary.to_ascii_lowercase();
+    let login_method = if lower.contains("qoderclicn") {
+        "qoderclicn-login"
+    } else {
+        "qodercli-login"
+    };
     AcpProfile {
         incomplete_turn: "Qoder 这一轮没有完成".into(),
         resume_fallback: "上次对话接不上，正在新开一轮。".into(),
@@ -48,6 +54,7 @@ fn qoder_profile() -> AcpProfile {
         images_note: "这个 Qoder 收不了图片，这次只带上了图里的字。".into(),
         default_tool: "这一步操作".into(),
         auth_method: None,
+        auth_on_demand: Some(login_method),
         resume_method: "session/resume",
     }
 }
@@ -94,6 +101,7 @@ fn run_qoder(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, &overlay);
+    apply_qoder_env(&mut cmd, &overlay);
     let command_display = format_command_display(&cmd);
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),
@@ -142,7 +150,7 @@ fn run_qoder(
             None,
             resume_session_id.as_deref(),
             auto_allow,
-            qoder_profile(),
+            qoder_profile(&binary),
             &mut emit,
         )
     };

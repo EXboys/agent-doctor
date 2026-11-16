@@ -3,12 +3,16 @@ mod claude;
 mod codex;
 mod hermes;
 mod openclaw;
+mod qoder;
+mod workbuddy;
 
 pub use ask_tools::*;
 pub use claude::*;
 pub use codex::*;
 pub use hermes::*;
 pub use openclaw::*;
+pub use qoder::*;
+pub use workbuddy::*;
 
 /// Legacy single-slot id (migrated away; removed when writing additive slots).
 pub const OPENCLAW_PROVIDER_ID: &str = "agent-doctor";

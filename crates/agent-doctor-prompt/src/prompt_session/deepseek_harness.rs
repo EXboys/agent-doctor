@@ -410,6 +410,7 @@ mod tests {
             next_id: 1,
             waiting: HashMap::new(),
             authenticated: true,
+            on_demand_auth_tried: false,
             acp_session: None,
             prompt_done: false,
             failed: None,

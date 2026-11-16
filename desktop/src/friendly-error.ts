@@ -497,6 +497,22 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
     };
   }
 
+  // ACP CLI (WorkBuddy / Qoder / Cursor) is not signed in yet and rejected `session/new`
+  // with bare `"Authentication required"` (no HTTP status or API URL). That is an account
+  // sign-in prompt, not a pasted API key error on the Provider page.
+  if (
+    /^authentication required\b/i.test(text) ||
+    (lower.includes("authentication required") &&
+      !/\b401\b|\b403\b|http|api[-_\s]?key|bearer/.test(lower))
+  ) {
+    return {
+      kind: "session_expired",
+      message: t("chat.fail.cliAuthRequired.message"),
+      next: t("chat.fail.cliAuthRequired.next"),
+      actions: ["native", "askAgain"],
+    };
+  }
+
   if (isGlmCodingPlanOnPayg(text, lower)) {
     return {
       kind: "glm_coding_plan",

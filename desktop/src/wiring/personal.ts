@@ -364,6 +364,14 @@ export function createPersonalController(deps: PersonalDeps) {
     return t("native.chipClaude");
   }
 
+  function loginButtonLabel(runtimeId: string): string {
+    if (runtimeId === "codex") return t("native.loginChatgpt");
+    if (runtimeId === "qoder") return t("native.loginQoder");
+    if (runtimeId === "cursor") return t("native.loginCursor");
+    if (runtimeId === "workbuddy") return t("native.loginWorkbuddy");
+    return t("native.loginClaude");
+  }
+
   function applyOkText(name: string): string {
     const kept = appState.nativeAccounts
       .filter((row) => row.using_subscription)
@@ -460,9 +468,7 @@ export function createPersonalController(deps: PersonalDeps) {
         ? provider
           ? t("native.revert", { name: provider })
           : t("native.revertCurrent")
-        : row.runtime_id === "codex"
-          ? t("native.loginChatgpt")
-          : t("native.loginClaude");
+        : loginButtonLabel(row.runtime_id);
       actions.appendChild(button);
       li.append(avatar, main, actions);
       nativeAccountListEl.appendChild(li);

@@ -12,7 +12,7 @@ use agent_doctor_repair::{
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{remember_tray_health, update_tray_tooltip};
 
@@ -376,6 +376,9 @@ pub async fn uninstall_runtime_command(app: AppHandle, runtime: String) -> Resul
         let doctor = run_doctor();
         remember_tray_health(&app_tray, &doctor);
         update_tray_tooltip(&app_tray);
+        if let Some(window) = app_tray.get_webview_window("main") {
+            let _ = window.emit("doctor-report", &doctor);
+        }
     });
     Ok(())
 }
@@ -433,6 +436,9 @@ pub async fn install_runtime_command(
         let doctor = run_doctor();
         remember_tray_health(&app_tray, &doctor);
         update_tray_tooltip(&app_tray);
+        if let Some(window) = app_tray.get_webview_window("main") {
+            let _ = window.emit("doctor-report", &doctor);
+        }
     });
     Ok(response)
 }

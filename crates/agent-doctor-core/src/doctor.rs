@@ -15,6 +15,9 @@ pub struct RuntimeDoctorResult {
     pub id: String,
     pub display_name: String,
     pub installed: bool,
+    /// Set when one half of a dual-install runtime (CLI or desktop app) is still missing.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub incomplete_install: bool,
     pub version: Option<String>,
     pub binary_path: Option<String>,
     pub config_paths: Vec<String>,
@@ -85,8 +88,24 @@ fn inspect_runtimes(adapters: &[Box<dyn RuntimeAdapter>]) -> Vec<RuntimeDoctorRe
     })
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn runtime_incomplete_install(id: &str, installed: bool) -> bool {
+    if !installed {
+        return false;
+    }
+    match id {
+        "workbuddy" => crate::adapters::workbuddy_missing_install_part().is_some(),
+        "qoder" => crate::adapters::qoder_missing_install_part().is_some(),
+        _ => false,
+    }
+}
+
 fn inspect_runtime(adapter: &dyn RuntimeAdapter) -> RuntimeDoctorResult {
     let discovery = adapter.discover();
+    let incomplete_install = runtime_incomplete_install(adapter.id(), discovery.installed);
     let profile = adapter.read_profile().unwrap_or(RuntimeProfile {
         gateway_url: None,
         key_source: None,
@@ -96,6 +115,7 @@ fn inspect_runtime(adapter: &dyn RuntimeAdapter) -> RuntimeDoctorResult {
         id: adapter.id().to_string(),
         display_name: adapter.display_name().to_string(),
         installed: discovery.installed,
+        incomplete_install,
         version: discovery.version,
         binary_path: discovery.binary_path.map(|path| path.display().to_string()),
         config_paths: adapter
@@ -113,6 +133,7 @@ fn probe_crashed(adapter: &dyn RuntimeAdapter, message: &str) -> RuntimeDoctorRe
         id: adapter.id().to_string(),
         display_name: adapter.display_name().to_string(),
         installed: false,
+        incomplete_install: false,
         version: None,
         binary_path: None,
         config_paths: Vec::new(),

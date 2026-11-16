@@ -28,20 +28,28 @@ assert.equal(pair.visibleCount, 2, "both CLIs are painted");
 assert.equal(pair.overflow, false, "two CLIs fit");
 
 // A full home: the doctor takes the first slot, the rest overflow.
-const many = ["a", "b", "c", "d", "e", "f", "g"];
-const packed = planAgentTiles(many, "a", false);
+const many = Array.from({ length: HOME_AGENT_VISIBLE + 1 }, (_, i) => `rt-${i}`);
+const last = many[many.length - 1]!;
+const packed = planAgentTiles(many, many[0]!, false);
 assert.equal(packed.overflow, true, "more CLIs than tiles overflow");
 assert.equal(packed.visibleCount, HOME_AGENT_VISIBLE - 1, "the doctor takes one tile");
 assert.equal(packed.hiddenCount, many.length - (HOME_AGENT_VISIBLE - 1), "the rest hide behind more");
 assert.equal(packed.expandForSelection, false, "a visible selection does not expand the list");
 
 // Selecting an agent past the window expands the list to reveal it.
-const hidden = planAgentTiles(many, "g", false);
+const hidden = planAgentTiles(many, last, false);
 assert.equal(hidden.expandForSelection, true, "a hidden selection expands the list");
 assert.equal(hidden.visibleCount, many.length, "the expanded list shows every CLI");
 
+// Collapsing explicitly while a deep agent is selected still collapses and keeps that agent visible.
+const collapsedDeep = planAgentTiles(many, last, false, true);
+assert.equal(collapsedDeep.expandForSelection, false, "user collapse overrides auto-expand");
+assert.equal(collapsedDeep.visibleCount, HOME_AGENT_VISIBLE - 1, "collapsed count matches budget");
+assert.ok(collapsedDeep.visibleIds.includes(last), "selected deep agent stays visible when collapsed");
+assert.ok(collapsedDeep.hiddenCount > 0, "remaining tiles hide behind show-more");
+
 // The user opened the overflow list themselves.
-const opened = planAgentTiles(many, "a", true);
+const opened = planAgentTiles(many, many[0]!, true);
 assert.equal(opened.visibleCount, many.length, "the opened list shows every CLI");
 assert.equal(opened.hiddenCount, 0, "an opened list hides nothing");
 assert.equal(opened.expandForSelection, false, "opening the list is not a selection change");

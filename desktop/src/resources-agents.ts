@@ -108,8 +108,9 @@ export function countAgentMatches(): number {
 export function stableCatalogNeedsInstall(): boolean {
   const rows = catalogAgents().filter((runtime) => runtime.id !== DOCTOR_RUNTIME_ID);
   const stable = rows.filter((runtime) => !isExperimentalRuntime(runtime.id));
-  if (stable.some((runtime) => !runtime.installed)) return true;
-  return stable.length === 0 && rows.some((runtime) => !runtime.installed);
+  const needs = (runtime: RuntimeDoctorResult) => !runtime.installed || Boolean(runtime.incomplete_install);
+  if (stable.some(needs)) return true;
+  return stable.length === 0 && rows.some(needs);
 }
 
 function renderAgentRow(runtime: RuntimeDoctorResult): HTMLLIElement {
@@ -147,9 +148,10 @@ function renderAgentRow(runtime: RuntimeDoctorResult): HTMLLIElement {
   desc.className = "res-catalog-desc";
   desc.textContent = agentCatalogBlurb(runtime.id);
   // The built-in doctor is a virtual agent: nothing to install, and the
-  // backend has no adapter for it. It gets the open button, and any stale
-  // install error on the row goes away with it.
-  const openable = runtime.installed || runtime.id === DOCTOR_RUNTIME_ID;
+  // backend has no adapter for it. Dual-install runtimes keep the Install
+  // button until both CLI and desktop app are on this computer.
+  const openable =
+    runtime.id === DOCTOR_RUNTIME_ID || (runtime.installed && !runtime.incomplete_install);
   if (runtime.id === DOCTOR_RUNTIME_ID) {
     agentInstallHint.delete(runtime.id);
   }

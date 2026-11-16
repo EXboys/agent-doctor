@@ -75,22 +75,17 @@ pub fn is_native_subscription(runtime_id: &str) -> bool {
     ) && read_mode(runtime_id) == MODE_SUBSCRIPTION
 }
 
-pub fn native_account_status(probe: bool) -> NativeAccountStatus {
+pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
     if ensure_edition_allows_mode(MODE_PERSONAL).is_err() {
         return NativeAccountStatus { rows: Vec::new() };
     }
     let provider_name = active_provider_name();
-    let (codex_up, claude_up) = if probe {
-        probe_login_sites()
-    } else {
-        (false, false)
-    };
     let mut rows = vec![
-        row(CODEX_ID, codex_up, &provider_name),
-        row(CLAUDE_ID, claude_up, &provider_name),
+        row(CODEX_ID, true, &provider_name),
+        row(CLAUDE_ID, true, &provider_name),
     ];
-    // These rows appear when that official command line is on this computer.
-    // The login site probe is for Codex and Claude only.
+    // Every installed subscription-capable CLI appears consistently; reachability
+    // is checked only when the user actually taps Sign in.
     for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID] {
         if cli_binary(runtime_id).is_some() {
             rows.push(row(runtime_id, true, &provider_name));
@@ -182,7 +177,28 @@ pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
             };
             apply_claude_code_with_model(&url, &provider.api_key, Some(provider.model.as_str()))?;
         }
-        QODER_ID | CURSOR_ID | WORKBUDDY_ID => {}
+        WORKBUDDY_ID => {
+            if provider.protocol == PROTOCOL_ANTHROPIC
+                && crate::setup::merge::hermes_chat_base_url(&provider.url)
+                    == provider.url.trim().trim_end_matches('/')
+            {
+                return Ok(switch(runtime_id, true, "unsupported", name));
+            }
+            crate::setup::merge::apply_workbuddy_with_model(
+                &provider.url,
+                &provider.api_key,
+                Some(provider.model.as_str()),
+            )?;
+        }
+        QODER_ID => {
+            crate::setup::merge::apply_qoder_with_model(
+                &provider.url,
+                &provider.api_key,
+                &provider.protocol,
+                Some(provider.model.as_str()),
+            )?;
+        }
+        CURSOR_ID => {}
         _ => bail!("unknown runtime"),
     }
     write_mode(runtime_id, "service")?;
@@ -249,7 +265,7 @@ fn cli_binary(runtime_id: &str) -> Option<PathBuf> {
     match runtime_id {
         QODER_ID => crate::adapters::qoder_cli_path(),
         CURSOR_ID => crate::adapters::cursor_cli_path(),
-        WORKBUDDY_ID => discover_binary("codebuddy").binary_path,
+        WORKBUDDY_ID => crate::adapters::workbuddy_cli_path(),
         _ => None,
     }
 }
@@ -258,9 +274,11 @@ fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<Nativ
     let Some(binary) = cli_binary(runtime_id) else {
         return Ok(switch(runtime_id, false, "missing_tool", provider_name));
     };
-    // WorkBuddy signs in inside its own command line. There is no login
-    // subcommand, and the desktop app's saved account stays where it is.
+    // WorkBuddy signs in inside its own command line. Clear any Agent Doctor
+    // API-key override first so `codebuddy` opens its sign-in screen.
     if runtime_id == WORKBUDDY_ID {
+        let _ =
+            crate::setup::merge::clear_workbuddy_provider_override_in_dir(&home_join(".codebuddy"));
         let owned = binary.to_string_lossy().into_owned();
         crate::session_launch::terminal::open_in_terminal(
             WORKBUDDY_ID,
@@ -269,6 +287,9 @@ fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<Nativ
             None,
         )?;
         return Ok(switch(runtime_id, false, "login_incomplete", provider_name));
+    }
+    if runtime_id == QODER_ID {
+        let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(&home_join(".qoder"));
     }
     if cli_logged_in(runtime_id) {
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
@@ -434,10 +455,10 @@ pub(crate) fn claude_credentials_are_oauth(value: &Value) -> bool {
 
 pub(crate) fn account_row_visible(
     using_subscription: bool,
-    reachable: bool,
+    _reachable: bool,
     installed: bool,
 ) -> bool {
-    using_subscription || (reachable && installed)
+    using_subscription || installed
 }
 
 fn release_provider_override(
@@ -723,17 +744,6 @@ fn trimmed_login_url(raw: &str) -> Option<String> {
     }
 }
 
-fn probe_login_sites() -> (bool, bool) {
-    thread::scope(|scope| {
-        let codex = scope.spawn(|| host_reachable(CODEX_LOGIN_URL));
-        let claude = scope.spawn(|| host_reachable(CLAUDE_LOGIN_URL));
-        (
-            codex.join().unwrap_or(false),
-            claude.join().unwrap_or(false),
-        )
-    })
-}
-
 fn host_reachable(url: &str) -> bool {
     let Ok(client) = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -814,8 +824,8 @@ mod tests {
     }
 
     #[test]
-    fn hidden_until_the_login_site_answers_unless_already_using_it() {
-        assert!(!account_row_visible(false, false, true));
+    fn visible_whenever_installed_or_already_using_subscription() {
+        assert!(account_row_visible(false, false, true));
         assert!(account_row_visible(false, true, true));
         assert!(account_row_visible(true, false, false));
         assert!(!account_row_visible(false, true, false));

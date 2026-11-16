@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
 use crate::adapters::util::{
-    desktop_app_candidates, desktop_app_path, discovery_from_cli, find_binary, home_join,
-    profile_from_config_paths, DesktopAppSpec,
+    desktop_app_candidates, desktop_app_path, discovery_from_cli, discovery_present, find_binary,
+    home_join, profile_from_config_paths, DesktopAppSpec,
 };
 
 pub struct QoderAdapter;
@@ -172,20 +172,14 @@ impl RuntimeAdapter for QoderAdapter {
     }
 
     fn discover(&self) -> AdapterDiscovery {
-        if qoder_missing_install_part().is_some() {
-            return AdapterDiscovery {
+        match locate_qoder() {
+            Some(QoderInstall::Cli(path)) => discovery_from_cli(path),
+            Some(QoderInstall::App(path)) => discovery_present(path),
+            None => AdapterDiscovery {
                 installed: false,
                 version: None,
                 binary_path: None,
-            };
-        }
-        if let Some(path) = qoder_cli_path() {
-            return discovery_from_cli(path);
-        }
-        AdapterDiscovery {
-            installed: false,
-            version: None,
-            binary_path: None,
+            },
         }
     }
 
@@ -194,7 +188,21 @@ impl RuntimeAdapter for QoderAdapter {
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
-        Ok(profile_from_config_paths(self.config_paths()))
+        let mut profile = profile_from_config_paths(self.config_paths());
+        let settings = home_join(".qoder/settings.json");
+        if let Ok(raw) = std::fs::read_to_string(&settings) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(url) = val
+                    .pointer("/providers/agent-doctor/baseUrl")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    profile.gateway_url = Some(url.to_string());
+                }
+            }
+        }
+        Ok(profile)
     }
 }
 
@@ -283,9 +291,9 @@ mod tests {
                 qoder_desktop_path(),
                 Some(home_join("Applications/Qoder IDE.app"))
             );
-            // App alone does not mark Qoder as installed on macOS/Windows; CLI is also required.
+            assert!(QoderAdapter.discover().installed);
             if DESKTOP_REQUIRED && cli_on_path().is_none() {
-                assert!(!QoderAdapter.discover().installed);
+                assert!(qoder_missing_install_part().is_some());
             }
         });
     }

@@ -518,6 +518,76 @@ pub fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     }
 }
 
+pub fn apply_qoder_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    if crate::setup::is_native_subscription("qoder") && resolve_hermes_overlay(overlay).is_none() {
+        scrub_subscription_gateway_env(cmd);
+        let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(
+            &crate::adapters::util::home_join(".qoder"),
+        );
+        return;
+    }
+    let protocol = overlay
+        .get(PROVIDER_PROTOCOL_ENV)
+        .map(String::as_str)
+        .unwrap_or(crate::setup::PROTOCOL_OPENAI);
+    let resolved = if protocol.eq_ignore_ascii_case(PROTOCOL_ANTHROPIC) {
+        resolve_claude_overlay(overlay).map(|(url, key)| {
+            let model = overlay
+                .get(MODEL_ENV)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            (url, key, model, PROTOCOL_ANTHROPIC)
+        })
+    } else {
+        resolve_hermes_overlay(overlay)
+            .map(|(url, key, model)| (url, key, model, crate::setup::PROTOCOL_OPENAI))
+    };
+    if let Some((url, key, model, proto)) = resolved {
+        let chosen = model
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or("deepseek-v4.1-flash");
+        cmd.env("QODER_MODEL", crate::setup::merge::qoder_model_ref(chosen));
+        let _ = crate::setup::merge::apply_qoder_with_model(&url, &key, proto, Some(chosen));
+    }
+}
+
+pub fn apply_workbuddy_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    if crate::setup::is_native_subscription("workbuddy")
+        && resolve_hermes_overlay(overlay).is_none()
+    {
+        scrub_subscription_gateway_env(cmd);
+        let _ = crate::setup::merge::clear_workbuddy_provider_override_in_dir(
+            &crate::adapters::util::home_join(".codebuddy"),
+        );
+        return;
+    }
+    if let Some((url, key, model)) = resolve_hermes_overlay(overlay) {
+        let protocol = overlay
+            .get(PROVIDER_PROTOCOL_ENV)
+            .map(String::as_str)
+            .unwrap_or(crate::setup::PROTOCOL_OPENAI);
+        // Pure Anthropic-only gateways without a known OpenAI twin cannot feed
+        // CodeBuddy's OpenAI custom-model client.
+        if protocol.eq_ignore_ascii_case(PROTOCOL_ANTHROPIC)
+            && crate::setup::merge::hermes_chat_base_url(&url) == url.trim().trim_end_matches('/')
+        {
+            return;
+        }
+        let chosen = model
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or("deepseek-v4.1-flash");
+        cmd.env("CODEBUDDY_API_KEY", &key);
+        cmd.env("CODEBUDDY_BASE_URL", &url);
+        cmd.env("CODEBUDDY_MODEL", chosen);
+        cmd.env("CODEBUDDY_SKIP_BUILTIN_MARKETPLACE", "1");
+        let _ = crate::setup::merge::apply_workbuddy_with_model(&url, &key, Some(chosen));
+    }
+}
+
 pub fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let (url, key) = resolve_deepseek_harness_overlay(overlay);
     if let Some(key) = key {
@@ -961,6 +1031,10 @@ const SUBSCRIPTION_GATEWAY_ENV: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
+    "CODEBUDDY_API_KEY",
+    "CODEBUDDY_BASE_URL",
+    "CODEBUDDY_MODEL",
+    "QODER_MODEL",
 ];
 
 pub fn scrub_subscription_gateway_env(cmd: &mut Command) {

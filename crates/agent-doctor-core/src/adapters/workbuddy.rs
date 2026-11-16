@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::adapter::{AdapterDiscovery, RuntimeAdapter, RuntimeProfile};
 use crate::adapters::util::{
-    desktop_app_candidates, desktop_app_path, discovery_from_cli, find_binary, home_join,
-    profile_from_config_paths, DesktopAppSpec,
+    desktop_app_candidates, desktop_app_path, discovery_from_cli, discovery_present, find_binary,
+    home_join, profile_from_config_paths, DesktopAppSpec,
 };
 
 pub struct WorkbuddyAdapter;
@@ -80,15 +80,11 @@ impl RuntimeAdapter for WorkbuddyAdapter {
     }
 
     fn discover(&self) -> AdapterDiscovery {
-        if workbuddy_missing_install_part().is_some() {
-            return AdapterDiscovery {
-                installed: false,
-                version: None,
-                binary_path: None,
-            };
-        }
         if let Some(cli) = workbuddy_cli_path() {
             return discovery_from_cli(cli);
+        }
+        if let Some(app) = workbuddy_desktop_path() {
+            return discovery_present(app);
         }
         AdapterDiscovery {
             installed: false,
@@ -98,11 +94,28 @@ impl RuntimeAdapter for WorkbuddyAdapter {
     }
 
     fn config_paths(&self) -> Vec<PathBuf> {
-        vec![home_join(".codebuddy/settings.json")]
+        vec![
+            home_join(".codebuddy/settings.json"),
+            home_join(".codebuddy/models.json"),
+        ]
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
-        Ok(profile_from_config_paths(self.config_paths()))
+        let mut profile = profile_from_config_paths(self.config_paths());
+        let settings = home_join(".codebuddy/settings.json");
+        if let Ok(raw) = std::fs::read_to_string(&settings) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(url) = val
+                    .pointer("/env/CODEBUDDY_BASE_URL")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    profile.gateway_url = Some(url.to_string());
+                }
+            }
+        }
+        Ok(profile)
     }
 }
 

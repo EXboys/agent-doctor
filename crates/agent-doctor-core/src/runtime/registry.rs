@@ -332,6 +332,20 @@ const WIRE_CLAUDE: WiringSpec = WiringSpec {
     anthropic_compatible: true,
 };
 
+const WIRE_QODER: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Additive,
+    effector: EffectorKind::None,
+    openai_compatible: true,
+    anthropic_compatible: true,
+};
+
+const WIRE_WORKBUDDY: WiringSpec = WiringSpec {
+    write_semantics: WriteSemantics::Additive,
+    effector: EffectorKind::None,
+    openai_compatible: true,
+    anthropic_compatible: false,
+};
+
 fn bind_openclaw_workspace(input: &WorkspaceBindInput) -> Result<RuntimeBindReport> {
     bind_openclaw(input.openclaw_agent_id, input.openclaw_workspace)
 }
@@ -613,7 +627,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_qoder),
         deep_probe: Some(probe_deep_noop),
         run_lifecycle: Some(run_qoder_lifecycle_action),
-        wiring: None,
+        wiring: Some(WIRE_QODER),
         workspace_bind: None,
         workspace_repairs: &[],
         label: "Qoder",
@@ -634,7 +648,7 @@ static RUNTIME_REGISTRY: &[RuntimeDescriptor] = &[
         schema_probe: Some(schema_workbuddy),
         deep_probe: Some(probe_deep_noop),
         run_lifecycle: Some(run_workbuddy_lifecycle_action),
-        wiring: None,
+        wiring: Some(WIRE_WORKBUDDY),
         workspace_bind: None,
         workspace_repairs: &[],
         label: "WorkBuddy",
@@ -1127,7 +1141,17 @@ mod tests {
             .filter(|entry| entry.wiring.is_some())
             .map(|entry| entry.id)
             .collect();
-        assert_eq!(wired, vec!["openclaw", "hermes", "claude-code", "codex"]);
+        assert_eq!(
+            wired,
+            vec![
+                "openclaw",
+                "hermes",
+                "claude-code",
+                "codex",
+                "qoder",
+                "workbuddy"
+            ]
+        );
         let workspace: Vec<_> = RUNTIME_REGISTRY
             .iter()
             .filter(|entry| entry.workspace_bind.is_some())
@@ -1137,7 +1161,7 @@ mod tests {
             workspace,
             vec!["openclaw", "hermes", "claude-code", "codex"]
         );
-        assert!(descriptor_by_id("qoder").unwrap().wiring.is_none());
+        assert!(descriptor_by_id("zcode").unwrap().wiring.is_none());
         assert!(descriptor_by_id("cursor").unwrap().workspace_bind.is_none());
         assert_eq!(
             descriptor_by_id("zcode").unwrap().open_session_kind,

@@ -37,17 +37,6 @@ export const repairPreviewByRuntime = new Map<string, RepairPreviewResponse>();
 export const repairFilterByRuntime = new Map<string, RepairStatusFilter>();
 export const repairConfirmRuntimeIds = new Set<string>();
 
-/** A status read that did not probe must not hide a row the last probe showed. */
-export function applyNativeAccounts(rows: NativeAccountRow[], probed: boolean): void {
-  if (probed) {
-    appState.nativeAccounts = rows;
-    return;
-  }
-  const previous = new Map(appState.nativeAccounts.map((row) => [row.runtime_id, row]));
-  appState.nativeAccounts = rows.map((row) => {
-    if (row.using_subscription) return { ...row, visible: true };
-    const earlier = previous.get(row.runtime_id);
-    if (!earlier?.reachable) return row;
-    return { ...row, reachable: true, visible: earlier.visible };
-  });
+export function applyNativeAccounts(rows: NativeAccountRow[], _probed: boolean): void {
+  appState.nativeAccounts = rows;
 }

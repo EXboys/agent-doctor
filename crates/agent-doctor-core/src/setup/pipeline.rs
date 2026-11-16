@@ -306,6 +306,24 @@ fn project_one_runtime(
                 Some(slot),
             )
         }
+        (PROTOCOL_OPENAI, "workbuddy") => merge::apply_workbuddy_with_model(
+            &bundle.gateway_url,
+            &bundle.api_key,
+            Some(&bundle.model),
+        ),
+        (_, "qoder") => {
+            let target_url = if bundle.protocol == PROTOCOL_ANTHROPIC {
+                claude_code_target_url(bundle).unwrap_or(bundle.gateway_url.as_str())
+            } else {
+                bundle.gateway_url.as_str()
+            };
+            merge::apply_qoder_with_model(
+                target_url,
+                &bundle.api_key,
+                &bundle.protocol,
+                Some(&bundle.model),
+            )
+        }
         (_, "claude-code") => project_claude_code(bundle, display_name),
         (PROTOCOL_ANTHROPIC, other) => Ok(RuntimeSetupResult {
             runtime_id: other.into(),
@@ -836,7 +854,10 @@ mod tests {
         use crate::runtime::all_runtime_ids;
 
         for id in all_runtime_ids() {
-            let wired = matches!(id, "openclaw" | "hermes" | "codex" | "claude-code");
+            let wired = matches!(
+                id,
+                "openclaw" | "hermes" | "codex" | "claude-code" | "qoder" | "workbuddy"
+            );
             assert_eq!(strategy_for(id).is_some(), wired, "{id}");
         }
         let oc = strategy_for("openclaw").unwrap();
@@ -854,7 +875,7 @@ mod tests {
         assert!(cd.anthropic_compatible);
         assert!(!cd.openai_compatible);
         assert!(strategy_for("deepseek-harness").is_none());
-        assert!(strategy_for("qoder").is_none());
+        assert!(strategy_for("zcode").is_none());
     }
 
     #[test]

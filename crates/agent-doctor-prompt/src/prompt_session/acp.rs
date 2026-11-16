@@ -41,6 +41,9 @@ pub(crate) struct AcpProfile {
     pub default_tool: String,
     /// Optional `authenticate` method id sent right after `initialize` (e.g. `"cursor_login"`).
     pub auth_method: Option<&'static str>,
+    /// Optional `authenticate` method id tried automatically when `session/new` rejects
+    /// with `-32000`/`-32001` `"Authentication required"` (e.g. WorkBuddy `"internal"`).
+    pub auth_on_demand: Option<&'static str>,
     /// Wire method for continuing a saved session (`"session/resume"` or `"session/load"`).
     pub resume_method: &'static str,
 }
@@ -55,6 +58,7 @@ impl AcpProfile {
             images_note: "这个 DeepSeek 助手收不了图片，这次只带上了图里的字。".into(),
             default_tool: "这一步操作".into(),
             auth_method: None,
+            auth_on_demand: None,
             resume_method: "session/resume",
         }
     }
@@ -68,6 +72,7 @@ impl AcpProfile {
             images_note: "这个 ACP 助手收不了图片，这次只带上了图里的字。".into(),
             default_tool: "这一步操作".into(),
             auth_method: None,
+            auth_on_demand: None,
             resume_method: "session/resume",
         }
     }
@@ -95,6 +100,7 @@ pub(crate) struct AcpState {
     pub next_id: i64,
     pub waiting: HashMap<i64, Waiting>,
     pub authenticated: bool,
+    pub on_demand_auth_tried: bool,
     pub acp_session: Option<String>,
     pub prompt_done: bool,
     pub failed: Option<String>,
@@ -137,6 +143,7 @@ where
         next_id: 1,
         waiting: HashMap::new(),
         authenticated,
+        on_demand_auth_tried: false,
         acp_session: already_open.clone(),
         prompt_done: false,
         failed: None,
@@ -276,7 +283,12 @@ fn advance_handshake(
         return Ok(());
     }
     if !state.authenticated {
-        if let Some(method_id) = state.profile.auth_method {
+        let method = if state.on_demand_auth_tried {
+            state.profile.auth_on_demand.or(state.profile.auth_method)
+        } else {
+            state.profile.auth_method
+        };
+        if let Some(method_id) = method {
             queue_rpc(
                 control,
                 state,
@@ -432,6 +444,27 @@ fn handle_acp_message<F>(
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .unwrap_or_else(|| state.profile.incomplete_turn.clone());
+        let is_auth_required = error
+            .pointer("/data/category")
+            .and_then(|v| v.as_str())
+            .is_some_and(|cat| cat == "auth")
+            || text
+                .to_ascii_lowercase()
+                .contains("authentication required");
+        if matches!(kind, Waiting::NewSession | Waiting::Resume)
+            && is_auth_required
+            && !state.on_demand_auth_tried
+            && state.profile.auth_on_demand.is_some()
+        {
+            state.on_demand_auth_tried = true;
+            state.authenticated = false;
+            on_event(PromptSessionEvent::Status {
+                session_id: session_id.to_string(),
+                phase: "auth".into(),
+                message: "正在打开浏览器登录账号，请在浏览器里确认一次…".into(),
+            });
+            return;
+        }
         if kind == Waiting::Resume {
             state.resume_rejected = true;
             on_event(PromptSessionEvent::Status {
