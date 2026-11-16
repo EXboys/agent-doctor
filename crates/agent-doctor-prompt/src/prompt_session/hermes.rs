@@ -204,11 +204,15 @@ fn run_hermes(
     let duration_ms = started.elapsed().as_millis() as u64;
     let report = match result {
         Ok((status, exit_code, stdout, stderr, timeout)) => {
+            let failed = status != PromptSessionStatus::Succeeded;
             let stream = extract_hermes_stream_final(&stdout);
-            let reply = stream
-                .text
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| extract_hermes_reply(&stdout));
+            let reply = if stream.saw_json {
+                stream.text.unwrap_or_default()
+            } else if !failed {
+                extract_hermes_reply(&stdout)
+            } else {
+                String::new()
+            };
             let runtime_thread_id = stream
                 .session_id
                 .or_else(|| extract_hermes_session_id(&stderr))
@@ -216,13 +220,17 @@ fn run_hermes(
                 .or_else(|| extract_hermes_session_id(&combine_output(&stdout, &stderr)))
                 .or_else(|| resume_session_id.map(str::to_string));
 
-            let failed = status != PromptSessionStatus::Succeeded;
             let error = if failed && hermes_rejected_stream_format(&stderr, &stdout) {
                 Some((HERMES_TOO_OLD.to_string(), true))
-            } else if failed && reply.trim().is_empty() {
+            } else if failed {
                 stream
                     .error
                     .or_else(|| extract_hermes_error_text(&stderr))
+                    .or_else(|| {
+                        (!stream.saw_json)
+                            .then(|| extract_hermes_reply(&stdout))
+                            .filter(|text| !text.trim().is_empty())
+                    })
                     .map(|text| (text, false))
             } else {
                 None
@@ -412,6 +420,7 @@ fn observe_hermes_tools(line: &str, tools: &mut ToolWatch) {
 
 #[derive(Default)]
 struct HermesStreamFinal {
+    saw_json: bool,
     text: Option<String>,
     session_id: Option<String>,
     error: Option<String>,
@@ -568,29 +577,55 @@ fn extract_hermes_stream_final(stdout: &str) -> HermesStreamFinal {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
             continue;
         };
-        match value.get("type").and_then(|v| v.as_str()) {
-            Some("system") => {
+        let Some(ty) = value.get("type").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        out.saw_json = true;
+        match ty {
+            "system" => {
                 if out.session_id.is_none() {
                     out.session_id = hermes_session_id(&value);
                 }
             }
-            Some("text" | "delta" | "assistant" | "message") => {
+            "text" | "delta" | "assistant" | "message" => {
                 if let Some(text) = hermes_text(&value) {
                     acc.push_str(&text);
                 }
             }
-            Some("result") => {
+            "result" => {
                 if let Some(sid) = hermes_session_id(&value) {
                     out.session_id = Some(sid);
                 }
-                if let Some(text) = hermes_text(&value) {
-                    if !text.trim().is_empty() {
-                        out.text = Some(text);
-                    }
-                }
+                let exit_failed = value
+                    .get("exit_code")
+                    .and_then(|v| v.as_i64())
+                    .is_some_and(|code| code != 0)
+                    || value
+                        .get("is_error")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                 if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
                     if !err.trim().is_empty() {
                         out.error = Some(err.to_string());
+                    }
+                }
+                if let Some(text) = hermes_text(&value) {
+                    if !text.trim().is_empty() {
+                        if exit_failed {
+                            // On non-zero exit, Hermes puts its abnormal-exit explainer in
+                            // `result.text` (appended after any partial fragment). Never emit
+                            // that as an assistant reply; keep it for the collapsed run log.
+                            let trailing = if !acc.is_empty() && text.starts_with(&acc) {
+                                text[acc.len()..].trim()
+                            } else {
+                                text.trim()
+                            };
+                            if out.error.is_none() && !trailing.is_empty() {
+                                out.error = Some(trailing.to_string());
+                            }
+                        } else {
+                            out.text = Some(text);
+                        }
                     }
                 }
             }
@@ -1093,6 +1128,16 @@ exit 1
         std::env::remove_var("AGENT_DOCTOR_HERMES_BIN");
         assert_eq!(report.status, PromptSessionStatus::Failed);
         assert!(report.log_excerpt.contains("Gateway inaccessible"));
+        let evs = events.lock().unwrap();
+        assert!(!evs
+            .iter()
+            .any(|ev| matches!(ev, PromptSessionEvent::Delta { .. })));
+        assert!(evs.iter().any(|ev| matches!(
+            ev,
+            PromptSessionEvent::TurnError { message, plain: false, .. }
+                if message.contains("Gateway inaccessible")
+        )));
+        drop(evs);
         let log = fs::read_to_string(dir.path().join("commands.log")).unwrap();
         assert_eq!(
             log.lines()
@@ -1147,6 +1192,63 @@ exit 1
         let got = extract_hermes_stream_final(stdout);
         assert_eq!(got.text.as_deref(), Some("hello"));
         assert_eq!(got.session_id.as_deref(), Some("s1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_result_explainer_stays_out_of_assistant_deltas() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let bin = write_fake_bin(
+            dir.path(),
+            "persistence-failed-hermes",
+            r#"#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"sid-disk"}'
+echo '{"type":"result","session_id":"sid-disk","exit_code":1,"text":"⚠️ No reply: Hermes couldn'\''t save this conversation, so it stopped rather than lose your messages."}'
+exit 1
+"#,
+        );
+        std::env::set_var("AGENT_DOCTOR_HERMES_BIN", &bin);
+        let events = StdMutex::new(Vec::new());
+        let report = HermesAskBackend
+            .run(
+                &PromptSessionOptions {
+                    runtime: "hermes".into(),
+                    prompt: "hello".into(),
+                    cwd: Some(dir.path().to_path_buf()),
+                    timeout_sec: 30,
+                    dangerously_skip_permissions: true,
+                    full_auto: false,
+                    resume_thread_id: None,
+                    selected_mcps: Vec::new(),
+                    image_paths: Vec::new(),
+                    workspace_name: None,
+                    provider_id: None,
+                    model: None,
+                    browser_tools_enabled: None,
+                    computer_use_enabled: None,
+                },
+                PromptSessionCancel::new(),
+                None,
+                &mut |ev| events.lock().unwrap().push(ev),
+            )
+            .expect("session");
+        std::env::remove_var("AGENT_DOCTOR_HERMES_BIN");
+        assert_eq!(report.status, PromptSessionStatus::Failed);
+        assert!(report
+            .log_excerpt
+            .contains("couldn't save this conversation"));
+        let evs = events.lock().unwrap();
+        assert!(
+            !evs.iter()
+                .any(|ev| matches!(ev, PromptSessionEvent::Delta { .. })),
+            "failed result text must not masquerade as an assistant reply: {evs:?}"
+        );
+        assert!(evs.iter().any(|ev| matches!(
+            ev,
+            PromptSessionEvent::TurnError { message, plain: false, .. }
+                if message.contains("couldn't save this conversation")
+        )));
     }
 
     #[cfg(unix)]

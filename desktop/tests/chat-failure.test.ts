@@ -195,6 +195,24 @@ async function main() {
     "stream drop copy hides the wire detail",
   );
 
+  const diskFull = explainChatFailure(
+    "No reply: Hermes couldn't save this conversation, so it stopped rather than lose your messages. Possible causes: the drive is out of room, or another Hermes process is holding the database. Close other Hermes windows, run hermes -p desktop doctor to check storage, then send your message again.",
+  );
+  assert(
+    diskFull?.kind === "local_storage",
+    "session persistence failure maps to local_storage",
+  );
+  assert(
+    diskFull!.actions.length === 1 && diskFull!.actions[0] === "askAgain",
+    "local storage failure offers asking again after freeing space",
+  );
+  assert(
+    !diskFull!.message.includes("doctor") &&
+      !diskFull!.next.includes("doctor") &&
+      !diskFull!.message.includes("Hermes"),
+    "local storage copy hides CLI commands and raw English",
+  );
+
   const unknown = explainChatFailure("unexpected status 500 Internal Server Error");
   assert(unknown?.kind === "unknown", "bare 500 stays unknown");
   assert(!unknown!.actions.includes("repair"), "unknown failure does not offer a settings apply");

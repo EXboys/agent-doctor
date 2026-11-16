@@ -272,6 +272,7 @@ export type ChatFailureKind =
   | "glm_coding_plan"
   | "geo_blocked"
   | "macos_denied"
+  | "local_storage"
   | "account_balance"
   | "rate_limit"
   | "session_expired"
@@ -534,6 +535,19 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
       message: t("chat.fail.macosDenied.message"),
       next: t("chat.fail.macosDenied.next"),
       actions: ["privacy"],
+    };
+  }
+
+  if (
+    /no space left on device|\benospc\b|os error 28|database or disk is full|disk is probably full|drive is out of room|couldn't save this conversation|session storage was busy/.test(
+      lower,
+    )
+  ) {
+    return {
+      kind: "local_storage",
+      message: t("chat.fail.localStorage.message"),
+      next: t("chat.fail.localStorage.next"),
+      actions: ["askAgain"],
     };
   }
 
