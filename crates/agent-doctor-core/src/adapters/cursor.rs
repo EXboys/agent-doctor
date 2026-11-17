@@ -27,8 +27,25 @@ const DESKTOP_APP: DesktopAppSpec = DesktopAppSpec {
     ],
 };
 
-fn desktop_app_path() -> Option<PathBuf> {
+/// Official Cursor desktop app (`Cursor.app` / `Cursor.exe`).
+pub fn cursor_desktop_path() -> Option<PathBuf> {
     crate::adapters::util::desktop_app_path(&DESKTOP_APP)
+}
+
+fn desktop_app_path() -> Option<PathBuf> {
+    cursor_desktop_path()
+}
+
+/// Ask needs the Cursor Agent CLI (`agent`). The desktop IDE alone is not enough.
+pub fn cursor_missing_install_part() -> Option<&'static str> {
+    if cursor_cli_path().is_some() {
+        return None;
+    }
+    if cursor_desktop_path().is_some() {
+        Some("Cursor 桌面软件已在本机，命令行还没装。")
+    } else {
+        Some("Cursor 命令行还没装。")
+    }
 }
 
 /// The official Cursor command line. The desktop app is not this binary.
@@ -143,6 +160,22 @@ mod tests {
                 found.binary_path,
                 Some(home_join("Applications/Cursor.app"))
             );
+            assert_eq!(
+                cursor_missing_install_part(),
+                Some("Cursor 桌面软件已在本机，命令行还没装。")
+            );
+        });
+    }
+
+    #[test]
+    fn agent_cli_clears_the_missing_part() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let bin = temp.path().join(".local/bin/agent");
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, b"").unwrap();
+        with_test_home(temp.path(), || {
+            assert_eq!(cursor_cli_path(), Some(bin));
+            assert_eq!(cursor_missing_install_part(), None);
         });
     }
 }

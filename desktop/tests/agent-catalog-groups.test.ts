@@ -29,7 +29,7 @@ assert.equal(installsDesktopAndCli("zcode"), true);
 assert.equal(installsDesktopAndCli("deepseek-harness"), false);
 assert.equal(installsDesktopAndCli("codex"), false);
 assert.equal(installsDesktopAndCli("claude-code"), false);
-assert.equal(installsDesktopAndCli("cursor"), false);
+assert.equal(installsDesktopAndCli("cursor"), true);
 assert.equal(installsDesktopAndCli("openclaw"), false);
 assert.equal(installsDesktopAndCli("hermes"), false);
 
@@ -38,7 +38,7 @@ assert.equal(agentCatalogGroup("doctor"), "builtin");
 assert.equal(agentCatalogGroup("codex"), "npm");
 assert.equal(agentCatalogGroup("claude-code"), "npm");
 assert.equal(agentCatalogGroup("openclaw"), "npm");
-assert.equal(agentCatalogGroup("cursor"), "npm");
+assert.equal(agentCatalogGroup("cursor"), "domestic");
 assert.equal(agentCatalogGroup("workbuddy"), "domestic");
 assert.equal(agentCatalogGroup("qoder"), "domestic");
 assert.equal(agentCatalogGroup("zcode"), "domestic");
@@ -49,7 +49,8 @@ assert.equal(agentCatalogGroup("hermes"), "experimental");
 assert(agentCatalogRank("doctor") < agentCatalogRank("codex"));
 assert(agentCatalogRank("codex") < agentCatalogRank("workbuddy"));
 assert(agentCatalogRank("claude-code") < agentCatalogRank("qoder"));
-assert(agentCatalogRank("openclaw") < agentCatalogRank("workbuddy"));
+assert(agentCatalogRank("openclaw") < agentCatalogRank("cursor"));
+assert(agentCatalogRank("cursor") < agentCatalogRank("workbuddy"));
 assert(agentCatalogRank("workbuddy") < agentCatalogRank("deepseek-harness"));
 assert(agentCatalogRank("qoder") < agentCatalogRank("hermes"));
 
@@ -58,6 +59,7 @@ const grouped = groupAgentCatalog([
   { id: "doctor" },
   { id: "qoder" },
   { id: "codex" },
+  { id: "cursor" },
   { id: "workbuddy" },
   { id: "deepseek-harness" },
   { id: "claude-code" },
@@ -73,7 +75,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   grouped.domestic.map((row) => row.id),
-  ["qoder", "workbuddy", "zcode"],
+  ["qoder", "cursor", "workbuddy", "zcode"],
 );
 assert.deepEqual(
   grouped.experimental.map((row) => row.id),

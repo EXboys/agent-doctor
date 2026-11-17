@@ -623,11 +623,12 @@ fn install_attempt_ok(probe: &RuntimeProbeReport, updating: bool) -> bool {
     !needs_binary_install(probe) && !(updating && client_still_too_old(probe))
 }
 
-/// Non-empty when one half of a dual-install bundle (`workbuddy` / `qoder`) landed and the other did not.
+/// Non-empty when one half of a dual-install bundle landed and the other did not.
 fn dual_install_partial_reason(runtime_id: &str) -> Option<&'static str> {
     let reason = match runtime_id {
         "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
         "qoder" => crate::adapters::qoder_missing_install_part(),
+        "cursor" => crate::adapters::cursor_missing_install_part(),
         _ => None,
     }?;
     (reason.contains("已装好") || reason.contains("已在本机")).then_some(reason)

@@ -424,7 +424,10 @@ fn open_cursor_session(
     _prefer_deep_link: bool,
 ) -> Result<OpenSessionReport> {
     let Some(path) = cursor_cli_path() else {
-        anyhow::bail!("桌面里的 Cursor 留在那边。这里要用它的命令行，这台电脑还没装。");
+        anyhow::bail!(
+            "{}",
+            crate::adapters::cursor_missing_install_part().unwrap_or("Cursor 命令行还没装。")
+        );
     };
     let owned = path.to_string_lossy().into_owned();
     open_in_terminal("cursor", &[&owned], cwd, prompt)

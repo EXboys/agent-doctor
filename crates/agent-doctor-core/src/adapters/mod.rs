@@ -12,7 +12,9 @@ mod zcode;
 pub use claude_code::{ClaudeCodeAdapter, CLAUDE_CODE_NPM_PACKAGE};
 pub use codex::{CodexAdapter, CODEX_NPM_PACKAGE};
 pub(crate) use cursor::cursor_desktop_installs;
-pub use cursor::{cursor_cli_path, CursorAdapter};
+pub use cursor::{
+    cursor_cli_path, cursor_desktop_path, cursor_missing_install_part, CursorAdapter,
+};
 pub use deepseek_harness::{
     DeepSeekHarnessAdapter, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, DEEPSEEK_HARNESS_CLI,
     DEEPSEEK_HARNESS_NODE_MIN, DEEPSEEK_HARNESS_NPM_PACKAGE, DEEPSEEK_HARNESS_RUNTIME_ID,

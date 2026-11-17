@@ -321,6 +321,22 @@ async function main() {
     "not logged in offers both provider and native sign-in",
   );
 
+  const cliMissing = explainChatFailure("Cursor 桌面软件已在本机，命令行还没装。");
+  assert(cliMissing?.kind === "provider_key", `cli missing kind: ${cliMissing?.kind}`);
+  assert(
+    cliMissing?.actions.includes("repair") && cliMissing?.message.includes("命令行"),
+    "cli missing points at Auto-fix",
+  );
+
+  const cursorLogin = explainChatFailure(
+    "Cursor 要用它自己的账号，服务商里的密钥用不了。请点「打开原生」登录，或换用 Codex / Claude Code / Qoder。",
+  );
+  assert(cursorLogin?.kind === "session_expired", `cursor login kind: ${cursorLogin?.kind}`);
+  assert(
+    cursorLogin?.actions.includes("native") && cursorLogin?.message.includes("Cursor"),
+    "cursor login points at Open Native",
+  );
+
   console.log("chat-failure.test.ts OK");
 }
 

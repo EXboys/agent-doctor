@@ -191,7 +191,7 @@ pub use setup::{
     apply_hermes_slot, apply_mode_switch, apply_openclaw_slot, clear_codex_placeholder_auth,
     delete_personal_provider, effector_label, evotown_agent_env_path, evotown_base_from_gateway,
     execute_personal_provider_setup, execute_setup, gateway_url_from_evotown_base,
-    is_native_subscription, list_personal_providers, load_mode_status,
+    is_native_subscription, is_runtime_logged_in, list_personal_providers, load_mode_status,
     load_personal_provider_status, native_account_status, normalize_personal_gateway_url,
     normalize_protocol, probe_endpoint_bundle, project_bundle, refresh_account_models,
     resign_native_subscription, runtime_strategies, strategy_for, switch_to_personal_mode,

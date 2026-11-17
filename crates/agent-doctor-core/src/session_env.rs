@@ -620,6 +620,41 @@ pub fn apply_qoder_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let _ = crate::setup::merge::apply_qoder_with_model(&url, &key, proto, Some(&chosen));
 }
 
+/// Cursor CLI auth: a Cursor account login, or `CURSOR_API_KEY` / `--api-key`.
+/// OpenAI-compatible personal providers are not accepted by `agent`.
+pub fn resolve_cursor_api_key(overlay: &HashMap<String, String>) -> Option<String> {
+    for key in ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"] {
+        if let Some(value) = overlay
+            .get(key)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn apply_cursor_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    // Never forward TeamUps / DeepSeek gateway env into Cursor — those keys are
+    // not Cursor credentials and would only produce confusing auth errors.
+    scrub_subscription_gateway_env(cmd);
+    if crate::setup::is_native_subscription("cursor") {
+        return;
+    }
+    // Prefer the env form so it works whether this runs before or after `acp`.
+    if let Some(key) = resolve_cursor_api_key(overlay) {
+        cmd.env("CURSOR_API_KEY", key);
+    }
+}
+
 pub fn apply_workbuddy_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     if crate::setup::is_native_subscription("workbuddy")
         && resolve_hermes_overlay(overlay).is_none()

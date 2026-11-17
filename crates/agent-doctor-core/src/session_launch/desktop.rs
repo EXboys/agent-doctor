@@ -14,6 +14,7 @@ pub(crate) const DESKTOP_APP_MISSING: &str = "这台电脑上还没有它的桌�
 /// Path to the desktop app for runtimes that ship one alongside the CLI.
 pub fn runtime_desktop_app_path(runtime: &str) -> Option<PathBuf> {
     match runtime {
+        "cursor" => crate::adapters::cursor_desktop_path(),
         "qoder" => crate::adapters::qoder_desktop_path(),
         "workbuddy" => crate::adapters::workbuddy_desktop_path(),
         "zcode" => crate::adapters::zcode_desktop_path(),
@@ -92,10 +93,11 @@ mod tests {
 
     #[test]
     fn only_dual_runtimes_look_up_a_desktop_app() {
-        for id in ["codex", "claude-code", "openclaw", "hermes", "cursor"] {
+        for id in ["codex", "claude-code", "openclaw", "hermes"] {
             assert_eq!(runtime_desktop_app_path(id), None, "{id}");
         }
         // Presence depends on the machine; the lookup itself must not panic.
+        let _ = runtime_desktop_app_path("cursor");
         let _ = runtime_desktop_app_path("qoder");
         let _ = runtime_desktop_app_path("workbuddy");
         let _ = runtime_desktop_app_path("zcode");

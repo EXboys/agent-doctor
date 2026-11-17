@@ -76,10 +76,12 @@ pub fn is_native_subscription(runtime_id: &str) -> bool {
     {
         return false;
     }
-    // When Qoder is not signed in locally, degrade to the configured custom or
-    // official provider instead of trapping Ask on a missing Qoder login.
-    if runtime_id == QODER_ID {
-        return cli_logged_in(QODER_ID);
+    // When Qoder / Cursor is not signed in locally, do not pretend the
+    // subscription is active. Qoder can fall through to a configured provider;
+    // Cursor Ask still needs a Cursor login or CURSOR_API_KEY (its CLI cannot
+    // use TeamUps / DeepSeek-style keys).
+    if matches!(runtime_id, QODER_ID | CURSOR_ID) {
+        return cli_logged_in(runtime_id);
     }
     true
 }
@@ -813,6 +815,16 @@ mod tests {
             &json!({"accessToken": "cli-token"})
         ));
         assert!(!cursor_cli_config_is_signed_in(&json!({"version": 1})));
+    }
+
+    #[test]
+    fn cursor_subscription_requires_a_saved_login() {
+        // Mode alone is not enough — same soft degrade as Qoder.
+        let _ = write_mode(CURSOR_ID, MODE_SUBSCRIPTION);
+        if !cli_logged_in(CURSOR_ID) {
+            assert!(!is_native_subscription(CURSOR_ID));
+        }
+        let _ = write_mode(CURSOR_ID, "service");
     }
 
     #[test]

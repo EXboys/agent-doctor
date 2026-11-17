@@ -20,11 +20,19 @@ use super::{
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
 use agent_doctor_core::adapters::cursor_cli_path;
-use agent_doctor_core::session_env::{apply_overlay_env, format_command_display};
+use agent_doctor_core::session_env::{
+    apply_cursor_env, apply_overlay_env, chat_uses_saved_service, format_command_display,
+    resolve_cursor_api_key,
+};
 use agent_doctor_core::session_launch::resolve_session_cwd;
 
 const RUNTIME_ID: &str = "cursor";
-const CURSOR_CLI_MISSING: &str = "桌面里的 Cursor 留在那边。这里要用它的命令行，这台电脑还没装。";
+const CURSOR_NEEDS_LOGIN: &str =
+    "Cursor 要用它自己的账号，服务商里的密钥用不了。请点「打开原生」登录，或换用 Codex / Claude Code / Qoder。";
+
+fn cursor_cli_missing() -> &'static str {
+    agent_doctor_core::adapters::cursor_missing_install_part().unwrap_or("Cursor 命令行还没装。")
+}
 
 pub struct CursorAskBackend;
 
@@ -40,7 +48,11 @@ impl AskBackend for CursorAskBackend {
     }
 }
 
-fn cursor_profile() -> AcpProfile {
+fn cursor_profile(logged_in: bool, has_api_key: bool) -> AcpProfile {
+    // CURSOR_API_KEY already authenticates the process — only fall back to the
+    // browser login if session/new still rejects. A saved Cursor login (or a
+    // first-time Ask with neither) authenticates up front, like before.
+    let preauthed = has_api_key && !logged_in;
     AcpProfile {
         incomplete_turn: "Cursor 这一轮没有完成".into(),
         resume_fallback: "上次对话接不上，正在新开一轮。".into(),
@@ -48,8 +60,8 @@ fn cursor_profile() -> AcpProfile {
         refusal: "Cursor 拒绝继续这一轮。".into(),
         images_note: "这个 Cursor 收不了图片，这次只带上了图里的字。".into(),
         default_tool: "这一步操作".into(),
-        auth_method: Some("cursor_login"),
-        auth_on_demand: None,
+        auth_method: (!preauthed).then_some("cursor_login"),
+        auth_on_demand: preauthed.then_some("cursor_login"),
         resume_method: "session/load",
     }
 }
@@ -74,7 +86,7 @@ fn run_cursor(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| cursor_cli_path().map(|path| path.display().to_string()))
-        .ok_or_else(|| anyhow::Error::msg(CURSOR_CLI_MISSING))?;
+        .ok_or_else(|| anyhow::Error::msg(cursor_cli_missing()))?;
     let timeout_sec = options.timeout_sec.clamp(MIN_TIMEOUT_SEC, MAX_TIMEOUT_SEC);
     let resume_session_id = options
         .resume_thread_id
@@ -84,6 +96,18 @@ fn run_cursor(
         .map(str::to_string);
     let auto_allow = options.dangerously_skip_permissions || options.full_auto;
     let overlay = super::collect_overlay_env_for_options(options);
+    let logged_in = agent_doctor_core::is_runtime_logged_in(RUNTIME_ID);
+    let has_cursor_key = resolve_cursor_api_key(&overlay).is_some();
+    // Cursor's CLI only accepts a Cursor login or CURSOR_API_KEY — not the
+    // OpenAI-compatible keys saved under 服务商 (unlike Codex / Qoder).
+    // Only refuse when this chat explicitly pinned a saved service; ambient
+    // active-provider overlay must not block a plain Cursor login Ask.
+    if !logged_in
+        && !has_cursor_key
+        && chat_uses_saved_service(options.model.as_deref(), options.provider_id.as_deref())
+    {
+        bail!(CURSOR_NEEDS_LOGIN);
+    }
     let images: Vec<EncodedImage> = turn_images(RUNTIME_ID, &options.image_paths, &overlay)
         .iter()
         .filter_map(|path| encode_image(path))
@@ -96,6 +120,8 @@ fn run_cursor(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, &overlay);
+    // Last: drop gateway keys overlay may have set, keep only Cursor credentials.
+    apply_cursor_env(&mut cmd, &overlay);
     let command_display = format_command_display(&cmd);
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),
@@ -109,7 +135,7 @@ fn run_cursor(
     let writer = control.unwrap_or_default();
     let mut child = cmd
         .spawn()
-        .map_err(|_| anyhow::Error::msg(CURSOR_CLI_MISSING))?;
+        .map_err(|_| anyhow::Error::msg(cursor_cli_missing()))?;
     let mut pipes = match LivePipes::attach(&mut child) {
         Ok(pipes) => pipes,
         Err(err) => {
@@ -144,7 +170,7 @@ fn run_cursor(
             None,
             resume_session_id.as_deref(),
             auto_allow,
-            cursor_profile(),
+            cursor_profile(logged_in, has_cursor_key),
             &mut emit,
         )
     };

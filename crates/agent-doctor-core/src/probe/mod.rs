@@ -322,9 +322,9 @@ fn adopt_adapter_discovery(
     }
 }
 
-/// Domestic dual-install runtimes (`workbuddy`, `qoder`) require both their CLI
-/// and their desktop client on macOS and Windows. Having only one of the two
-/// leaves `binary.exists` failed so Install completes the missing half.
+/// Dual-install runtimes need their Ask CLI. WorkBuddy / Qoder also want the
+/// desktop app on macOS and Windows. Cursor's installer only ships the CLI, so
+/// a missing desktop IDE alone is not treated as incomplete here.
 fn enforce_dual_install_bundle(
     runtime_id: &str,
     checks: &mut [ProbeCheck],
@@ -333,6 +333,7 @@ fn enforce_dual_install_bundle(
     let missing = match runtime_id {
         "workbuddy" => crate::adapters::workbuddy_missing_install_part(),
         "qoder" => crate::adapters::qoder_missing_install_part(),
+        "cursor" => crate::adapters::cursor_missing_install_part(),
         _ => None,
     };
     let Some(reason) = missing else {

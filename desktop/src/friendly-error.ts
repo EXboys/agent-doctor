@@ -492,6 +492,26 @@ export function explainChatFailure(raw: string): ChatFailureExplain | null {
 
   const account = explainLlmAccountBlock(text);
 
+  // Dual-client Ask needs the CLI. Desktop IDE alone is not enough.
+  if (text.includes("命令行还没装") || /command line.*(missing|not installed)|cli.*(missing|not installed)/i.test(lower)) {
+    return {
+      kind: "provider_key",
+      message: t("chat.fail.cliMissing.message"),
+      next: t("chat.fail.cliMissing.next"),
+      actions: ["repair", "askAgain"],
+    };
+  }
+
+  // Cursor CLI only accepts a Cursor account / CURSOR_API_KEY, not 服务商 keys.
+  if (text.includes("Cursor 要用它自己的账号") || text.includes("服务商里的密钥用不了")) {
+    return {
+      kind: "session_expired",
+      message: t("chat.fail.cursorNeedsLogin.message"),
+      next: t("chat.fail.cursorNeedsLogin.next"),
+      actions: ["native", "askAgain"],
+    };
+  }
+
   if (isExpiredSignIn(lower)) {
     return {
       kind: "session_expired",

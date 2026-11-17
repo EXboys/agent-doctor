@@ -3334,12 +3334,14 @@ body.is-diagnose-open .diagnose-detail {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 0 12px;
+  gap: 4px;
+  padding: 0 10px;
   border-radius: 10px;
   font-size: 0.74rem;
   font-weight: 650;
   box-shadow: none;
+  flex: 0 1 auto;
+  white-space: nowrap;
 }
 
 .btn-with-icon .btn-action-icon {
@@ -3983,7 +3985,7 @@ html[data-os="windows"] .resources-hub-card-desc {
   flex-wrap: wrap;
   justify-content: flex-start;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 12px;
 }
 

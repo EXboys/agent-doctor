@@ -305,6 +305,7 @@ function actionButton(
 }
 
 export function renderStandardRuntimeActions(runtimeId: string): string {
+  const dual = installsDesktopAndCli(runtimeId);
   const actions = [
     actionButton("primary", "diagnose-runtime", ACTION_ICON.diagnose, t("runtime.diagnose"), {
       title: t("runtime.diagnoseHint"),
@@ -313,17 +314,21 @@ export function renderStandardRuntimeActions(runtimeId: string): string {
       title: t("runtime.askHint"),
     }),
   ];
-  if (installsDesktopAndCli(runtimeId)) {
+  if (dual) {
     actions.push(
       actionButton("secondary", "open-desktop-app", ACTION_ICON.desktop, t("runtime.openDesktop"), {
         title: t("runtime.openDesktopHint"),
       }),
     );
+  } else {
+    // Dual already has Open on the main row — Skills goes under More so EN still fits.
+    actions.push(
+      actionButton("secondary", "open-resources-skills", ACTION_ICON.skills, t("runtime.addSkills"), {
+        title: t("runtime.addSkillsHint"),
+      }),
+    );
   }
   actions.push(
-    actionButton("secondary", "open-resources-skills", ACTION_ICON.skills, t("runtime.addSkills"), {
-      title: t("runtime.addSkillsHint"),
-    }),
     actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
       title: t("runtime.uninstallHint"),
     }),
@@ -387,16 +392,21 @@ export function renderRuntimeCardActions(
     );
   }
 
+  const dual = installsDesktopAndCli(runtime.id);
+  const skillsAdvanced = dual
+    ? `<button type="button" class="btn-ghost" data-action="open-resources-skills" title="${escapeHtml(t("runtime.addSkillsHint"))}">${escapeHtml(t("runtime.addSkills"))}</button>`
+    : "";
   parts.push(`
     <details class="runtime-advanced">
       <summary>${escapeHtml(t("runtime.advanced"))}</summary>
       ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
       <div class="runtime-advanced-actions">
         ${
-          installsDesktopAndCli(runtime.id)
+          dual
             ? ""
             : `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${escapeHtml(t("runtime.openTerminal"))}</button>`
         }
+        ${skillsAdvanced}
         <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
         <button type="button" class="btn-ghost" data-action="force-reinstall-runtime" title="${escapeHtml(t("runtime.forceReinstallHint"))}">${t("runtime.forceReinstall")}</button>
       </div>

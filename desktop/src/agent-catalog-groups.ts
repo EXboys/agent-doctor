@@ -3,10 +3,9 @@
  *
  * Groups in the Resources → Agent catalog:
  * 1. `builtin`: built into this app, ready without installing (`doctor`).
- * 2. `npm`: direct command-line installs (npm-backed first: Codex, Claude,
- *    OpenClaw, then Cursor).
- * 3. `domestic`: dual-client suites whose single Install tap sets up both
- *    the command line and the desktop app (WorkBuddy, Qoder, ZCode).
+ * 2. `npm`: direct command-line installs (Codex, Claude, OpenClaw).
+ * 3. `domestic`: dual-client suites with a desktop window and a command line
+ *    (Cursor, WorkBuddy, Qoder, ZCode).
  * 4. `experimental`: preview / unstable helpers — Hermes (installer needs
  *    overseas / GitHub network) and DeepSeek Harness (experimental preview).
  */
@@ -44,6 +43,7 @@ export const EXPERIMENTAL_RUNTIME_IDS = [
 ] as const;
 
 export const DOMESTIC_DUAL_RUNTIME_IDS = [
+  "cursor",
   "workbuddy",
   "qoder",
   "zcode",
