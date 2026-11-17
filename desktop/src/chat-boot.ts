@@ -813,10 +813,11 @@ function bootChatTail(): void {
         builtin: provider.id === OFFICIAL_PROVIDER_ID,
       }));
       const current = pickOf(activeSession());
-      const agent = current.agent || selectedRuntime();
       await teamupsChannelInventory({
         agents: agentRows(installed),
-        models: modelRows(providers, (id) => modelOptionLabel(id), agent),
+        // 不带 agent 提示：providers 全 Agent 共享，标了会被手机端当归属过滤，
+        // 电脑当前运行时和会话选的 Agent 不一样时，模型面板就开天窗了。
+        models: modelRows(providers, (id) => modelOptionLabel(id)),
         current,
       });
     } catch (error) {

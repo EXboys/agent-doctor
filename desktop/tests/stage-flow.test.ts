@@ -45,6 +45,7 @@ for (const key of [
 }
 
 const { createToolRowElement, createActivityController } = await import("../src/chat/activity");
+const { createBubblesController } = await import("../src/chat/bubbles");
 const {
   isReadOnlyTerminalCommand,
   plainRunningActivityText,
@@ -281,19 +282,194 @@ function check(name: string, ok: boolean, detail?: unknown): void {
   prose.textContent = "已读完启动脚本，接下来检查注册表与计划任务日志。";
   logEl.appendChild(prose);
 
-  // Stage 2: two more Explore tools after the prose
+  // Stage 2: two more Explore tools after the prose (turn still running)
   ctrl.pushToolStep({ id: "t3", kind: "search", name: "Grep", status: "done", query: "mihomo" });
   ctrl.pushToolStep({ id: "t4", kind: "terminal", name: "PowerShell", status: "done", command: "schtasks /query" });
+
+  const liveKids = Array.from(logEl.children);
+  check(
+    "while running, earlier tool stage stays anchored above prose and new live stage opens below prose",
+    liveKids.length === 3 &&
+      liveKids[0]!.classList.contains("chat-stage-group") &&
+      liveKids[1] === prose &&
+      liveKids[2]!.classList.contains("chat-work-stream"),
+    liveKids.map((k) => k.className),
+  );
+
+  // Final result arrives and turn completes -> entire pre-result process folds into one `.chat-work`
+  const finalAnswer = document.createElement("div");
+  finalAnswer.className = "chat-msg chat-msg-assistant";
+  finalAnswer.textContent = "结论：计划任务触发器导致 mihomo 重启。";
+  logEl.appendChild(finalAnswer);
   ctrl.sealProcessStream();
 
-  const kids = Array.from(logEl.children);
+  const settledKids = Array.from(logEl.children);
+  const workModule = settledKids[0] as HTMLDetailsElement | undefined;
   check(
-    "earlier tool stage stays anchored above prose and new tool stage opens below prose",
+    "after result returns, all execution stages + intermediate prose collapse into one closed .chat-work module",
+    settledKids.length === 2 &&
+      Boolean(workModule?.classList.contains("chat-work")) &&
+      workModule?.open === false &&
+      settledKids[1] === finalAnswer,
+    settledKids.map((k) => k.className),
+  );
+  const workBodyKids = Array.from(workModule?.querySelector(".chat-work-body")?.children ?? []);
+  check(
+    "expanding .chat-work reveals chronological stage groups interleaved with stage summary prose",
+    workBodyKids.length === 3 &&
+      workBodyKids[0]!.classList.contains("chat-stage-group") &&
+      workBodyKids[1]!.classList.contains("chat-work-prose") &&
+      workBodyKids[2]!.classList.contains("chat-stage-group"),
+    workBodyKids.map((k) => k.className),
+  );
+}
+
+// 7. Completed repaint via createBubblesController: single tool & multi-stage turns fold into .chat-work
+{
+  const logEl = document.createElement("div");
+  logEl.className = "chat-log";
+  const titleEl = document.createElement("div");
+  let busy = false;
+  let completing = false;
+  const session: import("../src/chat/types").ChatSession = {
+    id: "s1",
+    title: "测试折叠",
+    runtime: "doctor",
+    createdAt: 1,
+    updatedAt: 10,
+    messages: [
+      { id: "u1", role: "user", content: "检查项目配置", at: 1 },
+      { id: "th1", role: "thinking", content: "先读取配置文件", at: 2, durationMs: 3000 },
+      {
+        id: "tl1",
+        role: "tool",
+        content: "调用工具 Read…\nconfig.toml",
+        at: 3,
+        step: { id: "st1", kind: "read", name: "Read", status: "done", path: "config.toml" },
+      },
+      { id: "a_mid", role: "assistant", content: "已读完配置，接下来运行检查命令。", at: 4 },
+      {
+        id: "tl2",
+        role: "tool",
+        content: "调用工具 Bash…\ncargo check",
+        at: 5,
+        step: { id: "st2", kind: "terminal", name: "Bash", status: "done", command: "cargo check" },
+      },
+      {
+        id: "tl3",
+        role: "tool",
+        content: "调用工具 Bash…\ncargo test",
+        at: 6,
+        step: { id: "st3", kind: "terminal", name: "Bash", status: "done", command: "cargo test" },
+      },
+      { id: "a_final", role: "assistant", content: "检查完成，配置正常。", at: 7 },
+    ],
+  };
+  let assistantBubble: HTMLElement | null = null;
+  let assistantMessageId: string | null = null;
+  let assistantRaw = "";
+  let pendingText = "";
+  let turnHadText = false;
+  let activityEl: HTMLElement | null = null;
+  let toolGroupEl: HTMLDetailsElement | null = null;
+  let lifecycleEl: HTMLElement | null = null;
+
+  const bubbles = createBubblesController({
+    logEl,
+    titleEl,
+    getBusy: () => busy,
+    getStore: () => ({ activeId: session.id, sessions: [session] }),
+    isViewingRunningSession: () => busy,
+    isTurnCompleting: () => completing,
+    runTargetSession: () => session,
+    activeSession: () => session,
+    selectedRuntime: () => "doctor",
+    sessionTitle: (s) => s.title,
+    touchSession: () => {},
+    saveStore: () => {},
+    flushStorePersist: () => {},
+    scheduleStorePersist: () => {},
+    scheduleSessionListRender: () => {},
+    renderSessionList: () => {},
+    updateContextMeter: () => {},
+    pushActivity: () => {},
+    settleActivity: () => {},
+    finishToolGroup: () => {},
+    dismissLifecycleActivity: () => {},
+    collapseResolvedPermissionsBeforeAssistant: () => {},
+    renderPermissionCard: () => document.createElement("div"),
+    renderPermissionGroup: () => document.createElement("details"),
+    getPendingPermissionBatch: () => [],
+    getAssistantBubble: () => assistantBubble,
+    setAssistantBubble: (el) => {
+      assistantBubble = el;
+    },
+    getAssistantMessageId: () => assistantMessageId,
+    setAssistantMessageId: (id) => {
+      assistantMessageId = id;
+    },
+    getAssistantRaw: () => assistantRaw,
+    setAssistantRaw: (raw) => {
+      assistantRaw = raw;
+    },
+    getPendingText: () => pendingText,
+    setPendingText: (text) => {
+      pendingText = text;
+    },
+    getTurnHadAssistantText: () => turnHadText,
+    setTurnHadAssistantText: (v) => {
+      turnHadText = v;
+    },
+    getActivityEl: () => activityEl,
+    setActivityEl: (el) => {
+      activityEl = el;
+    },
+    getToolGroupEl: () => toolGroupEl,
+    setToolGroupEl: (el) => {
+      toolGroupEl = el;
+    },
+    getLifecycleActivityEl: () => lifecycleEl,
+    setLifecycleActivityEl: (el) => {
+      lifecycleEl = el;
+    },
+    addProject: () => {},
+    openProvider: () => {},
+    draftPrompt: () => {},
+  });
+
+  // Completed repaint (same path stream.ts runs on `completed` with isTurnCompleting = true)
+  busy = true;
+  completing = true;
+  bubbles.renderActiveMessages();
+  busy = false;
+  completing = false;
+
+  const kids = Array.from(logEl.children);
+  const fold = kids[1] as HTMLDetailsElement | undefined;
+  const label = fold?.querySelector(".chat-work-label")?.textContent ?? "";
+  check(
+    "completed repaint renders [user, closed .chat-work, final assistant]",
     kids.length === 3 &&
-      kids[0]!.classList.contains("chat-stage-group") &&
-      kids[1] === prose &&
-      kids[2]!.classList.contains("chat-stage-group"),
+      kids[0]!.classList.contains("chat-msg-user") &&
+      Boolean(fold?.classList.contains("chat-work")) &&
+      fold?.open === false &&
+      kids[2]!.classList.contains("chat-msg-assistant"),
     kids.map((k) => k.className),
+  );
+  check(
+    "collapsed .chat-work header summarizes read and terminal counts",
+    label.includes("查阅 1 个文件") && label.includes("执行 2 条命令"),
+    label,
+  );
+  const inner = Array.from(fold?.querySelector(".chat-work-body")?.children ?? []);
+  check(
+    "inside .chat-work-body: thinking, single read row, stage summary prose, and grouped terminal stage",
+    inner.length === 4 &&
+      inner[0]!.classList.contains("chat-thinking") &&
+      inner[1]!.classList.contains("chat-tool-row") &&
+      inner[2]!.classList.contains("chat-work-prose") &&
+      inner[3]!.classList.contains("chat-stage-group"),
+    inner.map((n) => n.className),
   );
 }
 

@@ -3689,7 +3689,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   }
 }
 
-/* The reopen arrow stays out of the way until the pointer is on this row. */
+/* Disclosure arrow stays visible on folded process bars, brightening on hover. */
 .chat-thinking-chevron {
   display: block;
   flex: 0 0 auto;
@@ -3699,7 +3699,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  opacity: 0;
+  opacity: 0.52;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
@@ -4028,7 +4028,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  opacity: 0;
+  opacity: 0.52;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
@@ -4054,9 +4054,27 @@ body.chat-project-dragging .chat-session-group-drag-handle {
 
 .chat-work-body .chat-thinking,
 .chat-work-body .chat-tool-group,
+.chat-work-body .chat-stage-group,
+.chat-work-body .chat-tool-row,
 .chat-stage-body .chat-tool-row {
   max-width: 100%;
   margin: 0;
+}
+
+.chat-work-prose {
+  margin: 2px 0;
+  padding: 2px 6px 2px 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.chat-work-prose > :first-child {
+  margin-top: 0;
+}
+
+.chat-work-prose > :last-child {
+  margin-bottom: 0;
 }
 
 /* Stage-grouped tool rows (ZCode Explore / Terminal / Changes / Browser) */
@@ -4170,7 +4188,7 @@ body.chat-project-dragging .chat-session-group-drag-handle {
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  opacity: 0;
+  opacity: 0.52;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 
@@ -9808,6 +9826,10 @@ html[data-theme="dark"] .chat-stage-group.is-live .chat-stage-label {
 html[data-theme="dark"] .chat-work-body,
 html[data-theme="dark"] .chat-stage-body {
   border-left-color: rgba(255, 255, 255, 0.14);
+}
+
+html[data-theme="dark"] .chat-work-prose {
+  color: rgba(255, 255, 255, 0.68);
 }
 
 html[data-theme="dark"] .chat-thinking-summary:hover {

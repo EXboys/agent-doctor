@@ -39,10 +39,11 @@ import {
 import { markTurnNoticeShown, pushChatTurnError, pushChatTurnReport } from "./turn-errors";
 import {
   appendToolRowToStageStream,
+  foldCompletedTurnInLog,
   placeProcessBlock,
   refreshStageRowInStream,
-  sealProcessContainer,
   sealWorkGroup,
+  settleProcessSegment,
   settleTrailingStageInStream,
   wrapProcessRows,
 } from "./work-trail";
@@ -1247,7 +1248,7 @@ export function createActivityController(deps: ActivityDeps) {
       after = after.nextElementSibling;
     }
     if (crossedProse) {
-      sealProcessContainer(processStream);
+      settleProcessSegment(processStream);
       processStream = wrapProcessRows([], true);
       placeProcessBlock(deps.logEl, processStream);
     }
@@ -1260,14 +1261,13 @@ export function createActivityController(deps: ActivityDeps) {
     stream.append(el);
   }
 
-  /** Settle the active process segment in place into stage-grouped rows. */
+  /** Turn finished: settle the active stream and fold the turn's execution process into `.chat-work`. */
   function sealProcessStream(): void {
-    if (!processStream?.isConnected) {
-      processStream = null;
-      return;
+    if (processStream?.isConnected) {
+      settleProcessSegment(processStream);
     }
-    sealProcessContainer(processStream);
     processStream = null;
+    foldCompletedTurnInLog(deps.logEl);
   }
 
   function appendActivityRow(phase: string, kind: string, text: string): void {
@@ -1280,9 +1280,11 @@ export function createActivityController(deps: ActivityDeps) {
     if (shouldAppend) {
       deps.flushPendingTextSync();
       deps.sealAssistantBubble();
-      // The text segment sealed above closes this tool container: the next
-      // reply segment opens a fresh one after it, keeping rows chronological.
-      sealProcessStream();
+      // Settle the current mid-turn segment in place without folding the whole turn yet.
+      if (processStream?.isConnected) {
+        settleProcessSegment(processStream);
+        processStream = null;
+      }
       settleActivity();
       const row = document.createElement("div");
       row.className = `chat-activity is-live kind-${kind}`;

@@ -25,7 +25,7 @@ import { followChatLog, noteTurnUserAt, pinChatLog, renderToolHistoryGroup, with
 import { markThinkingLive, renderThinkingBlock } from "./thinking";
 import { linkFileMentions } from "./file-links";
 import { appendRunLogMessage, omitBareToolStarts, storeToolStep } from "./tool-records";
-import { wrapProcessRows } from "./work-trail";
+import { buildStageFlowNodes, wrapProcessRows } from "./work-trail";
 import { scheduleQuestionRail, syncQuestionRail } from "./question-rail";
 import {
   assistantMsgWrap,
@@ -1092,6 +1092,153 @@ export function createBubblesController(deps: BubblesDeps) {
     });
     log.prepend(button);
   }
+  function createWorkProseEl(markdown: string): HTMLElement {
+    const prose = document.createElement("div");
+    prose.className = "chat-work-prose chat-md";
+    const source = markdown.trim();
+    if (source) {
+      const { html, truncated } = renderAssistantHtml(source);
+      prose.innerHTML = html;
+      if (truncated) appendFullReplyToggle(prose, source, { deferHighlight: true, skipCopySync: true });
+      enhanceCodeBlocks(prose, { defer: true });
+      linkFileMentions(prose);
+    }
+    return prose;
+  }
+  function collectProcessRun(messages: ChatMessage[], startIdx: number, endIdx: number): {
+    rows: HTMLElement[];
+    nextIndex: number;
+  } {
+    const rows: HTMLElement[] = [];
+    let i = startIdx;
+    while (i < endIdx) {
+      const current = messages[i]!;
+      if (current.role === "tool") {
+        const run: ChatMessage[] = [current];
+        while (i + run.length < endIdx && messages[i + run.length]!.role === "tool") {
+          run.push(messages[i + run.length]!);
+        }
+        rows.push(
+          renderToolHistoryGroup(
+            omitBareToolStarts(
+              run.map((item) =>
+                item.step || item.skippedTools
+                  ? { text: item.content, step: item.step, skipped: item.skippedTools }
+                  : item.content,
+              ),
+            ),
+          ),
+        );
+        i += run.length;
+        continue;
+      }
+      if (current.role === "thinking") {
+        if (current.content.trim()) {
+          rows.push(
+            renderThinkingBlock(current.content, {
+              id: current.id,
+              durationMs: current.durationMs,
+            }),
+          );
+        }
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    return { rows, nextIndex: i };
+  }
+  function renderNonProcessMessage(
+    messages: ChatMessage[],
+    index: number,
+    limit: number,
+    target: HTMLElement,
+    covered: { hidden: Set<number>; failedLogs: Set<number> },
+    runtime: ChatSession["runtime"],
+  ): number {
+    const message = messages[index]!;
+    if (message.role === "permission") {
+      const pendingLive =
+        deps.isViewingRunningSession() &&
+        message.permission?.allowed == null &&
+        deps.getPendingPermissionBatch().some((p) => p.requestId === message.permission?.requestId);
+      if (pendingLive) return index + 1;
+      // Unanswered asks stay as standalone cards — never fold into "$ N tools".
+      if (message.permission?.allowed == null) {
+        const needsReply =
+          message.permission?.inputMode === "line" ||
+          message.permission?.inputMode === "secret" ||
+          message.permission?.inputMode === "options";
+        target.appendChild(deps.renderPermissionCard(message, needsReply));
+        return index + 1;
+      }
+      const run: ChatMessage[] = [message];
+      while (index + run.length < limit && messages[index + run.length]!.role === "permission") {
+        const next = messages[index + run.length]!;
+        if (next.permission?.allowed == null) break;
+        const nextPending =
+          deps.isViewingRunningSession() &&
+          deps.getPendingPermissionBatch().some((p) => p.requestId === next.permission?.requestId);
+        if (nextPending) break;
+        run.push(next);
+      }
+      if (run.length >= 2) {
+        try {
+          target.appendChild(deps.renderPermissionGroup(run, false));
+        } catch {
+          for (const item of run) target.appendChild(deps.renderPermissionCard(item, false));
+        }
+      } else {
+        target.appendChild(deps.renderPermissionCard(message, false));
+      }
+      return index + run.length;
+    }
+    if (message.role === "assistant") {
+      const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
+      const liveContent =
+        deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()
+          ? deps.getAssistantRaw()
+          : message.content;
+      const streaming = Boolean(deps.getBusy() && message.id === deps.getAssistantMessageId());
+      if (streaming) {
+        bubble.classList.add("is-streaming");
+        deps.setAssistantBubble(bubble);
+      }
+      setAssistantMarkdown(bubble, liveContent, { deferHighlight: true, skipCopySync: true });
+      syncAssistantTime(bubble, message.at, streaming);
+      target.appendChild(wrap);
+      return index + 1;
+    }
+    if (message.role === "user") {
+      const { wrap } = createUserBubbleEl({
+        id: message.id,
+        text: message.content,
+        attachments: message.attachments,
+      });
+      target.appendChild(wrap);
+      return index + 1;
+    }
+    if (covered.hidden.has(index)) return index + 1;
+    if (isLogMessage(message)) {
+      const failed = covered.failedLogs.has(index);
+      const row = appendRunLog(
+        target,
+        message.content,
+        failed ? runLogFailureLabel(message.content, runtime) : undefined,
+      );
+      if (failed && row) deps.attachRunLogFailure?.(row, message.content);
+      return index + 1;
+    }
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${message.role}`;
+    bubble.dataset.messageId = message.id;
+    const shown = isRunLogPointer(message.content) ? agentFailedLine(runtime) : message.content;
+    if (!mountFailedCommand(bubble, shown)) bubble.textContent = shown;
+    const strip = renderAttachmentStrip(message.attachments);
+    if (strip) bubble.appendChild(strip);
+    target.appendChild(bubble);
+    return index + 1;
+  }
   function renderMessageRange(
     messages: ChatMessage[],
     start: number,
@@ -1101,145 +1248,134 @@ export function createBubblesController(deps: BubblesDeps) {
     runtime: ChatSession["runtime"],
   ): void {
     perfMark("history-render");
+    let latestUserIdx = 0;
+    for (let k = messages.length - 1; k >= 0; k -= 1) {
+      if (messages[k]?.role === "user") {
+        latestUserIdx = k;
+        break;
+      }
+    }
+    const sessionRunning =
+      deps.getBusy() && deps.isViewingRunningSession() && !deps.isTurnCompleting();
+
     for (let i = start; i < end; ) {
-      const message = messages[i];
-      if (message.role === "tool" || message.role === "thinking") {
-        const rows: HTMLElement[] = [];
-        while (i < end) {
-          const current = messages[i];
-          if (current.role === "tool") {
-            const run: ChatMessage[] = [current];
-            while (i + run.length < end && messages[i + run.length].role === "tool") {
-              run.push(messages[i + run.length]);
-            }
-            rows.push(
-              renderToolHistoryGroup(
-                omitBareToolStarts(
-                  run.map((item) =>
-                    item.step || item.skippedTools
-                      ? { text: item.content, step: item.step, skipped: item.skippedTools }
-                      : item.content,
-                  ),
-                ),
-              ),
-            );
-            i += run.length;
-            continue;
-          }
-          if (current.role === "thinking") {
-            if (current.content.trim()) {
-              rows.push(
-                renderThinkingBlock(current.content, {
-                  id: current.id,
-                  durationMs: current.durationMs,
-                }),
-              );
-            }
-            i += 1;
-            continue;
-          }
+      const message = messages[i]!;
+      if (message.role === "user") {
+        i = renderNonProcessMessage(messages, i, end, target, covered, runtime);
+        continue;
+      }
+
+      let turnEnd = i + 1;
+      while (turnEnd < end && messages[turnEnd]?.role !== "user") {
+        turnEnd += 1;
+      }
+      const turnLive = sessionRunning && i >= latestUserIdx;
+      let turnHasProcess = false;
+      for (let k = i; k < turnEnd; k += 1) {
+        const cur = messages[k]!;
+        if (cur.role === "tool" || (cur.role === "thinking" && cur.content.trim().length > 0)) {
+          turnHasProcess = true;
           break;
         }
-        const live =
-          deps.getBusy() &&
-          deps.isViewingRunningSession() &&
-          !deps.isTurnCompleting() &&
-          i >= messages.length;
-        if (live) {
-          const lastRow = rows[rows.length - 1];
-          if (lastRow instanceof HTMLDetailsElement && lastRow.classList.contains("chat-thinking")) {
-            markThinkingLive(lastRow);
+      }
+
+      if (!turnLive && turnHasProcess) {
+        let finalAssistantIdx = -1;
+        for (let k = turnEnd - 1; k >= i; k -= 1) {
+          const cur = messages[k]!;
+          if (cur.role === "assistant" && cur.content.trim().length > 0) {
+            finalAssistantIdx = k;
+            break;
           }
         }
-        if (rows.length >= 1) {
-          target.appendChild(wrapProcessRows(rows, live));
-        }
-        continue;
-      }
-      if (message.role === "permission") {
-        const pendingLive =
-          deps.isViewingRunningSession() &&
-          message.permission?.allowed == null &&
-          deps.getPendingPermissionBatch().some((p) => p.requestId === message.permission?.requestId);
-        if (pendingLive) {
-          i += 1;
-          continue;
-        }
-        // Unanswered asks stay as standalone cards — never fold into "$ N tools".
-        if (message.permission?.allowed == null) {
-          const needsReply =
-            message.permission?.inputMode === "line" ||
-            message.permission?.inputMode === "secret" ||
-            message.permission?.inputMode === "options";
-          target.appendChild(deps.renderPermissionCard(message, needsReply));
-          i += 1;
-          continue;
-        }
-        const run: ChatMessage[] = [message];
-        while (i + run.length < end && messages[i + run.length].role === "permission") {
-          const next = messages[i + run.length];
-          if (next.permission?.allowed == null) break;
-          const nextPending =
-            deps.isViewingRunningSession() &&
-            deps.getPendingPermissionBatch().some((p) => p.requestId === next.permission?.requestId);
-          if (nextPending) break;
-          run.push(next);
-        }
-        if (run.length >= 2) {
-          try {
-            target.appendChild(deps.renderPermissionGroup(run, false));
-          } catch {
-            for (const item of run) target.appendChild(deps.renderPermissionCard(item, false));
+        const preEnd = finalAssistantIdx >= 0 ? finalAssistantIdx : turnEnd;
+        const preUnits: HTMLElement[] = [];
+        let preAnchor: Comment | null = null;
+        const ensurePreAnchor = () => {
+          if (!preAnchor) {
+            preAnchor = document.createComment("turn-work");
+            target.appendChild(preAnchor);
           }
-        } else {
-          target.appendChild(deps.renderPermissionCard(message, false));
+        };
+
+        for (let k = i; k < preEnd; ) {
+          const cur = messages[k]!;
+          if (cur.role === "tool" || cur.role === "thinking") {
+            const { rows, nextIndex } = collectProcessRun(messages, k, preEnd);
+            if (rows.length > 0) {
+              ensurePreAnchor();
+              preUnits.push(...rows);
+            }
+            k = nextIndex;
+            continue;
+          }
+          if (finalAssistantIdx >= 0 && cur.role === "assistant") {
+            if (cur.content.trim()) {
+              ensurePreAnchor();
+              preUnits.push(createWorkProseEl(cur.content));
+            }
+            k += 1;
+            continue;
+          }
+          k = renderNonProcessMessage(messages, k, preEnd, target, covered, runtime);
         }
-        i += run.length;
+
+        if (preAnchor) {
+          if (preUnits.length > 0) {
+            (preAnchor as Comment).replaceWith(wrapProcessRows(preUnits, false));
+          } else {
+            (preAnchor as Comment).remove();
+          }
+        }
+
+        if (finalAssistantIdx >= 0) {
+          renderNonProcessMessage(messages, finalAssistantIdx, turnEnd, target, covered, runtime);
+          for (let k = finalAssistantIdx + 1; k < turnEnd; ) {
+            const cur = messages[k]!;
+            if (cur.role === "tool" || cur.role === "thinking") {
+              const { rows, nextIndex } = collectProcessRun(messages, k, turnEnd);
+              if (rows.length > 0) {
+                target.appendChild(wrapProcessRows(rows, false));
+              }
+              k = nextIndex;
+              continue;
+            }
+            k = renderNonProcessMessage(messages, k, turnEnd, target, covered, runtime);
+          }
+        }
+
+        i = turnEnd;
         continue;
       }
-      if (message.role === "assistant") {
-        const { wrap, bubble } = createAssistantBubbleEl({ id: message.id });
-        const liveContent =
-          deps.getBusy() && message.id === deps.getAssistantMessageId() && deps.getAssistantRaw()
-            ? deps.getAssistantRaw()
-            : message.content;
-        const streaming = Boolean(deps.getBusy() && message.id === deps.getAssistantMessageId());
-        if (streaming) {
-          bubble.classList.add("is-streaming");
-          deps.setAssistantBubble(bubble);
+
+      // Live running turn (or plain Q&A turn without tools/thinking): keep live alternating rhythm.
+      for (let k = i; k < turnEnd; ) {
+        const cur = messages[k]!;
+        if (cur.role === "tool" || cur.role === "thinking") {
+          const { rows, nextIndex } = collectProcessRun(messages, k, turnEnd);
+          const tailLive = turnLive && nextIndex >= messages.length;
+          if (tailLive) {
+            const lastRow = rows[rows.length - 1];
+            if (lastRow instanceof HTMLDetailsElement && lastRow.classList.contains("chat-thinking")) {
+              markThinkingLive(lastRow);
+            }
+          }
+          if (rows.length >= 1) {
+            if (tailLive) {
+              target.appendChild(wrapProcessRows(rows, true));
+            } else {
+              // Settled earlier segment inside a still-running turn stays interleaved above prose.
+              for (const node of buildStageFlowNodes(rows, false)) {
+                target.appendChild(node);
+              }
+            }
+          }
+          k = nextIndex;
+          continue;
         }
-        setAssistantMarkdown(bubble, liveContent, { deferHighlight: true, skipCopySync: true });
-        syncAssistantTime(bubble, message.at, streaming);
-        target.appendChild(wrap);
-      } else if (message.role === "user") {
-        const { wrap } = createUserBubbleEl({
-          id: message.id,
-          text: message.content,
-          attachments: message.attachments,
-        });
-        target.appendChild(wrap);
-      } else if (covered.hidden.has(i)) {
-        i += 1;
-        continue;
-      } else if (isLogMessage(message)) {
-        const failed = covered.failedLogs.has(i);
-        const row = appendRunLog(
-          target,
-          message.content,
-          failed ? runLogFailureLabel(message.content, runtime) : undefined,
-        );
-        if (failed && row) deps.attachRunLogFailure?.(row, message.content);
-      } else {
-        const bubble = document.createElement("div");
-        bubble.className = `chat-bubble ${message.role}`;
-        bubble.dataset.messageId = message.id;
-        const shown = isRunLogPointer(message.content) ? agentFailedLine(runtime) : message.content;
-        if (!mountFailedCommand(bubble, shown)) bubble.textContent = shown;
-        const strip = renderAttachmentStrip(message.attachments);
-        if (strip) bubble.appendChild(strip);
-        target.appendChild(bubble);
+        k = renderNonProcessMessage(messages, k, turnEnd, target, covered, runtime);
       }
-      i += 1;
+      i = turnEnd;
     }
   }
   function renderActiveMessages(): void {

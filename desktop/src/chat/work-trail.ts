@@ -231,6 +231,21 @@ function collectFlatProcessUnits(nodes: Iterable<Element>): HTMLElement[] {
         return;
       }
     }
+    if (node.classList.contains("chat-msg-assistant")) {
+      const bubble = node.querySelector<HTMLElement>(":scope > .chat-bubble.assistant");
+      if (bubble && bubble.innerHTML.trim()) {
+        const prose = document.createElement("div");
+        prose.className = "chat-work-prose chat-md";
+        prose.innerHTML = bubble.innerHTML;
+        out.push(prose);
+      } else if (node.textContent?.trim()) {
+        const prose = document.createElement("div");
+        prose.className = "chat-work-prose chat-md";
+        prose.textContent = node.textContent.trim();
+        out.push(prose);
+      }
+      return;
+    }
     if (node instanceof HTMLElement) out.push(node);
   };
   for (const node of nodes) visit(node);
@@ -368,6 +383,20 @@ export function refreshStageRowInStream(row: HTMLElement, tailRunning = true): v
   }
 }
 
+function summarizeTrailLabel(toolRows: HTMLElement[]): { label: string; infos: ToolActivityInfo[] } {
+  const infos = toolRows.map(rowActivityInfo);
+  if (toolRows.length === 0) {
+    return { label: t("chat.workDone"), infos };
+  }
+  const base = summarizeToolActivities(infos);
+  const failed = toolRows.filter(
+    (r) => r.classList.contains("is-failed") || readRowStep(r)?.status === "failed",
+  ).length;
+  const parts = [base || t("chat.workDone")];
+  if (failed > 0) parts.push(t("chat.workFailedCount", { count: String(failed) }));
+  return { label: parts.join(" · "), infos };
+}
+
 export function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
   const trail = document.createElement("details");
   trail.className = "chat-work";
@@ -380,43 +409,56 @@ export function completedTrail(rows: HTMLElement[]): HTMLDetailsElement {
     </summary>
     <div class="chat-work-body"></div>
   `;
-  const toolRows = rows.flatMap((row) => [
-    ...(row.matches(".chat-tool-row") ? [row] : []),
-    ...row.querySelectorAll<HTMLElement>(".chat-tool-row"),
-  ]);
-  const infos = toolRows.map(rowActivityInfo);
-  trail.querySelector<HTMLElement>(".chat-work-label")!.textContent =
-    summarizeToolActivities(infos) || t("chat.workDone");
+  const flat = collectFlatProcessUnits(rows);
+  const toolRows = flat.filter((unit) => unit.classList.contains("chat-tool-row"));
+  const { label, infos } = summarizeTrailLabel(toolRows);
+  trail.querySelector<HTMLElement>(".chat-work-label")!.textContent = label;
   const files = changedFileChips(infos);
   if (files) trail.querySelector(".chat-work-summary")!.append(files);
   const body = trail.querySelector<HTMLElement>(".chat-work-body")!;
-  for (const unit of collectFlatProcessUnits(rows)) body.append(unit);
+  const staged = buildStageFlowNodes(flat, false);
+  // If the entire trail is a single stage group, unwrap its rows so expanding
+  // `.chat-work` shows the steps in one click instead of repeating the same header.
+  if (staged.length === 1 && staged[0]!.classList.contains("chat-stage-group")) {
+    const inner = staged[0]!.querySelector<HTMLElement>(":scope > .chat-stage-body");
+    if (inner) body.append(...Array.from(inner.children));
+    else body.append(...staged);
+  } else {
+    body.append(...staged);
+  }
   return trail;
 }
 
 /**
- * Wrap a contiguous segment of process rows (thinking + tools between prose
- * paragraphs). Instead of collapsing an entire 40-step turn into one giant
- * opaque `查阅 6 个文件 · 其他 31 项` box, consecutive same-stage tools fold
- * into compact stage rows (`查阅 3 个文件 · 搜索 2 次`, `执行 4 条命令`) while
- * thinking rows and single tools stay in chronological rhythm.
+ * Wrap process rows according to turn state:
+ * - While `live`: keep an open streaming container with live stage bars and
+ *   single-line thinking tickers so prose and tools alternate in real time.
+ * - Once completed (`!live`): collapse the execution process into one folded
+ *   `<details class="chat-work">` module (a lone thinking block is already a
+ *   collapsed `<details class="chat-thinking">`), keeping stage-grouped rows
+ *   inside `.chat-work-body` when expanded.
  */
 export function wrapProcessRows(rows: HTMLElement[], live = false): HTMLElement {
-  const staged = buildStageFlowNodes(rows, live);
-  if (!live && staged.length === 1) return staged[0]!;
-  const stream = document.createElement("div");
-  stream.className = live ? "chat-work-stream is-live" : "chat-work-stream";
-  stream.append(...staged);
-  return stream;
+  if (live) {
+    const staged = buildStageFlowNodes(rows, true);
+    const stream = document.createElement("div");
+    stream.className = "chat-work-stream is-live";
+    stream.append(...staged);
+    return stream;
+  }
+  const flat = collectFlatProcessUnits(rows);
+  if (flat.length === 1 && flat[0]!.classList.contains("chat-thinking")) {
+    return flat[0]!;
+  }
+  return completedTrail(flat);
 }
 
-/** Fold one finished tool group into stage-grouped rows in place. */
+/** Fold one finished tool group into a collapsed trail in place. */
 export function sealWorkGroup(group: HTMLDetailsElement): void {
   if (!group.isConnected || !group.querySelector(".chat-tool-row")) return;
   const marker = document.createComment("finished work");
   group.before(marker);
-  const staged = buildStageFlowNodes([group], false);
-  marker.replaceWith(...staged);
+  marker.replaceWith(completedTrail([group]));
   group.remove();
 }
 
@@ -425,14 +467,8 @@ export function placeProcessBlock(logEl: HTMLElement, node: HTMLElement): void {
   logEl.appendChild(node);
 }
 
-/**
- * Settle one process segment container (between assistant text paragraphs or
- * at turn completion) into clean stage-grouped rows without merging across
- * prose segments.
- */
-export function sealProcessContainer(container: HTMLElement): void {
-  if (!container.isConnected) return;
-  for (const live of container.querySelectorAll<HTMLElement>(
+function cleanLiveProcessDom(root: HTMLElement): void {
+  for (const live of root.querySelectorAll<HTMLElement>(
     ".chat-activity.is-live, .chat-tool-row.is-live",
   )) {
     live.classList.remove("is-live");
@@ -440,15 +476,24 @@ export function sealProcessContainer(container: HTMLElement): void {
     live.querySelector(".chat-spinner")?.remove();
   }
   // Transient lifecycle spinners ("正在请求模型…") are ephemeral, not saved steps.
-  for (const row of container.querySelectorAll<HTMLElement>(":scope > .chat-activity:not(.chat-tool-row)")) {
+  for (const row of root.querySelectorAll<HTMLElement>(":scope > .chat-activity:not(.chat-tool-row)")) {
     const kind = row.dataset.kind ?? "";
     if (kind !== "error" && kind !== "log") row.remove();
   }
-  container.querySelector(".chat-work-live-pill")?.remove();
-  container.classList.remove("is-folded", "is-live");
+  root.querySelector(".chat-work-live-pill")?.remove();
+  root.classList.remove("is-folded", "is-live");
+}
 
+/**
+ * Settle an in-flight process segment container (when an intermediate stage
+ * summary prose bubble lands mid-turn and the turn continues below it) into
+ * stage-grouped rows in place without folding the whole turn yet.
+ */
+export function settleProcessSegment(container: HTMLElement): void {
+  if (!container.isConnected) return;
+  cleanLiveProcessDom(container);
   const staged = buildStageFlowNodes(Array.from(container.children), false);
-  const marker = document.createComment("completed segment");
+  const marker = document.createComment("settled segment");
   container.before(marker);
   if (staged.length > 0) {
     marker.replaceWith(...staged);
@@ -458,7 +503,106 @@ export function sealProcessContainer(container: HTMLElement): void {
   container.remove();
 }
 
+/**
+ * Fold a finished process container into a collapsed `<details class="chat-work">`
+ * module once the turn is done.
+ */
+export function sealProcessContainer(container: HTMLElement): void {
+  if (!container.isConnected) return;
+  cleanLiveProcessDom(container);
+  const units = collectFlatProcessUnits(Array.from(container.children));
+  const marker = document.createComment("completed segment");
+  container.before(marker);
+  if (units.length > 0) {
+    marker.replaceWith(wrapProcessRows(units, false));
+  } else {
+    marker.remove();
+  }
+  container.remove();
+}
+
+function isTurnProcessElement(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (
+    el.classList.contains("chat-work") ||
+    el.classList.contains("chat-stage-group") ||
+    el.classList.contains("chat-tool-row") ||
+    el.classList.contains("chat-thinking") ||
+    el.classList.contains("chat-work-stream")
+  ) {
+    return true;
+  }
+  return (
+    el.classList.contains("chat-tool-group") &&
+    !el.classList.contains("chat-permission-group") &&
+    !el.classList.contains("chat-turn-tools")
+  );
+}
+
+function foldTurnRangeNodes(nodes: HTMLElement[], includeAssistantProse: boolean): void {
+  const absorbed: HTMLElement[] = [];
+  for (const node of nodes) {
+    if (isTurnProcessElement(node) || (includeAssistantProse && node.classList.contains("chat-msg-assistant"))) {
+      absorbed.push(node);
+    }
+  }
+  if (absorbed.length === 0) return;
+  const marker = document.createComment("completed turn work");
+  absorbed[0]!.before(marker);
+  const folded = wrapProcessRows(absorbed, false);
+  marker.replaceWith(folded);
+  for (const node of absorbed) {
+    if (node !== folded && node.isConnected) node.remove();
+  }
+}
+
+/**
+ * Once a turn finishes, fold all of its execution process (thinking, tool
+ * stages, and any intermediate stage-commentary bubbles before the final
+ * answer) into one collapsed `<details class="chat-work">` module.
+ */
+export function foldCompletedTurnInLog(logEl: HTMLElement): void {
+  const children = Array.from(logEl.children) as HTMLElement[];
+  let turnStart = 0;
+  for (let i = children.length - 1; i >= 0; i -= 1) {
+    if (children[i]?.classList.contains("chat-msg-user")) {
+      turnStart = i + 1;
+      break;
+    }
+  }
+  const turnNodes = children.slice(turnStart);
+  if (!turnNodes.some(isTurnProcessElement)) return;
+
+  let finalAssistantIdx = -1;
+  for (let i = turnNodes.length - 1; i >= 0; i -= 1) {
+    if (turnNodes[i]?.classList.contains("chat-msg-assistant")) {
+      finalAssistantIdx = i;
+      break;
+    }
+  }
+
+  if (finalAssistantIdx >= 0) {
+    const beforeAnswer = turnNodes.slice(0, finalAssistantIdx);
+    if (beforeAnswer.some(isTurnProcessElement)) {
+      foldTurnRangeNodes(beforeAnswer, true);
+    }
+    const afterAnswer = turnNodes.slice(finalAssistantIdx + 1);
+    if (afterAnswer.some(isTurnProcessElement)) {
+      foldTurnRangeNodes(afterAnswer, false);
+    }
+    return;
+  }
+
+  foldTurnRangeNodes(turnNodes, false);
+}
+
 /** Restored timelines retain their live marker while thinking continues. */
 export function noteThinkingLive(block: HTMLElement): void {
   block.closest<HTMLElement>(".chat-work-stream")?.classList.add("is-live");
+  const completed = block.closest<HTMLDetailsElement>(".chat-work");
+  if (!completed) return;
+  completed.classList.add("is-live");
+  completed.open = true;
+  const label = completed.querySelector<HTMLElement>(".chat-work-label");
+  if (label) label.textContent = t("chat.workLive");
 }

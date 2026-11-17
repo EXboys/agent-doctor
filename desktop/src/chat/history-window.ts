@@ -85,6 +85,14 @@ export function messageContinuesRun(messages: readonly HistoryRow[], index: numb
   const role = current.role;
   const prev = previous.role;
   if ((role === "tool" || role === "thinking") && (prev === "tool" || prev === "thinking")) return true;
+  if ((role === "tool" || role === "thinking") && prev === "assistant") return true;
+  if (
+    role === "assistant" &&
+    (prev === "tool" || prev === "thinking") &&
+    (messages[index + 1]?.role === "tool" || messages[index + 1]?.role === "thinking")
+  ) {
+    return true;
+  }
   if (role === "permission" && prev === "permission") return true;
   return isLogMessage(asLogRow(current)) && isLogMessage(asLogRow(previous));
 }
