@@ -7848,11 +7848,16 @@ html[data-os="windows"] .chat-log {
 }
 
 /* A new question reads as a new exchange: one generous, uniform gap above
-   every user bubble, visibly larger than the spacing inside a turn. */
+   every later user bubble, visibly larger than the spacing inside a turn.
+   The first bubble sits under the top bar — no exchange band above it. */
 .chat-log > .chat-msg-user {
   /* One full exchange band: ~78px of air above every new user bubble once
      the log's own gap is added. */
   margin-top: 68px;
+}
+
+.chat-log > .chat-msg-user:first-child {
+  margin-top: 0;
 }
 
 .chat-log > .chat-msg-user + .chat-msg-assistant {
