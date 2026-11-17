@@ -859,14 +859,19 @@ function bootChatTail(): void {
       const installedIds = new Set(agents.map((item) => item.id));
       const quota = officialQuotaState(officialAccount);
       const officialRow = (doc?.providers ?? []).find((p) => p.id === OFFICIAL_PROVIDER_ID);
+      const hasOfficialRow = Boolean(officialRow);
       const providers = phoneInventoryProviders({
         installedIds,
         personalProviders: doc?.providers ?? [],
         nativeRows,
         official: {
-          signedIn: quota.signedIn,
+          signedIn: officialAccount ? quota.signedIn : hasOfficialRow,
           giftLeft: quota.free?.left ?? 0,
-          paidOrTrialReady: officialLineUsable(officialAccount),
+          paidOrTrialReady: officialAccount?.official
+            ? officialLineUsable(officialAccount)
+            : officialAccount
+              ? quota.signedIn && hasOfficialRow
+              : hasOfficialRow,
           model: officialRow?.model,
           officialLabel: t("chat.modelOfficialGroup"),
         },

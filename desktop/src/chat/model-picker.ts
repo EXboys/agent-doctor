@@ -287,12 +287,21 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     if (deps.getModelMenuOpen()) renderModelMenu();
   }
 
+  function hasSavedOfficialProvider(): boolean {
+    return (
+      deps.getProviders().some((item) => item.id === OFFICIAL_PROVIDER_ID) ||
+      deps.getWiredProvider()?.id === OFFICIAL_PROVIDER_ID
+    );
+  }
+
   function officialSignedIn(): boolean {
-    return officialQuotaState(officialStatus).signedIn;
+    if (officialStatus) return officialQuotaState(officialStatus).signedIn;
+    return hasSavedOfficialProvider();
   }
 
   function officialLineReady(): boolean {
-    return officialLineUsable(officialStatus);
+    if (officialStatus?.official) return officialLineUsable(officialStatus);
+    return officialSignedIn();
   }
 
   function loggedAccountCatalog(): LoggedAccountCatalog | null {
@@ -699,8 +708,9 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   }
 
   function renderDoctorOfficialPanel(panel: HTMLElement): void {
+    if (!officialSignedIn()) return;
     const quota = officialQuotaState(officialStatus);
-    if (!quota.signedIn) return;
+    const quotaLoaded = Boolean(officialStatus?.official || officialStatus?.agent);
 
     const onOfficial = !doctorPinnedAwayFromOfficial();
     const session = deps.activeSession();
@@ -710,9 +720,10 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const effectivePaid =
       pinnedModel !== "" && pinnedModel !== OFFICIAL_GIFT_MODEL
         ? onOfficial
-        : onOfficial && pinnedModel === "" && giftLeft <= 0 && paidLeft > 0;
+        : onOfficial && pinnedModel === "" && giftLeft <= 0 && (paidLeft > 0 || !quotaLoaded);
     const effectiveGift =
       onOfficial &&
+      quotaLoaded &&
       (pinnedModel === OFFICIAL_GIFT_MODEL ||
         (pinnedModel === "" && (giftLeft > 0 || paidLeft <= 0)));
 
@@ -744,7 +755,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         ),
       );
     }
-    if (hasRow && paidLeft > 0) {
+    if (hasRow && (paidLeft > 0 || !quotaLoaded)) {
       group.appendChild(
         officialOption(
           t("chat.modelOfficialAutoModel"),
@@ -754,7 +765,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
         ),
       );
     }
-    if (!hasRow || (giftLeft <= 0 && paidLeft <= 0)) {
+    if (!hasRow || (quotaLoaded && giftLeft <= 0 && paidLeft <= 0)) {
       const empty = document.createElement("div");
       empty.className = "chat-model-menu-hint";
       const reset = quota.free?.resetDate;
@@ -860,46 +871,71 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       isDoctor && officialSignedIn() && !doctorPinnedAwayFromOfficial();
     const chosen = onAccount || onDoctorOfficial ? null : chosenModel();
 
+    const rows = compatibleSavedProviders();
+    const officialProvider = rows.find((p) => p.id === OFFICIAL_PROVIDER_ID) ?? null;
+    const customEntries: Array<{ provider: PersonalProviderListItem; models: string[] }> = [];
+    for (const provider of rows) {
+      if (provider.id === OFFICIAL_PROVIDER_ID) continue;
+      const models = modelsForProviderUrl(provider.url, provider.model);
+      if (models.length > 0) {
+        customEntries.push({ provider, models });
+      }
+    }
+
     const tabs: MenuTab[] = [];
     if (isDoctor && officialSignedIn()) {
       tabs.push({
-        id: OFFICIAL_PROVIDER_ID,
-        title: t("chat.modelOfficialGroup"),
+        id: "official",
+        title: t("chat.modelTabOfficial"),
         hasActive: onDoctorOfficial,
         render: (panel) => renderDoctorOfficialPanel(panel),
       });
+    } else if (officialProvider) {
+      let officialModels = modelsForProviderUrl(officialProvider.url, officialProvider.model);
+      if (officialModels.length === 0) officialModels = ["auto"];
+      tabs.push({
+        id: "official",
+        title: t("chat.modelTabOfficial"),
+        hasActive: Boolean(chosen && chosen.provider.id === OFFICIAL_PROVIDER_ID),
+        render: (panel) =>
+          renderProviderPanel(
+            panel,
+            officialProvider,
+            officialModels,
+            chosen,
+            Boolean(catalog?.usingByDefault),
+          ),
+      });
     }
+
     if (catalog) {
       tabs.push({
-        id: catalog.providerId,
-        title: catalog.label,
+        id: "subscription",
+        title: t("chat.modelTabSubscription"),
         hasActive: onAccount,
         render: (panel) => renderAccountPanel(panel, catalog),
       });
     }
 
-    const rows = compatibleSavedProviders();
-    for (const provider of rows) {
-      if (isDoctor && provider.id === OFFICIAL_PROVIDER_ID) continue;
-      const isOfficial = provider.id === OFFICIAL_PROVIDER_ID;
-      let models = modelsForProviderUrl(provider.url, provider.model);
-      if (isOfficial && models.length === 0) models = ["auto"];
-      if (models.length === 0) continue;
-      const title = isOfficial
-        ? t("chat.modelOfficialGroup")
-        : providerChipForUrl(provider.url, provider.name);
+    if (customEntries.length > 0) {
+      const customActive = Boolean(
+        chosen && customEntries.some((entry) => entry.provider.id === chosen.provider.id),
+      );
       tabs.push({
-        id: provider.id,
-        title,
-        hasActive: Boolean(chosen && chosen.provider.id === provider.id),
-        render: (panel) =>
-          renderProviderPanel(
-            panel,
-            provider,
-            models,
-            chosen,
-            Boolean(catalog?.usingByDefault),
-          ),
+        id: "custom",
+        title: t("chat.modelTabCustom"),
+        hasActive: customActive,
+        render: (panel) => {
+          for (const entry of customEntries) {
+            renderProviderPanel(
+              panel,
+              entry.provider,
+              entry.models,
+              chosen,
+              Boolean(catalog?.usingByDefault),
+            );
+          }
+        },
       });
     }
     return tabs;

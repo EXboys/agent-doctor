@@ -133,12 +133,15 @@ pub(crate) fn http_client() -> Result<reqwest::blocking::Client> {
         .context("failed to build TeamUps auth HTTP client")
 }
 
-/// Account status is read while the provider list is on screen. A hung mall
-/// must not hold that refresh for the login client's 30s budget.
+const ACCOUNT_STATUS_CACHE_KEY: &str = "teamups_account_status_cache";
+
+/// Account status is read while the provider list is on screen. Give `/doctor/me`
+/// (which returns 365-day token history) enough headroom for proxy routes, and
+/// fall back to the cached status on transient network timeouts.
 fn status_http_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
         .build()
         .context("failed to build TeamUps status HTTP client")
 }
@@ -274,6 +277,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
     else {
+        let _ = store.set_meta(ACCOUNT_STATUS_CACHE_KEY, "");
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
@@ -286,16 +290,23 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
     };
 
     let url = format!("{base_url}/api/v1/doctor/me");
-    let resp = status_http_client()?
-        .get(&url)
-        .header("Accept", "application/json")
-        .header("Authorization", format!("Bearer {license}"))
-        .send()
-        .with_context(|| format!("GET {url}"))?;
+    let resp = match status_http_client().and_then(|client| {
+        client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("Authorization", format!("Bearer {license}"))
+            .send()
+            .with_context(|| format!("GET {url}"))
+    }) {
+        Ok(resp) => resp,
+        Err(_) => return Ok(cached_or_signed_in_account_status(&store, base_url)),
+    };
     let status = resp.status();
     let body_text = resp.text().unwrap_or_default();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         let _ = store.clear_teamups_license();
+        let _ = store.set_meta(ACCOUNT_STATUS_CACHE_KEY, "");
+        let _ = crate::setup::delete_personal_provider(crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID);
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
@@ -307,12 +318,11 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         });
     }
     if !status.is_success() {
-        bail!(
-            "TeamUps account check failed ({status}): {}",
-            error_body(&body_text)
-        );
+        return Ok(cached_or_signed_in_account_status(&store, base_url));
     }
-    let body: Value = serde_json::from_str(&body_text).context("invalid doctor/me JSON")?;
+    let Ok(body) = serde_json::from_str::<Value>(&body_text) else {
+        return Ok(cached_or_signed_in_account_status(&store, base_url));
+    };
     let packs = body
         .get("packs")
         .and_then(Value::as_array)
@@ -336,7 +346,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    Ok(TeamupsAccountStatus {
+    let fresh = TeamupsAccountStatus {
         base_url,
         signed_in: true,
         name,
@@ -344,7 +354,36 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         packs,
         official,
         agent,
-    })
+    };
+    if let Ok(serialized) = serde_json::to_string(&fresh) {
+        let _ = store.set_meta(ACCOUNT_STATUS_CACHE_KEY, &serialized);
+    }
+    Ok(fresh)
+}
+
+fn cached_or_signed_in_account_status(
+    store: &crate::store::SettingsStore,
+    base_url: String,
+) -> TeamupsAccountStatus {
+    if let Ok(Some(raw)) = store.get_meta(ACCOUNT_STATUS_CACHE_KEY) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            if let Ok(mut cached) = serde_json::from_str::<TeamupsAccountStatus>(trimmed) {
+                cached.base_url = base_url;
+                cached.signed_in = true;
+                return cached;
+            }
+        }
+    }
+    TeamupsAccountStatus {
+        base_url,
+        signed_in: true,
+        name: None,
+        pack_count: 0,
+        packs: Vec::new(),
+        official: None,
+        agent: None,
+    }
 }
 
 /// One signed dictation socket. `kind` is `spark_v2`, `spark_v1`, or `classic`.
@@ -426,6 +465,7 @@ pub fn teamups_voice_ticket() -> Result<TeamupsVoiceTicket> {
 pub fn sign_out_teamups() -> Result<TeamupsAccountStatus> {
     let store = open_settings_store()?;
     store.clear_teamups_license()?;
+    let _ = store.set_meta(ACCOUNT_STATUS_CACHE_KEY, "");
     let _ = crate::setup::delete_personal_provider(crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID);
     teamups_account_status()
 }
