@@ -112,9 +112,30 @@ fn apply_ask_provider_choice(
         .ok()
         .and_then(|store| {
             let providers = store.list_personal_providers().ok()?;
+            let has_key = |id: &str| {
+                store
+                    .get_personal_api_key(id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|k| !k.trim().is_empty())
+            };
             let chosen = provider_id
                 .and_then(|id| providers.iter().find(|item| item.id == id))
-                .or_else(|| providers.iter().find(|item| item.active))?
+                .or_else(|| {
+                    providers
+                        .iter()
+                        .find(|item| item.active && has_key(&item.id))
+                })
+                .or_else(|| {
+                    providers.iter().find(|item| {
+                        item.id != crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID && has_key(&item.id)
+                    })
+                })
+                .or_else(|| {
+                    providers.iter().find(|item| {
+                        item.id == crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID && has_key(&item.id)
+                    })
+                })?
                 .clone();
             Some((store, chosen))
         });
@@ -363,7 +384,27 @@ fn merge_settings_store_overlay(env: &mut HashMap<String, String>) {
                     env.insert("DEEPSEEK_BASE_URL".into(), url);
                 }
             }
-            if let Some(active) = providers.iter().find(|p| p.active) {
+            let has_key = |id: &str| {
+                store
+                    .get_personal_api_key(id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|k| !k.trim().is_empty())
+            };
+            let chosen = providers
+                .iter()
+                .find(|p| p.active && has_key(&p.id))
+                .or_else(|| {
+                    providers.iter().find(|p| {
+                        p.id != crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID && has_key(&p.id)
+                    })
+                })
+                .or_else(|| {
+                    providers.iter().find(|p| {
+                        p.id == crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID && has_key(&p.id)
+                    })
+                });
+            if let Some(active) = chosen {
                 install_personal_ask_env(
                     env,
                     &store,
@@ -518,39 +559,65 @@ pub fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     }
 }
 
-pub fn apply_qoder_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
-    if crate::setup::is_native_subscription("qoder") && resolve_hermes_overlay(overlay).is_none() {
-        scrub_subscription_gateway_env(cmd);
-        let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(
-            &crate::adapters::util::home_join(".qoder"),
-        );
-        return;
+/// Resolve `(gateway_url, api_key, model_id, protocol)` for Qoder on this turn.
+///
+/// Returns `None` when Qoder is actively using its signed-in Qoder subscription
+/// (with no per-chat service pin) or when no custom/official provider is configured.
+pub fn resolve_qoder_overlay(
+    overlay: &HashMap<String, String>,
+) -> Option<(String, String, String, &'static str)> {
+    if crate::setup::is_native_subscription("qoder")
+        && resolve_hermes_overlay(overlay).is_none()
+        && resolve_claude_overlay(overlay).is_none()
+    {
+        return None;
     }
     let protocol = overlay
         .get(PROVIDER_PROTOCOL_ENV)
         .map(String::as_str)
         .unwrap_or(crate::setup::PROTOCOL_OPENAI);
+    let model_from_env = || {
+        overlay
+            .get(MODEL_ENV)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
     let resolved = if protocol.eq_ignore_ascii_case(PROTOCOL_ANTHROPIC) {
-        resolve_claude_overlay(overlay).map(|(url, key)| {
-            let model = overlay
-                .get(MODEL_ENV)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty());
-            (url, key, model, PROTOCOL_ANTHROPIC)
-        })
+        resolve_claude_overlay(overlay)
+            .map(|(url, key)| (url, key, model_from_env(), PROTOCOL_ANTHROPIC))
+            .or_else(|| {
+                resolve_hermes_overlay(overlay)
+                    .map(|(url, key, model)| (url, key, model, crate::setup::PROTOCOL_OPENAI))
+            })
     } else {
         resolve_hermes_overlay(overlay)
             .map(|(url, key, model)| (url, key, model, crate::setup::PROTOCOL_OPENAI))
+            .or_else(|| {
+                resolve_claude_overlay(overlay)
+                    .map(|(url, key)| (url, key, model_from_env(), PROTOCOL_ANTHROPIC))
+            })
     };
-    if let Some((url, key, model, proto)) = resolved {
+    resolved.map(|(url, key, model, proto)| {
         let chosen = model
             .as_deref()
             .map(str::trim)
             .filter(|id| !id.is_empty())
-            .unwrap_or("deepseek-v4.1-flash");
-        cmd.env("QODER_MODEL", crate::setup::merge::qoder_model_ref(chosen));
-        let _ = crate::setup::merge::apply_qoder_with_model(&url, &key, proto, Some(chosen));
-    }
+            .unwrap_or("deepseek-v4.1-flash")
+            .to_string();
+        (url, key, chosen, proto)
+    })
+}
+
+pub fn apply_qoder_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    let Some((url, key, chosen, proto)) = resolve_qoder_overlay(overlay) else {
+        scrub_subscription_gateway_env(cmd);
+        let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(
+            &crate::adapters::util::home_join(".qoder"),
+        );
+        return;
+    };
+    cmd.env("QODER_MODEL", crate::setup::merge::qoder_model_ref(&chosen));
+    let _ = crate::setup::merge::apply_qoder_with_model(&url, &key, proto, Some(&chosen));
 }
 
 pub fn apply_workbuddy_env(cmd: &mut Command, overlay: &HashMap<String, String>) {

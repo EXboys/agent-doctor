@@ -644,11 +644,11 @@ fn push_failure_note(notes: &mut String, line: &str) {
 fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
     if matches!(
         runtime,
-        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID | "zcode" | "qoder" | "cursor" | "workbuddy"
+        agent_doctor_core::DEEPSEEK_HARNESS_RUNTIME_ID | "zcode" | "cursor"
     ) {
         return false;
     }
-    // A ChatGPT or Claude login is not one of the saved providers.
+    // A ChatGPT / Claude / Qoder / WorkBuddy subscription login is not one of the saved providers.
     if agent_doctor_core::is_native_subscription(runtime)
         && !agent_doctor_core::session_env::chat_uses_saved_service(
             options.model.as_deref(),
@@ -660,12 +660,14 @@ fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
     true
 }
 
-/// Wire protocol this runtime speaks. `doctor` speaks both OpenAI and Anthropic natively.
+/// Wire protocol this runtime speaks. `doctor` and `qoder` speak both OpenAI and Anthropic natively.
 fn required_protocol_for_runtime(runtime: &str) -> Option<&'static str> {
     match runtime {
         "claude-code" => Some(agent_doctor_core::setup::PROTOCOL_ANTHROPIC),
-        "codex" | "hermes" | "openclaw" | "acp" => Some(agent_doctor_core::setup::PROTOCOL_OPENAI),
-        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID => Some("*"),
+        "codex" | "hermes" | "openclaw" | "workbuddy" | "acp" => {
+            Some(agent_doctor_core::setup::PROTOCOL_OPENAI)
+        }
+        agent_doctor_repair::OFFICIAL_AGENT_RUNTIME_ID | "qoder" => Some("*"),
         _ => None,
     }
 }

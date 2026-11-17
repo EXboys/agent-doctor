@@ -69,10 +69,23 @@ pub struct NativeAccountSwitch {
 }
 
 pub fn is_native_subscription(runtime_id: &str) -> bool {
-    matches!(
+    if !matches!(
         runtime_id,
         CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID
-    ) && read_mode(runtime_id) == MODE_SUBSCRIPTION
+    ) || read_mode(runtime_id) != MODE_SUBSCRIPTION
+    {
+        return false;
+    }
+    // When Qoder is not signed in locally, degrade to the configured custom or
+    // official provider instead of trapping Ask on a missing Qoder login.
+    if runtime_id == QODER_ID {
+        return cli_logged_in(QODER_ID);
+    }
+    true
+}
+
+pub fn is_runtime_logged_in(runtime_id: &str) -> bool {
+    logged_in(runtime_id)
 }
 
 pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
@@ -305,11 +318,29 @@ fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<Nativ
 
 fn cli_logged_in(runtime_id: &str) -> bool {
     match runtime_id {
-        QODER_ID => read_json(&home_join(".qoder/auth.json")).is_some_and(|value| tokenish(&value)),
+        QODER_ID => {
+            qoder_auth_dir_has_user(&home_join(".qoder/.auth"))
+                || read_json(&home_join(".qoder/auth.json")).is_some_and(|value| tokenish(&value))
+        }
         CURSOR_ID => read_json(&home_join(".cursor/cli-config.json"))
             .is_some_and(|value| cursor_cli_config_is_signed_in(&value)),
         _ => false,
     }
+}
+
+pub(crate) fn qoder_auth_dir_has_user(auth_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(auth_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let is_user_record = name == "user" || name.starts_with("user.");
+        is_user_record
+            && entry
+                .metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+    })
 }
 
 fn tokenish(value: &Value) -> bool {
@@ -782,6 +813,19 @@ mod tests {
             &json!({"accessToken": "cli-token"})
         ));
         assert!(!cursor_cli_config_is_signed_in(&json!({"version": 1})));
+    }
+
+    #[test]
+    fn qoder_auth_dir_ignores_machine_id_and_detects_saved_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join(".auth");
+        fs::create_dir_all(&auth).unwrap();
+        fs::write(auth.join("machine_id"), "36-byte-id").unwrap();
+        fs::write(auth.join(".credential-transaction"), "").unwrap();
+        assert!(!qoder_auth_dir_has_user(&auth));
+
+        fs::write(auth.join("user"), "encrypted-qoder-credential").unwrap();
+        assert!(qoder_auth_dir_has_user(&auth));
     }
 
     #[test]

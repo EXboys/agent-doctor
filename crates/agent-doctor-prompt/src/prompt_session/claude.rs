@@ -384,8 +384,8 @@ fn claude_config_files(cwd: &Path) -> Vec<std::path::PathBuf> {
     files
 }
 
-/// Claude Code session ids are UUIDs. `sess_…` belongs to ZCode.
-fn is_claude_session_id(value: &str) -> bool {
+/// Claude Code (and Qoder CLI) session ids are UUIDs. `sess_…` belongs to ZCode.
+pub(crate) fn is_claude_session_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 36 {
         return false;
@@ -546,14 +546,14 @@ fn write_ask_settings(settings: &serde_json::Value) -> Result<std::path::PathBuf
     Ok(path)
 }
 
-struct ProjectMcpLaunch {
-    arg: String,
+pub(crate) struct ProjectMcpLaunch {
+    pub(crate) arg: String,
     /// Skip every MCP file except the ones passed on the command line.
     /// The project copy on Desktop would still be opened, and that open is EPERM.
-    strict: bool,
+    pub(crate) strict: bool,
 }
 
-fn ask_private_dir() -> Result<std::path::PathBuf> {
+pub(crate) fn ask_private_dir() -> Result<std::path::PathBuf> {
     #[cfg(test)]
     let dir = std::env::temp_dir().join("agent-doctor-test-ask");
     #[cfg(not(test))]
@@ -585,7 +585,10 @@ fn is_privacy_protected(path: &Path, home: &Path) -> bool {
     }
 }
 
-fn project_mcp_launch(cwd: &Path, home: Option<&Path>) -> Result<Option<ProjectMcpLaunch>> {
+pub(crate) fn project_mcp_launch(
+    cwd: &Path,
+    home: Option<&Path>,
+) -> Result<Option<ProjectMcpLaunch>> {
     let src = cwd.join(".mcp.json");
     if !src.is_file() {
         return Ok(None);
@@ -619,7 +622,7 @@ fn stage_mcp_for_claude(src: &Path) -> Result<std::path::PathBuf> {
 /// Read one turn. The first `result` envelope ends it; with `keep_alive` the
 /// process then stays up (parked or watched) so background work can land.
 #[allow(clippy::too_many_arguments)]
-fn pump_claude<F>(
+pub(crate) fn pump_claude<F>(
     session_id: &str,
     child: &mut Child,
     pipes: &mut LivePipes,
@@ -981,7 +984,7 @@ fn claude_question_detail(input: &serde_json::Value) -> String {
 /// Open questions (`kind: text|number`) and choice questions with fewer than
 /// two options never reach the user: Claude rejects them before the prompt.
 /// Tell the model to use an open question for a secret or free-text reply.
-const CLAUDE_ASK_INSTRUCTIONS: &str = "When you need a secret, token, password, or any value only the user knows, call AskUserQuestion with one question, \"kind\": \"text\", and no options. A choice question with fewer than 2 options is rejected before the user can answer. Do not add a filler option. Do not ask the user to paste the secret into the chat, export an environment variable, or write it to a file. Wait for the tool result.";
+pub(crate) const CLAUDE_ASK_INSTRUCTIONS: &str = "When you need a secret, token, password, or any value only the user knows, call AskUserQuestion with one question, \"kind\": \"text\", and no options. A choice question with fewer than 2 options is rejected before the user can answer. Do not add a filler option. Do not ask the user to paste the secret into the chat, export an environment variable, or write it to a file. Wait for the tool result.";
 
 fn question_is_open(question: &serde_json::Value) -> bool {
     question
@@ -1037,7 +1040,7 @@ fn claude_question_mode(input: &serde_json::Value) -> String {
 /// This state never holds a turn open (the `result` envelope always ends the
 /// turn); it only feeds the turn-end notice and the keep-alive decision.
 #[derive(Default)]
-struct BackgroundTasks {
+pub(crate) struct BackgroundTasks {
     /// `None` until `background_tasks_changed`. After that, each event replaces the set.
     roster: Option<Vec<BackgroundTask>>,
     /// Rostered task ids whose completion notice has not arrived yet.
@@ -1606,6 +1609,12 @@ fn parse_claude_stream_line(
                     .get("result")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        value
+                            .pointer("/errors/0")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                    })
                     .unwrap_or("Claude reported an error");
                 vec![turn_error(session_id, msg)]
             } else {
@@ -1629,7 +1638,7 @@ fn parse_claude_stream_line(
 }
 
 /// Stream-json event lines are protocol, not something to show the user.
-fn without_stream_json(stdout: &str) -> String {
+pub(crate) fn without_stream_json(stdout: &str) -> String {
     stdout
         .lines()
         .filter(|line| {
@@ -1646,7 +1655,7 @@ fn without_stream_json(stdout: &str) -> String {
 }
 
 /// Pull the final answer out of Claude Code stream-json when live deltas were empty.
-fn extract_claude_session_id(stdout: &str) -> Option<String> {
+pub(crate) fn extract_claude_session_id(stdout: &str) -> Option<String> {
     for line in stdout.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -1663,7 +1672,40 @@ fn extract_claude_session_id(stdout: &str) -> Option<String> {
     None
 }
 
-fn extract_claude_result_text(stdout: &str) -> Option<String> {
+pub(crate) fn stream_json_result_failed(stdout: &str) -> Option<String> {
+    for line in stdout.lines().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("result") {
+            continue;
+        }
+        if value
+            .get("is_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            let msg = value
+                .get("result")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    value
+                        .pointer("/errors/0")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or("stream-json result reported an error");
+            return Some(msg.to_string());
+        }
+        return None;
+    }
+    None
+}
+
+pub(crate) fn extract_claude_result_text(stdout: &str) -> Option<String> {
     for line in stdout.lines().rev() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;

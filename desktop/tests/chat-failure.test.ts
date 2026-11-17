@@ -312,6 +312,15 @@ async function main() {
   assert(banner.includes("去服务商"), "diagnose banner names the next button");
   assert(!banner.includes("LLM HTTP"), "diagnose banner hides the raw dump");
 
+  const notLoggedIn = explainChatFailure(
+    "NonInteractiveAuthRequiredError: Not logged in · Please run /login",
+  );
+  assert(notLoggedIn?.kind === "provider_key", `not logged in kind: ${notLoggedIn?.kind}`);
+  assert(
+    notLoggedIn?.actions.includes("provider") && notLoggedIn?.actions.includes("native"),
+    "not logged in offers both provider and native sign-in",
+  );
+
   console.log("chat-failure.test.ts OK");
 }
 

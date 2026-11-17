@@ -229,7 +229,11 @@ export function explainProviderFailure(
     };
   }
 
-  if (/api key must not be empty|key must not be empty|missing.*key/.test(lower)) {
+  if (
+    /api key must not be empty|key must not be empty|missing.*key|not logged in|please run \/login|noninteractiveauthrequirederror/.test(
+      lower,
+    )
+  ) {
     return {
       kind: "missing",
       message: t("provider.fail.missingKey"),

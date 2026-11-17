@@ -27,8 +27,9 @@ pub use mode::{
 };
 pub(crate) use native_login::publish_codex_subscription_auth;
 pub use native_login::{
-    is_native_subscription, native_account_status, resign_native_subscription, use_current_service,
-    use_native_subscription, NativeAccountRow, NativeAccountStatus, NativeAccountSwitch,
+    is_native_subscription, is_runtime_logged_in, native_account_status,
+    resign_native_subscription, use_current_service, use_native_subscription, NativeAccountRow,
+    NativeAccountStatus, NativeAccountSwitch,
 };
 pub(crate) use personal::persist_personal_provider_model;
 pub use personal::{

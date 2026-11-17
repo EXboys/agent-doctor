@@ -302,7 +302,17 @@ pub fn delete_personal_provider(id: &str) -> Result<PersonalProvidersDocument> {
         bail!("provider not found: {id}");
     }
     if store.active_id.as_deref() == Some(id) {
-        store.active_id = None;
+        store.active_id = store
+            .providers
+            .iter()
+            .find(|p| p.id != TEAMUPS_OFFICIAL_PROVIDER_ID && !p.api_key.trim().is_empty())
+            .or_else(|| {
+                store
+                    .providers
+                    .iter()
+                    .find(|p| !p.api_key.trim().is_empty())
+            })
+            .map(|p| p.id.clone());
     }
     save_store(&path, &store)?;
     crate::setup::clear_provider_cooldown(id);
