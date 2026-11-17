@@ -798,6 +798,11 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       return;
     }
 
+    if (action === "open-desktop-app" && runtimeCard) {
+      void sessions.openDesktopAppFromCard(runtimeCard);
+      return;
+    }
+
     if (action === "ask-session" && runtimeCard) {
       const runtime = runtimeCard.dataset.runtime;
       if (runtime && isAskRuntimeId(runtime)) {

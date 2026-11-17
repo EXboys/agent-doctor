@@ -21,6 +21,9 @@ pub struct OpenSessionOptions {
     /// Prefer opening via deep link when available (Claude Code).
     #[serde(default = "default_true")]
     pub prefer_deep_link: bool,
+    /// Open the official desktop window for dual-install runtimes (Qoder / WorkBuddy / ZCode).
+    #[serde(default)]
+    pub prefer_app: bool,
 }
 
 fn default_true() -> bool {
@@ -81,6 +84,9 @@ pub fn resolve_session_cwd(explicit: Option<&Path>, workspace_name: Option<&str>
 /// Open an interactive session for a known runtime.
 pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSessionReport> {
     let runtime = normalize_runtime(&options.runtime);
+    if options.prefer_app {
+        return open_runtime_desktop_app(&runtime);
+    }
     let cwd = resolve_session_cwd(options.cwd.as_deref(), None);
     if !cwd.exists() {
         bail!("session cwd does not exist: {}", cwd.display());
@@ -94,12 +100,14 @@ pub fn open_interactive_session(options: &OpenSessionOptions) -> Result<OpenSess
 
 mod claude;
 mod codex;
+mod desktop;
 mod qoder;
 pub(crate) mod terminal;
 mod zcode;
 
 pub use claude::*;
 pub(crate) use codex::*;
+pub use desktop::{open_runtime_desktop_app, runtime_desktop_app_path};
 pub(crate) use qoder::*;
 pub(crate) use terminal::*;
 pub(crate) use zcode::*;

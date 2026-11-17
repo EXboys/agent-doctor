@@ -28,8 +28,13 @@ pub fn locate_zcode() -> Option<ZcodeInstall> {
     cli_path().map(ZcodeInstall::Cli)
 }
 
-fn desktop_app_path() -> Option<PathBuf> {
+/// Official ZCode desktop app (`ZCode.app` / `ZCode.exe` / AppImage).
+pub fn zcode_desktop_path() -> Option<PathBuf> {
     crate::adapters::util::desktop_app_path(&DESKTOP_APP)
+}
+
+fn desktop_app_path() -> Option<PathBuf> {
+    zcode_desktop_path()
 }
 
 /// How to start a headless `zcode --prompt` without opening the window.

@@ -504,6 +504,19 @@ export function createAgentsDiagnose(deps: AgentsDiagnoseDeps) {
         return;
       }
 
+      if (action === "open-desktop-app" && runtime) {
+        void openSession({
+          runtime,
+          cwd: null,
+          prompt: null,
+          terminal: null,
+          app: true,
+        }).catch((error) => {
+          deps.setStatusBanner("error", withErrorDetail(t("runtime.openFailed"), error));
+        });
+        return;
+      }
+
       if (action === "uninstall-runtime" && runtime) {
         const name =
           diagnoseDetailEl.querySelector(".repair-panel-head strong")?.textContent?.trim() ||

@@ -26,13 +26,13 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         "deepseek-harness" => DEEPSEEK_HARNESS_NPM_PACKAGE,
         "qoder" => {
             return Ok(
-                "rm -rf \"$HOME/Applications/Qoder CN.app\" \"$HOME/Applications/Qoder IDE.app\" \"$HOME/Applications/Qoder.app\" \"$HOME/.qoder/bin/qodercli\" \"$HOME/.qoder/bin/qoderclicn\"; rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.local/bin/qodercli\" \"$HOME/.local/bin/qoderclicn\" \"$HOME/.qoder/bin/qoder\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
+                "rm -rf \"$HOME/Applications/Qoder CN IDE.app\" \"$HOME/Applications/Qoder CN.app\" \"$HOME/Applications/Qoder IDE.app\" \"$HOME/Applications/Qoder.app\" \"/Applications/Qoder CN IDE.app\" \"/Applications/Qoder CN.app\" \"/Applications/Qoder IDE.app\" \"/Applications/Qoder.app\" \"$HOME/.qoder/bin/qodercli\" \"$HOME/.qoder/bin/qoderclicn\"; rm -f \"$HOME/.local/bin/qoder\" \"$HOME/.local/bin/qodercli\" \"$HOME/.local/bin/qoderclicn\" \"$HOME/.qoder/bin/qoder\"; npm uninstall -g @qoder-ai/qodercli 2>/dev/null || true"
                     .to_string(),
             );
         }
         "workbuddy" => {
             return Ok(
-                "rm -rf \"$HOME/Applications/WorkBuddy.app\"; rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
+                "rm -rf \"$HOME/Applications/WorkBuddy.app\" \"/Applications/WorkBuddy.app\"; rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
                     .to_string(),
             );
         }
@@ -44,7 +44,7 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         }
         "zcode" => {
             return Ok(
-                "rm -rf \"$HOME/Applications/ZCode.app\"; rm -f \"$HOME/.local/bin/zcode\" \"$HOME/.local/bin/ZCode.AppImage\""
+                "rm -rf \"$HOME/Applications/ZCode.app\" \"/Applications/ZCode.app\"; rm -f \"$HOME/.local/bin/zcode\" \"$HOME/.local/bin/ZCode.AppImage\""
                     .to_string(),
             );
         }

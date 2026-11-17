@@ -87,6 +87,7 @@ import {
   type WorkspaceDoc,
 } from "./ask-resources";
 import { getLocale, t, type MessageKey } from "./i18n";
+import { installsDesktopAndCli } from "./agent-catalog-groups";
 import { withErrorDetail } from "./friendly-error";
 
 import { registerProjectFromAsk } from "./chat/register-project";
@@ -1280,12 +1281,15 @@ export function applyVerifyDraftIfAny(): void {
 
 export async function openTerminal(): Promise<void> {
   try {
+    const runtime = selectedRuntime();
+    const dual = installsDesktopAndCli(runtime);
     await withTimeoutChat(
       openSession({
-        runtime: selectedRuntime(),
+        runtime,
         cwd: null,
         prompt: null,
-        terminal: true,
+        terminal: dual ? null : true,
+        app: dual ? true : null,
       }),
       20_000,
       new Error(t("chat.terminalFailed", { error: t("runtime.openTimeout") })),

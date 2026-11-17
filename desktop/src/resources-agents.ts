@@ -167,19 +167,47 @@ function renderAgentRow(runtime: RuntimeDoctorResult): HTMLLIElement {
   metaWrap.className = "res-catalog-meta mall-actions";
   if (openable) {
     const opening = agentOpenInFlight.has(runtime.id);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn-secondary btn-compact";
-    btn.textContent = opening
-      ? t("runtime.opening")
-      : agentJustOpened.has(runtime.id)
-        ? t("resources.agentOpened")
-        : t("runtime.open");
-    btn.disabled = opening;
-    btn.addEventListener("click", () => {
-      void openCatalogAgent(runtime.id);
-    });
-    metaWrap.appendChild(btn);
+    const opened = agentJustOpened.has(runtime.id);
+    const dual = installsDesktopAndCli(runtime.id) && isAskRuntimeId(runtime.id);
+    if (dual) {
+      const askBtn = document.createElement("button");
+      askBtn.type = "button";
+      askBtn.className = "btn-secondary btn-compact";
+      askBtn.textContent = opening
+        ? t("runtime.opening")
+        : opened
+          ? t("resources.agentOpened")
+          : t("runtime.ask");
+      askBtn.disabled = opening;
+      askBtn.title = t("runtime.askHint");
+      askBtn.addEventListener("click", () => {
+        void openCatalogAgent(runtime.id, "ask");
+      });
+      const appBtn = document.createElement("button");
+      appBtn.type = "button";
+      appBtn.className = "btn-secondary btn-compact";
+      appBtn.textContent = opening ? t("runtime.opening") : t("runtime.openDesktop");
+      appBtn.disabled = opening;
+      appBtn.title = t("runtime.openDesktopHint");
+      appBtn.addEventListener("click", () => {
+        void openCatalogAgent(runtime.id, "app");
+      });
+      metaWrap.append(askBtn, appBtn);
+    } else {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary btn-compact";
+      btn.textContent = opening
+        ? t("runtime.opening")
+        : opened
+          ? t("resources.agentOpened")
+          : t("runtime.open");
+      btn.disabled = opening;
+      btn.addEventListener("click", () => {
+        void openCatalogAgent(runtime.id);
+      });
+      metaWrap.appendChild(btn);
+    }
   } else {
     const busy = agentInstallInFlight.has(runtime.id);
     const btn = document.createElement("button");
@@ -430,13 +458,24 @@ function markAgentJustOpened(runtime: string): void {
   );
 }
 
-export async function openCatalogAgent(runtime: string): Promise<void> {
+export async function openCatalogAgent(
+  runtime: string,
+  entry: "ask" | "app" | "default" = "default",
+): Promise<void> {
   if (agentOpenInFlight.has(runtime) || agentInstallInFlight.has(runtime)) return;
   agentOpenInFlight.add(runtime);
   agentInstallHint.delete(runtime);
   renderAgentCatalog();
   try {
-    if (isAskRuntimeId(runtime)) {
+    if (entry === "app") {
+      await openSession({
+        runtime,
+        cwd: null,
+        prompt: null,
+        terminal: null,
+        app: true,
+      });
+    } else if (isAskRuntimeId(runtime)) {
       await openAskWindow({ runtime });
     } else {
       await openSession({

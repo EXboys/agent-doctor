@@ -1018,6 +1018,8 @@ export function openSession(args: {
   cwd?: string | null;
   prompt?: string | null;
   terminal?: boolean | null;
+  /** Open the official desktop window (Qoder / WorkBuddy / ZCode). */
+  app?: boolean | null;
 }): Promise<OpenSessionReport> {
   return invoke("open_session_command", args);
 }

@@ -12,7 +12,9 @@ pub struct QoderAdapter;
 ///
 /// The current installer publishes `qodercli` (symlink in `~/.local/bin`,
 /// binary under `~/.qoder/bin/qodercli/`). Older installs still use `qoder`.
-/// The desktop IDE is a separate app (`Qoder CN.app` / `Qoder IDE.app` / `Qoder.app`).
+/// The desktop IDE is a separate app. Current CN builds ship as
+/// `Qoder CN IDE.app`; older names (`Qoder CN.app` / `Qoder IDE.app` /
+/// `Qoder.app`) still count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QoderInstall {
     Cli(PathBuf),
@@ -20,18 +22,26 @@ pub(crate) enum QoderInstall {
 }
 
 const DESKTOP_APP: DesktopAppSpec = DesktopAppSpec {
-    macos_apps: &["Qoder CN.app", "Qoder IDE.app", "Qoder.app"],
+    macos_apps: &[
+        "Qoder CN IDE.app",
+        "Qoder CN.app",
+        "Qoder IDE.app",
+        "Qoder.app",
+    ],
     windows_local: &[
+        "Programs/Qoder CN IDE/Qoder CN IDE.exe",
         "Programs/Qoder CN/Qoder CN.exe",
         "Programs/Qoder IDE/Qoder IDE.exe",
         "Programs/Qoder/Qoder.exe",
     ],
     windows_machine: &[
+        "Qoder CN IDE/Qoder CN IDE.exe",
         "Qoder CN/Qoder CN.exe",
         "Qoder IDE/Qoder IDE.exe",
         "Qoder/Qoder.exe",
     ],
     linux_paths: &[
+        "/usr/share/qoder-cn-ide/qoder-cn-ide",
         "/usr/share/qoder-ide/qoder-ide",
         "/usr/bin/qoder-ide",
         "/opt/Qoder/qoder",
@@ -54,7 +64,7 @@ pub fn qoder_cli_path() -> Option<PathBuf> {
     }
 }
 
-/// Official Qoder desktop IDE (`Qoder CN` / `Qoder IDE` / `Qoder`).
+/// Official Qoder desktop IDE (`Qoder CN IDE` / legacy `Qoder CN` / `Qoder IDE` / `Qoder`).
 pub fn qoder_desktop_path() -> Option<PathBuf> {
     desktop_app_path(&DESKTOP_APP)
 }
@@ -299,11 +309,25 @@ mod tests {
     }
 
     #[test]
-    fn qoder_cn_app_wins_over_legacy_apps() {
+    fn qoder_cn_ide_app_wins_over_legacy_apps() {
         let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("Applications/Qoder CN IDE.app")).unwrap();
         fs::create_dir_all(temp.path().join("Applications/Qoder CN.app")).unwrap();
         fs::create_dir_all(temp.path().join("Applications/Qoder IDE.app")).unwrap();
         fs::create_dir_all(temp.path().join("Applications/Qoder.app")).unwrap();
+        with_test_home(temp.path(), || {
+            assert_eq!(
+                qoder_desktop_path(),
+                Some(home_join("Applications/Qoder CN IDE.app"))
+            );
+            assert_eq!(missing_qoder_bundle_reason(true, true, true), None);
+        });
+    }
+
+    #[test]
+    fn legacy_qoder_cn_app_still_counts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("Applications/Qoder CN.app")).unwrap();
         with_test_home(temp.path(), || {
             assert_eq!(
                 qoder_desktop_path(),

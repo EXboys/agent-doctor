@@ -218,7 +218,7 @@ export interface OnboardingReport {
 
 export interface OpenSessionReport {
   runtime: string;
-  method: "deep-link" | "terminal";
+  method: "deep-link" | "terminal" | "app";
   cwd: string;
   target: string;
   detail: string;

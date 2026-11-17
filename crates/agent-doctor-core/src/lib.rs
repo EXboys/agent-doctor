@@ -183,8 +183,8 @@ pub use runtime::{
 };
 pub use runtime::{register_runtime_playbooks, RuntimePlaybooks};
 pub use session_launch::{
-    claude_cli_deep_link, open_interactive_session, resolve_session_cwd, OpenSessionMethod,
-    OpenSessionOptions, OpenSessionReport,
+    claude_cli_deep_link, open_interactive_session, open_runtime_desktop_app, resolve_session_cwd,
+    runtime_desktop_app_path, OpenSessionMethod, OpenSessionOptions, OpenSessionReport,
 };
 pub use setup::{
     activate_personal_provider, anthropic_gateway_url_from_evotown_base, apply_codex_slot,

@@ -316,6 +316,7 @@ async fn open_session_command(
     cwd: Option<String>,
     prompt: Option<String>,
     terminal: Option<bool>,
+    app: Option<bool>,
 ) -> Result<OpenSessionReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         open_interactive_session(&OpenSessionOptions {
@@ -323,6 +324,7 @@ async fn open_session_command(
             cwd: cwd.map(std::path::PathBuf::from),
             prompt,
             prefer_deep_link: !terminal.unwrap_or(false),
+            prefer_app: app.unwrap_or(false),
         })
         .map_err(|err| format!("{err:#}"))
     })

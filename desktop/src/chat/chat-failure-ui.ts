@@ -1,3 +1,4 @@
+import { installsDesktopAndCli } from "../agent-catalog-groups";
 import { settingsApplyKind } from "../diagnose-flow";
 import {
   focusMainTab,
@@ -279,11 +280,14 @@ async function runChatFailureAction(
     return;
   }
   try {
+    const runtime = handlers.selectedRuntime();
+    const dual = installsDesktopAndCli(runtime);
     await openSession({
-      runtime: handlers.selectedRuntime(),
+      runtime,
       cwd: null,
       prompt: null,
-      terminal: true,
+      terminal: dual ? null : true,
+      app: dual ? true : null,
     });
     writeActionResult(actions, t("chat.terminalOpened"), "ok");
   } catch {

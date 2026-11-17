@@ -28,4 +28,6 @@ pub use workbuddy::{
     workbuddy_cli_path, workbuddy_desktop_path, workbuddy_missing_install_part, WorkbuddyAdapter,
 };
 pub use zcode::ZcodeAdapter;
-pub use zcode::{locate_zcode, locate_zcode_headless, ZcodeHeadless, ZcodeInstall};
+pub use zcode::{
+    locate_zcode, locate_zcode_headless, zcode_desktop_path, ZcodeHeadless, ZcodeInstall,
+};

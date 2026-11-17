@@ -91,6 +91,7 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
     const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
     const openButtons = [
       ...card.querySelectorAll<HTMLButtonElement>('[data-action="open-session"]'),
+      ...card.querySelectorAll<HTMLButtonElement>('[data-action="open-desktop-app"]'),
     ];
     if (!runtime || openingSessionRuntimes.has(runtime)) {
       return;
@@ -114,7 +115,12 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
         20_000,
         new Error(t("runtime.openTimeout")),
       );
-      const method = report.method === "deep-link" ? "deep-link" : "terminal";
+      const method =
+        report.method === "deep-link"
+          ? "deep-link"
+          : report.method === "app"
+            ? "app"
+            : "terminal";
       if (hint) {
         hint.textContent = t("runtime.openOk", { method });
       }
@@ -133,10 +139,59 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
     }
   }
 
+  async function openDesktopAppFromCard(card: HTMLElement): Promise<void> {
+    const runtime = card.dataset.runtime;
+    const hint = card.querySelector<HTMLElement>("[data-repair-hint]");
+    const openButtons = [
+      ...card.querySelectorAll<HTMLButtonElement>('[data-action="open-session"]'),
+      ...card.querySelectorAll<HTMLButtonElement>('[data-action="open-desktop-app"]'),
+    ];
+    if (!runtime || openingSessionRuntimes.has(runtime)) {
+      return;
+    }
+    openingSessionRuntimes.add(runtime);
+    for (const button of openButtons) {
+      button.setAttribute("disabled", "true");
+    }
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = t("runtime.opening");
+    }
+    try {
+      const report = await withTimeout(
+        openSession({
+          runtime,
+          cwd: null,
+          prompt: null,
+          terminal: null,
+          app: true,
+        }),
+        20_000,
+        new Error(t("runtime.openTimeout")),
+      );
+      if (hint) {
+        hint.textContent = t("runtime.openOk", { method: report.method });
+      }
+      deps.setStatusBanner("ok", t("runtime.openOk", { method: report.method }));
+    } catch (error) {
+      if (hint) {
+        hint.hidden = false;
+        hint.textContent = t("runtime.openFailed", { error: String(error) });
+      }
+      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+    } finally {
+      openingSessionRuntimes.delete(runtime);
+      for (const button of openButtons) {
+        button.removeAttribute("disabled");
+      }
+    }
+  }
+
   return {
     openAskWindow,
     openAskWindowForVerify,
     openSessionFromCard,
+    openDesktopAppFromCard,
   };
 }
 

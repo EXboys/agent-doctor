@@ -14,6 +14,7 @@ pub fn run(
         cwd: cwd.map(PathBuf::from),
         prompt: prompt.map(str::to_string),
         prefer_deep_link: !terminal,
+        prefer_app: false,
     })?;
 
     if json {

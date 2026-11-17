@@ -189,10 +189,19 @@ if [ "$(uname -s)" = "Darwin" ]; then
     echo "安装包里没有 ZCode。" >&2
     exit 1
   fi
-  mkdir -p "$HOME/Applications"
-  rm -rf "$HOME/Applications/ZCode.app"
-  ditto "$app" "$HOME/Applications/ZCode.app"
-  xattr -dr com.apple.quarantine "$HOME/Applications/ZCode.app" || true
+  if [ -w /Applications ]; then
+    app_dir="/Applications"
+  else
+    app_dir="$HOME/Applications"
+    mkdir -p "$app_dir"
+  fi
+  if [ "$app_dir" = "/Applications" ] && [ -d "$HOME/Applications/ZCode.app" ] && [ ! -e "/Applications/ZCode.app" ]; then
+    ditto "$HOME/Applications/ZCode.app" "/Applications/ZCode.app"
+    xattr -dr com.apple.quarantine "/Applications/ZCode.app" || true
+  fi
+  rm -rf "$app_dir/ZCode.app"
+  ditto "$app" "$app_dir/ZCode.app"
+  xattr -dr com.apple.quarantine "$app_dir/ZCode.app" || true
 else
   mkdir -p "$HOME/.local/bin"
   rm -f "$HOME/.local/bin/ZCode.AppImage"

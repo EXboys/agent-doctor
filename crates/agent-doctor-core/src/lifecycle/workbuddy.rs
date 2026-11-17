@@ -167,6 +167,16 @@ else
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
+  if [ -w /Applications ]; then
+    app_dir="/Applications"
+  else
+    app_dir="$HOME/Applications"
+    mkdir -p "$app_dir"
+  fi
+  if [ "$app_dir" = "/Applications" ] && [ -d "$HOME/Applications/WorkBuddy.app" ] && [ ! -e "/Applications/WorkBuddy.app" ]; then
+    ditto "$HOME/Applications/WorkBuddy.app" "/Applications/WorkBuddy.app"
+    xattr -dr com.apple.quarantine "/Applications/WorkBuddy.app" || true
+  fi
   if [ "$update" != "1" ] && { [ -d "$HOME/Applications/WorkBuddy.app" ] || [ -d "/Applications/WorkBuddy.app" ]; }; then
     echo "WorkBuddy 桌面软件已在本机。"
   else
@@ -249,10 +259,9 @@ PY
       echo "安装包里没有 WorkBuddy。" >&2
       exit 1
     fi
-    mkdir -p "$HOME/Applications"
-    rm -rf "$HOME/Applications/WorkBuddy.app"
-    ditto "$app" "$HOME/Applications/WorkBuddy.app"
-    xattr -dr com.apple.quarantine "$HOME/Applications/WorkBuddy.app" || true
+    rm -rf "$app_dir/WorkBuddy.app"
+    ditto "$app" "$app_dir/WorkBuddy.app"
+    xattr -dr com.apple.quarantine "$app_dir/WorkBuddy.app" || true
   fi
 fi
 echo "WorkBuddy 命令行和桌面软件已装好。"

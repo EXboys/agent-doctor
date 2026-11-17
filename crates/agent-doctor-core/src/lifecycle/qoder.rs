@@ -112,9 +112,11 @@ if (-not $update -and $cliPresent) {
 }
 
 $appCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Qoder CN IDE\Qoder CN IDE.exe'),
     (Join-Path $env:LOCALAPPDATA 'Programs\Qoder CN\Qoder CN.exe'),
     (Join-Path $env:LOCALAPPDATA 'Programs\Qoder IDE\Qoder IDE.exe'),
     (Join-Path $env:LOCALAPPDATA 'Programs\Qoder\Qoder.exe'),
+    (Join-Path $env:ProgramFiles 'Qoder CN IDE\Qoder CN IDE.exe'),
     (Join-Path $env:ProgramFiles 'Qoder CN\Qoder CN.exe'),
     (Join-Path $env:ProgramFiles 'Qoder IDE\Qoder IDE.exe'),
     (Join-Path $env:ProgramFiles 'Qoder\Qoder.exe')
@@ -186,8 +188,24 @@ else
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
+  # Finder's Applications list is /Applications. Prefer it when writable.
+  if [ -w /Applications ]; then
+    app_dir="/Applications"
+  else
+    app_dir="$HOME/Applications"
+    mkdir -p "$app_dir"
+  fi
+  # Older installs landed in ~/Applications — copy into Finder's list when we can.
+  if [ "$app_dir" = "/Applications" ]; then
+    for app_name in "Qoder CN IDE.app" "Qoder CN.app" "Qoder IDE.app" "Qoder.app"; do
+      if [ -d "$HOME/Applications/$app_name" ] && [ ! -e "/Applications/$app_name" ]; then
+        ditto "$HOME/Applications/$app_name" "/Applications/$app_name"
+        xattr -dr com.apple.quarantine "/Applications/$app_name" || true
+      fi
+    done
+  fi
   has_app=0
-  for app_name in "Qoder CN.app" "Qoder IDE.app" "Qoder.app"; do
+  for app_name in "Qoder CN IDE.app" "Qoder CN.app" "Qoder IDE.app" "Qoder.app"; do
     if [ -d "$HOME/Applications/$app_name" ] || [ -d "/Applications/$app_name" ]; then
       has_app=1
       break
@@ -231,10 +249,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
       exit 1
     fi
     app_base=$(basename "$app")
-    mkdir -p "$HOME/Applications"
-    rm -rf "$HOME/Applications/$app_base"
-    ditto "$app" "$HOME/Applications/$app_base"
-    xattr -dr com.apple.quarantine "$HOME/Applications/$app_base" || true
+    rm -rf "$app_dir/$app_base"
+    ditto "$app" "$app_dir/$app_base"
+    xattr -dr com.apple.quarantine "$app_dir/$app_base" || true
   fi
 fi
 echo "Qoder 命令行和桌面软件已装好。"
@@ -253,6 +270,7 @@ mod tests {
         assert!(cn.contains(QODER_GLOBAL_MAC_PREFIX));
         assert!(cn.contains("china=\"1\""));
         assert!(cn.contains("update=\"0\""));
+        assert!(cn.contains("Qoder CN IDE.app"));
 
         let global_update = unix_shell_command(true, false);
         assert!(global_update.contains("china=\"0\""));

@@ -1,4 +1,4 @@
-import { isExperimentalRuntime } from "./agent-catalog-groups";
+import { installsDesktopAndCli, isExperimentalRuntime } from "./agent-catalog-groups";
 import { agentBrandIconHtml } from "./agent-brand";
 import { t, tRuntimeBlurb, type MessageKey } from "./i18n";
 import { escapeHtml } from "./format";
@@ -288,6 +288,8 @@ const ACTION_ICON = {
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   skills:
     '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l2.2 5.2L19 10l-4.8 1.8L12 17l-2.2-5.2L5 10l4.8-1.8L12 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M18.5 15.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" fill="currentColor" stroke="none"/></svg>',
+  desktop:
+    '<svg class="btn-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 21h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 } as const;
 
 function actionButton(
@@ -302,21 +304,31 @@ function actionButton(
   return `<button type="button" class="btn-${kind} btn-with-icon" data-action="${action}"${title}${extra}>${icon}<span>${escapeHtml(label)}</span></button>`;
 }
 
-export function renderStandardRuntimeActions(_runtimeId: string): string {
-  return [
+export function renderStandardRuntimeActions(runtimeId: string): string {
+  const actions = [
     actionButton("primary", "diagnose-runtime", ACTION_ICON.diagnose, t("runtime.diagnose"), {
       title: t("runtime.diagnoseHint"),
     }),
     actionButton("secondary", "ask-session", ACTION_ICON.ask, t("runtime.ask"), {
       title: t("runtime.askHint"),
     }),
+  ];
+  if (installsDesktopAndCli(runtimeId)) {
+    actions.push(
+      actionButton("secondary", "open-desktop-app", ACTION_ICON.desktop, t("runtime.openDesktop"), {
+        title: t("runtime.openDesktopHint"),
+      }),
+    );
+  }
+  actions.push(
     actionButton("secondary", "open-resources-skills", ACTION_ICON.skills, t("runtime.addSkills"), {
       title: t("runtime.addSkillsHint"),
     }),
     actionButton("secondary", "uninstall-runtime", ACTION_ICON.uninstall, t("runtime.uninstall"), {
       title: t("runtime.uninstallHint"),
     }),
-  ].join("");
+  );
+  return actions.join("");
 }
 
 export function renderRuntimeCardActions(
@@ -380,7 +392,11 @@ export function renderRuntimeCardActions(
       <summary>${escapeHtml(t("runtime.advanced"))}</summary>
       ${advancedContent ? `<div class="runtime-advanced-meta">${advancedContent}</div>` : ""}
       <div class="runtime-advanced-actions">
-        <button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${escapeHtml(t("runtime.openTerminal"))}</button>
+        ${
+          installsDesktopAndCli(runtime.id)
+            ? ""
+            : `<button type="button" class="btn-ghost" data-action="open-session" data-open-terminal="1" title="${escapeHtml(t("runtime.openTerminalHint"))}">${escapeHtml(t("runtime.openTerminal"))}</button>`
+        }
         <button type="button" class="btn-ghost" data-action="wire-runtime" title="${escapeHtml(t("runtime.wireRuntimeHint"))}">${t("runtime.wireRuntime")}</button>
         <button type="button" class="btn-ghost" data-action="force-reinstall-runtime" title="${escapeHtml(t("runtime.forceReinstallHint"))}">${t("runtime.forceReinstall")}</button>
       </div>
