@@ -292,25 +292,24 @@ fn run_codex_app_server(
     };
 
     let saved_service = codex_turn_keeps_saved_service(&overlay);
-    let account_model =
-        if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
-            agent_doctor_core::setup::load_account_models("codex").and_then(|list| {
-                list.choose(
-                    overlay
-                        .get(agent_doctor_core::setup::MODEL_ENV)
-                        .map(String::as_str),
-                )
-            })
-        } else {
-            None
-        };
+    let on_codex_account = (agent_doctor_core::session_env::overlay_uses_native_account(&overlay)
+        || agent_doctor_core::setup::is_native_subscription("codex"))
+        && !saved_service;
+    let account_model = if on_codex_account {
+        agent_doctor_core::setup::load_account_models("codex").and_then(|list| {
+            list.choose(
+                overlay
+                    .get(agent_doctor_core::setup::MODEL_ENV)
+                    .map(String::as_str),
+            )
+        })
+    } else {
+        None
+    };
     // No account model means the saved one belonged to another service. An old
     // thread would keep that model, so this turn starts a new thread instead.
     // A saved-service turn keeps its own model and must not be replaced here.
-    if account_model.is_none()
-        && agent_doctor_core::setup::is_native_subscription("codex")
-        && !saved_service
-    {
+    if account_model.is_none() && on_codex_account {
         resume_thread_id = None;
     }
     let display_text = Arc::new(Mutex::new(String::new()));
@@ -607,7 +606,10 @@ fn build_app_server_command(
         .arg("-c")
         .arg("features.default_mode_request_user_input=true");
     let saved_service = codex_turn_keeps_saved_service(overlay);
-    if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
+    let on_codex_account = (agent_doctor_core::session_env::overlay_uses_native_account(overlay)
+        || agent_doctor_core::setup::is_native_subscription("codex"))
+        && !saved_service;
+    if on_codex_account {
         let model = overlay
             .get(agent_doctor_core::setup::MODEL_ENV)
             .map(|value| value.as_str());
@@ -625,7 +627,7 @@ fn build_app_server_command(
         .stderr(Stdio::piped());
     apply_overlay_env(&mut cmd, overlay);
     apply_codex_env(&mut cmd, overlay);
-    if agent_doctor_core::setup::is_native_subscription("codex") && !saved_service {
+    if on_codex_account {
         scrub_subscription_gateway_env(&mut cmd);
     }
     Ok(cmd)

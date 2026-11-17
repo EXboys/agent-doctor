@@ -1,6 +1,5 @@
 
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { setAgentBrandIcon } from "../agent-brand";
 import { isTeamEdition } from "../edition";
 import { appState, applyNativeAccounts } from "../app-state";
@@ -26,8 +25,11 @@ import {
   getPersonalProviderStatus,
   listPersonalProviders,
   nativeAccountStatus,
+  openBrowserUrl,
   installPingStatus,
+  resignNativeSubscription,
   setInstallPingEnabled,
+  signOutNativeSubscription,
   signOutTeamups,
   startTeamupsLogin,
   teamupsAccountStatus,
@@ -414,9 +416,14 @@ export function createPersonalController(deps: PersonalDeps) {
       nativeAccountListEl.replaceChildren();
       return;
     }
-    const rows = appState.nativeAccounts.filter((row) => row.visible);
+    const MANAGED_NATIVE_IDS = new Set(["codex", "claude-code", "qoder", "cursor", "workbuddy"]);
+    const rows = appState.nativeAccounts.filter(
+      (row) => row.visible && MANAGED_NATIVE_IDS.has(row.runtime_id),
+    );
     nativeFoldEl.hidden = rows.length === 0;
-    const using = rows.filter((row) => row.using_subscription).map((row) => toolLabel(row.runtime_id));
+    const using = rows
+      .filter((row) => row.using_subscription || row.logged_in)
+      .map((row) => toolLabel(row.runtime_id));
     const sep = getLocale() === "en" ? ", " : "、";
     nativeFoldLabelEl.textContent = using.length
       ? t("native.foldUsing", { tools: using.join(sep) })
@@ -449,7 +456,7 @@ export function createPersonalController(deps: PersonalDeps) {
       note.className = "provider-item-note";
       const noteText = busy
         ? t("native.loggingIn")
-        : row.using_subscription
+        : row.using_subscription || row.logged_in
           ? t("native.using", { account })
           : t("native.onlyTool");
       note.textContent = noteText;
@@ -468,8 +475,31 @@ export function createPersonalController(deps: PersonalDeps) {
         ? provider
           ? t("native.revert", { name: provider })
           : t("native.revertCurrent")
-        : loginButtonLabel(row.runtime_id);
+        : row.logged_in && !row.desktop_needs_sync
+          ? t("native.useLoggedAccount", { account })
+          : row.desktop_logged_in
+            ? t("chat.modelSyncDesktopCta", { account })
+            : loginButtonLabel(row.runtime_id);
       actions.appendChild(button);
+      if (row.logged_in && row.runtime_id !== "workbuddy") {
+        const resyncBtn = document.createElement("button");
+        resyncBtn.type = "button";
+        resyncBtn.className = "btn-ghost btn-compact";
+        resyncBtn.disabled = busy;
+        resyncBtn.dataset.runtimeId = row.runtime_id;
+        resyncBtn.dataset.action = "resync-subscription";
+        resyncBtn.textContent = t("chat.modelAccountResync");
+        actions.appendChild(resyncBtn);
+
+        const signOutBtn = document.createElement("button");
+        signOutBtn.type = "button";
+        signOutBtn.className = "btn-ghost btn-compact";
+        signOutBtn.disabled = busy;
+        signOutBtn.dataset.runtimeId = row.runtime_id;
+        signOutBtn.dataset.action = "signout-subscription";
+        signOutBtn.textContent = t("chat.modelAccountSignOut");
+        actions.appendChild(signOutBtn);
+      }
       li.append(avatar, main, actions);
       nativeAccountListEl.appendChild(li);
     }
@@ -485,20 +515,32 @@ export function createPersonalController(deps: PersonalDeps) {
     }
   }
 
-  async function onNativeAccountAction(runtimeId: string, action: "use-subscription" | "use-service") {
+  async function onNativeAccountAction(
+    runtimeId: string,
+    action: "use-subscription" | "use-service" | "resync-subscription" | "signout-subscription",
+  ) {
     if (nativeBusyId) return;
     nativeBusyId = runtimeId;
     renderNativeAccounts();
     personalListHintEl.hidden = false;
     personalListHintEl.textContent =
-      action === "use-subscription" ? t("native.loggingInHint") : t("personal.applying");
+      action === "use-subscription" || action === "resync-subscription"
+        ? t("native.loggingInHint")
+        : t("personal.applying");
     try {
       const result =
         action === "use-subscription"
           ? await useNativeSubscription(runtimeId)
-          : await useCurrentService(runtimeId);
+          : action === "resync-subscription"
+            ? await resignNativeSubscription(runtimeId)
+            : action === "signout-subscription"
+              ? await signOutNativeSubscription(runtimeId)
+              : await useCurrentService(runtimeId);
       await loadNativeAccounts(false);
-      personalListHintEl.textContent = nativeOutcome(result);
+      personalListHintEl.textContent =
+        result.outcome === "signed_out"
+          ? t("chat.modelAccountSignedOut", { account: accountLabel(runtimeId) })
+          : nativeOutcome(result);
       settleAfterProviderSwitch();
     } catch (error) {
       personalListHintEl.textContent = withProviderFailure("personal.applyFailed", error);
@@ -667,7 +709,7 @@ export function createPersonalController(deps: PersonalDeps) {
     personalListHintEl.textContent = t("resources.mallLoggingIn");
     try {
       const started = await startTeamupsLogin();
-      await openUrl(started.verification_url);
+      await openBrowserUrl(started.verification_url);
     } catch (error) {
       officialLoginWaiting = false;
       personalListHintEl.hidden = false;
@@ -678,7 +720,7 @@ export function createPersonalController(deps: PersonalDeps) {
   function openOfficialMembership(): void {
     const base = officialAccount?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
     startOfficialBalanceWatch();
-    void openUrl(`${base}/membership`);
+    void openBrowserUrl(`${base}/membership`);
   }
 
   /** First-run hands off here once the provider page is showing. */
@@ -1120,7 +1162,14 @@ export function createPersonalController(deps: PersonalDeps) {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
       const action = button?.dataset.action;
       const runtimeId = button?.dataset.runtimeId;
-      if (!button || !runtimeId || (action !== "use-subscription" && action !== "use-service")) {
+      if (
+        !button ||
+        !runtimeId ||
+        (action !== "use-subscription" &&
+          action !== "use-service" &&
+          action !== "resync-subscription" &&
+          action !== "signout-subscription")
+      ) {
         return;
       }
       void onNativeAccountAction(runtimeId, action);

@@ -153,13 +153,31 @@ pub fn normalize_personal_gateway_url(url: &str) -> Result<String> {
 }
 
 pub fn list_personal_providers() -> Result<PersonalProvidersDocument> {
-    if let Ok(Some((base_url, license))) = crate::skills::saved_teamups_provider_credentials() {
-        let _ = ensure_teamups_official_provider(&base_url, &license);
-    }
+    let signed_in = match crate::skills::saved_teamups_provider_credentials() {
+        Ok(Some((base_url, license))) => {
+            let _ = ensure_teamups_official_provider(&base_url, &license);
+            true
+        }
+        Ok(None) => false,
+        Err(_) => true,
+    };
     let path = personal_providers_path().context("could not resolve config directory")?;
     let mut store = load_store(&path)?;
     migrate_from_profile_if_empty(&mut store, &path)?;
-    Ok(document_from_store(&store, &path))
+    let mut doc = document_from_store(&store, &path);
+    if !signed_in {
+        doc.providers
+            .retain(|item| item.id != TEAMUPS_OFFICIAL_PROVIDER_ID);
+        if doc.active_id.as_deref() == Some(TEAMUPS_OFFICIAL_PROVIDER_ID) {
+            doc.active_id = doc.providers.first().map(|item| item.id.clone());
+            if let Some(ref first_id) = doc.active_id {
+                for item in &mut doc.providers {
+                    item.active = &item.id == first_id;
+                }
+            }
+        }
+    }
+    Ok(doc)
 }
 
 pub fn upsert_personal_provider(

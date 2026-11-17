@@ -4,12 +4,13 @@ use agent_doctor_core::{
     list_subscription_pool, load_mode_status, load_personal_provider_status, native_account_status,
     reclaim_subscription, refresh_account_models, resign_native_subscription,
     resolve_agent_doctor_binary, set_subscription_cap, set_subscription_disabled,
-    set_subscription_proxy, start_subscription_login, switch_to_personal_mode, switch_to_team_mode,
-    upsert_personal_provider, use_current_service, use_native_subscription,
-    verify_personal_provider_with_protocol, wire_browser_mcp_installed, ModeStatus,
-    ModeSwitchReport, NativeAccountStatus, NativeAccountSwitch, PersonalProviderOptions,
-    PersonalProviderSetupReport, PersonalProviderStatus, PersonalProviderVerifyReport,
-    PersonalProvidersDocument, SubscriptionPoolRow, UpsertPersonalProviderOptions,
+    set_subscription_proxy, sign_out_native_subscription, start_subscription_login,
+    switch_to_personal_mode, switch_to_team_mode, upsert_personal_provider, use_current_service,
+    use_native_subscription, verify_personal_provider_with_protocol, wire_browser_mcp_installed,
+    ModeStatus, ModeSwitchReport, NativeAccountStatus, NativeAccountSwitch,
+    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
+    PersonalProviderVerifyReport, PersonalProvidersDocument, SubscriptionPoolRow,
+    UpsertPersonalProviderOptions,
 };
 use agent_doctor_mcp::BrowserMcpWireReport;
 use serde::{Deserialize, Serialize};
@@ -333,6 +334,7 @@ pub async fn refresh_subscription_models_command(
 #[tauri::command]
 pub async fn use_native_subscription_command(
     app: tauri::AppHandle,
+    caller: tauri::WebviewWindow,
     runtime_id: String,
 ) -> Result<NativeAccountSwitch, String> {
     let switched = tauri::async_runtime::spawn_blocking(move || {
@@ -342,9 +344,11 @@ pub async fn use_native_subscription_command(
     .map_err(|error| error.to_string())??;
     if switched.outcome == "using" {
         notify_provider_changed(&app);
-        // The browser tries to open the Codex app after sign-in. This window
-        // is the one that should come forward.
-        if let Some(window) = app.get_webview_window("main") {
+        // Bring back whichever window initiated the sign-in (Ask or Main).
+        let target = app
+            .get_webview_window(caller.label())
+            .or_else(|| app.get_webview_window("main"));
+        if let Some(window) = target {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
@@ -356,6 +360,7 @@ pub async fn use_native_subscription_command(
 #[tauri::command]
 pub async fn resign_native_subscription_command(
     app: tauri::AppHandle,
+    caller: tauri::WebviewWindow,
     runtime_id: String,
 ) -> Result<NativeAccountSwitch, String> {
     let switched = tauri::async_runtime::spawn_blocking(move || {
@@ -367,14 +372,30 @@ pub async fn resign_native_subscription_command(
     agent_doctor_prompt::retire_warm_sessions();
     if switched.outcome == "using" {
         notify_provider_changed(&app);
-        // The browser tries to open the Codex app after sign-in. This window
-        // is the one that should come forward.
-        if let Some(window) = app.get_webview_window("main") {
+        let target = app
+            .get_webview_window(caller.label())
+            .or_else(|| app.get_webview_window("main"));
+        if let Some(window) = target {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
         }
     }
+    Ok(switched)
+}
+
+#[tauri::command]
+pub async fn sign_out_native_subscription_command(
+    app: tauri::AppHandle,
+    runtime_id: String,
+) -> Result<NativeAccountSwitch, String> {
+    let switched = tauri::async_runtime::spawn_blocking(move || {
+        sign_out_native_subscription(&runtime_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    agent_doctor_prompt::retire_warm_sessions();
+    notify_provider_changed(&app);
     Ok(switched)
 }
 

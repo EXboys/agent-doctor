@@ -1,6 +1,11 @@
 import { setFollowQueueInsertHandler } from "./chat/follow-queue";
 import { isChatRunning, liveRuns, MAX_PARALLEL_RUNS, runningCount } from "./chat/live-runs";
-import { OFFICIAL_PROVIDER_ID } from "./official-quota";
+import {
+  OFFICIAL_GIFT_MODEL,
+  OFFICIAL_PROVIDER_ID,
+  officialLineUsable,
+  officialQuotaState,
+} from "./official-quota";
 import { chatState } from "./chat-state";
 import { syncQuestionRail } from "./chat/question-rail";
 
@@ -95,6 +100,9 @@ import {
   type ChannelReplyImage,
   listInstalledAskAgents,
   listPersonalProviders,
+  nativeAccountStatus,
+  refreshSubscriptionModels,
+  teamupsAccountStatus,
   teamupsChannelChats,
   teamupsChannelConnected,
   teamupsChannelImage,
@@ -110,9 +118,11 @@ import {
   agentRows,
   applyPick,
   modelRows,
+  phoneInventoryProviders,
   pickOf,
 } from "./chat/phone-agents";
-import { modelOptionLabel, modelsForProviderUrl } from "./provider-models";
+import { accountSupportsModelList, nativeAccountLabel } from "./chat/model-picker";
+import { modelOptionLabel, modelsForProviderUrl, providerChipForUrl } from "./provider-models";
 import {
   applyChannelAnswer,
   channelSessionForJob,
@@ -149,6 +159,7 @@ import { contextLimitForModel, estimateTokens, sessionContextText } from "./chat
 import { createChannelLedger } from "./chat/channel-ledger";
 import { decidePhoneStop } from "./chat/channel-stop";
 import { createEmptySession } from "./chat/store";
+import { readAutoApproveDefault } from "./chat/confirm-pref";
 import {
   defaultWorkspaceName,
   projectDisplayLabel,
@@ -797,27 +808,83 @@ function bootChatTail(): void {
     const id = event.payload?.id?.trim() ?? "";
     if (id) void stopAsked(id);
   });
+  // The phone changed how one chat confirms tool calls. A chat that already
+  // exists follows at once; a chat created by a later job picks it up from
+  // the job frame (runChannelJob). `on` missing means "follow the computer's
+  // setting": the per-chat override goes back to the personal default.
+  void listen<{ chat?: string; on?: boolean | null }>("teamups-channel-auto-allow", (event) => {
+    const chat = event.payload?.chat?.trim() ?? "";
+    const on = event.payload?.on;
+    const store = chatState.store;
+    if (!chat || !store) return;
+    const session = store.sessions.find((item) => item.channelKey === chat);
+    if (!session) return;
+    const next = on === true || on === false ? on : readAutoApproveDefault();
+    if (session.autoApprove === next) return;
+    session.autoApprove = next;
+    saveStore();
+    renderSessionList();
+    if (activeSession()?.id === session.id) setActiveSessionAutoApprove(next);
+  });
   // The phone opened its agent / model sheet: name what this computer can run.
   let inventoryBusy = false;
   async function publishPhoneInventory(): Promise<void> {
     if (inventoryBusy) return;
     inventoryBusy = true;
     try {
-      const installed = await listInstalledAskAgents().catch(() => []);
-      const doc = await listPersonalProviders().catch(() => null);
-      const providers = (doc?.providers ?? []).map((provider) => ({
-        id: provider.id,
-        model: provider.model,
-        models: modelsForProviderUrl(provider.url, provider.model),
-        // 官方内置（配额制）打上标记，手机端好区分「内置 / 自配 key」。
-        builtin: provider.id === OFFICIAL_PROVIDER_ID,
-      }));
+      const [installed, doc, initialAccounts, officialAccount] = await Promise.all([
+        listInstalledAskAgents().catch(() => []),
+        listPersonalProviders().catch(() => null),
+        nativeAccountStatus(false).catch(() => null),
+        teamupsAccountStatus().catch(() => null),
+      ]);
+      let nativeRows = initialAccounts?.rows ?? [];
+      const missingAccountModels = nativeRows.filter(
+        (row) =>
+          row.logged_in &&
+          accountSupportsModelList(row.runtime_id) &&
+          (row.models ?? []).length === 0,
+      );
+      if (missingAccountModels.length > 0) {
+        await Promise.all(
+          missingAccountModels.map((row) =>
+            refreshSubscriptionModels(row.runtime_id).catch(() => []),
+          ),
+        );
+        const refreshed = await nativeAccountStatus(false).catch(() => null);
+        if (refreshed) nativeRows = refreshed.rows;
+      }
+
+      const agents = agentRows(installed);
+      const installedIds = new Set(agents.map((item) => item.id));
+      const quota = officialQuotaState(officialAccount);
+      const officialRow = (doc?.providers ?? []).find((p) => p.id === OFFICIAL_PROVIDER_ID);
+      const providers = phoneInventoryProviders({
+        installedIds,
+        personalProviders: doc?.providers ?? [],
+        nativeRows,
+        official: {
+          signedIn: quota.signedIn,
+          giftLeft: quota.free?.left ?? 0,
+          paidOrTrialReady: officialLineUsable(officialAccount),
+          model: officialRow?.model,
+          officialLabel: t("chat.modelOfficialGroup"),
+        },
+        officialProviderId: OFFICIAL_PROVIDER_ID,
+        officialGiftModel: OFFICIAL_GIFT_MODEL,
+        modelsForUrl: (url, currentModel) => modelsForProviderUrl(url, currentModel),
+        chipForUrl: (url, fallbackName) => providerChipForUrl(url, fallbackName),
+        accountLabel: (runtimeId) => nativeAccountLabel(runtimeId),
+      });
       const current = pickOf(activeSession());
       await teamupsChannelInventory({
-        agents: agentRows(installed),
-        // 不带 agent 提示：providers 全 Agent 共享，标了会被手机端当归属过滤，
-        // 电脑当前运行时和会话选的 Agent 不一样时，模型面板就开天窗了。
-        models: modelRows(providers, (id) => modelOptionLabel(id)),
+        agents,
+        models: modelRows(
+          providers,
+          (id) => (id === OFFICIAL_GIFT_MODEL ? t("chat.officialGiftOption") : modelOptionLabel(id)),
+          "",
+          60,
+        ),
         current,
       });
     } catch (error) {
@@ -828,6 +895,12 @@ function bootChatTail(): void {
   }
   void listen("teamups-channel-choices", () => {
     void publishPhoneInventory();
+  });
+  void listen("personal-provider-changed", () => {
+    if (channelOn) void publishPhoneInventory();
+  });
+  void listen("teamups-account-changed", () => {
+    if (channelOn) void publishPhoneInventory();
   });
   setChannelSessionIdle((sessionId) => {
     const next = takeNextChannelJob(sessionId);
@@ -854,6 +927,7 @@ function bootChatTail(): void {
     runtime?: string;
     model?: string;
     provider?: string;
+    autoAllow?: boolean | null;
     files?: { name?: string; path?: string; kind?: string }[];
   }>("teamups-channel-job", (event) => {
     const id = event.payload?.id?.trim() ?? "";
@@ -869,7 +943,18 @@ function bootChatTail(): void {
     const runtime = event.payload?.runtime?.trim() ?? "";
     const model = event.payload?.model?.trim() ?? "";
     const provider = event.payload?.provider?.trim() ?? "";
-    void runChannelJob(id, text, chat, files, project, runtime, model, provider);
+    const autoAllow = event.payload?.autoAllow;
+    void runChannelJob(
+      id,
+      text,
+      chat,
+      files,
+      project,
+      runtime,
+      model,
+      provider,
+      autoAllow === true || autoAllow === false ? autoAllow : undefined,
+    );
   });
   function pinChannelWorkspace(sessionId: string, project: string): void {
     const name = project.trim();
@@ -1071,6 +1156,7 @@ function bootChatTail(): void {
     runtime = "",
     model = "",
     provider = "",
+    autoAllow?: boolean,
   ): Promise<void> {
     teamupsChannelNote(id, "reached chat window");
     if (!id || (!text && files.length === 0) || !chatState.send || !chatState.store) {
@@ -1119,6 +1205,17 @@ function bootChatTail(): void {
           renderSessionList();
           publishActiveRuntime();
           updateContextMeter();
+        }
+      }
+      // The phone may also have said how this chat confirms. Applied before
+      // the turn, so the first ask already follows the phone's choice.
+      if (autoAllow !== undefined) {
+        const allowedSession = chatState.store?.sessions.find((item) => item.id === sessionId);
+        if (allowedSession && allowedSession.autoApprove !== autoAllow) {
+          allowedSession.autoApprove = autoAllow;
+          saveStore();
+          renderSessionList();
+          if (activeSession()?.id === sessionId) setActiveSessionAutoApprove(autoAllow);
         }
       }
       const job: ChannelQueued = {

@@ -13,7 +13,6 @@ use std::path::Path;
 use anyhow::{Context, Result as AnyhowResult};
 use serde_json::{json, Value};
 
-use crate::adapters::util::home_join;
 use crate::setup::{backup_file, ensure_parent, RuntimeSetupResult, PROTOCOL_ANTHROPIC};
 
 pub const QODER_PROVIDER_SLOT: &str = "agent-doctor";
@@ -109,7 +108,7 @@ pub fn apply_qoder_with_model(
     protocol: &str,
     model: Option<&str>,
 ) -> AnyhowResult<RuntimeSetupResult> {
-    let qoder_dir = home_join(".qoder");
+    let qoder_dir = crate::adapters::qoder_config_dir();
     apply_qoder_in_dir(&qoder_dir, gateway_url, api_key, protocol, model)
 }
 

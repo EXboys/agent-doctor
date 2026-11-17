@@ -55,6 +55,10 @@ pub struct TeamupsChannelJob {
     /// Which saved service serves that model. Empty means the wired one. A
     /// model id alone is ambiguous when the computer holds several providers.
     pub provider: String,
+    /// The phone asked this chat how to confirm: `Some(true)` skips the
+    /// per-step asks, `Some(false)` asks again even on a computer whose
+    /// global default would let go, `None` keeps whatever this chat does.
+    pub auto_allow: Option<bool>,
 }
 
 pub fn teamups_channel_ws_url(http_base: &str) -> String {
@@ -160,7 +164,7 @@ fn clean_since(value: Value) -> Option<Value> {
     Some(Value::Object(clean))
 }
 
-fn channel_client_id() -> String {
+pub(crate) fn channel_client_id() -> String {
     let Ok(store) = open_settings_store() else {
         return new_client_id();
     };
@@ -196,6 +200,11 @@ fn channel_hello_frame(id: &str, name: &str, os: &str, ip: &str, since: &Value) 
     .to_string()
 }
 
+/// This computer's channel id, so schedules can bind to it.
+pub fn teamups_channel_client_id() -> Result<String> {
+    Ok(channel_client_id())
+}
+
 pub fn teamups_channel_heard(id: &str) -> String {
     json!({ "type": "heard", "id": id }).to_string()
 }
@@ -210,7 +219,7 @@ fn clip_field(value: &str, max: usize) -> String {
         .to_string()
 }
 
-fn computer_name() -> String {
+pub(crate) fn computer_name() -> String {
     #[cfg(target_os = "macos")]
     if let Some(name) = macos_computer_name() {
         return name;
@@ -567,6 +576,7 @@ pub fn parse_teamups_channel_job(frame: &str) -> Option<TeamupsChannelJob> {
         runtime: runtime.chars().take(40).collect(),
         model: model.chars().take(120).collect(),
         provider: provider.chars().take(64).collect(),
+        auto_allow: value.get("autoAllow").and_then(Value::as_bool),
     })
 }
 
@@ -576,6 +586,25 @@ pub fn parse_channel_choices(frame: &str) -> bool {
         return false;
     };
     value.get("type").and_then(Value::as_str) == Some("choices")
+}
+
+/// The phone sets how one chat confirms tool calls:
+/// `{"type":"auto-allow","chat":"phone:...","on":true}`. `on: false` asks
+/// every step again; a frame without `on` follows the computer's setting.
+/// Returns the chat key and the requested state.
+pub fn parse_channel_auto_allow(frame: &str) -> Option<(String, Option<bool>)> {
+    let value: Value = serde_json::from_str(frame).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("auto-allow") {
+        return None;
+    }
+    let chat = value.get("chat").and_then(Value::as_str)?.trim();
+    if chat.is_empty() {
+        return None;
+    }
+    Some((
+        chat.chars().take(128).collect(),
+        value.get("on").and_then(Value::as_bool),
+    ))
 }
 
 fn parse_job_files(value: Option<&Value>) -> Vec<TeamupsChannelFile> {
@@ -641,8 +670,9 @@ fn clip_file_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_hello_frame, parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
-        parse_teamups_channel_sync, teamups_channel_reply, teamups_channel_ws_url,
+        channel_hello_frame, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
+        parse_teamups_channel_job, parse_teamups_channel_sync, teamups_channel_reply,
+        teamups_channel_ws_url,
     };
 
     #[test]
@@ -683,6 +713,37 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(long.model.chars().count(), 120);
+    }
+
+    #[test]
+    fn a_job_can_carry_the_auto_allow_request() {
+        let job = parse_teamups_channel_job(
+            r#"{"type":"job","id":"p","text":"放手做","autoAllow":true}"#,
+        )
+        .unwrap();
+        assert_eq!(job.auto_allow, Some(true));
+        let ask =
+            parse_teamups_channel_job(r#"{"type":"job","id":"r","text":"问我","autoAllow":false}"#)
+                .unwrap();
+        assert_eq!(ask.auto_allow, Some(false));
+        let plain = parse_teamups_channel_job(r#"{"type":"job","id":"q","text":"照旧"}"#).unwrap();
+        assert_eq!(plain.auto_allow, None);
+    }
+
+    #[test]
+    fn the_phone_can_set_how_a_chat_confirms() {
+        let on = parse_channel_auto_allow(r#"{"type":"auto-allow","chat":"phone:c1","on":true}"#);
+        assert_eq!(on, Some(("phone:c1".to_string(), Some(true))));
+        let off = parse_channel_auto_allow(r#"{"type":"auto-allow","chat":"phone:c1","on":false}"#);
+        assert_eq!(off, Some(("phone:c1".to_string(), Some(false))));
+        let follow = parse_channel_auto_allow(r#"{"type":"auto-allow","chat":"phone:c1"}"#);
+        assert_eq!(follow, Some(("phone:c1".to_string(), None)));
+        assert_eq!(parse_channel_auto_allow(r#"{"type":"auto-allow"}"#), None);
+        assert_eq!(parse_channel_auto_allow("not json"), None);
+        assert_eq!(
+            parse_channel_auto_allow(r#"{"type":"job","id":"a","text":"t"}"#),
+            None,
+        );
     }
 
     #[test]

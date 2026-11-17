@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { markdownCutInfo, safeMarkdownCut } from "../src/markdown";
+import { markdownCutInfo, renderMarkdown, restoreCollapsedMarkdown, safeMarkdownCut } from "../src/markdown";
 
 // No safe boundary yet: a single unfinished paragraph stays entirely in the tail.
 assert.equal(safeMarkdownCut("just one line"), 0);
@@ -49,4 +49,19 @@ assert.equal(
   const info = markdownCutInfo(closed);
   assert.equal(info.cut, "intro\n\n```bash\nnpm install\n```\n".length);
   assert.equal(info.fenced, false);
+}
+
+// Phone archive once stripped newlines; restore mid-line ## / 1. markers.
+{
+  const flat =
+    "诊断完成。已跑通。 ## 当前状态 线路正常。 ## 值得优化的 4 点 1. 睡眠会拖住 cron 2. 没有幂等保护";
+  const restored = restoreCollapsedMarkdown(flat);
+  assert.match(restored, /\n\n## 当前状态/);
+  assert.match(restored, /\n\n## 值得优化的 4 点/);
+  assert.match(restored, /\n1\. 睡眠会拖住 cron/);
+  assert.match(restored, /\n2\. 没有幂等保护/);
+  const html = renderMarkdown(flat);
+  assert.match(html, /<h2>/);
+  assert.match(html, /<ol>/);
+  assert.doesNotMatch(html, /## 当前状态/);
 }

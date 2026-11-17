@@ -118,7 +118,7 @@ pub(crate) fn saved_teamups_provider_credentials() -> Result<Option<(String, Str
 }
 
 /// Error bodies from the site's HTML 404 page are useless to show; keep JSON/text short.
-fn error_body(body: &str) -> String {
+pub(crate) fn error_body(body: &str) -> String {
     let trimmed = body.trim();
     if trimmed.starts_with('<') {
         return "(html page)".to_string();
@@ -126,7 +126,7 @@ fn error_body(body: &str) -> String {
     trimmed.chars().take(300).collect()
 }
 
-fn http_client() -> Result<reqwest::blocking::Client> {
+pub(crate) fn http_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -426,6 +426,7 @@ pub fn teamups_voice_ticket() -> Result<TeamupsVoiceTicket> {
 pub fn sign_out_teamups() -> Result<TeamupsAccountStatus> {
     let store = open_settings_store()?;
     store.clear_teamups_license()?;
+    let _ = crate::setup::delete_personal_provider(crate::setup::TEAMUPS_OFFICIAL_PROVIDER_ID);
     teamups_account_status()
 }
 

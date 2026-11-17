@@ -10,7 +10,7 @@ use std::path::Path;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::path::PathBuf;
 use std::process::Command;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Stdio;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -168,9 +168,14 @@ pub(crate) fn ensure_profile_env_from_evotown() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn open_url(url: &str) -> Result<()> {
+pub fn open_url(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
+        if (url.starts_with("http://") || url.starts_with("https://"))
+            && try_open_in_macos_everyday_browser(url)
+        {
+            return Ok(());
+        }
         let status = Command::new("open") // raw-spawn-ok
             .arg(url)
             .status()
@@ -211,6 +216,302 @@ pub(crate) fn open_url(url: &str) -> Result<()> {
     {
         bail!("deep link open is not supported on this platform");
     }
+}
+
+/// When Agent Doctor's isolated `chrome-cdp` process is running on macOS, plain
+/// `/usr/bin/open <https-url>` gets routed by LaunchServices to whichever
+/// `com.google.Chrome` instance registered earlier — often the empty `chrome-cdp`
+/// profile instead of the user's signed-in everyday browser.
+///
+/// Target the PID recorded in the everyday browser's `SingletonLock` directly
+/// via a `kInternetEventClass`/`kAEGetURL` AppleEvent (or launch the everyday
+/// binary directly when unlocked) so sign-in pages always reuse the user's
+/// existing browser session.
+#[cfg(target_os = "macos")]
+fn try_open_in_macos_everyday_browser(url: &str) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let Some(bundle_id) = macos_default_https_bundle_id(&home) else {
+        return false;
+    };
+    let Some((app_name, bin_name, user_data_rel)) = macos_chromium_spec_for_bundle_id(&bundle_id)
+    else {
+        return false;
+    };
+
+    let user_data_dir = home.join(user_data_rel);
+    if let Ok(target) = fs::read_link(user_data_dir.join("SingletonLock")) {
+        if let Some(pid) = parse_singleton_lock_pid(&target.to_string_lossy()) {
+            if macos_pid_alive(pid) && macos_send_open_url_to_pid(pid, url).is_ok() {
+                return true;
+            }
+        }
+    }
+
+    // Everyday Chromium is not running yet; if an isolated `chrome-cdp` process
+    // is active, `open` would still land in `chrome-cdp`, so launch the everyday
+    // browser binary directly against its default user-data-dir.
+    if home
+        .join("Library/Application Support/agent-doctor/chrome-cdp/SingletonLock")
+        .symlink_metadata()
+        .is_ok()
+    {
+        for root in [PathBuf::from("/Applications"), home.join("Applications")] {
+            let binary = root.join(app_name).join("Contents/MacOS").join(bin_name);
+            if binary.is_file() {
+                if let Ok(mut child) = Command::new(&binary) // raw-spawn-ok
+                    .arg(url)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn parse_singleton_lock_pid(target: &str) -> Option<i32> {
+    let (_, pid_str) = target.trim().rsplit_once('-')?;
+    let pid = pid_str.parse::<i32>().ok()?;
+    (pid > 0).then_some(pid)
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos_chromium_spec_for_bundle_id(
+    bundle_id: &str,
+) -> Option<(&'static str, &'static str, &'static str)> {
+    match bundle_id.trim().to_ascii_lowercase().as_str() {
+        "com.google.chrome" => Some((
+            "Google Chrome.app",
+            "Google Chrome",
+            "Library/Application Support/Google/Chrome",
+        )),
+        "com.google.chrome.canary" => Some((
+            "Google Chrome Canary.app",
+            "Google Chrome Canary",
+            "Library/Application Support/Google/Chrome Canary",
+        )),
+        "com.google.chrome.beta" => Some((
+            "Google Chrome Beta.app",
+            "Google Chrome Beta",
+            "Library/Application Support/Google/Chrome Beta",
+        )),
+        "com.google.chrome.dev" => Some((
+            "Google Chrome Dev.app",
+            "Google Chrome Dev",
+            "Library/Application Support/Google/Chrome Dev",
+        )),
+        "com.microsoft.edgemac" => Some((
+            "Microsoft Edge.app",
+            "Microsoft Edge",
+            "Library/Application Support/Microsoft Edge",
+        )),
+        "com.brave.browser" => Some((
+            "Brave Browser.app",
+            "Brave Browser",
+            "Library/Application Support/BraveSoftware/Brave-Browser",
+        )),
+        "org.chromium.chromium" => Some((
+            "Chromium.app",
+            "Chromium",
+            "Library/Application Support/Chromium",
+        )),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_default_https_bundle_id(home: &Path) -> Option<String> {
+    let plist = home
+        .join("Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
+    if !plist.is_file() {
+        return None;
+    }
+    let output = Command::new("/usr/bin/plutil") // raw-spawn-ok
+        .args(["-convert", "json", "-o", "-"])
+        .arg(&plist)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let root: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let handlers = root.get("LSHandlers")?.as_array()?;
+    for item in handlers {
+        let scheme = item
+            .get("LSHandlerURLScheme")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if scheme.eq_ignore_ascii_case("https") {
+            if let Some(role) = item
+                .get("LSHandlerRoleAll")
+                .or_else(|| item.get("LSHandlerRoleViewer"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && *s != "-")
+            {
+                return Some(role.to_ascii_lowercase());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_pid_alive(pid: i32) -> bool {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    // SAFETY: `kill(pid, 0)` performs a standard POSIX existence/permission check without sending a signal.
+    unsafe { kill(pid, 0) == 0 }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_send_open_url_to_pid(pid: i32, url: &str) -> Result<()> {
+    #[repr(C, packed(2))]
+    struct AEDesc {
+        descriptor_type: u32,
+        data_handle: *mut std::ffi::c_void,
+    }
+
+    #[link(name = "CoreServices", kind = "framework")]
+    extern "C" {
+        fn AECreateDesc(
+            type_code: u32,
+            data_ptr: *const std::ffi::c_void,
+            data_size: isize,
+            result: *mut AEDesc,
+        ) -> i32;
+        fn AEDisposeDesc(the_ae_desc: *mut AEDesc) -> i32;
+        fn AECreateAppleEvent(
+            the_ae_event_class: u32,
+            the_ae_event_id: u32,
+            target: *const AEDesc,
+            return_id: i16,
+            transaction_id: i32,
+            result: *mut AEDesc,
+        ) -> i32;
+        fn AEPutParamPtr(
+            the_apple_event: *mut AEDesc,
+            the_ae_keyword: u32,
+            type_code: u32,
+            data_ptr: *const std::ffi::c_void,
+            data_size: isize,
+        ) -> i32;
+        fn AESendMessage(
+            event: *const AEDesc,
+            reply: *mut AEDesc,
+            send_mode: i32,
+            time_out_in_ticks: isize,
+        ) -> i32;
+    }
+
+    const TYPE_KERNEL_PROCESS_ID: u32 = 0x6b70_6964; // 'kpid'
+    const K_INTERNET_EVENT_CLASS: u32 = 0x4755_524c; // 'GURL'
+    const K_AE_GET_URL: u32 = 0x4755_524c; // 'GURL'
+    const K_AE_MISC_STANDARDS: u32 = 0x6d69_7363; // 'misc'
+    const K_AE_ACTIVATE: u32 = 0x6163_7476; // 'actv'
+    const KEY_DIRECT_OBJECT: u32 = 0x2d2d_2d2d; // '----'
+    const TYPE_UTF8_TEXT: u32 = 0x7574_6638; // 'utf8'
+    const K_AUTO_GENERATE_RETURN_ID: i16 = -1;
+    const K_ANY_TRANSACTION_ID: i32 = 0;
+    const K_AE_NO_REPLY: i32 = 0x1;
+    const K_AE_DEFAULT_TIMEOUT: isize = -1;
+
+    // SAFETY: All descriptors are zero-initialized, checked for `noErr` (0), and disposed before return.
+    unsafe {
+        let mut target = AEDesc {
+            descriptor_type: 0,
+            data_handle: std::ptr::null_mut(),
+        };
+        let err = AECreateDesc(
+            TYPE_KERNEL_PROCESS_ID,
+            (&pid as *const i32).cast(),
+            std::mem::size_of::<i32>() as isize,
+            &mut target,
+        );
+        if err != 0 {
+            bail!("AECreateDesc failed with OSStatus {err}");
+        }
+
+        let mut gurl_event = AEDesc {
+            descriptor_type: 0,
+            data_handle: std::ptr::null_mut(),
+        };
+        let create_err = AECreateAppleEvent(
+            K_INTERNET_EVENT_CLASS,
+            K_AE_GET_URL,
+            &target,
+            K_AUTO_GENERATE_RETURN_ID,
+            K_ANY_TRANSACTION_ID,
+            &mut gurl_event,
+        );
+        if create_err != 0 {
+            let _ = AEDisposeDesc(&mut target);
+            bail!("AECreateAppleEvent(GURL) failed with OSStatus {create_err}");
+        }
+
+        let bytes = url.as_bytes();
+        let param_err = AEPutParamPtr(
+            &mut gurl_event,
+            KEY_DIRECT_OBJECT,
+            TYPE_UTF8_TEXT,
+            bytes.as_ptr().cast(),
+            bytes.len() as isize,
+        );
+        let send_err = if param_err == 0 {
+            let mut reply = AEDesc {
+                descriptor_type: 0,
+                data_handle: std::ptr::null_mut(),
+            };
+            AESendMessage(&gurl_event, &mut reply, K_AE_NO_REPLY, K_AE_DEFAULT_TIMEOUT)
+        } else {
+            param_err
+        };
+        let _ = AEDisposeDesc(&mut gurl_event);
+
+        // Best-effort bring the everyday browser window to the front.
+        if send_err == 0 {
+            let mut actv_event = AEDesc {
+                descriptor_type: 0,
+                data_handle: std::ptr::null_mut(),
+            };
+            if AECreateAppleEvent(
+                K_AE_MISC_STANDARDS,
+                K_AE_ACTIVATE,
+                &target,
+                K_AUTO_GENERATE_RETURN_ID,
+                K_ANY_TRANSACTION_ID,
+                &mut actv_event,
+            ) == 0
+            {
+                let mut reply = AEDesc {
+                    descriptor_type: 0,
+                    data_handle: std::ptr::null_mut(),
+                };
+                let _ = AESendMessage(&actv_event, &mut reply, K_AE_NO_REPLY, K_AE_DEFAULT_TIMEOUT);
+                let _ = AEDisposeDesc(&mut actv_event);
+            }
+        }
+        let _ = AEDisposeDesc(&mut target);
+
+        if send_err != 0 {
+            bail!("AESendMessage(GURL) failed with OSStatus {send_err}");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn launch_system_terminal(cwd: &Path, command_line: &str) -> Result<()> {

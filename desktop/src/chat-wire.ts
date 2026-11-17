@@ -142,6 +142,7 @@ import { createRunningIndicator } from "./chat/running";
 import { t } from "./i18n";
 import {
   createModelPickerController,
+  isNativeProviderId,
   pinSessionAfterFailover,
   providerHostTag,
 } from "./chat/model-picker";
@@ -891,6 +892,9 @@ export function wireChatControllers(): void {
     releaseUnansweredSteps: () => chatState.permissions.denyPendingChoices(),
     providerTag: (target) => {
       const session = target ?? (chatState.store?.sessions ? activeSession() : null);
+      if (session?.providerId && isNativeProviderId(session.providerId)) {
+        return providerHostTag({ id: session.providerId, url: session.providerId });
+      }
       const pinned = session?.providerId
         ? chatState.personalProviders.find((item) => item.id === session.providerId)
         : undefined;

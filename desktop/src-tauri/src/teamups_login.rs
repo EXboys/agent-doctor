@@ -56,7 +56,9 @@ pub fn open_from_website(app: &AppHandle, urls: &[String]) {
         };
         let url = started.verification_url.clone();
         watch(app.clone(), "main".to_string(), &started);
-        let _ = app.opener().open_url(url, None::<&str>);
+        if agent_doctor_core::open_url(&url).is_err() {
+            let _ = app.opener().open_url(url, None::<&str>);
+        }
     });
 }
 

@@ -114,6 +114,14 @@ fn run_cursor(
         .collect();
 
     let mut cmd = command_from_cli(&binary);
+    if let Some(model) = overlay
+        .get(agent_doctor_core::setup::MODEL_ENV)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case("auto"))
+    {
+        cmd.arg("--model").arg(model);
+    }
     cmd.arg("acp")
         .current_dir(&cwd)
         .stdin(Stdio::piped())

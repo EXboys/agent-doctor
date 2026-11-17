@@ -37,15 +37,40 @@ const CLAUDE_ID: &str = "claude-code";
 const QODER_ID: &str = "qoder";
 const CURSOR_ID: &str = "cursor";
 const WORKBUDDY_ID: &str = "workbuddy";
+const ZCODE_ID: &str = "zcode";
+const DEEPSEEK_HARNESS_ID: &str = "deepseek-harness";
 const CODEX_LOGIN_URL: &str = "https://auth.openai.com";
 const CLAUDE_LOGIN_URL: &str = "https://claude.ai";
 const LOGIN_WAIT: Duration = Duration::from_secs(180);
+
+/// Prefix for per-session provider pins that target a runtime's own signed-in account
+/// (e.g. `native:claude-code`, `native:codex`, `native:qoder`).
+pub const NATIVE_PROVIDER_PREFIX: &str = "native:";
+
+pub fn native_provider_id(runtime_id: &str) -> String {
+    format!("{NATIVE_PROVIDER_PREFIX}{}", runtime_id.trim())
+}
+
+pub fn parse_native_provider_id(provider_id: Option<&str>) -> Option<&str> {
+    let raw = provider_id?.trim();
+    raw.strip_prefix(NATIVE_PROVIDER_PREFIX).map(str::trim)
+}
+
+pub fn is_native_provider_id(provider_id: Option<&str>) -> bool {
+    parse_native_provider_id(provider_id).is_some()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeAccountRow {
     pub runtime_id: String,
     pub using_subscription: bool,
     pub logged_in: bool,
+    /// True when the companion desktop IDE (e.g. Qoder / Cursor) is signed in on this machine.
+    #[serde(default)]
+    pub desktop_logged_in: bool,
+    /// True when the companion desktop IDE has an active login that the CLI has not yet synced.
+    #[serde(default)]
+    pub desktop_needs_sync: bool,
     pub reachable: bool,
     pub visible: bool,
     pub provider_name: String,
@@ -76,18 +101,34 @@ pub fn is_native_subscription(runtime_id: &str) -> bool {
     {
         return false;
     }
-    // When Qoder / Cursor is not signed in locally, do not pretend the
-    // subscription is active. Qoder can fall through to a configured provider;
-    // Cursor Ask still needs a Cursor login or CURSOR_API_KEY (its CLI cannot
-    // use TeamUps / DeepSeek-style keys).
-    if matches!(runtime_id, QODER_ID | CURSOR_ID) {
-        return cli_logged_in(runtime_id);
-    }
-    true
+    // Never pretend a subscription is active when the local account is not signed in.
+    logged_in(runtime_id)
 }
 
 pub fn is_runtime_logged_in(runtime_id: &str) -> bool {
     logged_in(runtime_id)
+}
+
+/// Whether this Ask turn should run on `runtime_id`'s own signed-in account
+/// instead of a configured API-key provider.
+///
+/// - `provider_id = Some("native:<rt>")`: explicit account selection — true iff
+///   that runtime is currently signed in.
+/// - `provider_id = Some("<saved-id>")`: explicit saved provider — false.
+/// - `provider_id = None` / empty: follows global subscription mode unless the
+///   session model names a vendor gateway model.
+pub fn turn_uses_native_account(
+    runtime_id: &str,
+    model: Option<&str>,
+    provider_id: Option<&str>,
+) -> bool {
+    if let Some(target) = parse_native_provider_id(provider_id) {
+        return (target.is_empty() || target == runtime_id) && logged_in(runtime_id);
+    }
+    if provider_id.map(str::trim).is_some_and(|id| !id.is_empty()) {
+        return false;
+    }
+    is_native_subscription(runtime_id) && !crate::session_env::chat_uses_saved_service(model, None)
 }
 
 pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
@@ -99,11 +140,21 @@ pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
         row(CODEX_ID, true, &provider_name),
         row(CLAUDE_ID, true, &provider_name),
     ];
-    // Every installed subscription-capable CLI appears consistently; reachability
-    // is checked only when the user actually taps Sign in.
+    // Every installed subscription-capable CLI (or signed-in companion desktop IDE)
+    // appears consistently; reachability is checked only when the user taps Sign in.
     for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID] {
-        if cli_binary(runtime_id).is_some() {
+        if cli_binary(runtime_id).is_some() || desktop_login_state(runtime_id).0 {
             rows.push(row(runtime_id, true, &provider_name));
+        }
+    }
+    // ZCode and DeepSeek Harness sign in inside their own tools, so their rows stay
+    // hidden from the main-page login fold (`visible: false`) while Ask and the phone
+    // inventory still learn whether their accounts are currently signed in.
+    for runtime_id in [ZCODE_ID, DEEPSEEK_HARNESS_ID] {
+        if extra_account_runtime_installed(runtime_id) {
+            let mut extra = row(runtime_id, false, &provider_name);
+            extra.visible = false;
+            rows.push(extra);
         }
     }
     NativeAccountStatus { rows }
@@ -148,12 +199,37 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     Ok(switch(runtime_id, true, "using", provider_name))
 }
 
-/// The saved sign-in can no longer refresh. Drop it and run the login again.
+/// The saved sign-in can no longer refresh, or the user wants to switch/resync accounts.
 pub fn resign_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> {
     ensure_edition_allows_mode(MODE_PERSONAL)?;
     let runtime_id = known_runtime(runtime_id)?;
     forget_saved_login(runtime_id);
+    let _ = write_mode(runtime_id, "service");
     use_native_subscription(runtime_id)
+}
+
+/// Sign out of this runtime's saved CLI account and revert it to the active personal provider.
+pub fn sign_out_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> {
+    ensure_edition_allows_mode(MODE_PERSONAL)?;
+    let runtime_id = known_runtime(runtime_id)?;
+    forget_saved_login(runtime_id);
+    let _ = write_mode(runtime_id, "service");
+    if let Ok(switched) = use_current_service(runtime_id) {
+        if switched.outcome == "reverted" {
+            return Ok(switch(
+                runtime_id,
+                false,
+                "signed_out",
+                switched.provider_name,
+            ));
+        }
+    }
+    Ok(switch(
+        runtime_id,
+        false,
+        "signed_out",
+        active_provider_name(),
+    ))
 }
 
 pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
@@ -236,8 +312,12 @@ fn switch(
 
 fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountRow {
     let using = is_native_subscription(runtime_id);
+    let is_logged_in = logged_in(runtime_id);
+    let (desktop_logged_in, desktop_needs_sync) = desktop_login_state(runtime_id);
     let installed = if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
-        cli_binary(runtime_id).is_some()
+        cli_binary(runtime_id).is_some() || desktop_logged_in
+    } else if matches!(runtime_id, ZCODE_ID | DEEPSEEK_HARNESS_ID) {
+        extra_account_runtime_installed(runtime_id)
     } else {
         discover_binary(binary_name(runtime_id))
             .binary_path
@@ -246,17 +326,29 @@ fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountR
     NativeAccountRow {
         runtime_id: runtime_id.to_string(),
         using_subscription: using,
-        logged_in: logged_in(runtime_id),
+        logged_in: is_logged_in,
+        desktop_logged_in,
+        desktop_needs_sync,
         reachable,
         visible: account_row_visible(using, reachable, installed),
         provider_name: provider_name.to_string(),
-        models: if using {
+        models: if is_logged_in {
             crate::setup::load_account_models(runtime_id)
                 .map(|list| list.models)
                 .unwrap_or_default()
         } else {
             Vec::new()
         },
+    }
+}
+
+fn extra_account_runtime_installed(runtime_id: &str) -> bool {
+    match runtime_id {
+        ZCODE_ID => crate::adapters::locate_zcode_headless().is_some(),
+        DEEPSEEK_HARNESS_ID => discover_binary(crate::adapters::DEEPSEEK_HARNESS_CLI)
+            .binary_path
+            .is_some(),
+        _ => false,
     }
 }
 
@@ -286,6 +378,9 @@ fn cli_binary(runtime_id: &str) -> Option<PathBuf> {
 }
 
 fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<NativeAccountSwitch> {
+    if runtime_id == QODER_ID {
+        return use_qoder_subscription(provider_name);
+    }
     let Some(binary) = cli_binary(runtime_id) else {
         return Ok(switch(runtime_id, false, "missing_tool", provider_name));
     };
@@ -303,31 +398,498 @@ fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<Nativ
         )?;
         return Ok(switch(runtime_id, false, "login_incomplete", provider_name));
     }
-    if runtime_id == QODER_ID {
-        let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(&home_join(".qoder"));
-    }
     if cli_logged_in(runtime_id) {
+        let _ = crate::setup::refresh_account_models(runtime_id);
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
         return Ok(switch(runtime_id, true, "using", provider_name));
     }
     let _ = spawn_cli_login(&binary);
     if cli_logged_in(runtime_id) {
+        let _ = crate::setup::refresh_account_models(runtime_id);
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
         return Ok(switch(runtime_id, true, "using", provider_name));
     }
     Ok(switch(runtime_id, false, "login_incomplete", provider_name))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QoderDesktopKind {
+    Cn,
+    Global,
+}
+
+fn use_qoder_subscription(provider_name: String) -> Result<NativeAccountSwitch> {
+    let desktop_kind = qoder_desktop_login_kind();
+    // When the user's Qoder CN desktop IDE is signed in, align the CLI to `qoderclicn`
+    // (installing it automatically if only global `qodercli` was present) so browser
+    // authorization reuses their signed-in `qoder.com.cn` session in one click. Never
+    // fall back to global `qodercli` here — signing into `qoder.com` would leave the
+    // CN account unsynced.
+    let (binary, config_dir) = if desktop_kind == Some(QoderDesktopKind::Cn) {
+        if crate::adapters::qoder_cn_cli_path().is_none() {
+            let _ = install_qoder_cn_cli();
+        }
+        let Some(bin) = crate::adapters::qoder_cn_cli_path() else {
+            return Ok(switch(QODER_ID, false, "missing_tool", provider_name));
+        };
+        (bin, home_join(".qoder-cn"))
+    } else {
+        let Some(bin) = crate::adapters::qoder_cli_path() else {
+            return Ok(switch(QODER_ID, false, "missing_tool", provider_name));
+        };
+        (bin, crate::adapters::qoder_config_dir())
+    };
+    let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(&config_dir);
+    if qoder_dir_logged_in(&config_dir) {
+        let _ = crate::setup::refresh_account_models(QODER_ID);
+        write_mode(QODER_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(QODER_ID, true, "using", provider_name));
+    }
+    let _ = spawn_cli_login(&binary);
+    if qoder_dir_logged_in(&config_dir) {
+        let _ = crate::setup::refresh_account_models(QODER_ID);
+        write_mode(QODER_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(QODER_ID, true, "using", provider_name));
+    }
+    Ok(switch(QODER_ID, false, "login_incomplete", provider_name))
+}
+
+fn install_qoder_cn_cli() -> Result<()> {
+    // Prefer the lightweight `@qodercn-ai/qoderclicn` npm bundle (~35 MB JS bundle vs
+    // ~70 MB Bun archive on `static.qoder.com.cn`, which often crawls or times out when
+    // TUN proxies are active). Try npmjs first, then npmmirror, then the official script.
+    let npm_name = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    if let Some(npm) = crate::adapters::util::find_binary(npm_name) {
+        for registry in [
+            "https://registry.npmjs.org",
+            "https://registry.npmmirror.com",
+        ] {
+            let _ = crate::exec::command_for_path(&npm)
+                .args([
+                    "install",
+                    "-g",
+                    "@qodercn-ai/qoderclicn@latest",
+                    "--omit=optional",
+                    "--no-audit",
+                    "--no-fund",
+                    &format!("--registry={registry}"),
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            crate::adapters::refresh_managed_runtime_path();
+            if crate::adapters::qoder_cn_cli_path().is_some() {
+                return Ok(());
+            }
+        }
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(10))
+        .build()?;
+    #[cfg(windows)]
+    {
+        let script = client
+            .get("https://static.qoder.com.cn/qoder-cli-cn/install.ps1")
+            .send()?
+            .error_for_status()?
+            .text()?;
+        let dir = tempfile::tempdir()?;
+        let script_path = dir.path().join("install-qoderclicn.ps1");
+        fs::write(&script_path, script)?;
+        let mut cmd = crate::exec::command_for_path(Path::new("powershell"));
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            cmd.env_remove(key);
+        }
+        let _ = cmd
+            .env("NO_PROXY", "*")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &script_path.to_string_lossy(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let script = client
+            .get("https://static.qoder.com.cn/qoder-cli-cn/install.sh")
+            .send()?
+            .error_for_status()?
+            .text()?;
+        let dir = tempfile::tempdir()?;
+        let script_path = dir.path().join("install-qoderclicn.sh");
+        fs::write(&script_path, script)?;
+        let mut cmd = crate::exec::command_for_path(Path::new("bash"));
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            cmd.env_remove(key);
+        }
+        let _ = cmd
+            .env("NO_PROXY", "*")
+            .arg(&script_path)
+            .arg("--skip-path")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    crate::adapters::refresh_managed_runtime_path();
+    Ok(())
+}
+
+fn qoder_dir_logged_in(dir: &Path) -> bool {
+    qoder_auth_dir_has_user(&dir.join(".auth"))
+        || read_json(&dir.join("auth.json")).is_some_and(|value| tokenish(&value))
+}
+
+/// `(desktop_logged_in, desktop_needs_sync)` for runtimes that have a companion desktop IDE.
+fn desktop_login_state(runtime_id: &str) -> (bool, bool) {
+    match runtime_id {
+        QODER_ID => match qoder_desktop_login_kind() {
+            Some(QoderDesktopKind::Cn) => {
+                let cn_cli_ready = crate::adapters::qoder_cn_cli_path().is_some()
+                    && qoder_dir_logged_in(&home_join(".qoder-cn"));
+                (true, !cn_cli_ready)
+            }
+            Some(QoderDesktopKind::Global) => {
+                let global_cli_ready = qoder_dir_logged_in(&home_join(".qoder"));
+                (true, !global_cli_ready)
+            }
+            None => (false, false),
+        },
+        CURSOR_ID => {
+            let desktop = cursor_desktop_logged_in();
+            (desktop, desktop && !cursor_logged_in())
+        }
+        _ => (false, false),
+    }
+}
+
+pub(crate) fn qoder_desktop_login_kind() -> Option<QoderDesktopKind> {
+    let mut bases = Vec::new();
+    if using_test_home() {
+        bases.push(home_join("Library/Application Support"));
+        bases.push(home_join(".config"));
+    } else {
+        if let Some(cfg) = dirs::config_dir() {
+            bases.push(cfg);
+        }
+        if let Some(local) = dirs::data_local_dir() {
+            if !bases.contains(&local) {
+                bases.push(local);
+            }
+        }
+    }
+    for base in &bases {
+        for folder in ["QoderCN", "Qoder CN"] {
+            let status_path = base
+                .join(folder)
+                .join("SharedClientCache")
+                .join("cache")
+                .join("status.json");
+            if qoder_desktop_status_is_signed_in(&status_path) {
+                return Some(QoderDesktopKind::Cn);
+            }
+        }
+    }
+    for base in &bases {
+        for folder in ["Qoder", "Qoder IDE"] {
+            let status_path = base
+                .join(folder)
+                .join("SharedClientCache")
+                .join("cache")
+                .join("status.json");
+            if qoder_desktop_status_is_signed_in(&status_path) {
+                return Some(QoderDesktopKind::Global);
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn qoder_desktop_status_is_signed_in(path: &Path) -> bool {
+    read_json(path)
+        .and_then(|value| value.get("logged_in").and_then(Value::as_bool))
+        .unwrap_or(false)
+}
+
+fn cursor_desktop_logged_in() -> bool {
+    let mut dbs = Vec::new();
+    if using_test_home() {
+        dbs.push(home_join(
+            "Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+        ));
+    } else if let Some(cfg) = dirs::config_dir() {
+        dbs.push(
+            cfg.join("Cursor")
+                .join("User")
+                .join("globalStorage")
+                .join("state.vscdb"),
+        );
+    }
+    dbs.into_iter().any(|path| cursor_state_db_has_token(&path))
+}
+
+pub(crate) fn cursor_state_db_has_token(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let Ok(conn) = rusqlite::Connection::open_with_flags(path, flags) else {
+        return false;
+    };
+    let _ = conn.busy_timeout(Duration::from_millis(200));
+    conn.query_row(
+        "SELECT 1 FROM ItemTable WHERE key = 'cursorAuth/accessToken' AND length(trim(value)) > 0 LIMIT 1",
+        [],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
 fn cli_logged_in(runtime_id: &str) -> bool {
     match runtime_id {
         QODER_ID => {
-            qoder_auth_dir_has_user(&home_join(".qoder/.auth"))
-                || read_json(&home_join(".qoder/auth.json")).is_some_and(|value| tokenish(&value))
+            let dir = if using_test_home() {
+                home_join(".qoder")
+            } else {
+                crate::adapters::qoder_config_dir()
+            };
+            qoder_auth_dir_has_user(&dir.join(".auth"))
+                || read_json(&dir.join("auth.json")).is_some_and(|value| tokenish(&value))
         }
-        CURSOR_ID => read_json(&home_join(".cursor/cli-config.json"))
-            .is_some_and(|value| cursor_cli_config_is_signed_in(&value)),
+        CURSOR_ID => cursor_logged_in(),
+        WORKBUDDY_ID => workbuddy_logged_in(),
+        ZCODE_ID => zcode_logged_in(),
+        DEEPSEEK_HARNESS_ID => dsh_logged_in(),
         _ => false,
     }
+}
+
+fn cursor_logged_in() -> bool {
+    if read_json(&home_join(".cursor/cli-config.json"))
+        .is_some_and(|value| cursor_cli_config_is_signed_in(&value))
+    {
+        return true;
+    }
+    for path in cursor_auth_file_candidates() {
+        if read_json(&path).is_some_and(|value| cursor_auth_file_is_signed_in(&value)) {
+            return true;
+        }
+    }
+    for env_key in ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"] {
+        if std::env::var(env_key).is_ok_and(|value| !value.trim().is_empty()) {
+            return true;
+        }
+    }
+    macos_keychain_has_cursor_auth()
+}
+
+fn cursor_auth_file_candidates() -> Vec<PathBuf> {
+    let mut paths = vec![
+        home_join(".cursor/auth.json"),
+        home_join(".config/cursor/auth.json"),
+    ];
+    if !using_test_home() {
+        if let Some(cfg) = dirs::config_dir() {
+            paths.push(cfg.join("Cursor").join("auth.json"));
+            paths.push(cfg.join("cursor").join("auth.json"));
+        }
+    }
+    paths
+}
+
+pub(crate) fn cursor_auth_file_is_signed_in(value: &Value) -> bool {
+    tokenish(value) || nonempty_str(value.get("apiKey"))
+}
+
+fn workbuddy_logged_in() -> bool {
+    if read_json(&home_join(".codebuddy/auth.json")).is_some_and(|value| tokenish(&value))
+        || read_json(&home_join(".codebuddy/credentials.json"))
+            .is_some_and(|value| tokenish(&value))
+    {
+        return true;
+    }
+    workbuddy_logs_show_signed_in(&home_join(".codebuddy/logs"))
+}
+
+/// CodeBuddy encrypts its `local_storage` entries and also creates an
+/// `anonymous_*` session whenever `CODEBUDDY_API_KEY` runs. Its startup log
+/// records whether a real Tencent / WeChat user (`uid=<id>`, not `<none>` and
+/// not `anonymous_*`) restored with an access token.
+pub(crate) fn workbuddy_logs_show_signed_in(logs_dir: &Path) -> bool {
+    let Some(latest_log) = newest_workbuddy_log(logs_dir) else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(latest_log) else {
+        return false;
+    };
+    workbuddy_log_text_is_signed_in(&raw)
+}
+
+fn newest_workbuddy_log(logs_dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(logs_dir).ok()?;
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for day_entry in entries.flatten() {
+        let day_path = day_entry.path();
+        if !day_path.is_dir() {
+            continue;
+        }
+        let Ok(files) = fs::read_dir(&day_path) else {
+            continue;
+        };
+        for file_entry in files.flatten() {
+            let path = file_entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
+                continue;
+            }
+            let Ok(modified) = file_entry.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if newest.as_ref().map_or(true, |(best, _)| modified > *best) {
+                newest = Some((modified, path));
+            }
+        }
+    }
+    newest.map(|(_, path)| path)
+}
+
+pub(crate) fn workbuddy_log_text_is_signed_in(raw: &str) -> bool {
+    let mut signed_in = false;
+    for line in raw.lines() {
+        if !line.contains("[AuthenticationManager]")
+            && !line.contains("[AuthenticationSessionListener]")
+        {
+            continue;
+        }
+        if let Some(idx) = line.find("[auth_success:") {
+            let rest = line[idx + "[auth_success:".len()..].trim_start();
+            let uid = rest.split(']').next().unwrap_or("").trim();
+            signed_in = is_real_workbuddy_uid(uid);
+            continue;
+        }
+        if let Some(idx) = line.find("uid=") {
+            let rest = &line[idx + "uid=".len()..];
+            let uid = rest.split_whitespace().next().unwrap_or("").trim();
+            if line.contains("hasAccessToken=true") {
+                signed_in = is_real_workbuddy_uid(uid);
+            } else if line.contains("hasAccessToken=false") {
+                signed_in = false;
+            }
+            continue;
+        }
+        if line.contains("userId changed:")
+            && line.ends_with("-> <empty>")
+            && !line.contains("<init> -> <empty>")
+        {
+            signed_in = false;
+        }
+    }
+    signed_in
+}
+
+fn is_real_workbuddy_uid(uid: &str) -> bool {
+    let trimmed = uid.trim();
+    !trimmed.is_empty()
+        && trimmed != "<none>"
+        && trimmed != "<empty>"
+        && !trimmed.starts_with("anonymous_")
+}
+
+fn zcode_logged_in() -> bool {
+    read_json(&home_join(".zcode/v2/credentials.json"))
+        .is_some_and(|value| zcode_credentials_are_signed_in(&value))
+}
+
+pub(crate) fn zcode_credentials_are_signed_in(value: &Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    for key in [
+        "oauth:zai:access_token",
+        "oauth:bigmodel:access_token",
+        "zcodejwttoken",
+    ] {
+        if nonempty_str(map.get(key)) {
+            return true;
+        }
+    }
+    map.iter().any(|(key, val)| {
+        key.starts_with("account-provider:")
+            && key.ends_with(":identity")
+            && nonempty_str(Some(val))
+    })
+}
+
+fn dsh_logged_in() -> bool {
+    let path = if using_test_home() {
+        home_join(".dsh/.credentials.yaml")
+    } else {
+        crate::adapters::DeepSeekHarnessAdapter::credentials_path()
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    dsh_credentials_are_signed_in(&raw)
+}
+
+pub(crate) fn dsh_credentials_are_signed_in(raw: &str) -> bool {
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(raw) else {
+        return false;
+    };
+    yaml_has_auth_token(&value)
+}
+
+fn yaml_has_auth_token(value: &serde_yaml::Value) -> bool {
+    match value {
+        serde_yaml::Value::Mapping(map) => map.iter().any(|(k, v)| {
+            let key = k.as_str().unwrap_or("");
+            if matches!(
+                key,
+                "access_token"
+                    | "accessToken"
+                    | "token"
+                    | "refresh_token"
+                    | "refreshToken"
+                    | "apiKey"
+                    | "api_key"
+                    | "DEEPSEEK_API_KEY"
+            ) {
+                v.as_str().is_some_and(|s| !s.trim().is_empty())
+            } else {
+                yaml_has_auth_token(v)
+            }
+        }),
+        serde_yaml::Value::Sequence(items) => items.iter().any(yaml_has_auth_token),
+        _ => false,
+    }
+}
+
+fn using_test_home() -> bool {
+    dirs::home_dir().as_deref() != Some(crate::adapters::util::home_dir().as_path())
 }
 
 pub(crate) fn qoder_auth_dir_has_user(auth_dir: &Path) -> bool {
@@ -368,29 +930,70 @@ pub(crate) fn cursor_cli_config_is_signed_in(value: &Value) -> bool {
 }
 
 fn spawn_cli_login(binary: &Path) -> Result<()> {
-    let mut child = crate::exec::command_for_path(binary)
-        .arg("login")
+    let bin_lower = binary
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let is_qoder = bin_lower.contains("qoder");
+    let is_cursor = bin_lower == "agent" || bin_lower.contains("cursor");
+    let qoder_dir = if bin_lower.contains("qoderclicn") {
+        Some(home_join(".qoder-cn"))
+    } else if is_qoder {
+        Some(home_join(".qoder"))
+    } else {
+        None
+    };
+
+    let mut cmd = crate::exec::command_for_path(binary);
+    cmd.arg("login")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    if is_qoder {
+        // Tell Qoder CLI to skip its silent `.catch(() => {})` opener so we open
+        // the printed authorization URL deterministically once via `open_url`.
+        cmd.env("BROWSER", "www-browser");
+    }
+    if is_cursor {
+        // Cursor `agent login` honors `NO_OPEN_BROWSER` so `open_url` can route
+        // directly to the user's everyday browser session instead of `chrome-cdp`.
+        cmd.env("NO_OPEN_BROWSER", "1");
+    }
+    let open_shim = install_macos_login_open_shim(&mut cmd);
+    let mut child = cmd.spawn()?;
     let opened = Arc::new(AtomicBool::new(false));
+    let intercept_url = is_qoder || is_cursor;
     if let Some(pipe) = child.stdout.take() {
-        watch_login_output(pipe, Arc::clone(&opened));
+        watch_login_output_mode(pipe, Arc::clone(&opened), intercept_url);
     }
     if let Some(pipe) = child.stderr.take() {
-        watch_login_output(pipe, opened);
+        watch_login_output_mode(pipe, Arc::clone(&opened), intercept_url);
     }
     let started = Instant::now();
     loop {
+        drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+        if let Some(ref dir) = qoder_dir {
+            if qoder_dir_logged_in(dir) {
+                wait_for_login_exit(&mut child);
+                return Ok(());
+            }
+        }
+        if is_cursor && cursor_logged_in() {
+            wait_for_login_exit(&mut child);
+            return Ok(());
+        }
         if started.elapsed() > LOGIN_WAIT {
             let _ = child.kill();
             let _ = child.wait();
             bail!("login timed out");
         }
         match child.try_wait() {
-            Ok(Some(_)) => return Ok(()),
-            Ok(None) => thread::sleep(Duration::from_millis(400)),
+            Ok(Some(_)) => {
+                drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                return Ok(());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
             Err(_) => return Ok(()),
         }
     }
@@ -451,18 +1054,84 @@ fn claude_target_url(url: &str, protocol: &str) -> Option<String> {
 }
 
 fn logged_in(runtime_id: &str) -> bool {
-    if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
-        return cli_logged_in(runtime_id);
+    match runtime_id {
+        QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID | DEEPSEEK_HARNESS_ID => {
+            cli_logged_in(runtime_id)
+        }
+        CODEX_ID => {
+            read_json(&home_join(".codex/auth.json"))
+                .is_some_and(|value| codex_auth_is_chatgpt(&value))
+                || stash_path()
+                    .and_then(|path| read_json(&path))
+                    .is_some_and(|value| codex_auth_is_chatgpt(&value))
+        }
+        CLAUDE_ID => {
+            read_json(&home_join(".claude/.credentials.json"))
+                .is_some_and(|value| claude_credentials_are_oauth(&value))
+                || macos_keychain_has_claude_oauth()
+        }
+        _ => false,
     }
-    if runtime_id == CODEX_ID {
-        read_json(&home_join(".codex/auth.json"))
-            .map(|value| codex_auth_is_chatgpt(&value))
-            .unwrap_or(false)
-    } else {
-        read_json(&home_join(".claude/.credentials.json"))
-            .map(|value| claude_credentials_are_oauth(&value))
-            .unwrap_or(false)
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn keychain_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, (Instant, bool)>>
+{
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn clear_macos_keychain_cache() {
+    if let Ok(mut guard) = keychain_cache().lock() {
+        guard.clear();
     }
+}
+
+#[cfg(not(all(target_os = "macos", not(test))))]
+fn clear_macos_keychain_cache() {}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn macos_keychain_item_exists(service: &str, account: Option<&str>) -> bool {
+    let key = format!("{service}\0{}", account.unwrap_or(""));
+    let cache = keychain_cache();
+    if let Ok(guard) = cache.lock() {
+        if let Some((at, present)) = guard.get(&key) {
+            if at.elapsed() < Duration::from_secs(5) {
+                return *present;
+            }
+        }
+    }
+    let mut cmd = std::process::Command::new("security"); // raw-spawn-ok
+    cmd.arg("find-generic-password").arg("-s").arg(service);
+    if let Some(acc) = account {
+        cmd.arg("-a").arg(acc);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let present = cmd.status().is_ok_and(|s| s.success());
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, (Instant::now(), present));
+    }
+    present
+}
+
+#[cfg(not(all(target_os = "macos", not(test))))]
+fn macos_keychain_item_exists(_service: &str, _account: Option<&str>) -> bool {
+    false
+}
+
+fn macos_keychain_has_claude_oauth() -> bool {
+    !using_test_home() && macos_keychain_item_exists("Claude Code-credentials", None)
+}
+
+fn macos_keychain_has_cursor_auth() -> bool {
+    !using_test_home()
+        && (macos_keychain_item_exists("cursor-access-token", Some("cursor-user"))
+            || macos_keychain_item_exists("cursor-api-key", Some("cursor-user")))
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -542,7 +1211,14 @@ pub(crate) fn strip_claude_provider_keys(root: &mut Value) {
     }
 }
 
+pub(crate) fn codex_chatgpt_stash_path() -> Option<PathBuf> {
+    stash_path()
+}
+
 fn stash_path() -> Option<PathBuf> {
+    if using_test_home() {
+        return Some(home_join(".agent-doctor/codex-chatgpt-auth.json"));
+    }
     crate::store::agent_doctor_config_dir().map(|dir| dir.join("codex-chatgpt-auth.json"))
 }
 
@@ -572,23 +1248,94 @@ fn stash_codex_auth() {
 }
 
 fn forget_saved_login(runtime_id: &str) {
-    if runtime_id == CODEX_ID {
-        let _ = fs::remove_file(home_join(".codex/auth.json"));
-        if let Some(path) = stash_path() {
-            let _ = fs::remove_file(path);
+    if !using_test_home() {
+        if let Ok(store) = open_settings_store() {
+            let _ = store.set_meta(&format!("native_models:{runtime_id}"), "{}");
         }
-        return;
     }
-    if runtime_id == CLAUDE_ID {
-        let _ = fs::remove_file(home_join(".claude/.credentials.json"));
+    match runtime_id {
+        CODEX_ID => {
+            let _ = fs::remove_file(home_join(".codex/auth.json"));
+            if let Some(path) = stash_path() {
+                let _ = fs::remove_file(path);
+            }
+            if !using_test_home() {
+                let _ = clear_codex_chatgpt_auth_for_gateway();
+            }
+        }
+        CLAUDE_ID => {
+            let _ = fs::remove_file(home_join(".claude/.credentials.json"));
+            if !using_test_home() {
+                if let Some(bin) = discover_binary("claude").binary_path {
+                    let _ = crate::exec::command_for_path(&bin)
+                        .args(["auth", "logout"])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                }
+                clear_macos_keychain_cache();
+            }
+        }
+        QODER_ID => {
+            for folder in [".qoder", ".qoder-cn"] {
+                let dir = home_join(folder);
+                let _ = fs::remove_file(dir.join("auth.json"));
+                clear_qoder_auth_dir(&dir.join(".auth"));
+            }
+        }
+        CURSOR_ID => {
+            for path in cursor_auth_file_candidates() {
+                let _ = fs::remove_file(path);
+            }
+            if !using_test_home() {
+                if let Some(bin) = crate::adapters::cursor_cli_path() {
+                    let _ = crate::exec::command_for_path(&bin)
+                        .arg("logout")
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                }
+                clear_macos_keychain_cache();
+            }
+        }
+        _ => {}
     }
 }
 
-/// Replace a project Codex home's account file with the one just written to `~/.codex`.
+pub(crate) fn clear_qoder_auth_dir(auth_dir: &Path) {
+    let Ok(entries) = fs::read_dir(auth_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == "user" || name.starts_with("user.") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Replace a project Codex home's account file with the signed-in ChatGPT auth
+/// from `~/.codex/auth.json` (or the stashed copy when a personal gateway is active).
 pub(crate) fn publish_codex_subscription_auth(codex_home: Option<&Path>) {
-    let src = home_join(".codex/auth.json");
+    let global_auth = home_join(".codex/auth.json");
+    let global_has_chatgpt =
+        read_json(&global_auth).is_some_and(|value| codex_auth_is_chatgpt(&value));
+    let src = if global_has_chatgpt {
+        global_auth.clone()
+    } else if let Some(stash) =
+        stash_path().filter(|p| read_json(p).is_some_and(|value| codex_auth_is_chatgpt(&value)))
+    {
+        stash
+    } else {
+        global_auth.clone()
+    };
     if let Some(home) = codex_home {
         copy_chatgpt_auth_file(&src, home);
+    } else if !global_has_chatgpt {
+        restore_codex_auth();
     }
     let Ok(doc) = crate::workspace::load_workspaces() else {
         return;
@@ -655,15 +1402,15 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
         &["auth", "login"]
     };
     let mut cmd = crate::exec::command_for_path(&binary);
-    let mut child = cmd
-        .args(args)
+    cmd.args(args)
         // Sign-in must land in ~/.codex. A project CODEX_HOME would keep the new
         // account away from the file the next chat copies in.
         .env_remove("CODEX_HOME")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    let open_shim = install_macos_login_open_shim(&mut cmd);
+    let mut child = cmd.spawn()?;
     let opened = Arc::new(AtomicBool::new(false));
     // Codex and Claude each open the authorize page themselves. Opening that
     // same address again shows the account that is already signed in, and that
@@ -672,10 +1419,11 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
         watch_login_output(pipe, Arc::clone(&opened));
     }
     if let Some(pipe) = child.stderr.take() {
-        watch_login_output(pipe, opened);
+        watch_login_output(pipe, Arc::clone(&opened));
     }
     let started = Instant::now();
     loop {
+        drain_macos_login_open_shim(open_shim.as_ref(), &opened);
         if logged_in(runtime_id) {
             // The tool writes the account, then tells the browser where to go.
             // Killing it in that gap leaves the signed-in page with nowhere to jump.
@@ -688,14 +1436,81 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
             bail!("login timed out");
         }
         match child.try_wait() {
-            Ok(Some(_)) => return Ok(()),
-            Ok(None) => thread::sleep(Duration::from_millis(400)),
+            Ok(Some(_)) => {
+                drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                return Ok(());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
             Err(_) => return Ok(()),
         }
     }
 }
 
+/// Intercepts `open <https://...>` from login CLIs on macOS so we route the
+/// authorization link to the user's everyday browser session instead of Agent
+/// Doctor's isolated `chrome-cdp` process.
+#[cfg(target_os = "macos")]
+fn install_macos_login_open_shim(cmd: &mut std::process::Command) -> Option<tempfile::TempDir> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().ok()?;
+    let shim_path = dir.path().join("open");
+    let url_file = dir.path().join("opened-url.txt");
+    let script = format!(
+        "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    http://*|https://*)\n      printf '%s\\n' \"$arg\" > '{}'\n      exit 0\n      ;;\n  esac\ndone\nexec /usr/bin/open \"$@\"\n",
+        url_file.display().to_string().replace('\'', "'\\''")
+    );
+    fs::write(&shim_path, script).ok()?;
+    fs::set_permissions(&shim_path, fs::Permissions::from_mode(0o755)).ok()?;
+
+    let existing_path = cmd
+        .get_envs()
+        .find_map(|(k, v)| {
+            (k == "PATH")
+                .then_some(v)
+                .flatten()
+                .map(|v| v.to_os_string())
+        })
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let joined = std::env::join_paths(
+        std::iter::once(dir.path().to_path_buf()).chain(std::env::split_paths(&existing_path)),
+    )
+    .ok()?;
+    cmd.env("PATH", joined);
+    Some(dir)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_macos_login_open_shim(_cmd: &mut std::process::Command) -> Option<tempfile::TempDir> {
+    None
+}
+
+fn drain_macos_login_open_shim(shim: Option<&tempfile::TempDir>, opened: &AtomicBool) {
+    let Some(dir) = shim else {
+        return;
+    };
+    let url_file = dir.path().join("opened-url.txt");
+    let Ok(raw) = fs::read_to_string(&url_file) else {
+        return;
+    };
+    let _ = fs::remove_file(&url_file);
+    let url = raw.lines().next().unwrap_or("").trim();
+    if (url.starts_with("http://") || url.starts_with("https://"))
+        && !opened.swap(true, Ordering::SeqCst)
+    {
+        let _ = crate::session_launch::open_url(url);
+    }
+}
+
 fn watch_login_output<R>(pipe: R, opened: Arc<AtomicBool>)
+where
+    R: Read + Send + 'static,
+{
+    watch_login_output_mode(pipe, opened, false);
+}
+
+fn watch_login_output_mode<R>(pipe: R, opened: Arc<AtomicBool>, always_open_url: bool)
 where
     R: Read + Send + 'static,
 {
@@ -708,14 +1523,14 @@ where
                 break;
             }
             pending.push_str(&String::from_utf8_lossy(&chunk[..n]));
-            maybe_open_login_url(&pending, &opened, false);
+            maybe_open_login_url_mode(&pending, &opened, false, always_open_url);
         }
-        maybe_open_login_url(&pending, &opened, true);
+        maybe_open_login_url_mode(&pending, &opened, true, always_open_url);
     });
 }
 
-fn maybe_open_login_url(text: &str, opened: &AtomicBool, at_end: bool) {
-    if !login_url_should_open(text) {
+fn maybe_open_login_url_mode(text: &str, opened: &AtomicBool, at_end: bool, always_open_url: bool) {
+    if !always_open_url && !login_url_should_open(text) {
         return;
     }
     let url = if at_end {
@@ -938,5 +1753,126 @@ mod tests {
             first_login_url(&format!("{partial}&state=abc\n")),
             Some(format!("{partial}&state=abc"))
         );
+    }
+
+    #[test]
+    fn workbuddy_log_distinguishes_real_login_from_anonymous_api_key_session() {
+        let anon = "[Info] [AuthenticationManager] [AuthDoInitProbe] stage=fastPathBeforeEmit uid=anonymous_vv_thbz8 hasAccessToken=true\n";
+        assert!(!workbuddy_log_text_is_signed_in(anon));
+
+        let empty = "[Info] [AuthenticationManager] [AuthDoInitProbe] stage=fastPathBeforeEmit uid=<none> hasAccessToken=false\n";
+        assert!(!workbuddy_log_text_is_signed_in(empty));
+
+        let real =
+            "[Info] [AuthenticationSessionListener] [auth_success: wx_user_12345] 认证成功\n";
+        assert!(workbuddy_log_text_is_signed_in(real));
+
+        let signed_out = format!(
+            "{real}[Info] [AuthenticationManager] userId changed: wx_user_12345 -> <empty>\n"
+        );
+        assert!(!workbuddy_log_text_is_signed_in(&signed_out));
+    }
+
+    #[test]
+    fn zcode_and_dsh_credentials_detect_only_real_sign_ins() {
+        assert!(!zcode_credentials_are_signed_in(
+            &json!({"web-remote-control:external-relay:pass_hash": "hash"})
+        ));
+        assert!(zcode_credentials_are_signed_in(
+            &json!({"oauth:zai:access_token": "enc-tok"})
+        ));
+        assert!(zcode_credentials_are_signed_in(
+            &json!({"account-provider:zai-coding-plan:identity": "u_123"})
+        ));
+
+        assert!(!dsh_credentials_are_signed_in("{}\n"));
+        assert!(dsh_credentials_are_signed_in(
+            "deepseek:\n  access_token: tok-123\n"
+        ));
+    }
+
+    #[test]
+    fn explicit_native_provider_pin_follows_actual_login_state() {
+        use crate::adapters::util::with_test_home;
+
+        let dir = tempfile::tempdir().unwrap();
+        with_test_home(dir.path(), || {
+            // Not logged in: `native:qoder` is refused and does not pretend to be subscribed.
+            assert!(!is_runtime_logged_in("qoder"));
+            assert!(!turn_uses_native_account(
+                "qoder",
+                Some("auto"),
+                Some("native:qoder")
+            ));
+
+            // Sign Qoder in: `native:qoder` activates the account even when mode is "service",
+            // while an explicit saved provider id (`pp_1`) keeps using that saved provider.
+            let auth = dir.path().join(".qoder/.auth");
+            fs::create_dir_all(&auth).unwrap();
+            fs::write(auth.join("user"), "cred").unwrap();
+            assert!(is_runtime_logged_in("qoder"));
+            assert!(turn_uses_native_account(
+                "qoder",
+                Some("auto"),
+                Some("native:qoder")
+            ));
+            assert!(!turn_uses_native_account(
+                "qoder",
+                Some("deepseek-flash"),
+                Some("pp_1")
+            ));
+
+            // Stashed Codex ChatGPT auth still counts as logged in while a gateway is active.
+            let stash = dir.path().join(".agent-doctor/codex-chatgpt-auth.json");
+            fs::create_dir_all(stash.parent().unwrap()).unwrap();
+            fs::write(
+                &stash,
+                r#"{"auth_mode":"chatgpt","tokens":{"access_token":"tok"}}"#,
+            )
+            .unwrap();
+            assert!(is_runtime_logged_in("codex"));
+            assert!(turn_uses_native_account(
+                "codex",
+                Some("gpt-5.6-sol"),
+                Some("native:codex")
+            ));
+        });
+    }
+
+    #[test]
+    fn detects_qoder_and_cursor_desktop_ide_sign_ins() {
+        use crate::adapters::util::with_test_home;
+
+        let dir = tempfile::tempdir().unwrap();
+        with_test_home(dir.path(), || {
+            assert_eq!(qoder_desktop_login_kind(), None);
+
+            let qoder_cn_status = dir
+                .path()
+                .join("Library/Application Support/QoderCN/SharedClientCache/cache/status.json");
+            fs::create_dir_all(qoder_cn_status.parent().unwrap()).unwrap();
+            fs::write(&qoder_cn_status, r#"{"logged_in":true,"username":"u1"}"#).unwrap();
+            assert_eq!(qoder_desktop_login_kind(), Some(QoderDesktopKind::Cn));
+
+            let cursor_db = dir
+                .path()
+                .join("Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+            fs::create_dir_all(cursor_db.parent().unwrap()).unwrap();
+            let conn = rusqlite::Connection::open(&cursor_db).unwrap();
+            conn.execute(
+                "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)",
+                [],
+            )
+            .unwrap();
+            assert!(!cursor_state_db_has_token(&cursor_db));
+            conn.execute(
+                "INSERT INTO ItemTable (key, value) VALUES ('cursorAuth/accessToken', 'jwt-tok')",
+                [],
+            )
+            .unwrap();
+            drop(conn);
+            assert!(cursor_state_db_has_token(&cursor_db));
+            assert_eq!(desktop_login_state("cursor"), (true, true));
+        });
     }
 }

@@ -294,16 +294,19 @@ fn billed_service(
         );
     }
     if subscription {
-        let name = if runtime == "codex" {
-            "ChatGPT"
-        } else {
-            "Claude"
+        let name = match runtime {
+            "codex" => "ChatGPT",
+            "qoder" => "Qoder",
+            "cursor" => "Cursor",
+            "workbuddy" => "WorkBuddy",
+            "zcode" => "ZCode",
+            "deepseek-harness" => "DeepSeek",
+            _ => "Claude",
         };
-        return (
-            String::new(),
-            name.to_string(),
-            reported.unwrap_or("").to_string(),
-        );
+        let model_label = reported
+            .filter(|m| !m.eq_ignore_ascii_case("auto"))
+            .unwrap_or("");
+        return (String::new(), name.to_string(), model_label.to_string());
     }
     if runtime == crate::DEEPSEEK_HARNESS_RUNTIME_ID {
         let deepseek = providers
@@ -373,7 +376,7 @@ fn resolve_billed_service(
         provider_id,
         reported_model,
         team_label.as_deref(),
-        crate::setup::is_native_subscription(runtime),
+        crate::setup::turn_uses_native_account(runtime, reported_model, provider_id),
         &providers,
     )
 }

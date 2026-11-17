@@ -12,6 +12,7 @@ mod sync_router;
 mod teamups;
 mod teamups_auth;
 mod teamups_channel;
+mod teamups_schedules;
 
 pub use install::{
     install_local_skills, remove_local_skill, skill_roots, SkillInstallError, SkillInstallReport,
@@ -34,12 +35,18 @@ pub use teamups_auth::{
     TeamupsLoginPollStatus, TeamupsLoginStart, TeamupsOfficialStatus, TeamupsVoiceTicket,
 };
 pub use teamups_channel::{
-    clean_reply_images, parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
-    parse_teamups_channel_sync, read_reply_image, read_reply_image_in, set_teamups_channel_enabled,
-    set_teamups_channel_since, teamups_channel_auth, teamups_channel_enabled,
-    teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
-    teamups_channel_since, teamups_channel_ws_url, TeamupsChannelFile, TeamupsChannelJob,
-    REPLY_IMAGE_DATA_MAX, REPLY_IMAGE_MAX,
+    clean_reply_images, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
+    parse_teamups_channel_job, parse_teamups_channel_sync, read_reply_image, read_reply_image_in,
+    set_teamups_channel_enabled, set_teamups_channel_since, teamups_channel_auth,
+    teamups_channel_client_id, teamups_channel_enabled, teamups_channel_heard,
+    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in, teamups_channel_since,
+    teamups_channel_ws_url, TeamupsChannelFile, TeamupsChannelJob, REPLY_IMAGE_DATA_MAX,
+    REPLY_IMAGE_MAX,
+};
+pub use teamups_schedules::{
+    teamups_computers, teamups_create_schedule, teamups_delete_schedule, teamups_run_schedule,
+    teamups_schedules, teamups_update_schedule, TeamupsComputer, TeamupsRunOutcome,
+    TeamupsSchedule, TeamupsScheduleInput,
 };
 
 use anyhow::Result;

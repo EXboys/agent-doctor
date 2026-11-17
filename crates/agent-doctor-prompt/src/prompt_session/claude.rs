@@ -80,25 +80,33 @@ fn run_claude(
         chat_uses_saved_service(options.model.as_deref(), options.provider_id.as_deref());
     // A saved DeepSeek / GLM key must stay on the request. Rewriting Claude's
     // settings here deletes that key, and the same key then comes back as 401.
-    if agent_doctor_core::setup::is_native_subscription("claude-code") && !saved_service {
-        if let Ok(list) = agent_doctor_core::setup::ensure_account_models("claude-code") {
-            let chosen = list.choose(
+    if (agent_doctor_core::session_env::overlay_uses_native_account(&overlay)
+        || agent_doctor_core::setup::is_native_subscription("claude-code"))
+        && !saved_service
+    {
+        let account_list = agent_doctor_core::setup::ensure_account_models("claude-code").ok();
+        let allowed = account_list
+            .as_ref()
+            .map(|list| list.models.as_slice())
+            .unwrap_or(&[]);
+        let chosen = account_list.as_ref().and_then(|list| {
+            list.choose(
                 overlay
                     .get(agent_doctor_core::setup::MODEL_ENV)
                     .map(String::as_str),
-            );
-            if agent_doctor_core::setup::merge::repair_claude_subscription_configs(
-                &cwd,
-                chosen.as_deref(),
-                &list.models,
             )
-            .is_ok()
-            {
-                if let Some(id) = chosen {
-                    overlay.insert(agent_doctor_core::setup::MODEL_ENV.to_string(), id);
-                } else {
-                    overlay.remove(agent_doctor_core::setup::MODEL_ENV);
-                }
+        });
+        if agent_doctor_core::setup::merge::repair_claude_subscription_configs(
+            &cwd,
+            chosen.as_deref(),
+            allowed,
+        )
+        .is_ok()
+        {
+            if let Some(id) = chosen {
+                overlay.insert(agent_doctor_core::setup::MODEL_ENV.to_string(), id);
+            } else if !allowed.is_empty() {
+                overlay.remove(agent_doctor_core::setup::MODEL_ENV);
             }
         }
     }

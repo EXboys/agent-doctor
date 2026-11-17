@@ -12,11 +12,24 @@ export type PhoneModelRow = {
   agent: string;
   label: string;
   provider: string;
+  providerName?: string;
   /** The official (quota-based) provider: the phone tags it 内置 vs 自配 key. */
   builtin?: boolean;
+  /** A signed-in subscription / native account on this computer. */
+  account?: boolean;
 };
 
 export type PhonePick = { agent: string; model: string; provider: string };
+
+export type PhoneProviderInput = {
+  id?: string | null;
+  name?: string | null;
+  agent?: string | null;
+  model?: string | null;
+  models?: readonly string[];
+  builtin?: boolean | null;
+  account?: boolean | null;
+};
 
 /** Installed agents, deduped, in the order the computer listed them. */
 export function agentRows(installed: Array<{ id: string; label: string }>): PhoneAgentRow[] {
@@ -32,18 +45,91 @@ export function agentRows(installed: Array<{ id: string; label: string }>): Phon
 }
 
 /**
+ * Build the provider sources for the phone picker:
+ * - Official account entries ONLY when the official account is signed in.
+ * - Native / subscription account entries ONLY when that runtime is signed in
+ *   and installed on this computer.
+ * - Saved API-key providers configured by the owner.
+ */
+export function phoneInventoryProviders(opts: {
+  installedIds: ReadonlySet<string>;
+  personalProviders: ReadonlyArray<{ id: string; name: string; url: string; model: string }>;
+  nativeRows: ReadonlyArray<{
+    runtime_id: string;
+    logged_in: boolean;
+    models?: readonly string[];
+  }>;
+  official: {
+    signedIn: boolean;
+    giftLeft: number;
+    paidOrTrialReady: boolean;
+    model?: string | null;
+    officialLabel: string;
+  };
+  officialProviderId: string;
+  officialGiftModel: string;
+  modelsForUrl: (url: string, currentModel?: string | null) => string[];
+  chipForUrl: (url: string, fallbackName: string) => string;
+  accountLabel: (runtimeId: string) => string;
+}): PhoneProviderInput[] {
+  const out: PhoneProviderInput[] = [];
+
+  if (opts.official.signedIn) {
+    if (opts.official.giftLeft > 0) {
+      out.push({
+        id: opts.officialProviderId,
+        name: opts.official.officialLabel,
+        agent: "doctor",
+        models: [opts.officialGiftModel],
+        builtin: true,
+      });
+    }
+    if (opts.official.paidOrTrialReady) {
+      out.push({
+        id: opts.officialProviderId,
+        name: opts.official.officialLabel,
+        agent: "",
+        models: [opts.official.model?.trim() || "deepseek-flash"],
+        builtin: true,
+      });
+    }
+  }
+
+  for (const row of opts.nativeRows) {
+    const runtimeId = row.runtime_id?.trim();
+    if (!runtimeId || !row.logged_in || !opts.installedIds.has(runtimeId)) continue;
+    const models = (row.models ?? []).map((m) => m.trim()).filter(Boolean);
+    out.push({
+      id: `native:${runtimeId}`,
+      name: opts.accountLabel(runtimeId),
+      agent: runtimeId,
+      models: models.length > 0 ? models : ["auto"],
+      account: true,
+    });
+  }
+
+  for (const provider of opts.personalProviders) {
+    if (provider.id === opts.officialProviderId) continue;
+    out.push({
+      id: provider.id,
+      name: opts.chipForUrl(provider.url, provider.name),
+      agent: "",
+      model: provider.model,
+      models: opts.modelsForUrl(provider.url, provider.model),
+    });
+  }
+
+  return out;
+}
+
+/**
  * Every model the computer can offer, with the provider's active model first.
- * `agent` is a hint only: providers are shared, so a model may fit several
- * agents. `provider` is what the chat pins so the answer never leaves on a
- * different key. Deduped by provider+id, capped so the sheet stays readable.
+ * `agent` scopes account-bound rows to the agent that owns that login; shared
+ * API-key providers keep an empty `agent` so every compatible agent sees them.
+ * Deduped by agent+provider+id, capped so the sheet stays readable.
  */
 export function modelRows(
-  providers: Array<{
-    id?: string | null;
-    model?: string | null;
-    models?: readonly string[];
-    builtin?: boolean | null;
-  }>,
+  providers: Array<PhoneProviderInput>,
   label: (id: string) => string,
   agent = "",
   cap = 40,
@@ -52,19 +138,27 @@ export function modelRows(
   const seen = new Set<string>();
   for (const provider of providers) {
     const providerId = (provider.id ?? "").trim();
+    const providerName = (provider.name ?? "").trim();
+    const rowAgent = (provider.agent ?? agent ?? "").trim();
     const candidates = [provider.model ?? "", ...(provider.models ?? [])];
     for (const raw of candidates) {
       const id = (raw ?? "").trim();
       if (!id) continue;
-      const key = `${providerId}\n${id}`;
+      const key = `${rowAgent}\n${providerId}\n${id}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      const resolvedLabel =
+        id === "auto" && provider.account && providerName
+          ? providerName
+          : label(id) || id;
       rows.push({
         id,
-        agent,
-        label: label(id) || id,
+        agent: rowAgent,
+        label: resolvedLabel,
         provider: providerId,
+        ...(providerName ? { providerName } : {}),
         ...(provider.builtin ? { builtin: true } : {}),
+        ...(provider.account ? { account: true } : {}),
       });
       if (rows.length >= cap) return rows;
     }
@@ -104,6 +198,7 @@ export function applyPick(
 ): boolean {
   const agent = pick.agent.trim();
   const model = pick.model.trim();
+  const nextProvider = pick.provider ? pick.provider.trim() : null;
   let changed = false;
   if (agent && !opts.running && session.runtime !== agent) {
     session.runtime = agent;
@@ -111,14 +206,18 @@ export function applyPick(
     session.runtimeThreadId = null;
     changed = true;
   }
-  if (model && session.model !== model) {
+  if (model && (session.model !== model || (session.providerId ?? null) !== nextProvider)) {
+    if ((session.providerId ?? null) !== nextProvider) {
+      session.runtimeThreadId = null;
+    }
     session.model = model;
     // The phone sends the provider its sheet came from: pin it, so the model
-    // is asked for on the key that actually serves it.
-    session.providerId = pick.provider ? pick.provider : null;
+    // is asked for on the key (or signed-in account) that actually serves it.
+    session.providerId = nextProvider;
     changed = true;
-  } else if (!model && pick.provider && session.providerId !== pick.provider) {
-    session.providerId = pick.provider;
+  } else if (!model && nextProvider && session.providerId !== nextProvider) {
+    session.providerId = nextProvider;
+    session.runtimeThreadId = null;
     changed = true;
   }
   if (changed && typeof session.updatedAt === "number") session.updatedAt = Date.now();

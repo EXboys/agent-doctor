@@ -169,4 +169,24 @@ assert(since["conv-1"] === 1_000_000, "the cursor map names the phone conversati
 const plain = [{ ...makeSession("x"), channelKey: "phone:plain" }];
 assert(Object.keys(channelSyncSince(plain)).length === 0, "a chat that never synced asks for everything");
 
+// Archive once stripped newlines; a flattened copy of a held reply must not
+// land again and become the "final" assistant bubble on PC.
+const rich =
+  "诊断完成。\n\n## 当前状态\n\n- 已跑通\n\n## 值得优化的 4 点\n\n1. 睡眠会拖住 cron\n2. 没有幂等保护";
+const flat = rich.replace(/\s+/g, " ");
+store.sessions[0].messages.push({ id: "live-md", role: "assistant", content: rich, at: 3_000_000 });
+const beforeFlat = store.sessions[0].messages.length;
+applyChannelSync(
+  conversation([{ key: "p:jflat", kind: "pc", jobId: "jflat", text: flat }]),
+);
+assert(
+  store.sessions[0].messages.every((message) => message.id !== "sync:conv-1:p:jflat"),
+  "a newline-stripped archive of a held reply does not land again",
+);
+assert(store.sessions[0].messages.length === beforeFlat, "flattened archive adds nothing");
+assert(
+  store.sessions[0].messages.some((message) => message.id === "live-md" && message.content === rich),
+  "the richer local reply stays",
+);
+
 console.log("channel-sync: ok");

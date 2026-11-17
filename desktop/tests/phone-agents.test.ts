@@ -7,6 +7,7 @@ import {
   agentRows,
   applyPick,
   modelRows,
+  phoneInventoryProviders,
   pickLabel,
   pickOf,
 } from "../src/chat/phone-agents";
@@ -52,6 +53,54 @@ assert(twice.length === 2, `same model on two providers stays two rows: ${twice.
 const capped = modelRows([{ models: Array.from({ length: 60 }, (_, i) => `m${i}`) }], (id) => id);
 assert(capped.length === 40, `model rows are capped: ${capped.length}`);
 
+// Phone inventory gating: ONLY signed-in accounts appear; signed-out accounts are omitted.
+const invSignedOut = phoneInventoryProviders({
+  installedIds: new Set(["doctor", "claude-code", "codex", "qoder", "cursor"]),
+  personalProviders: [
+    { id: "teamups-official", name: "官方", url: "https://agentdoctor.cn/api/v1/official", model: "deepseek-flash" },
+    { id: "pp_ds", name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-flash" },
+  ],
+  nativeRows: [
+    { runtime_id: "claude-code", logged_in: true, models: ["claude-sonnet-5"] },
+    { runtime_id: "codex", logged_in: false, models: ["gpt-5.6-sol"] },
+    { runtime_id: "qoder", logged_in: true, models: [] },
+    { runtime_id: "cursor", logged_in: false, models: [] },
+  ],
+  official: {
+    signedIn: false,
+    giftLeft: 0,
+    paidOrTrialReady: false,
+    model: "deepseek-flash",
+    officialLabel: "官方模型",
+  },
+  officialProviderId: "teamups-official",
+  officialGiftModel: "official-gift",
+  modelsForUrl: (_url, m) => (m ? [m] : []),
+  chipForUrl: (_url, name) => name,
+  accountLabel: (rt) => `${rt} 账号`,
+});
+const signedOutRows = modelRows(invSignedOut, (id) => id, "", 60);
+assert(
+  !signedOutRows.some((r) => r.provider === "teamups-official"),
+  "signed-out official account is excluded from phone inventory",
+);
+assert(
+  !signedOutRows.some((r) => r.provider === "native:codex" || r.provider === "native:cursor"),
+  "un-logged-in native accounts are excluded from phone inventory",
+);
+assert(
+  signedOutRows.some((r) => r.provider === "native:claude-code" && r.account === true && r.agent === "claude-code"),
+  "logged-in Claude account is included for claude-code",
+);
+assert(
+  signedOutRows.some((r) => r.provider === "native:qoder" && r.id === "auto" && r.label === "qoder 账号"),
+  "logged-in Qoder account without model list exposes auto option labeled with account name",
+);
+assert(
+  signedOutRows.some((r) => r.provider === "pp_ds" && r.agent === ""),
+  "configured API-key provider stays shared across agents",
+);
+
 const session = {
   runtime: "claude-code",
   model: "old",
@@ -72,6 +121,24 @@ assert(session.runtimeThreadId === null, "a new agent drops the old thread");
 assert(session.model === "deepseek-flash", "model applied");
 assert(session.providerId === "prov-2", "the model's own provider is pinned");
 assert(session.updatedAt > 1, "the chat moves up the list");
+
+// Switching between two providers that share the same model id updates providerId and resets thread.
+const sameModelDifferentProvider = {
+  runtime: "qoder",
+  model: "deepseek-flash",
+  providerId: "prov-1" as string | null,
+  runtimeThreadId: "t-keep" as string | null,
+};
+assert(
+  applyPick(sameModelDifferentProvider, {
+    agent: "qoder",
+    model: "deepseek-flash",
+    provider: "prov-2",
+  }),
+  "switching provider on the same model id counts as a change",
+);
+assert(sameModelDifferentProvider.providerId === "prov-2", "new provider id is pinned");
+assert(sameModelDifferentProvider.runtimeThreadId === null, "switching provider drops the old thread");
 
 const stale = { runtime: "hermes", model: "old", providerId: "prov-1" } as {
   runtime: string;

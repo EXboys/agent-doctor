@@ -649,12 +649,11 @@ fn failover_allowed(runtime: &str, options: &PromptSessionOptions) -> bool {
         return false;
     }
     // A ChatGPT / Claude / Qoder / WorkBuddy subscription login is not one of the saved providers.
-    if agent_doctor_core::is_native_subscription(runtime)
-        && !agent_doctor_core::session_env::chat_uses_saved_service(
-            options.model.as_deref(),
-            options.provider_id.as_deref(),
-        )
-    {
+    if agent_doctor_core::turn_uses_native_account(
+        runtime,
+        options.model.as_deref(),
+        options.provider_id.as_deref(),
+    ) {
         return false;
     }
     true

@@ -1,5 +1,4 @@
 
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { t } from "./i18n";
 import { teamupsLoginFailure, teamupsMallInstallFailure, withErrorDetail } from "./friendly-error";
 import type { TeamupsAccountStatus, TeamupsCatalogItem } from "./types";
@@ -8,7 +7,7 @@ import type { MallFilter } from "./resources-state";
 import { defaultToolsFootnote, renderResourcesList, rowMatchesQuery, setSkillsFootnote, skillsPanelActive, syncSkillsFootnote } from "./resources";
 import { buildMcpRows, loadMcpStatus } from "./resources-browser";
 import { appendFilterChip, appendResourceRow, appendUnifiedSkillRow, entryFromMallItem, isStoreScope, loadSkills, mountSkill, renderSkillsList } from "./resources-skills";
-import { listTeamupsMallCatalog, teamupsAccountStatus, startTeamupsLogin, signOutTeamups, installTeamupsMallItem, installTeamupsResource } from "./ipc";
+import { listTeamupsMallCatalog, teamupsAccountStatus, startTeamupsLogin, signOutTeamups, installTeamupsMallItem, installTeamupsResource, openBrowserUrl } from "./ipc";
 
 export function applyAccountOwnership(): void {
   if (!resourcesState.lastMallCatalog || !resourcesState.lastTeamupsAccount?.signed_in) return;
@@ -232,7 +231,7 @@ export async function startMallLogin(): Promise<void> {
   setSkillsFootnote(t("resources.mallLoggingIn"));
   try {
     const started = await startTeamupsLogin();
-    await openUrl(started.verification_url);
+    await openBrowserUrl(started.verification_url);
   } catch (error) {
     resourcesState.mallLoginInFlight = false;
     setSkillsFootnote(teamupsLoginFailure(error));
@@ -258,7 +257,7 @@ export async function openMallPurchase(item: TeamupsCatalogItem): Promise<void> 
     return;
   }
   try {
-    await openUrl(url);
+    await openBrowserUrl(url);
     resourcesState.skillsStatusMessage = null;
     syncSkillsFootnote();
   } catch (error) {

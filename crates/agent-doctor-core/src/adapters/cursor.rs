@@ -10,10 +10,13 @@ pub struct CursorAdapter;
 /// `cursor-agent` installs as `agent` under `~/.local/bin`, so the binary name
 /// alone cannot tell it from other tools'.
 fn looks_like_cursor_agent(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    text.contains("cursor-agent")
+    // Normalize separators so Windows `\.local\bin\agent` matches the same
+    // suffix check as Unix `/.local/bin/agent`.
+    let text = path.to_string_lossy().replace('\\', "/");
+    let lower = text.to_ascii_lowercase();
+    lower.contains("cursor-agent")
         || text.ends_with("/.local/bin/agent")
-        || text.ends_with("\\agent.exe")
+        || (lower.ends_with("/agent.exe") && lower.contains("cursor"))
 }
 
 const DESKTOP_APP: DesktopAppSpec = DesktopAppSpec {
@@ -54,6 +57,9 @@ pub fn cursor_cli_path() -> Option<PathBuf> {
     if local_agent.is_file() && looks_like_cursor_agent(&local_agent) {
         return Some(local_agent);
     }
+    if crate::adapters::util::is_test_home_active() {
+        return None;
+    }
     let named = discover_binary("cursor-agent");
     if named.binary_path.is_some() {
         return named.binary_path;
@@ -88,17 +94,19 @@ impl RuntimeAdapter for CursorAdapter {
         if local_agent.is_file() {
             return discovery_from_cli(local_agent);
         }
-        let cursor = discover_binary("cursor");
-        if cursor.installed {
-            return cursor;
-        }
-        let agent = discover_binary("agent");
-        if agent
-            .binary_path
-            .as_deref()
-            .is_some_and(looks_like_cursor_agent)
-        {
-            return agent;
+        if !crate::adapters::util::is_test_home_active() {
+            let cursor = discover_binary("cursor");
+            if cursor.installed {
+                return cursor;
+            }
+            let agent = discover_binary("agent");
+            if agent
+                .binary_path
+                .as_deref()
+                .is_some_and(looks_like_cursor_agent)
+            {
+                return agent;
+            }
         }
         if let Some(app) = desktop_app_path() {
             return discovery_present(app);
@@ -174,8 +182,21 @@ mod tests {
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
         fs::write(&bin, b"").unwrap();
         with_test_home(temp.path(), || {
-            assert_eq!(cursor_cli_path(), Some(bin));
+            assert_eq!(cursor_cli_path(), Some(home_join(".local/bin/agent")));
             assert_eq!(cursor_missing_install_part(), None);
         });
+    }
+
+    #[test]
+    fn windows_local_agent_path_counts_as_cursor_cli() {
+        assert!(looks_like_cursor_agent(Path::new(
+            r"C:\Users\runner\AppData\Local\Temp\.tmp\home\.local\bin\agent"
+        )));
+        assert!(looks_like_cursor_agent(Path::new(
+            r"C:\Users\runner\AppData\Local\Programs\cursor\resources\app\bin\agent.exe"
+        )));
+        assert!(!looks_like_cursor_agent(Path::new(
+            r"C:\Windows\System32\agent.exe"
+        )));
     }
 }

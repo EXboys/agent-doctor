@@ -109,6 +109,7 @@ pub use claude::*;
 pub(crate) use codex::*;
 pub use desktop::{open_runtime_desktop_app, runtime_desktop_app_path};
 pub(crate) use qoder::*;
+pub use terminal::open_url;
 pub(crate) use terminal::*;
 pub(crate) use zcode::*;
 
@@ -424,5 +425,25 @@ mod tests {
         assert!(rendered.contains("cd '/tmp/demo project' && codex"));
         assert!(rendered.contains("rm -f -- "));
         fs::remove_file(path).expect("remove launch script");
+    }
+
+    #[test]
+    fn parses_chromium_singleton_lock_pid_and_bundle_specs() {
+        assert_eq!(
+            parse_singleton_lock_pid("airludeMacBook-Air-3.local-38063"),
+            Some(38063)
+        );
+        assert_eq!(parse_singleton_lock_pid("my-host-name-99"), Some(99));
+        assert_eq!(parse_singleton_lock_pid("invalid"), None);
+        assert_eq!(parse_singleton_lock_pid("host-0"), None);
+        assert_eq!(
+            macos_chromium_spec_for_bundle_id("com.google.Chrome"),
+            Some((
+                "Google Chrome.app",
+                "Google Chrome",
+                "Library/Application Support/Google/Chrome"
+            ))
+        );
+        assert_eq!(macos_chromium_spec_for_bundle_id("com.apple.Safari"), None);
     }
 }

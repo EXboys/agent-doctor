@@ -10,11 +10,11 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 
 use agent_doctor_core::{
-    clean_reply_images, parse_channel_choices, parse_channel_stop, parse_teamups_channel_job,
-    parse_teamups_channel_sync, read_reply_image_in, set_teamups_channel_enabled,
-    set_teamups_channel_since, settings_db_path, teamups_channel_auth, teamups_channel_enabled,
-    teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
-    TeamupsChannelFile,
+    clean_reply_images, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
+    parse_teamups_channel_job, parse_teamups_channel_sync, read_reply_image_in,
+    set_teamups_channel_enabled, set_teamups_channel_since, settings_db_path, teamups_channel_auth,
+    teamups_channel_client_id, teamups_channel_enabled, teamups_channel_heard,
+    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -79,6 +79,8 @@ struct Wake(Arc<Notify>);
 pub struct ChannelPref {
     enabled: bool,
     signed_in: bool,
+    /// 本机的 channel id：排期绑电脑时用。
+    client_id: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -97,6 +99,7 @@ struct JobPayload {
     runtime: String,
     model: String,
     provider: String,
+    auto_allow: Option<bool>,
     files: Vec<JobFilePayload>,
 }
 
@@ -260,12 +263,26 @@ async fn connect(app: &AppHandle, url: &str, license: &str) -> Result<(), String
                                     runtime: job.runtime,
                                     model: job.model,
                                     provider: job.provider,
+                                    auto_allow: job.auto_allow,
                                     files,
                                 },
                             );
                         } else if parse_channel_choices(&text) {
                             // The site wants to fill the phone's picker.
                             let _ = app.emit("teamups-channel-choices", ());
+                        } else if let Some((chat, on)) = parse_channel_auto_allow(&text) {
+                            note(&format!(
+                                "auto-allow chat={chat} {}",
+                                match on {
+                                    Some(true) => "on",
+                                    Some(false) => "off",
+                                    None => "follow-computer",
+                                }
+                            ));
+                            let _ = app.emit(
+                                "teamups-channel-auto-allow",
+                                serde_json::json!({ "chat": chat, "on": on }),
+                            );
                         } else if let Some(answer) = parse_channel_answer(&text) {
                             let _ = app.emit("teamups-channel-answer", answer);
                         } else if let Some(id) = parse_channel_stop(&text) {
@@ -383,6 +400,7 @@ pub async fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
         Ok(ChannelPref {
             enabled: teamups_channel_enabled().map_err(|err| err.to_string())?,
             signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
+            client_id: teamups_channel_client_id().unwrap_or_default(),
         })
     })
     .await

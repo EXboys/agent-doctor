@@ -498,6 +498,8 @@ export interface NativeAccountRow {
   runtime_id: string;
   using_subscription: boolean;
   logged_in: boolean;
+  desktop_logged_in?: boolean;
+  desktop_needs_sync?: boolean;
   reachable: boolean;
   visible: boolean;
   provider_name: string;

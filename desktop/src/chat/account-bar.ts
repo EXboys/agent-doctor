@@ -1,8 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { teamupsLoginFailure } from "../friendly-error";
 import { t } from "../i18n";
-import { signOutTeamups, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
+import { openBrowserUrl, signOutTeamups, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
 import {
   setTeamupsBaseUrl,
   teamupsAccountPageUrl,
@@ -123,7 +122,7 @@ export function bindAccountBar(): void {
     accountLoginWaiting = true;
     showAccountLoggingIn();
     void startTeamupsLogin()
-      .then((started) => openUrl(started.verification_url))
+      .then((started) => openBrowserUrl(started.verification_url))
       .catch((error) => {
         accountLoginWaiting = false;
         showAccountProblem(teamupsLoginFailure(error));
@@ -131,7 +130,7 @@ export function bindAccountBar(): void {
   });
   menuCenter?.addEventListener("click", () => {
     closeAccountMenu();
-    void openUrl(teamupsAccountPageUrl()).catch(() => {
+    void openBrowserUrl(teamupsAccountPageUrl()).catch(() => {
       // Outside the app there is no system browser hook.
     });
   });

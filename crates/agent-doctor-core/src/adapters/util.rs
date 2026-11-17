@@ -28,6 +28,10 @@ pub fn home_dir() -> PathBuf {
     dirs::home_dir().expect("home directory")
 }
 
+pub(crate) fn is_test_home_active() -> bool {
+    TEST_HOME_OVERRIDE.with(|cell| cell.borrow().is_some())
+}
+
 pub fn home_join(relative: &str) -> PathBuf {
     if relative == ".hermes" {
         return hermes_root();
@@ -897,6 +901,7 @@ fn static_common_binary_dirs() -> Vec<PathBuf> {
         dirs.push(home.join("bin"));
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".codebuddy/bin"));
+        dirs.push(home.join(".qoder-cn/bin"));
         dirs.push(home.join(".qoder/bin"));
         dirs.push(home.join(".claude/local"));
         dirs.push(home.join(".hermes/bin"));

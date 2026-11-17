@@ -109,9 +109,53 @@ fn choose_qoder_install(
     app.map(QoderInstall::App)
 }
 
+fn prefers_cn_qoder_cli() -> bool {
+    qoder_desktop_path().is_some_and(|p| {
+        let lower = p.to_string_lossy().to_ascii_lowercase();
+        lower.contains("qoder cn") || lower.contains("qoder-cn")
+    })
+}
+
+/// Official China-edition Qoder CLI (`qoderclicn`), when installed on this machine.
+pub fn qoder_cn_cli_path() -> Option<PathBuf> {
+    if let Some(path) = find_binary("qoderclicn") {
+        return Some(path);
+    }
+    for root in [home_join(".qoder-cn/bin"), home_join(".qoder/bin")] {
+        let mut found = Vec::new();
+        collect_cli_files(&root, &mut found);
+        collect_cli_files(&root.join("qoderclicn"), &mut found);
+        found.retain(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_ascii_lowercase().starts_with("qoderclicn"))
+        });
+        found.sort();
+        if let Some(best) = found.pop() {
+            return Some(best);
+        }
+    }
+    None
+}
+
+/// Active Qoder CLI user directory (`~/.qoder-cn` for `qoderclicn`, `~/.qoder` for `qodercli`).
+pub fn qoder_config_dir() -> PathBuf {
+    if let Some(cli) = qoder_cli_path() {
+        let lower = cli.to_string_lossy().to_ascii_lowercase();
+        if lower.contains("qoderclicn") || lower.contains(".qoder-cn") {
+            return home_join(".qoder-cn");
+        }
+    }
+    home_join(".qoder")
+}
+
 fn cli_on_path() -> Option<PathBuf> {
-    // Current installer name first. `qoder` is the older command.
-    for name in ["qodercli", "qoderclicn", "qoder"] {
+    let names: [&str; 3] = if prefers_cn_qoder_cli() {
+        ["qoderclicn", "qodercli", "qoder"]
+    } else {
+        ["qodercli", "qoderclicn", "qoder"]
+    };
+    for name in names {
         if let Some(path) = find_binary(name) {
             return Some(path);
         }
@@ -120,14 +164,23 @@ fn cli_on_path() -> Option<PathBuf> {
 }
 
 fn versioned_cli_path() -> Option<PathBuf> {
-    let root = home_join(".qoder/bin");
-    let mut found = Vec::new();
-    collect_cli_files(&root, &mut found);
-    collect_cli_files(&root.join("qodercli"), &mut found);
-    collect_cli_files(&root.join("qoderclicn"), &mut found);
-    collect_cli_files(&root.join("qoder"), &mut found);
-    found.sort();
-    found.pop()
+    let roots = if prefers_cn_qoder_cli() {
+        [home_join(".qoder-cn/bin"), home_join(".qoder/bin")]
+    } else {
+        [home_join(".qoder/bin"), home_join(".qoder-cn/bin")]
+    };
+    for root in roots {
+        let mut found = Vec::new();
+        collect_cli_files(&root, &mut found);
+        collect_cli_files(&root.join("qoderclicn"), &mut found);
+        collect_cli_files(&root.join("qodercli"), &mut found);
+        collect_cli_files(&root.join("qoder"), &mut found);
+        found.sort();
+        if let Some(best) = found.pop() {
+            return Some(best);
+        }
+    }
+    None
 }
 
 fn collect_cli_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -194,12 +247,12 @@ impl RuntimeAdapter for QoderAdapter {
     }
 
     fn config_paths(&self) -> Vec<PathBuf> {
-        vec![home_join(".qoder/settings.json")]
+        vec![qoder_config_dir().join("settings.json")]
     }
 
     fn read_profile(&self) -> anyhow::Result<RuntimeProfile> {
         let mut profile = profile_from_config_paths(self.config_paths());
-        let settings = home_join(".qoder/settings.json");
+        let settings = qoder_config_dir().join("settings.json");
         if let Ok(raw) = std::fs::read_to_string(&settings) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(url) = val

@@ -163,9 +163,9 @@ Write-Output 'Qoder 命令行和桌面软件已装好。'
 const UNIX_SCRIPT: &str = r#"set -euo pipefail
 update="__UPDATE__"
 china="__CHINA__"
-export PATH="$HOME/.local/bin:$HOME/.qoder/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.qoder-cn/bin:$HOME/.qoder/bin:$PATH"
 
-if [ "$update" != "1" ] && { command -v qodercli >/dev/null 2>&1 || command -v qoderclicn >/dev/null 2>&1; }; then
+if [ "$update" != "1" ] && { { [ "$china" = "1" ] && command -v qoderclicn >/dev/null 2>&1; } || { [ "$china" != "1" ] && { command -v qodercli >/dev/null 2>&1 || command -v qoderclicn >/dev/null 2>&1; }; }; }; then
   echo "Qoder 命令行已在本机。"
 else
   echo "正在安装 Qoder 命令行…"
@@ -175,15 +175,27 @@ else
   if [ "$update" = "1" ]; then
     cli_args="--force"
   fi
-  if curl -fsSL --proto "=https" --tlsv1.2 --max-time 60 https://qoder.com/install -o "$tmp_cli"; then
-    if bash "$tmp_cli" $cli_args; then
-      cli_ok=1
-    fi
+  if [ "$china" = "1" ]; then
+    cli_sources="https://static.qoder.com.cn/qoder-cli-cn/install.sh https://qoder.com/install"
+  else
+    cli_sources="https://qoder.com/install https://static.qoder.com.cn/qoder-cli-cn/install.sh"
   fi
+  for cli_url in $cli_sources; do
+    if curl -fsSL --proto "=https" --tlsv1.2 --max-time 60 "$cli_url" -o "$tmp_cli"; then
+      if bash "$tmp_cli" $cli_args; then
+        cli_ok=1
+        break
+      fi
+    fi
+  done
   rm -f "$tmp_cli"
   if [ "$cli_ok" -ne 1 ]; then
     echo "原生脚本未完成，改用 npm 继续安装命令行…"
-    npm install -g @qoder-ai/qodercli@latest
+    if [ "$china" = "1" ]; then
+      npm install -g @qodercn-ai/qoderclicn@latest --omit=optional || npm install -g @qoder-ai/qodercli@latest
+    else
+      npm install -g @qoder-ai/qodercli@latest
+    fi
   fi
 fi
 

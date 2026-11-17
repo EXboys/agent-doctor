@@ -25,11 +25,13 @@ pub use mode::{
     switch_to_personal_mode, switch_to_team_mode, ModeStatus, ModeSwitchReport, MODE_PERSONAL,
     MODE_TEAM, MODE_UNSET,
 };
-pub(crate) use native_login::publish_codex_subscription_auth;
+pub(crate) use native_login::{codex_chatgpt_stash_path, publish_codex_subscription_auth};
 pub use native_login::{
-    is_native_subscription, is_runtime_logged_in, native_account_status,
-    resign_native_subscription, use_current_service, use_native_subscription, NativeAccountRow,
-    NativeAccountStatus, NativeAccountSwitch,
+    is_native_provider_id, is_native_subscription, is_runtime_logged_in, native_account_status,
+    native_provider_id, parse_native_provider_id, resign_native_subscription,
+    sign_out_native_subscription, turn_uses_native_account, use_current_service,
+    use_native_subscription, NativeAccountRow, NativeAccountStatus, NativeAccountSwitch,
+    NATIVE_PROVIDER_PREFIX,
 };
 pub(crate) use personal::persist_personal_provider_model;
 pub use personal::{

@@ -79,10 +79,25 @@ export function safeMarkdownCut(raw: string): number {
 }
 
 /**
+ * Phone archive once stripped C0 controls including `\n`. A flattened reply
+ * still carries `##` / `1.` markers mid-sentence — put those back on their
+ * own lines so GFM headings and lists render on PC.
+ */
+export function restoreCollapsedMarkdown(source: string): string {
+  let text = source.replace(/\r\n/g, "\n");
+  if (!text.includes("#") && !/\d+\.\s/.test(text)) return text;
+  // Mid-line ATX headings: "……。## 标题" / "… ## 标题"
+  text = text.replace(/([^\n#])[ \t]*(#{1,3}[ \t]+)/g, "$1\n\n$2");
+  // Mid-line ordered lists (avoid version numbers like 1.2.3).
+  text = text.replace(/([^\n\d.])[ \t]+(\d{1,2}\.[ \t]+[^\d])/g, "$1\n$2");
+  return text;
+}
+
+/**
  * Convert markdown source to sanitized HTML (no raw HTML passthrough).
  */
 export function renderMarkdown(source: string, opts: MarkdownOptions = {}): string {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const lines = restoreCollapsedMarkdown(source).split("\n");
   const out: string[] = [];
   let i = 0;
   let inCode: string | null = null;

@@ -238,6 +238,20 @@ fn apply_profile_model_command(
 }
 
 #[tauri::command]
+fn open_browser_url_command(url: String, app: tauri::AppHandle) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        return Err("仅支持打开 http/https 链接".to_string());
+    }
+    if agent_doctor_core::open_url(trimmed).is_ok() {
+        return Ok(());
+    }
+    app.opener()
+        .open_url(trimmed, None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn open_path_command(path: String, app: tauri::AppHandle) -> Result<(), String> {
     let candidate = std::path::Path::new(&path);
     // The webview can only ask for paths this app printed itself, but an
@@ -826,6 +840,14 @@ pub fn run() {
             start_teamups_login_command,
             poll_teamups_login_command,
             teamups_account_status_command,
+            teamups_schedules_command,
+            teamups_create_schedule_command,
+            teamups_update_schedule_command,
+            teamups_toggle_schedule_command,
+            teamups_delete_schedule_command,
+            teamups_run_schedule_command,
+            teamups_computers_command,
+            teamups_channel_client_id_command,
             sign_out_teamups_command,
             install_teamups_mall_item_command,
             install_teamups_resource_command,
@@ -849,6 +871,8 @@ pub fn run() {
             refresh_subscription_models_command,
             use_native_subscription_command,
             resign_native_subscription_command,
+            sign_out_native_subscription_command,
+            open_browser_url_command,
             use_current_service_command,
             get_mode_status_command,
             get_product_edition_command,

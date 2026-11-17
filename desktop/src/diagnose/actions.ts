@@ -2,7 +2,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   autoFixNoticeKey,
   computeDiagnoseScore,
@@ -40,7 +39,7 @@ import type { DiagnosePaintApi } from "./paint";
 import type { DiagnoseSession } from "./session";
 import { friendlyDeepError } from "./deep-chat";
 import { describeRepairSummary } from "./repair-summary";
-import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, listPersonalProviders, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
+import { deepRepair, installRuntime, runRepairExecute, verifyPersonalProvider, upsertPersonalProvider, activatePersonalProvider, getPersonalProviderStatus, listPersonalProviders, openSession, openAskWindow, focusMainTab, closeDiagnoseWindow, openBrowserUrl, startTeamupsLogin, teamupsAccountStatus } from "../ipc";
 
 /**
  * Whether the saved provider can serve this agent: on file, and not an
@@ -345,12 +344,12 @@ export function createDiagnoseActions(deps: DiagnoseActionsDeps) {
       if (path === "login") {
         paint.setResult("busy", t("resources.mallLoggingIn"));
         const started = await startTeamupsLogin();
-        await openUrl(started.verification_url);
+        await openBrowserUrl(started.verification_url);
         return;
       }
       const account = await teamupsAccountStatus().catch(() => null);
       const base = account?.base_url?.replace(/\/+$/, "") || DEFAULT_TEAMUPS_BASE_URL;
-      await openUrl(`${base}/membership`);
+      await openBrowserUrl(`${base}/membership`);
       paint.setResult("busy", t("diagnose.flow.officialBuyOpened"));
     } catch (error) {
       session.officialPending = null;

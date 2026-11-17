@@ -209,21 +209,34 @@ function applyChannelSyncNow(payload: unknown): void {
  * Pour the replayed rows into one chat, in place. Returns whether anything
  * changed; the archive cursor only moves when it did.
  */
+/** Archive `clip` once stripped newlines; compare sentences without whitespace shape. */
+function flatTextKey(role: ChatMessage["role"], content: string): string {
+  return `${role}\n${content.replace(/\s+/g, " ").trim()}`;
+}
+
+function newlineScore(content: string): number {
+  return (content.match(/\n/g) ?? []).length;
+}
+
 function mergeSyncedConversation(session: ChatSession, conversation: SyncedConversation): boolean {
   const messages = session.messages ?? [];
   const empty = messages.length === 0;
   const byId = new Map<string, number>();
   messages.forEach((message, index) => byId.set(message.id, index));
   const texts = new Set<string>();
+  const flatTexts = new Set<string>();
   const longTexts: { role: ChatMessage["role"]; content: string }[] = [];
   for (const message of messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     const content = message.content.trim();
     texts.add(`${message.role}\n${content}`);
+    flatTexts.add(flatTextKey(message.role, content));
     if (content.length >= TEXT_CAP_ME) longTexts.push({ role: message.role, content });
   }
   const knownText = (role: ChatMessage["role"], content: string): boolean => {
     if (texts.has(`${role}\n${content}`)) return true;
+    // Flattened archive of a reply this chat already holds (with newlines).
+    if (flatTexts.has(flatTextKey(role, content))) return true;
     // The archive clips long lines; a clipped row of a line held whole is not new.
     return (
       content.length >= TEXT_CAP_ME &&
@@ -251,6 +264,17 @@ function mergeSyncedConversation(session: ChatSession, conversation: SyncedConve
     if (at !== undefined) {
       const current = next[at];
       if (current.role === role && current.content === content) continue;
+      // Never let a flattened archive copy erase a richer local reply.
+      if (
+        current.role === role &&
+        flatTextKey(role, current.content) === flatTextKey(role, content) &&
+        newlineScore(current.content) >= newlineScore(content)
+      ) {
+        continue;
+      }
+      if (newlineScore(current.content) > newlineScore(content) && current.content.length >= content.length) {
+        continue;
+      }
       next[at] = { ...current, role, content };
       changed = true;
       continue;

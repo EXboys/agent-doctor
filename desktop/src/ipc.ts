@@ -277,8 +277,82 @@ export function teamupsChannelConnected(): Promise<boolean> {
   return invoke("teamups_channel_connected_command");
 }
 
-export function teamupsChannelPref(): Promise<{ enabled: boolean; signed_in: boolean }> {
+export function teamupsChannelPref(): Promise<{
+  enabled: boolean;
+  signed_in: boolean;
+  client_id: string;
+}> {
   return invoke("teamups_channel_pref_command");
+}
+
+/// 站点上那批排期：手机和本机管的是同一份数据。
+export type TeamupsSchedule = {
+  id: string;
+  chat: string;
+  title: string;
+  prompt: string;
+  freq: string;
+  hhmm: string;
+  weekdays: string;
+  tz: string;
+  client_id: string;
+  client_name: string;
+  next_run_at: number;
+  enabled: boolean;
+  last_status: string;
+  last_run_at: number;
+};
+
+export type TeamupsComputer = {
+  id: string;
+  name: string;
+  os: string;
+  default: boolean;
+};
+
+export type TeamupsScheduleInput = {
+  prompt: string;
+  freq: string;
+  hhmm: string;
+  weekdays: string;
+  tz: string;
+  client_id: string;
+  client_name?: string;
+};
+
+export function teamupsSchedules(): Promise<TeamupsSchedule[]> {
+  return invoke("teamups_schedules_command");
+}
+
+export function teamupsCreateSchedule(input: TeamupsScheduleInput): Promise<TeamupsSchedule> {
+  return invoke("teamups_create_schedule_command", { input });
+}
+
+export function teamupsUpdateSchedule(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<TeamupsSchedule> {
+  return invoke("teamups_update_schedule_command", { id, patch });
+}
+
+export function teamupsToggleSchedule(id: string, enabled: boolean): Promise<TeamupsSchedule> {
+  return invoke("teamups_toggle_schedule_command", { id, enabled });
+}
+
+export function teamupsDeleteSchedule(id: string): Promise<boolean> {
+  return invoke("teamups_delete_schedule_command", { id });
+}
+
+export function teamupsRunSchedule(id: string): Promise<{ sent: boolean; job_id: string }> {
+  return invoke("teamups_run_schedule_command", { id });
+}
+
+export function teamupsComputers(): Promise<TeamupsComputer[]> {
+  return invoke("teamups_computers_command");
+}
+
+export function teamupsChannelClientId(): Promise<string> {
+  return invoke("teamups_channel_client_id_command");
 }
 
 export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
@@ -389,7 +463,15 @@ export function teamupsChannelChats(
  */
 export function teamupsChannelInventory(args: {
   agents: Array<{ id: string; name: string }>;
-  models: Array<{ id: string; agent: string; label: string; provider: string }>;
+  models: Array<{
+    id: string;
+    agent: string;
+    label: string;
+    provider: string;
+    providerName?: string;
+    builtin?: boolean;
+    account?: boolean;
+  }>;
   current: { agent: string; model: string; provider: string };
 }): Promise<void> {
   return invoke("teamups_channel_inventory_command", args);
@@ -516,6 +598,10 @@ export function useNativeSubscription(runtimeId: string): Promise<NativeAccountS
 
 export function resignNativeSubscription(runtimeId: string): Promise<NativeAccountSwitch> {
   return invoke("resign_native_subscription_command", { runtimeId });
+}
+
+export function signOutNativeSubscription(runtimeId: string): Promise<NativeAccountSwitch> {
+  return invoke("sign_out_native_subscription_command", { runtimeId });
 }
 
 export function useCurrentService(runtimeId: string): Promise<NativeAccountSwitch> {
@@ -1284,4 +1370,17 @@ export function islandClaimKeyboard(): Promise<void> {
 
 export function currentIslandView(): Promise<import("./island/track").IslandView> {
   return invoke("current_island_view_command");
+}
+
+/**
+ * Open an `http(s)` page in the user's everyday browser session (bypassing
+ * Agent Doctor's isolated `chrome-cdp` instance when running on macOS).
+ */
+export async function openBrowserUrl(url: string): Promise<void> {
+  try {
+    await invoke("open_browser_url_command", { url });
+  } catch {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  }
 }

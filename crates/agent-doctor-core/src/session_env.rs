@@ -26,20 +26,39 @@ pub struct OverlayAskOptions<'a> {
     pub workspace_name: Option<&'a str>,
 }
 
+/// Marker placed in the per-turn overlay when the turn explicitly or implicitly
+/// runs on the runtime's own signed-in account instead of a configured gateway.
+pub const USE_NATIVE_ACCOUNT_ENV: &str = "AGENT_DOCTOR_USE_NATIVE_ACCOUNT";
+
+pub fn overlay_uses_native_account(overlay: &HashMap<String, String>) -> bool {
+    overlay
+        .get(USE_NATIVE_ACCOUNT_ENV)
+        .is_some_and(|v| v.trim() == "1")
+}
+
 /// Overlay env for an Ask turn, optionally bound to a registered workspace (not global `active` only).
 pub fn collect_overlay_env_for_options(options: &OverlayAskOptions) -> HashMap<String, String> {
     let mut env = collect_overlay_env_for_workspace(options.workspace_name);
     let runtime = crate::evotown::normalize_runtime(options.runtime);
     // A DeepSeek / GLM id is the saved service. 0.86 sent that key. Login mode
-    // must not strip it, or the same key comes back as 401.
-    if crate::setup::is_native_subscription(&runtime)
-        && !chat_uses_saved_service(options.model, options.provider_id)
-    {
+    // must not strip it, or the same key comes back as 401. Conversely, a chat
+    // pinned to `native:<runtime>` explicitly chose the signed-in account even
+    // when a personal provider is active globally.
+    if crate::setup::turn_uses_native_account(&runtime, options.model, options.provider_id) {
         // The saved service stays checked for other tools. Its address must not
         // rewrite the account model (gpt-5.6-sol on a GLM host becomes glm-5.3).
         apply_subscription_model(&mut env, &runtime, options.model);
     } else {
-        apply_ask_provider_choice(&mut env, options.provider_id, options.model);
+        // Drop a stale `native:*` pin whose account has since signed out so it
+        // is not mistaken for a personal provider id.
+        let provider_id = options
+            .provider_id
+            .filter(|id| !crate::setup::is_native_provider_id(Some(id)));
+        let model = options.model.filter(|m| {
+            !(crate::setup::is_native_provider_id(options.provider_id)
+                && m.trim().eq_ignore_ascii_case("auto"))
+        });
+        apply_ask_provider_choice(&mut env, provider_id, model);
     }
     env
 }
@@ -50,6 +69,10 @@ fn apply_subscription_model(env: &mut HashMap<String, String>, runtime: &str, mo
     for key in SUBSCRIPTION_GATEWAY_ENV {
         env.remove(*key);
     }
+    env.remove(PROVIDER_KIND_ENV);
+    env.remove("DEEPSEEK_API_KEY");
+    env.remove("DEEPSEEK_BASE_URL");
+    env.insert(USE_NATIVE_ACCOUNT_ENV.to_string(), "1".to_string());
     match subscription_model_for(runtime, model) {
         Some(id) => {
             env.insert(MODEL_ENV.to_string(), id.to_string());
@@ -66,6 +89,9 @@ fn apply_subscription_model(env: &mut HashMap<String, String>, runtime: &str, mo
 /// The chat named a saved service (DeepSeek, GLM, …) or pinned one. That key
 /// has to go out with the turn. A Claude / ChatGPT login must not replace it.
 pub fn chat_uses_saved_service(model: Option<&str>, provider_id: Option<&str>) -> bool {
+    if crate::setup::is_native_provider_id(provider_id) {
+        return false;
+    }
     if provider_id.map(str::trim).is_some_and(|id| !id.is_empty()) {
         return true;
     }
@@ -73,6 +99,9 @@ pub fn chat_uses_saved_service(model: Option<&str>, provider_id: Option<&str>) -
 }
 
 pub fn codex_turn_keeps_saved_service(overlay: &HashMap<String, String>) -> bool {
+    if overlay_uses_native_account(overlay) {
+        return false;
+    }
     saved_service_model(overlay.get(MODEL_ENV).map(String::as_str))
         || resolve_codex_overlay(overlay).is_some()
 }
@@ -90,7 +119,9 @@ fn saved_service_model(model: Option<&str>) -> bool {
 }
 
 pub fn subscription_model_for(runtime: &str, model: Option<&str>) -> Option<String> {
-    let model = model.map(str::trim).filter(|id| !id.is_empty());
+    let model = model
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !id.eq_ignore_ascii_case("auto"));
     match crate::setup::load_account_models(runtime) {
         Some(list) => list.choose(model),
         None => model.map(str::to_string),
@@ -441,7 +472,7 @@ pub fn apply_overlay_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
 }
 
 pub fn apply_claude_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
-    if crate::setup::is_native_subscription("claude-code")
+    if (overlay_uses_native_account(overlay) || crate::setup::is_native_subscription("claude-code"))
         && resolve_claude_overlay(overlay).is_none()
     {
         if !overlay.contains_key("CLAUDE_CODE_ENABLE_TODO_TOOLS") {
@@ -504,7 +535,7 @@ fn claude_model(overlay: &HashMap<String, String>) -> Option<&str> {
 pub fn claude_provider_env(
     overlay: &HashMap<String, String>,
 ) -> Option<Vec<(&'static str, String)>> {
-    if crate::setup::is_native_subscription("claude-code")
+    if (overlay_uses_native_account(overlay) || crate::setup::is_native_subscription("claude-code"))
         && resolve_claude_overlay(overlay).is_none()
     {
         return None;
@@ -528,7 +559,9 @@ pub fn claude_provider_env(
 }
 
 pub fn apply_codex_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
-    if crate::setup::is_native_subscription("codex") && resolve_codex_overlay(overlay).is_none() {
+    if (overlay_uses_native_account(overlay) || crate::setup::is_native_subscription("codex"))
+        && resolve_codex_overlay(overlay).is_none()
+    {
         scrub_subscription_gateway_env(cmd);
         return;
     }
@@ -566,9 +599,10 @@ pub fn apply_hermes_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
 pub fn resolve_qoder_overlay(
     overlay: &HashMap<String, String>,
 ) -> Option<(String, String, String, &'static str)> {
-    if crate::setup::is_native_subscription("qoder")
-        && resolve_hermes_overlay(overlay).is_none()
-        && resolve_claude_overlay(overlay).is_none()
+    if overlay_uses_native_account(overlay)
+        || (crate::setup::is_native_subscription("qoder")
+            && resolve_hermes_overlay(overlay).is_none()
+            && resolve_claude_overlay(overlay).is_none())
     {
         return None;
     }
@@ -612,7 +646,7 @@ pub fn apply_qoder_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
     let Some((url, key, chosen, proto)) = resolve_qoder_overlay(overlay) else {
         scrub_subscription_gateway_env(cmd);
         let _ = crate::setup::merge::clear_qoder_provider_override_in_dir(
-            &crate::adapters::util::home_join(".qoder"),
+            &crate::adapters::qoder_config_dir(),
         );
         return;
     };
@@ -656,8 +690,9 @@ pub fn apply_cursor_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
 }
 
 pub fn apply_workbuddy_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
-    if crate::setup::is_native_subscription("workbuddy")
-        && resolve_hermes_overlay(overlay).is_none()
+    if overlay_uses_native_account(overlay)
+        || (crate::setup::is_native_subscription("workbuddy")
+            && resolve_hermes_overlay(overlay).is_none())
     {
         scrub_subscription_gateway_env(cmd);
         let _ = crate::setup::merge::clear_workbuddy_provider_override_in_dir(
@@ -691,6 +726,10 @@ pub fn apply_workbuddy_env(cmd: &mut Command, overlay: &HashMap<String, String>)
 }
 
 pub fn apply_deepseek_harness_env(cmd: &mut Command, overlay: &HashMap<String, String>) {
+    if overlay_uses_native_account(overlay) {
+        cmd.env_remove("DEEPSEEK_API_KEY");
+        cmd.env_remove("DEEPSEEK_BASE_URL");
+    }
     let (url, key) = resolve_deepseek_harness_overlay(overlay);
     if let Some(key) = key {
         cmd.env("DEEPSEEK_API_KEY", key);
@@ -751,12 +790,15 @@ pub fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> 
     // The overlay already carries that service's address and key; login must not
     // rewrite the Codex files out from under it.
     let saved_service = codex_turn_keeps_saved_service(overlay);
-    if crate::setup::is_native_subscription("codex") && !saved_service {
+    if (overlay_uses_native_account(overlay) || crate::setup::is_native_subscription("codex"))
+        && !saved_service
+    {
         // Login writes ~/.codex/auth.json. A project home keeps the copy it was
         // seeded with, so a later sign-in never reaches the chat until we replace it.
         let home = overlay.get("CODEX_HOME").map(PathBuf::from);
         crate::setup::publish_codex_subscription_auth(home.as_deref());
-        // A missing model list must not cancel the turn. 0.86 still sent it.
+        // A missing model list must not cancel the turn or fall back to clearing auth.json.
+        let paths = crate::setup::merge::codex_subscription_config_paths(home.as_deref(), cwd);
         if let Ok(list) = crate::setup::ensure_account_models("codex") {
             let chosen = list.choose(overlay.get(MODEL_ENV).map(String::as_str));
             match &chosen {
@@ -769,17 +811,15 @@ pub fn prepare_codex_home(overlay: &mut HashMap<String, String>, cwd: &Path) -> 
             }
             // Project config wins over `-c`. Every file this turn can load is
             // rewritten to a model this account listed.
-            let paths = crate::setup::merge::codex_subscription_config_paths(home.as_deref(), cwd);
-            if crate::setup::merge::align_codex_subscription_configs(
+            let _ = crate::setup::merge::align_codex_subscription_configs(
                 &paths,
                 chosen.as_deref(),
                 &list.models,
-            )
-            .is_ok()
-            {
-                return Ok(());
-            }
+            );
+        } else {
+            let _ = crate::setup::merge::align_codex_subscription_configs(&paths, None, &[]);
         }
+        return Ok(());
     }
     let home = overlay
         .get("CODEX_HOME")

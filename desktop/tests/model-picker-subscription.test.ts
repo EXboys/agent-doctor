@@ -27,7 +27,16 @@ function assert(cond: boolean, msg: string) {
 }
 
 async function main() {
-  const { subscriptionModelForSession } = await import("../src/chat/model-picker");
+  const {
+    loggedAccountCatalogFor,
+    nativeProviderId,
+    pinSessionAfterFailover,
+    releaseStalePins,
+    runtimeAcceptsProvider,
+    sessionKeepsSavedService,
+    sessionUsesLoggedAccount,
+    subscriptionModelForSession,
+  } = await import("../src/chat/model-picker");
   const account = ["claude-sonnet-5", "claude-haiku-4-5"];
 
   const deepseek = subscriptionModelForSession(
@@ -52,19 +61,125 @@ async function main() {
   );
   assert(waiting.replace === false && waiting.model === "deepseek-flash", "empty catalog does not clear it");
 
-  const { releaseStalePins } = await import("../src/chat/model-picker");
+  // Logged-in account gating: ONLY logged-in accounts appear; signed-out accounts never appear.
+  const nativeRows = [
+    {
+      runtime_id: "claude-code",
+      using_subscription: false,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "DeepSeek",
+      models: ["claude-sonnet-5"],
+    },
+    {
+      runtime_id: "codex",
+      using_subscription: true,
+      logged_in: false,
+      reachable: true,
+      visible: true,
+      provider_name: "DeepSeek",
+      models: ["gpt-5.6-sol"],
+    },
+    {
+      runtime_id: "qoder",
+      using_subscription: false,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "DeepSeek",
+      models: [],
+    },
+    {
+      runtime_id: "cursor",
+      using_subscription: false,
+      logged_in: false,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: [],
+    },
+  ];
+  const claudeCat = loggedAccountCatalogFor("claude-code", nativeRows);
+  assert(claudeCat !== null && claudeCat.providerId === "native:claude-code", "logged-in Claude account is selectable even while a personal provider is active");
+  assert(loggedAccountCatalogFor("codex", nativeRows) === null, "un-logged-in Codex account has no option even if mode said using_subscription");
+  const qoderCat = loggedAccountCatalogFor("qoder", nativeRows);
+  assert(qoderCat !== null && qoderCat.providerId === "native:qoder", "logged-in Qoder account is selectable");
+  assert(loggedAccountCatalogFor("cursor", nativeRows) === null, "un-logged-in Cursor account has no option");
+
+  // Desktop-signed-in IDE without CLI authorization yet exposes a sync-pending catalog (not yet cliReady).
+  const desktopOnlyRows = [
+    {
+      runtime_id: "cursor",
+      using_subscription: false,
+      logged_in: false,
+      desktop_logged_in: true,
+      desktop_needs_sync: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: [],
+    },
+  ];
+  const cursorSyncCat = loggedAccountCatalogFor("cursor", desktopOnlyRows);
+  assert(
+    cursorSyncCat !== null && !cursorSyncCat.cliReady && cursorSyncCat.desktopNeedsSync,
+    "signed-in Cursor desktop IDE surfaces sync-ready account tab in Ask",
+  );
+  assert(
+    !sessionUsesLoggedAccount(
+      { model: "auto", providerId: "native:cursor" } as never,
+      cursorSyncCat,
+    ),
+    "chat does not route to native CLI before one-click sync completes",
+  );
+
+  // Explicit native pin vs saved service pin.
+  const pinnedAccount = { model: "claude-sonnet-5", providerId: nativeProviderId("claude-code") } as never;
+  assert(!sessionKeepsSavedService(pinnedAccount), "native account pin is not treated as a saved API-key service");
+  assert(sessionUsesLoggedAccount(pinnedAccount, claudeCat), "explicit native pin routes to the logged-in account");
+  assert(!sessionUsesLoggedAccount({ model: "deepseek-flash", providerId: "pp_ds" } as never, claudeCat), "explicit saved provider pin stays on that provider");
+  assert(!sessionUsesLoggedAccount({ model: "", providerId: null } as never, claudeCat), "unpinned chat follows global provider when usingByDefault is false");
+
+  // Provider compatibility & official sign-in gate.
+  assert(
+    !runtimeAcceptsProvider(
+      "claude-code",
+      { id: "teamups-official", url: "https://agentdoctor.cn/api/v1/official" },
+      { officialSignedIn: false },
+    ),
+    "signed-out official account is hidden from provider picker",
+  );
+  assert(
+    runtimeAcceptsProvider(
+      "claude-code",
+      { id: "teamups-official", url: "https://agentdoctor.cn/api/v1/official" },
+      { officialSignedIn: true },
+    ),
+    "signed-in official account is selectable",
+  );
+  assert(
+    !runtimeAcceptsProvider(
+      "cursor",
+      { id: "pp_ds", url: "https://api.deepseek.com/v1" },
+      { officialSignedIn: true },
+    ),
+    "Cursor does not accept OpenAI-compatible saved providers",
+  );
+
   const sessions = [
     { providerId: "minimax", model: "MiniMax-M3", providerTag: "minimax|minimax.io" },
     { providerId: "deepseek", model: "deepseek-reasoner", providerTag: "deepseek|api.deepseek.com" },
+    { providerId: "native:claude-code", model: "claude-sonnet-5", providerTag: "native:claude-code|native:claude-code" },
     { providerId: null, model: "", providerTag: null },
   ];
   assert(releaseStalePins(sessions, "deepseek") === true, "a switch with stale pins reports a change");
   assert(sessions[0]?.providerId === null && sessions[0]?.model === "" && sessions[0]?.providerTag === null, "the minimax pin is released");
   assert(sessions[1]?.providerId === "deepseek" && sessions[1]?.model === "deepseek-reasoner", "a pin on the active provider stays");
+  assert(sessions[2]?.providerId === "native:claude-code", "a pin on a signed-in subscription account stays across personal provider switches");
   assert(releaseStalePins(sessions, "deepseek") === false, "a second pass finds nothing to release");
   assert(releaseStalePins([{ providerId: "minimax", model: "MiniMax-M3" }], null) === false, "no active provider releases nothing");
 
-  const { pinSessionAfterFailover } = await import("../src/chat/model-picker");
   const failingChat = {
     providerId: null as string | null,
     model: "",
