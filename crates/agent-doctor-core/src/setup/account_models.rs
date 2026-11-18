@@ -811,7 +811,7 @@ fn codex_keychain_auth_json() -> Option<String> {
     let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
     let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
     let account = format!("cli|{}", &hex[..16]);
-    let output = std::process::Command::new("security")
+    let output = std::process::Command::new("security") // raw-spawn-ok
         .args([
             "find-generic-password",
             "-s",

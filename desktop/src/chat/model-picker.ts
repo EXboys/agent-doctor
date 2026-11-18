@@ -1017,9 +1017,17 @@ export function createModelPickerController(deps: ModelPickerDeps) {
           providerId: nativeProviderId(runtime),
           label: nativeAccountLabel(runtime),
           models: [],
+          modelLabels: [],
+          modelSections: [],
           usingByDefault: false,
           cliReady: false,
           desktopNeedsSync: false,
+          quotaCursorPercent: null,
+          quotaOtherPercent: null,
+          quotaHours: null,
+          quotaHoursPercent: null,
+          quotaWeekPercent: null,
+          quotaCreditsLeft: null,
         });
       });
       deps.modelMenuEl.appendChild(btn);
