@@ -842,7 +842,7 @@ function bootChatTail(): void {
   async function publishPhoneInventory(): Promise<void> {
     if (inventoryBusy) return;
     inventoryBusy = true;
-    try {
+    const publish = async (): Promise<void> => {
       const [installed, doc, initialAccounts, officialAccount] = await Promise.all([
         listInstalledAskAgents().catch(() => []),
         listPersonalProviders().catch(() => null),
@@ -903,6 +903,15 @@ function bootChatTail(): void {
         ),
         current,
       });
+    };
+    try {
+      // 一次检测挂起不能永远锁死清单发布：超时放行，迟到的清单照常送达。
+      await Promise.race([
+        publish(),
+        new Promise((_, reject) =>
+          window.setTimeout(() => reject(new Error("inventory publish timeout")), 20000),
+        ),
+      ]);
     } catch (error) {
       console.warn("channel: agent list not sent", error);
     } finally {
