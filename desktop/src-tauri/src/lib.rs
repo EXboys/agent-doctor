@@ -877,8 +877,6 @@ pub fn run() {
             use_current_service_command,
             get_mode_status_command,
             get_product_edition_command,
-            install_ping_status_command,
-            set_install_ping_enabled_command,
             switch_to_personal_mode_command,
             switch_to_team_mode_command,
             wire_browser_mcp_command,
