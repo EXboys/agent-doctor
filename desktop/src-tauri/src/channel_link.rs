@@ -13,8 +13,9 @@ use agent_doctor_core::{
     clean_reply_images, parse_channel_auto_allow, parse_channel_choices, parse_channel_stop,
     parse_teamups_channel_job, parse_teamups_channel_sync, read_reply_image_in,
     set_teamups_channel_enabled, set_teamups_channel_since, settings_db_path, teamups_channel_auth,
-    teamups_channel_client_id, teamups_channel_enabled, teamups_channel_heard,
-    teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in, TeamupsChannelFile,
+    teamups_channel_client_id, teamups_channel_computer_name, teamups_channel_enabled,
+    teamups_channel_heard, teamups_channel_hello, teamups_channel_reply, teamups_channel_signed_in,
+    TeamupsChannelFile,
 };
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde::Serialize;
@@ -81,6 +82,8 @@ pub struct ChannelPref {
     signed_in: bool,
     /// 本机的 channel id：排期绑电脑时用。
     client_id: String,
+    /// 本机的电脑名称：即使未连上远端也能立即显示名字。
+    computer_name: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -401,6 +404,7 @@ pub async fn teamups_channel_pref_command() -> Result<ChannelPref, String> {
             enabled: teamups_channel_enabled().map_err(|err| err.to_string())?,
             signed_in: teamups_channel_signed_in().map_err(|err| err.to_string())?,
             client_id: teamups_channel_client_id().unwrap_or_default(),
+            computer_name: teamups_channel_computer_name(),
         })
     })
     .await

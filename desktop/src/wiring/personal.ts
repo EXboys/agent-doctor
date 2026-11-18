@@ -26,9 +26,7 @@ import {
   listPersonalProviders,
   nativeAccountStatus,
   openBrowserUrl,
-  installPingStatus,
   resignNativeSubscription,
-  setInstallPingEnabled,
   signOutNativeSubscription,
   signOutTeamups,
   startTeamupsLogin,
@@ -59,7 +57,6 @@ const personalListHintEl = document.querySelector<HTMLElement>("#personal-list-h
 const nativeFoldEl = document.querySelector<HTMLDetailsElement>("#native-accounts")!;
 const nativeFoldLabelEl = document.querySelector<HTMLElement>("#native-accounts-label")!;
 const nativeAccountListEl = document.querySelector<HTMLUListElement>("#native-account-list")!;
-const installPingToggleEl = document.querySelector<HTMLInputElement>("#install-ping-toggle")!;
 const personalFormEl = document.querySelector<HTMLFormElement>("#personal-form")!;
 const personalFormTitleEl = document.querySelector<HTMLElement>("#personal-form-title")!;
 const personalIdEl = document.querySelector<HTMLInputElement>("#personal-id")!;
@@ -347,6 +344,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "qoder") return t("native.qoder");
     if (runtimeId === "cursor") return t("native.cursor");
     if (runtimeId === "workbuddy") return t("native.workbuddy");
+    if (runtimeId === "zcode") return t("native.zcode");
     return t("native.claude");
   }
 
@@ -355,6 +353,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "qoder") return "Qoder";
     if (runtimeId === "cursor") return "Cursor";
     if (runtimeId === "workbuddy") return "WorkBuddy";
+    if (runtimeId === "zcode") return "ZCode";
     return "Claude Code";
   }
 
@@ -363,6 +362,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "qoder") return t("native.chipQoder");
     if (runtimeId === "cursor") return t("native.chipCursor");
     if (runtimeId === "workbuddy") return t("native.chipWorkbuddy");
+    if (runtimeId === "zcode") return t("native.chipZcode");
     return t("native.chipClaude");
   }
 
@@ -371,6 +371,7 @@ export function createPersonalController(deps: PersonalDeps) {
     if (runtimeId === "qoder") return t("native.loginQoder");
     if (runtimeId === "cursor") return t("native.loginCursor");
     if (runtimeId === "workbuddy") return t("native.loginWorkbuddy");
+    if (runtimeId === "zcode") return t("native.loginZcode");
     return t("native.loginClaude");
   }
 
@@ -399,13 +400,13 @@ export function createPersonalController(deps: PersonalDeps) {
         if (result.runtime_id === "qoder") return t("native.missingQoder");
         if (result.runtime_id === "cursor") return t("native.missingCursor");
         if (result.runtime_id === "workbuddy") return t("native.missingWorkbuddy");
+        if (result.runtime_id === "zcode") return t("native.missingZcode");
         return t("native.missingClaude");
       case "no_provider":
         return t("native.noProvider");
       case "unsupported":
         return t("native.unsupported", { tool });
       default:
-        if (result.runtime_id === "workbuddy") return t("native.openedCli");
         return t("native.incomplete");
     }
   }
@@ -416,7 +417,14 @@ export function createPersonalController(deps: PersonalDeps) {
       nativeAccountListEl.replaceChildren();
       return;
     }
-    const MANAGED_NATIVE_IDS = new Set(["codex", "claude-code", "qoder", "cursor", "workbuddy"]);
+    const MANAGED_NATIVE_IDS = new Set([
+      "codex",
+      "claude-code",
+      "qoder",
+      "cursor",
+      "workbuddy",
+      "zcode",
+    ]);
     const rows = appState.nativeAccounts.filter(
       (row) => row.visible && MANAGED_NATIVE_IDS.has(row.runtime_id),
     );
@@ -481,7 +489,7 @@ export function createPersonalController(deps: PersonalDeps) {
             ? t("chat.modelSyncDesktopCta", { account })
             : loginButtonLabel(row.runtime_id);
       actions.appendChild(button);
-      if (row.logged_in && row.runtime_id !== "workbuddy") {
+      if (row.logged_in) {
         const resyncBtn = document.createElement("button");
         resyncBtn.type = "button";
         resyncBtn.className = "btn-ghost btn-compact";
@@ -1174,22 +1182,6 @@ export function createPersonalController(deps: PersonalDeps) {
       }
       void onNativeAccountAction(runtimeId, action);
     });
-
-    installPingToggleEl.addEventListener("change", () => {
-      const enabled = installPingToggleEl.checked;
-      setInstallPingEnabled(enabled).catch(() => {
-        // Persist failed — flip back so the switch tells the truth.
-        installPingToggleEl.checked = !enabled;
-      });
-    });
-
-    // The switch defaults on (opt-out model); the saved flag replaces it when read.
-    installPingToggleEl.checked = true;
-    installPingStatus()
-      .then((status) => {
-        installPingToggleEl.checked = status.enabled;
-      })
-      .catch(() => {});
   }
 
   return {

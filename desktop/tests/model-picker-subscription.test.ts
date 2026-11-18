@@ -28,6 +28,8 @@ function assert(cond: boolean, msg: string) {
 
 async function main() {
   const {
+    accountAllowanceTitle,
+    accountSupportsModelList,
     loggedAccountCatalogFor,
     nativeProviderId,
     pinSessionAfterFailover,
@@ -106,6 +108,82 @@ async function main() {
   const qoderCat = loggedAccountCatalogFor("qoder", nativeRows);
   assert(qoderCat !== null && qoderCat.providerId === "native:qoder", "logged-in Qoder account is selectable");
   assert(loggedAccountCatalogFor("cursor", nativeRows) === null, "un-logged-in Cursor account has no option");
+  const cursorQuota = loggedAccountCatalogFor("cursor", [
+    {
+      runtime_id: "cursor",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: ["auto"],
+      quota_cursor_percent: 8,
+      quota_other_percent: 53,
+      model_sections: ["auto", "cursor", "other"],
+    },
+  ]);
+  assert(
+    cursorQuota?.quotaCursorPercent === 8 && cursorQuota?.quotaOtherPercent === 53,
+    "signed-in Cursor account carries the two plan-page bars",
+  );
+  assert(
+    cursorQuota?.modelSections.join(",") === "auto,cursor,other",
+    "Cursor menu keeps Cursor models separate from other models",
+  );
+  const codexQuota = loggedAccountCatalogFor("codex", [
+    {
+      runtime_id: "codex",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: ["gpt-5.3-codex", "gpt-5.2"],
+      model_labels: ["GPT-5.3 Codex", "GPT-5.2"],
+      model_sections: ["codex-coding", "codex-general"],
+      quota_hours: 5,
+      quota_hours_percent: 12,
+      quota_week_percent: 40,
+    },
+  ]);
+  assert(
+    accountAllowanceTitle(codexQuota!) === "ChatGPT 账号 · 5 小时还剩 88% · 本周还剩 60%",
+    "Codex shows how much of the shared allowance is left on the account title",
+  );
+  const qoderQuota = loggedAccountCatalogFor("qoder", [
+    {
+      runtime_id: "qoder",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: ["auto"],
+      quota_credits_left: 297,
+    },
+  ]);
+  assert(
+    accountAllowanceTitle(qoderQuota!) === "Qoder 账号 · 积分还剩 297",
+    "Qoder shows the credits still left on the account title",
+  );
+  const zcodeQuota = loggedAccountCatalogFor("zcode", [
+    {
+      runtime_id: "zcode",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: ["GLM-5.3"],
+      quota_hours: 5,
+      quota_hours_percent: 1,
+      quota_week_percent: 3,
+    },
+  ]);
+  assert(
+    accountAllowanceTitle(zcodeQuota!) === "ZCode 账号 · 5 小时还剩 99% · 本周还剩 97%",
+    "ZCode shows the 5-hour window and the week on the account title",
+  );
 
   // Desktop-signed-in IDE without CLI authorization yet exposes a sync-pending catalog (not yet cliReady).
   const desktopOnlyRows = [
@@ -165,6 +243,49 @@ async function main() {
       { officialSignedIn: true },
     ),
     "Cursor does not accept OpenAI-compatible saved providers",
+  );
+
+  // WorkBuddy and ZCode full subscription parity with Qoder.
+  assert(accountSupportsModelList("workbuddy"), "WorkBuddy supports subscription model lists");
+  assert(accountSupportsModelList("zcode"), "ZCode supports subscription model lists");
+
+  const wbAndZcodeRows = [
+    {
+      runtime_id: "workbuddy",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "DeepSeek",
+      models: ["hy4-preview", "deepseek-v4.1-flash", "glm-5.3"],
+    },
+    {
+      runtime_id: "zcode",
+      using_subscription: true,
+      logged_in: true,
+      reachable: true,
+      visible: true,
+      provider_name: "",
+      models: ["GLM-5.3", "GLM-5.3-Flash", "GLM-5.2"],
+    },
+  ];
+  const wbCat = loggedAccountCatalogFor("workbuddy", wbAndZcodeRows);
+  const zcodeCat = loggedAccountCatalogFor("zcode", wbAndZcodeRows);
+  assert(
+    wbCat !== null && wbCat.models.includes("glm-5.3"),
+    "signed-in WorkBuddy catalog exposes account models",
+  );
+  assert(
+    sessionUsesLoggedAccount({ model: "glm-5.3", providerId: null } as never, wbCat),
+    "WorkBuddy subscription session keeps native glm-5.3 instead of mistaking it for a saved provider",
+  );
+  assert(
+    !sessionUsesLoggedAccount({ model: "deepseek-chat", providerId: "pp_ds" } as never, wbCat),
+    "WorkBuddy chat explicitly pinned to a saved provider stays on that provider",
+  );
+  assert(
+    zcodeCat !== null && sessionUsesLoggedAccount({ model: "GLM-5.3", providerId: null } as never, zcodeCat),
+    "ZCode subscription session routes GLM-5.3 to ZCode native account",
   );
 
   const sessions = [

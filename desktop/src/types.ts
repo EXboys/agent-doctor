@@ -505,6 +505,22 @@ export interface NativeAccountRow {
   provider_name: string;
   /** Models this signed-in account listed. Empty until that list arrives. */
   models: string[];
+  /** Menu text for `models`, same order. Empty entry keeps the id. */
+  model_labels?: string[];
+  /** `auto`, `cursor`, or `other`, same order as `models`. Empty keeps one list. */
+  model_sections?: string[];
+  /** Cursor Models bar on the plan page, 0–100. */
+  quota_cursor_percent?: number;
+  /** Other Models bar on the plan page, 0–100. */
+  quota_other_percent?: number;
+  /** Short ChatGPT window length, in hours. */
+  quota_hours?: number;
+  /** Used percent of that short window, 0–100. */
+  quota_hours_percent?: number;
+  /** Used percent of the weekly window, 0–100. */
+  quota_week_percent?: number;
+  /** Credits still left on a Qoder or WorkBuddy account. */
+  quota_credits_left?: number;
 }
 
 export interface NativeAccountStatus {

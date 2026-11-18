@@ -21,6 +21,9 @@ zip = "9"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.23"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+aes-gcm = "0.10"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 uuid.workspace = true
 url = "2"

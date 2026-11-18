@@ -34,5 +34,6 @@ pub use workbuddy::{
 };
 pub use zcode::ZcodeAdapter;
 pub use zcode::{
-    locate_zcode, locate_zcode_headless, zcode_desktop_path, ZcodeHeadless, ZcodeInstall,
+    locate_zcode, locate_zcode_headless, zcode_bundled_provider_config, zcode_desktop_path,
+    zcode_headless_command, ZcodeHeadless, ZcodeInstall,
 };

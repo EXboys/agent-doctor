@@ -22,7 +22,7 @@ use super::{
 use agent_doctor_core::adapters::cursor_cli_path;
 use agent_doctor_core::session_env::{
     apply_cursor_env, apply_overlay_env, chat_uses_saved_service, format_command_display,
-    resolve_cursor_api_key,
+    overlay_uses_native_account, resolve_cursor_api_key,
 };
 use agent_doctor_core::session_launch::resolve_session_cwd;
 
@@ -114,9 +114,14 @@ fn run_cursor(
         .collect();
 
     let mut cmd = command_from_cli(&binary);
-    if let Some(model) = overlay
-        .get(agent_doctor_core::setup::MODEL_ENV)
-        .map(String::as_str)
+    let cursor_model = if overlay_uses_native_account(&overlay) {
+        overlay
+            .get(agent_doctor_core::setup::MODEL_ENV)
+            .map(String::as_str)
+    } else {
+        options.model.as_deref()
+    };
+    if let Some(model) = cursor_model
         .map(str::trim)
         .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case("auto"))
     {

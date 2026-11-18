@@ -33,7 +33,50 @@ pub fn workbuddy_cli_path() -> Option<PathBuf> {
     if win_home.is_file() {
         return Some(win_home);
     }
-    None
+    versioned_codebuddy_cli_path()
+}
+
+fn versioned_codebuddy_cli_path() -> Option<PathBuf> {
+    let mut best: Option<((u64, u64, u64, String), PathBuf)> = None;
+    for (versions_dir, bin_name) in [
+        (home_join(".local/share/codebuddy/versions"), "codebuddy"),
+        (
+            home_join("AppData/Local/codebuddy/versions"),
+            "codebuddy.exe",
+        ),
+    ] {
+        let Ok(entries) = std::fs::read_dir(&versions_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let candidate = dir.join(bin_name);
+            if !candidate.is_file() {
+                continue;
+            }
+            let ver = entry.file_name().to_string_lossy().into_owned();
+            let key = parse_version_key(&ver);
+            if best.as_ref().map_or(true, |(cur, _)| key > *cur) {
+                best = Some((key, candidate));
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+fn parse_version_key(raw: &str) -> (u64, u64, u64, String) {
+    let clean = raw.trim().trim_start_matches('v');
+    let head = clean.split('-').next().unwrap_or(clean);
+    let mut parts = head.split('.').map(|s| s.parse::<u64>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        clean.to_string(),
+    )
 }
 
 /// Official WorkBuddy desktop client (`WorkBuddy.app` / `WorkBuddy.exe`).
@@ -149,6 +192,24 @@ mod tests {
                 workbuddy_desktop_path(),
                 Some(home_join("Applications/WorkBuddy.app"))
             );
+        });
+    }
+
+    #[test]
+    fn finds_newest_versioned_codebuddy_binary_under_local_share() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let older = temp
+            .path()
+            .join(".local/share/codebuddy/versions/2.99.0/codebuddy");
+        let newer = temp
+            .path()
+            .join(".local/share/codebuddy/versions/2.184.0/codebuddy");
+        fs::create_dir_all(older.parent().unwrap()).unwrap();
+        fs::create_dir_all(newer.parent().unwrap()).unwrap();
+        fs::write(&older, b"").unwrap();
+        fs::write(&newer, b"").unwrap();
+        with_test_home(temp.path(), || {
+            assert_eq!(versioned_codebuddy_cli_path(), Some(newer));
         });
     }
 }

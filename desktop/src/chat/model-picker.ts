@@ -45,7 +45,14 @@ export function isNativeProviderId(providerId: string | null | undefined): boole
 
 export function accountSupportsModelList(runtimeId: string): boolean {
   const id = runtimeId.trim();
-  return id === "codex" || id === "claude-code" || id === "qoder" || id === "cursor";
+  return (
+    id === "codex" ||
+    id === "claude-code" ||
+    id === "qoder" ||
+    id === "cursor" ||
+    id === "workbuddy" ||
+    id === "zcode"
+  );
 }
 
 export function nativeAccountLabel(runtimeId: string): string {
@@ -74,11 +81,27 @@ export type LoggedAccountCatalog = {
   providerId: string;
   label: string;
   models: string[];
+  /** Menu text aligned with `models`. Empty entry keeps the id. */
+  modelLabels: string[];
+  /** `auto`, `cursor`, or `other`, aligned with `models`. Empty keeps one list. */
+  modelSections: string[];
   usingByDefault: boolean;
   /** True when the CLI itself is already authorized and ready to answer. */
   cliReady: boolean;
   /** True when the companion desktop IDE has an active login not yet synced to CLI. */
   desktopNeedsSync: boolean;
+  /** Cursor Models used this period, 0–100. Empty when that bar is missing. */
+  quotaCursorPercent: number | null;
+  /** Other Models used this period, 0–100. Empty when that bar is missing. */
+  quotaOtherPercent: number | null;
+  /** Short ChatGPT window length, in hours. */
+  quotaHours: number | null;
+  /** Used percent of that short window, 0–100. */
+  quotaHoursPercent: number | null;
+  /** Used percent of the weekly window, 0–100. */
+  quotaWeekPercent: number | null;
+  /** Credits still left. Empty when the account did not report a balance. */
+  quotaCreditsLeft: number | null;
 };
 
 /**
@@ -98,10 +121,98 @@ export function loggedAccountCatalogFor(
     providerId: nativeProviderId(runtime),
     label: nativeAccountLabel(runtime),
     models: cliReady ? row?.models ?? [] : [],
+    modelLabels: cliReady ? row?.model_labels ?? [] : [],
+    modelSections: cliReady ? row?.model_sections ?? [] : [],
     usingByDefault: cliReady && Boolean(row?.using_subscription),
     cliReady,
     desktopNeedsSync: Boolean(row?.desktop_needs_sync || (!cliReady && desktopLogged)),
+    quotaCursorPercent: shownPercent(cliReady ? row?.quota_cursor_percent : undefined),
+    quotaOtherPercent: shownPercent(cliReady ? row?.quota_other_percent : undefined),
+    quotaHours: shownHours(cliReady ? row?.quota_hours : undefined),
+    quotaHoursPercent: shownPercent(cliReady ? row?.quota_hours_percent : undefined),
+    quotaWeekPercent: shownPercent(cliReady ? row?.quota_week_percent : undefined),
+    quotaCreditsLeft: shownCredits(cliReady ? row?.quota_credits_left : undefined),
   };
+}
+
+function shownHours(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value);
+}
+
+/** Account title plus how much of the shared allowance is left. */
+export function accountAllowanceTitle(catalog: LoggedAccountCatalog): string {
+  const parts: string[] = [];
+  if (catalog.quotaHours != null && catalog.quotaHoursPercent != null) {
+    parts.push(
+      t("native.quotaHoursLeft", {
+        hours: String(catalog.quotaHours),
+        percent: String(100 - catalog.quotaHoursPercent),
+      }),
+    );
+  }
+  if (catalog.quotaWeekPercent != null) {
+    parts.push(
+      t("native.quotaWeekLeft", {
+        percent: String(100 - catalog.quotaWeekPercent),
+      }),
+    );
+  }
+  if (catalog.quotaCreditsLeft != null) {
+    parts.push(
+      catalog.quotaCreditsLeft <= 0
+        ? t("native.quotaCreditsNone")
+        : t("native.quotaCreditsLeft", { left: formatCredits(catalog.quotaCreditsLeft) }),
+    );
+  }
+  return parts.length === 0 ? catalog.label : `${catalog.label} · ${parts.join(" · ")}`;
+}
+
+function shownCredits(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * 100) / 100;
+}
+
+function formatCredits(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  if (Number.isInteger(rounded)) return String(rounded);
+  return rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function shownPercent(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function accountSectionTitle(section: string, catalog: LoggedAccountCatalog): string {
+  if (section === "cursor") {
+    return catalog.quotaCursorPercent == null
+      ? t("chat.modelCursorGroup")
+      : t("native.quotaCursor", { percent: String(catalog.quotaCursorPercent) });
+  }
+  if (section === "other") {
+    return catalog.runtimeId === "cursor" && catalog.quotaOtherPercent != null
+      ? t("native.quotaOther", { percent: String(catalog.quotaOtherPercent) })
+      : t("chat.modelOtherGroup");
+  }
+  switch (section) {
+    case "qoder-power":
+      return t("chat.modelQoderPower");
+    case "qoder-value":
+      return t("chat.modelQoderValue");
+    case "qoder-lite":
+      return t("chat.modelQoderLite");
+    case "qoder-new":
+      return t("chat.modelQoderNew");
+    case "workbuddy-own":
+      return t("chat.modelWorkbuddyOwn");
+    case "codex-coding":
+      return t("chat.modelCodexCoding");
+    case "codex-general":
+      return t("chat.modelCodexGeneral");
+    default:
+      return "";
+  }
 }
 
 /**
@@ -191,7 +302,11 @@ export function sessionUsesLoggedAccount(
   const pinned = session?.providerId?.trim() ?? "";
   if (pinned === catalog.providerId) return true;
   if (pinned) return false;
-  return catalog.usingByDefault && !sessionKeepsSavedService(session);
+  if (!catalog.usingByDefault) return false;
+  if (catalog.runtimeId === "cursor" || catalog.runtimeId === "zcode") return true;
+  const current = session?.model?.trim().toLowerCase() ?? "";
+  if (current && catalog.models.some((id) => id.toLowerCase() === current)) return true;
+  return !sessionKeepsSavedService(session);
 }
 
 /**
@@ -400,10 +515,9 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const session = deps.activeSession();
     if (catalog && sessionUsesLoggedAccount(session, catalog)) {
       const model = alignAccountSession(catalog);
-      const label =
-        !model || model.toLowerCase() === NATIVE_ACCOUNT_DEFAULT_MODEL
-          ? catalog.label
-          : `${catalog.label} · ${model}`;
+      const onDefault =
+        !model || model.toLowerCase() === NATIVE_ACCOUNT_DEFAULT_MODEL;
+      const label = onDefault ? catalog.label : `${catalog.label} · ${model}`;
       deps.modelLabelEl.textContent = label;
       deps.modelBtnEl.disabled = deps.isComposerLocked();
       deps.modelBtnEl.title = t("chat.modelSubscriptionHint");
@@ -568,6 +682,60 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     }
   }
 
+  function appendAccountModelOptions(
+    group: HTMLElement,
+    catalog: LoggedAccountCatalog,
+    options: string[],
+    onAccount: boolean,
+    activeModel: string,
+  ): void {
+    const sections = catalog.modelSections;
+    const distinct = sections.filter(
+      (section, index) => section && section !== "auto" && sections.indexOf(section) === index,
+    );
+    const grouped = sections.length === options.length && distinct.length >= 2;
+    const order = grouped
+      ? [
+          ...(sections.includes("auto") ? ["auto"] : []),
+          ...sections.filter(
+            (section, index) => section !== "auto" && sections.indexOf(section) === index,
+          ),
+        ]
+      : ["flat"];
+    for (const section of order) {
+      const rows = options
+        .map((id, index) => ({ id, index }))
+        .filter((row) => !grouped || (sections[row.index] || "other") === section);
+      if (rows.length === 0) continue;
+      if (grouped && section !== "auto") {
+        const title = accountSectionTitle(section, catalog);
+        if (title) {
+          const heading = document.createElement("div");
+          heading.className = "chat-model-subgroup-label";
+          heading.textContent = title;
+          group.appendChild(heading);
+        }
+      }
+      for (const row of rows) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const active = onAccount && activeModel.toLowerCase() === row.id.toLowerCase();
+        btn.className = `chat-model-option${active ? " is-active" : ""}`;
+        btn.role = "option";
+        btn.setAttribute("aria-selected", active ? "true" : "false");
+        const named = catalog.modelLabels[row.index]?.trim();
+        btn.textContent =
+          row.id === NATIVE_ACCOUNT_DEFAULT_MODEL
+            ? t("chat.modelAccountDefault")
+            : named || modelOptionLabel(row.id);
+        btn.addEventListener("click", () => {
+          selectAccountModel(catalog, row.id);
+        });
+        group.appendChild(btn);
+      }
+    }
+  }
+
   function renderAccountPanel(panel: HTMLElement, catalog: LoggedAccountCatalog): void {
     const session = deps.activeSession();
     const onAccount = sessionUsesLoggedAccount(session, catalog);
@@ -576,7 +744,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     group.className = "chat-model-group";
     const label = document.createElement("div");
     label.className = "chat-model-group-label";
-    label.textContent = catalog.label;
+    label.textContent = accountAllowanceTitle(catalog);
     if (catalog.usingByDefault) {
       const mark = document.createElement("span");
       mark.className = "chat-model-default";
@@ -593,21 +761,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
     const options =
       catalog.models.length > 0 ? catalog.models : [NATIVE_ACCOUNT_DEFAULT_MODEL];
-    for (const id of options) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      const active =
-        onAccount && activeModel.toLowerCase() === id.toLowerCase();
-      btn.className = `chat-model-option${active ? " is-active" : ""}`;
-      btn.role = "option";
-      btn.setAttribute("aria-selected", active ? "true" : "false");
-      btn.textContent =
-        id === NATIVE_ACCOUNT_DEFAULT_MODEL ? t("chat.modelAccountDefault") : modelOptionLabel(id);
-      btn.addEventListener("click", () => {
-        selectAccountModel(catalog, id);
-      });
-      group.appendChild(btn);
-    }
+    appendAccountModelOptions(group, catalog, options, onAccount, activeModel);
 
     if (catalog.models.length === 0) {
       if (loadingAccountRuntimes.has(catalog.runtimeId)) {
@@ -839,14 +993,36 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   function renderEmptyMenuHint(runtime: AskRuntime): void {
     const hint = document.createElement("div");
     hint.className = "chat-model-menu-hint";
-    if (runtime === "cursor") {
-      hint.textContent = t("chat.modelNeedCursorLogin");
+    if (runtime === "cursor" || runtime === "zcode") {
+      const busy = syncingAccountRuntime === runtime;
+      const feedback = syncFeedbackByRuntime.get(runtime) ?? "";
+      hint.textContent =
+        feedback ||
+        (runtime === "cursor" ? t("chat.modelNeedCursorLogin") : t("chat.modelNeedZcodeLogin"));
       deps.modelMenuEl.appendChild(hint);
-      return;
-    }
-    if (runtime === "zcode") {
-      hint.textContent = t("chat.modelNeedZcodeLogin");
-      deps.modelMenuEl.appendChild(hint);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chat-model-menu-action";
+      btn.disabled = busy;
+      btn.textContent = busy
+        ? t("chat.modelSyncDesktopBusy")
+        : runtime === "cursor"
+          ? t("native.loginCursor")
+          : t("native.loginZcode");
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void syncDesktopAccount({
+          runtimeId: runtime,
+          providerId: nativeProviderId(runtime),
+          label: nativeAccountLabel(runtime),
+          models: [],
+          usingByDefault: false,
+          cliReady: false,
+          desktopNeedsSync: false,
+        });
+      });
+      deps.modelMenuEl.appendChild(btn);
       return;
     }
     if (runtime === "doctor") {

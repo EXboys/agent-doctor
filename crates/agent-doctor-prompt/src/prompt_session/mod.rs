@@ -124,8 +124,7 @@ fn ask_cli_installed(runtime_id: &str) -> bool {
         "qoder" => agent_doctor_core::adapters::qoder_cli_path().is_some(),
         "cursor" => agent_doctor_core::adapters::cursor_cli_path().is_some(),
         "workbuddy" => agent_doctor_core::adapters::workbuddy_cli_path().is_some(),
-        "zcode" => agent_doctor_core::adapters::locate_zcode_headless()
-            .is_some_and(|launch| launch.script.is_none()),
+        "zcode" => agent_doctor_core::adapters::locate_zcode_headless().is_some(),
         _ => true,
     }
 }

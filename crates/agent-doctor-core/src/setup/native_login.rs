@@ -5,13 +5,13 @@
 //! login site answers, or when the tool is already on the subscription.
 
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
@@ -77,6 +77,30 @@ pub struct NativeAccountRow {
     /// Models this signed-in account listed. Empty until that list arrives.
     #[serde(default)]
     pub models: Vec<String>,
+    /// Menu text for `models`, same order. Empty entry keeps the id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_labels: Vec<String>,
+    /// `auto`, `cursor`, or `other`, same order as `models`. Empty keeps one list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_sections: Vec<String>,
+    /// Cursor Models bar on the plan page, 0–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_cursor_percent: Option<u8>,
+    /// Other Models bar on the plan page, 0–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_other_percent: Option<u8>,
+    /// Short ChatGPT window length, in hours. The used percent is shared by every model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_hours: Option<u32>,
+    /// Used percent of that short window, 0–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_hours_percent: Option<u8>,
+    /// Used percent of the weekly window, 0–100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_week_percent: Option<u8>,
+    /// Credits still left on a Qoder or WorkBuddy account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_credits_left: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,7 +120,7 @@ pub struct NativeAccountSwitch {
 pub fn is_native_subscription(runtime_id: &str) -> bool {
     if !matches!(
         runtime_id,
-        CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID
+        CODEX_ID | CLAUDE_ID | QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID
     ) || read_mode(runtime_id) != MODE_SUBSCRIPTION
     {
         return false;
@@ -116,7 +140,7 @@ pub fn is_runtime_logged_in(runtime_id: &str) -> bool {
 ///   that runtime is currently signed in.
 /// - `provider_id = Some("<saved-id>")`: explicit saved provider — false.
 /// - `provider_id = None` / empty: follows global subscription mode unless the
-///   session model names a vendor gateway model.
+///   session model names a foreign vendor gateway model not offered by the account.
 pub fn turn_uses_native_account(
     runtime_id: &str,
     model: Option<&str>,
@@ -128,7 +152,18 @@ pub fn turn_uses_native_account(
     if provider_id.map(str::trim).is_some_and(|id| !id.is_empty()) {
         return false;
     }
-    is_native_subscription(runtime_id) && !crate::session_env::chat_uses_saved_service(model, None)
+    if !is_native_subscription(runtime_id) {
+        return false;
+    }
+    if matches!(runtime_id, CURSOR_ID | ZCODE_ID) {
+        return true;
+    }
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        if crate::setup::load_account_models(runtime_id).is_some_and(|list| list.allows(m)) {
+            return true;
+        }
+    }
+    !crate::session_env::chat_uses_saved_service(model, None)
 }
 
 pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
@@ -142,15 +177,15 @@ pub fn native_account_status(_probe: bool) -> NativeAccountStatus {
     ];
     // Every installed subscription-capable CLI (or signed-in companion desktop IDE)
     // appears consistently; reachability is checked only when the user taps Sign in.
-    for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID] {
-        if cli_binary(runtime_id).is_some() || desktop_login_state(runtime_id).0 {
+    for runtime_id in [QODER_ID, CURSOR_ID, WORKBUDDY_ID, ZCODE_ID] {
+        if runtime_has_cli_or_headless(runtime_id) || desktop_login_state(runtime_id).0 {
             rows.push(row(runtime_id, true, &provider_name));
         }
     }
-    // ZCode and DeepSeek Harness sign in inside their own tools, so their rows stay
-    // hidden from the main-page login fold (`visible: false`) while Ask and the phone
-    // inventory still learn whether their accounts are currently signed in.
-    for runtime_id in [ZCODE_ID, DEEPSEEK_HARNESS_ID] {
+    // DeepSeek Harness signs in inside its own tool, so its row stays hidden from
+    // the main-page login fold (`visible: false`) while Ask and the phone inventory
+    // still learn whether its account is currently signed in.
+    for runtime_id in [DEEPSEEK_HARNESS_ID] {
         if extra_account_runtime_installed(runtime_id) {
             let mut extra = row(runtime_id, false, &provider_name);
             extra.visible = false;
@@ -164,7 +199,7 @@ pub fn use_native_subscription(runtime_id: &str) -> Result<NativeAccountSwitch> 
     ensure_edition_allows_mode(MODE_PERSONAL)?;
     let runtime_id = known_runtime(runtime_id)?;
     let provider_name = active_provider_name();
-    if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
+    if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID) {
         return use_cli_subscription(runtime_id, provider_name);
     }
     if runtime_id == CODEX_ID {
@@ -289,7 +324,7 @@ pub fn use_current_service(runtime_id: &str) -> Result<NativeAccountSwitch> {
                 Some(provider.model.as_str()),
             )?;
         }
-        CURSOR_ID => {}
+        CURSOR_ID | ZCODE_ID => {}
         _ => bail!("unknown runtime"),
     }
     write_mode(runtime_id, "service")?;
@@ -310,18 +345,50 @@ fn switch(
     }
 }
 
+fn runtime_has_cli_or_headless(runtime_id: &str) -> bool {
+    match runtime_id {
+        ZCODE_ID => crate::adapters::locate_zcode_headless().is_some(),
+        _ => cli_binary(runtime_id).is_some(),
+    }
+}
+
 fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountRow {
     let using = is_native_subscription(runtime_id);
     let is_logged_in = logged_in(runtime_id);
     let (desktop_logged_in, desktop_needs_sync) = desktop_login_state(runtime_id);
-    let installed = if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID) {
-        cli_binary(runtime_id).is_some() || desktop_logged_in
-    } else if matches!(runtime_id, ZCODE_ID | DEEPSEEK_HARNESS_ID) {
+    let installed = if matches!(runtime_id, QODER_ID | CURSOR_ID | WORKBUDDY_ID | ZCODE_ID) {
+        runtime_has_cli_or_headless(runtime_id) || desktop_logged_in
+    } else if runtime_id == DEEPSEEK_HARNESS_ID {
         extra_account_runtime_installed(runtime_id)
     } else {
         discover_binary(binary_name(runtime_id))
             .binary_path
             .is_some()
+    };
+    let menu = account_menu(runtime_id, is_logged_in);
+    let usage = if runtime_id == CURSOR_ID && is_logged_in {
+        crate::setup::cursor_period_usage()
+    } else {
+        crate::setup::CursorPeriodUsage::default()
+    };
+    let allowance = if runtime_id == CODEX_ID && is_logged_in {
+        crate::setup::codex_allowance()
+    } else if runtime_id == ZCODE_ID && is_logged_in {
+        let windows = crate::setup::zcode_plan_windows();
+        crate::setup::CodexAllowance {
+            hours: windows.hours,
+            hours_used_percent: windows.hours_used_percent,
+            week_used_percent: windows.week_used_percent,
+        }
+    } else {
+        crate::setup::CodexAllowance::default()
+    };
+    let credits = if runtime_id == QODER_ID && is_logged_in {
+        crate::setup::qoder_credits()
+    } else if runtime_id == WORKBUDDY_ID && is_logged_in {
+        crate::setup::workbuddy_credits()
+    } else {
+        crate::setup::CreditAllowance::default()
     };
     NativeAccountRow {
         runtime_id: runtime_id.to_string(),
@@ -332,13 +399,127 @@ fn row(runtime_id: &str, reachable: bool, provider_name: &str) -> NativeAccountR
         reachable,
         visible: account_row_visible(using, reachable, installed),
         provider_name: provider_name.to_string(),
-        models: if is_logged_in {
-            crate::setup::load_account_models(runtime_id)
-                .map(|list| list.models)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        },
+        models: menu.0,
+        model_labels: menu.1,
+        model_sections: menu.2,
+        quota_cursor_percent: usage.cursor_models_percent,
+        quota_other_percent: usage.other_models_percent,
+        quota_hours: allowance.hours,
+        quota_hours_percent: allowance.hours_used_percent,
+        quota_week_percent: allowance.week_used_percent,
+        quota_credits_left: credits.left,
+    }
+}
+
+fn account_menu(runtime_id: &str, logged_in: bool) -> (Vec<String>, Vec<String>, Vec<String>) {
+    if !logged_in {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
+    let list = if runtime_id == CURSOR_ID {
+        cursor_picker_list()
+    } else if runtime_id == CODEX_ID {
+        codex_catalog_list()
+    } else if runtime_id == WORKBUDDY_ID {
+        workbuddy_catalog_list()
+    } else {
+        crate::setup::load_account_models(runtime_id)
+    };
+    let Some(list) = list else {
+        return (Vec::new(), Vec::new(), Vec::new());
+    };
+    let aligned = list.labels.len() == list.models.len();
+    let labels = if aligned { list.labels } else { Vec::new() };
+    let sections = if aligned && list.sections.len() == list.models.len() {
+        list.sections
+    } else {
+        Vec::new()
+    };
+    (list.models, labels, sections)
+}
+
+static CURSOR_PICKER_REFRESH_FAILED: AtomicBool = AtomicBool::new(false);
+static CODEX_CATALOG_REFRESH_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// The ChatGPT catalog has a display name on each model. An older app-server
+/// list does not. Replace that list once with the account's own catalog.
+fn codex_catalog_named(list: &crate::setup::AccountModelList) -> bool {
+    !list.models.is_empty()
+        && list.labels.len() == list.models.len()
+        && list.labels.iter().any(|label| !label.trim().is_empty())
+}
+
+/// Prefer the model list this WorkBuddy sign-in saved. Refresh once when the
+/// saved list is still the command-line help text.
+fn workbuddy_catalog_list() -> Option<crate::setup::AccountModelList> {
+    let live = crate::setup::workbuddy_account_catalog();
+    let saved = crate::setup::load_account_models(WORKBUDDY_ID);
+    let Some(live) = live else {
+        return saved;
+    };
+    let same = saved.as_ref().is_some_and(|list| {
+        list.models == live.models && list.labels == live.labels && list.sections == live.sections
+    });
+    if same {
+        return saved;
+    }
+    match crate::setup::refresh_account_models(WORKBUDDY_ID) {
+        Ok(list) if !list.models.is_empty() => Some(list),
+        _ => Some(live),
+    }
+}
+
+fn codex_catalog_list() -> Option<crate::setup::AccountModelList> {
+    let saved = crate::setup::load_account_models(CODEX_ID);
+    if saved.as_ref().is_some_and(codex_catalog_named) {
+        return saved;
+    }
+    if CODEX_CATALOG_REFRESH_FAILED.load(Ordering::Relaxed) {
+        return saved;
+    }
+    match crate::setup::refresh_account_models(CODEX_ID) {
+        Ok(list) => {
+            if !codex_catalog_named(&list) {
+                CODEX_CATALOG_REFRESH_FAILED.store(true, Ordering::Relaxed);
+            }
+            Some(list)
+        }
+        Err(_) => {
+            CODEX_CATALOG_REFRESH_FAILED.store(true, Ordering::Relaxed);
+            saved
+        }
+    }
+}
+
+/// The saved Cursor list used to be every model. Replace it once with the
+/// short list the Cursor client shows.
+fn cursor_menu_grouped(list: &crate::setup::AccountModelList) -> bool {
+    list.picker
+        && list.sections.len() == list.models.len()
+        && list
+            .sections
+            .iter()
+            .any(|section| section == "cursor" || section == "other")
+}
+
+fn cursor_picker_list() -> Option<crate::setup::AccountModelList> {
+    let saved = crate::setup::load_account_models(CURSOR_ID);
+    if saved.as_ref().is_some_and(cursor_menu_grouped) {
+        return saved;
+    }
+    if CURSOR_PICKER_REFRESH_FAILED.load(Ordering::Relaxed) {
+        return saved;
+    }
+    match crate::setup::refresh_account_models(CURSOR_ID) {
+        Ok(list) => {
+            if !cursor_menu_grouped(&list) {
+                CURSOR_PICKER_REFRESH_FAILED.store(true, Ordering::Relaxed);
+            }
+            Some(list)
+        }
+        Err(_) => {
+            CURSOR_PICKER_REFRESH_FAILED.store(true, Ordering::Relaxed);
+            saved
+        }
     }
 }
 
@@ -364,6 +545,7 @@ fn known_runtime(runtime_id: &str) -> Result<&'static str> {
         QODER_ID => Ok(QODER_ID),
         CURSOR_ID => Ok(CURSOR_ID),
         WORKBUDDY_ID => Ok(WORKBUDDY_ID),
+        ZCODE_ID => Ok(ZCODE_ID),
         other => bail!("subscription login is only for an official command line, not {other}"),
     }
 }
@@ -378,26 +560,15 @@ fn cli_binary(runtime_id: &str) -> Option<PathBuf> {
 }
 
 fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<NativeAccountSwitch> {
-    if runtime_id == QODER_ID {
-        return use_qoder_subscription(provider_name);
+    match runtime_id {
+        QODER_ID => return use_qoder_subscription(provider_name),
+        WORKBUDDY_ID => return use_workbuddy_subscription(provider_name),
+        ZCODE_ID => return use_zcode_subscription(provider_name),
+        _ => {}
     }
     let Some(binary) = cli_binary(runtime_id) else {
         return Ok(switch(runtime_id, false, "missing_tool", provider_name));
     };
-    // WorkBuddy signs in inside its own command line. Clear any Agent Doctor
-    // API-key override first so `codebuddy` opens its sign-in screen.
-    if runtime_id == WORKBUDDY_ID {
-        let _ =
-            crate::setup::merge::clear_workbuddy_provider_override_in_dir(&home_join(".codebuddy"));
-        let owned = binary.to_string_lossy().into_owned();
-        crate::session_launch::terminal::open_in_terminal(
-            WORKBUDDY_ID,
-            &[&owned],
-            &crate::adapters::util::home_dir(),
-            None,
-        )?;
-        return Ok(switch(runtime_id, false, "login_incomplete", provider_name));
-    }
     if cli_logged_in(runtime_id) {
         let _ = crate::setup::refresh_account_models(runtime_id);
         write_mode(runtime_id, MODE_SUBSCRIPTION)?;
@@ -410,6 +581,51 @@ fn use_cli_subscription(runtime_id: &str, provider_name: String) -> Result<Nativ
         return Ok(switch(runtime_id, true, "using", provider_name));
     }
     Ok(switch(runtime_id, false, "login_incomplete", provider_name))
+}
+
+fn use_workbuddy_subscription(provider_name: String) -> Result<NativeAccountSwitch> {
+    let Some(binary) = crate::adapters::workbuddy_cli_path() else {
+        return Ok(switch(WORKBUDDY_ID, false, "missing_tool", provider_name));
+    };
+    let codebuddy_dir = home_join(".codebuddy");
+    let _ = crate::setup::merge::clear_workbuddy_provider_override_in_dir(&codebuddy_dir);
+    if workbuddy_logged_in() {
+        let _ = crate::setup::refresh_account_models(WORKBUDDY_ID);
+        write_mode(WORKBUDDY_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(WORKBUDDY_ID, true, "using", provider_name));
+    }
+    let ok = spawn_workbuddy_acp_login(&binary, &codebuddy_dir).unwrap_or(false);
+    if ok || workbuddy_logged_in() {
+        record_workbuddy_login_marker(&codebuddy_dir);
+        let _ = crate::setup::refresh_account_models(WORKBUDDY_ID);
+        write_mode(WORKBUDDY_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(WORKBUDDY_ID, true, "using", provider_name));
+    }
+    Ok(switch(
+        WORKBUDDY_ID,
+        false,
+        "login_incomplete",
+        provider_name,
+    ))
+}
+
+fn use_zcode_subscription(provider_name: String) -> Result<NativeAccountSwitch> {
+    let Some(launch) = crate::adapters::locate_zcode_headless() else {
+        return Ok(switch(ZCODE_ID, false, "missing_tool", provider_name));
+    };
+    let family = zcode_preferred_family();
+    if zcode_logged_in() && !zcode_needs_family_sync(family) {
+        let _ = crate::setup::refresh_account_models(ZCODE_ID);
+        write_mode(ZCODE_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(ZCODE_ID, true, "using", provider_name));
+    }
+    let _ = spawn_zcode_login(&launch, family);
+    if zcode_logged_in() {
+        let _ = crate::setup::refresh_account_models(ZCODE_ID);
+        write_mode(ZCODE_ID, MODE_SUBSCRIPTION)?;
+        return Ok(switch(ZCODE_ID, true, "using", provider_name));
+    }
+    Ok(switch(ZCODE_ID, false, "login_incomplete", provider_name))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -583,6 +799,16 @@ fn desktop_login_state(runtime_id: &str) -> (bool, bool) {
             let desktop = cursor_desktop_logged_in();
             (desktop, desktop && !cursor_logged_in())
         }
+        WORKBUDDY_ID => {
+            let desktop = workbuddy_desktop_logged_in();
+            (desktop, desktop && !workbuddy_logged_in())
+        }
+        ZCODE_ID => {
+            let has_desktop = crate::adapters::zcode_desktop_path().is_some();
+            let signed_in = zcode_logged_in();
+            let needs_sync = signed_in && zcode_needs_family_sync(zcode_preferred_family());
+            (has_desktop && signed_in, has_desktop && needs_sync)
+        }
         _ => (false, false),
     }
 }
@@ -726,59 +952,149 @@ pub(crate) fn cursor_auth_file_is_signed_in(value: &Value) -> bool {
     tokenish(value) || nonempty_str(value.get("apiKey"))
 }
 
+const WORKBUDDY_AUTH_MARKER: &str = ".agent-doctor-auth.json";
+const WORKBUDDY_SIGNOUT_MARKER: &str = ".agent-doctor-signed-out";
+
+fn workbuddy_desktop_logged_in() -> bool {
+    let mut bases = Vec::new();
+    if using_test_home() {
+        bases.push(home_join("Library/Application Support"));
+        bases.push(home_join(".config"));
+    } else {
+        if let Some(cfg) = dirs::config_dir() {
+            bases.push(cfg);
+        }
+        if let Some(local) = dirs::data_local_dir() {
+            if !bases.contains(&local) {
+                bases.push(local);
+            }
+        }
+    }
+    for base in &bases {
+        for folder in ["WorkBuddy", "WorkBuddy CN", "CodeBuddy"] {
+            let status_path = base
+                .join(folder)
+                .join("SharedClientCache")
+                .join("cache")
+                .join("status.json");
+            if qoder_desktop_status_is_signed_in(&status_path) {
+                return true;
+            }
+            let vscdb = base
+                .join(folder)
+                .join("User")
+                .join("globalStorage")
+                .join("state.vscdb");
+            if workbuddy_state_db_has_token(&vscdb) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn workbuddy_state_db_has_token(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let Ok(conn) = rusqlite::Connection::open_with_flags(path, flags) else {
+        return false;
+    };
+    let _ = conn.busy_timeout(Duration::from_millis(200));
+    conn.query_row(
+        "SELECT 1 FROM ItemTable WHERE (lower(key) LIKE '%codebuddy%auth%' OR lower(key) LIKE '%workbuddy%auth%' OR lower(key) LIKE '%tencent%auth%' OR key = 'cursorAuth/accessToken') AND length(trim(value)) > 2 AND trim(value) != '{}' AND trim(value) != '[]' LIMIT 1",
+        [],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
+fn record_workbuddy_login_marker(codebuddy_dir: &Path) {
+    let _ = fs::create_dir_all(codebuddy_dir);
+    let _ = fs::remove_file(codebuddy_dir.join(WORKBUDDY_SIGNOUT_MARKER));
+    let _ = fs::write(
+        codebuddy_dir.join(WORKBUDDY_AUTH_MARKER),
+        r#"{"logged_in":true}"#,
+    );
+}
+
 fn workbuddy_logged_in() -> bool {
-    if read_json(&home_join(".codebuddy/auth.json")).is_some_and(|value| tokenish(&value))
-        || read_json(&home_join(".codebuddy/credentials.json"))
-            .is_some_and(|value| tokenish(&value))
+    let dir = home_join(".codebuddy");
+    if read_json(&dir.join("auth.json")).is_some_and(|value| tokenish(&value))
+        || read_json(&dir.join("credentials.json")).is_some_and(|value| tokenish(&value))
+        || read_json(&dir.join(WORKBUDDY_AUTH_MARKER)).is_some_and(|value| {
+            value
+                .get("logged_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
     {
         return true;
     }
-    workbuddy_logs_show_signed_in(&home_join(".codebuddy/logs"))
+    let signed_out_at = fs::metadata(dir.join(WORKBUDDY_SIGNOUT_MARKER))
+        .and_then(|m| m.modified())
+        .ok();
+    workbuddy_logs_show_signed_in_since(&dir.join("logs"), signed_out_at)
 }
 
 /// CodeBuddy encrypts its `local_storage` entries and also creates an
-/// `anonymous_*` session whenever `CODEBUDDY_API_KEY` runs. Its startup log
-/// records whether a real Tencent / WeChat user (`uid=<id>`, not `<none>` and
-/// not `anonymous_*`) restored with an access token.
-pub(crate) fn workbuddy_logs_show_signed_in(logs_dir: &Path) -> bool {
-    let Some(latest_log) = newest_workbuddy_log(logs_dir) else {
-        return false;
-    };
-    let Ok(raw) = fs::read_to_string(latest_log) else {
-        return false;
-    };
-    workbuddy_log_text_is_signed_in(&raw)
-}
-
-fn newest_workbuddy_log(logs_dir: &Path) -> Option<PathBuf> {
-    let entries = fs::read_dir(logs_dir).ok()?;
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for day_entry in entries.flatten() {
-        let day_path = day_entry.path();
-        if !day_path.is_dir() {
-            continue;
+/// `anonymous_*` session whenever `CODEBUDDY_API_KEY` runs. Scan recent startup
+/// logs newest-first: skip pure `anonymous_*` API-key runs, stop false on an
+/// explicit user sign-out, and return true when a real Tencent / WeChat user
+/// (`uid=<id>`, not `<none>` and not `anonymous_*`) signed in after `since`.
+fn workbuddy_logs_show_signed_in_since(logs_dir: &Path, since: Option<SystemTime>) -> bool {
+    let mut files = sorted_workbuddy_logs_newest_first(logs_dir);
+    for (modified, path) in files.drain(..).take(24) {
+        if since.is_some_and(|cutoff| modified <= cutoff) {
+            break;
         }
-        let Ok(files) = fs::read_dir(&day_path) else {
+        let Ok(raw) = fs::read_to_string(&path) else {
             continue;
         };
-        for file_entry in files.flatten() {
-            let path = file_entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
-                continue;
-            }
-            let Ok(modified) = file_entry.metadata().and_then(|m| m.modified()) else {
+        match classify_workbuddy_log_text(&raw) {
+            Some(true) => return true,
+            Some(false) => return false,
+            None => continue,
+        }
+    }
+    false
+}
+
+fn sorted_workbuddy_logs_newest_first(logs_dir: &Path) -> Vec<(SystemTime, PathBuf)> {
+    let Ok(entries) = fs::read_dir(logs_dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let Ok(files) = fs::read_dir(&path) else {
                 continue;
             };
-            if newest.as_ref().map_or(true, |(best, _)| modified > *best) {
-                newest = Some((modified, path));
+            for file_entry in files.flatten() {
+                let fpath = file_entry.path();
+                if fpath.extension().and_then(|ext| ext.to_str()) == Some("log") {
+                    if let Ok(modified) = file_entry.metadata().and_then(|m| m.modified()) {
+                        out.push((modified, fpath));
+                    }
+                }
+            }
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("log") {
+            if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+                out.push((modified, path));
             }
         }
     }
-    newest.map(|(_, path)| path)
+    out.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    out
 }
 
-pub(crate) fn workbuddy_log_text_is_signed_in(raw: &str) -> bool {
-    let mut signed_in = false;
+/// `Some(true)` = real user signed in; `Some(false)` = explicit sign-out;
+/// `None` = neutral/anonymous API-key session only.
+fn classify_workbuddy_log_text(raw: &str) -> Option<bool> {
+    let mut state: Option<bool> = None;
     for line in raw.lines() {
         if !line.contains("[AuthenticationManager]")
             && !line.contains("[AuthenticationSessionListener]")
@@ -788,16 +1104,16 @@ pub(crate) fn workbuddy_log_text_is_signed_in(raw: &str) -> bool {
         if let Some(idx) = line.find("[auth_success:") {
             let rest = line[idx + "[auth_success:".len()..].trim_start();
             let uid = rest.split(']').next().unwrap_or("").trim();
-            signed_in = is_real_workbuddy_uid(uid);
+            if is_real_workbuddy_uid(uid) {
+                state = Some(true);
+            }
             continue;
         }
         if let Some(idx) = line.find("uid=") {
             let rest = &line[idx + "uid=".len()..];
             let uid = rest.split_whitespace().next().unwrap_or("").trim();
-            if line.contains("hasAccessToken=true") {
-                signed_in = is_real_workbuddy_uid(uid);
-            } else if line.contains("hasAccessToken=false") {
-                signed_in = false;
+            if line.contains("hasAccessToken=true") && is_real_workbuddy_uid(uid) {
+                state = Some(true);
             }
             continue;
         }
@@ -805,10 +1121,15 @@ pub(crate) fn workbuddy_log_text_is_signed_in(raw: &str) -> bool {
             && line.ends_with("-> <empty>")
             && !line.contains("<init> -> <empty>")
         {
-            signed_in = false;
+            state = Some(false);
         }
     }
-    signed_in
+    state
+}
+
+#[cfg(test)]
+pub(crate) fn workbuddy_log_text_is_signed_in(raw: &str) -> bool {
+    classify_workbuddy_log_text(raw) == Some(true)
 }
 
 fn is_real_workbuddy_uid(uid: &str) -> bool {
@@ -817,6 +1138,55 @@ fn is_real_workbuddy_uid(uid: &str) -> bool {
         && trimmed != "<none>"
         && trimmed != "<empty>"
         && !trimmed.starts_with("anonymous_")
+}
+
+fn zcode_preferred_family() -> &'static str {
+    if let Some(setting) = read_json(&home_join(".zcode/v2/setting.json")) {
+        if let Some(domain) = setting.get("providerFamilyDomain").and_then(Value::as_str) {
+            if domain.trim().eq_ignore_ascii_case("zai") {
+                return "zai";
+            }
+            if domain.trim().eq_ignore_ascii_case("bigmodel") {
+                return "bigmodel";
+            }
+        }
+    }
+    if let Some(creds) = read_json(&home_join(".zcode/v2/credentials.json")) {
+        if nonempty_str(creds.get("oauth:zai:access_token"))
+            && !nonempty_str(creds.get("oauth:bigmodel:access_token"))
+        {
+            return "zai";
+        }
+    }
+    "bigmodel"
+}
+
+fn zcode_needs_family_sync(preferred_family: &str) -> bool {
+    let Some(setting) = read_json(&home_join(".zcode/v2/setting.json")) else {
+        return false;
+    };
+    if setting
+        .get("providerFamilyDomain")
+        .and_then(Value::as_str)
+        .is_none()
+    {
+        return false;
+    }
+    let Some(creds) = read_json(&home_join(".zcode/v2/credentials.json")) else {
+        return true;
+    };
+    let Some(map) = creds.as_object() else {
+        return true;
+    };
+    let oauth_key = format!("oauth:{preferred_family}:access_token");
+    if nonempty_str(map.get(&oauth_key)) {
+        return false;
+    }
+    let family_prefix = format!("account-provider:account:{preferred_family}-");
+    let has_family_identity = map.iter().any(|(k, v)| {
+        k.starts_with(&family_prefix) && k.ends_with(":identity") && nonempty_str(Some(v))
+    });
+    !has_family_identity
 }
 
 fn zcode_logged_in() -> bool {
@@ -927,6 +1297,175 @@ pub(crate) fn cursor_cli_config_is_signed_in(value: &Value) -> bool {
         || value.get("auth").is_some_and(|auth| {
             nonempty_str(auth.get("accessToken")) || nonempty_str(auth.get("token"))
         })
+}
+
+fn spawn_workbuddy_acp_login(binary: &Path, codebuddy_dir: &Path) -> Result<bool> {
+    let started_sys = SystemTime::now()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap_or_else(SystemTime::now);
+    let mut cmd = crate::exec::command_for_path(binary);
+    cmd.arg("--acp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in [
+        "CODEBUDDY_API_KEY",
+        "CODEBUDDY_BASE_URL",
+        "CODEBUDDY_MODEL",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+    ] {
+        cmd.env_remove(key);
+    }
+    let open_shim = install_macos_login_open_shim(&mut cmd);
+    let mut child = cmd.spawn()?;
+    let mut stdin = child.stdin.take();
+    let opened = Arc::new(AtomicBool::new(false));
+    if let Some(pipe) = child.stderr.take() {
+        watch_login_output_mode(pipe, Arc::clone(&opened), false);
+    }
+    let (tx, rx) = mpsc::channel::<String>();
+    if let Some(stdout) = child.stdout.take() {
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if tx.send(line.trim().to_string()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+    if let Some(ref mut pipe) = stdin {
+        for payload in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"agent_doctor","version":"0"}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"authenticate","params":{"methodId":"internal"}}"#,
+        ] {
+            let _ = writeln!(pipe, "{payload}");
+        }
+        let _ = pipe.flush();
+    }
+
+    let logs_dir = codebuddy_dir.join("logs");
+    let started = Instant::now();
+    let mut authed = false;
+    loop {
+        drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+        if !opened.load(Ordering::SeqCst) {
+            if let Some(url) = find_workbuddy_log_auth_url(&logs_dir, started_sys) {
+                if !opened.swap(true, Ordering::SeqCst) {
+                    let _ = crate::session_launch::open_url(&url);
+                }
+            }
+        }
+        while let Ok(line) = rx.try_recv() {
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if msg.get("id").and_then(Value::as_u64) == Some(2) {
+                if msg.get("error").is_none() {
+                    authed = true;
+                } else {
+                    drop(stdin);
+                    wait_for_login_exit(&mut child);
+                    return Ok(false);
+                }
+            }
+        }
+        if authed || workbuddy_logs_show_signed_in_since(&logs_dir, Some(started_sys)) {
+            drop(stdin);
+            wait_for_login_exit(&mut child);
+            return Ok(true);
+        }
+        if started.elapsed() > LOGIN_WAIT {
+            drop(stdin);
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("login timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                return Ok(
+                    authed || workbuddy_logs_show_signed_in_since(&logs_dir, Some(started_sys))
+                );
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
+            Err(_) => return Ok(false),
+        }
+    }
+}
+
+fn find_workbuddy_log_auth_url(logs_dir: &Path, since: SystemTime) -> Option<String> {
+    for (modified, path) in sorted_workbuddy_logs_newest_first(logs_dir)
+        .into_iter()
+        .take(4)
+    {
+        if modified < since {
+            break;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in raw.lines().rev() {
+            if let Some(idx) = line.find("Opening auth URL: ") {
+                let tail = line[idx + "Opening auth URL: ".len()..].trim();
+                if let Some(url) = login_url_at_end(tail) {
+                    return Some(url);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn spawn_zcode_login(launch: &crate::adapters::ZcodeHeadless, family: &str) -> Result<()> {
+    let mut cmd = crate::adapters::zcode_headless_command(launch);
+    cmd.arg("login")
+        .arg(family)
+        .arg("--no-browser")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let open_shim = install_macos_login_open_shim(&mut cmd);
+    let mut child = cmd.spawn()?;
+    let opened = Arc::new(AtomicBool::new(false));
+    if let Some(pipe) = child.stdout.take() {
+        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+    }
+    if let Some(pipe) = child.stderr.take() {
+        watch_login_output_mode(pipe, Arc::clone(&opened), true);
+    }
+    let started = Instant::now();
+    loop {
+        drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+        if zcode_logged_in() && !zcode_needs_family_sync(family) {
+            wait_for_login_exit(&mut child);
+            return Ok(());
+        }
+        if started.elapsed() > LOGIN_WAIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("login timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                drain_macos_login_open_shim(open_shim.as_ref(), &opened);
+                return Ok(());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
+            Err(_) => return Ok(()),
+        }
+    }
 }
 
 fn spawn_cli_login(binary: &Path) -> Result<()> {
@@ -1300,7 +1839,62 @@ fn forget_saved_login(runtime_id: &str) {
                 clear_macos_keychain_cache();
             }
         }
+        WORKBUDDY_ID => {
+            let dir = home_join(".codebuddy");
+            let _ = fs::remove_file(dir.join("auth.json"));
+            let _ = fs::remove_file(dir.join("credentials.json"));
+            let _ = fs::remove_file(dir.join(WORKBUDDY_AUTH_MARKER));
+            clear_workbuddy_local_storage(&dir.join("local_storage"));
+            let _ = fs::create_dir_all(&dir);
+            let _ = fs::write(dir.join(WORKBUDDY_SIGNOUT_MARKER), "signed-out");
+        }
+        ZCODE_ID => {
+            if !using_test_home() {
+                if let Some(launch) = crate::adapters::locate_zcode_headless() {
+                    let mut cmd = crate::adapters::zcode_headless_command(&launch);
+                    let _ = cmd
+                        .arg("logout")
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                }
+            }
+            scrub_zcode_credentials_file(&home_join(".zcode/v2/credentials.json"));
+        }
         _ => {}
+    }
+}
+
+fn clear_workbuddy_local_storage(storage_dir: &Path) {
+    let Ok(entries) = fs::read_dir(storage_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+pub(crate) fn scrub_zcode_credentials_file(path: &Path) {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
+    let Some(map) = value.as_object_mut() else {
+        return;
+    };
+    map.retain(|key, _| {
+        key != "zcodejwttoken"
+            && !key.starts_with("oauth:")
+            && !key.starts_with("account-provider:")
+    });
+    if let Ok(serialized) = serde_json::to_string_pretty(&value) {
+        let _ = fs::write(path, serialized);
     }
 }
 
@@ -1873,6 +2467,68 @@ mod tests {
             drop(conn);
             assert!(cursor_state_db_has_token(&cursor_db));
             assert_eq!(desktop_login_state("cursor"), (true, true));
+        });
+    }
+
+    #[test]
+    fn workbuddy_sign_in_survives_anonymous_api_key_log_and_clears_on_sign_out() {
+        use crate::adapters::util::with_test_home;
+
+        let dir = tempfile::tempdir().unwrap();
+        with_test_home(dir.path(), || {
+            let day = dir.path().join(".codebuddy/logs/2026-11-18");
+            fs::create_dir_all(&day).unwrap();
+            let real_log = day.join("01_login.log");
+            fs::write(
+                &real_log,
+                "[Info] [AuthenticationSessionListener] [auth_success: wx_user_88] 认证成功\n",
+            )
+            .unwrap();
+            thread::sleep(Duration::from_millis(20));
+            let anon_log = day.join("02_apikey.log");
+            fs::write(
+                &anon_log,
+                "[Info] [AuthenticationSessionListener] [auth_success: anonymous_abc] 认证成功\n",
+            )
+            .unwrap();
+            assert!(is_runtime_logged_in("workbuddy"));
+
+            forget_saved_login("workbuddy");
+            assert!(!is_runtime_logged_in("workbuddy"));
+
+            record_workbuddy_login_marker(&dir.path().join(".codebuddy"));
+            assert!(is_runtime_logged_in("workbuddy"));
+        });
+    }
+
+    #[test]
+    fn zcode_sign_in_and_sign_out_roundtrip_preserves_non_auth_keys() {
+        use crate::adapters::util::with_test_home;
+
+        let dir = tempfile::tempdir().unwrap();
+        with_test_home(dir.path(), || {
+            let zcode_v2 = dir.path().join(".zcode/v2");
+            fs::create_dir_all(&zcode_v2).unwrap();
+            let creds_path = zcode_v2.join("credentials.json");
+            fs::write(
+                &creds_path,
+                r#"{"web-remote-control:external-relay:pass_hash":"keep","oauth:bigmodel:access_token":"tok","zcodejwttoken":"jwt"}"#,
+            )
+            .unwrap();
+            assert!(is_runtime_logged_in("zcode"));
+            assert!(turn_uses_native_account(
+                "zcode",
+                Some("GLM-5.3"),
+                Some("native:zcode")
+            ));
+
+            forget_saved_login("zcode");
+            assert!(!is_runtime_logged_in("zcode"));
+            let after: Value =
+                serde_json::from_str(&fs::read_to_string(&creds_path).unwrap()).unwrap();
+            assert_eq!(after["web-remote-control:external-relay:pass_hash"], "keep");
+            assert!(after.get("zcodejwttoken").is_none());
+            assert!(after.get("oauth:bigmodel:access_token").is_none());
         });
     }
 }

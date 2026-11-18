@@ -20,9 +20,11 @@ use super::{
 };
 use agent_doctor_core::adapters::workbuddy_cli_path;
 use agent_doctor_core::session_env::{
-    apply_overlay_env, apply_workbuddy_env, format_command_display,
+    apply_overlay_env, apply_workbuddy_env, format_command_display, overlay_uses_native_account,
+    resolve_hermes_overlay,
 };
 use agent_doctor_core::session_launch::resolve_session_cwd;
+use agent_doctor_core::setup::MODEL_ENV;
 
 const RUNTIME_ID: &str = "workbuddy";
 const WORKBUDDY_CLI_MISSING: &str =
@@ -94,6 +96,19 @@ fn run_workbuddy(
         .collect();
 
     let mut cmd = command_from_cli(&binary);
+    let using_native = overlay_uses_native_account(&overlay)
+        || (agent_doctor_core::is_native_subscription(RUNTIME_ID)
+            && resolve_hermes_overlay(&overlay).is_none());
+    if using_native {
+        if let Some(account_model) = overlay
+            .get(MODEL_ENV)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case("auto"))
+        {
+            cmd.arg("--model").arg(account_model);
+        }
+    }
     cmd.arg("--acp")
         .current_dir(&cwd)
         .stdin(Stdio::piped())

@@ -281,6 +281,7 @@ export function teamupsChannelPref(): Promise<{
   enabled: boolean;
   signed_in: boolean;
   client_id: string;
+  computer_name?: string;
 }> {
   return invoke("teamups_channel_pref_command");
 }
@@ -355,16 +356,24 @@ export function teamupsChannelClientId(): Promise<string> {
   return invoke("teamups_channel_client_id_command");
 }
 
+export function polishSchedulePrompt(args: {
+  prompt: string;
+  runtime?: string | null;
+  providerId?: string | null;
+  model?: string | null;
+  locale?: string | null;
+}): Promise<string> {
+  return invoke("polish_schedule_prompt_command", {
+    prompt: args.prompt,
+    runtime: args.runtime ?? null,
+    providerId: args.providerId ?? null,
+    model: args.model ?? null,
+    locale: args.locale ?? null,
+  });
+}
+
 export function teamupsChannelSetEnabled(enabled: boolean): Promise<void> {
   return invoke("teamups_channel_set_enabled_command", { enabled });
-}
-
-export function installPingStatus(): Promise<{ enabled: boolean }> {
-  return invoke("install_ping_status_command");
-}
-
-export function setInstallPingEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
-  return invoke("set_install_ping_enabled_command", { enabled });
 }
 
 export type ChannelReplyImage = {

@@ -607,45 +607,119 @@
                 <h2 data-i18n="chat.schedule">计划任务</h2>
               </div>
             </header>
-            <p class="chat-knowledge-scope" data-i18n="chat.scheduleHint">选一种。话术会填进当前项目里最近的一次对话，时间和内容可以再改，然后发送。</p>
-            <div id="chat-schedule-grid" class="chat-schedule-grid"></div>
             <div class="chat-schedules-manage">
               <div class="chat-schedules-manage-head">
-                <div class="chat-schedules-mine-wrap">
-                  <h3 class="chat-schedules-mine" data-i18n="chat.schedulesMine">我的排期</h3>
-                  <span id="chat-schedules-count" class="chat-schedules-count" hidden>0</span>
+                <div class="chat-schedules-head-copy">
+                  <div class="chat-schedules-mine-wrap">
+                    <h3 class="chat-schedules-mine" data-i18n="chat.schedulesMine">我的排期</h3>
+                    <span id="chat-schedules-count" class="chat-schedules-count" hidden>0</span>
+                  </div>
+                  <p class="chat-schedules-note" data-i18n="chat.schedulesNote">到点自动让绑定的电脑执行；手机和电脑上都能管理。</p>
                 </div>
-                <button type="button" id="chat-schedules-refresh" class="chat-schedules-mini" data-i18n="chat.schedulesRefresh">刷新</button>
+                <div class="chat-schedules-head-actions">
+                  <button type="button" id="chat-schedules-refresh" class="chat-schedules-toolbtn">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M13.5 8a5.5 5.5 0 1 1-1.45-3.72M13.5 2.75v2.75h-2.75" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span data-i18n="chat.schedulesRefresh">刷新</span>
+                  </button>
+                  <button type="button" id="chat-schedules-new" class="chat-schedules-addbtn" data-i18n="chat.schedulesNew" hidden>＋ 新建排期</button>
+                </div>
               </div>
-              <p class="chat-schedules-note" data-i18n="chat.schedulesNote">到点自动让绑定的电脑执行；手机和电脑上都能管理。</p>
               <div id="chat-schedules-guard" class="chat-schedules-guard" hidden>
                 <span id="chat-schedules-guard-text" class="chat-schedules-guard-text"></span>
                 <button type="button" id="chat-schedules-guard-action" class="chat-schedules-primary"></button>
               </div>
-              <div id="chat-schedules-list" class="chat-schedules-list"></div>
-              <p id="chat-schedules-empty" class="chat-schedules-empty" data-i18n="chat.schedulesEmpty">还没有排期。下面建一个，或在手机上建，两边都能管。</p>
-              <button type="button" id="chat-schedules-new" class="chat-schedules-new" data-i18n="chat.schedulesNew">＋ 新建排期</button>
               <form id="chat-schedules-form" class="chat-schedules-form" hidden>
-                <textarea id="chat-schedules-prompt" class="chat-schedules-prompt" rows="2" data-i18n-placeholder="chat.schedulesPromptPlaceholder"></textarea>
-                <div class="chat-schedules-formrow">
-                  <select id="chat-schedules-freq" class="chat-schedules-freq">
-                    <option value="daily" data-i18n="chat.schedulesDaily">每天</option>
-                    <option value="weekly" data-i18n="chat.schedulesWeekly">每周</option>
-                    <option value="once" data-i18n="chat.schedulesOnce">仅一次</option>
-                  </select>
-                  <input type="time" id="chat-schedules-time" class="chat-schedules-time" value="08:00" />
+                <div class="chat-schedules-form-head">
+                  <strong id="chat-schedules-form-title" class="chat-schedules-form-title" data-i18n="chat.schedulesFormNewTitle">新建排期</strong>
+                  <div class="chat-schedules-polish-bar">
+                    <button type="button" id="chat-schedules-polish-undo" class="chat-schedules-polish-undo" data-i18n="chat.schedulesPolishUndo" hidden>撤回</button>
+                    <button type="button" id="chat-schedules-polish" class="chat-schedules-polish">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M8 1.75l1.35 3.65L13 6.75l-3.65 1.35L8 11.75 6.65 8.1 3 6.75l3.65-1.35L8 1.75z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>
+                        <path d="M12.75 10.5l.6 1.65 1.65.6-1.65.6-.6 1.65-.6-1.65-1.65-.6 1.65-.6.6-1.65z" fill="currentColor"/>
+                      </svg>
+                      <span id="chat-schedules-polish-label" data-i18n="chat.schedulesPolish">AI 润色</span>
+                    </button>
+                  </div>
                 </div>
-                <div id="chat-schedules-days" class="chat-schedules-days" hidden></div>
-                <div class="chat-schedules-formrow chat-schedules-formrow-end">
-                  <label class="chat-schedules-bind-wrap">
-                    <span class="chat-schedules-bind" id="chat-schedules-bind" data-i18n="chat.schedulesRunOn">执行电脑</span>
+                <textarea id="chat-schedules-prompt" class="chat-schedules-prompt" rows="3" data-i18n-placeholder="chat.schedulesPromptPlaceholder"></textarea>
+                <div class="chat-schedules-fields">
+                  <div class="chat-schedules-field">
+                    <span class="chat-schedules-label" data-i18n="chat.schedulesWhenLabel">执行时间</span>
+                    <div class="chat-schedules-when-controls">
+                      <select id="chat-schedules-freq" class="chat-schedules-freq">
+                        <option value="daily" data-i18n="chat.schedulesDaily">每天</option>
+                        <option value="weekly" data-i18n="chat.schedulesWeekly">每周</option>
+                        <option value="once" data-i18n="chat.schedulesOnce">仅一次</option>
+                      </select>
+                      <div id="chat-schedules-timepicker" class="chat-schedules-timepicker">
+                        <input type="hidden" id="chat-schedules-time" value="08:00" />
+                        <button
+                          type="button"
+                          id="chat-schedules-time-btn"
+                          class="chat-schedules-time-btn"
+                          aria-haspopup="dialog"
+                          aria-expanded="false"
+                        >
+                          <svg class="chat-schedules-clock-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.35"/>
+                            <path d="M8 4.75V8l2.25 1.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                          <span id="chat-schedules-time-label">08:00</span>
+                        </button>
+                        <div id="chat-schedules-time-popover" class="chat-timepicker-popover" role="dialog" hidden>
+                          <div id="chat-schedules-time-presets" class="chat-timepicker-presets"></div>
+                          <div class="chat-timepicker-cols">
+                            <div class="chat-timepicker-col">
+                              <span class="chat-timepicker-col-head" data-i18n="chat.schedulesTimeHour">时</span>
+                              <div id="chat-schedules-time-hours" class="chat-timepicker-list"></div>
+                            </div>
+                            <div class="chat-timepicker-col">
+                              <span class="chat-timepicker-col-head" data-i18n="chat.schedulesTimeMinute">分</span>
+                              <div id="chat-schedules-time-minutes" class="chat-timepicker-list"></div>
+                            </div>
+                          </div>
+                          <div class="chat-timepicker-foot">
+                            <input
+                              type="text"
+                              id="chat-schedules-time-custom"
+                              class="chat-timepicker-custom"
+                              inputmode="numeric"
+                              maxlength="5"
+                              placeholder="08:00"
+                              aria-label="HH:MM"
+                            />
+                            <button type="button" id="chat-schedules-time-done" class="chat-timepicker-done" data-i18n="chat.schedulesTimeDone">确定</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <label class="chat-schedules-field chat-schedules-bind-wrap">
+                    <span class="chat-schedules-label chat-schedules-bind" id="chat-schedules-bind" data-i18n="chat.schedulesRunOn">执行电脑</span>
                     <select id="chat-schedules-client" class="chat-schedules-client"></select>
                   </label>
-                  <span class="chat-schedules-formspace"></span>
-                  <button type="button" id="chat-schedules-cancel" class="chat-schedules-mini" data-i18n="chat.schedulesCancel">取消</button>
+                </div>
+                <div id="chat-schedules-days" class="chat-schedules-days" hidden></div>
+                <div class="chat-schedules-form-foot">
+                  <button type="button" id="chat-schedules-cancel" class="chat-schedules-cancel" data-i18n="chat.schedulesCancel">取消</button>
                   <button type="submit" id="chat-schedules-save" class="chat-schedules-primary" data-i18n="chat.schedulesSave">保存</button>
                 </div>
               </form>
+              <div id="chat-schedules-list" class="chat-schedules-list" hidden></div>
+              <div id="chat-schedules-empty" class="chat-schedules-empty">
+                <p id="chat-schedules-empty-text" class="chat-schedules-empty-text" data-i18n="chat.schedulesEmpty">还没有排期。建一个后，到点会自动让选定的电脑执行，手机上也能一起管。</p>
+                <button type="button" id="chat-schedules-empty-new" class="chat-schedules-empty-cta" data-i18n="chat.schedulesNew">＋ 新建排期</button>
+              </div>
+            </div>
+            <div class="chat-schedules-scenes">
+              <div class="chat-schedules-scenes-head">
+                <h3 class="chat-schedules-mine" data-i18n="chat.scheduleScenesTitle">对话快捷话术</h3>
+                <p class="chat-schedules-note" data-i18n="chat.scheduleHint">选一种。话术会填进当前项目里最近的一次对话，时间和内容可以再改，然后发送。</p>
+              </div>
+              <div id="chat-schedule-grid" class="chat-schedule-grid"></div>
             </div>
           </div>
         </section>

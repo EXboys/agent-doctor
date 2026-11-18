@@ -26,7 +26,10 @@ pub use execute::{execute_repair, RepairExecuteOptions, RepairExecuteReport};
 pub use explain::explain_runtime;
 
 use agent_doctor_core::repair_types::LlmConfig;
-pub use llm::{official_llm_config, official_llm_config_for, OFFICIAL_GIFT_MODEL};
+pub use llm::{
+    complete_plain_text, default_llm_config_for, official_llm_config, official_llm_config_for,
+    OFFICIAL_GIFT_MODEL,
+};
 pub use planner::{
     build_masked_repair_context, AiRepairPlanner, DeterministicPlanner, PlannerOptions,
     PlannerResult, RepairPlanner,

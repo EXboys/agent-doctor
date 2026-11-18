@@ -59,6 +59,32 @@ pub fn locate_zcode_headless() -> Option<ZcodeHeadless> {
     desktop_app_path().and_then(|app| headless_inside_app(&app))
 }
 
+/// Locate the bundled `zcode-builtin.json` next to `zcode.cjs` inside a desktop install.
+pub fn zcode_bundled_provider_config(script: &Path) -> Option<PathBuf> {
+    let dir = script.parent()?;
+    [
+        dir.join("provider").join("zcode-builtin.json"),
+        dir.join("../config/provider/zcode-builtin.json"),
+        dir.join("../../../../../config/provider/zcode-builtin.json"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
+/// Build a ready-to-add-args `Command` for either standalone `zcode` or bundled `zcode.cjs`.
+pub fn zcode_headless_command(launch: &ZcodeHeadless) -> std::process::Command {
+    let mut cmd = crate::exec::command_for_path(&launch.program);
+    cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
+    if let Some(script) = &launch.script {
+        cmd.env("ELECTRON_RUN_AS_NODE", "1");
+        cmd.arg(script);
+        if let Some(builtin) = zcode_bundled_provider_config(script) {
+            cmd.env("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", builtin);
+        }
+    }
+    cmd
+}
+
 fn macos_headless_program(app: &Path) -> PathBuf {
     let helper = app.join("Contents/Frameworks/ZCode Helper.app/Contents/MacOS/ZCode Helper");
     if helper.is_file() {

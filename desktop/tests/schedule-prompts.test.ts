@@ -26,7 +26,8 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { schedulePrompt } = await import("../src/chat/schedule-prompts.ts");
-const { latestSessionInSelectedProject } = await import("../src/chat/schedule-page.ts");
+const { buildScheduleClientOptions, latestSessionInSelectedProject, normalizeScheduleHhmm } =
+  await import("../src/chat/schedule-page.ts");
 import type { ChatSession } from "../src/chat/types.ts";
 
 let failures = 0;
@@ -88,6 +89,70 @@ check("latest chat is the newest one in the selected project", () => {
   const other = session({ id: "other", runtime: "openclaw", updatedAt: 90, workspaceName: "site" });
   const picked = latestSessionInSelectedProject(active, [other, active, newer], null);
   ok(picked.id === "new", `picked ${picked.id}`);
+});
+
+check("client select is never empty even before ownClientId resolves", () => {
+  const res = buildScheduleClientOptions({
+    ownClientId: "",
+    ownComputerName: "",
+    computers: [],
+    editingSchedule: null,
+    pickedClientId: null,
+  });
+  ok(res.options.length === 2, `expected 2 options, got ${res.options.length}`);
+  ok(res.selected === "__self__", `selected ${res.selected}`);
+  ok(res.options[0]?.label === "这台电脑", `label ${res.options[0]?.label}`);
+});
+
+check("client select binds to this named computer even when remote list is empty", () => {
+  const res = buildScheduleClientOptions({
+    ownClientId: "ad-mac-1",
+    ownComputerName: "AirLu的MacBook Pro",
+    computers: [],
+    editingSchedule: null,
+    pickedClientId: null,
+  });
+  ok(res.selected === "ad-mac-1", `selected ${res.selected}`);
+  ok(res.options[0]?.label === "AirLu的MacBook Pro（这台电脑）", `label ${res.options[0]?.label}`);
+});
+
+check("client select preserves explicit follow-default choice across refreshes", () => {
+  const res = buildScheduleClientOptions({
+    ownClientId: "ad-mac-1",
+    ownComputerName: "MacBook",
+    computers: [{ id: "ad-desk", name: "办公室主机", os: "windows", default: true }],
+    editingSchedule: null,
+    pickedClientId: "",
+  });
+  ok(res.selected === "", `selected ${res.selected}`);
+  ok(
+    res.options.some((opt) => opt.value === "" && opt.label.includes("办公室主机")),
+    "names default computer when different from self",
+  );
+});
+
+check("client select retains offline bound computer when editing", () => {
+  const res = buildScheduleClientOptions({
+    ownClientId: "ad-mac-1",
+    ownComputerName: "MacBook",
+    computers: [],
+    editingSchedule: { client_id: "ad-home", client_name: "家里台式机" },
+    pickedClientId: null,
+  });
+  ok(res.selected === "ad-home", `selected ${res.selected}`);
+  ok(
+    res.options.some((opt) => opt.value === "ad-home" && opt.label.includes("家里台式机")),
+    "keeps offline computer option",
+  );
+});
+
+check("time picker normalizes HH:MM, single-digit hour, full-width colon, and 4-digit input", () => {
+  ok(normalizeScheduleHhmm("8:5") === "08:05", "single digits");
+  ok(normalizeScheduleHhmm("09：30") === "09:30", "full-width colon");
+  ok(normalizeScheduleHhmm("1845") === "18:45", "compact 4 digits");
+  ok(normalizeScheduleHhmm("23:59") === "23:59", "max valid");
+  ok(normalizeScheduleHhmm("24:00") === null, "rejects hour 24");
+  ok(normalizeScheduleHhmm("12:60") === null, "rejects minute 60");
 });
 
 if (failures > 0) {

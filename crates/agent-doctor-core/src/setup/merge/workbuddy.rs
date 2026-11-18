@@ -89,34 +89,100 @@ pub fn apply_workbuddy_in_dir(
     })
 }
 
-/// Remove Agent Doctor's API-key override from `~/.codebuddy/settings.json` so
-/// WorkBuddy falls back to its own Tencent / WeChat account login.
+/// Remove Agent Doctor's API-key override from `~/.codebuddy/settings.json` and
+/// `~/.codebuddy/models.json` so WorkBuddy falls back to its own Tencent / WeChat
+/// account login and native subscription models.
 pub fn clear_workbuddy_provider_override_in_dir(codebuddy_dir: &Path) -> AnyhowResult<bool> {
-    let settings_path = codebuddy_dir.join("settings.json");
-    if !settings_path.exists() {
-        return Ok(false);
-    }
-    let raw = fs::read_to_string(&settings_path)
-        .with_context(|| format!("read {}", settings_path.display()))?;
-    let Ok(mut root) = serde_json::from_str::<Value>(&raw) else {
-        return Ok(false);
-    };
-    let mut changed = false;
-    if let Some(obj) = root.as_object_mut() {
-        if let Some(env) = obj.get_mut("env").and_then(Value::as_object_mut) {
-            for k in ["CODEBUDDY_API_KEY", "CODEBUDDY_BASE_URL", "CODEBUDDY_MODEL"] {
-                if env.remove(k).is_some() {
-                    changed = true;
+    let mut removed_ids = Vec::new();
+    let models_path = codebuddy_dir.join("models.json");
+    let mut models_changed = false;
+    if models_path.exists() {
+        if let Ok(raw) = fs::read_to_string(&models_path) {
+            if let Ok(mut root) = serde_json::from_str::<Value>(&raw) {
+                if let Some(obj) = root.as_object_mut() {
+                    if let Some(arr) = obj.get_mut("models").and_then(Value::as_array_mut) {
+                        let before = arr.len();
+                        arr.retain(|item| {
+                            let ours = item
+                                .get("vendor")
+                                .and_then(Value::as_str)
+                                .is_some_and(|v| v == "AgentDoctor");
+                            if ours {
+                                if let Some(id) = item.get("id").and_then(Value::as_str) {
+                                    removed_ids.push(id.to_string());
+                                }
+                            }
+                            !ours
+                        });
+                        if arr.len() != before {
+                            models_changed = true;
+                        }
+                    }
+                    if !removed_ids.is_empty() {
+                        if let Some(avail) =
+                            obj.get_mut("availableModels").and_then(Value::as_array_mut)
+                        {
+                            let before = avail.len();
+                            avail.retain(|v| {
+                                v.as_str()
+                                    .map_or(true, |id| !removed_ids.iter().any(|r| r == id))
+                            });
+                            if avail.len() != before {
+                                models_changed = true;
+                            }
+                        }
+                    }
+                }
+                if models_changed {
+                    let _ = backup_file(&models_path)?;
+                    fs::write(&models_path, serde_json::to_string_pretty(&root)?)
+                        .with_context(|| format!("write {}", models_path.display()))?;
                 }
             }
         }
     }
-    if changed {
+
+    let settings_path = codebuddy_dir.join("settings.json");
+    if !settings_path.exists() {
+        return Ok(models_changed);
+    }
+    let raw = fs::read_to_string(&settings_path)
+        .with_context(|| format!("read {}", settings_path.display()))?;
+    let Ok(mut root) = serde_json::from_str::<Value>(&raw) else {
+        return Ok(models_changed);
+    };
+    let mut settings_changed = false;
+    if let Some(obj) = root.as_object_mut() {
+        let mut custom_model_from_env = None;
+        if let Some(env) = obj.get_mut("env").and_then(Value::as_object_mut) {
+            if let Some(val) = env
+                .get("CODEBUDDY_MODEL")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+            {
+                custom_model_from_env = Some(val);
+            }
+            for k in ["CODEBUDDY_API_KEY", "CODEBUDDY_BASE_URL", "CODEBUDDY_MODEL"] {
+                if env.remove(k).is_some() {
+                    settings_changed = true;
+                }
+            }
+        }
+        if let Some(cur_model) = obj.get("model").and_then(Value::as_str).map(str::to_string) {
+            if custom_model_from_env.as_deref() == Some(cur_model.as_str())
+                || removed_ids.iter().any(|r| r == &cur_model)
+            {
+                obj.remove("model");
+                settings_changed = true;
+            }
+        }
+    }
+    if settings_changed {
         let _ = backup_file(&settings_path)?;
         fs::write(&settings_path, serde_json::to_string_pretty(&root)?)
             .with_context(|| format!("write {}", settings_path.display()))?;
     }
-    Ok(changed)
+    Ok(models_changed || settings_changed)
 }
 
 fn upsert_workbuddy_models_file(

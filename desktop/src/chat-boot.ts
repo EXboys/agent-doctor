@@ -265,6 +265,17 @@ export function bootChat(): void {
       promptEl.setSelectionRange(end, end);
     },
     setStatus,
+    defaultModelPick: () => {
+      const runtime = selectedRuntime();
+      const session = activeSession();
+      const fallback =
+        runtime === "doctor" ? chatState.modelPicker?.doctorOfficialFallback() ?? null : null;
+      return {
+        runtime,
+        providerId: session.providerId?.trim() || fallback?.providerId || null,
+        model: session.model?.trim() || fallback?.model || null,
+      };
+    },
   });
   bindResourcesPage({
     projects: () => (chatState.workspaceDoc ? orderedProjectNames(chatState.workspaceDoc) : []),

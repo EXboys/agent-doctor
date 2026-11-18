@@ -205,6 +205,11 @@ pub fn teamups_channel_client_id() -> Result<String> {
     Ok(channel_client_id())
 }
 
+/// Human-readable name of this computer (macOS ComputerName or hostname).
+pub fn teamups_channel_computer_name() -> String {
+    computer_name()
+}
+
 pub fn teamups_channel_heard(id: &str) -> String {
     json!({ "type": "heard", "id": id }).to_string()
 }

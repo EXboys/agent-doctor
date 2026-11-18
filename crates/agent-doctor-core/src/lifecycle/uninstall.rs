@@ -32,7 +32,7 @@ pub fn uninstall_shell_command(runtime_id: &str) -> Result<String> {
         }
         "workbuddy" => {
             return Ok(
-                "rm -rf \"$HOME/Applications/WorkBuddy.app\" \"/Applications/WorkBuddy.app\"; rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
+                "rm -rf \"$HOME/Applications/WorkBuddy.app\" \"/Applications/WorkBuddy.app\" \"$HOME/.local/share/codebuddy\"; rm -f \"$HOME/.local/bin/codebuddy\" \"$HOME/.codebuddy/bin/codebuddy\"; npm uninstall -g @tencent-ai/codebuddy-code 2>/dev/null || true"
                     .to_string(),
             );
         }

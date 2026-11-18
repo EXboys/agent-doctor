@@ -600,6 +600,61 @@ pub fn official_llm_config() -> Result<LlmConfig> {
     official_llm_config_for(None, None)
 }
 
+/// Resolve Agent Doctor's default HTTP LLM config:
+/// 1. Explicit non-native `provider_id` if passed;
+/// 2. Official built-in channel first when `prefer_official` is true (`runtime == "doctor"`),
+///    otherwise the globally active personal provider (`load_active_personal_provider()`);
+/// 3. Fallback between active personal provider, official account, and `LlmConfig::from_env()`.
+pub fn default_llm_config_for(
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    prefer_official: bool,
+) -> Result<LlmConfig> {
+    let clean_provider = provider_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !id.starts_with("native:"));
+    let clean_model = model.map(str::trim).filter(|m| !m.is_empty());
+
+    let resolved = if let Some(pid) = clean_provider {
+        official_llm_config_for(Some(pid), clean_model)
+    } else if prefer_official {
+        official_llm_config_for(None, clean_model).or_else(|first_err| {
+            if let Ok(Some(active)) = agent_doctor_core::setup::load_active_personal_provider() {
+                official_llm_config_for(Some(&active.id), clean_model)
+            } else {
+                Err(first_err)
+            }
+        })
+    } else if let Ok(Some(active)) = agent_doctor_core::setup::load_active_personal_provider() {
+        official_llm_config_for(Some(&active.id), clean_model)
+            .or_else(|_| official_llm_config_for(None, clean_model))
+    } else {
+        official_llm_config_for(None, clean_model)
+    };
+
+    let mut config = resolved.or_else(|err| LlmConfig::from_env().ok_or(err))?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    config.turn_id = Some(format!("ad-inline-{nanos}"));
+    Ok(config)
+}
+
+/// Single-turn plain text completion with no tools (OpenAI or Anthropic wire).
+pub fn complete_plain_text(config: &LlmConfig, system: &str, user: &str) -> Result<String> {
+    let messages = vec![
+        json!({ "role": "system", "content": system }),
+        json!({ "role": "user", "content": user }),
+    ];
+    let turn = chat_with_tool_set(config, &messages, None)?;
+    let text = turn.content.unwrap_or_default().trim().to_string();
+    if text.is_empty() {
+        bail!("empty LLM response");
+    }
+    Ok(text)
+}
+
 /// `…/api/v1/official` → `…/api/v1/agent` (OpenAI wire) or `…/api/v1/agent/anthropic`
 /// (Anthropic wire). Anything else — custom edits included — stays as configured.
 fn official_agent_gateway_url(entry: &agent_doctor_core::setup::PersonalProviderEntry) -> String {

@@ -91,7 +91,9 @@ function subscriptionServiceRow(runtimeId: string): string {
           ? t("native.cursor")
           : runtimeId === "workbuddy"
             ? t("native.workbuddy")
-            : t("native.claude");
+            : runtimeId === "zcode"
+              ? t("native.zcode")
+              : t("native.claude");
   return metaRow("meta.service", account);
 }
 

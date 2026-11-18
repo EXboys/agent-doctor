@@ -123,6 +123,7 @@ pub fn subscription_model_for(runtime: &str, model: Option<&str>) -> Option<Stri
         .map(str::trim)
         .filter(|id| !id.is_empty() && !id.eq_ignore_ascii_case("auto"));
     match crate::setup::load_account_models(runtime) {
+        Some(list) if runtime == "cursor" => list.choose_cursor(model),
         Some(list) => list.choose(model),
         None => model.map(str::to_string),
     }
@@ -1273,6 +1274,7 @@ mod tests {
         let codex = crate::setup::AccountModelList {
             models: vec!["gpt-5.6-sol".into(), "gpt-5.5".into()],
             default_model: Some("gpt-5.6-sol".into()),
+            ..Default::default()
         };
         assert_eq!(codex.choose(Some("gpt-5.5")).as_deref(), Some("gpt-5.5"));
         assert_eq!(
@@ -1286,6 +1288,7 @@ mod tests {
         let claude = crate::setup::AccountModelList {
             models: vec!["claude-sonnet-5".into(), "claude-opus-5".into()],
             default_model: Some("claude-sonnet-5".into()),
+            ..Default::default()
         };
         assert_eq!(
             claude.choose(Some("claude-opus-5")).as_deref(),

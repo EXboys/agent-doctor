@@ -15,6 +15,7 @@ use anyhow::{bail, Result};
 use serde_json::Value;
 
 use super::backend::AskBackend;
+use super::claude::ask_private_dir;
 use super::control::PromptSessionControl;
 use super::plan::{tool_carries_plan, PlanBoard};
 use super::tool_step::{tool_result_text, tool_step, tool_step_result};
@@ -26,9 +27,10 @@ use super::{
     next_session_id, PromptSessionCancel, PromptSessionEvent, PromptSessionOptions,
     PromptSessionReport, PromptSessionStatus, MAX_TIMEOUT_SEC, MIN_TIMEOUT_SEC,
 };
-use agent_doctor_core::adapters::locate_zcode_headless;
-use agent_doctor_core::session_env::format_command_display;
+use agent_doctor_core::adapters::{locate_zcode_headless, zcode_bundled_provider_config};
+use agent_doctor_core::session_env::{format_command_display, overlay_uses_native_account};
 use agent_doctor_core::session_launch::resolve_session_cwd;
+use agent_doctor_core::setup::MODEL_ENV;
 
 const ZCODE_MISSING: &str = "桌面里的 ZCode 留在那边。这里要用它的命令行，这台电脑还没装。";
 const ZCODE_NOT_READY: &str = "ZCode 的命令行这次没能开始。";
@@ -66,8 +68,20 @@ fn run_zcode(
     // Headless `--resume` takes a ZCode session id (`sess_…`). A bare UUID is
     // a Claude session and must not be forwarded.
     let resume_session_id = zcode_resume_id(options.resume_thread_id.as_deref());
+    let overlay = super::collect_overlay_env_for_options(options);
+    let raw_model = if overlay_uses_native_account(&overlay) {
+        overlay
+            .get(MODEL_ENV)
+            .map(String::as_str)
+            .or(options.model.as_deref())
+    } else {
+        options.model.as_deref()
+    };
+    let requested_model = raw_model
+        .map(str::trim)
+        .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case("auto"));
 
-    let mut cmd = build_zcode_command(prompt, &cwd, resume_session_id)?;
+    let mut cmd = build_zcode_command(prompt, &cwd, resume_session_id, requested_model)?;
     let command_display = format_command_display(&cmd);
     on_event(PromptSessionEvent::Started {
         session_id: session_id.clone(),
@@ -216,14 +230,7 @@ fn is_zcode_refresh_note(line: &str) -> bool {
 }
 
 fn bundled_provider_config(script: &Path) -> Option<std::path::PathBuf> {
-    let dir = script.parent()?;
-    [
-        dir.join("provider").join("zcode-builtin.json"),
-        dir.join("../config/provider/zcode-builtin.json"),
-        dir.join("../../../../../config/provider/zcode-builtin.json"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
+    zcode_bundled_provider_config(script)
 }
 
 /// ZCode session ids are `sess_…`. A bare UUID belongs to Claude.
@@ -236,6 +243,7 @@ fn build_zcode_command(
     prompt: &str,
     cwd: &Path,
     resume_session_id: Option<&str>,
+    requested_model: Option<&str>,
 ) -> Result<Command> {
     let launch = if let Some(bin) = std::env::var_os("AGENT_DOCTOR_ZCODE_BIN") {
         agent_doctor_core::adapters::ZcodeHeadless {
@@ -243,9 +251,7 @@ fn build_zcode_command(
             script: std::env::var_os("AGENT_DOCTOR_ZCODE_SCRIPT").map(std::path::PathBuf::from),
         }
     } else {
-        locate_zcode_headless()
-            .filter(|launch| launch.script.is_none())
-            .ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
+        locate_zcode_headless().ok_or_else(|| anyhow::Error::msg(ZCODE_MISSING))?
     };
     let mut cmd = agent_doctor_core::exec::command_for_path(&launch.program);
     cmd.env("NO_COLOR", "1").env("FORCE_COLOR", "0");
@@ -256,6 +262,15 @@ fn build_zcode_command(
         // install keeps this file at Contents/Resources/config/provider instead.
         if let Some(builtin) = bundled_provider_config(script) {
             cmd.env("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", builtin);
+        }
+    }
+    if let Some(model) = requested_model {
+        if let Some((provider_id, model_id)) =
+            agent_doctor_core::resolve_zcode_account_selection(Some(model))
+        {
+            if let Ok(cfg_path) = write_zcode_ask_provider_config(&provider_id, &model_id) {
+                cmd.env("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", cfg_path);
+            }
         }
     }
     cmd.arg("--prompt")
@@ -279,6 +294,55 @@ fn build_zcode_command(
         cmd.arg("--resume").arg(session);
     }
     Ok(cmd)
+}
+
+fn write_zcode_ask_provider_config(
+    provider_id: &str,
+    model_id: &str,
+) -> Result<std::path::PathBuf> {
+    use anyhow::Context;
+    use std::hash::{Hash, Hasher};
+
+    let base_path = agent_doctor_core::adapters::util::home_join(".zcode/v2/provider_config.json");
+    let mut root = std::fs::read_to_string(&base_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter(|val| {
+            val.get("schemaVersion").and_then(Value::as_i64) == Some(1)
+                && val.get("config").is_some_and(Value::is_object)
+        })
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "schemaVersion": 1,
+                "config": {
+                    "providerConfigRules": { "providerRules": [] },
+                    "modelConfigRules": { "providerModelRules": [], "manualProviderModelRules": [] }
+                }
+            })
+        });
+    if let Some(cfg) = root.get_mut("config").and_then(Value::as_object_mut) {
+        cfg.insert(
+            "defaultModelSelection".into(),
+            serde_json::json!({
+                "providerId": provider_id,
+                "modelId": model_id,
+            }),
+        );
+    }
+    let body = root.to_string();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    let dir = ask_private_dir()?;
+    let path = dir.join(format!("zcode-provider-{:016x}.json", hasher.finish()));
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
+        std::fs::write(&path, &body).with_context(|| format!("write {}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    Ok(path)
 }
 
 /// ZCode's half of the shared pump: stream-json stdout becomes live

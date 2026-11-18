@@ -848,6 +848,7 @@ pub fn run() {
             teamups_run_schedule_command,
             teamups_computers_command,
             teamups_channel_client_id_command,
+            polish_schedule_prompt_command,
             sign_out_teamups_command,
             install_teamups_mall_item_command,
             install_teamups_resource_command,
