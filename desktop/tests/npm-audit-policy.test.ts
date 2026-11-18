@@ -62,6 +62,15 @@ const picomatchUnpatchedReport = {
   const prodRes = evaluateAuditReport(picomatchUnpatchedReport, {});
   assert.equal(prodRes.ok, false);
   assert.ok(prodRes.failures.some((f) => f.includes("GHSA-fc5q-39xc-vjpf")));
+
+  // npm 10 (Node 22) sets `fixAvailable: true` on intermediate transitive
+  // nodes whose `effects` array is empty, even while `picomatch` and `vite`
+  // still report `isSemVerMajor: true`.
+  const npm10Shape = structuredClone(picomatchUnpatchedReport);
+  npm10Shape.vulnerabilities.fdir.fixAvailable = true;
+  npm10Shape.vulnerabilities.tinyglobby.fixAvailable = true;
+  const npm10Res = evaluateAuditReport(npm10Shape, IGNORED_DEV_ADVISORIES);
+  assert.equal(npm10Res.ok, true);
 }
 
 // 3. As soon as upstream publishes a non-breaking fix, the ignore expires and fails.

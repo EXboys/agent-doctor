@@ -129,7 +129,11 @@ export function evaluateAuditReport(report, allowedAdvisories = {}) {
         continue;
       }
 
-      if (hasNonBreakingFix(ownerVuln.fixAvailable) || hasNonBreakingFix(vuln.fixAvailable)) {
+      // Check ownerVuln.fixAvailable only: in npm 10 (Node 22), intermediate
+      // transitive nodes (e.g. fdir, tinyglobby) report `effects: []` and
+      // `fixAvailable: true` even when the root package (`picomatch`) and the
+      // direct dependent (`vite`) both require `isSemVerMajor: true`.
+      if (hasNonBreakingFix(ownerVuln.fixAvailable)) {
         failures.push(
           `${ghsaId} (${ownerPackage}) now has a non-breaking upstream fix — run 'npm audit fix' in desktop/ and remove ${ghsaId} from IGNORED_DEV_ADVISORIES`,
         );
