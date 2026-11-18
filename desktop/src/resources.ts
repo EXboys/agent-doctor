@@ -1,4 +1,5 @@
 import "./platform";
+import { mountWindowChrome } from "./window-chrome";
 import { listen } from "@tauri-apps/api/event";
 import { getLocale, t } from "./i18n";
 import { bindLocaleSync } from "./locale-sync";
@@ -499,6 +500,7 @@ function openFocusedSection(section?: string | null): void {
   else if (section === "skills" || section === "catalog") setSection("skills");
 }
 
+mountWindowChrome();
 applyI18n();
 bindLocaleSync(() => applyI18n());
 (window as Window & { __AD_RESOURCES_APPLY_SECTION__?: (section: string) => void }).__AD_RESOURCES_APPLY_SECTION__ =

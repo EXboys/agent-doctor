@@ -5,15 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Doctor — Diagnose</title>
     <script>
-      if (/\bWindows\b/.test(navigator.userAgent)) document.documentElement.dataset.os = "windows";
+      var ua = navigator.userAgent;
+      document.documentElement.dataset.os = /\bWindows\b/.test(ua) ? "windows" : /Mac/i.test(ua) ? "macos" : "other";
     </script>
     <link rel="stylesheet" href="/src/styles.css" />
     <link rel="stylesheet" href="/src/diagnose.css" />
+    <link rel="stylesheet" href="/src/window-chrome.css" />
   </head>
   <body class="diagnose-page">
     <div class="diagnose-shell" id="diagnose-shell">
       <div class="diagnose-main">
-      <header class="diagnose-top">
+      <header class="diagnose-top" data-tauri-drag-region="deep">
         <div>
           <p class="diagnose-eyebrow" data-i18n="diagnose.flow.eyebrow">准备 Agent</p>
           <h1 id="diagnose-title">—</h1>
@@ -227,7 +229,7 @@
         aria-hidden="true"
         aria-labelledby="diagnose-deep-title"
       >
-        <div class="diagnose-deep-drawer-head">
+        <div class="diagnose-deep-drawer-head" data-tauri-drag-region="deep">
           <strong id="diagnose-deep-title" data-i18n="diagnose.flow.deepTitle">深度诊断</strong>
           <button
             id="diagnose-deep-close"

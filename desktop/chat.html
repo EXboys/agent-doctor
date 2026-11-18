@@ -5,9 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Doctor — 问答</title>
     <script>
-      if (/\bWindows\b/.test(navigator.userAgent)) document.documentElement.dataset.os = "windows";
+      var ua = navigator.userAgent;
+      document.documentElement.dataset.os = /\bWindows\b/.test(ua) ? "windows" : /Mac/i.test(ua) ? "macos" : "other";
     </script>
     <link rel="stylesheet" href="/src/chat.css" />
+    <link rel="stylesheet" href="/src/window-chrome.css" />
   </head>
   <body>
     <noscript>
@@ -16,7 +18,7 @@
     <div class="chat-shell" id="chat-shell">
       <aside id="chat-resources-panel" class="chat-resources-panel" aria-hidden="true">
         <div class="chat-resources-panel-inner">
-          <div class="chat-resources-panel-head">
+          <div class="chat-resources-panel-head" data-tauri-drag-region="deep">
             <div class="chat-resources-panel-titles">
               <strong data-i18n="chat.resourcesPanelTitle">Skills / MCP</strong>
               <span id="chat-resources-count" class="chat-resources-count">—</span>
@@ -75,7 +77,7 @@
       </aside>
 
       <aside class="chat-side">
-        <div class="chat-side-tools">
+        <div class="chat-side-tools" data-tauri-drag-region="deep">
           <button
             id="chat-side-collapse"
             type="button"
@@ -208,7 +210,7 @@
             <p id="chat-question-rail-reply" class="chat-question-rail-reply"></p>
           </div>
         </nav>
-        <header class="chat-top">
+        <header class="chat-top" data-tauri-drag-region="deep">
           <div class="chat-title-wrap">
             <button
               id="chat-side-expand"
@@ -785,7 +787,7 @@
           aria-hidden="true"
           aria-label="当前文件夹"
         >
-          <header class="chat-files-head">
+          <header class="chat-files-head" data-tauri-drag-region="deep">
             <p id="chat-files-breadcrumb" class="chat-files-breadcrumb"></p>
             <button
               id="chat-files-layout"

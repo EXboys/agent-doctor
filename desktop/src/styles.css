@@ -456,6 +456,15 @@ body::before {
   flex-shrink: 0;
 }
 
+.status-bar .brand {
+  flex: 0 0 auto;
+}
+
+.status-bar .brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .health-pill {
   display: inline-flex;
   align-items: center;
@@ -481,11 +490,12 @@ body::before {
 .status-meta {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 4px;
   margin-left: auto;
   min-width: 0;
+  overflow: hidden;
   font-size: 0.64rem;
   color: var(--text-soft);
   font-weight: 600;
@@ -494,6 +504,16 @@ body::before {
 .status-meta strong {
   color: var(--text);
   font-weight: 700;
+}
+
+.status-meta-item[hidden] {
+  display: none;
+}
+
+.status-meta-item:not([hidden]) + .status-meta-item:not([hidden])::before {
+  content: "·";
+  margin-right: 4px;
+  opacity: 0.55;
 }
 
 .status-sep {

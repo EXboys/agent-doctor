@@ -1,4 +1,5 @@
 import "./platform";
+import { mountWindowChrome, syncWindowControlLabels } from "./window-chrome";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyStaticI18n, getLocale, type Locale } from "./i18n";
@@ -20,8 +21,9 @@ import type { DoctorReport, MainTabId } from "./types";
 
 await loadRuntimeCatalog();
 
-// Native OS title bar — fill the window edge-to-edge (no frameless traffic lights).
+// macOS overlays the system traffic lights. Windows draws its own caption buttons.
 document.documentElement.classList.add("is-opaque-shell");
+mountWindowChrome();
 
 const mainTabsEl = document.querySelector<HTMLElement>("#main-tabs")!;
 const mainPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-main-panel]"));
@@ -89,6 +91,7 @@ async function switchLocale(next: Locale) {
 function applyMainLocale() {
   updateLangButtons();
   applyStaticI18n();
+  syncWindowControlLabels();
   if (refs.firstRun && refs.firstRun.getPhase() !== "hidden" && refs.firstRun.getPhase() !== "awaitingWiring") {
     refs.firstRun.renderFirstRunUi();
   }
@@ -165,6 +168,11 @@ widgetToolbarEl.addEventListener("dblclick", (event) => {
     void mainWindow.toggleMaximize();
   }
 });
+document.querySelector(".status-bar")?.addEventListener("dblclick", (event) => {
+  if (!(event.target as HTMLElement).closest("button")) {
+    void mainWindow.toggleMaximize();
+  }
+});
 
 void listen<DoctorReport>("doctor-report", (event) => {
   void (async () => {
@@ -228,6 +236,8 @@ afterFirstPaint(() => {
   void bootWiring.loadModeStatus();
   // Do not call loadMcpStatus() on boot — discover_chrome / CDP probe must not
   // wake Chrome until the user opens Resources or clicks Browser smoke.
+  // Local skill count is pure disk I/O, so populate the header badge quietly.
+  void refs.resources?.loadSkillsInventory({ remoteStats: false });
   bootFirstRun.initPersonalFirstRun();
   if (bootFirstRun.getPhase() === "hidden") {
     void bootAgents.refresh();

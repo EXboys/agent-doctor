@@ -5,14 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Doctor — Resources</title>
     <script>
-      if (/\bWindows\b/.test(navigator.userAgent)) document.documentElement.dataset.os = "windows";
+      var ua = navigator.userAgent;
+      document.documentElement.dataset.os = /\bWindows\b/.test(ua) ? "windows" : /Mac/i.test(ua) ? "macos" : "other";
     </script>
     <link rel="stylesheet" href="/src/styles.css" />
     <link rel="stylesheet" href="/src/resources.css" />
+    <link rel="stylesheet" href="/src/window-chrome.css" />
   </head>
   <body class="resources-page">
     <div class="resources-shell">
-      <aside class="resources-rail">
+      <aside class="resources-rail" data-tauri-drag-region="deep">
         <nav class="resources-section-tabs" id="resources-section-tabs" role="tablist" aria-label="Resources">
           <button type="button" class="resources-section-tab" data-section="agents" role="tab" aria-selected="false">
             <svg class="resources-section-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -44,7 +46,7 @@
       </aside>
       <div class="resources-main">
         <div class="resources-module">
-        <div class="resources-main-head is-skills" id="resources-main-head">
+        <div class="resources-main-head is-skills" id="resources-main-head" data-tauri-drag-region="deep">
           <div class="resources-toolbar-row">
             <div class="resources-toolbar-left">
               <div class="resources-scope-tabs" id="resources-skill-scope" role="tablist" data-i18n-title="resources.skillScopeAria" aria-label="技能来源">

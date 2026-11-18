@@ -7,10 +7,10 @@
         "title": "Agent Doctor",
         "width": 420,
         "height": 800,
-        "decorations": true,
+        "decorations": false,
         "transparent": false,
         "shadow": true,
-        "visible": true
+        "visible": false
       }
     ]
   }

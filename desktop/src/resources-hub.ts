@@ -16,6 +16,8 @@ const skillsDirEl = document.querySelector<HTMLElement>("#skills-dir")!;
 const skillsListEl = document.querySelector<HTMLUListElement>("#skills-list")!;
 const skillsEmptyEl = document.querySelector<HTMLElement>("#skills-empty")!;
 const skillsFootnoteEl = document.querySelector<HTMLElement>("#skills-footnote")!;
+const skillsStatEl = document.querySelector<HTMLElement>("#skills-stat");
+const mcpStatEl = document.querySelector<HTMLElement>("#mcp-stat");
 const skillsCountEl = document.querySelector<HTMLElement>("#skills-count")!;
 const mcpCountEl = document.querySelector<HTMLElement>("#mcp-count")!;
 
@@ -160,11 +162,12 @@ async function loadSkillsInventory(opts?: { remoteStats?: boolean }) {
     });
     appState.lastSkillsInventory = report;
     skillsCountEl.textContent = String(report.skills.length);
+    if (skillsStatEl) skillsStatEl.hidden = false;
     paintSkillsInventory(report);
     updateResourcesHubSummary();
   } catch (error) {
     appState.lastSkillsInventory = null;
-    skillsCountEl.textContent = "—";
+    if (skillsStatEl) skillsStatEl.hidden = true;
     skillsInventoryEl.hidden = false;
     skillsListEl.replaceChildren();
     skillsEmptyEl.hidden = false;
@@ -181,7 +184,9 @@ function updateResourcesHubSummary(): void {
   );
   const skillCount = appState.lastSkillsInventory?.skills.length ?? 0;
   const mcpCount = uniqueMcpNames.size;
-  mcpCountEl.textContent = appState.lastMcpStatus ? String(mcpCount) : "—";
+  if (skillsStatEl) skillsStatEl.hidden = !appState.lastSkillsInventory;
+  if (mcpStatEl) mcpStatEl.hidden = !appState.lastMcpStatus;
+  if (appState.lastMcpStatus) mcpCountEl.textContent = String(mcpCount);
   hubSkillsCountEl.textContent = appState.lastSkillsInventory
     ? t("resources.hubSkillsCount", { count: String(skillCount) })
     : "—";
@@ -250,7 +255,7 @@ async function loadMcpStatus(options?: { discoverChrome?: boolean }) {
     updateResourcesHubSummary();
   } catch {
     appState.lastMcpStatus = null;
-    mcpCountEl.textContent = "—";
+    if (mcpStatEl) mcpStatEl.hidden = true;
     updateResourcesHubSummary();
   }
 }

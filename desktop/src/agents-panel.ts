@@ -5,7 +5,6 @@ import { agentBrandIconHtml } from "./agent-brand";
 import { isPersonalEdition } from "./edition";
 import { listPersonalProviders, nativeAccountStatus, teamupsAccountStatus } from "./ipc";
 import { withErrorDetail } from "./friendly-error";
-import { formatTime } from "./format";
 import { officialQuotaLines, officialQuotaState } from "./official-quota";
 import {
   isAskRuntimeId,
@@ -97,12 +96,9 @@ const agentsSecurityInstalledEl =
 const agentsSecurityIssuesEl = document.querySelector<HTMLElement>("#agents-security-issues")!;
 const refreshBtn = document.querySelector<HTMLButtonElement>("#refresh")!;
 const spinnerEl = refreshBtn.querySelector<HTMLElement>(".spinner")!;
-const installedCountEl = document.querySelector<HTMLElement>("#installed-count")!;
-const profileStatusEl = document.querySelector<HTMLElement>("#profile-status")!;
-const lastScanEl = document.querySelector<HTMLElement>("#last-scan")!;
 const runtimeCountEl = document.querySelector<HTMLElement>("#runtime-count")!;
-const healthPillEl = document.querySelector<HTMLElement>("#health-pill")!;
-const healthLabelEl = document.querySelector<HTMLElement>("#health-label")!;
+const healthPillEl = document.querySelector<HTMLElement>("#health-pill");
+const healthLabelEl = document.querySelector<HTMLElement>("#health-label");
 const panelDiagnoseEl = document.querySelector<HTMLElement>("#panel-diagnose")!;
 
 function setStatusBanner(
@@ -120,6 +116,7 @@ function setStatusBanner(
 }
 
 function updateHealthStrip(installed: number, total: number, scanning = false): void {
+  if (!healthPillEl || !healthLabelEl) return;
   healthPillEl.classList.remove("is-good", "is-partial", "is-bad", "is-scanning");
   if (scanning) {
     healthPillEl.classList.add("is-scanning");
@@ -487,8 +484,6 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       runtimeTabsEl.innerHTML = "";
       lastTabSkeleton = "";
       appState.activeRuntimeId = null;
-      installedCountEl.textContent = "—";
-      profileStatusEl.textContent = t("status.error");
       runtimeCountEl.textContent = "—";
     } finally {
       setLoading(false);
@@ -536,11 +531,6 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
     );
     const total = report.runtimes.length;
 
-    installedCountEl.textContent = String(installed);
-    profileStatusEl.textContent = report.active_preset ?? t("status.none");
-    if (!opts?.relocalize) {
-      lastScanEl.textContent = formatTime(new Date());
-    }
     runtimeCountEl.textContent = String(installed);
     updateHealthStrip(installed, total);
     updateAgentsSecurityOverview(report);
@@ -984,7 +974,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       } else {
         setStatusBanner("neutral", t("doctor.loading"));
         presets.setLoadingStatus(t("presets.loading"));
-        healthLabelEl.textContent = t("health.ready");
+        if (healthLabelEl) healthLabelEl.textContent = t("health.ready");
       }
     },
   };

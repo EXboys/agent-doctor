@@ -5,22 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Doctor</title>
     <script>
-      if (/\bWindows\b/.test(navigator.userAgent)) document.documentElement.dataset.os = "windows";
+      var ua = navigator.userAgent;
+      document.documentElement.dataset.os = /\bWindows\b/.test(ua) ? "windows" : /Mac/i.test(ua) ? "macos" : "other";
     </script>
     <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/window-chrome.css" />
   </head>
   <body>
     <main class="widget">
-      <header class="widget-toolbar" data-tauri-drag-region>
-        <div class="brand" data-tauri-drag-region>
-          <div class="brand-icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-              <path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <p class="brand-name" data-i18n="app.eyebrow" data-tauri-drag-region>Agent Doctor</p>
-        </div>
+      <header class="widget-toolbar" data-tauri-drag-region="deep">
         <div class="toolbar-actions">
           <div class="lang-switch" role="group" aria-label="Language">
             <button type="button" class="lang-btn" data-lang="zh" data-i18n="lang.zh">中</button>
@@ -40,21 +33,19 @@
         <p id="mode-hint" class="sr-only" aria-live="polite" hidden></p>
       </header>
 
-      <section class="status-bar" id="health-strip" aria-live="polite">
-        <div class="health-pill" id="health-pill">
-          <span class="health-dot" id="health-dot" aria-hidden="true"></span>
-          <span class="health-label" id="health-label" data-i18n="health.ready">就绪</span>
+      <section class="status-bar" id="health-strip" data-tauri-drag-region="deep">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <path d="M12 12L4 7.5M12 12L20 7.5M12 12V21" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <p class="brand-name" data-i18n="app.eyebrow">Agent Doctor</p>
         </div>
         <div class="status-meta">
-          <span><span data-i18n="summary.installed">已装</span> <strong id="installed-count">—</strong></span>
-          <span class="status-sep" aria-hidden="true">·</span>
-          <span><span data-i18n="summary.skills">Skills</span> <strong id="skills-count">—</strong></span>
-          <span class="status-sep" aria-hidden="true">·</span>
-          <span><span data-i18n="summary.mcp">MCP</span> <strong id="mcp-count">—</strong></span>
-          <span class="status-sep" aria-hidden="true">·</span>
-          <span><span data-i18n="summary.preset">预设</span> <strong id="profile-status">—</strong></span>
-          <span class="status-sep" aria-hidden="true">·</span>
-          <span><strong id="last-scan" class="stat-chip-value-sm">—</strong></span>
+          <span class="status-meta-item" id="skills-stat" hidden><span data-i18n="summary.skills">技能</span> <strong id="skills-count">0</strong></span>
+          <span class="status-meta-item" id="mcp-stat" hidden><span data-i18n="summary.mcp">工具</span> <strong id="mcp-count">0</strong></span>
         </div>
       </section>
 

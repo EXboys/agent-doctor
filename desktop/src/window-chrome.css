@@ -1,0 +1,145 @@
+/* Window chrome.
+   macOS keeps the system traffic lights; the top row clears them.
+   Windows draws caption buttons in the top-right. Each is 40px so the
+   420px home window can still show its own toolbar actions. */
+
+html[data-os="windows"] {
+  --window-control-w: 40px;
+  --window-controls-w: 120px;
+  --window-controls-h: 36px;
+}
+
+html[data-os="windows"] .window-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  height: var(--window-controls-h);
+}
+
+.window-controls {
+  display: none;
+}
+
+.window-control {
+  width: var(--window-control-w, 40px);
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text, #152033);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.window-control svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.window-control .icon-restore {
+  display: none;
+}
+
+.window-control[data-maximized="true"] .icon-max {
+  display: none;
+}
+
+.window-control[data-maximized="true"] .icon-restore {
+  display: block;
+}
+
+.window-control:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme="dark"] .window-control {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+html[data-theme="dark"] .window-control:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+html.is-window-unfocused .window-control:not(:hover) {
+  opacity: 0.72;
+}
+
+.window-control-close:hover {
+  background: #e81123;
+  color: #fff;
+  opacity: 1;
+}
+
+.window-control:focus-visible {
+  outline: 2px solid var(--primary, #3b82f6);
+  outline-offset: -2px;
+}
+
+html[data-os="windows"] .widget {
+  padding-top: 0;
+}
+
+html[data-os="windows"] .widget-toolbar {
+  height: var(--window-controls-h);
+  margin-bottom: 8px;
+  padding-right: calc(var(--window-controls-w) - 8px);
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar {
+  min-height: 28px;
+  padding-left: 72px;
+}
+
+html[data-os="windows"] .chat-top {
+  padding-right: calc(16px + var(--window-controls-w));
+}
+
+html[data-os="windows"] .chat-main.is-files-open.is-files-split > .chat-top {
+  padding-right: 16px;
+}
+
+html[data-os="windows"] .chat-files-head {
+  padding-right: calc(12px + var(--window-controls-w));
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-shell.is-side-collapsed:not(.is-settings) .chat-top {
+  padding-left: 84px;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-shell.is-resources-open .chat-top {
+  padding-left: 16px;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .chat-shell.is-resources-open .chat-resources-panel-inner {
+  padding-top: 36px;
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .diagnose-top {
+  padding-left: 72px;
+}
+
+html[data-os="windows"] .diagnose-top {
+  padding-right: var(--window-controls-w);
+}
+
+html[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-top {
+  padding-right: 0;
+}
+
+html[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-deep-drawer-head {
+  padding-right: calc(14px + var(--window-controls-w));
+}
+
+html[data-os="macos"]:not(.is-window-fullscreen) .resources-rail {
+  padding-top: 40px;
+}
+
+html[data-os="windows"] .resources-toolbar-row {
+  padding-right: calc(var(--window-controls-w) - 8px);
+}

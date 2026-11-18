@@ -1,4 +1,5 @@
 import "./platform";
+import { mountWindowChrome } from "./window-chrome";
 import { fitTextarea } from "./fit-textarea";
 import { installImageLightbox } from "./chat/image-lightbox";
 import { renderFollowQueue } from "./chat/follow-queue";
@@ -149,6 +150,8 @@ import { cancelPromptSession, loadChatStore, openSession, removeWorkspace, saveC
 export function applyChatTheme(theme: ChatTheme, persist = true): void {
   applyChatThemeBase(theme, themeEl, persist);
 }
+
+mountWindowChrome();
 
 let durableSaveWarned = false;
 let durablePending: SessionStore | null = null;

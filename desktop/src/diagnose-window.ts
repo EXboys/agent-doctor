@@ -1,4 +1,5 @@
 import "./platform";
+import { mountWindowChrome } from "./window-chrome";
 import { listen } from "@tauri-apps/api/event";
 import { applyStaticI18n, getLocale, t } from "./i18n";
 import { bindLocaleSync } from "./locale-sync";
@@ -379,6 +380,7 @@ dom.deepBodyEl.addEventListener("submit", (event) => {
 });
 
 document.documentElement.classList.add("is-opaque-shell");
+mountWindowChrome();
 document.documentElement.lang = getLocale() === "zh" ? "zh-CN" : "en";
 applyStaticI18n(document);
 bindLocaleSync(() => {

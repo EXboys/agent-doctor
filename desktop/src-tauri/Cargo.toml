@@ -72,4 +72,4 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSGeometry"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSEvent", "NSWindow", "NSPanel", "NSResponder", "NSScreen", "NSView"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAppearance", "NSEvent", "NSWindow", "NSPanel", "NSResponder", "NSScreen", "NSView"] }

@@ -7831,6 +7831,13 @@ body.chat-skill-dragging .chat-res-grip {
   margin-top: 10px;
 }
 
+/* The turn's copy / time / rating row hangs 30px under the reply and does
+   not take flow space. The file card is the next block, so give it that
+   strip plus a little air — otherwise the row paints on top of the card. */
+.chat-log > .chat-reply-changes {
+  margin-top: 40px;
+}
+
 /* Windows scrollbars take width from the text. Reserve that strip so a growing
    answer does not reflow when the bar appears. */
 html[data-os="windows"] .chat-log {

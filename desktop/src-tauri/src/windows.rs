@@ -296,6 +296,9 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     let Some(window) = ensure_main_window(app) else {
         return;
     };
+    // The config-created window still has a system frame on Windows until this
+    // runs. Do it before show so the first frame is already the custom chrome.
+    apply_content_window_chrome(&window);
     // Show first. A hidden window often has no monitor, so sizing it before
     // show left the restored window short and the home had to scroll.
     let _ = window.unminimize();
@@ -324,6 +327,8 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    // Showing the window can put the system title back on the transparent bar.
+    apply_content_window_chrome(&window);
     // WebView2 / undecorated windows on Windows sometimes stay behind after
     // restore; a brief always-on-top pulse pulls them to the foreground.
     #[cfg(target_os = "windows")]
@@ -379,20 +384,96 @@ pub(crate) fn attach_main_window_close_behavior(window: &tauri::WebviewWindow) {
     });
 }
 
+/// macOS keeps the system traffic lights on an overlay title bar.
+/// Windows drops the system frame; the page draws caption buttons.
+/// Linux keeps the system frame.
+///
+/// Edition configs replace the whole `windows` array (JSON merge patch), so a
+/// Windows-only `decorations: false` in `tauri.windows.conf.json` does not
+/// survive `--config tauri.personal.conf.json`. Call
+/// [`apply_content_window_chrome`] on the config-created main window before
+/// it is shown. Windows created here already go through [`with_content_chrome`].
+fn with_content_chrome<'a, M: Manager<tauri::Wry>>(
+    builder: WebviewWindowBuilder<'a, tauri::Wry, M>,
+) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
+    #[cfg(target_os = "macos")]
+    {
+        return builder
+            .decorations(true)
+            .shadow(true)
+            .hidden_title(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .traffic_light_position(LogicalPosition::new(16.0, 14.0));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return builder.decorations(false).shadow(true);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        builder.decorations(true).shadow(true)
+    }
+}
+
+/// The overlay title bar is transparent, so macOS still draws the window title
+/// in the center. On a narrow home window that text sits on top of the brand.
+/// Light-background windows also pin an Aqua appearance so an unfocused
+/// window under macOS Dark Mode keeps visible grey traffic lights instead of
+/// translucent dark-mode circles that disappear into the pale header.
+#[cfg(target_os = "macos")]
+fn style_macos_content_window(window: &tauri::WebviewWindow, always_light: bool) {
+    use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSWindow,
+        NSWindowTitleVisibility,
+    };
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    // Do not call set_title: on macOS that snaps the traffic lights back to
+    // the system corner. Hiding visibility leaves the title for the menu and
+    // removes the faint text drawn over the brand.
+    unsafe {
+        let ns: &NSWindow = &*ptr.cast();
+        ns.setTitlebarAppearsTransparent(true);
+        ns.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        if always_light {
+            let aqua = NSAppearance::appearanceNamed(NSAppearanceNameAqua);
+            ns.setAppearance(aqua.as_deref());
+        }
+    }
+}
+
+pub(crate) fn apply_content_window_chrome(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
+        // Ask (chat.html) has its own dark theme; the other three windows are light.
+        style_macos_content_window(window, window.label() != ASK_WINDOW_LABEL);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_decorations(false);
+        let _ = window.set_shadow(true);
+    }
+}
+
 fn ensure_main_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window("main") {
         return Some(window);
     }
 
-    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Agent Doctor")
-        .inner_size(420.0, 800.0)
-        .min_inner_size(360.0, 520.0)
-        .decorations(true)
-        .transparent(false)
-        .shadow(true)
-        .resizable(true)
-        .visible(false);
+    let builder = with_content_chrome(
+        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .title("Agent Doctor")
+            .inner_size(420.0, 800.0)
+            .min_inner_size(360.0, 520.0)
+            .transparent(false)
+            .resizable(true)
+            .visible(false),
+    );
 
     match builder.build() {
         Ok(window) => {
@@ -575,20 +656,22 @@ fn create_ask_window(
     );
     // Load chat.html with no query string. WebView2 custom-protocol + `?query`
     // often produces a titled, permanently blank Ask window.
-    let window = WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
+    let window = with_content_chrome(
+        WebviewWindowBuilder::new(app, ASK_WINDOW_LABEL, WebviewUrl::App("chat.html".into()))
             .title("Agent Doctor — Ask")
             .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
             .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
             .resizable(true)
             .closable(true)
             .minimizable(true)
-            .decorations(true)
             .visible(visible)
             // Hidden Ask must not steal taskbar restore from the main window.
             .skip_taskbar(!visible)
-            .initialization_script(&init_script)
-            .build()
-            .map_err(|err| format!("failed to open ask window: {err}"))?;
+            .initialization_script(&init_script),
+    )
+    .build()
+    .map_err(|err| format!("failed to open ask window: {err}"))?;
+    apply_content_window_chrome(&window);
     attach_ask_window_close_behavior(&window);
     Ok(window)
 }
@@ -892,11 +975,12 @@ fn create_resources_window(
     .resizable(true)
     .closable(true)
     .minimizable(true)
-    .decorations(true)
     .visible(visible)
-    .skip_taskbar(!visible)
-    .build()
-    .map_err(|err| format!("failed to open resources window: {err}"))?;
+    .skip_taskbar(!visible);
+    let window = with_content_chrome(window)
+        .build()
+        .map_err(|err| format!("failed to open resources window: {err}"))?;
+    apply_content_window_chrome(&window);
     attach_resources_window_close_behavior(&window);
     Ok(window)
 }
@@ -967,12 +1051,13 @@ fn create_diagnose_window(
     .resizable(true)
     .closable(true)
     .minimizable(true)
-    .decorations(true)
     .visible(visible)
     .skip_taskbar(!visible)
-    .initialization_script(&init_script)
-    .build()
-    .map_err(|err| format!("failed to open diagnose window: {err}"))?;
+    .initialization_script(&init_script);
+    let window = with_content_chrome(window)
+        .build()
+        .map_err(|err| format!("failed to open diagnose window: {err}"))?;
+    apply_content_window_chrome(&window);
     attach_diagnose_window_close_behavior(&window);
     Ok(window)
 }

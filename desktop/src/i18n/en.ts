@@ -8,6 +8,7 @@ export const en = {
     "window.close": "Close",
     "window.minimize": "Minimize",
     "window.maximize": "Maximize",
+    "window.restore": "Restore",
     "health.ready": "Ready",
     "health.scanning": "Scanning…",
     "health.good": "All agents healthy",

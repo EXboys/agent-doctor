@@ -6,7 +6,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "Agent Doctor Preview"
+        "title": "Agent Doctor Preview",
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 16, "y": 14 },
+        "visible": false
       }
     ]
   }
