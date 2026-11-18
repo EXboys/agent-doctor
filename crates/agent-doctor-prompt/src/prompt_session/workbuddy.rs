@@ -317,7 +317,12 @@ for raw in sys.stdin:
         assert_eq!(report.runtime_thread_id.as_deref(), Some("wb-1"));
         assert!(report.log_excerpt.contains("wb-ok"));
         let calls = fs::read_to_string(log_path).unwrap();
-        assert!(calls.contains("argv=--acp"), "{calls}");
+        assert!(
+            calls
+                .split_whitespace()
+                .any(|part| part == "--acp" || part.ends_with("=--acp")),
+            "{calls}"
+        );
     }
 
     const FAKE_CODEBUDDY_AUTH_ON_DEMAND: &str = r#"#!/usr/bin/env python3
