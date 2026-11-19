@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
-use agent_doctor_core::exec::{command_for_path, run_output};
+use agent_doctor_core::exec::command_for_path;
+#[cfg(unix)]
+use agent_doctor_core::exec::run_output;
 use agent_doctor_core::lifecycle::{use_china_mirrors, GITHUB_MIRROR_PREFIX};
 use agent_doctor_core::setup::upsert_local_cluster_provider;
 

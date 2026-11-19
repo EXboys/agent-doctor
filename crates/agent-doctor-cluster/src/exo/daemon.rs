@@ -62,6 +62,10 @@ pub fn detect_host_support() -> NodeHostSupport {
 }
 
 /// Current pinned exo ships a Metal 4 library. macOS 15.6 can see the process, but cannot load it.
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) fn macos_version_supports_exo(major: u32, minor: u32) -> bool {
     major > 26 || (major == 26 && minor >= 2)
 }
@@ -368,6 +372,10 @@ fn terminate_pid_gracefully(pid: u32, child: &mut Child) {
             thread::sleep(Duration::from_millis(120));
         }
     }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+    }
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -401,6 +409,10 @@ fn reap_stale_pid_if_needed() {
                 thread::sleep(Duration::from_millis(300));
             }
         }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
     }
     let _ = fs::remove_file(&path);
 }

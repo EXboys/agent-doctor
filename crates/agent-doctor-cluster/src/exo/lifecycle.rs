@@ -4,22 +4,30 @@
 //! Fallback source: official `EXO-latest.dmg` headless mount & runtime extraction so
 //! development and overseas machines work even before an OSS tarball is mirrored.
 
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use agent_doctor_core::lifecycle::use_china_mirrors;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use sha2::{Digest, Sha256};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use std::fs::File;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use std::io::{Read, Write};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use std::time::Duration;
 
 /// Latest published EXO.app tag that ships a headless `exo` runtime in the DMG.
 /// (v1.0.72 was never cut; Zenoh builds live on main after the libp2p→zenoh migration.)
 pub const PINNED_EXO_VERSION: &str = "1.0.71";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const OSS_BASE_URL: &str = "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/runtimes/exo";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const OFFICIAL_DMG_URL: &str = "https://assets.exolabs.net/EXO-latest.dmg";
 
 static CANCEL_INSTALL: AtomicBool = AtomicBool::new(false);
