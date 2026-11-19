@@ -707,6 +707,12 @@ export interface RemoteHostRow {
   linked_client?: boolean;
 }
 
+export interface LinkHello {
+  computer_name: string;
+  version: string;
+  daemon_port: number;
+}
+
 export interface LinkHostStatus {
   hostId: string;
   displayName: string;

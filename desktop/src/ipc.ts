@@ -1003,6 +1003,12 @@ export function listLinkedHostStatus(): Promise<import("./types").LinkHostStatus
   return invoke("list_linked_host_status_command");
 }
 
+export function linkedPing(args: {
+  hostId: string;
+}): Promise<import("./types").LinkHello> {
+  return invoke("linked_ping_command", args);
+}
+
 export function linkedListWorkspaces(args: {
   hostId: string;
 }): Promise<import("./types").LinkWorkspaceRow[]> {
