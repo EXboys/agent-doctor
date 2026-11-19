@@ -1,8 +1,10 @@
 import { appState } from "./app-state";
 import { isTeamEdition } from "./edition";
+import { createClusterController } from "./wiring/cluster";
 import { createEvotownController } from "./wiring/evotown";
 import { createModeController } from "./wiring/mode";
 import { createPersonalController } from "./wiring/personal";
+import { bindProviderKindTabs, syncProviderKindTabs } from "./wiring/provider-kinds";
 import { createPresetsController } from "./wiring/presets";
 import { createUsageController } from "./wiring/usage";
 import type { ModeStatus } from "./types";
@@ -57,12 +59,22 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     loadModeStatus: () => mode.loadModeStatus(),
     usageFor: (id, name) => usage.usageForService(id, name),
   });
+  const cluster = createClusterController({
+    onProviderChanged: async () => {
+      await personal.loadPersonalProviderStatus();
+      await mode.loadModeStatus();
+      await d.refresh();
+    },
+  });
 
   presets.renderPresetPicker();
+  bindProviderKindTabs();
   evotown.bindEvents();
   personal.bindEvents();
+  cluster.bindEvents();
   usage.bindEvents();
   void usage.load();
+  void cluster.load();
 
   return {
     syncProviderPanelToEdition: () => mode.syncProviderPanelToEdition(),
@@ -71,6 +83,7 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
     loadEvotownStatus: () => evotown.loadEvotownStatus(),
     loadPersonalProviderStatus: () => {
       void usage.load();
+      void cluster.load();
       return personal.loadPersonalProviderStatus();
     },
     rewireCurrentMode: (hintEl) => mode.rewireCurrentMode(hintEl),
@@ -96,8 +109,10 @@ export function initWiringUi(d: WiringUiDeps): WiringUiApi {
       if (appState.personalProvidersDoc) {
         personal.renderPersonalProviderList(appState.personalProvidersDoc);
       }
+      cluster.render();
       usage.renderOverview();
       usage.renderDetail();
+      syncProviderKindTabs();
     },
   };
 }

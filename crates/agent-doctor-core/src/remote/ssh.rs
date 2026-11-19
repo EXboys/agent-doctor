@@ -314,6 +314,9 @@ mod tests {
             user: Some("ubuntu".into()),
             port: Some(2222),
             identity_file: Some("/keys/box".into()),
+            display_name: "box".into(),
+            linked_computer_name: String::new(),
+            linked_client: false,
             projects: BTreeMap::new(),
         };
         let target = SshTarget::from_host_entry(&entry).unwrap();
@@ -341,6 +344,9 @@ mod tests {
             user: None,
             port: None,
             identity_file: None,
+            display_name: "prod-vps".into(),
+            linked_computer_name: String::new(),
+            linked_client: false,
             projects: BTreeMap::new(),
         };
         let target = SshTarget::from_host_entry(&entry).unwrap();

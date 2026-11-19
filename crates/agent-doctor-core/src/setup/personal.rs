@@ -37,6 +37,13 @@ const TEAMUPS_OFFICIAL_PROVIDER_NAME: &str = "官方";
 /// `deepseek-chat` was retired upstream.
 const TEAMUPS_OFFICIAL_MODEL: &str = "deepseek-flash";
 
+/// Reserved personal provider slot for on-device / LAN multi-machine compute (`agent-doctor-cluster`).
+pub const LOCAL_CLUSTER_PROVIDER_ID: &str = "local-cluster";
+pub const LOCAL_CLUSTER_PROVIDER_NAME: &str = "算力组网";
+/// Non-empty placeholder so `load_active_personal_provider` and CLI env checks pass;
+/// local cluster backends (exo, llama.cpp, Ollama) ignore Bearer tokens by default.
+pub const LOCAL_CLUSTER_PLACEHOLDER_KEY: &str = "local-cluster";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonalProviderOptions {
     pub url: String,
@@ -309,6 +316,69 @@ pub fn ensure_teamups_official_provider(base_url: &str, license: &str) -> Result
         let _ = activate_personal_provider(TEAMUPS_OFFICIAL_PROVIDER_ID);
     }
     Ok(())
+}
+
+/// Upsert the reserved `local-cluster` personal provider (exo / Ollama / llama.cpp).
+/// When `activate` is true, projects both OpenAI and Anthropic configs to local runtimes.
+pub fn upsert_local_cluster_provider(
+    gateway_url: &str,
+    model: &str,
+    activate: bool,
+) -> Result<PersonalProvidersDocument> {
+    crate::edition::ensure_edition_allows_mode(crate::setup::MODE_PERSONAL)?;
+
+    let url = normalize_personal_gateway_url(gateway_url)?;
+    let model = model.trim();
+    if model.is_empty() {
+        bail!("cluster model must not be empty");
+    }
+
+    let path = personal_providers_path().context("could not resolve config directory")?;
+    let mut store = load_store(&path)?;
+    migrate_from_profile_if_empty(&mut store, &path)?;
+
+    if let Some(entry) = store
+        .providers
+        .iter_mut()
+        .find(|p| p.id == LOCAL_CLUSTER_PROVIDER_ID)
+    {
+        entry.name = LOCAL_CLUSTER_PROVIDER_NAME.to_string();
+        entry.url = url;
+        if entry.api_key.trim().is_empty() {
+            entry.api_key = LOCAL_CLUSTER_PLACEHOLDER_KEY.to_string();
+        }
+        entry.model = model.to_string();
+        entry.protocol = PROTOCOL_OPENAI.to_string();
+    } else {
+        store.providers.push(PersonalProviderEntry {
+            id: LOCAL_CLUSTER_PROVIDER_ID.to_string(),
+            name: LOCAL_CLUSTER_PROVIDER_NAME.to_string(),
+            url,
+            api_key: LOCAL_CLUSTER_PLACEHOLDER_KEY.to_string(),
+            model: model.to_string(),
+            protocol: PROTOCOL_OPENAI.to_string(),
+        });
+    }
+
+    save_store(&path, &store)?;
+    crate::setup::clear_provider_cooldown(LOCAL_CLUSTER_PROVIDER_ID);
+
+    if activate {
+        activate_personal_provider(LOCAL_CLUSTER_PROVIDER_ID)?;
+        store = load_store(&path)?;
+    } else if store.active_id.as_deref() == Some(LOCAL_CLUSTER_PROVIDER_ID)
+        && is_canonical_providers_path(&path)
+    {
+        if let Some(entry) = store
+            .providers
+            .iter()
+            .find(|p| p.id == LOCAL_CLUSTER_PROVIDER_ID)
+        {
+            let _ = rewrite_active_profile(entry);
+        }
+    }
+
+    Ok(document_from_store(&store, &path))
 }
 
 pub fn delete_personal_provider(id: &str) -> Result<PersonalProvidersDocument> {

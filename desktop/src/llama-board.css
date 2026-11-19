@@ -1,0 +1,10 @@
+/* Llama board and the EXO dashboard share vendor/board-ui/theme.css. */
+@import "../../vendor/board-ui/theme.css";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}

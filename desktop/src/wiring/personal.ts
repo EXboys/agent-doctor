@@ -83,10 +83,12 @@ function stopOfficialLoginPoll(): void {
   officialLoginWaiting = false;
 }
 
-/** Both editions show 官方, even before sign-in creates the saved row. */
+/** Both editions show 官方, even before sign-in creates the saved row.
+ * `local-cluster` lives on the 本地部署 tab (`#cluster-card`). */
 function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderListItem[] {
-  if (doc.providers.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {
-    return doc.providers;
+  const withoutCluster = doc.providers.filter((item) => item.id !== "local-cluster");
+  if (withoutCluster.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {
+    return withoutCluster;
   }
   const placeholder: PersonalProviderListItem = {
     id: OFFICIAL_PROVIDER_ID,
@@ -97,7 +99,7 @@ function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderLi
     api_key_hint: "",
     active: false,
   };
-  return [placeholder, ...doc.providers];
+  return [placeholder, ...withoutCluster];
 }
 
 const AVATAR_TONES = 6;

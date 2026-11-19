@@ -157,15 +157,7 @@
         <section class="main-panel" id="panel-provider" role="tabpanel" data-main-panel="provider" hidden>
           <section class="widget-section personal-section provider-panel is-active" id="personal-section" data-provider-panel="personal">
             <div id="personal-list-view">
-              <div class="section-label section-label-stack">
-                <div class="section-heading">
-                  <h2 data-i18n="personal.title">模型服务</h2>
-                  <p class="section-sub" data-i18n="personal.listHint">给本机 Agents 配置模型服务。</p>
-                </div>
-                <button id="personal-add" type="button" class="btn-primary btn-compact" data-i18n="personal.add">新增</button>
-              </div>
               <p id="personal-status" class="sr-only" data-i18n="personal.loading">检查中…</p>
-              <div id="personal-connected" class="evotown-connected" hidden></div>
               <section id="usage-overview" class="usage-card" aria-labelledby="usage-overview-title">
                 <div class="usage-card-head">
                   <h3 id="usage-overview-title"><span data-i18n="usage.title">用量</span><small data-i18n="usage.allServices">全部服务合计</small></h3>
@@ -189,7 +181,20 @@
                 <p id="usage-overview-empty" class="usage-empty" data-i18n="usage.empty" hidden>还没有用量。在对话里发一句话，这里就会显示用了多少。</p>
                 <p id="usage-overview-note" class="usage-empty" hidden></p>
               </section>
-              <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
+              <div class="main-tabs provider-kind-tabs" id="provider-kind-tabs" role="tablist">
+                <button type="button" class="provider-tab is-active" role="tab" id="provider-kind-tab-models" aria-selected="true" aria-controls="provider-kind-models" data-provider-kind="models" data-i18n="personal.title">模型服务</button>
+                <button type="button" class="provider-tab" role="tab" id="provider-kind-tab-accounts" aria-selected="false" tabindex="-1" aria-controls="provider-kind-accounts" data-provider-kind="accounts" data-i18n="providerKind.accounts">订阅账号</button>
+                <button type="button" class="provider-tab" role="tab" id="provider-kind-tab-local" aria-selected="false" tabindex="-1" aria-controls="provider-kind-local" data-provider-kind="local" data-i18n="providerKind.local">本地部署</button>
+              </div>
+              <div id="provider-kind-models" class="provider-kind-pane" role="tabpanel" aria-labelledby="provider-kind-tab-models">
+                <div class="section-label provider-kind-toolbar">
+                  <p class="section-sub" data-i18n="personal.listHint">给本机 Agent 配置模型服务。</p>
+                  <button id="personal-add" type="button" class="btn-primary btn-compact" data-i18n="personal.add">新增</button>
+                </div>
+                <div id="personal-connected" class="evotown-connected" hidden></div>
+                <ul id="personal-list" class="provider-list" aria-live="polite"></ul>
+              </div>
+              <div id="provider-kind-accounts" class="provider-kind-pane" role="tabpanel" aria-labelledby="provider-kind-tab-accounts" hidden>
               <div id="subscription-pool" class="subscription-pool" hidden>
                 <div class="section-label section-label-compact">
                   <h3 data-i18n="pool.title">订阅号</h3>
@@ -226,10 +231,16 @@
                 <ul id="subscription-pool-list" class="provider-list subscription-pool-list" aria-live="polite"></ul>
                 <p id="subscription-pool-result" class="section-footnote"></p>
               </div>
-              <details id="native-accounts" class="native-fold" hidden>
+              <details id="native-accounts" class="native-fold" open hidden>
                 <summary id="native-accounts-label"></summary>
                 <ul id="native-account-list" class="provider-list"></ul>
               </details>
+              <p id="provider-accounts-empty" class="section-footnote provider-kind-empty" data-i18n="providerKind.accountsEmpty">登录 Claude、Codex 这类账号后，会出现在这里。</p>
+              </div>
+              <div id="provider-kind-local" class="provider-kind-pane" role="tabpanel" aria-labelledby="provider-kind-tab-local" hidden>
+                <section id="cluster-card" class="cluster-card" aria-live="polite" hidden></section>
+                <p id="provider-local-empty" class="section-footnote provider-kind-empty" data-i18n="providerKind.localEmpty">同一网络里的苹果电脑可以一起免费跑本地模型。</p>
+              </div>
               <p id="personal-list-hint" class="section-footnote" hidden></p>
               <p id="wiring-mode-footnote" class="section-footnote wiring-mode-footnote" aria-live="polite"></p>
               <div id="subscription-detail" class="subscription-detail" hidden>
@@ -488,10 +499,11 @@
           <section class="widget-section" id="remote-section">
             <div class="section-label section-label-stack">
               <div class="section-heading">
-                <h2 data-i18n="remote.title">云端 VPS</h2>
+                <h2 data-i18n="remote.title">其他电脑</h2>
               </div>
               <button id="remote-refresh" type="button" class="btn-ghost btn-compact" data-i18n="remote.refresh">刷新</button>
             </div>
+            <p class="section-footnote" data-i18n="remote.hint">添加另一台已经装好的电脑。连上后，可以检查、整理，并在问答里打开那边的项目。</p>
             <p id="remote-status" class="section-footnote"></p>
 
             <ul id="remote-host-list" class="ws-manage-list" aria-live="polite"></ul>
@@ -500,7 +512,7 @@
             <p id="remote-hint" class="section-footnote"></p>
 
             <details class="remote-add" id="remote-bootstrap-host">
-              <summary data-i18n="remote.bootstrapHost">添加 VPS</summary>
+              <summary data-i18n="remote.bootstrapHost">添加电脑</summary>
               <form id="remote-bootstrap-form" class="remote-form" autocomplete="off">
                 <label class="field-row field-row-inline">
                   <span class="field-label" data-i18n="remote.hostName">名称</span>

@@ -1,13 +1,35 @@
-# Remote doctor (Agentless)
+# Remote computers (SSH)
 
-Diagnose **project + Agent runtime health on a remote VPS** over SSH.  
+Two modes share the same host registry under `…/agent-doctor/remote/`.
+
+## Linked client (Paseo-style)
+
+When the other computer is running Agent Doctor, this computer opens an SSH
+local-forward to its loopback client service (`127.0.0.1:18765`) and can:
+
+- Connect / disconnect with plain status (“computer unreachable” vs “app not open”)
+- List and register projects on that computer
+- Browse / read / write project files
+- Run workspace doctor + tidy on that computer
+
+The desktop app starts the loopback service automatically. The service never
+binds beyond localhost; only SSH reaches it.
+
+Asking agents on the remote computer streams over the same tunnel: events and
+permission cards appear on this computer; the agent process runs on the other
+one. Projects show a host badge in the sidebar.
+
+## Agentless doctor
+
+Diagnose **project + Agent runtime health on a remote VPS** over SSH when that
+machine has **no** Agent Doctor installed.  
 This is **not** a remote Provider switcher (unlike SSH-oriented config sync tools).
 
-## Boundaries
+## Boundaries (agentless)
 
 | In scope | Out of scope |
 |----------|--------------|
-| Read-only `remote doctor` | Remote writes / `repair --apply` |
+| Read-only `remote doctor` | Remote writes / `repair --apply` (use linked client for tidy) |
 | One-time password → auto ed25519 key bootstrap | Persisting the password (never written) |
 | OpenSSH BatchMode key auth thereafter | `sshpass` / interactive password doctor |
 | Binary, config parse, gateway field, project traces | Provider preset push/pull |

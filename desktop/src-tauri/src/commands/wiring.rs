@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::update_tray_tooltip;
 use tauri::{Emitter, Manager};
 
-fn notify_provider_changed(app: &tauri::AppHandle) {
+pub(crate) fn notify_provider_changed(app: &tauri::AppHandle) {
     agent_doctor_prompt::retire_warm_sessions();
     let _ = app.emit("personal-provider-changed", ());
 }

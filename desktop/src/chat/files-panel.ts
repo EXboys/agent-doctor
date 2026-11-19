@@ -4,6 +4,9 @@ import { t } from "../i18n";
 import { highlightCode } from "./code-highlight";
 import {
   findWorkspacePath,
+  linkedListProjectDir,
+  linkedReadFile,
+  linkedWriteFile,
   listWorkspaceDir,
   readWorkspaceFile,
   writeWorkspaceFile,
@@ -42,6 +45,8 @@ export type FilesPanelDeps = {
   noticeEl: HTMLElement;
   emptyEl: HTMLElement;
   getRoot: () => string;
+  /** When set, file ops go through the linked computer instead of this one. */
+  getHostId?: () => string | null;
   setStatus: (text: string, tone?: "ok" | "warn" | "error" | "muted") => void;
 };
 
@@ -50,6 +55,61 @@ type FilesLayout = "cover" | "split";
 
 const LAYOUT_KEY = "agent-doctor-ask-files-layout";
 const TREE_KEY = "agent-doctor-ask-files-tree";
+
+async function listDirForPanel(
+  hostId: string | null | undefined,
+  root: string,
+  relative: string | null,
+): Promise<WorkspaceDirEntry[]> {
+  if (hostId?.trim()) {
+    const rows = await linkedListProjectDir({
+      hostId: hostId.trim(),
+      root,
+      relative,
+    });
+    return rows.map((entry) => ({
+      name: entry.name,
+      relativePath: entry.relative_path,
+      isDir: entry.is_dir,
+    }));
+  }
+  return listWorkspaceDir({ root, relative });
+}
+
+async function readFileForPanel(
+  hostId: string | null | undefined,
+  root: string,
+  relative: string,
+) {
+  if (hostId?.trim()) {
+    const file = await linkedReadFile({ hostId: hostId.trim(), root, relative });
+    return {
+      relativePath: file.relative_path,
+      name: file.name,
+      content: file.content,
+      language: file.language,
+      editable: file.editable,
+      isImage: file.is_image,
+      absolutePath: file.absolute_path,
+      sheets: null as WorkspaceSheet[] | null,
+      sizeBytes: file.size_bytes,
+    };
+  }
+  return readWorkspaceFile({ root, relative });
+}
+
+async function writeFileForPanel(
+  hostId: string | null | undefined,
+  root: string,
+  relative: string,
+  content: string,
+): Promise<void> {
+  if (hostId?.trim()) {
+    await linkedWriteFile({ hostId: hostId.trim(), root, relative, content });
+    return;
+  }
+  await writeWorkspaceFile({ root, relative, content });
+}
 
 function readFilesLayout(): FilesLayout {
   return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "cover";
@@ -627,7 +687,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     deps.emptyEl.hidden = true;
 
     try {
-      const entries = await listWorkspaceDir({ root, relative: listRelative || null });
+      const entries = await listDirForPanel(deps.getHostId?.(), root, listRelative || null);
       if (generation !== listGeneration) return;
       if (listRelative) {
         const up = document.createElement("button");
@@ -688,7 +748,7 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     if (!root) return;
     btn.classList.add("is-open");
     try {
-      const entries = await listWorkspaceDir({ root, relative });
+      const entries = await listDirForPanel(deps.getHostId?.(), root, relative);
       if (!btn.isConnected) return;
       const nest = document.createElement("div");
       nest.className = "chat-files-nest";
@@ -735,10 +795,11 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     const relative = openFileRelative;
     let written = deps.editorEl.value;
     try {
-      await writeWorkspaceFile({ root, relative, content: written });
+      const hostId = deps.getHostId?.();
+      await writeFileForPanel(hostId, root, relative, written);
       if (openFileRelative === relative && deps.editorEl.value !== written) {
         written = deps.editorEl.value;
-        await writeWorkspaceFile({ root, relative, content: written });
+        await writeFileForPanel(hostId, root, relative, written);
       }
     } catch (error) {
       deps.setStatus(String(error ?? t("chat.filesSaveFailed")), "error");
@@ -759,21 +820,23 @@ export function createFilesPanel(deps: FilesPanelDeps) {
     const root = rootOrWarn();
     if (!root) return;
     try {
-      const file = await readWorkspaceFile({ root, relative });
+      const hostId = deps.getHostId?.();
+      const file = await readFileForPanel(hostId, root, relative);
       openFileRelative = file.relativePath;
       openFileLanguage = file.language;
       dirty = false;
       deps.viewEl.hidden = false;
       deps.placeholderEl.hidden = true;
+      const remoteImage = Boolean(file.isImage && hostId?.trim());
       deps.codeEl.hidden = !file.editable;
-      deps.imageEl.hidden = !file.isImage;
+      deps.imageEl.hidden = !file.isImage || remoteImage;
       deps.sheetEl.hidden = !file.sheets;
       if (file.sheets) paintSheet(file.sheets, 0);
-      deps.noticeEl.hidden = file.editable || file.isImage || Boolean(file.sheets);
-      deps.noticeEl.textContent = t("chat.filesBinary");
+      deps.noticeEl.hidden = (file.editable || file.isImage || Boolean(file.sheets)) && !remoteImage;
+      deps.noticeEl.textContent = remoteImage ? t("chat.filesBinary") : t("chat.filesBinary");
       const img = deps.imageEl.querySelector("img");
       if (img) {
-        if (file.isImage) {
+        if (file.isImage && !remoteImage) {
           img.alt = file.name;
           img.title = t("chat.imageZoom");
           img.src = convertFileSrc(file.absolutePath);

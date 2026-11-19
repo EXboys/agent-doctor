@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Agent Doctor",
-  "version": "0.1.100-beta.3",
+  "version": "0.1.100-beta.4",
   "identifier": "com.agentdoctor.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -20,7 +20,10 @@
         "decorations": true,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 16, "y": 14 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 14
+        },
         "transparent": false,
         "shadow": true,
         "visible": false
@@ -68,7 +71,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["agent-doctor"]
+        "schemes": [
+          "agent-doctor"
+        ]
       }
     },
     "updater": {

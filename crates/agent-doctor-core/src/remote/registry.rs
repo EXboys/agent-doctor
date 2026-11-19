@@ -32,6 +32,15 @@ pub struct RemoteHostEntry {
     /// Managed host: local private key path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_file: Option<String>,
+    /// Friendly name shown in the project list (Paseo host badge).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub display_name: String,
+    /// Last known remote computer name from a successful client link.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub linked_computer_name: String,
+    /// True after we confirmed the remote client service answers over SSH.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked_client: bool,
     #[serde(default)]
     pub projects: BTreeMap<String, RemoteProjectEntry>,
 }
@@ -153,6 +162,9 @@ pub fn add_host(id: &str, ssh_config_host: &str) -> Result<RemoteHostsDocument> 
             user: None,
             port: None,
             identity_file: None,
+            display_name: id.to_string(),
+            linked_computer_name: String::new(),
+            linked_client: false,
             projects: BTreeMap::new(),
         },
     );
@@ -185,19 +197,48 @@ pub fn upsert_managed_host(
         .filter(|s| !s.is_empty())
         .unwrap_or("")
         .to_string();
+    let previous = doc.hosts.get(id);
     let entry = RemoteHostEntry {
         ssh_config_host: label,
         hostname: Some(hostname.trim().to_string()),
         user: Some(user.trim().to_string()),
         port: Some(port),
         identity_file: Some(identity_file.display().to_string()),
-        projects: doc
-            .hosts
-            .get(id)
-            .map(|h| h.projects.clone())
+        display_name: previous
+            .map(|h| h.display_name.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| id.to_string()),
+        linked_computer_name: previous
+            .map(|h| h.linked_computer_name.clone())
             .unwrap_or_default(),
+        linked_client: previous.map(|h| h.linked_client).unwrap_or(false),
+        projects: previous.map(|h| h.projects.clone()).unwrap_or_default(),
     };
     doc.hosts.insert(id.to_string(), entry);
+    save_remote_hosts(&doc)?;
+    Ok(doc)
+}
+
+/// Remember that this host answered through the linked client service.
+pub fn mark_host_linked(
+    id: &str,
+    computer_name: &str,
+    display_name: Option<&str>,
+) -> Result<RemoteHostsDocument> {
+    let mut doc = load_remote_hosts()?;
+    let Some(entry) = doc.hosts.get_mut(id) else {
+        bail!("unknown host '{id}'");
+    };
+    entry.linked_client = true;
+    let name = computer_name.trim();
+    if !name.is_empty() {
+        entry.linked_computer_name = name.to_string();
+    }
+    if let Some(label) = display_name.map(str::trim).filter(|s| !s.is_empty()) {
+        entry.display_name = label.to_string();
+    } else if entry.display_name.trim().is_empty() {
+        entry.display_name = id.to_string();
+    }
     save_remote_hosts(&doc)?;
     Ok(doc)
 }
@@ -359,6 +400,9 @@ mod tests {
                 user: None,
                 port: None,
                 identity_file: None,
+                display_name: "prod".into(),
+                linked_computer_name: String::new(),
+                linked_client: false,
                 projects: BTreeMap::from([(
                     "api".into(),
                     RemoteProjectEntry {
@@ -386,6 +430,9 @@ mod tests {
                 user: Some("ubuntu".into()),
                 port: Some(22),
                 identity_file: Some("/tmp/keys/box".into()),
+                display_name: "box".into(),
+                linked_computer_name: String::new(),
+                linked_client: false,
                 projects: BTreeMap::new(),
             },
         );

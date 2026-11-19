@@ -36,6 +36,9 @@ pub struct TeamupsLoginPoll {
 pub struct TeamupsAccountStatus {
     pub base_url: String,
     pub signed_in: bool,
+    /// Stable account identifier across devices signed into the same TeamUps account.
+    #[serde(default)]
+    pub account_id: Option<String>,
     /// Website account name (WeChat nickname, email, or phone).
     #[serde(default)]
     pub name: Option<String>,
@@ -281,6 +284,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
+            account_id: None,
             name: None,
             pack_count: 0,
             packs: Vec::new(),
@@ -310,6 +314,7 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         return Ok(TeamupsAccountStatus {
             base_url,
             signed_in: false,
+            account_id: None,
             name: None,
             pack_count: 0,
             packs: Vec::new(),
@@ -346,9 +351,11 @@ pub fn teamups_account_status() -> Result<TeamupsAccountStatus> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let account_id = extract_account_id(&body).or_else(|| name.clone());
     let fresh = TeamupsAccountStatus {
         base_url,
         signed_in: true,
+        account_id,
         name,
         pack_count: packs.len() as u32,
         packs,
@@ -378,12 +385,51 @@ fn cached_or_signed_in_account_status(
     TeamupsAccountStatus {
         base_url,
         signed_in: true,
+        account_id: None,
         name: None,
         pack_count: 0,
         packs: Vec::new(),
         official: None,
         agent: None,
     }
+}
+
+fn extract_account_id(body: &Value) -> Option<String> {
+    for key in ["id", "userId", "user_id", "accountId", "account_id"] {
+        if let Some(val) = body.get(key) {
+            if let Some(s) = val.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                return Some(s.to_string());
+            }
+            if let Some(n) = val.as_u64() {
+                return Some(n.to_string());
+            }
+            if let Some(n) = val.as_i64() {
+                return Some(n.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Fast local read of `(base_url, account_key)` from `settings.db` without a network call.
+/// Used by `agent-doctor-cluster` so devices signed into the same TeamUps account derive
+/// the exact same LAN cluster namespace even when offline.
+pub fn cached_teamups_account_identity() -> Option<(String, String)> {
+    let store = open_settings_store().ok()?;
+    let _license = store
+        .get_teamups_license()
+        .ok()?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())?;
+    let base_url = mall_base_url().unwrap_or_else(|_| default_teamups_base_url());
+    let raw = store.get_meta(ACCOUNT_STATUS_CACHE_KEY).ok()??;
+    let cached: TeamupsAccountStatus = serde_json::from_str(raw.trim()).ok()?;
+    let key = cached
+        .account_id
+        .or(cached.name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    Some((base_url, key))
 }
 
 /// One signed dictation socket. `kind` is `spark_v2`, `spark_v1`, or `classic`.

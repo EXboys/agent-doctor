@@ -1,0 +1,20 @@
+[package]
+name = "agent-doctor-cluster"
+description = "Local and LAN multi-device AI compute cluster orchestration (exo, with extension slots for Ollama and llama.cpp)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+agent-doctor-core = { workspace = true }
+anyhow.workspace = true
+dirs.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,14 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/agent-doctor-core", "crates/agent-doctor-mcp", "crates/agent-doctor-ocr", "crates/agent-doctor-prompt", "crates/agent-doctor-repair", "crates/agent-doctor-voice", "cli", "desktop/src-tauri"]
+members = ["crates/agent-doctor-cluster", "crates/agent-doctor-core", "crates/agent-doctor-mcp", "crates/agent-doctor-ocr", "crates/agent-doctor-prompt", "crates/agent-doctor-repair", "crates/agent-doctor-voice", "cli", "desktop/src-tauri"]
 
 [workspace.package]
-version = "0.1.100-beta.3"
+version = "0.1.100-beta.4"
 edition = "2021"
 license = "MIT"
 authors = ["Agent Doctor Contributors"]
 
 [workspace.dependencies]
+agent-doctor-cluster = { path = "crates/agent-doctor-cluster" }
 agent-doctor-core = { path = "crates/agent-doctor-core" }
 agent-doctor-mcp = { path = "crates/agent-doctor-mcp" }
 agent-doctor-ocr = { path = "crates/agent-doctor-ocr" }

@@ -1,0 +1,129 @@
+# English<TAB>Chinese overlays for exo dashboard static build.
+# Longer phrases first is safer; script applies pairs in file order.
+# Do not list code identifiers (DownloadCompleted, MlxRing, …).
+
+Connection lost — Reconnecting to EXO…	连接已断开 — 正在重新连接算力服务…
+EXO connects all your devices into an AI supercomputer.	EXO 把你的多台设备连成一台 AI 超级计算机。
+EXO connects your devices into one AI cluster.	EXO 把你的多台设备连成一个 AI 算力集群。
+EXO splits models across devices	EXO 会把模型切开，放到多台设备上一起跑
+exo splits models across devices	EXO 会把模型切开，放到多台设备上一起跑
+Add devices to run larger models	再加设备，就能跑更大的模型
+Devices can leave anytime. Laptops close, machines restart.	设备随时可以离开。笔记本合上、机器重启都没问题。
+When a device disconnects...	当某台设备断开时…
+A device disconnects... start it again on the remaining devices	有设备断开后，可在剩下的设备上重新启动
+Start it again on the remaining devices	在剩余设备上重新启动即可
+exo automatically redistributes the model so inference continues without interruption.	EXO 会自动重新分配模型，推理不会中断。
+exo self-heals	EXO 会自我修复
+The model is automatically distributed. Each device handles a\n                piece.	模型会自动拆分，每台设备负责其中一部分。
+No model fits in your available memory	当前可用内存放不下任何模型
+No valid configurations for current settings	当前设置下没有可用配置
+No valid placement found for this model	这个模型找不到合适的摆放方案
+No valid placement found	找不到合适的摆放方案
+No cycles found with sufficient memory	没有找到内存足够的设备组合
+Not enough memory	内存不够
+Choose a model to start chatting	选一个模型开始对话
+Choose a model	选择模型
+Showing recommended models for your devices (	以下为按你设备推荐的模型（可用内存 
+ GB memory available).	 GB）。
+Select a model to get started.	先选一个模型开始。
+Pick a different model	换一个模型
+Close running models panel	关闭正在运行的模型面板
+Failed to copy:	复制失败：
+Click to copy	点击复制
+Ask anything	随便问点什么
+Add a device	添加设备
+Your EXO Network	你的 EXO 网络
+Your cluster	你的集群
+This device	这台设备
+This Mac	这台 Mac
+Your Mac	你的 Mac
+How EXO works	EXO 怎么工作
+Skip for now	暂时跳过
+Start now	现在开始
+Continue	继续
+ GB combined	 GB 合计
+(example)	（示例）
+Shard 1/2	分片 1/2
+Shard 2/2	分片 2/2
+Getting ready	正在准备
+Almost ready…	快好了…
+Starting…	正在启动…
+Reconnecting	正在重连
+Download failed	下载失败
+Warming up	预热中
+Shutting down	正在关闭
+Unavailable	不可用
+Integrations	对接方式
+Downloads	下载
+Only models this setup can run. Larger ones stay hidden here — open Downloads to manage files already on disk.	只显示这几台电脑现在能跑的。太大的不会出现在这里——要管理已下载文件请打开「下载」。
+To turn a model on for chat, go back to Agent Doctor and pick a size under Shared Compute. Use this page to see what fits; use Downloads to watch progress.	要在对话里用某个模型，请回到 Agent Doctor，在「多机算力」里选一档并启用。本页用来看能不能跑；下载进度请看「下载」。
+Nothing fits in free memory right now. Free some apps, or connect another Mac and refresh.	现在空闲内存里还跑不了任何模型。先关掉占内存的应用，或再连一台 Mac 后点刷新。
+These fit the total memory of your Macs, but not the free memory right now. Quit heavy apps or add another Mac.	按总内存够得上，但当前空闲不够。关掉占内存的应用，或再加一台 Mac。
+Needs more free memory	需要更多空闲内存
+Models this setup can run	这几台电脑能跑的模型
+Could not load the model list. Try again in a moment.	暂时读不到模型列表，稍后再试。
+Suitable models	适合本机
+Open Downloads →	打开下载 →
+Reading memory…	正在读取内存…
+Fits now	现在能跑
+Advanced	高级
+Devices	设备
+Suitable	适合本机
+Search mlx-community models...	搜索 mlx-community 模型…
+Trending on mlx-community	mlx-community 热门
+Search models...	搜索模型…
+Select a model	选择模型
+Cluster memory usage	集群内存占用
+Filter by capability or size	按能力或体积筛选
+Close model picker	关闭模型选择
+Or paste model ID directly...	或直接粘贴模型 ID…
+No matching recent models	没有匹配的最近模型
+No recently launched models	还没有最近启动过的模型
+Close model details	关闭模型详情
+Close info dialog	关闭说明
+Loading trending models...	正在加载热门模型…
+No models found	没有找到模型
+Try a different search term	换个关键词试试
+Recommended for your cluster	适合你当前集群
+Other models	其他模型
+Searching HuggingFace...	正在搜索 HuggingFace…
+From HuggingFace	来自 HuggingFace
+See all results on Hub	在 Hub 查看全部结果
+Clear filters	清除筛选
+Clear all	全部清除
+All models	全部模型
+Show favorited models	显示收藏的模型
+Recently launched models	最近启动过的模型
+Browse and add models from Hugging Face	从 Hugging Face 浏览并添加模型
+Downloaded on:	已下载到：
+Available quantizations:	可用量化：
+# Short labels: whole text-node / whole string only (see build script).
+Chat	对话
+Home	首页
+Model	模型
+Running	运行中
+Loading	加载中
+Loaded	已加载
+Ready	就绪
+Paused	已暂停
+Failed	失败
+Idle	空闲
+Resume	继续
+Shutdown	关闭
+Cancel	取消
+Delete	删除
+Skip	跳过
+Connecting	正在连接
+Connected	已连接
+Downloading	正在下载
+Downloaded	已下载
+Filters:	筛选：
+Family:	系列：
+Capabilities:	能力：
+Variants:	变体：
+All	全部
+Faves	收藏
+Recent	最近
+Hub	社区
+Add	添加
+

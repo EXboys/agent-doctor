@@ -1046,6 +1046,11 @@ const askFilesPanel = createFilesPanel({
     const fromSession = sessionWorkspacePath(activeSession(), chatState.workspaceDoc);
     return fromSession?.trim() || "—";
   },
+  getHostId: () => {
+    const name = sessionWorkspaceName(activeSession(), chatState.workspaceDoc);
+    if (!name) return null;
+    return chatState.workspaceDoc?.workspaces[name]?.hostId?.trim() || null;
+  },
   setStatus,
 });
 setFileLinkRoot(() => {

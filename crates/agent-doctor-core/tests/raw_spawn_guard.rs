@@ -62,6 +62,10 @@ fn guarded_sources() -> Vec<PathBuf> {
     vec![
         manifest.join("src"),
         manifest
+            .join("../agent-doctor-cluster/src")
+            .canonicalize()
+            .expect("agent-doctor-cluster/src next to agent-doctor-core"),
+        manifest
             .join("../agent-doctor-prompt/src")
             .canonicalize()
             .expect("agent-doctor-prompt/src next to agent-doctor-core"),

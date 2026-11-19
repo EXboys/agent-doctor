@@ -602,6 +602,16 @@ export function createSessionsController(deps: SessionsDeps) {
 
       head.append(fold, label);
 
+      const hostLabel = group.name ? doc?.workspaces[group.name]?.hostLabel?.trim() : "";
+      const hostId = group.name ? doc?.workspaces[group.name]?.hostId?.trim() : "";
+      if (hostLabel || hostId) {
+        const badge = document.createElement("span");
+        badge.className = "chat-host-badge";
+        badge.textContent = hostLabel || hostId || t("remote.hostBadgeOffline");
+        badge.title = hostLabel || hostId || "";
+        head.append(badge);
+      }
+
       if (group.name) {
         const projectName = group.name;
         head.addEventListener("contextmenu", (event) => {

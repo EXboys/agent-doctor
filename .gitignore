@@ -45,6 +45,8 @@ desktop/src-tauri/.updater-*.key.pub
 .coverage
 __pycache__/
 *.log
+# Legacy path; exo dashboard build cache now lives under ~/.agent-doctor/cache/
+.cache/
 
 # Local session artifacts
 .zcode/

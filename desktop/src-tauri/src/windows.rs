@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl,
+    WebviewWindowBuilder, WindowEvent,
 };
 
 const ASK_WINDOW_LABEL: &str = "ask";
@@ -15,6 +15,10 @@ const ASK_WINDOW_MIN_WIDTH: f64 = 720.0;
 const ASK_WINDOW_MIN_HEIGHT: f64 = 480.0;
 const RESOURCES_WINDOW_LABEL: &str = "resources";
 const DIAGNOSE_WINDOW_LABEL: &str = "diagnose";
+/// In-app exo board (downloads / devices). External URL, not the app bundle.
+const CLUSTER_BOARD_WINDOW_LABEL: &str = "cluster-board";
+/// In-app llama.cpp board: recommended models, downloads, and other computers.
+const LLAMA_BOARD_WINDOW_LABEL: &str = "llama-board";
 const MAIN_WINDOW_MARGIN: f64 = 16.0;
 const MAIN_WINDOW_MIN_WIDTH: f64 = 360.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 480.0;
@@ -169,6 +173,14 @@ pub(crate) fn layout_main_and_diagnose_side_by_side(app: &AppHandle) {
     layout_main_and_secondary_side_by_side(app, DIAGNOSE_WINDOW_LABEL);
 }
 
+pub(crate) fn layout_main_and_cluster_board_side_by_side(app: &AppHandle) {
+    layout_main_and_secondary_side_by_side(app, CLUSTER_BOARD_WINDOW_LABEL);
+}
+
+pub(crate) fn layout_main_and_llama_board_side_by_side(app: &AppHandle) {
+    layout_main_and_secondary_side_by_side(app, LLAMA_BOARD_WINDOW_LABEL);
+}
+
 fn secondary_is_visible(app: &AppHandle, label: &str) -> bool {
     app.get_webview_window(label)
         .and_then(|window| window.is_visible().ok())
@@ -180,6 +192,8 @@ fn another_secondary_is_visible(app: &AppHandle, except: &str) -> bool {
         ASK_WINDOW_LABEL,
         RESOURCES_WINDOW_LABEL,
         DIAGNOSE_WINDOW_LABEL,
+        CLUSTER_BOARD_WINDOW_LABEL,
+        LLAMA_BOARD_WINDOW_LABEL,
     ]
     .into_iter()
     .any(|label| label != except && secondary_is_visible(app, label))
@@ -219,6 +233,8 @@ fn place_secondary_cascaded(app: &AppHandle, window: &tauri::WebviewWindow) {
         ASK_WINDOW_LABEL,
         RESOURCES_WINDOW_LABEL,
         DIAGNOSE_WINDOW_LABEL,
+        CLUSTER_BOARD_WINDOW_LABEL,
+        LLAMA_BOARD_WINDOW_LABEL,
     ]
     .into_iter()
     .filter(|label| secondary_is_visible(app, label))
@@ -398,16 +414,16 @@ fn with_content_chrome<'a, M: Manager<tauri::Wry>>(
 ) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
     #[cfg(target_os = "macos")]
     {
-        return builder
+        builder
             .decorations(true)
             .shadow(true)
             .hidden_title(true)
             .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .traffic_light_position(LogicalPosition::new(16.0, 14.0));
+            .traffic_light_position(LogicalPosition::new(16.0, 14.0))
     }
     #[cfg(target_os = "windows")]
     {
-        return builder.decorations(false).shadow(true);
+        builder.decorations(false).shadow(true)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -1190,6 +1206,206 @@ pub(crate) fn close_resources_window(app: &AppHandle, destroy: bool) -> Result<(
     Ok(())
 }
 
+/// Build the in-app board URL. Lands on Suitable (models this setup can run);
+/// HeaderNav still reaches Downloads / Home / Devices. Chat chrome stays hidden.
+fn cluster_board_external_url(dashboard_url: &str) -> Result<Url, String> {
+    let trimmed = dashboard_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("算力看板还没准备好，请先开启多机算力。".to_string());
+    }
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("算力看板地址无效。".to_string());
+    }
+    let target = if trimmed.contains('#') {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/#/suitable")
+    };
+    target
+        .parse::<Url>()
+        .map_err(|err| format!("算力看板地址无效：{err}"))
+}
+
+fn attach_cluster_board_window_close_behavior(window: &tauri::WebviewWindow) {
+    let win = window.clone();
+    let app = window.app_handle().clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            dismiss_secondary_window(&win, false);
+            restore_standalone_home(&app, CLUSTER_BOARD_WINDOW_LABEL);
+        }
+    });
+}
+
+/// Frameless caption buttons for the external dashboard (Windows).
+/// macOS uses the same overlay traffic lights as the home window.
+fn cluster_board_chrome_script() -> String {
+    r#"(function(){
+      var ua = navigator.userAgent || "";
+      var os = /Windows/.test(ua) ? "windows" : (/Mac/.test(ua) ? "macos" : "other");
+      document.documentElement.dataset.os = os;
+      function invoke(cmd) {
+        var internals = window.__TAURI_INTERNALS__;
+        if (!internals || typeof internals.invoke !== "function") return;
+        internals.invoke(cmd, { label: "cluster-board" });
+      }
+      function mount() {
+        if (!document.querySelector(".ad-drag-strip")) {
+          var strip = document.createElement("div");
+          strip.className = "ad-drag-strip";
+          strip.setAttribute("data-tauri-drag-region", "");
+          (document.body || document.documentElement).appendChild(strip);
+        }
+        if (os !== "windows" || document.querySelector(".ad-window-controls")) return;
+        var bar = document.createElement("div");
+        bar.className = "ad-window-controls";
+        bar.setAttribute("role", "group");
+        [["minimize","—","plugin:window|minimize"],["maximize","□","plugin:window|toggle_maximize"],["close","×","plugin:window|close"]].forEach(function(item){
+          var button = document.createElement("button");
+          button.type = "button";
+          button.className = "ad-window-control ad-window-control-" + item[0];
+          button.textContent = item[1];
+          button.addEventListener("click", function(){ invoke(item[2]); });
+          bar.appendChild(button);
+        });
+        (document.body || document.documentElement).appendChild(bar);
+      }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", mount);
+      } else {
+        mount();
+      }
+    })();"#
+    .to_string()
+}
+
+fn create_cluster_board_window(
+    app: &AppHandle,
+    url: Url,
+    visible: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let chrome = cluster_board_chrome_script();
+    let window = with_content_chrome(
+        WebviewWindowBuilder::new(app, CLUSTER_BOARD_WINDOW_LABEL, WebviewUrl::External(url))
+            .title("EXO算力管理")
+            .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+            .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
+            .resizable(true)
+            .closable(true)
+            .minimizable(true)
+            .maximizable(true)
+            .visible(visible)
+            .skip_taskbar(!visible)
+            .initialization_script(&chrome)
+            .background_color(tauri::window::Color(238, 242, 248, 255)),
+    )
+    .build()
+    .map_err(|err| format!("failed to open compute board: {err}"))?;
+    apply_content_window_chrome(&window);
+    attach_cluster_board_window_close_behavior(&window);
+    Ok(window)
+}
+
+fn create_llama_board_window(
+    app: &AppHandle,
+    visible: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let window = with_content_chrome(
+        WebviewWindowBuilder::new(
+            app,
+            LLAMA_BOARD_WINDOW_LABEL,
+            WebviewUrl::App("llama-board.html".into()),
+        )
+        .title("本机算力")
+        .inner_size(ASK_WINDOW_WIDTH, ASK_WINDOW_HEIGHT)
+        .min_inner_size(ASK_WINDOW_MIN_WIDTH, ASK_WINDOW_MIN_HEIGHT)
+        .resizable(true)
+        .closable(true)
+        .minimizable(true)
+        .maximizable(true)
+        .visible(visible)
+        .skip_taskbar(!visible)
+        .background_color(tauri::window::Color(238, 242, 248, 255)),
+    )
+    .build()
+    .map_err(|err| format!("failed to open model page: {err}"))?;
+    apply_content_window_chrome(&window);
+    attach_llama_board_window_close_behavior(&window);
+    Ok(window)
+}
+
+fn attach_llama_board_window_close_behavior(window: &tauri::WebviewWindow) {
+    let win = window.clone();
+    let app = window.app_handle().clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            dismiss_secondary_window(&win, false);
+            restore_standalone_home(&app, LLAMA_BOARD_WINDOW_LABEL);
+        }
+    });
+}
+
+pub(crate) fn open_or_focus_llama_board_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(LLAMA_BOARD_WINDOW_LABEL) {
+        show_secondary_window(
+            app,
+            LLAMA_BOARD_WINDOW_LABEL,
+            &existing,
+            layout_main_and_llama_board_side_by_side,
+        );
+        return Ok(());
+    }
+    let window = create_llama_board_window(app, false)?;
+    show_secondary_window(
+        app,
+        LLAMA_BOARD_WINDOW_LABEL,
+        &window,
+        layout_main_and_llama_board_side_by_side,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_llama_board_window_command(app: AppHandle) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || open_or_focus_llama_board_window(&app_for_ui))
+}
+
+pub(crate) fn open_or_focus_cluster_board_window(
+    app: &AppHandle,
+    dashboard_url: &str,
+) -> Result<(), String> {
+    let url = cluster_board_external_url(dashboard_url)?;
+    if let Some(existing) = app.get_webview_window(CLUSTER_BOARD_WINDOW_LABEL) {
+        let _ = existing.navigate(url);
+        show_secondary_window(
+            app,
+            CLUSTER_BOARD_WINDOW_LABEL,
+            &existing,
+            layout_main_and_cluster_board_side_by_side,
+        );
+        return Ok(());
+    }
+    let window = create_cluster_board_window(app, url, false)?;
+    show_secondary_window(
+        app,
+        CLUSTER_BOARD_WINDOW_LABEL,
+        &window,
+        layout_main_and_cluster_board_side_by_side,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_cluster_board_window_command(app: AppHandle, url: String) -> Result<(), String> {
+    let app_for_ui = app.clone();
+    run_on_main_thread(&app, move || {
+        open_or_focus_cluster_board_window(&app_for_ui, &url)
+    })
+}
+
 #[tauri::command]
 pub fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
     let app_for_ui = app.clone();
@@ -1258,7 +1474,20 @@ pub fn focus_main_tab_command(app: AppHandle, tab: Option<String>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::{docked_inner_height, fit_main_inner_height, MAIN_WINDOW_MIN_HEIGHT};
+    use super::{
+        cluster_board_external_url, docked_inner_height, fit_main_inner_height,
+        MAIN_WINDOW_MIN_HEIGHT,
+    };
+
+    #[test]
+    fn cluster_board_url_lands_on_suitable() {
+        let url = cluster_board_external_url("http://127.0.0.1:52415").unwrap();
+        assert_eq!(url.as_str(), "http://127.0.0.1:52415/#/suitable");
+        let already = cluster_board_external_url("http://192.168.1.8:52415/#/downloads").unwrap();
+        assert_eq!(already.as_str(), "http://192.168.1.8:52415/#/downloads");
+        assert!(cluster_board_external_url("").is_err());
+        assert!(cluster_board_external_url("ftp://127.0.0.1:52415").is_err());
+    }
 
     #[test]
     fn a_short_screen_still_gets_the_whole_work_area_alone() {

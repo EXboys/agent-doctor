@@ -1,9 +1,14 @@
 use agent_doctor_core::{
     add_host, add_project, bootstrap_and_add_host, load_remote_hosts, probe_remote_host,
     publish_managed_logins, remove_host, remove_project, run_remote_doctor, BootstrapHostOptions,
-    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostProbeReport, RemoteHostsDocument,
+    LinkDirEntry, LinkDoctorSummary, LinkFilePayload, LinkFixSummary, LinkHello, LinkInitResult,
+    LinkWorkspaceRow, RemoteDoctorOptions, RemoteDoctorReport, RemoteHostProbeReport,
+    RemoteHostsDocument,
 };
 use serde::Serialize;
+use tauri::State;
+
+use crate::link_session::{LinkConnectReport, LinkHostStatus, LinkSessionState};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteHostRow {
@@ -11,6 +16,8 @@ pub struct RemoteHostRow {
     pub target: String,
     pub managed: bool,
     pub project_count: usize,
+    pub display_name: String,
+    pub linked_client: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,6 +49,12 @@ pub fn list_remote_host_rows_command() -> Result<Vec<RemoteHostRow>, String> {
             target: host.display_target(),
             managed: host.is_managed(),
             project_count: host.projects.len(),
+            display_name: if host.display_name.trim().is_empty() {
+                host_id.clone()
+            } else {
+                host.display_name.clone()
+            },
+            linked_client: host.linked_client,
         })
         .collect();
     rows.sort_by(|a, b| a.host_id.cmp(&b.host_id));
@@ -146,6 +159,167 @@ pub async fn run_remote_doctor_command(
             },
         )
         .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn connect_linked_host_command(
+    id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkConnectReport, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || state.connect(&id))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn disconnect_linked_host_command(
+    id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<(), String> {
+    state.disconnect(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_linked_host_status_command(
+    state: State<'_, LinkSessionState>,
+) -> Result<Vec<LinkHostStatus>, String> {
+    Ok(state.status_rows())
+}
+
+#[tauri::command]
+pub async fn linked_list_workspaces_command(
+    host_id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<Vec<LinkWorkspaceRow>, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.list_workspaces())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_init_workspace_command(
+    host_id: String,
+    path: String,
+    name: Option<String>,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkInitResult, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| {
+            client.init_workspace(&path, name.as_deref())
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_list_dir_command(
+    host_id: String,
+    path: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<Vec<LinkDirEntry>, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.list_absolute_dir(&path))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_list_project_dir_command(
+    host_id: String,
+    root: String,
+    relative: Option<String>,
+    state: State<'_, LinkSessionState>,
+) -> Result<Vec<LinkDirEntry>, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| {
+            client.list_project_dir(&root, relative.as_deref().unwrap_or(""))
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_read_file_command(
+    host_id: String,
+    root: String,
+    relative: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkFilePayload, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.read_file(&root, &relative))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_write_file_command(
+    host_id: String,
+    root: String,
+    relative: String,
+    content: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<(), String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| {
+            client.write_file(&root, &relative, &content)
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_workspace_doctor_command(
+    host_id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkDoctorSummary, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.workspace_doctor())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_workspace_fix_command(
+    host_id: String,
+    migrate_claude_mcp: bool,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkFixSummary, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.workspace_fix(migrate_claude_mcp))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_ping_command(
+    host_id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkHello, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.with_client(&host_id, |client| client.ping())
     })
     .await
     .map_err(|error| error.to_string())?

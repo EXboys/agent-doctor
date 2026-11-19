@@ -745,7 +745,35 @@ fn dual_protocol_endpoints(url: &str) -> Option<DualProtocolEndpoints> {
             anthropic_url: "https://openrouter.ai/api".into(),
         });
     }
+    if let Some(cluster) = local_cluster_dual_endpoints(url) {
+        return Some(cluster);
+    }
     None
+}
+
+/// Local / LAN cluster runtimes that natively serve OpenAI under `/v1` and
+/// Anthropic Messages under `/v1/messages` (so `ANTHROPIC_BASE_URL` omits `/v1`):
+/// - exo (`:52415`)
+/// - Ollama (`:11434`)
+fn local_cluster_dual_endpoints(raw_url: &str) -> Option<DualProtocolEndpoints> {
+    let parsed = url::Url::parse(raw_url.trim()).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let port = parsed.port()?;
+    if !matches!(port, 52415 | 11434) {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    let path = parsed.path().trim_end_matches('/');
+    if !matches!(path, "" | "/v1") {
+        return None;
+    }
+    let origin = format!("{}://{}:{}", parsed.scheme(), host, port);
+    Some(DualProtocolEndpoints {
+        openai_url: format!("{origin}/v1"),
+        anthropic_url: origin,
+    })
 }
 
 fn resolve_team_bundle() -> Result<EndpointBundle> {
@@ -972,6 +1000,26 @@ mod tests {
         let or = dual_protocol_endpoints("https://openrouter.ai/api/v1").expect("openrouter");
         assert_eq!(or.openai_url, "https://openrouter.ai/api/v1");
         assert_eq!(or.anthropic_url, "https://openrouter.ai/api");
+    }
+
+    #[test]
+    fn local_cluster_dual_endpoints_cover_exo_and_ollama() {
+        let exo = dual_protocol_endpoints("http://127.0.0.1:52415/v1").expect("exo localhost");
+        assert_eq!(exo.openai_url, "http://127.0.0.1:52415/v1");
+        assert_eq!(exo.anthropic_url, "http://127.0.0.1:52415");
+
+        let exo_lan = dual_protocol_endpoints("http://192.168.1.23:52415").expect("exo lan root");
+        assert_eq!(exo_lan.openai_url, "http://192.168.1.23:52415/v1");
+        assert_eq!(exo_lan.anthropic_url, "http://192.168.1.23:52415");
+        assert!(provider_supports_protocol(
+            PROTOCOL_OPENAI,
+            "http://192.168.1.23:52415/v1",
+            PROTOCOL_ANTHROPIC
+        ));
+
+        let ollama = dual_protocol_endpoints("http://127.0.0.1:11434/v1").expect("ollama");
+        assert_eq!(ollama.openai_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(ollama.anthropic_url, "http://127.0.0.1:11434");
     }
 
     #[test]

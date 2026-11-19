@@ -1,0 +1,670 @@
+/* Agent Doctor visual system for the embedded EXO compute board.
+   Matches desktop/src/styles.css + resources.css: soft cool-slate canvas,
+   rounded white cards, pill segmented tabs, system sans-serif typography,
+   and no sci-fi CRT scanlines / monospace ALL-CAPS chrome. */
+
+:root {
+  color-scheme: light;
+  --ad-bg: #eef2f8;
+  --ad-surface: #ffffff;
+  --ad-surface-muted: #f5f7fb;
+  --ad-surface-inset: #edf1f8;
+  --ad-border: rgba(15, 23, 42, 0.08);
+  --ad-border-strong: rgba(15, 23, 42, 0.13);
+  --ad-text: #0f172a;
+  --ad-text-muted: #64748b;
+  --ad-text-soft: #94a3b8;
+  --ad-primary: #3b82f6;
+  --ad-primary-deep: #2563eb;
+  --ad-shadow-card: 0 10px 28px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --ad-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.05);
+
+  /* Remap exo's design tokens so upstream pages (Downloads / Devices) harmonize. */
+  --exo-black: #f4f7fb;
+  --exo-dark-gray: #eef2f8;
+  --exo-medium-gray: #dce3ef;
+  --exo-light-gray: #64748b;
+  --exo-yellow: #2563eb;
+  --exo-yellow-darker: #1d4ed8;
+  --exo-yellow-glow: #60a5fa;
+  --exo-grid: rgba(15, 23, 42, 0.06);
+  --exo-scanline: transparent;
+  --radius: 0.75rem;
+  --background: var(--ad-bg);
+  --foreground: var(--ad-text);
+  --card: var(--ad-surface);
+  --card-foreground: var(--ad-text);
+  --popover: var(--ad-surface);
+  --popover-foreground: var(--ad-text);
+  --primary: var(--ad-primary);
+  --primary-foreground: #ffffff;
+  --secondary: var(--ad-surface-muted);
+  --secondary-foreground: var(--ad-text);
+  --muted: var(--ad-surface-muted);
+  --muted-foreground: var(--ad-text-muted);
+  --accent: #eff6ff;
+  --accent-foreground: #1d4ed8;
+  --border: var(--ad-border);
+  --input: var(--ad-border-strong);
+  --ring: var(--ad-primary);
+}
+
+html,
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(59, 130, 246, 0.09), transparent 38%),
+    radial-gradient(circle at 88% 6%, rgba(14, 165, 233, 0.07), transparent 34%),
+    linear-gradient(180deg, #f5f7fb 0%, #eef2f8 100%) !important;
+  color: var(--ad-text) !important;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif !important;
+  letter-spacing: 0 !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Strip stock exo sci-fi overlays & monospace uppercase shouting. */
+.scanlines,
+.scanlines::before,
+.shooting-stars,
+.shooting-star {
+  display: none !important;
+}
+
+.font-mono {
+  font-family: inherit !important;
+}
+
+.uppercase {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+/* Remap hardcoded white text utilities left in upstream Svelte files. */
+.text-white {
+  color: var(--ad-text) !important;
+}
+.text-white\/40,
+.text-white\/45 {
+  color: var(--ad-text-soft) !important;
+}
+.text-white\/50,
+.text-white\/55,
+.text-white\/60 {
+  color: var(--ad-text-muted) !important;
+}
+.text-white\/70,
+.text-white\/80,
+.text-white\/90 {
+  color: #334155 !important;
+}
+
+/* ───────── Top bar (matches Agent Doctor home brand + pill segmented tabs) ───────── */
+.ad-board-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border-bottom: 1px solid var(--ad-border);
+  user-select: none;
+}
+
+html[data-os="macos"] .ad-board-header {
+  padding-left: 86px;
+}
+
+html[data-os="windows"] .ad-board-header {
+  padding-right: 132px;
+}
+
+.ad-board-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ad-text);
+  cursor: pointer;
+}
+
+.ad-board-brand:disabled {
+  cursor: default;
+}
+
+.ad-board-brand-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(145deg, #3b82f6 0%, #06b6d4 100%);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
+  flex-shrink: 0;
+}
+
+.ad-board-brand-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ad-text);
+  white-space: nowrap;
+}
+
+.ad-board-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--ad-surface-inset);
+  border: 1px solid var(--ad-border);
+}
+
+.ad-board-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ad-text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ad-board-tab:hover {
+  color: var(--ad-text);
+}
+
+.ad-board-tab.is-active {
+  background: var(--ad-surface);
+  color: var(--ad-primary-deep);
+  box-shadow: var(--ad-shadow-soft);
+}
+
+.ad-board-dl-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--ad-primary-deep);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* ───────── Suitable page cards (matches health-card / ws-quick-item) ───────── */
+.ad-page-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ad-page-body {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 18px 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ad-hero-card,
+.ad-section-card,
+.ad-empty-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--ad-border);
+  border-radius: 16px;
+  box-shadow: var(--ad-shadow-card);
+}
+
+.ad-hero-card {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ad-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ad-hero-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ad-text);
+  letter-spacing: -0.01em;
+}
+
+.ad-hero-sub {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ad-text-muted);
+}
+
+.ad-btn-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  color: var(--ad-primary-deep);
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ad-btn-pill:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
+}
+
+.ad-btn-pill.is-primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+}
+
+.ad-btn-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ad-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ad-meter-box {
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: var(--ad-surface-muted);
+  border: 1px solid var(--ad-border);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ad-meter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--ad-text-muted);
+}
+
+.ad-meter-head strong {
+  color: var(--ad-primary-deep);
+  font-weight: 650;
+}
+
+.ad-meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.ad-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%);
+  transition: width 0.25s ease;
+}
+
+.ad-meter-fill.is-indeterminate {
+  width: 40%;
+  animation: ad-meter-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes ad-meter-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(280%); }
+}
+
+.ad-callout {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.ad-section-card {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ad-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ad-section-head h2 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ad-text);
+}
+
+.ad-section-note {
+  margin: 3px 0 0;
+  font-size: 0.75rem;
+  color: var(--ad-text-muted);
+}
+
+.ad-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--ad-surface-inset);
+  color: var(--ad-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ad-badge.is-ok {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+}
+
+.ad-model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.ad-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--ad-border);
+  background: var(--ad-surface-muted);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ad-model-row.is-ready {
+  background: #ffffff;
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.ad-model-row.is-ready:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: #f8fbff;
+}
+
+button.ad-model-row {
+  width: 100%;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ad-model-row.is-selected {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.1);
+}
+
+.ad-model-row:disabled {
+  cursor: default;
+}
+
+.ad-model-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ad-model-main strong {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--ad-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ad-model-main span {
+  font-size: 0.7rem;
+  color: var(--ad-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ad-size-pill {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--ad-surface-inset);
+  color: var(--ad-text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.ad-size-pill.is-ready {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--ad-primary-deep);
+}
+
+.ad-empty-card {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--ad-text-muted);
+}
+
+.ad-empty-card.is-error {
+  color: #dc2626;
+}
+
+.ad-empty-inline {
+  margin: 0;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--ad-surface-muted);
+  font-size: 0.78rem;
+  color: var(--ad-text-muted);
+}
+
+.ad-foot-link {
+  padding-top: 2px;
+}
+
+.ad-foot-link a {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ad-primary-deep);
+  text-decoration: none;
+}
+
+.ad-foot-link a:hover,
+.ad-foot-link button:hover {
+  text-decoration: underline;
+}
+
+.ad-foot-link button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ad-primary-deep);
+  cursor: pointer;
+}
+
+.ad-field {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--ad-border);
+  background: var(--ad-surface-muted);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+/* Shared device canvas. EXO 组网 and the llama board both mount this. */
+.ad-topo-stage {
+  min-height: 460px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--ad-border);
+  box-shadow: var(--ad-shadow-card);
+  overflow: hidden;
+}
+
+.ad-topo-stage-fill {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.ad-topo-svg {
+  display: block;
+  width: 100%;
+  height: 460px;
+}
+
+.ad-topo-stage-fill .ad-topo-svg {
+  height: 100%;
+  min-height: 420px;
+}
+
+/* ───────── Harmonize upstream Downloads / Devices tables & modals ───────── */
+.max-w-7xl {
+  max-width: 860px !important;
+}
+
+.bg-exo-black\/30,
+.bg-exo-black\/40 {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: var(--ad-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--ad-shadow-card) !important;
+}
+
+.bg-exo-black\/60 {
+  background: var(--ad-surface-inset) !important;
+}
+
+table thead tr {
+  background: var(--ad-surface-muted) !important;
+}
+
+table th.bg-exo-black,
+table td.bg-exo-dark-gray {
+  background: #ffffff !important;
+}
+
+table tr.group:hover td {
+  background: #f8fbff !important;
+}
+
+/* Topology SVG node labels on light canvas. */
+svg text {
+  fill: #1e293b;
+}
+
+/* Drag strip & frameless Windows caption controls. */
+.ad-drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  z-index: 70;
+}
+
+html[data-os="windows"] .ad-drag-strip {
+  right: 120px;
+}
+
+.ad-window-controls {
+  display: none;
+}
+
+html[data-os="windows"] .ad-window-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  height: 36px;
+}
+
+.ad-window-control {
+  width: 40px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #152033;
+  cursor: pointer;
+}
+
+.ad-window-control:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.ad-window-control-close:hover {
+  background: #e81123;
+  color: #fff;
+}

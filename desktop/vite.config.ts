@@ -36,6 +36,7 @@ export default defineConfig(async () => ({
         chat: resolve(__dirname, "chat.html"),
         resources: resolve(__dirname, "resources.html"),
         diagnose: resolve(__dirname, "diagnose.html"),
+        llamaBoard: resolve(__dirname, "llama-board.html"),
         island: resolve(__dirname, "island.html"),
       },
     },
@@ -47,6 +48,9 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
+    fs: {
+      allow: [resolve(__dirname, "..")],
+    },
     port: 1420,
     strictPort: true,
     // Bind IPv4 explicitly — macOS `localhost` often prefers ::1, which leaves

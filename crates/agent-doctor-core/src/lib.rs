@@ -150,13 +150,18 @@ pub use profile::{
     read_company_profile, AgentProfile, CompanyProfile, ProviderKind,
 };
 pub use remote::{
-    add_host, add_project, bootstrap_and_add_host, list_hosts, list_projects, load_remote_hosts,
-    probe_remote_host, publish_managed_logins, remote_hosts_path, remote_key_path_for,
-    remote_keys_dir, remote_root_dir, remove_host, remove_project, run_remote_doctor,
-    run_remote_doctor_with_backend, save_remote_hosts, upsert_managed_host,
-    write_remote_doctor_report, BootstrapHostOptions, RemoteDoctorOptions, RemoteDoctorReport,
-    RemoteHostEntry, RemoteHostProbeReport, RemoteHostsDocument, RemoteProjectEntry,
-    RemoteRuntimeDoctorResult, SshBackend, SshTarget,
+    add_host, add_project, bootstrap_and_add_host, is_link_daemon_running, list_hosts,
+    list_projects, load_remote_hosts, mark_host_linked, open_link_tunnel, probe_local_daemon,
+    probe_remote_host, publish_managed_logins, register_link_method, remote_hosts_path,
+    remote_key_path_for, remote_keys_dir, remote_root_dir, remove_host, remove_project,
+    run_remote_doctor, run_remote_doctor_with_backend, save_remote_hosts, spawn_link_daemon,
+    upsert_managed_host, write_remote_doctor_report, BootstrapHostOptions, LinkClient,
+    LinkConnectFailure, LinkDaemonGuard, LinkDirEntry, LinkDoctorSummary, LinkFilePayload,
+    LinkFixSummary, LinkHello, LinkImageBlob, LinkInitResult, LinkMethodHandler, LinkMethodOutcome,
+    LinkPush, LinkResponse, LinkRpcContext, LinkSocket, LinkTunnel, LinkWorkspaceRow,
+    RemoteDoctorOptions, RemoteDoctorReport, RemoteHostEntry, RemoteHostProbeReport,
+    RemoteHostsDocument, RemoteProjectEntry, RemoteRuntimeDoctorResult, SshBackend, SshTarget,
+    LINK_DAEMON_PORT,
 };
 // Repair vocabulary that lives in core; the playbooks and execution loop
 // moved to `agent-doctor-repair` (see its facade for those symbols).

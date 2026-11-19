@@ -27,6 +27,10 @@ import {
   bootstrapRemoteHost,
   addRemoteProject,
   openDiagnoseWindow,
+  connectLinkedHost,
+  disconnectLinkedHost,
+  linkedWorkspaceDoctor,
+  linkedWorkspaceFix,
 } from "./ipc";
 
 export interface WorkspaceUiDeps {
@@ -329,18 +333,25 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
           : "";
       const sub = [row.target, projects, detail].filter(Boolean).join(" · ");
       const firstProject = lastRemoteProjects.find((p) => p.host_id === row.host_id);
+      const title = row.display_name?.trim() || row.host_id;
       const doctorBtn = firstProject
         ? `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="doctor" data-remote-host="${escapeHtml(row.host_id)}" data-remote-target="${escapeHtml(`${firstProject.host_id}/${firstProject.project_id}`)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.doctor"))}</button>`
         : `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="add-path" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.addPath"))}</button>`;
+      const linkBtns = `
+              <button type="button" class="btn-primary btn-compact" data-remote-host-action="connect" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.connectClient"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="linked-doctor" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.linkedDoctor"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="linked-fix" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.linkedFix"))}</button>
+              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="disconnect" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.disconnectClient"))}</button>`;
       return `
         <li class="ws-manage-item">
           <div class="ws-manage-main">
-            <strong>${escapeHtml(row.host_id)}</strong>
+            <strong>${escapeHtml(title)}</strong>
             <span>${escapeHtml(sub)}</span>
           </div>
           <div class="ws-manage-right">
             <span class="badge ${badge.className}">${escapeHtml(badge.label)}</span>
             <div class="ws-manage-actions">
+              ${linkBtns}
               <button type="button" class="btn-ghost btn-compact" data-remote-host-action="probe" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.probe"))}</button>
               ${doctorBtn}
               <button type="button" class="btn-ghost btn-compact" data-remote-host-action="remove" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.removeHost"))}</button>
@@ -350,6 +361,53 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
       `;
     })
     .join("");
+}
+
+async function connectLinkedHostUi(hostId: string): Promise<void> {
+  if (remoteBusy) return;
+  remoteBusy = true;
+  remoteHintEl.textContent = t("remote.connectClientRunning");
+  try {
+    const report = await connectLinkedHost({ id: hostId });
+    remoteProbeStatus.set(hostId, report.ok ? "ok" : "fail");
+    remoteProbeMessage.set(hostId, report.message);
+    remoteHintEl.textContent = report.ok
+      ? t("remote.connectClientOk", { name: report.computerName || hostId })
+      : report.message || t("remote.connectClientFail");
+    await loadRemoteProjects();
+  } catch (error) {
+    remoteHintEl.textContent = withErrorDetail(t("remote.connectClientFail"), error);
+  } finally {
+    remoteBusy = false;
+  }
+}
+
+async function linkedDoctorUi(hostId: string): Promise<void> {
+  if (remoteBusy) return;
+  remoteBusy = true;
+  remoteHintEl.textContent = t("remote.linkedDoctorRunning");
+  try {
+    const report = await linkedWorkspaceDoctor({ hostId });
+    remoteHintEl.textContent = t("remote.linkedDoctorOk", { message: report.message });
+  } catch (error) {
+    remoteHintEl.textContent = withErrorDetail(t("remote.doctorFailed"), error);
+  } finally {
+    remoteBusy = false;
+  }
+}
+
+async function linkedFixUi(hostId: string): Promise<void> {
+  if (remoteBusy) return;
+  remoteBusy = true;
+  remoteHintEl.textContent = t("remote.linkedFixRunning");
+  try {
+    const report = await linkedWorkspaceFix({ hostId, migrateClaudeMcp: false });
+    remoteHintEl.textContent = t("remote.linkedFixOk", { message: report.message });
+  } catch (error) {
+    remoteHintEl.textContent = withErrorDetail(t("remote.doctorFailed"), error);
+  } finally {
+    remoteBusy = false;
+  }
 }
 
 function renderRemoteList(rows: RemoteProjectRow[]): void {
@@ -638,6 +696,29 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     }
     if (action === "probe") {
       void probeRemoteHostUi(host);
+      return;
+    }
+    if (action === "connect") {
+      void connectLinkedHostUi(host);
+      return;
+    }
+    if (action === "disconnect") {
+      void disconnectLinkedHost({ id: host })
+        .then(() => {
+          remoteHintEl.textContent = t("remote.disconnectClient");
+          return loadRemoteProjects();
+        })
+        .catch((error) => {
+          remoteHintEl.textContent = withErrorDetail(t("remote.removeFailed"), error);
+        });
+      return;
+    }
+    if (action === "linked-doctor") {
+      void linkedDoctorUi(host);
+      return;
+    }
+    if (action === "linked-fix") {
+      void linkedFixUi(host);
       return;
     }
     if (action === "add-path") {

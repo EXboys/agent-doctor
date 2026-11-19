@@ -991,6 +991,89 @@ export function runRemoteDoctor(args: {
   return invoke("run_remote_doctor_command", args);
 }
 
+export function connectLinkedHost(args: { id: string }): Promise<import("./types").LinkConnectReport> {
+  return invoke("connect_linked_host_command", args);
+}
+
+export function disconnectLinkedHost(args: { id: string }): Promise<void> {
+  return invoke("disconnect_linked_host_command", args);
+}
+
+export function listLinkedHostStatus(): Promise<import("./types").LinkHostStatus[]> {
+  return invoke("list_linked_host_status_command");
+}
+
+export function linkedListWorkspaces(args: {
+  hostId: string;
+}): Promise<import("./types").LinkWorkspaceRow[]> {
+  return invoke("linked_list_workspaces_command", args);
+}
+
+export function linkedInitWorkspace(args: {
+  hostId: string;
+  path: string;
+  name?: string | null;
+}): Promise<{ name: string; path: string }> {
+  return invoke("linked_init_workspace_command", args);
+}
+
+export function linkedListDir(args: {
+  hostId: string;
+  path: string;
+}): Promise<import("./types").LinkDirEntry[]> {
+  return invoke("linked_list_dir_command", args);
+}
+
+export function linkedListProjectDir(args: {
+  hostId: string;
+  root: string;
+  relative?: string | null;
+}): Promise<import("./types").LinkDirEntry[]> {
+  return invoke("linked_list_project_dir_command", args);
+}
+
+export function linkedReadFile(args: {
+  hostId: string;
+  root: string;
+  relative: string;
+}): Promise<{
+  relative_path: string;
+  name: string;
+  content: string;
+  language: string;
+  editable: boolean;
+  is_image: boolean;
+  absolute_path: string;
+  size_bytes: number;
+}> {
+  return invoke("linked_read_file_command", args);
+}
+
+export function linkedWriteFile(args: {
+  hostId: string;
+  root: string;
+  relative: string;
+  content: string;
+}): Promise<void> {
+  return invoke("linked_write_file_command", args);
+}
+
+export function linkedWorkspaceDoctor(args: {
+  hostId: string;
+}): Promise<import("./types").LinkDoctorSummary> {
+  return invoke("linked_workspace_doctor_command", args);
+}
+
+export function linkedWorkspaceFix(args: {
+  hostId: string;
+  migrateClaudeMcp: boolean;
+}): Promise<import("./types").LinkFixSummary> {
+  return invoke("linked_workspace_fix_command", {
+    hostId: args.hostId,
+    migrateClaudeMcp: args.migrateClaudeMcp,
+  });
+}
+
 export function useProfile(args: { name: string }): Promise<UseProfileReport> {
   return invoke("use_profile_command", args);
 }
@@ -1148,6 +1231,15 @@ export function closeResourcesWindow(args: { destroy?: boolean | null }): Promis
 
 export function openDiagnoseWindow(args: { runtime?: string | null }): Promise<void> {
   return invoke("open_diagnose_window_command", args);
+}
+
+/** Open the local exo compute board in an in-app window (downloads / devices). */
+export function openClusterBoardWindow(args: { url: string }): Promise<void> {
+  return invoke("open_cluster_board_window_command", args);
+}
+
+export function openLlamaBoardWindow(): Promise<void> {
+  return invoke("open_llama_board_window_command");
 }
 
 export function closeDiagnoseWindow(args: { destroy?: boolean | null }): Promise<void> {
@@ -1392,4 +1484,58 @@ export async function openBrowserUrl(url: string): Promise<void> {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
   }
+}
+
+export function getClusterStatus(): Promise<import("./types").ClusterStatus> {
+  return invoke("get_cluster_status_command");
+}
+
+export function startLocalCluster(): Promise<import("./types").ClusterStatus> {
+  return invoke("start_local_cluster_command");
+}
+
+export function cancelClusterInstall(): Promise<void> {
+  return invoke("cancel_cluster_install_command");
+}
+
+export function stopCluster(): Promise<import("./types").ClusterStatus> {
+  return invoke("stop_cluster_command");
+}
+
+export function activateClusterModel(modelId: string): Promise<import("./types").ClusterStatus> {
+  return invoke("activate_cluster_model_command", { modelId });
+}
+
+export function scanLanClusters(): Promise<import("./types").LanClusterCandidate[]> {
+  return invoke("scan_lan_clusters_command");
+}
+
+export function scanLlamaPeers(): Promise<string[]> {
+  return invoke("scan_llama_peers_command");
+}
+
+export function connectRemoteCluster(
+  hostOrUrl: string,
+  modelId?: string | null,
+): Promise<import("./types").ClusterStatus> {
+  return invoke("connect_remote_cluster_command", {
+    hostOrUrl,
+    modelId: modelId ?? null,
+  });
+}
+
+export function setClusterPairingCode(
+  code?: string | null,
+): Promise<import("./types").ClusterStatus> {
+  return invoke("set_cluster_pairing_code_command", { code: code ?? null });
+}
+
+export function setClusterBackend(
+  backend: import("./types").ClusterBackendKind,
+): Promise<import("./types").ClusterStatus> {
+  return invoke("set_cluster_backend_command", { backend });
+}
+
+export function setLlamaPeerHosts(peers: string): Promise<import("./types").ClusterStatus> {
+  return invoke("set_llama_peer_hosts_command", { peers });
 }

@@ -2662,6 +2662,102 @@ html[data-theme="dark"] .chat-project-menu {
   letter-spacing: 0.01em;
 }
 
+.chat-host-badge {
+  flex: 0 0 auto;
+  max-width: 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted, #667);
+  background: color-mix(in srgb, var(--line, #ddd) 55%, transparent);
+}
+
+.chat-host-pick {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 12, 18, 0.42);
+}
+
+.chat-host-pick-card {
+  width: min(420px, 100%);
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--panel, #fff);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.chat-host-pick-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.chat-host-pick-path,
+.chat-host-pick-empty {
+  margin: 0 0 10px;
+  color: var(--muted, #667);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.chat-host-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.chat-host-pick-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  background: color-mix(in srgb, var(--line, #ddd) 35%, transparent);
+  cursor: pointer;
+}
+
+.chat-host-pick-item:hover {
+  background: color-mix(in srgb, var(--accent, #4f6ef7) 14%, transparent);
+}
+
+.chat-host-pick-item strong {
+  font-size: 13px;
+}
+
+.chat-host-pick-item span {
+  font-size: 11px;
+  color: var(--muted, #667);
+}
+
+.chat-host-pick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.chat-host-pick-cancel {
+  width: 100%;
+}
+
 .chat-session-group-rename {
   width: 100%;
   min-width: 0;

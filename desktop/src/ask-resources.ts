@@ -19,7 +19,14 @@ import type {
   McpInventoryItem,
   SkillInventoryItem,
 } from "./types";
-import { knowledgePages, listSkillsInventory, listMcpInventory, listWorkspaces } from "./ipc";
+import {
+  knowledgePages,
+  linkedListWorkspaces,
+  listLinkedHostStatus,
+  listSkillsInventory,
+  listMcpInventory,
+  listWorkspaces,
+} from "./ipc";
 
 export type ResourceEmptyAction = "skill" | "tool";
 
@@ -82,7 +89,17 @@ export type MentionRef = {
 
 export type WorkspaceDoc = {
   active: string | null;
-  workspaces: Record<string, { path: string; title?: string }>;
+  workspaces: Record<
+    string,
+    {
+      path: string;
+      title?: string;
+      /** Empty / missing = this computer. */
+      hostId?: string;
+      /** Shown as the Paseo-style host badge. */
+      hostLabel?: string;
+    }
+  >;
 };
 
 export type MentionQuery = {
@@ -1054,7 +1071,26 @@ export class AskResourcesController {
       try {
         const doc = await listWorkspaces();
         workspaceDoc = doc;
-        opts.renderWorkspaceSwitcher(doc);
+        try {
+          const statuses = await listLinkedHostStatus();
+          for (const status of statuses.filter((s) => s.connected)) {
+            const remoteRows = await linkedListWorkspaces({ hostId: status.hostId }).catch(
+              () => [],
+            );
+            for (const row of remoteRows) {
+              const key = `${status.hostId}::${row.name}`;
+              workspaceDoc.workspaces[key] = {
+                path: row.path,
+                title: row.title?.trim() || row.name,
+                hostId: status.hostId,
+                hostLabel: status.displayName || status.computerName || status.hostId,
+              };
+            }
+          }
+        } catch {
+          // Linked hosts are optional; local projects still load.
+        }
+        opts.renderWorkspaceSwitcher(workspaceDoc);
         const projectNames = Object.keys(doc.workspaces);
         if (doc.active && doc.workspaces[doc.active]?.path) {
           workspaceCwd = doc.workspaces[doc.active].path;

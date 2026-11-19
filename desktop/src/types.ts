@@ -266,6 +266,7 @@ export interface TeamupsMallCatalog {
 export interface TeamupsAccountStatus {
   base_url: string;
   signed_in: boolean;
+  account_id?: string | null;
   name?: string | null;
   pack_count: number;
   packs: string[];
@@ -300,6 +301,70 @@ export interface TeamupsLoginStart {
 export interface TeamupsLoginPoll {
   status: "pending" | "approved" | "expired" | "denied";
   packs: string[];
+}
+
+export type ClusterBackendKind = "exo" | "ollama" | "llama_cpp";
+export type ClusterHostSupport = "supported" | "mac_os_too_old" | "consume_only";
+export type ClusterDaemonOwner = "not_running" | "managed_by_us" | "external_process";
+
+export interface ClusterNodeSummary {
+  node_id: string;
+  label: string;
+  total_memory_bytes: number;
+  available_memory_bytes: number;
+}
+
+export interface ClusterModelTier {
+  id: "fast" | "balanced" | "large" | string;
+  model_id: string;
+  min_usable_bytes: number;
+  fits_cluster: boolean;
+  recommended: boolean;
+  size_bytes?: number;
+  on_disk?: boolean;
+}
+
+export interface ClusterResolvedNamespace {
+  namespace: string;
+  source: "custom_code" | "account" | "generated_code";
+  pairing_code?: string | null;
+}
+
+export interface ClusterStatus {
+  backend: ClusterBackendKind;
+  exo_compatible: boolean;
+  offered_backends: ClusterBackendKind[];
+  host_support: ClusterHostSupport;
+  runtime_installed: boolean;
+  daemon_owner: ClusterDaemonOwner;
+  reachable: boolean;
+  dashboard_url?: string | null;
+  namespace: ClusterResolvedNamespace;
+  nodes: ClusterNodeSummary[];
+  usable_memory_bytes: number;
+  active_models: string[];
+  incompatible_peer_count: number;
+  tiers: ClusterModelTier[];
+  selected_model: string;
+  provider_active: boolean;
+  peer_hosts: string;
+  remote_origin?: string | null;
+}
+
+export interface LanClusterCandidate {
+  backend: ClusterBackendKind;
+  origin: string;
+  host: string;
+  node_count: number;
+  device_labels: string[];
+  usable_memory_bytes: number;
+  active_models: string[];
+}
+
+export interface ClusterInstallProgress {
+  downloaded_bytes: number;
+  total_bytes?: number | null;
+  stage: "downloading" | "extracting" | string;
 }
 
 export interface SkillAgentUsage {
@@ -638,6 +703,52 @@ export interface RemoteHostRow {
   target: string;
   managed: boolean;
   project_count: number;
+  display_name?: string;
+  linked_client?: boolean;
+}
+
+export interface LinkHostStatus {
+  hostId: string;
+  displayName: string;
+  target: string;
+  linkedClient: boolean;
+  connected: boolean;
+  computerName: string;
+  message: string;
+}
+
+export interface LinkConnectReport {
+  hostId: string;
+  ok: boolean;
+  connected: boolean;
+  computerName: string;
+  message: string;
+  kind: string;
+}
+
+export interface LinkWorkspaceRow {
+  name: string;
+  path: string;
+  title?: string;
+  active: boolean;
+}
+
+export interface LinkDirEntry {
+  name: string;
+  relative_path: string;
+  is_dir: boolean;
+}
+
+export interface LinkDoctorSummary {
+  pass: number;
+  warn: number;
+  fail: number;
+  message: string;
+}
+
+export interface LinkFixSummary {
+  applied: number;
+  message: string;
 }
 
 export type RemoteHostProbeStatus = "unknown" | "probing" | "ok" | "fail";

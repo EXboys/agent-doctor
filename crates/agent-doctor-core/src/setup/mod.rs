@@ -43,12 +43,13 @@ pub use personal::{
     activate_personal_provider, delete_personal_provider, ensure_teamups_official_provider,
     execute_personal_provider_setup, list_personal_providers, load_active_personal_provider,
     load_personal_provider, load_personal_provider_status, normalize_personal_gateway_url,
-    normalize_protocol, upsert_personal_provider, verify_personal_provider,
-    verify_personal_provider_with_protocol, PersonalProviderEntry, PersonalProviderListItem,
-    PersonalProviderOptions, PersonalProviderSetupReport, PersonalProviderStatus,
-    PersonalProviderVerifyReport, PersonalProvidersDocument, UpsertPersonalProviderOptions,
-    MODEL_ENV, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI, PROVIDER_PROTOCOL_ENV,
-    TEAMUPS_OFFICIAL_PROVIDER_ID,
+    normalize_protocol, upsert_local_cluster_provider, upsert_personal_provider,
+    verify_personal_provider, verify_personal_provider_with_protocol, PersonalProviderEntry,
+    PersonalProviderListItem, PersonalProviderOptions, PersonalProviderSetupReport,
+    PersonalProviderStatus, PersonalProviderVerifyReport, PersonalProvidersDocument,
+    UpsertPersonalProviderOptions, LOCAL_CLUSTER_PLACEHOLDER_KEY, LOCAL_CLUSTER_PROVIDER_ID,
+    LOCAL_CLUSTER_PROVIDER_NAME, MODEL_ENV, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI,
+    PROVIDER_PROTOCOL_ENV, TEAMUPS_OFFICIAL_PROVIDER_ID,
 };
 pub use pipeline::openai_gateway_for_provider_url;
 pub use pipeline::{

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>本机算力</title>
+    <script>
+      var ua = navigator.userAgent;
+      document.documentElement.dataset.os = /\bWindows\b/.test(ua) ? "windows" : /Mac/i.test(ua) ? "macos" : "other";
+    </script>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/window-chrome.css" />
+    <link rel="stylesheet" href="/src/llama-board.css" />
+  </head>
+  <body>
+    <div class="ad-page-shell">
+      <header class="ad-board-header" data-tauri-drag-region>
+        <div class="ad-board-brand">
+          <span class="ad-board-brand-badge" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="7" height="7" rx="1.5"></rect>
+              <rect x="14" y="4" width="7" height="7" rx="1.5"></rect>
+              <rect x="8.5" y="13.5" width="7" height="7" rx="1.5"></rect>
+              <path d="M6.5 11v2.5h11V11"></path>
+            </svg>
+          </span>
+          <span class="ad-board-brand-title" data-i18n="cluster.boardTitle">本机算力</span>
+        </div>
+        <nav class="ad-board-tabs" id="llama-board-tabs" aria-label="本机算力"></nav>
+      </header>
+      <main class="ad-page-body" id="llama-board-main"></main>
+    </div>
+    <script type="module" src="/src/llama-board.ts"></script>
+  </body>
+</html>

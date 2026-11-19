@@ -13,7 +13,7 @@ mod uninstall;
 pub mod workbuddy;
 pub mod zcode;
 
-pub use download_route::{use_china_mirrors, NPM_MIRROR};
+pub use download_route::{use_china_mirrors, GITHUB_MIRROR_PREFIX, NPM_MIRROR};
 
 /// A PowerShell script passed whole, so `cmd /C` never parses its quotes or pipes.
 pub(crate) fn powershell_encoded(script: &str) -> String {
