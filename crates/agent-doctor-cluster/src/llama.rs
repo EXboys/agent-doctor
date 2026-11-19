@@ -561,7 +561,7 @@ where
 
 fn extract_archive(archive: &Path, dest: &Path) -> Result<()> {
     let name = archive.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let mut cmd = Command::new("tar");
+    let mut cmd = Command::new("tar"); // raw-spawn-ok
     if name.ends_with(".zip") {
         cmd.arg("-xf");
     } else {
@@ -838,7 +838,7 @@ fn reap_pid_file(name: &str) {
         }
         #[cfg(windows)]
         {
-            let _ = Command::new("taskkill")
+            let _ = Command::new("taskkill") // raw-spawn-ok
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .output();
         }
@@ -904,7 +904,9 @@ fn peer_info_body() -> String {
 }
 
 fn machine_name() -> String {
-    let output = Command::new("hostname").stdin(Stdio::null()).output();
+    let output = Command::new("hostname") // raw-spawn-ok
+        .stdin(Stdio::null())
+        .output();
     let name = output
         .ok()
         .filter(|out| out.status.success())
@@ -917,7 +919,7 @@ fn machine_name() -> String {
 fn spawn_sleep_guard(pid: u32) -> Option<Child> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("/usr/bin/caffeinate")
+        Command::new("/usr/bin/caffeinate") // raw-spawn-ok
             .args(["-i", "-w", &pid.to_string()])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
