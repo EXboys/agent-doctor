@@ -142,7 +142,7 @@ fn arp_neighbor_ipv4s() -> Vec<Ipv4Addr> {
         else {
             return Vec::new();
         };
-        return parse_arp_ipv4s(&String::from_utf8_lossy(&out.stdout));
+        parse_arp_ipv4s(&String::from_utf8_lossy(&out.stdout))
     }
     #[cfg(not(target_os = "macos"))]
     {
