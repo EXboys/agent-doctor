@@ -6,18 +6,22 @@
 //! process onto the account namespace with those addresses.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+#[cfg(target_os = "macos")]
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+#[cfg(target_os = "macos")]
 use agent_doctor_core::exec::run_output;
 
 use crate::exo::daemon::{self, NodeHostSupport};
 use crate::exo::orchestrator::probe_exo_origin;
 use crate::exo::{EXO_DEFAULT_PORT, EXO_LIBP2P_PORT, EXO_LOCAL_ORIGIN};
-use crate::lan_scan::{self, is_scannable_lan_ipv4};
+use crate::lan_scan;
+#[cfg(any(target_os = "macos", test))]
+use crate::lan_scan::is_scannable_lan_ipv4;
 use crate::namespace::resolve_cluster_namespace;
 
 const MAX_BOOTSTRAP_PEERS: usize = 8;
@@ -217,6 +221,7 @@ fn thunderbolt_rank(multiaddr: &str) -> u8 {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_arp_ipv4s(text: &str) -> Vec<Ipv4Addr> {
     let mut ips = Vec::new();
     for line in text.lines() {
