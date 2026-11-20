@@ -193,7 +193,6 @@ pub async fn set_cluster_backend_command(
 }
 
 #[tauri::command]
-#[tauri::command]
 pub async fn set_cluster_model_source_command(
     app: tauri::AppHandle,
     source: String,
