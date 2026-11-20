@@ -151,7 +151,7 @@ const PREBUILT_DASHBOARD_ZH_TAR_GZ: &[u8] =
 pub fn ensure_managed_dashboard_zh() -> Result<()> {
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
