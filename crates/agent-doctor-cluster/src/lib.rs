@@ -274,6 +274,10 @@ where
         Some(rt) => rt,
         None => exo::lifecycle::install_exo_runtime(on_progress)?,
     };
+    // Even when exo binary was already on disk (DMG install), make sure the
+    // Agent Doctor dashboard overlay is present before we spawn.
+    let _ = exo::lifecycle::ensure_managed_dashboard_zh();
+    let runtime = exo::lifecycle::locate_exo_runtime().unwrap_or(runtime);
     exo::daemon::start_exo_daemon(&runtime)?;
     Ok(load_cluster_status())
 }

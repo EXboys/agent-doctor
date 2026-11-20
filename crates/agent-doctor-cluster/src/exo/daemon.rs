@@ -136,20 +136,60 @@ pub fn start_exo_daemon(runtime: &LocatedExoRuntime) -> Result<DaemonOwner> {
         bail!("这台电脑需要 Apple 芯片且系统在 macOS 15.1 以上才能开启本机算力。");
     }
 
+    // Install Agent Doctor's dashboard before spawn so EXO_DASHBOARD_DIR is set.
+    let _ = crate::exo::lifecycle::ensure_managed_dashboard_zh();
+    let mut runtime = runtime.clone();
+    runtime.dashboard_zh_rel_home = crate::exo::lifecycle::pinned_dashboard_zh_rel_home();
+
     // Reap any stale PID left behind by an earlier crash before probing port 52415.
     reap_stale_pid_if_needed();
 
     if local_exo_node_reachable() {
         let (owner, _) = current_daemon_owner(true);
         if owner == DaemonOwner::ManagedByUs {
+            // Started earlier without the customized board — bounce so the env applies.
+            if runtime.dashboard_zh_rel_home.is_some() && !local_dashboard_looks_customized() {
+                stop_exo_daemon()?;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while local_exo_node_reachable() && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(200));
+                }
+                if !local_exo_node_reachable() {
+                    let resolved_ns = resolve_cluster_namespace();
+                    spawn_managed_exo(&runtime, &resolved_ns.namespace)?;
+                    return Ok(DaemonOwner::ManagedByUs);
+                }
+            }
             return Ok(DaemonOwner::ManagedByUs);
         }
+        // Separately opened EXO.app keeps the stock dashboard; leave it alone.
         return Ok(DaemonOwner::ExternalProcess);
     }
 
     let resolved_ns = resolve_cluster_namespace();
-    spawn_managed_exo(runtime, &resolved_ns.namespace)?;
+    spawn_managed_exo(&runtime, &resolved_ns.namespace)?;
     Ok(DaemonOwner::ManagedByUs)
+}
+
+/// True when the live `:52415` page is Agent Doctor's overlay (not stock exo).
+fn local_dashboard_looks_customized() -> bool {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_millis(400))
+        .timeout(Duration::from_millis(1200))
+        .build()
+    else {
+        return false;
+    };
+    let Ok(resp) = client.get(EXO_LOCAL_ORIGIN).send() else {
+        return false;
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    let Ok(text) = resp.text() else {
+        return false;
+    };
+    text.contains("EXO算力管理") || text.contains("适合本机") || text.contains("AGENT_DOCTOR_ZH")
 }
 
 fn exo_cli_supports_namespace_flag(executable: &Path) -> bool {

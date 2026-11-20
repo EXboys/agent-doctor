@@ -134,6 +134,65 @@ fn managed_dashboard_zh_rel_home(version: &str) -> Option<String> {
         .then(|| format!(".agent-doctor/runtimes/exo/{version}/dashboard-zh"))
 }
 
+/// Relative-to-$HOME path for the Agent Doctor dashboard, if installed.
+pub fn pinned_dashboard_zh_rel_home() -> Option<String> {
+    managed_dashboard_zh_rel_home(&pinned_version())
+}
+
+/// Embedded Agent Doctor dashboard (中文 + 适合本机). Ships with the app so a
+/// DMG-only exo install still gets the customized board — OSS packs may omit it.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const PREBUILT_DASHBOARD_ZH_TAR_GZ: &[u8] =
+    include_bytes!("../../../../vendor/exo-dashboard-zh/prebuilt/dashboard-zh.tar.gz");
+
+/// Make sure `~/.agent-doctor/runtimes/exo/<pinned>/dashboard-zh/` exists.
+/// Prefer an already-installed tree; otherwise extract the embedded prebuilt
+/// (and optionally refresh from OSS when that object exists).
+pub fn ensure_managed_dashboard_zh() -> Result<()> {
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        return Ok(());
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let ver = pinned_version();
+        let root =
+            managed_exo_version_root(&ver).context("无法定位本机用户主目录以安装算力看板")?;
+        let zh_index = root.join("dashboard-zh").join("index.html");
+        if zh_index.is_file() {
+            return Ok(());
+        }
+        fs::create_dir_all(&root)
+            .with_context(|| format!("创建算力目录失败：{}", root.display()))?;
+
+        // Optional OSS refresh (when the object has been uploaded).
+        let oss_url = format!("{OSS_BASE_URL}/{ver}/dashboard-zh.tar.gz");
+        let archive = root.join(".dashboard-zh-download.tar.gz");
+        let mut installed = false;
+        if let Ok(sha) = download_to_file(&oss_url, &archive, &mut |_, _, _| {}) {
+            let _ = sha;
+            if extract_tar_gz(&archive, &root).is_ok() && zh_index.is_file() {
+                installed = true;
+            }
+        }
+        let _ = fs::remove_file(&archive);
+
+        if !installed {
+            let embedded = root.join(".dashboard-zh-prebuilt.tar.gz");
+            fs::write(&embedded, PREBUILT_DASHBOARD_ZH_TAR_GZ)
+                .with_context(|| format!("写入内置算力看板失败：{}", embedded.display()))?;
+            extract_tar_gz(&embedded, &root)?;
+            let _ = fs::remove_file(&embedded);
+        }
+
+        if !zh_index.is_file() {
+            bail!("定制算力看板安装失败，请重试开启多机算力。");
+        }
+        Ok(())
+    }
+}
+
 /// Download and install the headless `exo` runtime on Apple Silicon macOS.
 pub fn install_exo_runtime<F>(mut on_progress: F) -> Result<LocatedExoRuntime>
 where
@@ -188,6 +247,9 @@ where
             let _ = fs::rename(&zh_keep, &final_zh);
         }
         let _ = fs::remove_dir_all(&zh_keep);
+
+        // DMG / incomplete OSS packs have no dashboard-zh — install the embedded one.
+        let _ = ensure_managed_dashboard_zh();
 
         locate_exo_runtime().context("算力组件解压完成，但未找到可执行入口文件")
     }

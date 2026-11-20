@@ -133,9 +133,9 @@ Agent Doctor 启动时会探测 CLI 是否支持 `--namespace`，并**同时注�
 本地试跑步骤：
 
 1. `cd desktop && npm run tauri:dev:personal`
-2. （开发机）`./scripts/build-exo-dashboard-zh.sh` 生成中文看板到 `~/.agent-doctor/runtimes/exo/<PINNED>/dashboard-zh/`
-3. 打开「模型服务」→「多机算力」→「下载并开启」（首次拉官方 `EXO-latest.dmg`；OSS 包尚未上传时走此回退）。**重新安装会保留已有 `dashboard-zh/`**
-4. 点「打开算力看板」：应在桌面侧窗打开「适合本机」；顶栏有「适合本机 / 下载」；日志里应出现 `EXO_LIBP2P_NAMESPACE: ad-…`（1.0.71）
+2. （开发机）`./scripts/build-exo-dashboard-zh.sh` 生成中文看板，并刷新 `vendor/exo-dashboard-zh/prebuilt/dashboard-zh.tar.gz`（桌面端内置；纯 DMG 安装也会解压这份）
+3. 打开「模型服务」→「多机算力」→「下载并开启」。启动前会 `ensure_managed_dashboard_zh()`，用 `EXO_DASHBOARD_DIR` 挂定制页；若进程是旧实例且仍是原版页，会自动重启一次
+4. 点「打开算力看板」：应看到「EXO算力管理」顶栏（不是原版 exo）。若系统里单独开着 EXO.app，会继续用原版——先退出 EXO.app，再在 Agent Doctor 里重新开启
 
 ### 4. macOS 本地网络权限
 

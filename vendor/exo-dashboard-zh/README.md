@@ -16,6 +16,9 @@ Agent Doctor **只要 exo 的分布式部署能力**，不要 exo 自带对话�
 ```bash
 ./scripts/build-exo-dashboard-zh.sh
 # → ~/.agent-doctor/runtimes/exo/<PINNED>/dashboard-zh/
+# 同步刷新内置包（打进桌面端，DMG 安装也能挂上定制看板）：
+tar -czf vendor/exo-dashboard-zh/prebuilt/dashboard-zh.tar.gz \
+  -C ~/.agent-doctor/runtimes/exo/<PINNED> dashboard-zh
 ```
 
-客户端重新开启多机算力后，点「打开算力看板」即可（桌面内嵌窗口，默认进「适合本机」；顶栏可切下载）。
+客户端开启多机算力时会 `ensure_managed_dashboard_zh()`：没有 `dashboard-zh/` 就解压内置包，并用 `EXO_DASHBOARD_DIR` 挂载。点「打开算力看板」应看到「EXO算力管理」顶栏，而不是原版 exo 页。
