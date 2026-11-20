@@ -127,7 +127,7 @@ Agent Doctor 启动时会探测 CLI 是否支持 `--namespace`，并**同时注�
    - **构建缓存不入库**：上游 checkout / `node_modules` 放在 `~/.agent-doctor/cache/exo-dashboard/<ver>/`，避免仓库内嵌套 `exo/.git` 误触发 Cursor/git 工作区识别
    - 上游 tag 缺失时脚本会退回 `main` 仅供开发；正式 OSS 包必须锁到与运行时一致的 ref
 2. **双端入口与唯一事实来源（防状态打架）**：
-   - 桌面卡片提供次级入口**「打开算力看板」**：内嵌 WebView 默认打开 `http://<host>:52415/#/suitable`（**适合本机**：只列当前空闲/总内存能跑的模型，藏太大项）；顶栏可切到**下载**、首页设备拓扑；不必先嵌整个 integrations；不引导用户去 exo 里聊天
+   - 桌面卡片提供次级入口**「打开算力看板」**：内嵌 WebView 先打开 `http://<host>:52415/`，再在页面内切到 `#/suitable`（**适合本机**）。不要把 hash 写进加载 URL——WKWebView 在较新 macOS 上会把 `#/suitable` 当成路径去请求 `/suitable`，FastAPI 直接返回 `404 Not Found`。无 Suitable 覆盖时会退到 `#/downloads`；顶栏仍可切下载与设备拓扑
    - 若用户在看板里手动切换或删除了模型实例，客户端每次刷新读取 `GET /state` 同步回 `local-cluster` Provider
 
 本地试跑步骤：

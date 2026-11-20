@@ -517,32 +517,39 @@ fn main_window_logical_size(window: &tauri::WebviewWindow) -> Result<(f64, f64),
 
 /// Window create/resize must run on the UI thread. WebView2 on Windows
 /// otherwise yields a titled shell with a permanently blank page.
-fn run_on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+///
+/// Callers must be `async` commands: a sync invoke can land inside WebView2's
+/// `WebResourceRequested` COM stack, and blocking there for `run_on_main_thread`
+/// deadlocks the same UI thread that would run `f`.
+async fn run_on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = tokio::sync::oneshot::channel();
     app.run_on_main_thread(move || {
         let _ = tx.send(f());
     })
     .map_err(|err| format!("failed to run on UI thread: {err}"))?;
-    rx.recv_timeout(Duration::from_secs(12))
-        .map_err(|_| {
-            "UI thread did not finish the window operation in time. If a blank Ask window is stuck, end Agent Doctor.exe in Task Manager, then reopen.".to_string()
-        })?
+    match tokio::time::timeout(Duration::from_secs(12), rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("UI thread dropped the window operation".into()),
+        Err(_) => Err(
+            "UI thread did not finish the window operation in time. If a blank Ask window is stuck, end Agent Doctor.exe in Task Manager, then reopen.".into(),
+        ),
+    }
 }
 
 /// Resize the main window; omit width/height to only report the current size.
 /// Clamps to the monitor work area and shifts left if expanding would overflow.
 #[tauri::command]
-pub fn resize_main_window_command(
+pub async fn resize_main_window_command(
     app: AppHandle,
     width: Option<f64>,
     height: Option<f64>,
 ) -> Result<WindowSizeReport, String> {
     let app_for_ui = app.clone();
-    run_on_main_thread(&app, move || resize_main_window(&app_for_ui, width, height))
+    run_on_main_thread(&app, move || resize_main_window(&app_for_ui, width, height)).await
 }
 
 fn resize_main_window(
@@ -687,6 +694,8 @@ fn create_ask_window(
     )
     .build()
     .map_err(|err| format!("failed to open ask window: {err}"))?;
+    // Builder already set Windows decorations; macOS still needs NSAppearance.
+    #[cfg(target_os = "macos")]
     apply_content_window_chrome(&window);
     attach_ask_window_close_behavior(&window);
     Ok(window)
@@ -996,6 +1005,7 @@ fn create_resources_window(
     let window = with_content_chrome(window)
         .build()
         .map_err(|err| format!("failed to open resources window: {err}"))?;
+    #[cfg(target_os = "macos")]
     apply_content_window_chrome(&window);
     attach_resources_window_close_behavior(&window);
     Ok(window)
@@ -1073,6 +1083,7 @@ fn create_diagnose_window(
     let window = with_content_chrome(window)
         .build()
         .map_err(|err| format!("failed to open diagnose window: {err}"))?;
+    #[cfg(target_os = "macos")]
     apply_content_window_chrome(&window);
     attach_diagnose_window_close_behavior(&window);
     Ok(window)
@@ -1206,8 +1217,12 @@ pub(crate) fn close_resources_window(app: &AppHandle, destroy: bool) -> Result<(
     Ok(())
 }
 
-/// Build the in-app board URL. Lands on Suitable (models this setup can run);
-/// HeaderNav still reaches Downloads / Home / Devices. Chat chrome stays hidden.
+/// Build the in-app board origin URL (no hash).
+///
+/// WKWebView on newer macOS can treat `http://host:52415/#/suitable` as a path
+/// request for `/suitable`, and exo's FastAPI StaticFiles then returns
+/// `{"detail":"Not Found"}`. Load the origin here; [`cluster_board_chrome_script`]
+/// sets `#/suitable` (or `#/downloads`) after the page is up.
 fn cluster_board_external_url(dashboard_url: &str) -> Result<Url, String> {
     let trimmed = dashboard_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -1216,13 +1231,15 @@ fn cluster_board_external_url(dashboard_url: &str) -> Result<Url, String> {
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
         return Err("算力看板地址无效。".to_string());
     }
-    let target = if trimmed.contains('#') {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}/#/suitable")
-    };
-    target
-        .parse::<Url>()
+    let base = trimmed
+        .split_once('#')
+        .map(|(head, _)| head)
+        .unwrap_or(trimmed)
+        .trim_end_matches('/');
+    if base.is_empty() {
+        return Err("算力看板地址无效。".to_string());
+    }
+    base.parse::<Url>()
         .map_err(|err| format!("算力看板地址无效：{err}"))
 }
 
@@ -1240,8 +1257,13 @@ fn attach_cluster_board_window_close_behavior(window: &tauri::WebviewWindow) {
 
 /// Frameless caption buttons for the external dashboard (Windows).
 /// macOS uses the same overlay traffic lights as the home window.
+///
+/// Also lands on `#/suitable` via `location.hash` (never in the load URL) so
+/// WKWebView cannot 404 `/suitable`. Falls back to `#/downloads` when the
+/// stock exo SPA has no Suitable route (Agent Doctor overlay missing).
 fn cluster_board_chrome_script() -> String {
-    r#"(function(){
+    // r## so JS "#/suitable" does not terminate the raw string at "#.
+    r##"(function(){
       var ua = navigator.userAgent || "";
       var os = /Windows/.test(ua) ? "windows" : (/Mac/.test(ua) ? "macos" : "other");
       document.documentElement.dataset.os = os;
@@ -1250,7 +1272,29 @@ fn cluster_board_chrome_script() -> String {
         if (!internals || typeof internals.invoke !== "function") return;
         internals.invoke(cmd, { label: "cluster-board" });
       }
+      function setHash(hash) {
+        var next = hash.charAt(0) === "#" ? hash : ("#" + hash);
+        if ((location.hash || "") === next) return;
+        location.replace(location.pathname + location.search + next);
+      }
+      function pageLooksLikeMissingRoute() {
+        var text = (document.body && (document.body.innerText || document.body.textContent) || "").trim();
+        if (!text) return false;
+        // FastAPI JSON when a path (not hash) 404'd.
+        if (text.indexOf('"detail"') >= 0 && /not found/i.test(text)) return true;
+        // Stock SvelteKit error page when `#/suitable` is unknown.
+        return /^(Not Found|页面不存在|未找到)$/m.test(text);
+      }
+      function landOnBoardRoute() {
+        // Prefer Agent Doctor's Suitable page; fall back if this exo build
+        // only has the stock SPA (no /suitable overlay).
+        setHash("#/suitable");
+        setTimeout(function () {
+          if (pageLooksLikeMissingRoute()) setHash("#/downloads");
+        }, 700);
+      }
       function mount() {
+        landOnBoardRoute();
         if (!document.querySelector(".ad-drag-strip")) {
           var strip = document.createElement("div");
           strip.className = "ad-drag-strip";
@@ -1276,7 +1320,7 @@ fn cluster_board_chrome_script() -> String {
       } else {
         mount();
       }
-    })();"#
+    })();"##
     .to_string()
 }
 
@@ -1302,6 +1346,7 @@ fn create_cluster_board_window(
     )
     .build()
     .map_err(|err| format!("failed to open compute board: {err}"))?;
+    #[cfg(target_os = "macos")]
     apply_content_window_chrome(&window);
     attach_cluster_board_window_close_behavior(&window);
     Ok(window)
@@ -1330,6 +1375,7 @@ fn create_llama_board_window(
     )
     .build()
     .map_err(|err| format!("failed to open model page: {err}"))?;
+    #[cfg(target_os = "macos")]
     apply_content_window_chrome(&window);
     attach_llama_board_window_close_behavior(&window);
     Ok(window)
@@ -1368,9 +1414,35 @@ pub(crate) fn open_or_focus_llama_board_window(app: &AppHandle) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn open_llama_board_window_command(app: AppHandle) -> Result<(), String> {
+pub async fn open_llama_board_window_command(app: AppHandle) -> Result<(), String> {
     let app_for_ui = app.clone();
-    run_on_main_thread(&app, move || open_or_focus_llama_board_window(&app_for_ui))
+    run_on_main_thread(&app, move || open_or_focus_llama_board_window(&app_for_ui)).await
+}
+
+fn apply_cluster_board_landing_hash(window: &tauri::WebviewWindow) {
+    // navigate() replaces the document and does not re-run initialization_script.
+    // Wait for the new origin page before setting the hash in-page.
+    let win = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        let _ = win.eval(
+            r##"(function(){
+              function setHash(hash){
+                var next = hash.charAt(0) === "#" ? hash : ("#" + hash);
+                if ((location.hash || "") === next) return;
+                location.replace(location.pathname + location.search + next);
+              }
+              function missing(){
+                var text = (document.body && (document.body.innerText || document.body.textContent) || "").trim();
+                if (!text) return false;
+                if (text.indexOf('"detail"') >= 0 && /not found/i.test(text)) return true;
+                return /^(Not Found|页面不存在|未找到)$/m.test(text);
+              }
+              setHash("#/suitable");
+              setTimeout(function(){ if (missing()) setHash("#/downloads"); }, 700);
+            })();"##,
+        );
+    });
 }
 
 pub(crate) fn open_or_focus_cluster_board_window(
@@ -1380,6 +1452,7 @@ pub(crate) fn open_or_focus_cluster_board_window(
     let url = cluster_board_external_url(dashboard_url)?;
     if let Some(existing) = app.get_webview_window(CLUSTER_BOARD_WINDOW_LABEL) {
         let _ = existing.navigate(url);
+        apply_cluster_board_landing_hash(&existing);
         show_secondary_window(
             app,
             CLUSTER_BOARD_WINDOW_LABEL,
@@ -1399,31 +1472,37 @@ pub(crate) fn open_or_focus_cluster_board_window(
 }
 
 #[tauri::command]
-pub fn open_cluster_board_window_command(app: AppHandle, url: String) -> Result<(), String> {
+pub async fn open_cluster_board_window_command(app: AppHandle, url: String) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         open_or_focus_cluster_board_window(&app_for_ui, &url)
     })
+    .await
 }
 
 #[tauri::command]
-pub fn open_ask_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
+pub async fn open_ask_window_command(
+    app: AppHandle,
+    runtime: Option<String>,
+) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         open_or_focus_ask_window(&app_for_ui, runtime.as_deref())
     })
+    .await
 }
 
 #[tauri::command]
-pub fn close_ask_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+pub async fn close_ask_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         close_ask_window(&app_for_ui, destroy.unwrap_or(false))
     })
+    .await
 }
 
 #[tauri::command]
-pub fn open_resources_window_command(
+pub async fn open_resources_window_command(
     app: AppHandle,
     section: Option<String>,
 ) -> Result<(), String> {
@@ -1431,30 +1510,43 @@ pub fn open_resources_window_command(
     run_on_main_thread(&app, move || {
         open_or_focus_resources_window(&app_for_ui, section.as_deref())
     })
+    .await
 }
 
 #[tauri::command]
-pub fn close_resources_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+pub async fn close_resources_window_command(
+    app: AppHandle,
+    destroy: Option<bool>,
+) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         close_resources_window(&app_for_ui, destroy.unwrap_or(false))
     })
+    .await
 }
 
 #[tauri::command]
-pub fn open_diagnose_window_command(app: AppHandle, runtime: Option<String>) -> Result<(), String> {
+pub async fn open_diagnose_window_command(
+    app: AppHandle,
+    runtime: Option<String>,
+) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         open_or_focus_diagnose_window(&app_for_ui, runtime.as_deref())
     })
+    .await
 }
 
 #[tauri::command]
-pub fn close_diagnose_window_command(app: AppHandle, destroy: Option<bool>) -> Result<(), String> {
+pub async fn close_diagnose_window_command(
+    app: AppHandle,
+    destroy: Option<bool>,
+) -> Result<(), String> {
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         close_diagnose_window(&app_for_ui, destroy.unwrap_or(false))
     })
+    .await
 }
 
 /// Focus the main window and ask it to open a tab (e.g. `resources`).
@@ -1480,11 +1572,14 @@ mod tests {
     };
 
     #[test]
-    fn cluster_board_url_lands_on_suitable() {
+    fn cluster_board_url_strips_hash_for_webview() {
+        // Hash routes must not be in the load URL — WKWebView may 404 them as paths.
         let url = cluster_board_external_url("http://127.0.0.1:52415").unwrap();
-        assert_eq!(url.as_str(), "http://127.0.0.1:52415/#/suitable");
+        assert!(url.fragment().is_none());
+        assert!(url.as_str().starts_with("http://127.0.0.1:52415"));
         let already = cluster_board_external_url("http://192.168.1.8:52415/#/downloads").unwrap();
-        assert_eq!(already.as_str(), "http://192.168.1.8:52415/#/downloads");
+        assert!(already.fragment().is_none());
+        assert_eq!(already.host_str(), Some("192.168.1.8"));
         assert!(cluster_board_external_url("").is_err());
         assert!(cluster_board_external_url("ftp://127.0.0.1:52415").is_err());
     }

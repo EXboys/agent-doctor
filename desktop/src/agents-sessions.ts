@@ -1,4 +1,3 @@
-
 import { opensOwnWindowOnly } from "./agents-ui";
 import { t } from "./i18n";
 import { openSession, openAskWindow as openAskWindowCommand, closeAskWindow } from "./ipc";
@@ -25,6 +24,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, timeoutError: Error): P
 
 const ASK_VERIFY_DRAFT_KEY = "agent-doctor.ask.verifyDraft";
 const openingSessionRuntimes = new Set<string>();
+const openingAskRuntimes = new Set<string>();
+
+function isWindowsShell(): boolean {
+  return document.documentElement.dataset.os === "windows";
+}
+
+/** Keep the pre-created WebView2 shell on Windows; macOS can destroy/rebuild. */
+function askCloseDestroyOnFailure(): boolean {
+  return !isWindowsShell();
+}
 
 export function createAgentsSessions(deps: AgentsSessionsDeps) {
   async function openDesktopApp(runtime: string): Promise<void> {
@@ -40,10 +49,35 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
     );
   }
 
-  async function openAskWindow(runtime: string): Promise<void> {
+  async function openAskWindow(runtime: string, card?: HTMLElement | null): Promise<void> {
+    if (openingAskRuntimes.has(runtime)) {
+      return;
+    }
+    openingAskRuntimes.add(runtime);
+    const hint =
+      card?.querySelector<HTMLElement>("[data-repair-hint]") ??
+      card?.querySelector<HTMLElement>("[data-ask-hint]");
+    const askButtons = card
+      ? [
+          ...card.querySelectorAll<HTMLButtonElement>('[data-action="ask-doctor"]'),
+          ...card.querySelectorAll<HTMLButtonElement>('[data-action="ask-session"]'),
+          ...card.querySelectorAll<HTMLButtonElement>('[data-action="ask-verify"]'),
+        ]
+      : [];
+    for (const button of askButtons) {
+      button.setAttribute("disabled", "true");
+    }
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = t("runtime.opening");
+    }
     try {
       if (opensOwnWindowOnly(runtime)) {
         await openDesktopApp(runtime);
+        if (hint) {
+          hint.hidden = true;
+          hint.replaceChildren();
+        }
         return;
       }
       await withTimeout(
@@ -51,39 +85,40 @@ export function createAgentsSessions(deps: AgentsSessionsDeps) {
         15_000,
         new Error(t("runtime.openTimeout")),
       );
+      if (hint) {
+        hint.hidden = true;
+        hint.replaceChildren();
+      }
     } catch (error) {
       try {
-        await closeAskWindow({ destroy: true });
+        await closeAskWindow({ destroy: askCloseDestroyOnFailure() });
       } catch {
         /* window may already be gone or the UI thread is stuck */
       }
-      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+      const message = t("runtime.openFailed", { error: String(error) });
+      if (hint) {
+        hint.hidden = false;
+        hint.textContent = message;
+      }
+      deps.setStatusBanner("error", message);
+    } finally {
+      openingAskRuntimes.delete(runtime);
+      for (const button of askButtons) {
+        button.removeAttribute("disabled");
+      }
     }
   }
 
-  async function openAskWindowForVerify(runtime: string): Promise<void> {
-    try {
-      if (opensOwnWindowOnly(runtime)) {
-        await openDesktopApp(runtime);
-        return;
-      }
-      localStorage.setItem(
-        ASK_VERIFY_DRAFT_KEY,
-        JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
-      );
-      await withTimeout(
-        openAskWindowCommand({ runtime }),
-        15_000,
-        new Error(t("runtime.openTimeout")),
-      );
-    } catch (error) {
-      try {
-        await closeAskWindow({ destroy: true });
-      } catch {
-        /* window may already be gone or the UI thread is stuck */
-      }
-      deps.setStatusBanner("error", t("runtime.openFailed", { error: String(error) }));
+  async function openAskWindowForVerify(runtime: string, card?: HTMLElement | null): Promise<void> {
+    if (opensOwnWindowOnly(runtime)) {
+      await openDesktopApp(runtime);
+      return;
     }
+    localStorage.setItem(
+      ASK_VERIFY_DRAFT_KEY,
+      JSON.stringify({ prompt: t("ask.verifyPrompt"), autoSend: true }),
+    );
+    await openAskWindow(runtime, card);
   }
 
   async function openSessionFromCard(card: HTMLElement, forceTerminal = false) {

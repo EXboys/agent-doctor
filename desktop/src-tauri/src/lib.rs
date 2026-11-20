@@ -916,20 +916,33 @@ pub fn run() {
             spawn_skill_link_repair();
             spawn_browser_mcp_autowire();
             spawn_install_ping();
-            // Pre-create Ask on the UI thread at startup. Creating it on first
-            // click can hang WebView2 on Windows (blank titled window, Close
-            // and Task Manager "End task" appear to do nothing).
-            let _ = windows::ensure_ask_window(app.handle(), "claude-code");
-            // Windows: creating Resources or Diagnose on the first click can hang
-            // WebView2, so those buttons look dead. Build the hidden windows now.
-            // macOS still waits for the click; those pages scan folders and would
-            // raise the Files-and-Folders prompt during startup.
-            #[cfg(target_os = "windows")]
-            {
-                let _ = windows::ensure_resources_window(app.handle(), "skills", true);
-                let _ = windows::ensure_diagnose_window(app.handle(), "openclaw", true);
-                island::prepare_status_chip(app.handle());
-            }
+            // Pre-create secondary windows after the main WebView2 finishes its
+            // first paint. Doing it inside setup() races the main page load and
+            // can leave Ask/Diagnose as blank titled shells on Windows.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let ui = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    if let Err(err) = windows::ensure_ask_window(&ui, "claude-code") {
+                        eprintln!("[windows] pre-create ask failed: {err}");
+                    }
+                    // Windows: creating Resources or Diagnose on the first click can
+                    // hang WebView2, so those buttons look dead. Build them now.
+                    // macOS still waits for the click; those pages scan folders and
+                    // would raise the Files-and-Folders prompt during startup.
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Err(err) = windows::ensure_resources_window(&ui, "skills", true) {
+                            eprintln!("[windows] pre-create resources failed: {err}");
+                        }
+                        if let Err(err) = windows::ensure_diagnose_window(&ui, "openclaw", true) {
+                            eprintln!("[windows] pre-create diagnose failed: {err}");
+                        }
+                        island::prepare_status_chip(&ui);
+                    }
+                });
+            });
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }

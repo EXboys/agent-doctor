@@ -7,6 +7,8 @@
       {
         "label": "main",
         "title": "Agent Doctor",
+        "width": 420,
+        "height": 800,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
         "trafficLightPosition": { "x": 16, "y": 14 },

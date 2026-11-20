@@ -379,6 +379,7 @@ function doctorCardHtml(solo = false): string {
         </div>
       </div>
       <div class="card-actions">${actions}</div>
+      <div class="card-hint repair-hint" data-ask-hint hidden></div>
       <p class="footnote runtime-install-footnote">${t("chat.emptyDoctorHint")}</p>
     </article>
   `;
@@ -748,7 +749,8 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
   runtimesEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target.closest<HTMLButtonElement>("[data-action='ask-doctor']")) {
-      void sessions.openAskWindow("doctor").catch(() => {});
+      const doctorCard = target.closest<HTMLElement>("[data-runtime]");
+      void sessions.openAskWindow("doctor", doctorCard).catch(() => {});
       return;
     }
     const filterBtn = target.closest<HTMLButtonElement>("[data-repair-filter]");
@@ -798,7 +800,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       if (runtime && isAskRuntimeId(runtime)) {
         void (async () => {
           await diagnose.closeDiagnoseDetail({ skipDismiss: true });
-          await sessions.openAskWindow(runtime);
+          await sessions.openAskWindow(runtime, runtimeCard);
         })();
       }
       return;
@@ -809,7 +811,7 @@ export function initAgentsPanel(d: AgentsPanelDeps): AgentsPanelApi {
       if (runtime && supportsBrowserMcp(runtime)) {
         void (async () => {
           await diagnose.closeDiagnoseDetail({ skipDismiss: true });
-          await sessions.openAskWindowForVerify(runtime);
+          await sessions.openAskWindowForVerify(runtime, runtimeCard);
         })();
       }
       return;

@@ -1,14 +1,19 @@
 /* Window chrome.
    macOS keeps the system traffic lights; the top row clears them.
    Windows draws caption buttons in the top-right. Each is 40px so the
-   420px home window can still show its own toolbar actions. */
+   420px home window can still show its own toolbar actions.
+
+   Selectors use html.is-opaque-shell[data-os=…] so they beat Vite's
+   shared-chunk CSS order (window-chrome can load before styles.css /
+   chat.css in production multi-page builds). */
 
 html[data-os="windows"] {
-  --window-control-w: 40px;
-  --window-controls-w: 120px;
-  --window-controls-h: 36px;
+  --window-control-w: 46px;
+  --window-controls-w: 138px;
+  --window-controls-h: 40px;
 }
 
+html.is-opaque-shell[data-os="windows"] .window-controls,
 html[data-os="windows"] .window-controls {
   position: fixed;
   top: 0;
@@ -16,6 +21,9 @@ html[data-os="windows"] .window-controls {
   z-index: 25;
   display: flex;
   height: var(--window-controls-h);
+  /* Leave the top resize strip clickable for Tauri's undecorated edge. */
+  padding-top: 2px;
+  box-sizing: border-box;
 }
 
 .window-controls {
@@ -23,7 +31,7 @@ html[data-os="windows"] .window-controls {
 }
 
 .window-control {
-  width: var(--window-control-w, 40px);
+  width: var(--window-control-w, 46px);
   height: 100%;
   margin: 0;
   padding: 0;
@@ -81,14 +89,18 @@ html.is-window-unfocused .window-control:not(:hover) {
   outline-offset: -2px;
 }
 
+/* Beat styles.css `html[data-os="windows"] .widget { padding: 10px 12px }`. */
+html.is-opaque-shell[data-os="windows"] .widget,
 html[data-os="windows"] .widget {
   padding-top: 0;
 }
 
+html.is-opaque-shell[data-os="windows"] .widget-toolbar,
 html[data-os="windows"] .widget-toolbar {
   height: var(--window-controls-h);
   margin-bottom: 8px;
-  padding-right: calc(var(--window-controls-w) - 8px);
+  padding-right: calc(var(--window-controls-w) + 4px);
+  align-items: center;
 }
 
 html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar {
@@ -96,14 +108,17 @@ html[data-os="macos"]:not(.is-window-fullscreen) .widget-toolbar {
   padding-left: 72px;
 }
 
+html.is-opaque-shell[data-os="windows"] .chat-top,
 html[data-os="windows"] .chat-top {
   padding-right: calc(16px + var(--window-controls-w));
 }
 
+html.is-opaque-shell[data-os="windows"] .chat-main.is-files-open.is-files-split > .chat-top,
 html[data-os="windows"] .chat-main.is-files-open.is-files-split > .chat-top {
   padding-right: 16px;
 }
 
+html.is-opaque-shell[data-os="windows"] .chat-files-head,
 html[data-os="windows"] .chat-files-head {
   padding-right: calc(12px + var(--window-controls-w));
 }
@@ -124,14 +139,17 @@ html[data-os="macos"]:not(.is-window-fullscreen) .diagnose-top {
   padding-left: 72px;
 }
 
+html.is-opaque-shell[data-os="windows"] .diagnose-top,
 html[data-os="windows"] .diagnose-top {
   padding-right: var(--window-controls-w);
 }
 
+html.is-opaque-shell[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-top,
 html[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-top {
   padding-right: 0;
 }
 
+html.is-opaque-shell[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-deep-drawer-head,
 html[data-os="windows"] .diagnose-shell.is-deep-open .diagnose-deep-drawer-head {
   padding-right: calc(14px + var(--window-controls-w));
 }
@@ -140,6 +158,7 @@ html[data-os="macos"]:not(.is-window-fullscreen) .resources-rail {
   padding-top: 40px;
 }
 
+html.is-opaque-shell[data-os="windows"] .resources-toolbar-row,
 html[data-os="windows"] .resources-toolbar-row {
-  padding-right: calc(var(--window-controls-w) - 8px);
+  padding-right: calc(var(--window-controls-w) + 4px);
 }

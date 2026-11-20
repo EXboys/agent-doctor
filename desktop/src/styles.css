@@ -456,15 +456,6 @@ body::before {
   flex-shrink: 0;
 }
 
-.status-bar .brand {
-  flex: 0 0 auto;
-}
-
-.status-bar .brand-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .health-pill {
   display: inline-flex;
   align-items: center;
