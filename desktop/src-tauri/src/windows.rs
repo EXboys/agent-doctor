@@ -1258,42 +1258,77 @@ fn attach_cluster_board_window_close_behavior(window: &tauri::WebviewWindow) {
 /// Frameless caption buttons for the external dashboard (Windows).
 /// macOS uses the same overlay traffic lights as the home window.
 ///
-/// Also lands on `#/suitable` via `location.hash` (never in the load URL) so
-/// WKWebView cannot 404 `/suitable`. Falls back to `#/downloads` when the
-/// stock exo SPA has no Suitable route (Agent Doctor overlay missing).
+/// Also lands on `#/suitable` via **hash-only** assignment (never
+/// `location.replace('/#/…')` — WKWebView may request `/suitable` as a path
+/// and FastAPI returns `{"detail":"Not Found"}`). Intercepts SPA `<a href="/#/…">`
+/// the same way. Falls back to `#/downloads` when Suitable is missing.
 fn cluster_board_chrome_script() -> String {
     // r## so JS "#/suitable" does not terminate the raw string at "#.
     r##"(function(){
       var ua = navigator.userAgent || "";
       var os = /Windows/.test(ua) ? "windows" : (/Mac/.test(ua) ? "macos" : "other");
       document.documentElement.dataset.os = os;
+      var HASH_KEY = "ad-board-pending-hash";
       function invoke(cmd) {
         var internals = window.__TAURI_INTERNALS__;
         if (!internals || typeof internals.invoke !== "function") return;
         internals.invoke(cmd, { label: "cluster-board" });
       }
+      /** Hash-only. Never build a path+"#/…" URL — that 404s on WKWebView. */
       function setHash(hash) {
-        var next = hash.charAt(0) === "#" ? hash : ("#" + hash);
-        if ((location.hash || "") === next) return;
-        location.replace(location.pathname + location.search + next);
+        var route = (hash || "/").replace(/^#/, "");
+        if (!route) route = "/";
+        if ((location.hash || "") === "#" + route || (location.hash || "") === route) return;
+        location.hash = route;
       }
       function pageLooksLikeMissingRoute() {
         var text = (document.body && (document.body.innerText || document.body.textContent) || "").trim();
         if (!text) return false;
-        // FastAPI JSON when a path (not hash) 404'd.
         if (text.indexOf('"detail"') >= 0 && /not found/i.test(text)) return true;
-        // Stock SvelteKit error page when `#/suitable` is unknown.
-        return /^(Not Found|页面不存在|未找到)$/m.test(text);
+        return /(Not Found|页面不存在|未找到)/.test(text) && text.length < 80;
+      }
+      function stuckOnPath404() {
+        var path = location.pathname || "/";
+        if (path === "/" || path === "/index.html") return false;
+        return pageLooksLikeMissingRoute();
       }
       function landOnBoardRoute() {
-        // Prefer Agent Doctor's Suitable page; fall back if this exo build
-        // only has the stock SPA (no /suitable overlay).
-        setHash("#/suitable");
-        setTimeout(function () {
-          if (pageLooksLikeMissingRoute()) setHash("#/downloads");
-        }, 700);
+        try {
+          var pending = sessionStorage.getItem(HASH_KEY);
+          if (pending) {
+            sessionStorage.removeItem(HASH_KEY);
+            setHash(pending);
+            return;
+          }
+        } catch (e) {}
+        if (stuckOnPath404()) {
+          try { sessionStorage.setItem(HASH_KEY, "/downloads"); } catch (e) {}
+          location.href = location.origin + "/";
+          return;
+        }
+        // Stay on topology home. Suitable/Downloads are reached via tabs;
+        // auto-hash was still tripping WKWebView path 404s for some users.
+        if (!location.hash || location.hash === "#" || location.hash === "#/") {
+          setHash("/");
+        }
+      }
+      function interceptHashLinks() {
+        if (window.__adBoardHashGuard) return;
+        window.__adBoardHashGuard = true;
+        document.addEventListener("click", function (e) {
+          var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+          if (!a) return;
+          var href = a.getAttribute("href") || "";
+          var m = href.match(/#(\/[\w./-]*)/);
+          if (!m) return;
+          if (href.indexOf("://") >= 0 && href.indexOf(location.origin) !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setHash(m[1]);
+        }, true);
       }
       function mount() {
+        interceptHashLinks();
         landOnBoardRoute();
         if (!document.querySelector(".ad-drag-strip")) {
           var strip = document.createElement("div");
@@ -1420,28 +1455,12 @@ pub async fn open_llama_board_window_command(app: AppHandle) -> Result<(), Strin
 }
 
 fn apply_cluster_board_landing_hash(window: &tauri::WebviewWindow) {
-    // navigate() replaces the document and does not re-run initialization_script.
-    // Wait for the new origin page before setting the hash in-page.
+    // navigate() does not re-run initialization_script. Re-install hash-only
+    // landing + link guard after the origin page loads.
     let win = window.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(500));
-        let _ = win.eval(
-            r##"(function(){
-              function setHash(hash){
-                var next = hash.charAt(0) === "#" ? hash : ("#" + hash);
-                if ((location.hash || "") === next) return;
-                location.replace(location.pathname + location.search + next);
-              }
-              function missing(){
-                var text = (document.body && (document.body.innerText || document.body.textContent) || "").trim();
-                if (!text) return false;
-                if (text.indexOf('"detail"') >= 0 && /not found/i.test(text)) return true;
-                return /^(Not Found|页面不存在|未找到)$/m.test(text);
-              }
-              setHash("#/suitable");
-              setTimeout(function(){ if (missing()) setHash("#/downloads"); }, 700);
-            })();"##,
-        );
+        let _ = win.eval(cluster_board_chrome_script());
     });
 }
 

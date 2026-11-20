@@ -75,22 +75,32 @@
   </button>
 
   <nav class="ad-board-tabs" aria-label="Main navigation">
-    <a
-      href="/#/suitable"
+    <!--
+      Buttons + location.hash only. <a href="/#/suitable"> makes WKWebView on
+      newer macOS request the path /suitable, and exo's StaticFiles returns 404.
+    -->
+    <button
+      type="button"
       class="ad-board-tab {isActive('suitable') ? 'is-active' : ''}"
       title="Models this setup can run"
+      onclick={() => {
+        if (browser) window.location.hash = "/suitable";
+      }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M9 11l3 3L22 4" />
         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
       </svg>
       <span>Suitable</span>
-    </a>
+    </button>
 
-    <a
-      href="/#/downloads"
+    <button
+      type="button"
       class="ad-board-tab {isActive('downloads') ? 'is-active' : ''}"
       title="View downloads overview"
+      onclick={() => {
+        if (browser) window.location.hash = "/downloads";
+      }}
     >
       {#if downloadProgress}
         <span class="ad-board-dl-pill">
@@ -104,7 +114,7 @@
         </svg>
       {/if}
       <span>Downloads</span>
-    </a>
+    </button>
 
     {#if showHome}
       <button
