@@ -123,6 +123,15 @@ pub fn load_cluster_status() -> ClusterStatus {
     if backend != ClusterBackendKind::LlamaCpp {
         if let Some(ref snap) = snapshot {
             exo::orchestrator::sync_provider_if_dashboard_switched(snap);
+            if host_support == NodeHostSupport::Supported
+                && backend == ClusterBackendKind::Exo
+                && snap.nodes.len() >= 2
+            {
+                exo::heal::close_thunderbolt_loop_if_ours(
+                    snap.self_node_id.clone(),
+                    snap.nodes.iter().map(|node| node.node_id.clone()).collect(),
+                );
+            }
         }
     }
 

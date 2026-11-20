@@ -2009,12 +2009,19 @@ fn spawn_official_login(runtime_id: &str) -> Result<()> {
     // Codex and Claude each open the authorize page themselves. Opening that
     // same address again shows the account that is already signed in, and that
     // page never comes back to this computer.
+    // On Windows the login process has no window, so the browser Codex starts
+    // stays invisible and the printed hint is not a failure. Open that address
+    // once from this app, and close the browser Codex already started.
+    let open_printed_url = official_login_opens_printed_url(runtime_id);
     if let Some(pipe) = child.stdout.take() {
-        watch_login_output(pipe, Arc::clone(&opened));
+        watch_login_output_mode(pipe, Arc::clone(&opened), open_printed_url);
     }
     if let Some(pipe) = child.stderr.take() {
-        watch_login_output(pipe, Arc::clone(&opened));
+        watch_login_output_mode(pipe, Arc::clone(&opened), open_printed_url);
     }
+    // Codex opens its browser before it prints the address. Close that window
+    // as it appears, so only the page this app opens is left on screen.
+    let _stop_browsers = open_printed_url.then(|| watch_spawned_browsers(child.id()));
     let started = Instant::now();
     loop {
         drain_macos_login_open_shim(open_shim.as_ref(), &opened);
@@ -2097,13 +2104,6 @@ fn drain_macos_login_open_shim(shim: Option<&tempfile::TempDir>, opened: &Atomic
     }
 }
 
-fn watch_login_output<R>(pipe: R, opened: Arc<AtomicBool>)
-where
-    R: Read + Send + 'static,
-{
-    watch_login_output_mode(pipe, opened, false);
-}
-
 fn watch_login_output_mode<R>(pipe: R, opened: Arc<AtomicBool>, always_open_url: bool)
 where
     R: Read + Send + 'static,
@@ -2138,6 +2138,152 @@ fn maybe_open_login_url_mode(text: &str, opened: &AtomicBool, at_end: bool, alwa
     if !opened.swap(true, Ordering::SeqCst) {
         let _ = crate::session_launch::open_url(&url);
     }
+}
+
+/// Windows Codex login is started with a hidden console. The browser it
+/// launches inherits that and never appears, while the "if your browser did
+/// not open" line is only a hint. Open the printed page from this app there.
+/// Everywhere else the tool still owns the page.
+fn official_login_opens_printed_url(runtime_id: &str) -> bool {
+    printed_login_url_is_ours(runtime_id, cfg!(windows))
+}
+
+fn printed_login_url_is_ours(runtime_id: &str, windows: bool) -> bool {
+    windows && runtime_id == CODEX_ID
+}
+
+/// A browser process Codex itself started. The page this app opens is not a
+/// child of that login process, so it stays. WebView is the app window.
+#[cfg(any(windows, test))]
+fn login_spawned_browser(exe: &str) -> bool {
+    let name = exe.rsplit(['\\', '/']).next().unwrap_or(exe);
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "chrome.exe"
+            | "msedge.exe"
+            | "firefox.exe"
+            | "brave.exe"
+            | "opera.exe"
+            | "vivaldi.exe"
+            | "chromium.exe"
+            | "iexplore.exe"
+    )
+}
+
+#[cfg(any(windows, test))]
+struct ProcessRow {
+    pid: u32,
+    parent: u32,
+    exe: String,
+}
+
+#[cfg(any(windows, test))]
+fn spawned_browser_pids(root: u32, processes: &[ProcessRow]) -> Vec<u32> {
+    let mut family = vec![root];
+    let mut index = 0;
+    while index < family.len() {
+        let parent = family[index];
+        for process in processes {
+            if process.parent == parent && !family.contains(&process.pid) {
+                family.push(process.pid);
+            }
+        }
+        index += 1;
+    }
+    processes
+        .iter()
+        .filter(|process| {
+            process.pid != root
+                && family.contains(&process.pid)
+                && login_spawned_browser(&process.exe)
+        })
+        .map(|process| process.pid)
+        .collect()
+}
+
+struct StopBrowsers(Arc<AtomicBool>);
+
+impl Drop for StopBrowsers {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+fn watch_spawned_browsers(root: u32) -> StopBrowsers {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    thread::spawn(move || {
+        while !flag.load(Ordering::Relaxed) {
+            close_browsers_spawned_by(root);
+            thread::sleep(Duration::from_millis(40));
+        }
+        close_browsers_spawned_by(root);
+    });
+    StopBrowsers(stop)
+}
+
+fn close_browsers_spawned_by(root: u32) {
+    #[cfg(windows)]
+    {
+        for pid in spawned_browser_pids(root, &windows_process_snapshot()) {
+            terminate_pid(pid);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = root;
+    }
+}
+
+#[cfg(windows)]
+fn windows_process_snapshot() -> Vec<ProcessRow> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
+        return Vec::new();
+    };
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..PROCESSENTRY32W::default()
+    };
+    let mut rows = Vec::new();
+    // The snapshot handle is owned here and closed before return.
+    let started = unsafe { Process32FirstW(snapshot, &mut entry) };
+    if started.is_ok() {
+        loop {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(entry.szExeFile.len());
+            rows.push(ProcessRow {
+                pid: entry.th32ProcessID,
+                parent: entry.th32ParentProcessID,
+                exe: String::from_utf16_lossy(&entry.szExeFile[..len]),
+            });
+            if unsafe { Process32NextW(snapshot, &mut entry) }.is_err() {
+                break;
+            }
+        }
+    }
+    let _ = unsafe { CloseHandle(snapshot) };
+    rows
+}
+
+#[cfg(windows)]
+fn terminate_pid(pid: u32) {
+    use windows::Win32::Foundation::{CloseHandle, BOOL};
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_TERMINATE, BOOL(0), pid) }) else {
+        return;
+    };
+    let _ = unsafe { TerminateProcess(handle, 1) };
+    let _ = unsafe { CloseHandle(handle) };
 }
 
 /// Both tools open the page, then print a hint in case that open failed.
@@ -2323,6 +2469,60 @@ mod tests {
             Some("https://auth.openai.com/codex/device".to_string())
         );
         assert_eq!(first_login_url("no link"), None);
+    }
+
+    #[test]
+    fn windows_codex_login_opens_the_printed_page_itself() {
+        assert!(printed_login_url_is_ours(CODEX_ID, true));
+        assert!(!printed_login_url_is_ours(CLAUDE_ID, true));
+        assert!(!printed_login_url_is_ours(CODEX_ID, false));
+        assert!(!printed_login_url_is_ours("qoder", true));
+    }
+
+    #[test]
+    fn codex_login_banner_points_at_the_authorize_page() {
+        let banner = "Starting local login server on http://localhost:1455.\nIf your browser did not open, navigate to this URL to authenticate:\n\nhttps://auth.openai.com/oauth/authorize?x=1\n";
+        assert_eq!(
+            first_login_url(banner).as_deref(),
+            Some("https://auth.openai.com/oauth/authorize?x=1")
+        );
+    }
+
+    #[test]
+    fn only_the_browser_codex_started_is_closed() {
+        let processes = vec![
+            ProcessRow {
+                pid: 1,
+                parent: 0,
+                exe: "node.exe".to_string(),
+            },
+            ProcessRow {
+                pid: 2,
+                parent: 1,
+                exe: "codex.exe".to_string(),
+            },
+            ProcessRow {
+                pid: 3,
+                parent: 2,
+                exe: r"C:\Program Files\Google\Chrome\Application\chrome.exe".to_string(),
+            },
+            ProcessRow {
+                pid: 4,
+                parent: 3,
+                exe: "chrome.exe".to_string(),
+            },
+            ProcessRow {
+                pid: 5,
+                parent: 2,
+                exe: "msedgewebview2.exe".to_string(),
+            },
+            ProcessRow {
+                pid: 9,
+                parent: 8,
+                exe: "chrome.exe".to_string(),
+            },
+        ];
+        assert_eq!(spawned_browser_pids(1, &processes), vec![3, 4]);
     }
 
     #[test]

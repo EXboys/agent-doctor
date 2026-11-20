@@ -106,6 +106,151 @@ fn heal_once() -> Result<()> {
     Ok(())
 }
 
+/// Two linked Macs with Thunderbolt Bridge on both sides form a loop. macOS
+/// will not let an ordinary app change that, so the elected computer asks the
+/// system once. The other computer leaves its bridge on.
+pub fn close_thunderbolt_loop_if_ours(self_id: String, node_ids: Vec<String>) {
+    if !this_mac_closes_the_loop(&self_id, &node_ids) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    spawn_close_thunderbolt_bridge();
+}
+
+/// The computer with the greater id turns its own bridge off. Both sides
+/// compute the same answer, so the bridge stays up on one of them.
+pub(crate) fn this_mac_closes_the_loop(self_id: &str, node_ids: &[String]) -> bool {
+    let self_id = self_id.trim();
+    if self_id.is_empty() {
+        return false;
+    }
+    let mut ids: Vec<&str> = node_ids
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if !ids.contains(&self_id) {
+        ids.push(self_id);
+    }
+    ids.sort();
+    ids.dedup();
+    ids.len() >= 2 && ids.last().copied() == Some(self_id)
+}
+
+pub(crate) fn enabled_thunderbolt_bridge(listing: &str) -> Option<String> {
+    for line in listing.lines() {
+        let Some((disabled, name)) = network_service_line(line) else {
+            continue;
+        };
+        if !disabled && is_thunderbolt_bridge(&name) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn network_service_line(line: &str) -> Option<(bool, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with("An asterisk") {
+        return None;
+    }
+    let disabled = trimmed.starts_with('*');
+    let name = trimmed.trim_start_matches('*').trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((disabled, name.to_string()))
+}
+
+fn is_thunderbolt_bridge(name: &str) -> bool {
+    name.eq_ignore_ascii_case("thunderbolt bridge")
+        || name.contains("雷雳桥")
+        || name.contains("雷电桥")
+        || name.contains("雷雳网桥")
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_close_thunderbolt_bridge() {
+    {
+        let mut gate = BRIDGE_GATE.lock().unwrap_or_else(|err| err.into_inner());
+        match gate.state {
+            BridgeState::Prompting | BridgeState::Closed => return,
+            BridgeState::WaitUntil(at) if at > Instant::now() => return,
+            BridgeState::Idle | BridgeState::WaitUntil(_) => gate.state = BridgeState::Prompting,
+        }
+    }
+    if std::thread::Builder::new()
+        .name("tb-bridge".into())
+        .spawn(finish_thunderbolt_bridge)
+        .is_err()
+    {
+        let mut gate = BRIDGE_GATE.lock().unwrap_or_else(|err| err.into_inner());
+        gate.state = BridgeState::Idle;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn finish_thunderbolt_bridge() {
+    let closed = close_enabled_thunderbolt_bridge();
+    let mut gate = BRIDGE_GATE.lock().unwrap_or_else(|err| err.into_inner());
+    gate.state = if closed {
+        BridgeState::Closed
+    } else {
+        BridgeState::WaitUntil(Instant::now() + Duration::from_secs(10 * 60))
+    };
+}
+
+#[cfg(target_os = "macos")]
+fn close_enabled_thunderbolt_bridge() -> bool {
+    // raw-spawn-ok: macOS system tool, only compiled on this platform
+    let Ok(output) = std::process::Command::new("/usr/sbin/networksetup")
+        .arg("-listallnetworkservices")
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let Some(service) = enabled_thunderbolt_bridge(&listing) else {
+        return true;
+    };
+    let script = format!(
+        "do shell script \"/usr/sbin/networksetup -setnetworkserviceenabled \" & quoted form of {service} & \" off\" with administrator privileges",
+        service = apple_script_string(&service),
+    );
+    // raw-spawn-ok: macOS asks for the login password in its own dialog
+    std::process::Command::new("/usr/bin/osascript")
+        .args(["-e", &script])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn apple_script_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(target_os = "macos")]
+enum BridgeState {
+    Idle,
+    Prompting,
+    Closed,
+    WaitUntil(Instant),
+}
+
+#[cfg(target_os = "macos")]
+struct BridgeGate {
+    state: BridgeState,
+}
+
+#[cfg(target_os = "macos")]
+static BRIDGE_GATE: Mutex<BridgeGate> = Mutex::new(BridgeGate {
+    state: BridgeState::Idle,
+});
+
 fn discover_peer_hosts() -> Vec<String> {
     let mut hosts: Vec<String> = lan_scan::scan_lan_tcp_port(EXO_DEFAULT_PORT, true)
         .into_iter()
@@ -309,6 +454,40 @@ mod tests {
         )
         .expect("unpinned port should restart");
         assert_eq!(peers, vec!["/ip4/192.168.1.9/tcp/52416".to_string()]);
+    }
+
+    #[test]
+    fn the_later_computer_is_the_one_that_closes_the_loop() {
+        let nodes = vec!["aa".to_string(), "zz".to_string()];
+        assert!(this_mac_closes_the_loop("zz", &nodes));
+        assert!(!this_mac_closes_the_loop("aa", &nodes));
+        assert!(!this_mac_closes_the_loop("zz", &["zz".to_string()]));
+        assert!(!this_mac_closes_the_loop("  ", &nodes));
+    }
+
+    #[test]
+    fn an_enabled_thunderbolt_bridge_is_the_one_we_can_turn_off() {
+        let listing = "\
+An asterisk (*) denotes that a network service is disabled.
+Wi-Fi
+*Thunderbolt Bridge
+Ethernet
+";
+        assert!(enabled_thunderbolt_bridge(listing).is_none());
+        let listing = "\
+An asterisk (*) denotes that a network service is disabled.
+Wi-Fi
+Thunderbolt Bridge
+";
+        assert_eq!(
+            enabled_thunderbolt_bridge(listing).as_deref(),
+            Some("Thunderbolt Bridge")
+        );
+        let listing = "雷雳网桥\n";
+        assert_eq!(
+            enabled_thunderbolt_bridge(listing).as_deref(),
+            Some("雷雳网桥")
+        );
     }
 
     #[test]
