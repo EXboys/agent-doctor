@@ -232,15 +232,20 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-22.04'
-        timeout-minutes: 10
+        # libwebkit2gtk alone is about 27MB. On v0.1.100-beta.11 the Azure
+        # mirror was still transferring it when the 10 minute cap fired.
+        # 20 minutes still fails a real hang inside the 45 minute job cap.
+        timeout-minutes: 20
         env:
           # A runner-image update (2026-11-11, v0.1.98-beta.9) started a
           # package asking a conffile question; without this the step sat
           # on stdin for hours with no visible log.
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
+          sudo apt-get update -o Acquire::Retries=5
           sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
