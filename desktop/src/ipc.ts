@@ -1530,6 +1530,10 @@ export function connectRemoteCluster(
   });
 }
 
+export function healLocalCluster(): Promise<import("./types").ClusterStatus> {
+  return invoke("heal_local_cluster_command");
+}
+
 export function setClusterPairingCode(
   code?: string | null,
 ): Promise<import("./types").ClusterStatus> {

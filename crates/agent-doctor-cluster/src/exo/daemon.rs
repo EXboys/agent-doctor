@@ -9,12 +9,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use agent_doctor_core::exec::{command_for_path, run_output};
 use agent_doctor_core::lifecycle::use_china_mirrors;
 
 use crate::exo::lifecycle::{locate_exo_runtime, LocatedExoRuntime};
-use crate::exo::{EXO_DEFAULT_PORT, EXO_LOCAL_ORIGIN};
+use crate::exo::{EXO_DEFAULT_PORT, EXO_LIBP2P_PORT, EXO_LOCAL_ORIGIN};
 use crate::namespace::resolve_cluster_namespace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,11 +41,29 @@ struct ManagedExoProcess {
     child: Child,
     sleep_guard: Option<Child>,
     namespace: String,
+    bootstrap_peers: Vec<String>,
+    /// True when this process was started with `--libp2p-port`.
+    port_pinned: bool,
     /// Started with `EXO_OFFLINE` so model files come from disk, not hf-mirror.
     offline_models: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppliedJoin {
+    pub namespace: String,
+    pub peers: Vec<String>,
+    pub port_pinned: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ExoCliCaps {
+    namespace_flag: bool,
+    libp2p_port_flag: bool,
+    bootstrap_flag: bool,
+}
+
 static MANAGED_EXO: Mutex<Option<ManagedExoProcess>> = Mutex::new(None);
+static PENDING_BOOTSTRAP_PEERS: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
 pub fn detect_host_support() -> NodeHostSupport {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -124,6 +143,10 @@ pub fn current_daemon_owner(local_api_alive: bool) -> (DaemonOwner, Option<Strin
         }
     }
     if local_api_alive {
+        if pid_file_matches_live_exo() {
+            let namespace = read_join_file().map(|join| join.namespace);
+            return (DaemonOwner::ManagedByUs, namespace);
+        }
         (DaemonOwner::ExternalProcess, None)
     } else {
         (DaemonOwner::NotRunning, None)
@@ -192,13 +215,41 @@ fn local_dashboard_looks_customized() -> bool {
     text.contains("EXO算力管理") || text.contains("适合本机") || text.contains("AGENT_DOCTOR_ZH")
 }
 
-fn exo_cli_supports_namespace_flag(executable: &Path) -> bool {
-    let Ok(out) = run_output(executable, &["--help"], Duration::from_secs(8)) else {
-        return false;
+fn exo_cli_caps(executable: &Path) -> ExoCliCaps {
+    static CACHE: Mutex<Option<(PathBuf, ExoCliCaps)>> = Mutex::new(None);
+    {
+        let guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((path, caps)) = guard.as_ref() {
+            if path == executable {
+                return *caps;
+            }
+        }
+    }
+    let caps = match run_output(executable, &["--help"], Duration::from_secs(8)) {
+        Ok(out) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            ExoCliCaps {
+                namespace_flag: text.contains("--namespace"),
+                libp2p_port_flag: text.contains("--libp2p-port"),
+                bootstrap_flag: text.contains("--bootstrap-peers"),
+            }
+        }
+        Err(_) => ExoCliCaps {
+            namespace_flag: false,
+            libp2p_port_flag: false,
+            bootstrap_flag: false,
+        },
     };
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    stdout.contains("--namespace") || stderr.contains("--namespace")
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((executable.to_path_buf(), caps));
+    caps
+}
+
+pub(crate) fn runtime_supports_pinned_libp2p() -> bool {
+    locate_exo_runtime().is_some_and(|rt| exo_cli_caps(&rt.executable).libp2p_port_flag)
 }
 
 fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()> {
@@ -210,6 +261,8 @@ fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()>
     let log_file = open_truncated_log()?;
     let log_err = log_file.try_clone().context("复制算力日志句柄失败")?;
 
+    let peers = peers_for_spawn();
+    let caps = exo_cli_caps(&runtime.executable);
     let mut cmd = command_for_path(&runtime.executable);
     cmd.current_dir(&exo_home)
         .arg("--api-port")
@@ -221,8 +274,16 @@ fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()>
     // Shipping DMGs through v1.0.71 are still libp2p (`EXO_LIBP2P_NAMESPACE`).
     // Newer mainline builds speak Zenoh (`--namespace` / `EXO_ZENOH_NAMESPACE`).
     // Probe `--help` once so a single daemon path works across both.
-    if exo_cli_supports_namespace_flag(&runtime.executable) {
+    if caps.namespace_flag {
         cmd.arg("--namespace").arg(namespace);
+    }
+    // Fixed port + explicit peers. mDNS often never arrives (local-network privacy,
+    // guest Wi-Fi, Thunderbolt). Dialing a known port still joins the same account.
+    if caps.libp2p_port_flag {
+        cmd.arg("--libp2p-port").arg(EXO_LIBP2P_PORT.to_string());
+    }
+    if caps.bootstrap_flag && !peers.is_empty() {
+        cmd.arg("--bootstrap-peers").arg(peers.join(","));
     }
 
     let base_path = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string());
@@ -233,6 +294,9 @@ fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()>
     // Always set both; the unused var is ignored by the binary that does not read it.
     cmd.env("EXO_LIBP2P_NAMESPACE", namespace);
     cmd.env("EXO_ZENOH_NAMESPACE", namespace);
+    if !peers.is_empty() {
+        cmd.env("EXO_BOOTSTRAP_PEERS", peers.join(","));
+    }
 
     if let Some(ref zh_dir) = runtime.dashboard_zh_rel_home {
         cmd.env("EXO_DASHBOARD_DIR", zh_dir);
@@ -267,27 +331,49 @@ fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()>
             );
         }
         if local_exo_node_reachable() {
-            let mut guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
-            *guard = Some(ManagedExoProcess {
+            remember_managed(
                 child,
                 sleep_guard,
-                namespace: namespace.to_string(),
+                namespace,
+                peers.clone(),
+                caps.libp2p_port_flag,
                 offline_models,
-            });
+            );
             return Ok(());
         }
         thread::sleep(Duration::from_millis(350));
     }
 
     // Still starting on cold Gatekeeper scan; keep handle alive if child hasn't exited.
+    remember_managed(
+        child,
+        sleep_guard,
+        namespace,
+        peers,
+        caps.libp2p_port_flag,
+        offline_models,
+    );
+    Ok(())
+}
+
+fn remember_managed(
+    child: Child,
+    sleep_guard: Option<Child>,
+    namespace: &str,
+    peers: Vec<String>,
+    port_pinned: bool,
+    offline_models: bool,
+) {
+    let _ = store_join(namespace, &peers, port_pinned);
     let mut guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(ManagedExoProcess {
         child,
         sleep_guard,
         namespace: namespace.to_string(),
+        bootstrap_peers: peers,
+        port_pinned,
         offline_models,
     });
-    Ok(())
 }
 
 /// Prevent macOS from idle-sleeping while sharing unified memory with the cluster.
@@ -380,6 +466,126 @@ pub fn restart_exo_daemon_if_managed() -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub(crate) fn applied_join() -> AppliedJoin {
+    {
+        let guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(proc) = guard.as_ref() {
+            return AppliedJoin {
+                namespace: proc.namespace.clone(),
+                peers: proc.bootstrap_peers.clone(),
+                port_pinned: proc.port_pinned,
+            };
+        }
+    }
+    read_join_file().unwrap_or(AppliedJoin {
+        namespace: String::new(),
+        peers: Vec::new(),
+        port_pinned: false,
+    })
+}
+
+pub(crate) fn set_pending_bootstrap_peers(peers: &[String]) {
+    *PENDING_BOOTSTRAP_PEERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(peers.to_vec());
+}
+
+fn peers_for_spawn() -> Vec<String> {
+    let pending = PENDING_BOOTSTRAP_PEERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    pending.unwrap_or_else(saved_bootstrap_peers)
+}
+
+pub(crate) fn store_join(namespace: &str, peers: &[String], port_pinned: bool) -> Result<()> {
+    let path = join_file_path().context("无法定位用户目录")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let body = json!({
+        "namespace": namespace,
+        "peers": peers,
+        "port_pinned": port_pinned,
+    });
+    fs::write(&path, serde_json::to_string(&body)?)
+        .with_context(|| format!("写入组网记录失败：{}", path.display()))
+}
+
+/// Stop our exo (including one left running after the app restarted) and start it again.
+/// Leaves a separately opened EXO app alone. Returns false when nothing of ours is running.
+pub(crate) fn restart_our_exo() -> Result<bool> {
+    let owned = {
+        let guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_some() {
+            true
+        } else if local_exo_node_reachable() {
+            pid_file_matches_live_exo()
+        } else {
+            false
+        }
+    };
+    if !owned {
+        return Ok(false);
+    }
+    stop_exo_daemon()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while local_exo_node_reachable() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(200));
+    }
+    if local_exo_node_reachable() {
+        return Ok(false);
+    }
+    let Some(rt) = locate_exo_runtime() else {
+        bail!("本机算力组件不在了，请重新开启。");
+    };
+    start_exo_daemon(&rt)?;
+    Ok(true)
+}
+
+fn saved_bootstrap_peers() -> Vec<String> {
+    read_join_file().map(|join| join.peers).unwrap_or_default()
+}
+
+fn join_file_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| {
+        h.join(".agent-doctor")
+            .join("runtimes")
+            .join("exo")
+            .join("join.json")
+    })
+}
+
+fn read_join_file() -> Option<AppliedJoin> {
+    let path = join_file_path()?;
+    let raw = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let namespace = value
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let peers = value
+        .get("peers")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let port_pinned = value
+        .get("port_pinned")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    Some(AppliedJoin {
+        namespace,
+        peers,
+        port_pinned,
+    })
 }
 
 pub fn local_exo_node_reachable() -> bool {

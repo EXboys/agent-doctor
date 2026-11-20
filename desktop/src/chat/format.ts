@@ -66,6 +66,21 @@ export function isLogMessage(message: { role: string; content: string; log?: boo
 
 const RUN_LOG_CHARS = 64_000;
 
+/**
+ * The end of a turn often repeats the log already saved (stderr, then the
+ * same text as the summary). That repeat is not a second fact.
+ */
+export function runLogAlreadyHas(existing: string, incoming: string): boolean {
+  const prev = existing.trim();
+  const next = incoming.trim();
+  if (!next) return true;
+  if (!prev) return false;
+  if (prev === next) return true;
+  const incomingLines = next.split("\n");
+  const tail = prev.split("\n").slice(-incomingLines.length).join("\n");
+  return tail === next;
+}
+
 /** This turn's collapsed log row: after the last user message, if there is one yet. */
 function currentRunLog(logEl: HTMLElement): HTMLElement | null {
   for (let el = logEl.lastElementChild as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
@@ -167,6 +182,7 @@ export function appendRunLog(logEl: HTMLElement, raw: string, summaryText = t("c
   const existing = currentRunLog(logEl);
   const detail = existing?.querySelector<HTMLElement>(".chat-permission-detail");
   if (existing && detail) {
+    if (runLogAlreadyHas(detail.textContent ?? "", text)) return existing;
     const next = `${detail.textContent ?? ""}\n${text}`;
     detail.textContent = next.length > RUN_LOG_CHARS ? next.slice(next.length - RUN_LOG_CHARS) : next;
     const label = existing.querySelector(".chat-activity-text");

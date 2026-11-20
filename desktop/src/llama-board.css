@@ -1,10 +1,63 @@
 /* Llama board and the EXO dashboard share vendor/board-ui/theme.css. */
 @import "../../vendor/board-ui/theme.css";
 
+/* The shared stylesheet locks the document (`overflow: hidden` on html and
+   body). Giving both of them `overflow: auto` makes two scrollports of the
+   same height. Windows WebView2 then delivers the wheel to the document,
+   which has nothing to scroll, and the model list stays cut off. Keep one
+   scrollport: the page body under the tab bar. */
 html,
 body {
   height: 100%;
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.ad-page-shell {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ad-board-header {
+  position: relative;
+  top: auto;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+
+/* Windows has no system title bar on this window. The caption buttons are
+   drawn on the page; the tab bar used to paint over them (z-index 40). */
+html[data-os="windows"] .ad-board-header {
+  padding-right: 152px;
+}
+
+html[data-os="windows"] .window-controls {
+  z-index: 80;
+  display: flex;
+}
+
+.ad-page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-os="windows"] .ad-page-body {
+  scrollbar-width: thin;
+}
+
+html[data-os="windows"] .ad-page-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+html[data-os="windows"] .ad-page-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
 }

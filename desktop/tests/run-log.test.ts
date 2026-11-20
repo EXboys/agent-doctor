@@ -20,7 +20,7 @@ Object.defineProperty(globalThis, "navigator", {
 });
 
 const { appendRunLogMessage } = await import("../src/chat/tool-records");
-const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed, runLogFailureLabel } = await import("../src/chat/format");
+const { coveredRunLogPointers, isLogMessage, isRuntimeLog, isTransportDump, markTurnLogFailed, runLogAlreadyHas, runLogFailureLabel } = await import("../src/chat/format");
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -38,6 +38,9 @@ appendRunLogMessage(messages, "warn: something odd happened", newId);
 assert(messages.length === 2, "every line of one turn lands in one saved log");
 assert(messages[1].log === true && messages[1].role === "meta", "the saved log is marked as a log");
 assert(messages[1].content.split("\n").length === 3, "the original lines are all kept");
+appendRunLogMessage(messages, "warn: something odd happened", newId);
+assert(messages[1].content.split("\n").length === 3, "the same line arriving again is not a second fact");
+assert(runLogAlreadyHas("[AD Codex] CODEX_EXEC_AMBIGUOUS", "[AD Codex] CODEX_EXEC_AMBIGUOUS"), "a repeated failure line is already in the log");
 
 messages.push(user("再试一次"));
 appendRunLogMessage(messages, "[skills] again", newId);

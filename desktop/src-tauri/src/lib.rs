@@ -1013,6 +1013,7 @@ pub fn run() {
             scan_lan_clusters_command,
             scan_llama_peers_command,
             connect_remote_cluster_command,
+            heal_local_cluster_command,
             set_cluster_pairing_code_command,
             set_cluster_backend_command,
             set_llama_peer_hosts_command,

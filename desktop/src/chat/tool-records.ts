@@ -1,4 +1,4 @@
-import { mergeToolStep, splitToolActivity, toolSignature, toolStepText } from "./format";
+import { mergeToolStep, runLogAlreadyHas, splitToolActivity, toolSignature, toolStepText } from "./format";
 import type { ChatMessage, ToolStep } from "./types";
 
 export type ToolRecord = string | { text: string; step?: ToolStep; skipped?: number };
@@ -139,6 +139,7 @@ export function appendRunLogMessage(messages: ChatMessage[], text: string, newId
     const message = messages[i];
     if (message?.role === "user") break;
     if (message?.role === "meta" && message.log) {
+      if (runLogAlreadyHas(message.content, detail)) return;
       const next = `${message.content}\n${detail}`;
       message.content = next.length > SAVED_LOG_CHARS ? next.slice(next.length - SAVED_LOG_CHARS) : next;
       return;

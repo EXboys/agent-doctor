@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use agent_doctor_cluster::{
-    activate_cluster_model, cancel_exo_install, connect_remote_cluster,
+    activate_cluster_model, cancel_exo_install, connect_remote_cluster, heal_local_exo_cluster,
     install_and_start_local_cluster, llama::scan_llama_peer_hosts, load_cluster_status,
     scan_lan_clusters, set_cluster_backend, set_llama_peer_hosts, stop_or_disconnect_cluster,
     update_cluster_pairing_code, ClusterBackendKind, ClusterStatus, LanClusterCandidate,
@@ -141,6 +141,15 @@ pub async fn connect_remote_cluster_command(
 
     update_tray_tooltip(&app);
     notify_provider_changed(&app);
+    emit_cluster_changed(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn heal_local_cluster_command(app: tauri::AppHandle) -> Result<ClusterStatus, String> {
+    let status = tauri::async_runtime::spawn_blocking(heal_local_exo_cluster)
+        .await
+        .map_err(|err| err.to_string())?;
     emit_cluster_changed(&app, &status);
     Ok(status)
 }

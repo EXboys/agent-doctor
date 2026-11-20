@@ -7,6 +7,7 @@ import {
   cancelClusterInstall,
   connectRemoteCluster,
   getClusterStatus,
+  healLocalCluster,
   openAskWindow,
   openClusterBoardWindow,
   openLlamaBoardWindow,
@@ -44,6 +45,8 @@ export function createClusterController(deps: ClusterControllerDeps) {
   let manualHostDraft = "";
   let peerDraft: string | null = null;
   let llamaScanState: "idle" | "scanning" | "done" = "idle";
+  let joiningPeers = false;
+  let healTimer: number | null = null;
   let llamaFoundCount = 0;
 
   function formatGb(bytes: number): string {
@@ -113,6 +116,14 @@ export function createClusterController(deps: ClusterControllerDeps) {
     }
 
     if (s.reachable) {
+      if (
+        (joiningPeers || healTimer !== null) &&
+        s.backend === "exo" &&
+        s.nodes.length < 2 &&
+        !s.remote_origin
+      ) {
+        return t("cluster.joiningPeers");
+      }
       const count = String(Math.max(1, s.nodes.length));
       const gb = formatGb(s.usable_memory_bytes);
       const memory = gb === "—" ? "" : t("cluster.memoryNote", { gb });
@@ -140,6 +151,49 @@ export function createClusterController(deps: ClusterControllerDeps) {
       return t("cluster.macOSOld");
     }
     return t("cluster.consumerIdle");
+  }
+
+  function shouldKeepJoining(s: ClusterStatus): boolean {
+    return (
+      s.backend === "exo" &&
+      s.reachable &&
+      !s.remote_origin &&
+      s.nodes.length < 2 &&
+      s.daemon_owner !== "external_process" &&
+      s.host_support === "supported"
+    );
+  }
+
+  function scheduleHeal(s: ClusterStatus) {
+    if (!shouldKeepJoining(s)) {
+      if (healTimer !== null) {
+        window.clearInterval(healTimer);
+        healTimer = null;
+      }
+      return;
+    }
+    if (healTimer !== null) return;
+    void runHeal();
+    healTimer = window.setInterval(() => {
+      void runHeal();
+    }, 20000);
+  }
+
+  async function runHeal() {
+    if (joiningPeers) return;
+    const current = status;
+    if (!current || !shouldKeepJoining(current)) return;
+    joiningPeers = true;
+    render();
+    try {
+      status = await healLocalCluster();
+    } catch {
+      // Keep the last status. The next pass tries again.
+    } finally {
+      joiningPeers = false;
+      render();
+      if (status) scheduleHeal(status);
+    }
   }
 
   function maybeDiscoverLlama(s: ClusterStatus) {
@@ -442,6 +496,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
       status = await getClusterStatus();
       render();
       if (status?.backend === "llama_cpp") maybeDiscoverLlama(status);
+      if (status) scheduleHeal(status);
     } catch {
       // Keep UI quiet on transient probe failure.
     }
@@ -460,6 +515,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
       }
       status = await startLocalCluster();
       feedback = { tone: "ok", text: t("cluster.resultStarted") };
+      scheduleHeal(status);
     } catch (err) {
       feedback = { tone: "error", text: friendlyClusterError(err) };
     } finally {
@@ -650,6 +706,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
       status = ev.payload;
       if (busyMode === "idle") installProgress = null;
       render();
+      if (!joiningPeers) scheduleHeal(status);
     });
 
     void listen("personal-provider-changed", () => {

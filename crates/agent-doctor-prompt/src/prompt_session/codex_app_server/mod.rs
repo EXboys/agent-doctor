@@ -406,11 +406,23 @@ fn run_codex_app_server(
     }
 
     let mut dropped_resume = false;
+    let mut exec_retries_left = 1;
     let reused = match reused {
         Some((Err(err), mut child, mut pipes)) if is_thread_open_failure(&err) => {
             let _ = child.kill();
             let _ = child.wait();
             pipes.join(Duration::from_millis(500));
+            dropped_resume = true;
+            resume_thread_id = None;
+            None
+        }
+        Some((Ok(done), mut child, mut pipes))
+            if exec_retries_left > 0 && outcome_is_exec_selection(&done.0, &display_text) =>
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            pipes.join(Duration::from_millis(500));
+            exec_retries_left = 0;
             dropped_resume = true;
             resume_thread_id = None;
             None
@@ -521,6 +533,20 @@ fn run_codex_app_server(
                         resume_attempt = None;
                         continue;
                     }
+                    Ok((outcome, _))
+                        if exec_retries_left > 0
+                            && outcome_is_exec_selection(&outcome, &display_text) =>
+                    {
+                        control.close();
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        pipes.join(Duration::from_millis(500));
+                        exec_retries_left = 0;
+                        allow_fresh_start = false;
+                        dropped_resume = true;
+                        resume_attempt = None;
+                        continue;
+                    }
                     other => break (other, child, pipes),
                 }
             }
@@ -610,6 +636,10 @@ fn build_app_server_command(
         || agent_doctor_core::setup::is_native_subscription("codex"))
         && !saved_service;
     if on_codex_account {
+        // The built-in OpenAI provider is the signed-in ChatGPT account. A
+        // leftover `model_provider = "personal"` would send a GPT model to the
+        // saved gateway instead.
+        cmd.arg("-c").arg("model_provider=\"openai\"");
         let model = overlay
             .get(agent_doctor_core::setup::MODEL_ENV)
             .map(|value| value.as_str());
@@ -630,7 +660,83 @@ fn build_app_server_command(
     if on_codex_account {
         scrub_subscription_gateway_env(&mut cmd);
     }
+    // A remote exec server next to the local one makes Codex exit before any
+    // reply (`CODEX_EXEC_*`). Chat always uses the one local executor.
+    pin_single_local_executor(&mut cmd);
     Ok(cmd)
+}
+
+const REMOTE_EXEC_ENV: &[&str] = &[
+    "CODEX_EXEC_SERVER_URL",
+    "CODEX_EXEC_SERVER_NOISE_REGISTRY_URL",
+    "CODEX_EXEC_SERVER_NOISE_ENVIRONMENT_ID",
+    "CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN",
+    "CODEX_EXEC_SERVER_NOISE_CHATGPT_ACCOUNT_ID",
+];
+
+fn pin_single_local_executor(cmd: &mut Command) {
+    for key in REMOTE_EXEC_ENV {
+        cmd.env_remove(key);
+    }
+    for flag in [
+        "features.code_mode=false",
+        "features.code_mode_only=false",
+        "features.deferred_executor=false",
+    ] {
+        cmd.arg("-c").arg(flag);
+    }
+}
+
+/// The process died before any reply because it could not pick one executor.
+/// A short machine code (`[AD Codex] CODEX_EXEC_AMBIGUOUS`) is that failure,
+/// as are Codex's own sentences for the same situation.
+fn is_exec_selection_failure(raw: &str) -> bool {
+    let text = raw.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("expected one executor")
+        || lower.contains("duplicate tool")
+        || lower.contains("no usable execution environment")
+    {
+        return true;
+    }
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    !lines.is_empty() && lines.iter().copied().all(is_exec_code_line)
+}
+
+fn is_exec_code_line(line: &str) -> bool {
+    let token = line
+        .rsplit_once(']')
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or(line);
+    let mut parts = token.split_whitespace();
+    let Some(code) = parts.next() else {
+        return false;
+    };
+    parts.next().is_none()
+        && code.contains("EXEC")
+        && code.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_')
+}
+
+fn outcome_is_exec_selection(outcome: &super::PumpResult, display: &Arc<Mutex<String>>) -> bool {
+    let (status, _, stdout, stderr, _) = outcome;
+    if *status != PromptSessionStatus::Failed {
+        return false;
+    }
+    if display
+        .lock()
+        .map(|text| !text.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    is_exec_selection_failure(&combine_output(stdout, stderr))
 }
 
 /// How long to keep the stdout pipe open after stdin EOF.
@@ -1189,6 +1295,23 @@ mod tests {
             permission_from_codex("item/commandExecution/requestApproval", &params);
         assert_eq!(tool, "Bash");
         assert_eq!(detail, "network");
+    }
+
+    #[test]
+    fn an_executor_that_cannot_be_chosen_is_not_a_reply() {
+        assert!(is_exec_selection_failure(
+            "[AD Codex] CODEX_EXEC_AMBIGUOUS\n[AD Codex] CODEX_EXEC_AMBIGUOUS"
+        ));
+        assert!(is_exec_selection_failure(
+            "expected one executor for this call"
+        ));
+        assert!(is_exec_selection_failure(
+            "No usable execution environment is available."
+        ));
+        assert!(!is_exec_selection_failure("provider rejected the key"));
+        assert!(!is_exec_selection_failure(""));
+        assert!(is_exec_code_line("[AD Codex] CODEX_EXEC_AMBIGUOUS"));
+        assert!(!is_exec_code_line("hello from Codex"));
     }
 
     #[test]

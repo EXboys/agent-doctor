@@ -246,6 +246,10 @@ pub fn align_codex_subscription_configs(
     allowed: &[String],
 ) -> AnyhowResult<()> {
     for path in paths {
+        // A saved service leaves `model_provider` and `openai_base_url`. With a
+        // ChatGPT login those keys still win, so a chosen GPT model is sent to
+        // the gateway and the turn dies before any reply.
+        strip_codex_project_denied_provider_keys(path)?;
         align_codex_subscription_model(path, chosen, allowed)?;
     }
     Ok(())
@@ -667,6 +671,40 @@ mod codex_responses_tests {
         let cleared = fs::read_to_string(&path).unwrap();
         assert!(!cleared.contains("model"));
         assert!(cleared.contains("approval_policy"));
+    }
+
+    #[test]
+    fn subscription_config_sends_a_gpt_model_to_the_account() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+model = "deepseek-flash"
+model_provider = "personal"
+openai_base_url = "https://agentdoctor.cn/api/v1/official"
+approval_policy = "on-request"
+
+[model_providers.personal]
+base_url = "https://agentdoctor.cn/api/v1/official"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let allowed = vec!["gpt-5.6-sol".to_string()];
+        align_codex_subscription_configs(
+            std::slice::from_ref(&path),
+            Some("gpt-5.6-sol"),
+            &allowed,
+        )
+        .unwrap();
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert!(rendered.contains("model = \"gpt-5.6-sol\""));
+        assert!(rendered.contains("approval_policy"));
+        assert!(!rendered.contains("model_provider"));
+        assert!(!rendered.contains("openai_base_url"));
+        assert!(!rendered.contains("model_providers"));
+        assert!(!rendered.contains("deepseek-flash"));
     }
 
     #[test]

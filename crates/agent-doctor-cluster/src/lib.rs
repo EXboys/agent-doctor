@@ -254,6 +254,12 @@ pub fn set_llama_peer_hosts(raw: &str) -> Result<ClusterStatus> {
 }
 
 /// Install (if missing) and start the local `exo` daemon on Apple Silicon Mac.
+/// Re-join other Macs on this account. Safe to call repeatedly; it waits between tries.
+pub fn heal_local_exo_cluster() -> ClusterStatus {
+    let _ = exo::heal::heal_lonely_exo();
+    load_cluster_status()
+}
+
 pub fn install_and_start_local_cluster<F>(on_progress: F) -> Result<ClusterStatus>
 where
     F: FnMut(u64, Option<u64>, &str),
@@ -279,7 +285,7 @@ where
     let _ = exo::lifecycle::ensure_managed_dashboard_zh();
     let runtime = exo::lifecycle::locate_exo_runtime().unwrap_or(runtime);
     exo::daemon::start_exo_daemon(&runtime)?;
-    Ok(load_cluster_status())
+    Ok(heal_local_exo_cluster())
 }
 
 /// Stop the managed local daemon (or disconnect a saved remote LAN cluster on consumer devices).

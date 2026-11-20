@@ -203,6 +203,10 @@ pub fn scan_lan_clusters() -> Vec<LanClusterCandidate> {
     list
 }
 
+pub(crate) fn local_scannable_ipv4s(include_link_local: bool) -> Vec<Ipv4Addr> {
+    discover_local_ipv4s(include_link_local)
+}
+
 fn discover_local_ipv4s(include_link_local: bool) -> Vec<Ipv4Addr> {
     let mut ips = BTreeSet::new();
 
@@ -253,7 +257,7 @@ fn parse_ipv4_tokens(text: &str) -> Vec<Ipv4Addr> {
         .collect()
 }
 
-fn is_scannable_lan_ipv4(ip: Ipv4Addr, include_link_local: bool) -> bool {
+pub(crate) fn is_scannable_lan_ipv4(ip: Ipv4Addr, include_link_local: bool) -> bool {
     let [a, b, _, _] = ip.octets();
     if ip.is_loopback() || ip.is_unspecified() {
         return false;
