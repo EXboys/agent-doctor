@@ -1549,3 +1549,9 @@ export function setClusterBackend(
 export function setLlamaPeerHosts(peers: string): Promise<import("./types").ClusterStatus> {
   return invoke("set_llama_peer_hosts_command", { peers });
 }
+
+export function setClusterModelSource(
+  source: "modelscope" | "huggingface",
+): Promise<import("./types").ClusterStatus> {
+  return invoke("set_cluster_model_source_command", { source });
+}

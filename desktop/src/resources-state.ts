@@ -108,6 +108,8 @@ export const resourcesState = {
   agentCatalogTab: "all" as AgentCatalogTabId,
   mcpConfigureInFlight: false,
   mallActionInFlight: false,
+  mallActionItemId: null as string | null,
+  pendingRemoveSkillId: null as string | null,
   mallLoginInFlight: false,
   skillsStatusMessage: null as string | null,
   highlightSkillKey: null as string | null,

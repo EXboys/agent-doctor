@@ -1016,6 +1016,7 @@ pub fn run() {
             heal_local_cluster_command,
             set_cluster_pairing_code_command,
             set_cluster_backend_command,
+            set_cluster_model_source_command,
             set_llama_peer_hosts_command,
             native_account_status_command,
             refresh_subscription_models_command,

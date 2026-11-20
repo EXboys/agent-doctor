@@ -349,6 +349,7 @@ export interface ClusterStatus {
   provider_active: boolean;
   peer_hosts: string;
   remote_origin?: string | null;
+  model_source?: "modelscope" | "huggingface" | string;
 }
 
 export interface LanClusterCandidate {

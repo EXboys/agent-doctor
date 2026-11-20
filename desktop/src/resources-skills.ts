@@ -1,5 +1,4 @@
 
-import { ask } from "@tauri-apps/plugin-dialog";
 import { t } from "./i18n";
 import type { MessageKey } from "./i18n";
 import { withErrorDetail } from "./friendly-error";
@@ -627,12 +626,16 @@ export function appendUnifiedSkillActions(metaWrap: HTMLElement, entry: UnifiedS
       metaWrap.appendChild(btn);
     }
     if (entry.canUnmount) {
+      const pending = resourcesState.pendingRemoveSkillId === skillId;
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.className = "btn-ghost btn-compact";
-      removeBtn.textContent = t("resources.removeFromAgents");
+      removeBtn.className = `btn-ghost btn-compact${pending ? " is-armed" : ""}`;
+      removeBtn.textContent = pending
+        ? t("resources.removeFromAgentsConfirmBtn")
+        : t("resources.removeFromAgents");
       removeBtn.title = t("resources.removeFromAgentsHint");
-      removeBtn.addEventListener("click", () => {
+      removeBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
         void unmountSkill(skillId, entry.name);
       });
       metaWrap.appendChild(removeBtn);
@@ -663,11 +666,15 @@ export function appendUnifiedSkillActions(metaWrap: HTMLElement, entry: UnifiedS
     return;
   }
   if (canInstallMallItem(item)) {
+    const installing =
+      resourcesState.mallActionInFlight && resourcesState.mallActionItemId === item.id;
     const installBtn = document.createElement("button");
     installBtn.type = "button";
     installBtn.className = "btn-primary btn-compact";
-    installBtn.textContent = t("resources.mallInstall");
-    installBtn.addEventListener("click", () => {
+    installBtn.textContent = installing ? t("resources.mallInstalling") : t("resources.mallInstall");
+    installBtn.disabled = resourcesState.mallActionInFlight;
+    installBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
       void installMallItem(item, installBtn);
     });
     metaWrap.appendChild(installBtn);
@@ -868,18 +875,13 @@ export async function mountSkill(skillId: string, runtimes?: string[]): Promise<
 }
 
 export async function unmountSkill(skillId: string, name: string): Promise<void> {
-  let ok = false;
-  try {
-    ok = await ask(t("resources.removeFromAgentsConfirm", { name }), {
-      title: t("resources.removeFromAgents"),
-      kind: "warning",
-      okLabel: t("resources.removeFromAgents"),
-      cancelLabel: t("resources.cancel"),
-    });
-  } catch {
-    ok = window.confirm(t("resources.removeFromAgentsConfirm", { name }));
+  if (resourcesState.pendingRemoveSkillId !== skillId) {
+    resourcesState.pendingRemoveSkillId = skillId;
+    setSkillsFootnote(t("resources.removeFromAgentsAgain", { name }));
+    renderResourcesList();
+    return;
   }
-  if (!ok) return;
+  resourcesState.pendingRemoveSkillId = null;
   setSkillsFootnote(t("resources.removingFromAgents"));
   try {
     const report = await unmountSyncedSkills({

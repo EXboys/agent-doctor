@@ -159,7 +159,7 @@ pub fn run_linked_prompt(
 ) -> Result<PromptSessionReport, String> {
     let port = link_sessions
         .local_port(host_id)
-        .ok_or_else(|| "还没连上这台电脑，请先点「打开客户端连接」。".to_string())?;
+        .ok_or_else(|| "还没连上这台服务器。先点「连上这台服务器」。".to_string())?;
 
     linked_index.remember(client_key, host_id, port);
 

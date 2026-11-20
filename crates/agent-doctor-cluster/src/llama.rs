@@ -422,7 +422,7 @@ where
     let peers = parse_peer_hosts(&saved_peer_text())?;
     let server = locate_server().context("请先下载并开启 llama.cpp。")?;
     clear_llama_cancel();
-    let source = if use_china_mirrors() {
+    let source = if crate::namespace::prefers_modelscope() {
         let weights = crate::modelscope::ensure_llama_gguf(model_id, on_progress, &|| {
             CANCEL_INSTALL.load(Ordering::SeqCst)
         })?;

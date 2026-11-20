@@ -216,6 +216,58 @@ where
     Ok(first)
 }
 
+/// Weights plus the small config and tokenizer files exo reads from disk.
+/// Skips `original/` pytorch trees, pictures, and readmes that make a download look stuck.
+pub(crate) fn exo_snapshot_files(files: &[RemoteFile]) -> Vec<RemoteFile> {
+    files
+        .iter()
+        .filter(|file| exo_file_needed(&file.path))
+        .cloned()
+        .collect()
+}
+
+fn exo_file_needed(path: &str) -> bool {
+    if path.split('/').any(|seg| {
+        let seg = seg.to_ascii_lowercase();
+        seg == "original" || seg == ".git" || seg == "__pycache__" || seg == "onnx"
+    }) {
+        return false;
+    }
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    if name.is_empty() || name.starts_with('.') {
+        return false;
+    }
+    if name.ends_with(".safetensors") || name.ends_with(".safetensors.index.json") {
+        return true;
+    }
+    const KEEP: &[&str] = &[
+        "config.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "tokenizer.model",
+        "special_tokens_map.json",
+        "added_tokens.json",
+        "vocab.json",
+        "merges.txt",
+        "chat_template.jinja",
+        "preprocessor_config.json",
+    ];
+    KEEP.contains(&name.as_str()) || name.ends_with(".tiktoken")
+}
+
+fn has_safetensor_weight(files: &[RemoteFile]) -> bool {
+    files.iter().any(|file| {
+        let name = file
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&file.path)
+            .to_ascii_lowercase();
+        name.ends_with(".safetensors")
+    })
+}
+
 pub(crate) fn ensure_exo_snapshot<F, C>(
     model_id: &str,
     on_progress: &mut F,
@@ -227,15 +279,13 @@ where
 {
     let (repo, _) = split_model_spec(model_id)?;
     let dest = exo_models_root()?.join(exo_model_dirname(&repo));
-    let files = list_files(&repo)?;
-    if files.is_empty() {
-        bail!("国内源里没有找到这个模型。");
+    let listed = list_files(&repo)?;
+    if listed.is_empty() {
+        bail!("国内源里没有找到这个模型。可以换成 Hugging Face 再试。");
     }
-    if !files
-        .iter()
-        .any(|f| f.path.ends_with(".safetensors.index.json"))
-    {
-        bail!("国内源里的模型不完整。");
+    let files = exo_snapshot_files(&listed);
+    if !has_safetensor_weight(&files) {
+        bail!("国内源里没有这个模型的权重。可以换成 Hugging Face 再试。");
     }
     download_files(&repo, &dest, &files, on_progress, is_cancelled)?;
     Ok(dest)
@@ -377,7 +427,13 @@ where
         if is_cancelled() {
             bail!("已取消下载。");
         }
-        let n = resp.read(&mut buf).context("模型下载中断，请再试一次。")?;
+        let n = match resp.read(&mut buf) {
+            Ok(n) => n,
+            Err(err) if download_stalled(&err) => {
+                bail!("下载停住了。可以换成另一个下载地址再试。");
+            }
+            Err(err) => return Err(err).context("模型下载中断，请再试一次。"),
+        };
         if n == 0 {
             break;
         }
@@ -413,10 +469,18 @@ fn resolve_url(repo: &str, path: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 
+fn download_stalled(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::TimedOut
+        || err.to_string().to_ascii_lowercase().contains("timed out")
+}
+
 fn http_client() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(6 * 60 * 60))
+        // The blocking client applies this deadline to every body read, not to
+        // the whole file. A quiet socket fails here; bytes that keep arriving
+        // start the wait over.
+        .timeout(Duration::from_secs(90))
         .user_agent("agent-doctor")
         .build()
         .context("创建下载客户端失败")
@@ -456,6 +520,43 @@ mod tests {
         assert!(split_model_spec("../evil/name").is_err());
         assert!(safe_relative("../config.json").is_none());
         assert!(safe_relative("config.json").is_some());
+    }
+
+    #[test]
+    fn exo_snapshot_keeps_weights_and_skips_the_original_tree() {
+        let files = vec![
+            RemoteFile {
+                path: "model.safetensors".into(),
+                size: 10,
+            },
+            RemoteFile {
+                path: "config.json".into(),
+                size: 1,
+            },
+            RemoteFile {
+                path: "original/model.safetensors".into(),
+                size: 99,
+            },
+            RemoteFile {
+                path: "README.md".into(),
+                size: 1,
+            },
+            RemoteFile {
+                path: "model.safetensors.index.json".into(),
+                size: 1,
+            },
+        ];
+        let got = exo_snapshot_files(&files);
+        let paths: Vec<&str> = got.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "model.safetensors",
+                "config.json",
+                "model.safetensors.index.json"
+            ]
+        );
+        assert!(has_safetensor_weight(&got));
     }
 
     #[test]

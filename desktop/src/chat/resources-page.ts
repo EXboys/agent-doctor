@@ -168,6 +168,7 @@ function paintContent(): void {
       onDeleteSkill: (skillId) => {
         if (pendingDelete !== skillId) {
           pendingDelete = skillId;
+          setInstallNote(t("chat.skillDeleteAgain"));
           paintContent();
           return;
         }
@@ -273,7 +274,10 @@ function setAddMenu(open: boolean): void {
 }
 
 async function installSkills(directory: boolean): Promise<void> {
-  if (installing) return;
+  if (installing) {
+    setInstallNote(t("chat.skillInstalling"));
+    return;
+  }
   setAddMenu(false);
   if (tab === "project" && deps.projects().length === 0) {
     setInstallNote(t("chat.skillInstallNoProject"));
@@ -287,6 +291,7 @@ async function installSkills(directory: boolean): Promise<void> {
       filters: directory ? undefined : [{ name: "zip", extensions: ["zip"] }],
     });
   } catch {
+    setInstallNote(t("chat.skillInstallFailed"));
     return;
   }
   const paths = (Array.isArray(picked) ? picked : picked ? [picked] : []).filter(Boolean);
@@ -678,7 +683,9 @@ export function bindResourcesPage(next: Deps): void {
     void removeSubagent(editingSubagentId);
   });
   document.querySelector("#chat-resources-content")?.addEventListener("click", (event) => {
-    const row = (event.target as HTMLElement).closest(".chat-res-row");
+    const target = event.target as HTMLElement;
+    if (target.closest(".chat-res-delete, .chat-res-pin, .chat-res-grip, .chat-resources-add")) return;
+    const row = target.closest(".chat-res-row");
     if (!row || row.classList.contains("is-hand")) return;
     paintContent();
   });

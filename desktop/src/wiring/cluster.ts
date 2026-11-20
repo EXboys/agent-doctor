@@ -15,6 +15,7 @@ import {
   scanLlamaPeers,
   setClusterPairingCode,
   setClusterBackend,
+  setClusterModelSource,
   setLlamaPeerHosts,
   startLocalCluster,
   stopCluster,
@@ -103,6 +104,9 @@ export function createClusterController(deps: ClusterControllerDeps) {
       return t("cluster.starting");
     }
     if (busyMode === "preparing") {
+      if (s.model_source === "huggingface") {
+        return t("cluster.preparingModelHf");
+      }
       return t("cluster.preparingModel", { count: String(Math.max(1, s.nodes.length)) });
     }
     if (busyMode === "scanning") {
@@ -330,6 +334,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
         .join("");
 
       controlsHtml = `
+        ${modelSourceHtml(s, isBusy)}
         <div class="cluster-tier-block">
           <span class="cluster-tier-label">${escapeHtml(t("cluster.tierLabel"))}</span>
           <div class="cluster-tier-pills" role="radiogroup" aria-label="${escapeHtml(
@@ -613,6 +618,38 @@ export function createClusterController(deps: ClusterControllerDeps) {
     render();
   }
 
+  function modelSourceHtml(s: ClusterStatus, isBusy: boolean): string {
+    const source = s.model_source === "huggingface" ? "huggingface" : "modelscope";
+    const hint =
+      source === "huggingface" ? t("cluster.modelSourceHfHint") : t("cluster.modelSourceChinaHint");
+    const pill = (id: "modelscope" | "huggingface", label: string) =>
+      `<button type="button" class="cluster-tier-pill${source === id ? " is-selected" : ""}" role="radio" aria-checked="${
+        source === id ? "true" : "false"
+      }" data-cluster-action="model-source" data-source="${id}" ${isBusy ? "disabled" : ""}>
+        <span class="cluster-tier-pill-name">${escapeHtml(label)}</span>
+      </button>`;
+    return `<div class="cluster-source">
+      <span class="cluster-tier-label">${escapeHtml(t("cluster.modelSourceLabel"))}</span>
+      <div class="cluster-source-pills" role="radiogroup" aria-label="${escapeHtml(
+        t("cluster.modelSourceLabel"),
+      )}">
+        ${pill("modelscope", t("cluster.modelSourceChina"))}
+        ${pill("huggingface", t("cluster.modelSourceHf"))}
+      </div>
+      <p class="cluster-next">${escapeHtml(hint)}</p>
+    </div>`;
+  }
+
+  async function handleModelSource(source: "modelscope" | "huggingface") {
+    if (!status || status.model_source === source) return;
+    try {
+      status = await setClusterModelSource(source);
+    } catch (err) {
+      feedback = { tone: "error", text: friendlyClusterError(err) };
+    }
+    render();
+  }
+
   async function handlePickBackend(backend: "exo" | "llama_cpp") {
     if (!status || status.backend === backend) return;
     feedback = null;
@@ -689,6 +726,11 @@ export function createClusterController(deps: ClusterControllerDeps) {
       } else if (action === "save-code") {
         const input = cardEl.querySelector<HTMLInputElement>("#cluster-pairing-code");
         void handleSaveCode(input?.value ?? "");
+      } else if (action === "model-source") {
+        const source = btn.dataset.source;
+        if (source === "modelscope" || source === "huggingface") {
+          void handleModelSource(source);
+        }
       } else if (action === "pick-backend") {
         const backend = btn.dataset.backend;
         if (backend === "exo" || backend === "llama_cpp") {

@@ -269,8 +269,12 @@ export async function installMallItem(
   item: TeamupsCatalogItem,
   button: HTMLButtonElement,
 ): Promise<void> {
-  if (resourcesState.mallActionInFlight) return;
+  if (resourcesState.mallActionInFlight) {
+    setSkillsFootnote(t("resources.mallBusy"));
+    return;
+  }
   resourcesState.mallActionInFlight = true;
+  resourcesState.mallActionItemId = item.id;
   button.disabled = true;
   const previous = button.textContent;
   button.textContent = t("resources.mallInstalling");
@@ -311,5 +315,7 @@ export async function installMallItem(
     button.textContent = previous;
   } finally {
     resourcesState.mallActionInFlight = false;
+    resourcesState.mallActionItemId = null;
+    if (skillsPanelActive()) renderResourcesList();
   }
 }

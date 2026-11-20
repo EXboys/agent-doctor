@@ -12,11 +12,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use agent_doctor_core::exec::{command_for_path, run_output};
-use agent_doctor_core::lifecycle::use_china_mirrors;
 
 use crate::exo::lifecycle::{locate_exo_runtime, LocatedExoRuntime};
 use crate::exo::{EXO_DEFAULT_PORT, EXO_LIBP2P_PORT, EXO_LOCAL_ORIGIN};
-use crate::namespace::resolve_cluster_namespace;
+use crate::namespace::{prefers_modelscope, resolve_cluster_namespace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -301,9 +300,9 @@ fn spawn_managed_exo(runtime: &LocatedExoRuntime, namespace: &str) -> Result<()>
     if let Some(ref zh_dir) = runtime.dashboard_zh_rel_home {
         cmd.env("EXO_DASHBOARD_DIR", zh_dir);
     }
-    // China builds download the model from ModelScope into ~/.exo/models first.
-    // Offline stops this process from falling back to an overseas mirror.
-    let offline_models = use_china_mirrors();
+    // ModelScope downloads land in ~/.exo/models first. Offline stops this
+    // process from falling back to Hugging Face and sitting there.
+    let offline_models = prefers_modelscope();
     if offline_models {
         cmd.env("EXO_OFFLINE", "1");
     }
@@ -420,15 +419,16 @@ pub fn stop_exo_daemon() -> Result<()> {
     Ok(())
 }
 
-/// Restart the daemon we started so it reads the ModelScope snapshot from disk.
-/// Leaves a separately opened EXO app alone.
-pub fn restart_for_offline_models() -> Result<()> {
-    if !use_china_mirrors() {
-        return Ok(());
-    }
+/// Restart the daemon we started so it matches the chosen download address.
+/// A separately opened EXO window cannot be switched to the China source.
+pub fn restart_to_match_model_source() -> Result<()> {
+    let offline = prefers_modelscope();
     {
         let guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.as_ref().is_some_and(|proc| proc.offline_models) {
+        if guard
+            .as_ref()
+            .is_some_and(|proc| proc.offline_models == offline)
+        {
             return Ok(());
         }
     }
@@ -437,6 +437,9 @@ pub fn restart_for_offline_models() -> Result<()> {
         guard.is_none() && local_exo_node_reachable() && !pid_file_matches_live_exo()
     };
     if foreign {
+        if offline {
+            bail!("这台电脑上的算力窗口是单独打开的，模型还会从 Hugging Face 下载。先关掉那个窗口，再点一次。");
+        }
         return Ok(());
     }
     stop_exo_daemon()?;
@@ -445,6 +448,9 @@ pub fn restart_for_offline_models() -> Result<()> {
         thread::sleep(Duration::from_millis(200));
     }
     if local_exo_node_reachable() {
+        if offline {
+            bail!("算力窗口还开着，没法改用国内源。先关掉那个窗口，再点一次。");
+        }
         return Ok(());
     }
     if let Some(rt) = locate_exo_runtime() {

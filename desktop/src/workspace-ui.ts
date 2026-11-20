@@ -298,6 +298,23 @@ function fillRemoteHostSelect(doc: RemoteHostsDocument): void {
   }
 }
 
+function hostAction(
+  hostId: string,
+  action: string,
+  label: string,
+  kind: "primary" | "ghost" | "link" | "quiet",
+): string {
+  const busy = remoteBusy ? "disabled" : "";
+  const id = escapeHtml(hostId);
+  const text = escapeHtml(label);
+  if (kind === "link" || kind === "quiet") {
+    const quiet = kind === "quiet" ? " is-quiet" : "";
+    return `<button type="button" class="remote-host-link${quiet}" data-remote-host-action="${action}" data-remote-host="${id}" ${busy}>${text}</button>`;
+  }
+  const cls = kind === "primary" ? "btn-primary btn-compact" : "btn-ghost btn-compact";
+  return `<button type="button" class="${cls}" data-remote-host-action="${action}" data-remote-host="${id}" ${busy}>${text}</button>`;
+}
+
 function probeBadge(status: RemoteHostProbeStatus): { className: string; label: string } {
   switch (status) {
     case "ok":
@@ -331,32 +348,37 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
         row.project_count > 0
           ? t("remote.projectsCount", { count: String(row.project_count) })
           : "";
-      const sub = [row.target, projects, detail].filter(Boolean).join(" · ");
-      const firstProject = lastRemoteProjects.find((p) => p.host_id === row.host_id);
+      const note = [projects, detail].filter(Boolean).join(" · ");
       const title = row.display_name?.trim() || row.host_id;
-      const doctorBtn = firstProject
-        ? `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="doctor" data-remote-host="${escapeHtml(row.host_id)}" data-remote-target="${escapeHtml(`${firstProject.host_id}/${firstProject.project_id}`)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.doctor"))}</button>`
-        : `<button type="button" class="btn-ghost btn-compact" data-remote-host-action="add-path" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.addPath"))}</button>`;
-      const linkBtns = `
-              <button type="button" class="btn-primary btn-compact" data-remote-host-action="connect" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.connectClient"))}</button>
-              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="linked-doctor" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.linkedDoctor"))}</button>
-              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="linked-fix" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.linkedFix"))}</button>
-              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="disconnect" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.disconnectClient"))}</button>`;
+      const address = row.target.trim();
+      const linked = row.linked_client === true;
+      const main = linked
+        ? `${hostAction(row.host_id, "linked-doctor", t("remote.linkedDoctor"), "primary")}
+           ${hostAction(row.host_id, "linked-fix", t("remote.linkedFix"), "ghost")}`
+        : hostAction(row.host_id, "probe", t("remote.probe"), "primary");
+      const links = linked
+        ? [
+            hostAction(row.host_id, "disconnect", t("remote.disconnectClient"), "link"),
+            hostAction(row.host_id, "add-path", t("remote.addPath"), "link"),
+            hostAction(row.host_id, "remove", t("remote.removeHost"), "quiet"),
+          ]
+        : [
+            hostAction(row.host_id, "connect", t("remote.connectClient"), "link"),
+            hostAction(row.host_id, "add-path", t("remote.addPath"), "link"),
+            hostAction(row.host_id, "remove", t("remote.removeHost"), "quiet"),
+          ];
       return `
-        <li class="ws-manage-item">
-          <div class="ws-manage-main">
-            <strong>${escapeHtml(title)}</strong>
-            <span>${escapeHtml(sub)}</span>
-          </div>
-          <div class="ws-manage-right">
-            <span class="badge ${badge.className}">${escapeHtml(badge.label)}</span>
-            <div class="ws-manage-actions">
-              ${linkBtns}
-              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="probe" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.probe"))}</button>
-              ${doctorBtn}
-              <button type="button" class="btn-ghost btn-compact" data-remote-host-action="remove" data-remote-host="${escapeHtml(row.host_id)}" ${remoteBusy ? "disabled" : ""}>${escapeHtml(t("remote.removeHost"))}</button>
+        <li class="ws-manage-item remote-host-card">
+          <div class="remote-host-head">
+            <div class="ws-manage-main">
+              <strong>${escapeHtml(title)}</strong>
+              <span>${escapeHtml(address)}</span>
             </div>
+            <span class="remote-host-status ${badge.className}"><i></i>${escapeHtml(badge.label)}</span>
           </div>
+          ${note ? `<p class="remote-host-note">${escapeHtml(note)}</p>` : ""}
+          <div class="ws-manage-actions">${main}</div>
+          <div class="remote-host-foot">${links.join("")}</div>
         </li>
       `;
     })

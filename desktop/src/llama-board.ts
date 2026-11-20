@@ -7,6 +7,7 @@ import {
   activateClusterModel,
   cancelClusterInstall,
   getClusterStatus,
+  setClusterModelSource,
   openAskWindow,
   scanLlamaPeers,
   setLlamaPeerHosts,
@@ -74,6 +75,24 @@ function progressSentence(): string {
   }
   if (progress.stage === "extracting") return t("cluster.extracting");
   return t("cluster.downloadingNoTotal", { done: String(done) });
+}
+
+function sourcePicker(): string {
+  const source = status?.model_source === "huggingface" ? "huggingface" : "modelscope";
+  const hint =
+    source === "huggingface" ? t("cluster.modelSourceHfHint") : t("cluster.modelSourceChinaHint");
+  const pill = (id: "modelscope" | "huggingface", label: string) =>
+    `<button type="button" class="ad-source-pill${source === id ? " is-selected" : ""}" data-board-action="model-source" data-source="${id}" ${
+      busy !== "idle" ? "disabled" : ""
+    }>${escapeHtml(label)}</button>`;
+  return `<div class="ad-source">
+    <span class="ad-source-label">${escapeHtml(t("cluster.modelSourceLabel"))}</span>
+    <div class="ad-source-pills">${pill("modelscope", t("cluster.modelSourceChina"))}${pill(
+      "huggingface",
+      t("cluster.modelSourceHf"),
+    )}</div>
+    <p class="ad-source-hint">${escapeHtml(hint)}</p>
+  </div>`;
 }
 
 function meter(label: string, strong: string, pct: number, indeterminate = false): string {
@@ -151,9 +170,22 @@ function recommendPanel(): string {
         </div>
         ${action}
       </div>
+      ${sourcePicker()}
       ${meter(t("cluster.boardThisMac"), t("cluster.boardFitCount", { count: String(fits.length) }), pct)}
       ${wired ? `<p class="ad-callout">${escapeHtml(t("cluster.chatUsesModel"))}</p>` : ""}
-      ${busy !== "idle" ? meter(progressSentence() || t("cluster.boardDownload"), progressPct() ? `${progressPct()}%` : "…", progressPct(), progressPct() === 0) : ""}
+      ${
+        busy !== "idle"
+          ? meter(
+              progressSentence() ||
+                (status.model_source === "huggingface"
+                  ? t("cluster.preparingModelHf")
+                  : t("cluster.boardDownload")),
+              progressPct() ? `${progressPct()}%` : "…",
+              progressPct(),
+              progressPct() === 0,
+            )
+          : ""
+      }
       ${cancel ? `<div class="ad-hero-actions">${cancel}</div>` : ""}
     </section>
     <section class="ad-section-card">
@@ -215,11 +247,16 @@ function downloadPanel(): string {
         <div>
           <h1 class="ad-hero-title">${escapeHtml(t("cluster.boardDownload"))}</h1>
           <p class="ad-hero-sub">${escapeHtml(
-            busy !== "idle" && progress ? progressSentence() : t("cluster.boardDownloadLead"),
+            busy !== "idle" && status?.model_source === "huggingface" && !progress
+              ? t("cluster.preparingModelHf")
+              : busy !== "idle" && progress
+                ? progressSentence()
+                : t("cluster.boardDownloadLead"),
           )}</p>
         </div>
         ${cancel}
       </div>
+      ${sourcePicker()}
       ${
         busy !== "idle"
           ? meter(t("cluster.boardDownload"), pct ? `${pct}%` : "…", pct, pct === 0)
@@ -353,6 +390,16 @@ function friendly(err: unknown): string {
   return raw.replace(/^Error:\s*/i, "").trim() || t("personal.applyFailed");
 }
 
+async function pickSource(source: "modelscope" | "huggingface") {
+  if (!status || status.model_source === source || busy !== "idle") return;
+  try {
+    status = await setClusterModelSource(source);
+  } catch (err) {
+    errorText = friendly(err);
+  }
+  render();
+}
+
 async function turnOn() {
   busy = "installing";
   errorText = "";
@@ -467,7 +514,9 @@ function bind() {
     const actionBtn = target.closest<HTMLButtonElement>("[data-board-action]");
     const action = actionBtn?.dataset.boardAction;
     if (!action) return;
-    if (action === "pick" && actionBtn.dataset.model) {
+    if (action === "model-source" && (actionBtn.dataset.source === "modelscope" || actionBtn.dataset.source === "huggingface")) {
+      void pickSource(actionBtn.dataset.source);
+    } else if (action === "pick" && actionBtn.dataset.model) {
       pendingModelId = actionBtn.dataset.model;
       render();
     } else if (action === "turn-on") {

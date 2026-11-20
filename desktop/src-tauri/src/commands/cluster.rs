@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 use agent_doctor_cluster::{
     activate_cluster_model, cancel_exo_install, connect_remote_cluster, heal_local_exo_cluster,
     install_and_start_local_cluster, llama::scan_llama_peer_hosts, load_cluster_status,
-    scan_lan_clusters, set_cluster_backend, set_llama_peer_hosts, stop_or_disconnect_cluster,
-    update_cluster_pairing_code, ClusterBackendKind, ClusterStatus, LanClusterCandidate,
+    scan_lan_clusters, set_cluster_backend, set_cluster_model_source, set_llama_peer_hosts,
+    stop_or_disconnect_cluster, update_cluster_pairing_code, ClusterBackendKind, ClusterStatus,
+    LanClusterCandidate,
 };
 use serde::Serialize;
 use tauri::Emitter;
@@ -187,6 +188,21 @@ pub async fn set_cluster_backend_command(
     .await
     .map_err(|err| err.to_string())??;
 
+    emit_cluster_changed(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+#[tauri::command]
+pub async fn set_cluster_model_source_command(
+    app: tauri::AppHandle,
+    source: String,
+) -> Result<ClusterStatus, String> {
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        set_cluster_model_source(&source).map_err(|err| format!("{err:#}"))
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     emit_cluster_changed(&app, &status);
     Ok(status)
 }

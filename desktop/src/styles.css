@@ -1341,6 +1341,158 @@ body.is-diagnose-open .diagnose-detail {
   gap: 4px;
 }
 
+.remote-host-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: 16px;
+}
+
+.remote-host-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 0;
+}
+
+.remote-host-head .ws-manage-main {
+  flex: 1 1 auto;
+}
+
+.remote-host-card .ws-manage-main strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.remote-host-card .ws-manage-main span {
+  margin-top: 3px;
+  font-size: 0.75rem;
+}
+
+.remote-host-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.remote-host-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-soft);
+}
+
+.remote-host-status.ok {
+  color: var(--success);
+}
+
+.remote-host-status.ok i {
+  background: var(--success);
+}
+
+.remote-host-status.warn {
+  color: var(--warn);
+}
+
+.remote-host-status.warn i {
+  background: var(--warn);
+}
+
+.remote-host-status.bad {
+  color: var(--danger);
+}
+
+.remote-host-status.bad i {
+  background: var(--danger);
+}
+
+.remote-host-card .ws-manage-actions {
+  padding: 12px 14px 0;
+}
+
+.remote-host-card .ws-manage-actions .btn-primary,
+.remote-host-card .ws-manage-actions .btn-ghost {
+  flex: 1 1 0;
+  min-height: 36px;
+  border-radius: 10px;
+}
+
+.remote-host-foot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.remote-host-link {
+  min-height: 40px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.remote-host-link + .remote-host-link {
+  border-left: 1px solid var(--border);
+}
+
+.remote-host-link:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.remote-host-link.is-quiet {
+  color: var(--text-soft);
+  font-weight: 550;
+}
+
+.remote-host-link:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.remote-host-card .ws-manage-main strong,
+.remote-host-card .ws-manage-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-host-note {
+  margin: 8px 14px 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+#remote-bootstrap-host:not([open]) {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+}
+
+#remote-bootstrap-host:not([open]) > summary {
+  padding: 8px 0 2px;
+  color: var(--primary-deep);
+  font-weight: 650;
+}
+
 .widget-section {
   padding: 10px 12px;
   margin-bottom: 0;
@@ -5314,8 +5466,15 @@ html[data-os="windows"] .resources-hub-card-desc {
   color: #b45309;
 }
 
+.cluster-source,
 .cluster-tier-block {
   display: grid;
+  gap: 6px;
+}
+
+.cluster-source-pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 

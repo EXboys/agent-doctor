@@ -7,7 +7,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -20,6 +20,59 @@ const META_REMOTE_ORIGIN: &str = "cluster.remote_origin";
 const META_PREFERRED_MODEL: &str = "cluster.preferred_model";
 const META_BACKEND: &str = "cluster.backend";
 const META_LLAMA_PEERS: &str = "cluster.llama_peers";
+const META_MODEL_SOURCE: &str = "cluster.model_source";
+
+/// Where model weights are fetched. Separate from the GitHub / npm mirror route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelDownloadSource {
+    ModelScope,
+    HuggingFace,
+}
+
+pub fn parse_model_source(raw: &str) -> Option<ModelDownloadSource> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "modelscope" | "china" | "cn" => Some(ModelDownloadSource::ModelScope),
+        "huggingface" | "hf" | "official" => Some(ModelDownloadSource::HuggingFace),
+        _ => None,
+    }
+}
+
+/// Saved choice, or ModelScope when this computer uses the China download route.
+pub fn model_download_source() -> ModelDownloadSource {
+    if let Some(saved) = load_meta_non_empty(META_MODEL_SOURCE) {
+        if let Some(source) = parse_model_source(&saved) {
+            return source;
+        }
+    }
+    if agent_doctor_core::lifecycle::use_china_mirrors() {
+        ModelDownloadSource::ModelScope
+    } else {
+        ModelDownloadSource::HuggingFace
+    }
+}
+
+pub fn prefers_modelscope() -> bool {
+    model_download_source() == ModelDownloadSource::ModelScope
+}
+
+pub fn model_source_label() -> String {
+    match model_download_source() {
+        ModelDownloadSource::ModelScope => "modelscope".to_string(),
+        ModelDownloadSource::HuggingFace => "huggingface".to_string(),
+    }
+}
+
+pub fn set_model_download_source(raw: &str) -> Result<()> {
+    let Some(source) = parse_model_source(raw) else {
+        bail!("请选择国内源或 Hugging Face。");
+    };
+    let wire = match source {
+        ModelDownloadSource::ModelScope => "modelscope",
+        ModelDownloadSource::HuggingFace => "huggingface",
+    };
+    let store = open_settings_store()?;
+    store.set_meta(META_MODEL_SOURCE, wire)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -191,5 +244,18 @@ mod tests {
     fn sanitize_pairing_code_strips_spaces_and_symbols() {
         assert_eq!(sanitize_code(" 8842 "), "8842");
         assert_eq!(sanitize_code("Room A!@#9"), "rooma9");
+    }
+
+    #[test]
+    fn model_source_accepts_the_two_download_addresses() {
+        assert_eq!(
+            parse_model_source(" ModelScope "),
+            Some(ModelDownloadSource::ModelScope)
+        );
+        assert_eq!(
+            parse_model_source("huggingface"),
+            Some(ModelDownloadSource::HuggingFace)
+        );
+        assert_eq!(parse_model_source("github"), None);
     }
 }

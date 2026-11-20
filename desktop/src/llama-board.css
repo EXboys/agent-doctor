@@ -61,3 +61,50 @@ html[data-os="windows"] .ad-page-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.18);
 }
+
+.ad-source {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+
+.ad-source-label,
+.ad-source-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--muted, #667085);
+}
+
+.ad-source-label {
+  font-weight: 700;
+}
+
+.ad-source-pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ad-source-pill {
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line, rgba(15, 23, 42, 0.12));
+  background: #fff;
+  color: var(--text, #152033);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ad-source-pill.is-selected {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ad-source-pill:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

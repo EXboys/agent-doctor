@@ -17,7 +17,6 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use agent_doctor_core::lifecycle::use_china_mirrors;
 use agent_doctor_core::setup::{load_personal_provider_status, LOCAL_CLUSTER_PROVIDER_ID};
 
 pub use exo::daemon::{DaemonOwner, NodeHostSupport};
@@ -91,6 +90,13 @@ pub struct ClusterStatus {
     /// True when `local-cluster` is currently the active PersonalProvider for local agents.
     pub provider_active: bool,
     pub remote_origin: Option<String>,
+    /// `modelscope` or `huggingface`. The download address the next model uses.
+    #[serde(default = "default_model_source")]
+    pub model_source: String,
+}
+
+fn default_model_source() -> String {
+    "modelscope".to_string()
 }
 
 /// Inspect current local or saved remote cluster state without blocking the UI thread for long.
@@ -193,6 +199,7 @@ pub fn load_cluster_status() -> ClusterStatus {
             provider_active,
             remote_origin: None,
             peer_hosts,
+            model_source: namespace::model_source_label(),
         };
     }
 
@@ -237,6 +244,7 @@ pub fn load_cluster_status() -> ClusterStatus {
         provider_active,
         remote_origin,
         peer_hosts,
+        model_source: namespace::model_source_label(),
     }
 }
 
@@ -259,6 +267,12 @@ pub fn set_cluster_backend(kind: ClusterBackendKind) -> Result<ClusterStatus> {
 
 pub fn set_llama_peer_hosts(raw: &str) -> Result<ClusterStatus> {
     llama::set_peer_text(raw)?;
+    Ok(load_cluster_status())
+}
+
+/// Remember whether the next model comes from ModelScope or Hugging Face.
+pub fn set_cluster_model_source(raw: &str) -> Result<ClusterStatus> {
+    namespace::set_model_download_source(raw)?;
     Ok(load_cluster_status())
 }
 
@@ -322,15 +336,15 @@ where
         remote
     } else if exo::daemon::detect_host_support() == NodeHostSupport::Supported {
         let runtime = exo::lifecycle::locate_exo_runtime();
-        if use_china_mirrors() {
+        if namespace::prefers_modelscope() {
             if runtime.is_none() {
                 bail!("请先下载并开启本机算力。");
             }
             exo::lifecycle::clear_exo_install_cancel();
             let cancelled = || exo::lifecycle::exo_install_cancelled();
             modelscope::ensure_exo_snapshot(model_id, &mut on_progress, &cancelled)?;
-            exo::daemon::restart_for_offline_models()?;
         }
+        exo::daemon::restart_to_match_model_source()?;
         if !exo::daemon::local_exo_node_reachable() {
             let Some(rt) = runtime else {
                 bail!("请先下载并开启本机算力。");
