@@ -24,8 +24,18 @@ fn emit_cluster_changed(app: &tauri::AppHandle, status: &ClusterStatus) {
     let _ = app.emit("cluster-status-changed", status);
 }
 
+/// 本地部署 is a team-package feature. Personal builds refuse every entry.
+pub(crate) fn ensure_local_compute_allowed() -> Result<(), String> {
+    if agent_doctor_core::product_edition() == agent_doctor_core::ProductEdition::Team {
+        Ok(())
+    } else {
+        Err("本地部署只在团队版里。".into())
+    }
+}
+
 #[tauri::command]
 pub async fn get_cluster_status_command() -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     tauri::async_runtime::spawn_blocking(load_cluster_status)
         .await
         .map_err(|err| err.to_string())
@@ -33,6 +43,7 @@ pub async fn get_cluster_status_command() -> Result<ClusterStatus, String> {
 
 #[tauri::command]
 pub async fn start_local_cluster_command(app: tauri::AppHandle) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let progress_app = app.clone();
     let status = tauri::async_runtime::spawn_blocking(move || {
         let mut last_emit = Instant::now() - Duration::from_secs(1);
@@ -63,12 +74,16 @@ pub async fn start_local_cluster_command(app: tauri::AppHandle) -> Result<Cluste
 
 #[tauri::command]
 pub fn cancel_cluster_install_command() {
+    if ensure_local_compute_allowed().is_err() {
+        return;
+    }
     cancel_exo_install();
     agent_doctor_cluster::llama::cancel_llama_install();
 }
 
 #[tauri::command]
 pub async fn stop_cluster_command(app: tauri::AppHandle) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(|| {
         stop_or_disconnect_cluster().map_err(|err| format!("{err:#}"))
     })
@@ -84,6 +99,7 @@ pub async fn activate_cluster_model_command(
     app: tauri::AppHandle,
     model_id: String,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let progress_app = app.clone();
     let status = tauri::async_runtime::spawn_blocking(move || {
         let mut last_emit = Instant::now() - Duration::from_secs(1);
@@ -116,6 +132,7 @@ pub async fn activate_cluster_model_command(
 
 #[tauri::command]
 pub async fn scan_lan_clusters_command() -> Result<Vec<LanClusterCandidate>, String> {
+    ensure_local_compute_allowed()?;
     tauri::async_runtime::spawn_blocking(scan_lan_clusters)
         .await
         .map_err(|err| err.to_string())
@@ -123,6 +140,7 @@ pub async fn scan_lan_clusters_command() -> Result<Vec<LanClusterCandidate>, Str
 
 #[tauri::command]
 pub async fn scan_llama_peers_command() -> Result<Vec<String>, String> {
+    ensure_local_compute_allowed()?;
     tauri::async_runtime::spawn_blocking(scan_llama_peer_hosts)
         .await
         .map_err(|err| err.to_string())
@@ -134,6 +152,7 @@ pub async fn connect_remote_cluster_command(
     host_or_url: String,
     model_id: Option<String>,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(move || {
         connect_remote_cluster(&host_or_url, model_id.as_deref()).map_err(|err| format!("{err:#}"))
     })
@@ -148,6 +167,7 @@ pub async fn connect_remote_cluster_command(
 
 #[tauri::command]
 pub async fn heal_local_cluster_command(app: tauri::AppHandle) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(heal_local_exo_cluster)
         .await
         .map_err(|err| err.to_string())?;
@@ -160,6 +180,7 @@ pub async fn set_cluster_pairing_code_command(
     app: tauri::AppHandle,
     code: Option<String>,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(move || {
         update_cluster_pairing_code(code.as_deref()).map_err(|err| format!("{err:#}"))
     })
@@ -175,6 +196,7 @@ pub async fn set_cluster_backend_command(
     app: tauri::AppHandle,
     backend: String,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(move || {
         let kind = match backend.as_str() {
             "exo" => ClusterBackendKind::Exo,
@@ -197,6 +219,7 @@ pub async fn set_cluster_model_source_command(
     app: tauri::AppHandle,
     source: String,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(move || {
         set_cluster_model_source(&source).map_err(|err| format!("{err:#}"))
     })
@@ -211,6 +234,7 @@ pub async fn set_llama_peer_hosts_command(
     app: tauri::AppHandle,
     peers: String,
 ) -> Result<ClusterStatus, String> {
+    ensure_local_compute_allowed()?;
     let status = tauri::async_runtime::spawn_blocking(move || {
         set_llama_peer_hosts(&peers).map_err(|err| format!("{err:#}"))
     })

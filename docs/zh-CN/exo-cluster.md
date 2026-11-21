@@ -1,6 +1,6 @@
-# 多机算力集成设计（一期：个人版 + exo）
+# 多机算力集成设计（一期：团队版 + exo）
 
-基于 [exo](https://github.com/exo-explore/exo)（Apache-2.0）为个人版客户端提供「装上客户端即可多台苹果电脑自动组网跑模型，Windows 同局域网直接连过去用」的能力。
+基于 [exo](https://github.com/exo-explore/exo)（Apache-2.0）为团队版客户端提供「装上客户端即可多台苹果电脑自动组网跑模型，Windows 同局域网直接连过去用」的能力。个人版不开放这个入口。
 
 本文档锁定一期的产品边界、运行时分发、组网隔离、Provider 双协议接线与界面文案。实现时严格遵守 [product-boundary.md](product-boundary.md) 与 [core-flows.md](core-flows.md) 的不变量。
 
@@ -12,7 +12,7 @@
 
 | 维度 | 一期决策 |
 |------|----------|
-| **安装包门控** | 仅个人版（`AGENT_DOCTOR_EDITION=personal`）展示入口；团队版（`team`）隐藏，不混入 Evotown 合规网关链路 |
+| **安装包门控** | 仅团队版（`AGENT_DOCTOR_EDITION=team`）展示「本地部署」；个人版隐藏，命令也拒绝 |
 | **Apple Silicon Mac**（`aarch64-apple-darwin` 且 macOS ≥ 15.1） | **算力节点 + 消费端**：按需从 OSS 拉取锁死版本的无界面 `exo` 运行时，后台拉起并自动发现同组 Mac，完成模型切分摆放后写入本地个人 Provider |
 | **Windows / Intel Mac / macOS < 15.1** | **纯消费端**：不下载、不运行推理引擎；自动扫描局域网 `52415` 端口寻找已开启的 Mac 算力集群，扫不到时支持填 IP 一键接入，写入同一个个人 Provider 槽位 |
 | **接入形态** | 独立 `crates/agent-doctor-cluster`（`ClusterBackendKind::Exo`，预留 `Ollama` / `LlamaCpp`）+ `personal.rs` 内置 `local-cluster` Provider，**不做成 MCP 或对话内 Tool** |
@@ -31,7 +31,7 @@
 ```text
   Apple Silicon Mac A                 Apple Silicon Mac B
  ┌─────────────────────────┐         ┌─────────────────────────┐
- │ Agent Doctor (个人版)    │         │ Agent Doctor (个人版)    │
+ │ Agent Doctor (团队版)    │         │ Agent Doctor (团队版)    │
  │ lifecycle/exo 按需下载   │         │ lifecycle/exo 按需下载   │
  │ 注入同一 NAMESPACE 拉起  │         │ 注入同一 NAMESPACE 拉起  │
  └────────────┬────────────┘         └────────────┬────────────┘
@@ -215,9 +215,9 @@ Agent Doctor 启动时会探测 CLI 是否支持 `--namespace`，并**同时注�
 
 ---
 
-## 七、桌面端界面与小白文案规范（个人版）
+## 七、桌面端界面与小白文案规范（团队版）
 
-入口位于个人版的「模型服务」区域（`desktop/src/wiring/personal.ts`），作为独立于普通 API Key 表单的**「多机算力（局域网免费跑模型）」**卡片。所有文案在 `desktop/src/i18n/zh.ts` 与 `en.ts` 成对注册，通过 `desktop/tests/i18n-pairs.test.ts`。
+入口是团队版主页的「本地部署」页（`#provider-kind-local`，卡片在 `desktop/src/wiring/cluster.ts`）。个人版没有这一页。所有文案在 `desktop/src/i18n/zh.ts` 与 `en.ts` 成对注册，通过 `desktop/tests/i18n-pairs.test.ts`。
 
 ### 1. Apple Silicon Mac 界面状态与按钮
 
@@ -262,7 +262,7 @@ Agent Doctor 启动时会探测 CLI 是否支持 `--namespace`，并**同时注�
    - 新增 `desktop/src-tauri/src/commands/exo.rs` 并在 `lib.rs` 注册命令（查状态、安装并开启、停止、选档位摆放并设为当前 Provider、局域网扫描、填 IP 连接）。
    - 状态变更与 Provider 切换发出全局窗口事件；应用退出钩子回收受管 `exo` 子进程。
 
-4. **Step 4 — 个人版桌面 UI 与中英文文案**
-   - 在 `desktop/src/wiring/personal.ts`（仅 `personal` 包）接入「多机算力」卡片，区分 Apple Silicon 节点视图与 Windows 消费端视图。
+4. **Step 4 — 团队版桌面 UI 与中英文文案**
+   - 在「本地部署」页（仅 `team` 包）接入算力卡片，区分 Apple Silicon 节点视图与 Windows 消费端视图。
    - 在 `desktop/src/i18n/zh.ts` 与 `desktop/src/i18n/en.ts` 成对添加文案。
-   - **看护**：`desktop/tests/i18n-pairs.test.ts` 全绿；遵循开发环境规范通过 `npm run tauri:dev:personal` 在主页与问答双窗口实机验证。
+   - **看护**：`desktop/tests/i18n-pairs.test.ts` 全绿；团队包用 `npm run tauri:dev:team` 在主页确认「本地部署」在，个人包确认这一页不出现。

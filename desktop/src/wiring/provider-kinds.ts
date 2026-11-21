@@ -27,10 +27,10 @@ export function selectProviderKind(kind: string): void {
   }
 }
 
-/** Team builds have no local-compute card, so that tab stays out of the row. */
+/** Local compute is a team-edition tab. Personal builds leave it out of the row. */
 export function syncProviderKindTabs(): void {
   const localTab = tabs.find((tab) => tab.dataset.providerKind === "local");
-  if (localTab) localTab.hidden = isTeamEdition();
+  if (localTab) localTab.hidden = !isTeamEdition();
   if (tablist) tablist.setAttribute("aria-label", t("providerKind.tabs"));
   const active = tabs.find((tab) => tab.classList.contains("is-active") && !tab.hidden);
   selectProviderKind(active?.dataset.providerKind || "models");

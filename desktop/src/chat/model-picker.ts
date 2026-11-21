@@ -3,6 +3,8 @@ import type { AskRuntime } from "../ask-resources";
 import { isPersonalEdition } from "../edition";
 import { t } from "../i18n";
 import {
+  activateClusterModel,
+  getClusterStatus,
   getPersonalProviderStatus,
   listPersonalProviders,
   nativeAccountStatus,
@@ -25,6 +27,7 @@ import {
 import { modelOptionLabel, modelsForProviderUrl, providerChipForUrl } from "../provider-models";
 import { teamupsAccountPageUrl } from "../teamups-site";
 import type {
+  ClusterStatus,
   NativeAccountRow,
   PersonalProviderListItem,
   TeamupsAccountStatus,
@@ -34,6 +37,37 @@ import type { ChatSession } from "./types";
 
 export const NATIVE_PROVIDER_PREFIX = "native:";
 export const NATIVE_ACCOUNT_DEFAULT_MODEL = "auto";
+const LOCAL_CLUSTER_PROVIDER_ID = "local-cluster";
+
+/** Running models first, then weights already on disk. */
+export function localClusterModelIds(status: ClusterStatus | null): string[] {
+  if (!status || status.backend === "llama_cpp") return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...(status.active_models ?? []), ...(status.installed_models ?? [])]) {
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function localClusterProvider(
+  status: ClusterStatus,
+  model: string,
+): PersonalProviderListItem {
+  const origin = (status.dashboard_url || "http://127.0.0.1:52415").replace(/\/$/, "");
+  return {
+    id: LOCAL_CLUSTER_PROVIDER_ID,
+    name: t("chat.modelLocalGroup"),
+    url: `${origin}/v1`,
+    model,
+    protocol: "openai",
+    api_key_hint: "",
+    active: Boolean(status.provider_active),
+  };
+}
 
 export function nativeProviderId(runtimeId: string): string {
   return `${NATIVE_PROVIDER_PREFIX}${runtimeId.trim()}`;
@@ -381,6 +415,8 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   let selectedTabId = "";
   let officialStatus: TeamupsAccountStatus | null = null;
   let officialFetchedAt = 0;
+  let localCluster: ClusterStatus | null = null;
+  let loadingLocalModel = false;
 
   /** Throttled official-account fetch; drives the built-in agent's quota chip and official sign-in gate. */
   async function refreshOfficialStatus(): Promise<void> {
@@ -506,6 +542,13 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const provider = pinned || wired || allowed[0] || null;
     if (!provider) return null;
     const model = (pinned ? session?.model || provider.model : provider.model).trim();
+    if (
+      provider.id === LOCAL_CLUSTER_PROVIDER_ID &&
+      !pinned &&
+      !(localCluster?.active_models ?? []).some((id) => id.trim() === model)
+    ) {
+      return null;
+    }
     return { provider, model: model || "—" };
   }
 
@@ -548,6 +591,14 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       deps.modelBtnEl.disabled = deps.isComposerLocked();
       deps.modelBtnEl.title = t("chat.modelPickHint");
       deps.modelBtnEl.setAttribute("aria-label", chosen.model);
+      return;
+    }
+
+    if (!isPersonalEdition() && localClusterModelIds(localCluster).length > 0) {
+      deps.modelLabelEl.textContent = t("chat.modelPickLabel");
+      deps.modelBtnEl.disabled = deps.isComposerLocked();
+      deps.modelBtnEl.title = t("chat.modelLocalGroup");
+      deps.modelBtnEl.setAttribute("aria-label", t("chat.modelPickLabel"));
       return;
     }
 
@@ -983,7 +1034,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       btn.setAttribute("aria-selected", active ? "true" : "false");
       btn.textContent = isOfficial ? t("chat.modelOfficialAutoModel") : modelOptionLabel(model);
       btn.addEventListener("click", () => {
-        selectSessionModel(provider, model);
+        chooseProviderModel(provider, model);
       });
       group.appendChild(btn);
     }
@@ -1060,7 +1111,10 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     const customEntries: Array<{ provider: PersonalProviderListItem; models: string[] }> = [];
     for (const provider of rows) {
       if (provider.id === OFFICIAL_PROVIDER_ID) continue;
-      const models = modelsForProviderUrl(provider.url, provider.model);
+      const models =
+        provider.id === LOCAL_CLUSTER_PROVIDER_ID
+          ? localClusterModelIds(localCluster)
+          : modelsForProviderUrl(provider.url, provider.model);
       if (models.length > 0) {
         customEntries.push({ provider, models });
       }
@@ -1107,7 +1161,11 @@ export function createModelPickerController(deps: ModelPickerDeps) {
       );
       tabs.push({
         id: "custom",
-        title: t("chat.modelTabCustom"),
+        title:
+          customEntries.length === 1 &&
+          customEntries[0]?.provider.id === LOCAL_CLUSTER_PROVIDER_ID
+            ? t("chat.modelLocalGroup")
+            : t("chat.modelTabCustom"),
         hasActive: customActive,
         render: (panel) => {
           for (const entry of customEntries) {
@@ -1242,8 +1300,7 @@ export function createModelPickerController(deps: ModelPickerDeps) {
 
   async function refreshWiredProvider(): Promise<void> {
     if (!isPersonalEdition()) {
-      deps.setWiredProvider(null);
-      renderModelPickerLabel();
+      await refreshTeamLocalModels();
       return;
     }
     try {
@@ -1319,6 +1376,76 @@ export function createModelPickerController(deps: ModelPickerDeps) {
     }
     renderModelPickerLabel();
     if (deps.getModelMenuOpen()) renderModelMenu();
+  }
+
+  async function refreshTeamLocalModels(): Promise<void> {
+    try {
+      localCluster = await getClusterStatus();
+    } catch {
+      localCluster = null;
+    }
+    const models = localClusterModelIds(localCluster);
+    const running = localCluster?.active_models?.find((id) => id.trim())?.trim() || "";
+    if (!localCluster || models.length === 0) {
+      deps.setProviders([]);
+      deps.setWiredProvider(null);
+      renderModelPickerLabel();
+      if (deps.getModelMenuOpen()) renderModelMenu();
+      return;
+    }
+    const provider = localClusterProvider(localCluster, running || models[0] || "");
+    deps.setProviders([provider]);
+    deps.setWiredProvider(running ? provider : null);
+    if (running) adoptRunningModel(provider, running);
+    renderModelPickerLabel();
+    if (deps.getModelMenuOpen()) renderModelMenu();
+  }
+
+  function adoptRunningModel(provider: PersonalProviderListItem, running: string): void {
+    if (loadingLocalModel) return;
+    const session = deps.activeSession();
+    const pinned = session?.providerId?.trim() ?? "";
+    if (!pinned) {
+      deps.pinSessionModel(provider, running);
+      return;
+    }
+    if (pinned !== LOCAL_CLUSTER_PROVIDER_ID) return;
+    const current = session?.model?.trim() ?? "";
+    if (!current || current === running) return;
+    if ((localCluster?.active_models ?? []).some((id) => id.trim() === current)) return;
+    deps.pinSessionModel(provider, running);
+  }
+
+  function chooseProviderModel(provider: PersonalProviderListItem, model: string): void {
+    if (
+      provider.id === LOCAL_CLUSTER_PROVIDER_ID &&
+      !(localCluster?.active_models ?? []).some((id) => id.trim() === model)
+    ) {
+      void loadLocalModel(model);
+      return;
+    }
+    selectSessionModel(provider, model);
+  }
+
+  async function loadLocalModel(model: string): Promise<void> {
+    if (deps.isComposerLocked() || loadingLocalModel) return;
+    loadingLocalModel = true;
+    closeModelMenu();
+    deps.setStatus(t("chat.modelLocalLoading"), "muted");
+    try {
+      const status = await activateClusterModel(model);
+      localCluster = status;
+      const provider = localClusterProvider(status, model);
+      deps.setProviders([provider]);
+      deps.setWiredProvider(provider);
+      selectSessionModel(provider, model);
+      deps.setStatus(t("chat.modelLocalReady"), "ok");
+    } catch {
+      deps.setStatus(t("chat.modelLocalFailed"), "error");
+    } finally {
+      loadingLocalModel = false;
+      renderModelPickerLabel();
+    }
   }
 
   function selectAccountModel(catalog: LoggedAccountCatalog, model: string): void {
@@ -1409,6 +1536,12 @@ export function createModelPickerController(deps: ModelPickerDeps) {
   if (isPersonalEdition()) {
     void listen("teamups-account-changed", () => {
       officialFetchedAt = 0;
+      void refreshWiredProvider();
+    }).catch(() => {
+      // No Tauri bridge (tests, plain web preview).
+    });
+  } else {
+    void listen("cluster-status-changed", () => {
       void refreshWiredProvider();
     }).catch(() => {
       // No Tauri bridge (tests, plain web preview).

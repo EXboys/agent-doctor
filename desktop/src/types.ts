@@ -350,6 +350,8 @@ export interface ClusterStatus {
   peer_hosts: string;
   remote_origin?: string | null;
   model_source?: "modelscope" | "huggingface" | string;
+  /** Weights already on disk, whether or not a model is running. */
+  installed_models?: string[];
 }
 
 export interface LanClusterCandidate {

@@ -83,6 +83,49 @@ pub(crate) fn exo_model_dirname(repo: &str) -> String {
     repo.replace('/', "--")
 }
 
+/// Model folders under the exo models directory that already contain weights.
+pub(crate) fn list_installed_exo_models() -> Vec<String> {
+    let Ok(root) = exo_models_root() else {
+        return Vec::new();
+    };
+    installed_exo_models_in(&root)
+}
+
+pub(crate) fn installed_exo_models_in(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut models = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name.contains("..") || !dir_has_safetensor_weight(&path) {
+            continue;
+        }
+        let repo = name.replace("--", "/");
+        if !models.contains(&repo) {
+            models.push(repo);
+        }
+    }
+    models.sort();
+    models
+}
+
+fn dir_has_safetensor_weight(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".safetensors")
+    })
+}
+
 pub(crate) fn exo_models_root() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("EXO_DEFAULT_MODELS_DIR") {
         return Ok(PathBuf::from(dir));
@@ -517,6 +560,26 @@ mod tests {
             exo_model_dirname("mlx-community/Qwen2.5-7B-Instruct-4bit"),
             "mlx-community--Qwen2.5-7B-Instruct-4bit"
         );
+        let root = std::env::temp_dir().join(format!(
+            "ad-exo-models-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let keep = root.join("mlx-community--Qwen2.5-7B-Instruct-4bit");
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::write(keep.join("model.safetensors"), b"x").unwrap();
+        let notes = root.join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::write(notes.join("README.md"), b"hi").unwrap();
+        assert_eq!(
+            installed_exo_models_in(&root),
+            vec!["mlx-community/Qwen2.5-7B-Instruct-4bit".to_string()]
+        );
+        let _ = std::fs::remove_dir_all(&root);
         assert!(split_model_spec("../evil/name").is_err());
         assert!(safe_relative("../config.json").is_none());
         assert!(safe_relative("config.json").is_some());

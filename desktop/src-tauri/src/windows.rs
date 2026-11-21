@@ -1450,6 +1450,7 @@ pub(crate) fn open_or_focus_llama_board_window(app: &AppHandle) -> Result<(), St
 
 #[tauri::command]
 pub async fn open_llama_board_window_command(app: AppHandle) -> Result<(), String> {
+    crate::commands::ensure_local_compute_allowed()?;
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || open_or_focus_llama_board_window(&app_for_ui)).await
 }
@@ -1492,6 +1493,7 @@ pub(crate) fn open_or_focus_cluster_board_window(
 
 #[tauri::command]
 pub async fn open_cluster_board_window_command(app: AppHandle, url: String) -> Result<(), String> {
+    crate::commands::ensure_local_compute_allowed()?;
     let app_for_ui = app.clone();
     run_on_main_thread(&app, move || {
         open_or_focus_cluster_board_window(&app_for_ui, &url)

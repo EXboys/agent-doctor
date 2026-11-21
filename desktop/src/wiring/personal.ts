@@ -84,7 +84,7 @@ function stopOfficialLoginPoll(): void {
 }
 
 /** Both editions show 官方, even before sign-in creates the saved row.
- * `local-cluster` lives on the 本地部署 tab (`#cluster-card`). */
+ * `local-cluster` lives on the team-only 本地部署 tab (`#cluster-card`). */
 function providersForDisplay(doc: PersonalProvidersDocument): PersonalProviderListItem[] {
   const withoutCluster = doc.providers.filter((item) => item.id !== "local-cluster");
   if (withoutCluster.some((item) => item.id === OFFICIAL_PROVIDER_ID)) {

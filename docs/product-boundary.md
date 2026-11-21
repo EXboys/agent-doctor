@@ -34,7 +34,7 @@ Chat failures are diagnosed with [chat-experience.md](zh-CN/chat-experience.md).
 | **Wiring** | Personal provider only (no Evotown / team tab) |
 | **Value** | When agents break: diagnose, repair, keep projects isolated |
 | **Built-in service** | “Official” membership may show the remaining included tokens and expiry date needed to understand whether the service is available |
-| **Do not** | Become a multi-provider proxy marketplace or a general-purpose usage analytics dashboard |
+| **Do not** | Become a multi-provider proxy marketplace, a general-purpose usage analytics dashboard, or offer local model deployment |
 
 Personal provider means: wire an endpoint + key + model, verify, write runtime configs, and repair schema/gateway wiring. **URL/model templates** (DeepSeek, OpenRouter, …) are fine as fill-in helpers.
 
@@ -46,7 +46,7 @@ Personal provider means: wire an endpoint + key + model, verify, write runtime c
 | **Entry** | Enterprise-customized desktop + CLI |
 | **Wiring** | Evotown / company gateway only (no personal provider UI) |
 | **Value** | Compliance, baseline, sync, dispatch, audit |
-| **Increments** | `setup` / `sync` / `policy` / `connect` + audit/compliance export |
+| **Increments** | `setup` / `sync` / `policy` / `connect` + audit/compliance export; local model deployment (computers on the same network run a model together) |
 | **Do not** | Depend on personal proxy ecosystems for team compliance |
 
 Evotown is the control plane (accounts, SkillHub, policy, gateway, dispatch, audit ingest). Agent Doctor remains the on-laptop executor and repair tool. See [enterprise.md](enterprise.md).

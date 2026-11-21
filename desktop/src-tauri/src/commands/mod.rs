@@ -19,6 +19,7 @@ mod workspace;
 mod workspace_files;
 
 pub use chat_store::*;
+pub(crate) use cluster::ensure_local_compute_allowed;
 pub use cluster::*;
 pub use deep_diagnose::*;
 pub use knowledge::*;

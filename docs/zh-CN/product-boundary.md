@@ -34,7 +34,7 @@ Agent Doctor 是同一套代码、共用运维内核。**个人**与**团队**�
 | **接线** | 仅个人 Provider（无 Evotown / 团队 tab） |
 | **价值** | 坏了能查、能修、项目不串味 |
 | **内置服务** | 「官方」会员可以展示判断服务是否可用所需的剩余 Token 和有效期 |
-| **不做** | 不做多服务商中转市场，也不做通用用量分析看板 |
+| **不做** | 不做多服务商中转市场，也不做通用用量分析看板，也不做本地部署 |
 
 个人 Provider = 接线 endpoint + key + model，验证后写入 runtime，并修好 schema/网关。**服务商 URL/模型模板**（DeepSeek、OpenRouter 等）可以保留，那是填表便利。
 
@@ -46,7 +46,7 @@ Agent Doctor 是同一套代码、共用运维内核。**个人**与**团队**�
 | **入口** | 企业定制桌面 + CLI |
 | **接线** | 仅 Evotown / 公司网关（无个人 Provider UI） |
 | **价值** | 合规、基线、同步、派活、审计 |
-| **增量** | `setup` / `sync` / `policy` / `connect` + 审计/合规导出 |
+| **增量** | `setup` / `sync` / `policy` / `connect` + 审计/合规导出；本地部署（同一网络里的电脑一起跑模型） |
 | **不做** | 不为团队合规依赖个人中转生态 |
 
 Evotown 是控制面；Agent Doctor 仍是本机执行与修复工具。详见 [enterprise.md](../enterprise.md)。

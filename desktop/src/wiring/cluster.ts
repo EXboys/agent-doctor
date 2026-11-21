@@ -251,7 +251,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
 
   function render() {
     if (!cardEl) return;
-    if (isTeamEdition()) {
+    if (!isTeamEdition()) {
       cardEl.hidden = true;
       cardEl.innerHTML = "";
       return;
@@ -496,7 +496,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
   }
 
   async function load(): Promise<void> {
-    if (isTeamEdition() || !cardEl) return;
+    if (!isTeamEdition() || !cardEl) return;
     try {
       status = await getClusterStatus();
       render();
@@ -668,7 +668,7 @@ export function createClusterController(deps: ClusterControllerDeps) {
   }
 
   function bindEvents() {
-    if (!cardEl || isTeamEdition()) return;
+    if (!cardEl || !isTeamEdition()) return;
 
     cardEl.addEventListener("change", (event) => {
       const target = event.target as HTMLElement;

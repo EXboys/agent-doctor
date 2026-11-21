@@ -17,7 +17,12 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use agent_doctor_core::setup::{load_personal_provider_status, LOCAL_CLUSTER_PROVIDER_ID};
+use agent_doctor_core::edition::ProductEdition;
+use agent_doctor_core::product_edition;
+use agent_doctor_core::setup::{
+    load_active_personal_provider, load_personal_provider, load_personal_provider_status,
+    upsert_local_cluster_provider, LOCAL_CLUSTER_PROVIDER_ID,
+};
 
 pub use exo::daemon::{DaemonOwner, NodeHostSupport};
 pub use exo::lifecycle::cancel_exo_install;
@@ -93,6 +98,9 @@ pub struct ClusterStatus {
     /// `modelscope` or `huggingface`. The download address the next model uses.
     #[serde(default = "default_model_source")]
     pub model_source: String,
+    /// Model folders already on disk (`org/name`), whether or not one is running.
+    #[serde(default)]
+    pub installed_models: Vec<String>,
 }
 
 fn default_model_source() -> String {
@@ -128,6 +136,9 @@ pub fn load_cluster_status() -> ClusterStatus {
 
     if backend != ClusterBackendKind::LlamaCpp {
         if let Some(ref snap) = snapshot {
+            if let Some(model) = snap.active_models.first() {
+                adopt_running_exo_model(&snap.origin, model);
+            }
             exo::orchestrator::sync_provider_if_dashboard_switched(snap);
             if host_support == NodeHostSupport::Supported
                 && backend == ClusterBackendKind::Exo
@@ -149,6 +160,12 @@ pub fn load_cluster_status() -> ClusterStatus {
         .map(|s| s.usable_memory_bytes)
         .unwrap_or(0);
     let tiers = tiers::model_tiers_for_usable_memory(usable_memory_bytes);
+
+    let installed_models = if backend == ClusterBackendKind::LlamaCpp {
+        Vec::new()
+    } else {
+        modelscope::list_installed_exo_models()
+    };
 
     let provider_status = load_personal_provider_status().ok();
     let provider_active = provider_status
@@ -200,6 +217,7 @@ pub fn load_cluster_status() -> ClusterStatus {
             remote_origin: None,
             peer_hosts,
             model_source: namespace::model_source_label(),
+            installed_models,
         };
     }
 
@@ -245,7 +263,37 @@ pub fn load_cluster_status() -> ClusterStatus {
         remote_origin,
         peer_hosts,
         model_source: namespace::model_source_label(),
+        installed_models,
     }
+}
+
+/// A model exo is already running becomes the chat model on the team package.
+/// Another saved service stays the global default; the row is still recorded.
+fn adopt_running_exo_model(origin: &str, model: &str) {
+    if product_edition() != ProductEdition::Team {
+        return;
+    }
+    let model = model.trim();
+    if model.is_empty() {
+        return;
+    }
+    let gateway = format!("{}/v1", origin.trim().trim_end_matches('/'));
+    let existing = load_personal_provider(LOCAL_CLUSTER_PROVIDER_ID)
+        .ok()
+        .flatten();
+    let active = load_active_personal_provider().ok().flatten();
+    let row_matches = existing.as_ref().is_some_and(|entry| {
+        entry.model.trim() == model
+            && entry.url.trim_end_matches('/') == gateway.trim_end_matches('/')
+    });
+    let cluster_active = active
+        .as_ref()
+        .is_some_and(|entry| entry.id == LOCAL_CLUSTER_PROVIDER_ID);
+    let other_active = active.is_some() && !cluster_active;
+    if row_matches && (cluster_active || other_active) {
+        return;
+    }
+    let _ = upsert_local_cluster_provider(&gateway, model, !other_active);
 }
 
 /// Remember which compute engine this computer should show.
