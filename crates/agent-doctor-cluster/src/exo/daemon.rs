@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use agent_doctor_core::exec::{command_for_path, run_output};
+use agent_doctor_core::setup::{load_active_personal_provider, LOCAL_CLUSTER_PROVIDER_ID};
 
 use crate::exo::lifecycle::{locate_exo_runtime, LocatedExoRuntime};
+use crate::exo::orchestrator::{prepare_model_and_activate, probe_exo_origin};
 use crate::exo::{EXO_DEFAULT_PORT, EXO_LIBP2P_PORT, EXO_LOCAL_ORIGIN};
 use crate::namespace::{prefers_modelscope, resolve_cluster_namespace};
 
@@ -522,6 +524,10 @@ pub(crate) fn store_join(namespace: &str, peers: &[String], port_pinned: bool) -
 
 /// Stop our exo (including one left running after the app restarted) and start it again.
 /// Leaves a separately opened EXO app alone. Returns false when nothing of ours is running.
+///
+/// exo 1.0.71 keeps placed models only in memory and does not persist its node id, so the
+/// new process comes up empty. Read the ids from `/state` first and place them again
+/// once our process is answering. A failed placement does not undo the restart.
 pub(crate) fn restart_our_exo() -> Result<bool> {
     let owned = {
         let guard = MANAGED_EXO.lock().unwrap_or_else(|e| e.into_inner());
@@ -536,6 +542,7 @@ pub(crate) fn restart_our_exo() -> Result<bool> {
     if !owned {
         return Ok(false);
     }
+    let models = models_placed_locally();
     stop_exo_daemon()?;
     let deadline = Instant::now() + Duration::from_secs(5);
     while local_exo_node_reachable() && Instant::now() < deadline {
@@ -547,8 +554,100 @@ pub(crate) fn restart_our_exo() -> Result<bool> {
     let Some(rt) = locate_exo_runtime() else {
         bail!("本机算力组件不在了，请重新开启。");
     };
-    start_exo_daemon(&rt)?;
+    if start_exo_daemon(&rt)? == DaemonOwner::ManagedByUs {
+        restore_models_after_restart(&models);
+    }
     Ok(true)
+}
+
+/// Models exo has placed right now. Empty when the node is down or idle.
+/// A miss here is the only chance: after `stop_exo_daemon` the instances are gone.
+fn models_placed_locally() -> Vec<String> {
+    probe_exo_origin(EXO_LOCAL_ORIGIN, Duration::from_secs(2))
+        .map(|snap| snap.active_models)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+fn restore_models_after_restart(model_ids: &[String]) {
+    let ordered = models_in_restore_order(model_ids, chat_model_on_local_cluster().as_deref());
+    if ordered.is_empty() || !local_exo_answers_within(Duration::from_secs(8)) {
+        return;
+    }
+    for model_id in &ordered {
+        if let Err(err) = prepare_model_and_activate(EXO_LOCAL_ORIGIN, model_id) {
+            note_model_restore_failure(model_id, &err);
+        }
+    }
+}
+
+/// Every placed model goes back. The one chat is using goes last, because each
+/// activation rewrites which model the local cluster answers with.
+fn models_in_restore_order(placed: &[String], chat_model: Option<&str>) -> Vec<String> {
+    let chat = chat_model.map(str::trim).filter(|id| !id.is_empty());
+    let mut ordered = Vec::with_capacity(placed.len());
+    let mut chat_hit = None;
+    for raw in placed {
+        let id = raw.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if chat == Some(id) {
+            chat_hit = Some(id.to_string());
+            continue;
+        }
+        if ordered.iter().any(|existing| existing == id) {
+            continue;
+        }
+        ordered.push(id.to_string());
+    }
+    if let Some(id) = chat_hit {
+        ordered.push(id);
+    }
+    ordered
+}
+
+fn chat_model_on_local_cluster() -> Option<String> {
+    let active = load_active_personal_provider().ok().flatten()?;
+    if active.id != LOCAL_CLUSTER_PROVIDER_ID {
+        return None;
+    }
+    let model = active.model.trim();
+    if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    }
+}
+
+fn local_exo_answers_within(limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if local_exo_node_reachable() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn note_model_restore_failure(model_id: &str, err: &anyhow::Error) {
+    use std::io::Write;
+    let Some(path) = exo_log_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = writeln!(file, "重启后没能把模型重新放回去（{model_id}）：{err:#}");
 }
 
 fn saved_bootstrap_peers() -> Vec<String> {
@@ -742,6 +841,28 @@ fn read_log_tail(max_lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_puts_the_chat_model_last_and_drops_blanks() {
+        let placed = vec![
+            "  ".to_string(),
+            "model-a".to_string(),
+            "model-b".to_string(),
+            "model-a".to_string(),
+        ];
+        assert_eq!(
+            models_in_restore_order(&placed, Some("model-a")),
+            vec!["model-b".to_string(), "model-a".to_string()]
+        );
+        assert_eq!(
+            models_in_restore_order(&placed, Some("model-c")),
+            vec!["model-a".to_string(), "model-b".to_string()]
+        );
+        assert_eq!(
+            models_in_restore_order(&placed, None),
+            vec!["model-a".to_string(), "model-b".to_string()]
+        );
+    }
 
     #[test]
     fn macos_version_check_parses_sequoia_and_tahoe() {
