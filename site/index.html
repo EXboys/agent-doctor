@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/site.css?v=c136f0ef">
+  <link rel="stylesheet" href="/css/site.css?v=cfc23e92">
   <meta property="og:site_name" content="Agent Doctor">
   <meta property="og:title" content="Agents break. Now you can fix them.">
   <meta property="og:description" content="One desktop app for the agents already on your computer. Scan, explain the problem, repair with a backup, and roll back if you need to.">
@@ -325,6 +325,29 @@ tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
 ./agent-doctor doctor</code></pre>
           </details>
         </div>
+        <div class="download-panel" id="team-download">
+          <div class="download-top">
+            <strong>Team edition</strong>
+            <span class="release-meta" id="team-release-meta">Looking up the team release…</span>
+          </div>
+          <p class="team-lead">A separate install for a company. Computers on the same network can run a local model together. It does not replace the personal app.</p>
+          <div class="cards">
+            <article class="card" data-slot="team-macos-arm64">
+              <span class="yours">This computer</span>
+              <h3>macOS</h3>
+              <p>Apple silicon disk image for the team package. Open it and drag the app into Applications.</p>
+              <div class="file">Checking the release…</div>
+              <a class="btn btn-primary" data-team-download href="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team/beta/Agent.Doctor.Team_0.1.100-beta.13_aarch64.dmg">Download for macOS</a>
+            </article>
+            <article class="card" data-slot="team-windows-x64">
+              <span class="yours">This computer</span>
+              <h3>Windows</h3>
+              <p>64-bit installer for the team package. Run it and follow the steps on screen.</p>
+              <div class="file">Checking the release…</div>
+              <a class="btn btn-primary" data-team-download href="https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team/beta/Agent.Doctor.Team_0.1.100-beta.13_x64-setup.exe">Download for Windows</a>
+            </article>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -342,7 +365,7 @@ tar -xzf agent-doctor-*-macos-arm64.tar.gz && chmod +x agent-doctor
       </nav>
     </div>
   </footer>
-  <script src="/js/nav.js?v=c136f0ef"></script>
-  <script src="/js/site.js?v=c136f0ef"></script>
+  <script src="/js/nav.js?v=cfc23e92"></script>
+  <script src="/js/site.js?v=cfc23e92"></script>
 </body>
 </html>

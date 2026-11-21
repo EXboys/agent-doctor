@@ -880,6 +880,13 @@ h2 {
   font-size: 16px;
 }
 
+.team-lead {
+  margin: 8px 14px 0;
+  color: var(--muted);
+  font-size: 14.5px;
+  max-width: 62ch;
+}
+
 .release-meta {
   color: var(--muted);
   font-family: var(--mono);
@@ -920,8 +927,10 @@ h2 {
   vertical-align: 1px;
 }
 
-.card[data-slot="macos-arm64"] h3::before { background: var(--accent); color: var(--accent); }
-.card[data-slot="windows-x64"] h3::before { background: var(--blue); color: var(--blue); }
+.card[data-slot="macos-arm64"] h3::before,
+.card[data-slot="team-macos-arm64"] h3::before { background: var(--accent); color: var(--accent); }
+.card[data-slot="windows-x64"] h3::before,
+.card[data-slot="team-windows-x64"] h3::before { background: var(--blue); color: var(--blue); }
 .card[data-slot="linux-appimage"] h3::before { background: var(--amber); color: var(--amber); }
 
 .yours {

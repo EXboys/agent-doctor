@@ -90,8 +90,12 @@ Rules:
 
 Read both manifests:
 
-- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/download.json` — stable, always shown
-- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/beta/download.json` — beta; may be missing (404)
+- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/download.json` — personal stable, always shown
+- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop/beta/download.json` — personal beta; may be missing (404)
+- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team/download.json` — team stable
+- `https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team/beta/download.json` — team beta; may be missing (404)
+
+The download page shows the personal installers and, under them, the team installers. Team links point at the China OSS files for that release.
 
 Both have the same shape plus `"channel": "stable" | "beta"`. Show the beta block only when the file exists and its `version` is newer than stable (semver, prerelease-aware). Otherwise the beta is already superseded and should be hidden. Label it as a test version that may be unstable; keep stable as the recommended download.
 

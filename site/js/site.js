@@ -19,6 +19,8 @@ const SLOT_COPY = {
   },
 };
 
+const TEAM_OSS = "https://agent-doctor.oss-cn-shenzhen.aliyuncs.com/desktop-team";
+
 function classify(name) {
   const n = name.toLowerCase();
   if (n.includes("team") || n.endsWith(".sig") || n.endsWith(".json")) return null;
@@ -30,6 +32,47 @@ function classify(name) {
   if (n.endsWith(".appimage")) return "linux-appimage";
   if (n.endsWith(".deb")) return "linux-deb";
   return null;
+}
+
+function classifyTeam(name) {
+  const n = name.toLowerCase();
+  if (!n.includes("team") || n.endsWith(".sig") || n.endsWith(".json")) return null;
+  if (n.endsWith(".dmg")) {
+    if (n.includes("x64") || n.includes("x86_64")) return "macos-x64";
+    return "macos-arm64";
+  }
+  if (n.endsWith("setup.exe") && !n.includes("cli")) return "windows-x64";
+  return null;
+}
+
+function teamOssUrl(tag, fileName) {
+  const channel = /-beta\./i.test(tag) ? "/beta" : "";
+  return `${TEAM_OSS}${channel}/${fileName}`;
+}
+
+/** [major, minor, patch, betaN]. A plain release sorts after its own betas. */
+function versionKey(tag) {
+  const match = String(tag)
+    .replace(/^v/, "")
+    .match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/);
+  if (!match) return null;
+  return [
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+    match[4] == null ? Number.POSITIVE_INFINITY : Number(match[4]),
+  ];
+}
+
+function newerTag(left, right) {
+  const a = versionKey(left);
+  const b = versionKey(right);
+  if (!a) return false;
+  if (!b) return true;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return false;
 }
 
 function thisComputer() {
@@ -135,8 +178,54 @@ async function main() {
       intelLink.href = intel.browser_download_url;
     }
     pointHero(bySlot[mine] || bySlot["macos-arm64"] || bySlot["windows-x64"], SLOT_COPY[mine]?.button || "Download");
+    await loadTeamDownload(mine);
   } catch {
     setStatus("The release list did not load. Use the releases page.");
+    await loadTeamDownload(mine);
+  }
+}
+
+async function loadTeamDownload(mine) {
+  const meta = document.querySelector("#team-release-meta");
+  const setMeta = (text) => {
+    if (meta) meta.textContent = text;
+  };
+  try {
+    const recent = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=20`);
+    if (!recent.ok) throw new Error("release list failed");
+    const list = await recent.json();
+    const release = list
+      .filter((item) => (item.assets || []).some((asset) => classifyTeam(asset.name)))
+      .sort((a, b) => (newerTag(a.tag_name, b.tag_name) ? -1 : 1))[0];
+    if (!release) {
+      setMeta("No team installer in the recent releases.");
+      return;
+    }
+    const tag = release.tag_name || "";
+    const bySlot = {};
+    for (const asset of release.assets || []) {
+      const slot = classifyTeam(asset.name);
+      if (slot && !bySlot[slot]) bySlot[slot] = asset;
+    }
+    const test = /-beta\./i.test(tag);
+    setMeta(tag ? `${test ? "Test version " : ""}${tag}` : "Team release");
+    for (const slot of ["macos-arm64", "windows-x64"]) {
+      const card = document.querySelector(`[data-slot="team-${slot}"]`);
+      const asset = bySlot[slot];
+      if (!card) continue;
+      card.classList.toggle("is-yours", slot === mine);
+      const file = card.querySelector(".file");
+      const link = card.querySelector("[data-team-download]");
+      if (!asset) {
+        if (file) file.textContent = "No installer in this release yet.";
+        continue;
+      }
+      const size = formatSize(asset.size);
+      if (file) file.textContent = size ? `${asset.name} · ${size}` : asset.name;
+      if (link) link.href = teamOssUrl(tag, asset.name);
+    }
+  } catch {
+    setMeta("The team download did not load. Use the releases page.");
   }
 }
 
