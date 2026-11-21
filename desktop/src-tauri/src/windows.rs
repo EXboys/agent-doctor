@@ -1312,11 +1312,50 @@ fn cluster_board_chrome_script() -> String {
           setHash("/");
         }
       }
+      // Hash mode ignores a raw `location.hash = "/downloads"` write: the
+      // tab highlights and the page stays put. A same-document link click is
+      // what the dashboard router actually follows, without asking WKWebView
+      // to load "/downloads" as a path.
+      function clientNavigate(path) {
+        var route = path || "/";
+        if (route.charAt(0) !== "/") route = "/" + route;
+        var a = document.createElement("a");
+        a.href = "#" + route;
+        a.setAttribute("data-ad-nav", "1");
+        (document.body || document.documentElement).appendChild(a);
+        a.dispatchEvent(new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button: 0
+        }));
+        a.remove();
+      }
+      function routeFromTab(button) {
+        var title = button.getAttribute("title") || "";
+        var label = (button.textContent || "").replace(/\s+/g, "");
+        if (title === "View downloads overview" || label.indexOf("下载") !== -1 || label === "Downloads") return "/downloads";
+        if (title.indexOf("能跑的模型") !== -1 || title === "Models this setup can run" || label.indexOf("适合本机") !== -1 || label === "Suitable") return "/suitable";
+        return "";
+      }
       function interceptHashLinks() {
         if (window.__adBoardHashGuard) return;
         window.__adBoardHashGuard = true;
         document.addEventListener("click", function (e) {
-          var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+          var origin = e.target && e.target.closest ? e.target : (e.target && e.target.parentElement);
+          if (!origin || !origin.closest) return;
+          if (origin.closest("[data-ad-nav]")) return;
+          var button = origin.closest("button");
+          if (button && button.closest(".ad-board-header")) {
+            var path = routeFromTab(button);
+            if (path) {
+              e.preventDefault();
+              e.stopPropagation();
+              clientNavigate(path);
+              return;
+            }
+          }
+          var a = origin.closest("a[href]");
           if (!a) return;
           var href = a.getAttribute("href") || "";
           var m = href.match(/#(\/[\w./-]*)/);
@@ -1324,16 +1363,26 @@ fn cluster_board_chrome_script() -> String {
           if (href.indexOf("://") >= 0 && href.indexOf(location.origin) !== 0) return;
           e.preventDefault();
           e.stopPropagation();
-          setHash(m[1]);
+          clientNavigate(m[1]);
         }, true);
       }
       function mount() {
         interceptHashLinks();
         landOnBoardRoute();
+        if (!document.getElementById("ad-board-chrome-style")) {
+          var style = document.createElement("style");
+          style.id = "ad-board-chrome-style";
+          style.textContent = "html body > .ad-drag-strip{position:fixed;top:0;left:0;right:auto;width:72px;height:48px;z-index:80;}";
+          (document.head || document.documentElement).appendChild(style);
+        }
+        var header = document.querySelector(".ad-board-header");
+        if (header) header.setAttribute("data-tauri-drag-region", "deep");
+        var title = document.querySelector(".ad-board-brand-title");
+        if (title) title.setAttribute("data-tauri-drag-region", "");
         if (!document.querySelector(".ad-drag-strip")) {
           var strip = document.createElement("div");
           strip.className = "ad-drag-strip";
-          strip.setAttribute("data-tauri-drag-region", "");
+          strip.setAttribute("data-tauri-drag-region", "deep");
           (document.body || document.documentElement).appendChild(strip);
         }
         if (os !== "windows" || document.querySelector(".ad-window-controls")) return;

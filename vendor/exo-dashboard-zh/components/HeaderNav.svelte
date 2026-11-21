@@ -1,5 +1,6 @@
 <script lang="ts">
   import { browser } from "$app/environment";
+  import { goto } from "$app/navigation";
 
   interface Props {
     showHome?: boolean;
@@ -49,13 +50,11 @@
       onHome();
       return;
     }
-    if (browser) {
-      window.location.hash = "/";
-    }
+    if (browser) void goto("/");
   }
 </script>
 
-<header class="ad-board-header" data-tauri-drag-region>
+<header class="ad-board-header" data-tauri-drag-region="deep">
   <button
     type="button"
     onclick={handleHome}
@@ -71,7 +70,7 @@
         <path d="M6.5 11v2.5h11V11" />
       </svg>
     </span>
-    <span class="ad-board-brand-title">EXO算力管理</span>
+    <span class="ad-board-brand-title" data-tauri-drag-region>EXO算力管理</span>
   </button>
 
   <nav class="ad-board-tabs" aria-label="Main navigation">
@@ -84,7 +83,7 @@
       class="ad-board-tab {isActive('suitable') ? 'is-active' : ''}"
       title="Models this setup can run"
       onclick={() => {
-        if (browser) window.location.hash = "/suitable";
+        if (browser) void goto("/suitable");
       }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -99,7 +98,7 @@
       class="ad-board-tab {isActive('downloads') ? 'is-active' : ''}"
       title="View downloads overview"
       onclick={() => {
-        if (browser) window.location.hash = "/downloads";
+        if (browser) void goto("/downloads");
       }}
     >
       {#if downloadProgress}

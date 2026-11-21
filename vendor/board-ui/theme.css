@@ -627,9 +627,9 @@ svg text {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  height: 26px;
-  z-index: 70;
+  width: 72px;
+  height: 48px;
+  z-index: 80;
 }
 
 html[data-os="windows"] .ad-drag-strip {
