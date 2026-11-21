@@ -81,8 +81,15 @@ export function createShellUiController(deps: ShellUiDeps) {
     for (const name of names) {
       const opt = document.createElement("option");
       opt.value = name;
-      const path = doc.workspaces[name]?.path ?? "";
-      opt.textContent = path ? `${name} · ${shortCwdLabel(path)}` : name;
+      const entry = doc.workspaces[name];
+      const path = entry?.path ?? "";
+      const label = entry?.title?.trim() || name;
+      const host = entry?.hostLabel?.trim();
+      opt.textContent = host
+        ? `${host} · ${label}`
+        : path
+          ? `${label} · ${shortCwdLabel(path)}`
+          : label;
       if (name === doc.active) {
         opt.selected = true;
       }

@@ -36,6 +36,8 @@ import {
   pendingNearbyAsks,
   answerNearbyAsk,
   useNearbyComputer,
+  listLinkedHostStatus,
+  linkedListWorkspaces,
   linkedWorkspaceDoctor,
   linkedWorkspaceFix,
 } from "./ipc";
@@ -398,42 +400,109 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
 }
 
 let pendingAskId = "";
+const answeredAskIds = new Set<string>();
+let allowResult = "";
 
-function renderNearby(
-  peers: Array<{ id: string; name: string }>,
-): void {
-  if (peers.length === 0) {
+type NearbyView = {
+  phase: "waiting" | "ready" | "failed";
+  name: string;
+  message: string;
+  projects: Array<{ name: string; path: string }>;
+};
+
+const nearbyViews = new Map<string, NearbyView>();
+let lastNearbyPeers: Array<{ id: string; name: string }> = [];
+
+function nearbyHostId(id: string): string {
+  return id.startsWith("lan-") ? id : `lan-${id}`;
+}
+
+function renderNearby(peers: Array<{ id: string; name: string }>): void {
+  lastNearbyPeers = peers;
+  const merged = new Map(peers.map((peer) => [peer.id, peer.name]));
+  for (const [id, view] of nearbyViews) {
+    if ((view.phase === "ready" || view.phase === "waiting") && !merged.has(id)) {
+      merged.set(id, view.name);
+    }
+  }
+  const rows = [...merged.entries()].sort((a, b) => a[1].localeCompare(b[1], "zh"));
+  if (rows.length === 0) {
     nearbyListEl.innerHTML = `<li class="ws-manage-item"><span class="remote-host-note">${escapeHtml(t("remote.nearbyEmpty"))}</span></li>`;
     return;
   }
-  nearbyListEl.innerHTML = peers
-    .map(
-      (peer) => `
+  nearbyListEl.innerHTML = rows
+    .map(([id, name]) => {
+      const view = nearbyViews.get(id);
+      const note = view?.message
+        ? `<p class="remote-host-note">${escapeHtml(view.message)}</p>`
+        : "";
+      const projects = (view?.projects ?? [])
+        .map(
+          (project) =>
+            `<p class="remote-host-note">${escapeHtml(project.name)} · ${escapeHtml(project.path)}</p>`,
+        )
+        .join("");
+      const button =
+        !view || view.phase === "failed"
+          ? `<div class="ws-manage-actions"><button type="button" class="btn-primary btn-compact" data-nearby-use="${escapeHtml(id)}">${escapeHtml(t("remote.nearbyUse"))}</button></div>`
+          : "";
+      return `
         <li class="ws-manage-item remote-host-card">
           <div class="remote-host-head">
             <div class="ws-manage-main">
-              <strong>${escapeHtml(peer.name)}</strong>
+              <strong>${escapeHtml(name)}</strong>
             </div>
           </div>
-          <div class="ws-manage-actions">
-            <button type="button" class="btn-primary btn-compact" data-nearby-use="${escapeHtml(peer.id)}">${escapeHtml(t("remote.nearbyUse"))}</button>
-          </div>
+          ${note}
+          ${projects}
+          ${button}
         </li>
-      `,
-    )
+      `;
+    })
     .join("");
 }
 
 function renderNearbyAsk(ask: { id: string; name: string } | undefined): void {
-  if (!ask) {
-    pendingAskId = "";
-    nearbyAskEl.hidden = true;
-    nearbyAskTextEl.textContent = "";
+  if (ask && !answeredAskIds.has(ask.id)) {
+    pendingAskId = ask.id;
+    nearbyAskTextEl.textContent = t("remote.askText", { name: ask.name || "旁边的电脑" });
+    nearbyAskEl.classList.remove("is-result");
+    nearbyAskEl.hidden = false;
     return;
   }
-  pendingAskId = ask.id;
-  nearbyAskTextEl.textContent = t("remote.askText", { name: ask.name || "旁边的电脑" });
-  nearbyAskEl.hidden = false;
+  pendingAskId = "";
+  if (allowResult) {
+    nearbyAskTextEl.textContent = allowResult;
+    nearbyAskEl.classList.add("is-result");
+    nearbyAskEl.hidden = false;
+    return;
+  }
+  nearbyAskEl.classList.remove("is-result");
+  nearbyAskEl.hidden = true;
+  nearbyAskTextEl.textContent = "";
+}
+
+async function loadNearbyProjects(id: string, name: string): Promise<void> {
+  const view = nearbyViews.get(id);
+  if (!view || view.phase !== "ready") return;
+  try {
+    const rows = await linkedListWorkspaces({ hostId: nearbyHostId(id) });
+    const current = nearbyViews.get(id);
+    if (!current || current.phase !== "ready") return;
+    current.projects = rows.map((row) => ({
+      name: row.title?.trim() || row.name,
+      path: row.path,
+    }));
+    current.message =
+      rows.length > 0
+        ? t("remote.nearbyReady", { name })
+        : t("remote.nearbyNoProjects", { name });
+  } catch (error) {
+    const current = nearbyViews.get(id);
+    if (!current || current.phase !== "ready") return;
+    current.message = withErrorDetail(t("remote.nearbyProjectsFailed", { name }), error);
+  }
+  renderNearby(lastNearbyPeers);
 }
 
 function paintNearbyShare(enabled: boolean): void {
@@ -444,11 +513,38 @@ function paintNearbyShare(enabled: boolean): void {
   nearbyShareHintEl.textContent = t(enabled ? "remote.shareHint" : "remote.shareHintOff");
 }
 
+async function adoptLiveNearby(): Promise<void> {
+  let statuses: Awaited<ReturnType<typeof listLinkedHostStatus>>;
+  try {
+    statuses = await listLinkedHostStatus();
+  } catch {
+    return;
+  }
+  let changed = false;
+  for (const status of statuses) {
+    if (!status.connected || !status.hostId.startsWith("lan-")) continue;
+    const id = status.hostId.slice("lan-".length);
+    const view = nearbyViews.get(id);
+    if (view?.phase === "waiting" || view?.phase === "ready") continue;
+    const name = status.computerName || status.displayName || id;
+    nearbyViews.set(id, {
+      phase: "ready",
+      name,
+      message: t("remote.nearbyReady", { name }),
+      projects: [],
+    });
+    changed = true;
+    void loadNearbyProjects(id, name);
+  }
+  if (changed) renderNearby(lastNearbyPeers);
+}
+
 async function refreshNearby(): Promise<void> {
   try {
     const [peers, asks] = await Promise.all([listNearbyComputers(), pendingNearbyAsks()]);
     renderNearby(peers.map((peer) => ({ id: peer.id, name: peer.name })));
     renderNearbyAsk(asks[0]);
+    void adoptLiveNearby();
   } catch {
     // The list stays as it was if this refresh misses.
   }
@@ -473,17 +569,38 @@ async function refreshNearby(): Promise<void> {
 async function useNearbyComputerUi(id: string, name: string): Promise<void> {
   if (remoteBusy) return;
   remoteBusy = true;
-  remoteStatusEl.textContent = t("remote.nearbyWaiting");
+  nearbyViews.set(id, {
+    phase: "waiting",
+    name,
+    message: t("remote.nearbyWaiting"),
+    projects: [],
+  });
+  renderNearby(lastNearbyPeers);
   try {
     const report = await useNearbyComputer({ id });
-    remoteStatusEl.textContent = report.ok
-      ? t("remote.nearbyReady", { name: report.computerName || name })
-      : report.message;
-    if (report.ok) {
-      await loadRemoteProjects();
+    if (!report.ok) {
+      const message = report.message.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || t("remote.nearbyFailed");
+      nearbyViews.set(id, { phase: "failed", name, message, projects: [] });
+      renderNearby(lastNearbyPeers);
+      return;
     }
+    const connectedName = report.computerName || name;
+    nearbyViews.set(id, {
+      phase: "ready",
+      name: connectedName,
+      message: t("remote.nearbyReady", { name: connectedName }),
+      projects: [],
+    });
+    renderNearby(lastNearbyPeers);
+    await loadNearbyProjects(id, connectedName);
   } catch (error) {
-    remoteStatusEl.textContent = withErrorDetail(t("remote.nearbyWaiting"), error);
+    nearbyViews.set(id, {
+      phase: "failed",
+      name,
+      message: withErrorDetail(t("remote.nearbyFailed"), error),
+      projects: [],
+    });
+    renderNearby(lastNearbyPeers);
   } finally {
     remoteBusy = false;
   }
@@ -831,14 +948,24 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
   nearbyAllowEl.addEventListener("click", () => {
     if (!pendingAskId) return;
     const id = pendingAskId;
-    nearbyAskEl.hidden = true;
-    void answerNearbyAsk({ id, allow: true }).then(() => refreshNearby());
+    answeredAskIds.add(id);
+    allowResult = t("remote.askAllowed");
+    renderNearbyAsk(undefined);
+    void answerNearbyAsk({ id, allow: true })
+      .then(() => refreshNearby())
+      .catch(() => {
+        answeredAskIds.delete(id);
+        allowResult = t("remote.askFailed");
+        renderNearbyAsk(undefined);
+      });
   });
 
   nearbyDenyEl.addEventListener("click", () => {
     if (!pendingAskId) return;
     const id = pendingAskId;
-    nearbyAskEl.hidden = true;
+    answeredAskIds.add(id);
+    allowResult = t("remote.askDenied");
+    renderNearbyAsk(undefined);
     void answerNearbyAsk({ id, allow: false }).then(() => refreshNearby());
   });
 

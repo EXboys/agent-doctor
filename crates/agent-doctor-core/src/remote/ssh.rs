@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -171,10 +173,7 @@ impl SshBackend {
             .arg(remote_script)
             .stdin(Stdio::null());
 
-        let label = self.target.label();
-        let output = cmd.output().with_context(|| {
-            format!("failed to spawn ssh to '{label}'; is OpenSSH client installed?")
-        })?;
+        let output = captured_ssh(cmd, self.command_timeout)?;
 
         let status = output.status.code().unwrap_or(-1);
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -251,6 +250,29 @@ impl ExecBackend for SshBackend {
             bail!("remote HOME empty on '{}'", self.target.label());
         }
         Ok(PathBuf::from(home))
+    }
+}
+
+/// `Command::output()` waits forever. A stuck login used to leave the screen
+/// quiet until the user gave up.
+pub(crate) fn captured_ssh(mut cmd: Command, timeout: Duration) -> Result<Output> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = cmd.spawn().context("打不开 SSH")?;
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(err)) => Err(err).context("SSH 没有完成"),
+        Err(_) => {
+            crate::exec::kill_process_tree(pid);
+            let _ = rx.recv_timeout(Duration::from_millis(400));
+            bail!("连了 {} 秒还没有结果，已经停掉。", timeout.as_secs())
+        }
     }
 }
 

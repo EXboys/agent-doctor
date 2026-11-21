@@ -157,9 +157,11 @@ pub fn run_linked_prompt(
     browser_tools_enabled: Option<bool>,
     computer_use_enabled: Option<bool>,
 ) -> Result<PromptSessionReport, String> {
-    let port = link_sessions
-        .local_port(host_id)
-        .ok_or_else(|| "还没连上这台服务器。先点「连上这台服务器」。".to_string())?;
+    let lan = link_sessions.lan_client(host_id);
+    let port = link_sessions.local_port(host_id).unwrap_or(0);
+    if lan.is_none() && port == 0 {
+        return Err("还没连上这台电脑。先在旁边的电脑里点「在这台电脑上用」。".into());
+    }
 
     linked_index.remember(client_key, host_id, port);
 
@@ -187,8 +189,7 @@ pub fn run_linked_prompt(
     let client_for_events = client_key.to_string();
     let index = linked_index.clone();
 
-    let mut client = LinkClient::connect_local(port).map_err(|err| format!("{err:#}"))?;
-    let result = client.start_prompt(params, move |payload| {
+    let forward = move |payload: serde_json::Value| {
         let Ok(event) = serde_json::from_value::<PromptSessionEvent>(payload) else {
             return;
         };
@@ -197,7 +198,15 @@ pub fn run_linked_prompt(
             index.note_backend(session_id, &client_for_events);
         }
         let _ = app_for_emit.emit_to(owner.as_str(), "prompt-session-event", &event);
-    });
+    };
+
+    let result = if let Some(lan) = lan {
+        let mut client = lan.lock().unwrap_or_else(|err| err.into_inner());
+        client.start_prompt(params, forward)
+    } else {
+        let mut client = LinkClient::connect_local(port).map_err(|err| format!("{err:#}"))?;
+        client.start_prompt(params, forward)
+    };
 
     linked_index.forget_client(client_key);
 

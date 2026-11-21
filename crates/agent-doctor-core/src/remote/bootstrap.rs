@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use tempfile::TempDir;
@@ -187,9 +188,8 @@ pub fn verify_key_login(hostname: &str, user: &str, port: u16, identity_file: &P
         .arg("true")
         .stdin(Stdio::null());
 
-    let output = cmd
-        .output()
-        .context("failed to spawn ssh for key verification")?;
+    let output =
+        super::ssh::captured_ssh(cmd, Duration::from_secs(20)).context("钥匙登录没有完成")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
@@ -234,9 +234,8 @@ fn run_password_ssh(
         .env("DISPLAY", askpass.display.as_str())
         .env_remove("SSH_AUTH_SOCK");
 
-    let output = cmd
-        .output()
-        .context("failed to spawn ssh for password bootstrap")?;
+    let output =
+        super::ssh::captured_ssh(cmd, Duration::from_secs(20)).context("密码登录没有完成")?;
     // Drop askpass (wipes password file) before interpreting result.
     drop(askpass);
 

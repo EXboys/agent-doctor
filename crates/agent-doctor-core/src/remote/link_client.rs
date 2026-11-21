@@ -1,5 +1,6 @@
 //! Blocking WebSocket client for the loopback (or tunneled) client service.
 
+use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -34,6 +35,12 @@ impl LinkClient {
         })
     }
 
+    /// Keep using a socket that already finished the hello, instead of opening another one.
+    pub fn from_websocket(ws: WebSocket<TcpStream>) -> Self {
+        let _ = ws.get_ref().set_nodelay(true);
+        Self { ws, local_port: 0 }
+    }
+
     pub fn decode_hello(value: serde_json::Value) -> Result<LinkHello> {
         serde_json::from_value(value).context("电脑信息格式不对")
     }
@@ -57,7 +64,15 @@ impl LinkClient {
         mut on_push: impl FnMut(LinkPush),
     ) -> Result<serde_json::Value> {
         loop {
-            let msg = self.ws.read().context("等待回应失败")?;
+            let msg = match self.ws.read() {
+                Ok(msg) => msg,
+                Err(tungstenite::Error::Io(err))
+                    if matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
+                {
+                    bail!("那边没有回应");
+                }
+                Err(err) => return Err(err).context("等待回应失败"),
+            };
             match msg {
                 Message::Text(text) => {
                     if let Ok(push) = serde_json::from_str::<LinkPush>(&text) {
@@ -87,6 +102,11 @@ impl LinkClient {
     }
 
     fn call(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+        // Short questions must not sit forever when the other side never answers.
+        let _ = self
+            .ws
+            .get_mut()
+            .set_read_timeout(Some(Duration::from_secs(15)));
         let id = Self::next_id();
         let req = LinkRequest {
             id: id.clone(),
@@ -110,6 +130,7 @@ impl LinkClient {
             method: method.to_string(),
             params,
         };
+        let _ = self.ws.get_mut().set_read_timeout(None);
         self.send_request(&req)?;
         self.wait_response(&id, on_push)
     }

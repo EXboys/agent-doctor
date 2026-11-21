@@ -6,7 +6,7 @@ use agent_doctor_core::{
     RemoteHostsDocument,
 };
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::link_session::{LinkConnectReport, LinkHostStatus, LinkSessionState};
 
@@ -210,11 +210,16 @@ pub fn answer_nearby_ask_command(id: String, allow: bool) -> Result<(), String> 
 pub async fn use_nearby_computer_command(
     id: String,
     state: State<'_, LinkSessionState>,
+    app: tauri::AppHandle,
 ) -> Result<LinkConnectReport, String> {
     let state = (*state).clone();
-    tauri::async_runtime::spawn_blocking(move || state.connect_nearby(&id))
+    let report = tauri::async_runtime::spawn_blocking(move || state.connect_nearby(&id))
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if report.ok {
+        let _ = app.emit("workspace-changed", &report.host_id);
+    }
+    Ok(report)
 }
 
 #[tauri::command]

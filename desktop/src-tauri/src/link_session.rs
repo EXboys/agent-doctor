@@ -20,6 +20,8 @@ struct LiveLink {
     stop_proxy: Option<Arc<AtomicBool>>,
     hello: LinkHello,
     local_port: u16,
+    /// Nearby computers stay on the connection that already said hello.
+    lan: Option<Arc<Mutex<LinkClient>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,6 +128,7 @@ impl LinkSessionState {
                             tunnel: Some(tunnel),
                             stop_proxy: None,
                             hello: hello.clone(),
+                            lan: None,
                         },
                     );
                 }
@@ -173,16 +176,17 @@ impl LinkSessionState {
         let host_id = format!("lan-{peer_id}");
         self.disconnect(&host_id);
         match connect_nearby(peer_id) {
-            Ok((port, stop, hello)) => {
+            Ok((client, hello)) => {
                 let computer_name = hello.computer_name.clone();
                 if let Ok(mut guard) = self.inner.lock() {
                     guard.insert(
                         host_id.clone(),
                         LiveLink {
-                            local_port: port,
+                            local_port: 0,
                             tunnel: None,
-                            stop_proxy: Some(stop),
+                            stop_proxy: None,
                             hello,
+                            lan: Some(Arc::new(Mutex::new(client))),
                         },
                     );
                 }
@@ -206,13 +210,25 @@ impl LinkSessionState {
         }
     }
 
+    pub fn lan_client(&self, host_id: &str) -> Option<Arc<Mutex<LinkClient>>> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(host_id).and_then(|live| live.lan.clone()))
+    }
+
     pub fn with_client<T>(
         &self,
         host_id: &str,
         f: impl FnOnce(&mut LinkClient) -> anyhow::Result<T>,
     ) -> Result<T, String> {
+        if let Some(lan) = self.lan_client(host_id) {
+            let mut client = lan.lock().unwrap_or_else(|err| err.into_inner());
+            return f(&mut client).map_err(|err| format!("{err:#}"));
+        }
         let port = self
             .local_port(host_id)
+            .filter(|port| *port != 0)
             .ok_or_else(|| "还没连上这台电脑，请先点连接。".to_string())?;
         let mut client = LinkClient::connect_local(port).map_err(|err| format!("{err:#}"))?;
         f(&mut client).map_err(|err| format!("{err:#}"))
@@ -246,6 +262,23 @@ impl LinkSessionState {
                     "可做检查；打开那边的客户端后可完整操作".into()
                 },
             });
+        }
+        if let Some(guard) = connected.as_ref() {
+            for (host_id, live) in guard.iter() {
+                if !host_id.starts_with("lan-") || rows.iter().any(|row| row.host_id == *host_id) {
+                    continue;
+                }
+                let name = live.hello.computer_name.clone();
+                rows.push(LinkHostStatus {
+                    host_id: host_id.clone(),
+                    display_name: name.clone(),
+                    target: String::new(),
+                    linked_client: true,
+                    connected: true,
+                    computer_name: name,
+                    message: "已连接".into(),
+                });
+            }
         }
         rows.sort_by(|a, b| a.host_id.cmp(&b.host_id));
         rows

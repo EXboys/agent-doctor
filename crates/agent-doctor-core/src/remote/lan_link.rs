@@ -14,6 +14,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use tungstenite::{client::client as ws_client, Message};
 
+use super::link_client::LinkClient;
 use super::link_daemon::{dispatch_link_text, open_link_socket, serve_link_socket};
 use super::link_protocol::{LinkHello, LinkResponse, LINK_DAEMON_PORT};
 use super::registry::remote_root_dir;
@@ -312,16 +313,13 @@ pub fn pending_asks() -> Vec<NearbyAsk> {
 
 pub fn decide_ask(id: &str, allow: bool) {
     let Some(slot) = with_gate(|gate| {
-        let found = gate
-            .asks
-            .iter()
-            .find(|ask| ask.id == id)
-            .map(|ask| ask.slot.clone());
-        if allow && found.is_some() && !gate.trusted.iter().any(|saved| saved == id) {
+        let index = gate.asks.iter().position(|ask| ask.id == id);
+        let slot = index.map(|index| gate.asks.remove(index).slot);
+        if allow && slot.is_some() && !gate.trusted.iter().any(|saved| saved == id) {
             gate.trusted.push(id.to_string());
             save_trusted(&gate.trusted);
         }
-        found
+        slot
     }) else {
         return;
     };
@@ -384,6 +382,12 @@ fn handle_lan_client(stream: TcpStream, ip: Option<IpAddr>) -> Result<()> {
     }
     let allowed = ip.map(ip_allowed).unwrap_or(false);
     if !allowed {
+        let _ = socket.send_response(&LinkResponse {
+            id: hello_id(&text),
+            ok: false,
+            result: None,
+            error: Some("这台电脑还没有允许。".into()),
+        });
         return Ok(());
     }
     dispatch_link_text(&socket, &text)?;
@@ -490,25 +494,20 @@ fn wait_for_allow(id: &str, name: &str) -> bool {
     allowed
 }
 
-/// Open the other computer and keep a local forward so the rest of the app
-/// can talk to it the same way as a tunnel.
-pub fn connect_nearby(id: &str) -> Result<(u16, Arc<AtomicBool>, LinkHello)> {
+/// Open the other computer and keep that same connection for later work.
+pub fn connect_nearby(id: &str) -> Result<(LinkClient, LinkHello)> {
     let peer = list_nearby()
         .into_iter()
         .find(|peer| peer.id == id)
         .context("这台电脑刚才还在，现在看不到了。请让那边的客户端开着。")?;
-    let hello = greet(&peer)?;
-    let (port, stop) = spawn_proxy(&peer.addr, peer.port)?;
-    Ok((port, stop, hello))
+    greet(&peer)
 }
 
-fn greet(peer: &NearbyComputer) -> Result<LinkHello> {
+fn greet(peer: &NearbyComputer) -> Result<(LinkClient, LinkHello)> {
     let addr = format!("{}:{}", peer.addr, peer.port);
     let stream = TcpStream::connect(addr.as_str()).context("连不上旁边这台电脑")?;
     stream.set_nodelay(true).ok();
-    stream
-        .set_read_timeout(Some(ASK_FOR + Duration::from_secs(5)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
     let (mut ws, _) = ws_client(format!("ws://{addr}/ws"), stream).context("连上了，但握手失败")?;
     let body = serde_json::json!({
         "id": "1",
@@ -522,8 +521,22 @@ fn greet(peer: &NearbyComputer) -> Result<LinkHello> {
         if started.elapsed() > ASK_FOR + Duration::from_secs(5) {
             bail!("那边还没有允许。");
         }
-        let msg = ws.read().context("等待那边允许时断开了")?;
+        let msg = match ws.read() {
+            Ok(msg) => msg,
+            Err(tungstenite::Error::Io(err))
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                continue;
+            }
+            Err(err) => return Err(err).context("等待那边允许时断开了"),
+        };
         let Message::Text(text) = msg else {
+            if matches!(msg, Message::Close(_)) {
+                bail!("那边把连接关掉了");
+            }
             continue;
         };
         if let Ok(response) = serde_json::from_str::<LinkResponse>(&text) {
@@ -538,54 +551,8 @@ fn greet(peer: &NearbyComputer) -> Result<LinkHello> {
             }
             let hello: LinkHello = serde_json::from_value(response.result.unwrap_or_default())
                 .context("那边的回应格式不对")?;
-            return Ok(hello);
-        }
-    }
-}
-
-fn spawn_proxy(addr: &str, port: u16) -> Result<(u16, Arc<AtomicBool>)> {
-    let listener = TcpListener::bind("127.0.0.1:0").context("本机没有空闲端口")?;
-    listener.set_nonblocking(true).ok();
-    let local = listener.local_addr()?.port();
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = stop.clone();
-    let peer = format!("{addr}:{port}");
-    thread::Builder::new()
-        .name("ad-lan-proxy".into())
-        .spawn(move || proxy_loop(listener, peer, flag))
-        .context("无法转接旁边的电脑")?;
-    Ok((local, stop))
-}
-
-fn proxy_loop(listener: TcpListener, peer: String, stop: Arc<AtomicBool>) {
-    while !stop.load(Ordering::SeqCst) {
-        match listener.accept() {
-            Ok((local, _)) => {
-                // Accepted sockets stay nonblocking on macOS. The copy must block.
-                let _ = local.set_nonblocking(false);
-                let peer = peer.clone();
-                thread::spawn(move || {
-                    let Ok(remote) = TcpStream::connect(peer) else {
-                        return;
-                    };
-                    let Ok(mut outbound) = local.try_clone() else {
-                        return;
-                    };
-                    let Ok(mut inbound) = remote.try_clone() else {
-                        return;
-                    };
-                    let mut remote_read = remote;
-                    let mut local_read = local;
-                    thread::spawn(move || {
-                        let _ = std::io::copy(&mut remote_read, &mut outbound);
-                    });
-                    let _ = std::io::copy(&mut local_read, &mut inbound);
-                });
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(40));
-            }
-            Err(_) => break,
+            let _ = ws.get_mut().set_read_timeout(None);
+            return Ok((LinkClient::from_websocket(ws), hello));
         }
     }
 }

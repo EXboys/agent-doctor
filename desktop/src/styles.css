@@ -1349,6 +1349,10 @@ body.is-diagnose-open .diagnose-detail {
   margin-bottom: 14px;
 }
 
+#nearby-ask.is-result .ws-manage-actions {
+  display: none;
+}
+
 #remote-section > .section-label-stack {
   align-items: center;
   justify-content: space-between;
