@@ -40,6 +40,10 @@ pub struct ExoClusterSnapshot {
     /// "not in the latest state", not "seen long ago".
     #[serde(default)]
     pub other_peer_last_seen_ms: Option<u64>,
+    /// Node ids in a Thunderbolt-bridge cycle that includes this computer.
+    /// Empty unless exo itself reports a loop.
+    #[serde(default)]
+    pub thunderbolt_cycle_ids: Vec<String>,
 }
 
 /// Probe an `exo` origin (`http://127.0.0.1:52415` or `http://192.168.1.23:52415`).
@@ -492,6 +496,7 @@ pub(crate) fn parse_exo_state(
 
     let active_models = extract_active_models(state);
     let other_peer_last_seen_ms = newest_other_peer_last_seen_ms(state, self_node_id);
+    let thunderbolt_cycle_ids = thunderbolt_cycle_with_self(state, self_node_id);
 
     ExoClusterSnapshot {
         origin: origin.to_string(),
@@ -503,7 +508,40 @@ pub(crate) fn parse_exo_state(
         active_models,
         incompatible_peer_count: 0,
         other_peer_last_seen_ms,
+        thunderbolt_cycle_ids,
     }
+}
+
+/// Members of the first Thunderbolt-bridge cycle that includes this computer.
+/// A chain (A on the network, C only on the cable) is not a cycle.
+pub(crate) fn thunderbolt_cycle_with_self(state: &Value, self_node_id: &str) -> Vec<String> {
+    let self_id = self_node_id.trim();
+    if self_id.is_empty() {
+        return Vec::new();
+    }
+    let Some(cycles) = state
+        .get("thunderboltBridgeCycles")
+        .or_else(|| state.get("thunderbolt_bridge_cycles"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    for cycle in cycles {
+        let Some(items) = cycle.as_array() else {
+            continue;
+        };
+        let ids: Vec<String> = items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect();
+        if ids.iter().any(|id| id == self_id) {
+            return ids;
+        }
+    }
+    Vec::new()
 }
 
 /// Newest `lastSeen` for a node that is not us. exo 1.0.71 serializes datetimes
@@ -978,6 +1016,26 @@ mod tests {
             }
             other => panic!("expected failure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_thunderbolt_chain_is_not_a_loop_but_a_cycle_including_us_is() {
+        let chain = json!({
+            "thunderboltBridgeCycles": []
+        });
+        assert!(thunderbolt_cycle_with_self(&chain, "b").is_empty());
+
+        let looped = json!({
+            "thunderboltBridgeCycles": [
+                ["a", "b"],
+                ["b", "c"]
+            ]
+        });
+        assert_eq!(
+            thunderbolt_cycle_with_self(&looped, "b"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert!(thunderbolt_cycle_with_self(&looped, "z").is_empty());
     }
 
     #[test]

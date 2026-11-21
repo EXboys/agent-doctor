@@ -158,11 +158,12 @@ export function createClusterController(deps: ClusterControllerDeps) {
   }
 
   function shouldKeepJoining(s: ClusterStatus): boolean {
+    // Keep looking after two computers are already linked. The third may sit
+    // on a Thunderbolt cable that the first pair never scans again.
     return (
       s.backend === "exo" &&
       s.reachable &&
       !s.remote_origin &&
-      s.nodes.length < 2 &&
       s.daemon_owner !== "external_process" &&
       s.host_support === "supported"
     );

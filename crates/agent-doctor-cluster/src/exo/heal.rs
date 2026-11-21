@@ -43,11 +43,13 @@ struct HealGate {
 struct PeerWatch {
     ever_seen: bool,
     alone_since: Option<Instant>,
+    last_dial_restart: Option<Instant>,
 }
 
 static PEER_WATCH: Mutex<PeerWatch> = Mutex::new(PeerWatch {
     ever_seen: false,
     alone_since: None,
+    last_dial_restart: None,
 });
 
 static HEAL_GATE: Mutex<HealGate> = Mutex::new(HealGate {
@@ -110,9 +112,15 @@ fn heal_once() -> Result<()> {
             PEER_LOST_AFTER,
         )
     });
-    let absence = {
+    let now = Instant::now();
+    let (absence, cooled_down) = {
         let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
-        note_peers(&mut watch, saw, Instant::now(), PEER_LOST_AFTER)
+        let absence = note_peers(&mut watch, saw, now, PEER_LOST_AFTER);
+        let cooled_down = watch
+            .last_dial_restart
+            .map(|at| now.saturating_duration_since(at) >= PEER_LOST_AFTER)
+            .unwrap_or(true);
+        (absence, cooled_down)
     };
     let namespace_ok = applied.namespace == desired.namespace;
     if !should_restart(absence, namespace_ok) {
@@ -120,6 +128,11 @@ fn heal_once() -> Result<()> {
         // every few seconds; killing it to add one address drops the model.
         if namespace_ok && matches!(absence, PeerAbsence::Hold) {
             let _ = remember_discovered_peers(&applied, &desired.namespace);
+        }
+        // Already linked, but a computer on the Thunderbolt cable is not in
+        // the list this process dials. Restart once so that address is dialed.
+        if may_look_for_another_peer(absence, namespace_ok, cooled_down) {
+            let _ = dial_newly_found_peers(&applied, &desired.namespace);
         }
         return Ok(());
     }
@@ -145,6 +158,30 @@ fn heal_once() -> Result<()> {
     if daemon::restart_our_exo()? {
         let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
         arm_grace_after_restart(&mut watch, Instant::now());
+    }
+    Ok(())
+}
+
+fn dial_newly_found_peers(applied: &daemon::AppliedJoin, desired_namespace: &str) -> Result<()> {
+    let found_hosts = discover_peer_hosts();
+    let Some(peers) = plan_rejoin(
+        &applied.namespace,
+        desired_namespace,
+        &applied.peers,
+        &found_hosts,
+        &self_ips(),
+        applied.port_pinned,
+        daemon::runtime_supports_pinned_libp2p(),
+    ) else {
+        return Ok(());
+    };
+    if !has_new_address(&applied.peers, &peers) {
+        return Ok(());
+    }
+    daemon::set_pending_bootstrap_peers(&peers);
+    if daemon::restart_our_exo()? {
+        let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        note_dial_restart(&mut watch, Instant::now());
     }
     Ok(())
 }
@@ -236,6 +273,26 @@ fn note_peers(
 fn arm_grace_after_restart(watch: &mut PeerWatch, now: Instant) {
     watch.ever_seen = true;
     watch.alone_since = Some(now);
+}
+
+fn note_dial_restart(watch: &mut PeerWatch, now: Instant) {
+    watch.last_dial_restart = Some(now);
+    arm_grace_after_restart(watch, now);
+}
+
+/// A linked group keeps its process. A new dial address is applied once, then
+/// not again until the grace has passed, so a changing cable address cannot
+/// restart the group every few seconds.
+fn may_look_for_another_peer(
+    absence: PeerAbsence,
+    namespace_matches: bool,
+    cooled_down: bool,
+) -> bool {
+    namespace_matches && absence == PeerAbsence::Present && cooled_down
+}
+
+fn has_new_address(running: &[String], planned: &[String]) -> bool {
+    planned.iter().any(|peer| !running.contains(peer))
 }
 
 /// A wrong account still restarts immediately. A missing peer restarts on
@@ -548,6 +605,7 @@ mod tests {
         let mut watch = PeerWatch {
             ever_seen: false,
             alone_since: None,
+            last_dial_restart: None,
         };
         assert_eq!(
             note_peers(&mut watch, false, start, grace),
@@ -586,6 +644,24 @@ mod tests {
             note_peers(&mut watch, false, expired + Duration::from_secs(15), grace),
             PeerAbsence::Hold
         );
+    }
+
+    #[test]
+    fn a_third_computer_is_dialed_once_while_two_are_already_linked() {
+        let running = ["/ip4/192.168.1.9/tcp/52416".to_string()];
+        let with_cable = vec![
+            "/ip4/169.254.10.8/tcp/52416".to_string(),
+            "/ip4/192.168.1.9/tcp/52416".to_string(),
+        ];
+        assert!(has_new_address(&running, &with_cable));
+        assert!(may_look_for_another_peer(PeerAbsence::Present, true, true));
+        assert!(!may_look_for_another_peer(
+            PeerAbsence::Present,
+            true,
+            false
+        ));
+        assert!(!may_look_for_another_peer(PeerAbsence::Hold, true, true));
+        assert!(!has_new_address(&running, &running));
     }
 
     #[test]

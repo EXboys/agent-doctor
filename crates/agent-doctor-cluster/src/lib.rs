@@ -149,11 +149,11 @@ pub fn load_cluster_status() -> ClusterStatus {
             exo::orchestrator::sync_provider_if_dashboard_switched(snap);
             if host_support == NodeHostSupport::Supported
                 && backend == ClusterBackendKind::Exo
-                && snap.nodes.len() >= 2
+                && !snap.thunderbolt_cycle_ids.is_empty()
             {
                 exo::heal::close_thunderbolt_loop_if_ours(
                     snap.self_node_id.clone(),
-                    snap.nodes.iter().map(|node| node.node_id.clone()).collect(),
+                    snap.thunderbolt_cycle_ids.clone(),
                 );
             }
         }
