@@ -110,11 +110,10 @@ fn heal_once() -> Result<()> {
 /// will not let an ordinary app change that, so the elected computer asks the
 /// system once. The other computer leaves its bridge on.
 pub fn close_thunderbolt_loop_if_ours(self_id: String, node_ids: Vec<String>) {
-    if !this_mac_closes_the_loop(&self_id, &node_ids) {
-        return;
+    if this_mac_closes_the_loop(&self_id, &node_ids) {
+        #[cfg(target_os = "macos")]
+        spawn_close_thunderbolt_bridge();
     }
-    #[cfg(target_os = "macos")]
-    spawn_close_thunderbolt_bridge();
 }
 
 /// The computer with the greater id turns its own bridge off. Both sides
@@ -137,6 +136,7 @@ pub(crate) fn this_mac_closes_the_loop(self_id: &str, node_ids: &[String]) -> bo
     ids.len() >= 2 && ids.last().copied() == Some(self_id)
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn enabled_thunderbolt_bridge(listing: &str) -> Option<String> {
     for line in listing.lines() {
         let Some((disabled, name)) = network_service_line(line) else {
@@ -149,6 +149,7 @@ pub(crate) fn enabled_thunderbolt_bridge(listing: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn network_service_line(line: &str) -> Option<(bool, String)> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with("An asterisk") {
@@ -162,6 +163,7 @@ fn network_service_line(line: &str) -> Option<(bool, String)> {
     Some((disabled, name.to_string()))
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_thunderbolt_bridge(name: &str) -> bool {
     name.eq_ignore_ascii_case("thunderbolt bridge")
         || name.contains("雷雳桥")
