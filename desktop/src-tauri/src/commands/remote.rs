@@ -176,6 +176,48 @@ pub async fn connect_linked_host_command(
 }
 
 #[tauri::command]
+pub fn nearby_sharing_command() -> bool {
+    agent_doctor_core::nearby_sharing()
+}
+
+#[tauri::command]
+pub fn set_nearby_sharing_command(enabled: bool) {
+    agent_doctor_core::set_nearby_sharing(enabled);
+}
+
+#[tauri::command]
+pub fn this_computer_name_command() -> String {
+    agent_doctor_core::this_computer_name()
+}
+
+#[tauri::command]
+pub fn list_nearby_computers_command() -> Result<Vec<agent_doctor_core::NearbyComputer>, String> {
+    Ok(agent_doctor_core::list_nearby())
+}
+
+#[tauri::command]
+pub fn pending_nearby_asks_command() -> Result<Vec<agent_doctor_core::NearbyAsk>, String> {
+    Ok(agent_doctor_core::pending_asks())
+}
+
+#[tauri::command]
+pub fn answer_nearby_ask_command(id: String, allow: bool) -> Result<(), String> {
+    agent_doctor_core::decide_ask(&id, allow);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn use_nearby_computer_command(
+    id: String,
+    state: State<'_, LinkSessionState>,
+) -> Result<LinkConnectReport, String> {
+    let state = (*state).clone();
+    tauri::async_runtime::spawn_blocking(move || state.connect_nearby(&id))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn disconnect_linked_host_command(
     id: String,
     state: State<'_, LinkSessionState>,

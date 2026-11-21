@@ -912,6 +912,7 @@ pub fn run() {
             if let Err(err) = agent_doctor_core::spawn_link_daemon() {
                 eprintln!("[link-daemon] not started: {err:#}");
             }
+            agent_doctor_core::spawn_lan_link();
             seed_default_workspace_in_background();
             spawn_skill_link_repair();
             spawn_browser_mcp_autowire();
@@ -1074,6 +1075,13 @@ pub fn run() {
             remove_remote_project_command,
             probe_remote_host_command,
             run_remote_doctor_command,
+            nearby_sharing_command,
+            set_nearby_sharing_command,
+            this_computer_name_command,
+            list_nearby_computers_command,
+            pending_nearby_asks_command,
+            answer_nearby_ask_command,
+            use_nearby_computer_command,
             connect_linked_host_command,
             disconnect_linked_host_command,
             list_linked_host_status_command,

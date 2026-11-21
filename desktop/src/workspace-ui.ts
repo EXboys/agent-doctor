@@ -29,6 +29,13 @@ import {
   openDiagnoseWindow,
   connectLinkedHost,
   disconnectLinkedHost,
+  nearbySharing,
+  setNearbySharing,
+  thisComputerName,
+  listNearbyComputers,
+  pendingNearbyAsks,
+  answerNearbyAsk,
+  useNearbyComputer,
   linkedWorkspaceDoctor,
   linkedWorkspaceFix,
 } from "./ipc";
@@ -44,11 +51,21 @@ const workspaceListEl = document.querySelector<HTMLUListElement>("#workspace-lis
 const workspaceHintEl = document.querySelector<HTMLElement>("#workspace-hint")!;
 const workspaceRegisterEl = document.querySelector<HTMLButtonElement>("#workspace-register")!;
 const remoteStatusEl = document.querySelector<HTMLElement>("#remote-status")!;
+const nearbyListEl = document.querySelector<HTMLUListElement>("#nearby-list")!;
+const nearbySelfNameEl = document.querySelector<HTMLElement>("#nearby-self-name")!;
+const nearbyShareEl = document.querySelector<HTMLLabelElement>("#nearby-share")!;
+const nearbyShareInputEl = document.querySelector<HTMLInputElement>("#nearby-share-input")!;
+const nearbyShareLabelEl = document.querySelector<HTMLElement>("#nearby-share-label")!;
+const nearbyShareHintEl = document.querySelector<HTMLElement>("#nearby-share-hint")!;
+let nearbyShareEpoch = 0;
+const nearbyAskEl = document.querySelector<HTMLElement>("#nearby-ask")!;
+const nearbyAskTextEl = document.querySelector<HTMLElement>("#nearby-ask-text")!;
+const nearbyAllowEl = document.querySelector<HTMLButtonElement>("#nearby-allow")!;
+const nearbyDenyEl = document.querySelector<HTMLButtonElement>("#nearby-deny")!;
 const remoteHostListEl = document.querySelector<HTMLUListElement>("#remote-host-list")!;
 const remoteListEl = document.querySelector<HTMLUListElement>("#remote-list")!;
 const remoteChecksEl = document.querySelector<HTMLUListElement>("#remote-checks")!;
 const remoteHintEl = document.querySelector<HTMLElement>("#remote-hint")!;
-const remoteRefreshEl = document.querySelector<HTMLButtonElement>("#remote-refresh")!;
 const remoteBootstrapFormEl = document.querySelector<HTMLFormElement>("#remote-bootstrap-form")!;
 const remoteProjectFormEl = document.querySelector<HTMLFormElement>("#remote-project-form")!;
 const remoteBootstrapIdEl = document.querySelector<HTMLInputElement>("#remote-bootstrap-id")!;
@@ -329,11 +346,6 @@ function probeBadge(status: RemoteHostProbeStatus): { className: string; label: 
 }
 
 function renderRemoteHostList(rows: RemoteHostRow[]): void {
-  const bootstrap = document.querySelector<HTMLDetailsElement>("#remote-bootstrap-host");
-  if (bootstrap) {
-    bootstrap.open = rows.length === 0;
-  }
-
   if (rows.length === 0) {
     remoteHostListEl.innerHTML = "";
     return;
@@ -383,6 +395,98 @@ function renderRemoteHostList(rows: RemoteHostRow[]): void {
       `;
     })
     .join("");
+}
+
+let pendingAskId = "";
+
+function renderNearby(
+  peers: Array<{ id: string; name: string }>,
+): void {
+  if (peers.length === 0) {
+    nearbyListEl.innerHTML = `<li class="ws-manage-item"><span class="remote-host-note">${escapeHtml(t("remote.nearbyEmpty"))}</span></li>`;
+    return;
+  }
+  nearbyListEl.innerHTML = peers
+    .map(
+      (peer) => `
+        <li class="ws-manage-item remote-host-card">
+          <div class="remote-host-head">
+            <div class="ws-manage-main">
+              <strong>${escapeHtml(peer.name)}</strong>
+            </div>
+          </div>
+          <div class="ws-manage-actions">
+            <button type="button" class="btn-primary btn-compact" data-nearby-use="${escapeHtml(peer.id)}">${escapeHtml(t("remote.nearbyUse"))}</button>
+          </div>
+        </li>
+      `,
+    )
+    .join("");
+}
+
+function renderNearbyAsk(ask: { id: string; name: string } | undefined): void {
+  if (!ask) {
+    pendingAskId = "";
+    nearbyAskEl.hidden = true;
+    nearbyAskTextEl.textContent = "";
+    return;
+  }
+  pendingAskId = ask.id;
+  nearbyAskTextEl.textContent = t("remote.askText", { name: ask.name || "旁边的电脑" });
+  nearbyAskEl.hidden = false;
+}
+
+function paintNearbyShare(enabled: boolean): void {
+  nearbyShareInputEl.checked = enabled;
+  nearbyShareInputEl.setAttribute("aria-checked", enabled ? "true" : "false");
+  nearbyShareEl.classList.toggle("is-on", enabled);
+  nearbyShareLabelEl.textContent = t(enabled ? "remote.shareOpen" : "remote.shareClosed");
+  nearbyShareHintEl.textContent = t(enabled ? "remote.shareHint" : "remote.shareHintOff");
+}
+
+async function refreshNearby(): Promise<void> {
+  try {
+    const [peers, asks] = await Promise.all([listNearbyComputers(), pendingNearbyAsks()]);
+    renderNearby(peers.map((peer) => ({ id: peer.id, name: peer.name })));
+    renderNearbyAsk(asks[0]);
+  } catch {
+    // The list stays as it was if this refresh misses.
+  }
+  try {
+    const name = (await thisComputerName()).trim();
+    if (name) {
+      nearbySelfNameEl.hidden = false;
+      nearbySelfNameEl.textContent = name;
+    }
+  } catch {
+    // The card title still names this computer.
+  }
+  const epoch = nearbyShareEpoch;
+  try {
+    const enabled = await nearbySharing();
+    if (epoch === nearbyShareEpoch) paintNearbyShare(enabled);
+  } catch {
+    // A missed read leaves the switch where the last tap put it.
+  }
+}
+
+async function useNearbyComputerUi(id: string, name: string): Promise<void> {
+  if (remoteBusy) return;
+  remoteBusy = true;
+  remoteStatusEl.textContent = t("remote.nearbyWaiting");
+  try {
+    const report = await useNearbyComputer({ id });
+    remoteStatusEl.textContent = report.ok
+      ? t("remote.nearbyReady", { name: report.computerName || name })
+      : report.message;
+    if (report.ok) {
+      await loadRemoteProjects();
+    }
+  } catch (error) {
+    remoteStatusEl.textContent = withErrorDetail(t("remote.nearbyWaiting"), error);
+  } finally {
+    remoteBusy = false;
+  }
 }
 
 async function connectLinkedHostUi(hostId: string): Promise<void> {
@@ -700,9 +804,48 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
     }
   });
 
-  remoteRefreshEl.addEventListener("click", () => {
-    void loadRemoteProjects();
+  nearbyShareInputEl.addEventListener("change", () => {
+    const next = nearbyShareInputEl.checked;
+    const epoch = ++nearbyShareEpoch;
+    paintNearbyShare(next);
+    void setNearbySharing({ enabled: next })
+      .then(() => {
+        if (epoch === nearbyShareEpoch) paintNearbyShare(next);
+      })
+      .catch(() => {
+        if (epoch !== nearbyShareEpoch) return;
+        paintNearbyShare(!next);
+        nearbyShareHintEl.textContent = t("remote.shareFailed");
+      });
   });
+
+  nearbyListEl.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-nearby-use]");
+    if (!button?.dataset.nearbyUse) {
+      return;
+    }
+    const name = button.closest("li")?.querySelector("strong")?.textContent?.trim() || "";
+    void useNearbyComputerUi(button.dataset.nearbyUse, name);
+  });
+
+  nearbyAllowEl.addEventListener("click", () => {
+    if (!pendingAskId) return;
+    const id = pendingAskId;
+    nearbyAskEl.hidden = true;
+    void answerNearbyAsk({ id, allow: true }).then(() => refreshNearby());
+  });
+
+  nearbyDenyEl.addEventListener("click", () => {
+    if (!pendingAskId) return;
+    const id = pendingAskId;
+    nearbyAskEl.hidden = true;
+    void answerNearbyAsk({ id, allow: false }).then(() => refreshNearby());
+  });
+
+  void refreshNearby();
+  window.setInterval(() => {
+    void refreshNearby();
+  }, 3000);
 
   remoteHostListEl.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
@@ -895,6 +1038,7 @@ export function initWorkspaceUi(d: WorkspaceUiDeps): WorkspaceUiApi {
       }
       renderRemoteHostList(lastRemoteHosts);
       renderRemoteList(lastRemoteProjects);
+      void refreshNearby();
     },
   };
 }

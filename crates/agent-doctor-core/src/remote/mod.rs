@@ -7,6 +7,7 @@
 
 mod bootstrap;
 mod doctor;
+mod lan_link;
 mod link_client;
 mod link_daemon;
 mod link_files;
@@ -24,6 +25,10 @@ pub use doctor::{
     probe_remote_host, run_remote_doctor, run_remote_doctor_with_backend,
     write_remote_doctor_report, RemoteDoctorOptions, RemoteDoctorReport, RemoteHostProbeReport,
     RemoteRuntimeDoctorResult,
+};
+pub use lan_link::{
+    connect_nearby, decide_ask, list_nearby, nearby_sharing, pending_asks, set_nearby_sharing,
+    spawn_lan_link, this_computer_name, NearbyAsk, NearbyComputer,
 };
 pub use link_client::LinkClient;
 pub use link_daemon::{

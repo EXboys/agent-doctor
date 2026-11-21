@@ -72,6 +72,18 @@ impl LinkSocket {
         self.send_push(&LinkPush::prompt_event(payload))
     }
 
+    pub(crate) fn next_text(&self) -> Result<Option<String>> {
+        loop {
+            match self.read_message() {
+                Ok(Message::Text(text)) => return Ok(Some(text.to_string())),
+                Ok(Message::Ping(data)) => self.send_pong(data.to_vec()),
+                Ok(Message::Close(_) | Message::Binary(_)) => return Ok(None),
+                Ok(Message::Pong(_) | Message::Frame(_)) => {}
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+
     fn read_message(&self) -> Result<Message> {
         // Short read timeouts so a prompt worker can take the same mutex to
         // push events while this loop waits for the next client RPC.
@@ -178,9 +190,16 @@ pub fn spawn_link_daemon() -> Result<()> {
     Ok(())
 }
 
-fn handle_client(stream: TcpStream) -> Result<()> {
+pub(crate) fn open_link_socket(stream: TcpStream) -> Result<LinkSocket> {
     let ws = accept(stream).context("WebSocket 握手失败")?;
-    let socket = LinkSocket::new(ws);
+    Ok(LinkSocket::new(ws))
+}
+
+pub(crate) fn dispatch_link_text(socket: &LinkSocket, text: &str) -> Result<()> {
+    dispatch_text(socket, text)
+}
+
+pub(crate) fn serve_link_socket(socket: &LinkSocket) {
     loop {
         let msg = match socket.read_message() {
             Ok(msg) => msg,
@@ -188,7 +207,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
         };
         match msg {
             Message::Text(text) => {
-                if let Err(err) = dispatch_text(&socket, &text) {
+                if let Err(err) = dispatch_text(socket, &text) {
                     eprintln!("[link-daemon] dispatch: {err:#}");
                 }
             }
@@ -199,6 +218,11 @@ fn handle_client(stream: TcpStream) -> Result<()> {
             Message::Pong(_) | Message::Frame(_) => {}
         }
     }
+}
+
+fn handle_client(stream: TcpStream) -> Result<()> {
+    let socket = open_link_socket(stream)?;
+    serve_link_socket(&socket);
     Ok(())
 }
 

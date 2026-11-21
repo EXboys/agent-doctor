@@ -991,6 +991,38 @@ export function runRemoteDoctor(args: {
   return invoke("run_remote_doctor_command", args);
 }
 
+export function nearbySharing(): Promise<boolean> {
+  return invoke("nearby_sharing_command");
+}
+
+export function setNearbySharing(args: { enabled: boolean }): Promise<void> {
+  return invoke("set_nearby_sharing_command", args);
+}
+
+export function thisComputerName(): Promise<string> {
+  return invoke("this_computer_name_command");
+}
+
+export function listNearbyComputers(): Promise<
+  Array<{ id: string; name: string; addr: string; port: number }>
+> {
+  return invoke("list_nearby_computers_command");
+}
+
+export function pendingNearbyAsks(): Promise<Array<{ id: string; name: string }>> {
+  return invoke("pending_nearby_asks_command");
+}
+
+export function answerNearbyAsk(args: { id: string; allow: boolean }): Promise<void> {
+  return invoke("answer_nearby_ask_command", args);
+}
+
+export function useNearbyComputer(args: {
+  id: string;
+}): Promise<import("./types").LinkConnectReport> {
+  return invoke("use_nearby_computer_command", args);
+}
+
 export function connectLinkedHost(args: { id: string }): Promise<import("./types").LinkConnectReport> {
   return invoke("connect_linked_host_command", args);
 }

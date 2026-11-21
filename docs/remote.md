@@ -1,4 +1,15 @@
-# Remote computers (SSH)
+# Remote computers
+
+Nearby computers and servers are separate sections. Nearby computers need no
+address. This computer stays hidden until its switch is turned on. Each open app
+announces itself on the LAN (UDP `18766`). The other computer shows up by
+name. The first use waits for 允许 on that computer; later uses are trusted.
+The file service for this path listens on TCP `18767` and only accepts a
+peer after that allow. The loopback service on `127.0.0.1:18765` is unchanged.
+
+Servers that do not have the app still use the address form below.
+
+## SSH hosts
 
 Two modes share the same host registry under `…/agent-doctor/remote/`.
 
@@ -12,8 +23,9 @@ local-forward to its loopback client service (`127.0.0.1:18765`) and can:
 - Browse / read / write project files
 - Run workspace doctor + tidy on that computer
 
-The desktop app starts the loopback service automatically. The service never
-binds beyond localhost; only SSH reaches it.
+The desktop app starts the loopback service automatically. That port stays on
+localhost. Same-network use goes through the LAN port above; a server without
+the app is still reached by SSH.
 
 Asking agents on the remote computer streams over the same tunnel: events and
 permission cards appear on this computer; the agent process runs on the other

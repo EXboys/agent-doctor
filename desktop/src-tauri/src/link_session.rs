@@ -1,11 +1,12 @@
 //! Keeps SSH tunnels to linked computers alive for the desktop process.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_doctor_core::{
-    load_remote_hosts, mark_host_linked, open_link_tunnel, LinkClient, LinkConnectFailure,
-    LinkHello, LinkTunnel,
+    connect_nearby, load_remote_hosts, mark_host_linked, open_link_tunnel, LinkClient,
+    LinkConnectFailure, LinkHello, LinkTunnel,
 };
 use serde::Serialize;
 
@@ -15,8 +16,10 @@ pub struct LinkSessionState {
 }
 
 struct LiveLink {
-    tunnel: LinkTunnel,
+    tunnel: Option<LinkTunnel>,
+    stop_proxy: Option<Arc<AtomicBool>>,
     hello: LinkHello,
+    local_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,7 +49,12 @@ impl LinkSessionState {
     pub fn disconnect(&self, host_id: &str) {
         if let Ok(mut guard) = self.inner.lock() {
             if let Some(live) = guard.remove(host_id) {
-                live.tunnel.stop();
+                if let Some(tunnel) = live.tunnel {
+                    tunnel.stop();
+                }
+                if let Some(stop) = live.stop_proxy {
+                    stop.store(true, Ordering::SeqCst);
+                }
             }
         }
     }
@@ -55,7 +63,12 @@ impl LinkSessionState {
     pub fn disconnect_all(&self) {
         if let Ok(mut guard) = self.inner.lock() {
             for (_, live) in guard.drain() {
-                live.tunnel.stop();
+                if let Some(tunnel) = live.tunnel {
+                    tunnel.stop();
+                }
+                if let Some(stop) = live.stop_proxy {
+                    stop.store(true, Ordering::SeqCst);
+                }
             }
         }
     }
@@ -72,7 +85,7 @@ impl LinkSessionState {
         self.inner
             .lock()
             .ok()
-            .and_then(|g| g.get(host_id).map(|live| live.tunnel.local_port))
+            .and_then(|g| g.get(host_id).map(|live| live.local_port))
     }
 
     pub fn connect(&self, host_id: &str) -> LinkConnectReport {
@@ -109,7 +122,9 @@ impl LinkSessionState {
                     guard.insert(
                         host_id.to_string(),
                         LiveLink {
-                            tunnel,
+                            local_port: tunnel.local_port,
+                            tunnel: Some(tunnel),
+                            stop_proxy: None,
                             hello: hello.clone(),
                         },
                     );
@@ -149,6 +164,43 @@ impl LinkSessionState {
                 connected: false,
                 computer_name: String::new(),
                 message: detail,
+                kind: "other".into(),
+            },
+        }
+    }
+
+    pub fn connect_nearby(&self, peer_id: &str) -> LinkConnectReport {
+        let host_id = format!("lan-{peer_id}");
+        self.disconnect(&host_id);
+        match connect_nearby(peer_id) {
+            Ok((port, stop, hello)) => {
+                let computer_name = hello.computer_name.clone();
+                if let Ok(mut guard) = self.inner.lock() {
+                    guard.insert(
+                        host_id.clone(),
+                        LiveLink {
+                            local_port: port,
+                            tunnel: None,
+                            stop_proxy: Some(stop),
+                            hello,
+                        },
+                    );
+                }
+                LinkConnectReport {
+                    host_id,
+                    ok: true,
+                    connected: true,
+                    computer_name,
+                    message: "已连上，可以操作那边的项目了。".into(),
+                    kind: "ok".into(),
+                }
+            }
+            Err(err) => LinkConnectReport {
+                host_id,
+                ok: false,
+                connected: false,
+                computer_name: String::new(),
+                message: format!("{err:#}"),
                 kind: "other".into(),
             },
         }

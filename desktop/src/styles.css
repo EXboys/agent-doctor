@@ -1341,6 +1341,75 @@ body.is-diagnose-open .diagnose-detail {
   gap: 4px;
 }
 
+.remote-share-card {
+  margin: 4px 0 12px;
+}
+
+.remote-share-card .remote-host-note {
+  margin-bottom: 14px;
+}
+
+#remote-section > .section-label-stack {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.remote-share-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.remote-share-switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.remote-share-switch i {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: #d5dbe3;
+}
+
+.remote-share-switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+  transition: left 0.15s ease;
+}
+
+.remote-share-switch.is-on {
+  color: var(--success);
+}
+
+.remote-share-switch.is-on i {
+  background: var(--success);
+}
+
+.remote-share-switch.is-on i::after {
+  left: 18px;
+}
+
 .remote-host-card {
   display: flex;
   flex-direction: column;
