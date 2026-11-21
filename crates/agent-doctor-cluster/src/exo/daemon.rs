@@ -508,6 +508,24 @@ fn peers_for_spawn() -> Vec<String> {
     pending.unwrap_or_else(saved_bootstrap_peers)
 }
 
+/// Write dial addresses for the next start. The running process keeps the list
+/// it was spawned with and redials that list on its own. A new address here
+/// must not be treated as already applied.
+pub(crate) fn remember_bootstrap_peers(peers: &[String]) -> Result<()> {
+    let applied = applied_join();
+    if same_peer_set(&applied.peers, peers) {
+        return Ok(());
+    }
+    store_join(&applied.namespace, peers, applied.port_pinned)
+}
+
+fn same_peer_set(left: &[String], right: &[String]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .all(|peer| right.iter().any(|other| other == peer))
+}
+
 pub(crate) fn store_join(namespace: &str, peers: &[String], port_pinned: bool) -> Result<()> {
     let path = join_file_path().context("无法定位用户目录")?;
     if let Some(parent) = path.parent() {

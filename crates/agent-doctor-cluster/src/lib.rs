@@ -135,6 +135,13 @@ pub fn load_cluster_status() -> ClusterStatus {
     };
 
     if backend != ClusterBackendKind::LlamaCpp {
+        if host_support == NodeHostSupport::Supported && remote_origin.is_none() {
+            let (count, seen) = snapshot
+                .as_ref()
+                .map(|snap| (snap.nodes.len(), snap.other_peer_last_seen_ms))
+                .unwrap_or((0, None));
+            exo::heal::observe_cluster(count, seen);
+        }
         if let Some(ref snap) = snapshot {
             if let Some(model) = snap.active_models.first() {
                 adopt_running_exo_model(&snap.origin, model);

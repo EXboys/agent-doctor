@@ -35,6 +35,11 @@ pub struct ExoClusterSnapshot {
     pub usable_memory_bytes: u64,
     pub active_models: Vec<String>,
     pub incompatible_peer_count: usize,
+    /// Newest `lastSeen` among nodes other than this one, unix milliseconds.
+    /// exo deletes the entry when a node times out, so a missing value means
+    /// "not in the latest state", not "seen long ago".
+    #[serde(default)]
+    pub other_peer_last_seen_ms: Option<u64>,
 }
 
 /// Probe an `exo` origin (`http://127.0.0.1:52415` or `http://192.168.1.23:52415`).
@@ -486,6 +491,7 @@ pub(crate) fn parse_exo_state(
     };
 
     let active_models = extract_active_models(state);
+    let other_peer_last_seen_ms = newest_other_peer_last_seen_ms(state, self_node_id);
 
     ExoClusterSnapshot {
         origin: origin.to_string(),
@@ -496,7 +502,162 @@ pub(crate) fn parse_exo_state(
         usable_memory_bytes,
         active_models,
         incompatible_peer_count: 0,
+        other_peer_last_seen_ms,
     }
+}
+
+/// Newest `lastSeen` for a node that is not us. exo 1.0.71 serializes datetimes
+/// as ISO-8601 and also stamps `when` with `str(datetime)` (`YYYY-MM-DD HH:MM:SS+00:00`).
+pub(crate) fn newest_other_peer_last_seen_ms(state: &Value, self_node_id: &str) -> Option<u64> {
+    let map = state
+        .get("lastSeen")
+        .or_else(|| state.get("last_seen"))
+        .and_then(Value::as_object)?;
+    let self_id = self_node_id.trim();
+    map.iter()
+        .filter(|(id, _)| id.as_str() != self_id)
+        .filter_map(|(_, value)| parse_exo_time_ms(value))
+        .max()
+}
+
+fn parse_exo_time_ms(value: &Value) -> Option<u64> {
+    if let Some(n) = value.as_u64() {
+        return Some(if n < 1_000_000_000_000 { n * 1000 } else { n });
+    }
+    if let Some(n) = value.as_i64() {
+        if n < 0 {
+            return None;
+        }
+        let n = n as u64;
+        return Some(if n < 1_000_000_000_000 { n * 1000 } else { n });
+    }
+    parse_exo_time_text(value.as_str()?)
+}
+
+fn parse_exo_time_text(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let split_at = text.find(['T', ' '])?;
+    let date = &text[..split_at];
+    let rest = text[split_at + 1..].trim();
+    let mut parts = date.split('-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u32 = parts.next()?.parse().ok()?;
+    let day: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || rest.len() < 8 {
+        return None;
+    }
+    let hour: u32 = rest[0..2].parse().ok()?;
+    let minute: u32 = rest[3..5].parse().ok()?;
+    let second: u32 = rest[6..8].parse().ok()?;
+    if !rest.as_bytes().get(2).is_some_and(|b| *b == b':')
+        || !rest.as_bytes().get(5).is_some_and(|b| *b == b':')
+    {
+        return None;
+    }
+    let bytes = rest.as_bytes();
+    let mut idx = 8;
+    let mut millis = 0u32;
+    if bytes.get(idx) == Some(&b'.') {
+        idx += 1;
+        let start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        let frac = &rest[start..idx];
+        if frac.is_empty() {
+            return None;
+        }
+        let mut padded = frac.to_string();
+        if padded.len() > 3 {
+            padded.truncate(3);
+        }
+        while padded.len() < 3 {
+            padded.push('0');
+        }
+        millis = padded.parse().ok()?;
+    }
+    let offset_min = parse_zone_offset_minutes(&rest[idx..])?;
+    unix_ms_from_civil(
+        CivilTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            millis,
+        },
+        offset_min,
+    )
+}
+
+struct CivilTime {
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    millis: u32,
+}
+
+fn parse_zone_offset_minutes(zone: &str) -> Option<i32> {
+    if zone.is_empty() || zone == "Z" || zone == "z" {
+        return Some(0);
+    }
+    let sign = zone.chars().next()?;
+    if sign != '+' && sign != '-' {
+        return None;
+    }
+    let body = &zone[1..];
+    let (hours, minutes) = if let Some((h, m)) = body.split_once(':') {
+        (h.parse::<i32>().ok()?, m.parse::<i32>().ok()?)
+    } else if body.len() == 4 {
+        (body[..2].parse().ok()?, body[2..].parse().ok()?)
+    } else if body.len() == 2 {
+        (body.parse().ok()?, 0)
+    } else {
+        return None;
+    };
+    if !(0..=23).contains(&hours) || !(0..60).contains(&minutes) {
+        return None;
+    }
+    let magnitude = hours * 60 + minutes;
+    Some(if sign == '-' { -magnitude } else { magnitude })
+}
+
+fn unix_ms_from_civil(time: CivilTime, offset_min: i32) -> Option<u64> {
+    let CivilTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millis,
+    } = time;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+        || millis > 999
+    {
+        return None;
+    }
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = (y - era * 400) as u32;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = (era * 146097 + doe as i32 - 719468) as i64;
+    let secs = days * 86400 + hour as i64 * 3600 + minute as i64 * 60 + second as i64
+        - offset_min as i64 * 60;
+    if secs < 0 {
+        return None;
+    }
+    Some((secs as u64) * 1000 + millis as u64)
 }
 
 fn extract_nodes_from_state(state: &Value) -> Vec<ClusterNodeSummary> {
@@ -817,5 +978,26 @@ mod tests {
             }
             other => panic!("expected failure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn last_seen_keeps_the_other_mac_and_ignores_this_one() {
+        let state = json!({
+            "lastSeen": {
+                "self": "2026-11-21T04:38:00Z",
+                "peer": "2026-11-21 04:38:00.500000+00:00"
+            }
+        });
+        assert_eq!(
+            newest_other_peer_last_seen_ms(&state, "self"),
+            Some(1_795_235_880_500)
+        );
+        assert_eq!(
+            newest_other_peer_last_seen_ms(
+                &json!({"lastSeen": {"self": "2026-11-21T04:38:00Z"}}),
+                "self"
+            ),
+            None
+        );
     }
 }

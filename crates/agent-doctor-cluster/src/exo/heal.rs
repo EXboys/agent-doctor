@@ -4,12 +4,17 @@
 //! Wi-Fi, a Thunderbolt cable that is not the mDNS interface). The pinned runtime
 //! can also dial a fixed port. This module finds those computers and restarts our
 //! process onto the account namespace with those addresses.
+//!
+//! A probe miss or a peer that just blinked out is not "alone". Once this process
+//! has seen another computer, it waits `PEER_LOST_AFTER` before killing exo.
+//! Until then a new address is written down for the next start. The running
+//! process already redials the addresses it was given.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 #[cfg(target_os = "macos")]
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
@@ -26,11 +31,24 @@ use crate::namespace::resolve_cluster_namespace;
 
 const MAX_BOOTSTRAP_PEERS: usize = 8;
 const HEAL_GAP: Duration = Duration::from_secs(15);
+/// How long a computer we already linked may disappear before we kill our exo
+/// and dial again. Shorter than this, a blink restarts both machines.
+const PEER_LOST_AFTER: Duration = Duration::from_secs(3 * 60);
 
 struct HealGate {
     running: bool,
     last_finished: Option<Instant>,
 }
+
+struct PeerWatch {
+    ever_seen: bool,
+    alone_since: Option<Instant>,
+}
+
+static PEER_WATCH: Mutex<PeerWatch> = Mutex::new(PeerWatch {
+    ever_seen: false,
+    alone_since: None,
+});
 
 static HEAL_GATE: Mutex<HealGate> = Mutex::new(HealGate {
     running: false,
@@ -67,34 +85,56 @@ pub fn heal_lonely_exo() -> Result<()> {
     outcome
 }
 
+/// Record what the latest cluster read showed, so a later heal knows whether
+/// another computer was here a moment ago. A failed read counts as "not seen".
+pub fn observe_cluster(node_count: usize, other_peer_last_seen_ms: Option<u64>) {
+    let saw = cluster_has_live_peer(
+        node_count,
+        other_peer_last_seen_ms,
+        unix_now_ms(),
+        PEER_LOST_AFTER,
+    );
+    let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
+    let _ = note_peers(&mut watch, saw, Instant::now(), PEER_LOST_AFTER);
+}
+
 fn heal_once() -> Result<()> {
     let desired = resolve_cluster_namespace();
     let applied = daemon::applied_join();
     let snapshot = probe_exo_origin(EXO_LOCAL_ORIGIN, Duration::from_millis(750)).ok();
-    let alone = snapshot
-        .as_ref()
-        .map(|snap| snap.nodes.len() < 2)
-        .unwrap_or(true);
-    // Already linked on the right account: leave the running process alone.
-    if !alone && applied.namespace == desired.namespace {
+    let saw = snapshot.as_ref().is_some_and(|snap| {
+        cluster_has_live_peer(
+            snap.nodes.len(),
+            snap.other_peer_last_seen_ms,
+            unix_now_ms(),
+            PEER_LOST_AFTER,
+        )
+    });
+    let absence = {
+        let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        note_peers(&mut watch, saw, Instant::now(), PEER_LOST_AFTER)
+    };
+    let namespace_ok = applied.namespace == desired.namespace;
+    if !should_restart(absence, namespace_ok) {
+        // Still write a newly found address. exo redials its startup list
+        // every few seconds; killing it to add one address drops the model.
+        if namespace_ok && matches!(absence, PeerAbsence::Hold) {
+            let _ = remember_discovered_peers(&applied, &desired.namespace);
+        }
         return Ok(());
     }
 
-    let found_hosts = if alone {
-        discover_peer_hosts()
-    } else {
+    let found_hosts = if matches!(absence, PeerAbsence::Present) {
         Vec::new()
+    } else {
+        discover_peer_hosts()
     };
-    let self_ips = lan_scan::local_scannable_ipv4s(true)
-        .into_iter()
-        .map(|ip| ip.to_string())
-        .collect::<Vec<_>>();
     let Some(peers) = plan_rejoin(
         &applied.namespace,
         &desired.namespace,
         &applied.peers,
         &found_hosts,
-        &self_ips,
+        &self_ips(),
         applied.port_pinned,
         daemon::runtime_supports_pinned_libp2p(),
     ) else {
@@ -102,8 +142,110 @@ fn heal_once() -> Result<()> {
     };
 
     daemon::set_pending_bootstrap_peers(&peers);
-    daemon::restart_our_exo()?;
+    if daemon::restart_our_exo()? {
+        let mut watch = PEER_WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        arm_grace_after_restart(&mut watch, Instant::now());
+    }
     Ok(())
+}
+
+fn remember_discovered_peers(applied: &daemon::AppliedJoin, desired_namespace: &str) -> Result<()> {
+    let found_hosts = discover_peer_hosts();
+    let Some(peers) = plan_rejoin(
+        &applied.namespace,
+        desired_namespace,
+        &applied.peers,
+        &found_hosts,
+        &self_ips(),
+        applied.port_pinned,
+        daemon::runtime_supports_pinned_libp2p(),
+    ) else {
+        return Ok(());
+    };
+    daemon::remember_bootstrap_peers(&peers)
+}
+
+fn self_ips() -> Vec<String> {
+    lan_scan::local_scannable_ipv4s(true)
+        .into_iter()
+        .map(|ip| ip.to_string())
+        .collect()
+}
+
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Another computer is still here when the node list says so, or its `lastSeen`
+/// is younger than the grace. A failed probe is neither.
+fn cluster_has_live_peer(
+    node_count: usize,
+    other_peer_last_seen_ms: Option<u64>,
+    now_ms: u64,
+    grace: Duration,
+) -> bool {
+    if node_count >= 2 {
+        return true;
+    }
+    let Some(seen_ms) = other_peer_last_seen_ms else {
+        return false;
+    };
+    if seen_ms > now_ms {
+        return true;
+    }
+    now_ms.saturating_sub(seen_ms) < grace.as_millis() as u64
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeerAbsence {
+    Present,
+    /// This process has never seen another computer. Dial now.
+    JoinNow,
+    /// We had a peer. It has not been gone long enough to kill exo.
+    Hold,
+    /// The peer has been gone for the whole grace. Dial again.
+    Rejoin,
+}
+
+fn note_peers(
+    watch: &mut PeerWatch,
+    saw_other: bool,
+    now: Instant,
+    grace: Duration,
+) -> PeerAbsence {
+    if saw_other {
+        watch.ever_seen = true;
+        watch.alone_since = None;
+        return PeerAbsence::Present;
+    }
+    if !watch.ever_seen {
+        return PeerAbsence::JoinNow;
+    }
+    let since = *watch.alone_since.get_or_insert(now);
+    let gone = now.checked_duration_since(since).unwrap_or_default();
+    if gone >= grace {
+        PeerAbsence::Rejoin
+    } else {
+        PeerAbsence::Hold
+    }
+}
+
+fn arm_grace_after_restart(watch: &mut PeerWatch, now: Instant) {
+    watch.ever_seen = true;
+    watch.alone_since = Some(now);
+}
+
+/// A wrong account still restarts immediately. A missing peer restarts on
+/// `JoinNow` (never linked) or `Rejoin` (gone for the whole grace). `Hold`
+/// keeps the process and only records new dial addresses.
+fn should_restart(absence: PeerAbsence, namespace_matches: bool) -> bool {
+    if !namespace_matches {
+        return true;
+    }
+    matches!(absence, PeerAbsence::JoinNow | PeerAbsence::Rejoin)
 }
 
 /// Two linked Macs with Thunderbolt Bridge on both sides form a loop. macOS
@@ -398,6 +540,68 @@ pub(crate) fn parse_arp_ipv4s(text: &str) -> Vec<Ipv4Addr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_peer_that_just_vanished_does_not_kill_the_process() {
+        let start = Instant::now();
+        let grace = Duration::from_secs(3 * 60);
+        let mut watch = PeerWatch {
+            ever_seen: false,
+            alone_since: None,
+        };
+        assert_eq!(
+            note_peers(&mut watch, false, start, grace),
+            PeerAbsence::JoinNow
+        );
+        assert!(should_restart(PeerAbsence::JoinNow, true));
+        assert!(!should_restart(PeerAbsence::Present, true));
+        assert!(should_restart(PeerAbsence::Present, false));
+
+        assert_eq!(
+            note_peers(&mut watch, true, start, grace),
+            PeerAbsence::Present
+        );
+        let blinked = start + Duration::from_secs(1);
+        assert_eq!(
+            note_peers(&mut watch, false, blinked, grace),
+            PeerAbsence::Hold
+        );
+        assert!(!should_restart(PeerAbsence::Hold, true));
+        assert!(should_restart(PeerAbsence::Hold, false));
+
+        let still_early = blinked + Duration::from_secs(179);
+        assert_eq!(
+            note_peers(&mut watch, false, still_early, grace),
+            PeerAbsence::Hold
+        );
+        let expired = blinked + grace;
+        assert_eq!(
+            note_peers(&mut watch, false, expired, grace),
+            PeerAbsence::Rejoin
+        );
+        assert!(should_restart(PeerAbsence::Rejoin, true));
+
+        arm_grace_after_restart(&mut watch, expired);
+        assert_eq!(
+            note_peers(&mut watch, false, expired + Duration::from_secs(15), grace),
+            PeerAbsence::Hold
+        );
+    }
+
+    #[test]
+    fn a_failed_probe_is_not_a_live_peer_but_a_fresh_last_seen_is() {
+        let now = 1_795_235_880_000;
+        let grace = Duration::from_secs(3 * 60);
+        assert!(!cluster_has_live_peer(1, None, now, grace));
+        assert!(cluster_has_live_peer(2, None, now, grace));
+        assert!(cluster_has_live_peer(1, Some(now - 60_000), now, grace));
+        assert!(!cluster_has_live_peer(
+            1,
+            Some(now - grace.as_millis() as u64),
+            now,
+            grace
+        ));
+    }
 
     #[test]
     fn rejoin_adds_a_newly_found_computer_and_prefers_thunderbolt() {
